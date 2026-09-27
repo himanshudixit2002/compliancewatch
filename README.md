@@ -1,11 +1,13 @@
 # ComplianceWatch monorepo
 
 > **What is here today.** uv workspace with the FastAPI service template for ten services, the shared
-> domain kernel and Ontology v0, the LLM gateway skeleton (routing, prompt registry, cost ledger,
+> domain kernel (with the knowledge vocabulary: entity types, relation kinds, canonical names) and
+> Ontology v0, the rulebook's knowledge schema (canonical entities, clause mentions, rule relations),
+> the LLM gateway skeleton (routing, prompt registry, cost ledger,
 > budgets, PII masking, Langfuse tracing, fake provider container) with the first committed OpenAPI
 > spec, problem-details errors in py-common, pnpm + Turborepo workspace with the Next.js web app and
-> the WhatsApp bot, Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 006
-> and 008. No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
+> the WhatsApp bot, Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 006,
+> 008 and 017 (012 and 013 as stubs). No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
 >
 > Source of truth: *ComplianceWatch - Project Foundation (HLD, LLD & Build Guide)*. Section numbers below refer to that guide.
 
@@ -71,7 +73,7 @@ compliancewatch/
     golden/                  # Golden sets: extraction/, qa/, applicability/ (versioned data files)
     harness/                 # Runner, metrics, thresholds
   docs/
-    adr/                     # Architecture decision records (001 to 006 and 008 written; 007, 009 to 011 stubs)
+    adr/                     # Architecture decision records (001 to 006, 008 and 017 written; 007, 009 to 013 stubs)
     runbooks/
     onboarding/              # local-dev.md
   .github/workflows/         # ci.yml (lint, typecheck, tests, dev-stack smoke, gitleaks), pr-checks.yml
@@ -182,4 +184,5 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - OpenTelemetry collector in the dev stack; Kafka outbox for the gateway's events
 - Seeded fixtures and the 50-document sample rulebook
 - Real prompt texts for extraction, judgement, question answering and classification, and the eval harness
-- Full text for ADR-007 and ADR-009 to ADR-011
+- Full text for ADR-007 and ADR-009 to ADR-013; ADR-014 to ADR-016 (identity, recurring obligations, business hierarchy)
+- KAG-style reasoning beyond the schema: entity extraction and alignment in the pipeline, the logical-form planner and solver in qa, and its eval gate (ADR-017)
