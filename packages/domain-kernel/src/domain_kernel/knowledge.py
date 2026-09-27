@@ -37,17 +37,33 @@ class EntityType(StrEnum):
 
 
 class RelationKind(StrEnum):
-    """How a rule version relates to another rule version or to an entity."""
+    """How a rule version relates to another rule version or to an entity.
+
+    ``supersedes`` replaces a version from an effective date; ``amends`` changes part of it;
+    ``refers_to`` cites it or an entity; ``exempts`` carves something out of it;
+    ``extends_deadline`` moves the due date of a period; ``corrects`` replaces what an earlier
+    version said (a corrigendum); ``withdraws`` rescinds it.
+    """
 
     SUPERSEDES = "supersedes"
     AMENDS = "amends"
     REFERS_TO = "refers_to"
     EXEMPTS = "exempts"
     EXTENDS_DEADLINE = "extends_deadline"
+    CORRECTS = "corrects"
+    WITHDRAWS = "withdraws"
 
 
-RULE_VERSION_ONLY = frozenset({RelationKind.SUPERSEDES, RelationKind.EXTENDS_DEADLINE})
-"""Relations whose target must be a rule version; the other three may also target an entity."""
+RULE_VERSION_ONLY = frozenset(
+    {
+        RelationKind.SUPERSEDES,
+        RelationKind.EXTENDS_DEADLINE,
+        RelationKind.CORRECTS,
+        RelationKind.WITHDRAWS,
+    }
+)
+"""Relations whose target must be a rule version; ``amends``, ``refers_to`` and ``exempts`` may
+also target an entity."""
 
 _DOCUMENT_NUMBER_PREFIX = re.compile(
     r"^(?:(?:notification|circular)\b\s*|no\.\s*|no\b\s*|number\b\s*)+"
@@ -222,8 +238,9 @@ class RuleRelation:
     """A typed link from a rule version to another rule version or to an entity, with the
     clause that is the evidence for it.
 
-    ``supersedes`` and ``extends_deadline`` target a rule version; ``amends``, ``refers_to`` and
-    ``exempts`` target a rule version or an entity. A rule version never relates to itself.
+    ``supersedes``, ``extends_deadline``, ``corrects`` and ``withdraws`` target a rule version;
+    ``amends``, ``refers_to`` and ``exempts`` target a rule version or an entity. A rule version
+    never relates to itself.
     """
 
     from_rule_version_id: RuleVersionId
