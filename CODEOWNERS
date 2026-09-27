@@ -33,7 +33,7 @@
 
 # ---- Packages ---------------------------------------------------------------
 /packages/contracts/             @himanshudixit2002 # team: Platform and Infrastructure (custodian; every consuming team reviews a contract change; add their handles here when teams exist)
-/packages/domain-kernel/         @himanshudixit2002 # team: Platform and Infrastructure (custodian; Phase 0 golden-path deliverable)
+/packages/domain-kernel/         @himanshudixit2002 # team: Platform and Infrastructure (custodian)
 /packages/ontology/              @himanshudixit2002 # team: Core Product (co-approved by Regulatory Intelligence; content proposed by Regulatory Analysts)
 /packages/py-common/             @himanshudixit2002 # team: Platform and Infrastructure
 /packages/ui/                    @himanshudixit2002 # team: Core Product

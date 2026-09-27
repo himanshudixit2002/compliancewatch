@@ -2,5 +2,5 @@
   "name": "@compliancewatch/contracts",
   "version": "0.0.0",
   "private": true,
-  "description": "OpenAPI specs, event JSON Schemas and generated clients (guide section 13). No build or scripts yet; clients/typescript is generated in a later phase."
+  "description": "OpenAPI specs, event JSON Schemas and generated clients (guide section 13). No build or scripts yet; clients/typescript is generated later."
 }

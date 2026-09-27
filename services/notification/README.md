@@ -1,6 +1,6 @@
 # notification service
 
-Part of the ComplianceWatch monorepo. **Phase 0: service template in place, no domain code yet.**
+Part of the ComplianceWatch monorepo. **Service template only: health routes, migrations wiring, no domain code yet.**
 Design reference: Project Foundation guide, sections 7 and 14.
 
 - **Owns:** Notifications, channel adapters (WhatsApp, SES), preferences; dedupe by key, digests, quiet hours, template rendering per channel and language

@@ -10,7 +10,7 @@ Design reference: Project Foundation guide, sections 12 and 17.
 
 ## Layout
 
-Flat for now; module layout is Platform's Phase 0 deliverable.
+Flat for now; the module layout lands with the staging cluster.
 
 ## How to run
 

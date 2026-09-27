@@ -187,8 +187,8 @@ test: py-test ts-test ## Unit and contract tests on both sides (CI step 2)
 
 check: lint typecheck test importlint lock-check ## Everything CI runs before integration tests
 
-eval: ## Eval harness against evals/golden (arrives in Phase 1; prints a notice today)
-	@echo "make eval: the eval harness (evals/harness, thresholds in guide section 8) lands in Phase 1; nothing to run yet."
+eval: ## Eval harness against evals/golden (not built yet; prints a notice)
+	@echo "make eval: the eval harness under evals/harness is not built yet; nothing to run."
 
 migrate: check-uv ## alembic upgrade head for every service, or one: make migrate SERVICE=identity
 	@set -a; [ -f .env ] && . ./.env; set +a; \
@@ -210,7 +210,8 @@ run: check-uv ## Run one service with reload: make run SERVICE=identity [PORT=80
 	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$(SCHEMA)%2Cpublic"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \
 	  $(UV) run --package compliancewatch-$(SERVICE) uvicorn $(PKG).main:app --reload --port $(PORT) \
-	    --reload-dir services/$(SERVICE)/src --reload-dir packages/py-common/src
+	    --reload-dir services/$(SERVICE)/src --reload-dir packages/py-common/src \
+	    --reload-dir packages/domain-kernel/src --reload-dir packages/ontology/src
 
 hooks: ## Install the pre-commit and commit-msg hooks
 	pre-commit install --install-hooks

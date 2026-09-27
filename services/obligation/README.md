@@ -1,6 +1,6 @@
 # obligation service
 
-Part of the ComplianceWatch monorepo. **Phase 0: service template in place, no domain code yet.**
+Part of the ComplianceWatch monorepo. **Service template only: health routes, migrations wiring, no domain code yet.**
 Design reference: Project Foundation guide, sections 7 and 14.
 
 - **Owns:** Obligations, evidence metadata, append-only audit log; builds obligations from the RuleVersion template, computes due dates, schedules reminders

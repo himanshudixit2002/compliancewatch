@@ -173,7 +173,7 @@ jobs:
           # GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # required only once the repo moves under a GitHub organisation
 
 # -----------------------------------------------------------------------------------------------
-# TODO (guide section 17, steps 4-7) - deliberately not implemented in Phase 0:
+# TODO (guide section 17, steps 4-7) - not implemented yet:
 #   4. integration: testcontainers (Postgres, Redpanda, Temporal test server) for affected services,
 #                   e.g. `uv run pytest -m integration` (Docker is available on ubuntu-latest)
 #   5. evals:       run evals/harness when paths change under services/pipeline/prompts/**, services/qa/**,

@@ -1,6 +1,6 @@
 # pipeline service
 
-Part of the ComplianceWatch monorepo. **Phase 0: service template in place, no domain code yet.**
+Part of the ComplianceWatch monorepo. **Service template only: health routes, migrations wiring, no domain code yet.**
 Design reference: Project Foundation guide, sections 5, 7, 8, 11 and 14.
 
 - **Owns:** The regulatory intelligence pipeline as Temporal workers: source-crawler (source registry, fetch schedule, raw document store), change-detector (document classification, links to prior documents), doc-parser (clause-level structured text, OCR fallback), rule-extractor (schema-validated RuleCandidates with verified citations), review-service (ReviewTasks, decisions, edit diffs, two-person rule)

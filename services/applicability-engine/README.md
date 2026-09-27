@@ -1,6 +1,6 @@
 # applicability-engine service
 
-Part of the ComplianceWatch monorepo. **Phase 0: service template in place, no domain code yet.**
+Part of the ComplianceWatch monorepo. **Service template only: health routes, migrations wiring, no domain code yet.**
 Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
 
 - **Owns:** ApplicabilityDecisions: coarse filter by regulator and attribute index, per-business predicate evaluation, LLM-judged free-text predicates with confidence, Temporal fan-out in batches of 1,000

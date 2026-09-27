@@ -1,6 +1,6 @@
 # eval service
 
-Part of the ComplianceWatch monorepo. **Phase 0: service template in place, no domain code yet.**
+Part of the ComplianceWatch monorepo. **Service template only: health routes, migrations wiring, no domain code yet.**
 Design reference: Project Foundation guide, sections 7, 8, 14 and 19.
 
 - **Owns:** Metric runs and drift reports (retrieval recall and precision, grounded rate, citation correctness, extraction acceptance, applicability precision and recall). Golden data lives in `/evals/golden`, the runner in `/evals/harness`. Python package: `eval_service` (`eval` is a builtin)
