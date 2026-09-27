@@ -11,8 +11,8 @@
 > the Temporal worker scaffold with the pipeline's sample ingest workflow, OpenTelemetry tracing
 > and metrics with a dev observability stack (collector, Prometheus, Tempo, Grafana dashboard),
 > pnpm + Turborepo workspace with the Next.js web app and
-> the WhatsApp bot, Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 006,
-> 008 and 017 (012 and 013 as stubs). No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
+> the WhatsApp bot, Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 008
+> and 012 to 017 (009 to 011 as stubs). No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
 >
 > Source of truth: *ComplianceWatch - Project Foundation (HLD, LLD & Build Guide)*. Section numbers below refer to that guide.
 >
@@ -84,7 +84,7 @@ compliancewatch/
     golden/                  # Golden sets: extraction/, qa/, applicability/ (versioned data files)
     harness/                 # Runner, metrics, thresholds
   docs/
-    adr/                     # Architecture decision records (001 to 006, 008 and 017 written; 007, 009 to 013 stubs)
+    adr/                     # Architecture decision records (001 to 008 and 012 to 017 written; 009 to 011 stubs)
     runbooks/
     onboarding/              # local-dev.md
   .github/workflows/         # ci.yml (lint, typecheck, tests, dev-stack smoke, gitleaks), pr-checks.yml
@@ -200,5 +200,5 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - Real pipeline activities: the sample workflow runs on in-memory fakes
 - Seeded fixtures and the 50-document sample rulebook
 - Real prompt texts for extraction, judgement, question answering and classification, and the eval harness
-- Full text for ADR-007 and ADR-009 to ADR-013; ADR-014 to ADR-016 (identity, recurring obligations, business hierarchy)
+- Full text for ADR-009 to ADR-011; the identity service itself (ADR-014 decides Supabase Auth for the MVP; nothing is created until the maintainer opens the project)
 - KAG-style reasoning beyond the schema: entity extraction and alignment in the pipeline, the logical-form planner and solver in qa, and its eval gate (ADR-017)
