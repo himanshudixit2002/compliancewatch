@@ -14,6 +14,7 @@ Flat; one markdown file per alert or operational procedure.
 
 - [outbox-relay.md](outbox-relay.md): events not reaching Kafka, `dead` outbox rows, replay by hand, pruning.
 - [temporal-worker.md](temporal-worker.md): a worker that will not start, a task queue backing up, a failed workflow.
+- [whatsapp.md](whatsapp.md): the Meta manual steps, webhook signature failures, opt-outs that must be honoured, late or failed reminders, template rejections.
 
 ## How to run
 
