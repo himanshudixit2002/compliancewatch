@@ -19,14 +19,14 @@ Migration `0001` creates three tables in schema `rulebook`:
 | --- | --- | --- |
 | `canonical_entity` | One row per aligned entity: `type` (ten values), `canonical_name`, `aliases text[]` | pk `id`; unique (`type`, `canonical_name`); GIN index on `aliases` |
 | `clause_entity` | A mention of an entity in a clause with its character span | pk (`clause_id`, `entity_id`, `span_start`); fk `entity_id` to `canonical_entity` (restrict) |
-| `rule_relation` | A typed relation (`supersedes`, `amends`, `refers_to`, `exempts`, `extends_deadline`) from a rule version to a rule version or an entity, with the evidence clause | pk `id`; unique (`from_rule_version_id`, `relation`, `to_kind`, `to_ref`, `clause_id`); indexes (`relation`, `to_ref`) and (`from_rule_version_id`); fk `to_entity_id` to `canonical_entity` (restrict); CHECKs `ck_rule_relation_pairing`, `ck_rule_relation_target_entity`, `ck_rule_relation_not_self` |
+| `rule_relation` | A typed relation (`supersedes`, `amends`, `refers_to`, `exempts`, `extends_deadline`, `corrects`, `withdraws`) from a rule version to a rule version or an entity, with the evidence clause | pk `id`; unique (`from_rule_version_id`, `relation`, `to_kind`, `to_ref`, `clause_id`); indexes (`relation`, `to_ref`) and (`from_rule_version_id`); fk `to_entity_id` to `canonical_entity` (restrict); CHECKs `ck_rule_relation_pairing`, `ck_rule_relation_target_entity`, `ck_rule_relation_not_self` |
 
 The `clause`, `rule` and `rule_version` tables are not there yet. `clause_id` and
 `from_rule_version_id` are plain uuid columns; the migration that creates those tables adds the
 foreign keys. The vocabulary in the CHECK constraints is derived from `domain_kernel.knowledge`
 (`EntityType`, `RelationKind`, `RULE_VERSION_KIND`), and `to_kind` is `rule_version` or one of the
 ten entity types. Three more CHECKs on `rule_relation` repeat the kernel's rules:
-`ck_rule_relation_pairing` (`supersedes` and `extends_deadline` target a rule version),
+`ck_rule_relation_pairing` (`supersedes`, `extends_deadline`, `corrects` and `withdraws` target a rule version),
 `ck_rule_relation_target_entity` (`to_entity_id` is set exactly when `to_kind` is an entity type)
 and `ck_rule_relation_not_self` (`to_ref` is never the source rule version). Table names are
 unqualified: the connection's `search_path` puts them in `rulebook`.
