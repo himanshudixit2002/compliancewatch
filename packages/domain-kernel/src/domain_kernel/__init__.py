@@ -30,6 +30,7 @@ from domain_kernel.errors import (
     UnknownClosureReasonError,
 )
 from domain_kernel.events import SCHEMA_VERSION_PATTERN, TOPIC_PATTERN, DomainEvent, utc_now
+from domain_kernel.financial_year import FY_LABEL_PATTERN, FinancialYear
 from domain_kernel.ids import (
     BusinessId,
     CandidateId,
@@ -66,6 +67,7 @@ from domain_kernel.ontology import (
     NUMERIC_TYPES,
     SEMVER_PATTERN,
     AttributeDefinition,
+    AttributeLevel,
     AttributeSource,
     AttributeType,
     AttributeValue,
@@ -108,6 +110,7 @@ from domain_kernel.protocols import (
     VectorStore,
     WorkflowHandle,
 )
+from domain_kernel.recurrence import Frequency, Period, Recurrence
 from domain_kernel.rules import ObligationTemplate, RuleVersionSnapshot
 from domain_kernel.status import (
     OBLIGATION_TRANSITIONS,
@@ -129,6 +132,7 @@ __all__ = [
     "ATTRIBUTE_KEY_PATTERN",
     "CERTAIN",
     "ENUM_TYPES",
+    "FY_LABEL_PATTERN",
     "MULTI_VALUE_OPERATORS",
     "NUMERIC_TYPES",
     "OBLIGATION_TRANSITIONS",
@@ -148,6 +152,7 @@ __all__ = [
     "Applicability",
     "ApplicabilityDecision",
     "AttributeDefinition",
+    "AttributeLevel",
     "AttributeSource",
     "AttributeType",
     "AttributeValue",
@@ -184,6 +189,8 @@ __all__ = [
     "EntityType",
     "EventId",
     "ExtractionContext",
+    "FinancialYear",
+    "Frequency",
     "InvalidAttributeValueError",
     "InvalidOperatorError",
     "InvalidRelationError",
@@ -201,6 +208,7 @@ __all__ = [
     "OntologyDefinitionError",
     "Operator",
     "ParsedDocument",
+    "Period",
     "Predicate",
     "PredicateEvaluator",
     "PredicateKind",
@@ -208,6 +216,7 @@ __all__ = [
     "PredicateValue",
     "ProfileSnapshot",
     "RawDocument",
+    "Recurrence",
     "RelationKind",
     "RenderedMessage",
     "RuleCandidate",

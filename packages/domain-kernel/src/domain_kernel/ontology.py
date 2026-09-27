@@ -63,6 +63,15 @@ class AttributeSource(StrEnum):
     DERIVED = "derived"
 
 
+class AttributeLevel(StrEnum):
+    """Which node of the business hierarchy holds the value: the legal entity (PAN), one
+    registration (GSTIN) or one place of business. Values are inherited downward."""
+
+    ENTITY = "entity"
+    REGISTRATION = "registration"
+    LOCATION = "location"
+
+
 ENUM_TYPES = frozenset({AttributeType.ENUM, AttributeType.ORDERED_ENUM, AttributeType.ENUM_SET})
 NUMERIC_TYPES = frozenset({AttributeType.INTEGER, AttributeType.DECIMAL})
 
@@ -84,7 +93,19 @@ ALLOWED_OPERATORS: Mapping[AttributeType, frozenset[Operator]] = MappingProxyTyp
 """Operators a predicate may use per attribute type."""
 
 _ATTRIBUTE_KEYS = frozenset(
-    {"key", "type", "definition", "source", "allowed_values", "min", "max", "since", "example"}
+    {
+        "key",
+        "type",
+        "definition",
+        "source",
+        "level",
+        "per_financial_year",
+        "allowed_values",
+        "min",
+        "max",
+        "since",
+        "example",
+    }
 )
 _REQUIRED_ATTRIBUTE_KEYS = frozenset({"key", "type", "definition", "source"})
 _ONTOLOGY_KEYS = frozenset({"version", "attributes"})
@@ -96,13 +117,17 @@ class AttributeDefinition:
 
     ``allowed_values`` is the member list of the enum kinds; for ordered_enum its order is the
     rank. ``minimum`` and ``maximum`` bound integer and decimal attributes. ``example`` is
-    stored in canonical form.
+    stored in canonical form. ``level`` names the hierarchy node the value belongs to;
+    ``per_financial_year`` marks a value that is stated for one financial year (a turnover
+    band), so a profile carries it with the year it is as of.
     """
 
     key: str
     type: AttributeType
     definition: str
     source: AttributeSource
+    level: AttributeLevel = AttributeLevel.REGISTRATION
+    per_financial_year: bool = False
     allowed_values: tuple[str, ...] = ()
     minimum: int | Decimal | None = None
     maximum: int | Decimal | None = None
@@ -118,6 +143,9 @@ class AttributeDefinition:
         if not definition.strip():
             raise OntologyDefinitionError(f"{key}: definition must not be blank")
         _instance(self.source, AttributeSource, f"{key}: source")
+        _instance(self.level, AttributeLevel, f"{key}: level")
+        if not isinstance(self.per_financial_year, bool):
+            raise OntologyDefinitionError(f"{key}: per_financial_year must be true or false")
         self._check_allowed_values()
         _check_bound(self.minimum, self.type, key, "min")
         _check_bound(self.maximum, self.type, key, "max")
@@ -231,6 +259,8 @@ class AttributeDefinition:
                 type=attribute_type,
                 definition=_text(mapping, "definition", where),
                 source=_enum(AttributeSource, mapping["source"], "source", where),
+                level=_enum(AttributeLevel, mapping.get("level", "registration"), "level", where),
+                per_financial_year=_flag(mapping, "per_financial_year", where),
                 allowed_values=allowed_values,
                 minimum=_check_bound(mapping.get("min"), attribute_type, key, "min"),
                 maximum=_check_bound(mapping.get("max"), attribute_type, key, "max"),
@@ -502,6 +532,13 @@ def _text(mapping: Mapping[str, object], key: str, where: str) -> str:
     raw = mapping.get(key)
     if not isinstance(raw, str) or not raw.strip():
         raise OntologyDefinitionError(f"{where}: {key} must be a non-empty string")
+    return raw
+
+
+def _flag(mapping: Mapping[str, object], key: str, where: str) -> bool:
+    raw = mapping.get(key, False)
+    if not isinstance(raw, bool):
+        raise OntologyDefinitionError(f"{where}: {key} must be true or false")
     return raw
 
 
