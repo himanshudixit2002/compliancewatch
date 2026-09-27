@@ -1,0 +1,8 @@
+Copyright (c) 2026 Himanshu Dixit. All rights reserved.
+
+This repository and everything in it are proprietary. No licence is granted to use, copy,
+modify, merge, publish, distribute, sublicense or sell any part of it, in source or binary
+form, without prior written permission from the copyright holder.
+
+Third-party dependencies pulled in by the package managers keep their own licences; see the
+lockfiles (uv.lock, pnpm-lock.yaml) for the exact versions.
