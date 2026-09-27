@@ -15,12 +15,12 @@ cp .env.example .env          # placeholder values; never commit .env
 make install                  # uv sync --all-packages + pnpm install --frozen-lockfile
 make dev                      # Postgres+pgvector, Redis, Redpanda, Temporal (+UI) via Docker Compose
 make migrate                  # alembic upgrade head for every service, one schema each
-make run SERVICE=identity     # http://localhost:8001/health (ports 8001-8010, see `make help`)
+make run SERVICE=identity     # http://localhost:8001/health (ports 8001-8010, table below)
 make test                     # pytest with the coverage gate + vitest
-make check                    # lint, typecheck, test, import-linter, lock check (what CI runs)
+make check                    # the CI gates: lint, typecheck (incl. tests), test, import-linter, lock check
 ```
 
-Prerequisites: Docker (Docker Desktop or `brew install colima docker docker-compose docker-buildx && colima start`), `uv`, `pnpm` and Node 22+. Details and troubleshooting in [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
+Prerequisites: Node 22.18+ (type stripping for the bot's dev script), Docker (Docker Desktop or `brew install colima docker docker-compose docker-buildx && colima start --cpu 4 --memory 8 --disk 60`), `uv`, `pnpm` and Node 22+. Details and troubleshooting in [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
 
 ## Layout principles (section 13)
 
@@ -128,7 +128,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | `make run SERVICE=x [PORT=n]` | uvicorn with reload on the service's dev port |
 | `make test` | pytest (unit + contract, coverage gate on domain and application) and vitest |
 | `make lint` / `typecheck` / `format` | ruff + eslint + prettier; mypy --strict + tsc --strict |
-| `make check` | lint, typecheck, test, import-linter, uv lock check (what CI runs) |
+| `make check` | lint, typecheck, test, import-linter, uv lock check (the same gates CI runs) |
 | `make eval` | Eval harness against `evals/golden` (arrives in Phase 1; prints a notice today) |
 | `make hooks` | Install the pre-commit and commit-msg hooks |
 | `make help` | Every target with its description |
@@ -139,7 +139,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | --- | --- | --- |
 | No import from another service's package | import-linter contract in CI | wired |
 | Domain layer imports nothing from infrastructure or third-party I/O | import-linter | wired |
-| Every public endpoint has an OpenAPI schema and a contract test | CI job fails on undocumented routes | later (no endpoints yet) |
+| Every public endpoint has an OpenAPI schema and a contract test | CI job fails on undocumented routes | later (only template ping routes exist) |
 | Every event has a JSON Schema in packages/contracts and a changelog entry | Schema registry compatibility check in CI | later (no events yet) |
 | Every prompt file has a version, an owner and at least one eval case | Eval harness refuses to run an unregistered prompt | Phase 1 |
 | Every table with tenant data has tenant_id and an RLS policy | Migration lint script | later (no tables yet) |

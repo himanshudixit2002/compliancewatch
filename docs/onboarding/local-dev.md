@@ -8,7 +8,7 @@ Everything runs from the repo root through `make`; `make help` lists every targe
 | --- | --- | --- |
 | Docker | Docker Desktop, or `brew install colima docker docker-compose docker-buildx` then `colima start --cpu 4 --memory 8 --disk 60` | Homebrew's `docker-compose` and `docker-buildx` are CLI plugins (`docker build` needs buildx for the `--mount=type=cache` instructions in the Dockerfiles): `~/.docker/config.json` needs `{"cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"]}` (brew prints this). The default 2 GB Colima VM is too small for Redpanda + Temporal + Postgres. |
 | uv | `brew install uv` | `uv sync` downloads a managed CPython 3.12 (`.python-version`); the Homebrew `python3` is never used. |
-| pnpm + Node 22+ | `brew install pnpm node` | `package.json` pins `pnpm@11.15.0`; pnpm switches itself to that version. |
+| pnpm + Node 22.18+ | `brew install pnpm node` | `package.json` pins `pnpm@11.15.0`; pnpm switches itself to that version. |
 | pre-commit (optional but expected) | `brew install pre-commit` or `uv tool install pre-commit`, then `make hooks` | Installs the pre-commit and commit-msg hooks (ruff, prettier, gitleaks, conventional commits). |
 | actionlint, gitleaks (optional) | `brew install actionlint gitleaks` | `make ci-lint` validates the workflows locally. |
 
@@ -38,7 +38,7 @@ make test
 | Web app | `http://localhost:3000` | `pnpm --filter web dev`; `/admin` for the internal tools |
 | WhatsApp bot | `http://localhost:8080` | `pnpm --filter whatsapp-bot dev`; `/health`, `GET/POST /webhook` |
 
-Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPANDA_KAFKA_PORT`, `TEMPORAL_PORT`, `TEMPORAL_UI_PORT`, `LANGFUSE_PORT`). Other projects on this machine use 5432, 6379, 9092, 8080 and 3000 when they run; change the port in `.env`, not in `docker-compose.yml`.
+Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPANDA_KAFKA_PORT`, `REDPANDA_SCHEMA_REGISTRY_PORT`, `REDPANDA_ADMIN_PORT`, `TEMPORAL_PORT`, `TEMPORAL_UI_PORT`, `LANGFUSE_PORT`). Other projects on this machine use 5432, 6379, 9092, 8080 and 3000 when they run; change the port in `.env`, not in `docker-compose.yml`.
 
 ## Running one service
 
@@ -62,7 +62,7 @@ Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPAND
 - **`make dev` fails with a health-check timeout.** `make dev-logs SERVICE=<postgres|redpanda|temporal>`.
 - **`uv sync` says no interpreter for 3.12.** `uv python install 3.12`.
 - **Apple Silicon.** Every pinned image publishes an arm64 manifest; no `platform:` overrides are needed.
-- **`next dev` rewrites `apps/web/AGENTS.md`.** That file is maintained by Next.js and committed on purpose.
+- **`next dev` rewrites `apps/web/AGENTS.md` (and `CLAUDE.md`, which just points at it).** Both are maintained by Next.js and committed on purpose.
 
 ## Not in the stack yet
 

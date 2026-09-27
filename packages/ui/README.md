@@ -3,7 +3,7 @@
 Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 12, 13 and 15.
 
-- **Owns:** Shared React components and design tokens (Tailwind, shadcn/ui) used by the product and the internal tools
+- **Owns:** Shared React components and design tokens (Tailwind now; shadcn/ui to be adopted) used by the product and the internal tools
 - **Owning team:** Core Product (guide section 14)
 - **Consumes:** n/a
 - **Emits / publishes:** Consumed by apps/web

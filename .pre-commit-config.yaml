@@ -35,7 +35,7 @@ repos:
         entry: prettier --write --ignore-unknown
         language: node
         additional_dependencies: ["prettier@3.9.9"]
-        types_or: [ts, tsx, javascript, json, yaml, css]
+        files: \.(ts|tsx|mts|cts|js|mjs|cjs|jsx|json|ya?ml|css)$
 
   # Secrets (guide section 13). Built from source on first run (pre-commit downloads Go if absent);
   # switch to `id: gitleaks-system` if you prefer `brew install gitleaks`.

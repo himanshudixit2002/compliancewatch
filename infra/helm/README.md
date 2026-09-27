@@ -10,7 +10,7 @@ Design reference: Project Foundation guide, sections 14 and 17.
 
 ## Layout
 
-Flat for now; chart template arrives with the service template.
+Flat for now; the chart template arrives with the Platform infra slice.
 
 ## How to run
 

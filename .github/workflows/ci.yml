@@ -46,7 +46,9 @@ jobs:
               - 'evals/**'
               - 'pyproject.toml'
               - 'uv.lock'
+              - '.python-version'
               - 'conftest.py'
+              - 'Makefile'
               - '.github/workflows/ci.yml'
             typescript:
               - 'apps/**'
@@ -61,6 +63,8 @@ jobs:
               - '.prettierrc'
               - '.prettierignore'
               - '.nvmrc'
+              - '**/*.yml' # prettier --check . also covers YAML outside the packages
+              - '**/*.yaml'
               - '.github/workflows/ci.yml'
             devstack:
               - 'docker-compose.yml'
@@ -78,22 +82,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0 # exact tag: astral publishes no floating v10 tag
         with:
           enable-cache: true
           python-version: "3.12"
       - run: uv sync --all-packages --locked
+      # The same gates as `make check` locally (py- side): ruff, per-package mypy --strict (src, tests,
+      # migrations/env.py), import-linter, pytest with the 80% coverage gate, uv lock check.
       - name: Lint and format check (ruff)
-        run: |
-          uv run ruff check .
-          uv run ruff format --check .
-      - name: Type-check (mypy --strict; targets from [tool.mypy] in pyproject.toml)
-        run: uv run mypy
+        run: make py-lint
+      - name: Type-check (mypy --strict per package)
+        run: make py-typecheck
       - name: Contract check - import boundaries (import-linter)
-        run: uv run lint-imports
+        run: make importlint
       # TODO(section 17 step 3): OpenAPI diff, event-schema compatibility, migration lint (tenant_id + RLS).
       - name: Unit tests with coverage gate (80% on domain and application layers, guide section 19)
-        run: uv run pytest -m "not integration" --cov --cov-report=term-missing
+        run: make py-test
+      - name: Lockfile is current
+        run: make lock-check
 
   typescript:
     name: TypeScript (eslint, tsc, vitest, build)
@@ -134,7 +140,7 @@ jobs:
           docker compose exec -T postgres psql -U cw -d compliancewatch -Atc "select extversion from pg_extension where extname = 'vector'" | grep -E '^[0-9]'
           docker compose exec -T redpanda rpk cluster health
           docker compose exec -T temporal temporal operator cluster health --address temporal:7233
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0 # exact tag: astral publishes no floating v10 tag
         with:
           enable-cache: true
           python-version: "3.12"
@@ -151,6 +157,9 @@ jobs:
   gitleaks:
     name: Secrets scan (gitleaks)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # the action lists the PR's commits
     steps:
       - uses: actions/checkout@v7
         with:
