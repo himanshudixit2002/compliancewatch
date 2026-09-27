@@ -1,39 +1,16 @@
-"""FastAPI application factory: logging, request-id middleware, health routes, service routers."""
+"""FastAPI application factory: logging, request context, problem details, health, routers."""
 
-import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
-import structlog
 from fastapi import APIRouter, FastAPI
-from starlette.datastructures import Headers, MutableHeaders
-from starlette.types import ASGIApp, Lifespan, Message, Receive, Scope, Send
+from starlette.types import Lifespan
 
+from domain_kernel.errors import DomainError
 from py_common.health import ReadinessCheck, build_health_router
 from py_common.logging import configure_logging
+from py_common.problems import install_problem_handlers
+from py_common.request_context import RequestContextMiddleware
 from py_common.settings import Settings
-
-REQUEST_ID_HEADER = "x-request-id"
-
-
-class RequestContextMiddleware:
-    """Pure ASGI middleware: reuse or mint an ``x-request-id``, bind it as ``correlation_id``."""
-
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-        correlation_id = Headers(scope=scope).get(REQUEST_ID_HEADER) or uuid.uuid4().hex
-
-        async def send_with_request_id(message: Message) -> None:
-            if message["type"] == "http.response.start":
-                MutableHeaders(scope=message).append(REQUEST_ID_HEADER, correlation_id)
-            await send(message)
-
-        with structlog.contextvars.bound_contextvars(correlation_id=correlation_id):
-            await self.app(scope, receive, send_with_request_id)
 
 
 def create_app(
@@ -44,10 +21,13 @@ def create_app(
     settings: Settings | None = None,
     readiness_checks: Sequence[tuple[str, ReadinessCheck]] = (),
     lifespan: Lifespan[FastAPI] | None = None,
+    problem_status: Mapping[type[DomainError], int] | None = None,
 ) -> FastAPI:
     """Build the service app.
 
-    ``tenant_id`` is bound later by the auth dependency, never from a header.
+    ``problem_status`` maps the service's own domain errors to HTTP statuses; the kernel's defaults
+    apply underneath. Every error leaves as ``application/problem+json``. ``tenant_id`` is bound by
+    the service's own auth dependency.
     """
     settings = settings or Settings(service_name=service_name)
     configure_logging(
@@ -56,6 +36,7 @@ def create_app(
     app = FastAPI(title=f"compliancewatch-{service_name}", version=version, lifespan=lifespan)
     app.state.settings = settings
     app.add_middleware(RequestContextMiddleware)
+    install_problem_handlers(app, problem_status or {})
     app.include_router(
         build_health_router(
             service_name=service_name, version=version, readiness_checks=readiness_checks
