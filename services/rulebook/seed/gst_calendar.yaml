@@ -1,0 +1,393 @@
+# GST standing obligations: the seed calendar of the rulebook.
+#
+# Every entry is a draft rule version (seed_status: needs_review) that a Regulatory Analyst
+# confirms against the cited notification or rule before it is published; nothing here reaches a
+# business until then. Where the author was not sure, the entry carries a TODO question instead
+# of a guess. Predicates use ontology 0.2.0 keys; recurrence and template shapes are the kernel's.
+#
+# Fields per rule:
+#   rule_key           stable key of the rule (a rule keeps its key across versions)
+#   title, summary     plain language
+#   regulator          cbic
+#   level              the hierarchy node the rule applies to: entity, registration, location
+#   specification      predicate tree over ontology attributes (all_of / any_of / not / predicate)
+#   obligation_template title, steps, evidence_type (due_in_days for one-off duties)
+#   recurrence         frequency (monthly, quarterly, half_yearly, annual), due_day, due_month_offset
+#   effective_from     ISO date the version is in force from (the seed's own start, not the law's)
+#   source             citation: instrument, reference, url (the text the analyst checks)
+#   seed_status        needs_review
+#   todo               questions the analyst answers before publication
+version: "0.1.0"
+ontology_version: "0.2.0"
+rules:
+  - rule_key: gstr3b_monthly
+    title: File FORM GSTR-3B every month
+    summary: >-
+      A regular taxpayer that files monthly furnishes the return in FORM GSTR-3B for each month
+      by the 20th of the following month.
+    regulator: cbic
+    level: registration
+    specification:
+      all_of:
+        - { attribute: registration_type, operator: eq, value: regular }
+        - { attribute: filing_scheme, operator: eq, value: regular_monthly }
+    obligation_template:
+      title: File GSTR-3B for the month
+      steps:
+        - Reconcile outward supplies and input tax credit for the month
+        - Pay the tax due through the electronic cash or credit ledger
+        - File FORM GSTR-3B on the GST portal
+      evidence_type: filing_acknowledgement
+    recurrence: { frequency: monthly, due_day: 20, due_month_offset: 0 }
+    effective_from: "2026-04-01"
+    source:
+      instrument: CGST Rules, 2017
+      reference: rule 61(1)
+      note: Due date for FORM GSTR-3B of a monthly filer is the 20th of the following month.
+    seed_status: needs_review
+    todo:
+      - Confirm that no notification in force on the effective date changes the 20th for any class of taxpayer.
+
+  - rule_key: gstr3b_quarterly_group_a
+    title: File FORM GSTR-3B every quarter (QRMP, due on the 22nd)
+    summary: >-
+      A registration under the QRMP scheme in the first group of states and union territories
+      furnishes FORM GSTR-3B for each quarter by the 22nd of the month following the quarter,
+      paying tax monthly through FORM GST PMT-06.
+    regulator: cbic
+    level: registration
+    specification:
+      all_of:
+        - { attribute: registration_type, operator: eq, value: regular }
+        - { attribute: filing_scheme, operator: eq, value: regular_qrmp }
+        - attribute: state_codes
+          operator: contains_any
+          value: ["22", "23", "24", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "37"]
+    obligation_template:
+      title: File GSTR-3B for the quarter (QRMP)
+      steps:
+        - Pay tax for the first two months of the quarter through FORM GST PMT-06 by the 25th of the next month
+        - Reconcile the quarter's outward supplies and input tax credit
+        - File FORM GSTR-3B on the GST portal
+      evidence_type: filing_acknowledgement
+    recurrence: { frequency: quarterly, due_day: 22, due_month_offset: 0 }
+    effective_from: "2026-04-01"
+    source:
+      instrument: Notification No. 82/2020-Central Tax
+      reference: rule 61(1) proviso, first group of states
+      note: Quarterly filers in the named states and union territories file by the 22nd.
+    seed_status: needs_review
+    todo:
+      - Confirm the state and union territory list for the 22nd and map each name to its GST state code; the seed lists the codes the author recalls.
+      - Confirm whether the monthly PMT-06 payment should be its own recurring obligation rather than a step.
+
+  - rule_key: gstr3b_quarterly_group_b
+    title: File FORM GSTR-3B every quarter (QRMP, due on the 24th)
+    summary: >-
+      A registration under the QRMP scheme in the second group of states and union territories
+      furnishes FORM GSTR-3B for each quarter by the 24th of the month following the quarter.
+    regulator: cbic
+    level: registration
+    specification:
+      all_of:
+        - { attribute: registration_type, operator: eq, value: regular }
+        - { attribute: filing_scheme, operator: eq, value: regular_qrmp }
+        - not:
+            attribute: state_codes
+            operator: contains_any
+            value: ["22", "23", "24", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "37"]
+    obligation_template:
+      title: File GSTR-3B for the quarter (QRMP)
+      steps:
+        - Pay tax for the first two months of the quarter through FORM GST PMT-06 by the 25th of the next month
+        - Reconcile the quarter's outward supplies and input tax credit
+        - File FORM GSTR-3B on the GST portal
+      evidence_type: filing_acknowledgement
+    recurrence: { frequency: quarterly, due_day: 24, due_month_offset: 0 }
+    effective_from: "2026-04-01"
+    source:
+      instrument: Notification No. 82/2020-Central Tax
+      reference: rule 61(1) proviso, second group of states
+      note: Quarterly filers in the remaining states and union territories file by the 24th.
+    seed_status: needs_review
+    todo:
+      - Confirm the complement list; a registration with registrations in both groups needs a decision on which date applies per GSTIN (the rule is per registration, the profile's state_codes is per entity).
+
+  - rule_key: gstr1_monthly
+    title: File FORM GSTR-1 every month
+    summary: >-
+      A regular taxpayer that files monthly furnishes details of outward supplies in FORM GSTR-1
+      by the 11th of the following month.
+    regulator: cbic
+    level: registration
+    specification:
+      all_of:
+        - { attribute: registration_type, operator: eq, value: regular }
+        - { attribute: filing_scheme, operator: eq, value: regular_monthly }
+    obligation_template:
+      title: File GSTR-1 for the month
+      steps:
+        - Upload invoice-wise outward supplies for the month
+        - File FORM GSTR-1 on the GST portal
+      evidence_type: filing_acknowledgement
+    recurrence: { frequency: monthly, due_day: 11, due_month_offset: 0 }
+    effective_from: "2026-04-01"
+    source:
+      instrument: Notification No. 83/2020-Central Tax
+      reference: section 37(1) read with the notification
+      note: Monthly GSTR-1 is due by the 11th of the following month.
+    seed_status: needs_review
+    todo:
+      - Confirm the current due date and whether any later notification supersedes 83/2020.
+
+  - rule_key: gstr1_quarterly
+    title: File FORM GSTR-1 every quarter (QRMP)
+    summary: >-
+      A registration under the QRMP scheme furnishes FORM GSTR-1 for each quarter by the 13th of
+      the month following the quarter; the invoice furnishing facility for the first two months
+      is optional.
+    regulator: cbic
+    level: registration
+    specification:
+      all_of:
+        - { attribute: registration_type, operator: eq, value: regular }
+        - { attribute: filing_scheme, operator: eq, value: regular_qrmp }
+    obligation_template:
+      title: File GSTR-1 for the quarter (QRMP)
+      steps:
+        - Optionally report B2B invoices for the first two months through the invoice furnishing facility by the 13th of the next month
+        - Upload the quarter's outward supplies
+        - File FORM GSTR-1 on the GST portal
+      evidence_type: filing_acknowledgement
+    recurrence: { frequency: quarterly, due_day: 13, due_month_offset: 0 }
+    effective_from: "2026-04-01"
+    source:
+      instrument: Notification No. 83/2020-Central Tax
+      reference: quarterly return proviso
+      note: Quarterly GSTR-1 is due by the 13th of the month following the quarter.
+    seed_status: needs_review
+    todo:
+      - Confirm the 13th and the invoice furnishing facility window.
+
+  - rule_key: cmp08_quarterly
+    title: Pay tax every quarter through FORM GST CMP-08
+    summary: >-
+      A composition taxpayer furnishes a statement of self-assessed tax in FORM GST CMP-08 and
+      pays the tax for each quarter by the 18th of the month following the quarter.
+    regulator: cbic
+    level: registration
+    specification:
+      all_of:
+        - { attribute: registration_type, operator: eq, value: composition }
+        - { attribute: filing_scheme, operator: eq, value: composition }
+    obligation_template:
+      title: File CMP-08 and pay tax for the quarter
+      steps:
+        - Total the quarter's outward supplies and the tax at the composition rate
+        - File FORM GST CMP-08 and pay through the electronic cash ledger
+      evidence_type: filing_acknowledgement
+    recurrence: { frequency: quarterly, due_day: 18, due_month_offset: 0 }
+    effective_from: "2026-04-01"
+    source:
+      instrument: CGST Rules, 2017
+      reference: rule 62(1)(i)
+      note: CMP-08 for a quarter is due by the 18th of the month following the quarter.
+    seed_status: needs_review
+    todo:
+      - Confirm the due date has not been moved by a later notification.
+
+  - rule_key: gstr4_annual
+    title: File the annual return in FORM GSTR-4
+    summary: >-
+      A composition taxpayer furnishes the annual return in FORM GSTR-4 for each financial year
+      by 30 June following the end of the year.
+    regulator: cbic
+    level: registration
+    specification:
+      all_of:
+        - { attribute: registration_type, operator: eq, value: composition }
+    obligation_template:
+      title: File GSTR-4 for the financial year
+      steps:
+        - Reconcile the four CMP-08 statements of the year
+        - File FORM GSTR-4 on the GST portal
+      evidence_type: filing_acknowledgement
+    recurrence: { frequency: annual, due_day: 30, due_month_offset: 2 }
+    effective_from: "2026-04-01"
+    source:
+      instrument: Notification No. 12/2024-Central Tax
+      reference: rule 62(1)(ii) as amended
+      note: GSTR-4 is due by 30 June following the financial year, for years from 2024-25.
+    seed_status: needs_review
+    todo:
+      - Confirm the move from 30 April to 30 June and the first financial year it applies to.
+
+  - rule_key: gstr9_annual
+    title: File the annual return in FORM GSTR-9
+    summary: >-
+      A regular taxpayer furnishes the annual return in FORM GSTR-9 for each financial year by
+      31 December following the end of the year. Taxpayers with aggregate turnover up to 2 crore
+      have been exempted year by year.
+    regulator: cbic
+    level: registration
+    specification:
+      all_of:
+        - { attribute: registration_type, operator: eq, value: regular }
+        - { attribute: turnover_band, operator: gt, value: 1_5_crore_to_2_crore }
+    obligation_template:
+      title: File GSTR-9 for the financial year
+      steps:
+        - Reconcile the year's GSTR-1 and GSTR-3B figures with the books
+        - File FORM GSTR-9 on the GST portal
+      evidence_type: filing_acknowledgement
+    recurrence: { frequency: annual, due_day: 31, due_month_offset: 8 }
+    effective_from: "2026-04-01"
+    source:
+      instrument: CGST Rules, 2017
+      reference: rule 80(1)
+      note: The annual return for a financial year is due by 31 December following it.
+    seed_status: needs_review
+    todo:
+      - The exemption up to 2 crore has been notified for each year separately; confirm whether it holds for the current year or the predicate must be dropped.
+      - turnover_band is the previous year's band; confirm it is the right year for the annual return threshold.
+
+  - rule_key: gstr9c_annual
+    title: File the reconciliation statement in FORM GSTR-9C
+    summary: >-
+      A regular taxpayer with aggregate turnover above 5 crore in the financial year furnishes a
+      self-certified reconciliation statement in FORM GSTR-9C with the annual return, by 31
+      December following the end of the year.
+    regulator: cbic
+    level: registration
+    specification:
+      all_of:
+        - { attribute: registration_type, operator: eq, value: regular }
+        - { attribute: turnover_band, operator: gt, value: 2_crore_to_5_crore }
+    obligation_template:
+      title: File GSTR-9C for the financial year
+      steps:
+        - Reconcile the audited financial statements with the annual return
+        - File FORM GSTR-9C on the GST portal with GSTR-9
+      evidence_type: filing_acknowledgement
+    recurrence: { frequency: annual, due_day: 31, due_month_offset: 8 }
+    effective_from: "2026-04-01"
+    source:
+      instrument: Notification No. 30/2021-Central Tax
+      reference: rule 80(3)
+      note: Self-certified GSTR-9C for aggregate turnover above 5 crore, due with GSTR-9.
+    seed_status: needs_review
+    todo:
+      - Confirm the 5 crore threshold is stated for the same financial year the return covers.
+
+  - rule_key: itc04_half_yearly
+    title: File FORM GST ITC-04 every half year
+    summary: >-
+      A principal with aggregate turnover above 5 crore that sends goods to a job worker
+      furnishes FORM GST ITC-04 for April to September by 25 October and for October to March
+      by 25 April.
+    regulator: cbic
+    level: registration
+    specification:
+      all_of:
+        - { attribute: registration_type, operator: eq, value: regular }
+        - { attribute: turnover_band, operator: gt, value: 2_crore_to_5_crore }
+        - attribute: sends_goods_to_job_workers
+          free_text: The business sends inputs or capital goods to a job worker under section 143.
+    obligation_template:
+      title: File ITC-04 for the half year
+      steps:
+        - List the challans for goods sent to and received back from job workers in the half year
+        - File FORM GST ITC-04 on the GST portal
+      evidence_type: filing_acknowledgement
+    recurrence: { frequency: half_yearly, due_day: 25, due_month_offset: 0 }
+    effective_from: "2026-04-01"
+    source:
+      instrument: Notification No. 35/2021-Central Tax
+      reference: rule 45(3)
+      note: Half-yearly ITC-04 for aggregate turnover above 5 crore.
+    seed_status: needs_review
+    todo:
+      - The job-work condition has no ontology attribute; decide whether to add one in ontology 0.3.0 or keep the free-text predicate.
+
+  - rule_key: itc04_annual
+    title: File FORM GST ITC-04 every year
+    summary: >-
+      A principal with aggregate turnover up to 5 crore that sends goods to a job worker
+      furnishes FORM GST ITC-04 for the financial year by 25 April following it.
+    regulator: cbic
+    level: registration
+    specification:
+      all_of:
+        - { attribute: registration_type, operator: eq, value: regular }
+        - { attribute: turnover_band, operator: lte, value: 2_crore_to_5_crore }
+        - attribute: sends_goods_to_job_workers
+          free_text: The business sends inputs or capital goods to a job worker under section 143.
+    obligation_template:
+      title: File ITC-04 for the financial year
+      steps:
+        - List the challans for goods sent to and received back from job workers in the year
+        - File FORM GST ITC-04 on the GST portal
+      evidence_type: filing_acknowledgement
+    recurrence: { frequency: annual, due_day: 25, due_month_offset: 0 }
+    effective_from: "2026-04-01"
+    source:
+      instrument: Notification No. 35/2021-Central Tax
+      reference: rule 45(3)
+      note: Yearly ITC-04 for aggregate turnover up to 5 crore.
+    seed_status: needs_review
+    todo:
+      - Same job-work attribute question as itc04_half_yearly.
+
+  - rule_key: e_invoicing
+    title: Issue e-invoices for B2B supplies
+    summary: >-
+      A registered person whose aggregate turnover exceeded 5 crore in any financial year from
+      2017-18 onwards must report B2B invoices to an Invoice Registration Portal and issue
+      invoices with the IRN and QR code.
+    regulator: cbic
+    level: entity
+    specification:
+      all_of:
+        - { attribute: registration_type, operator: eq, value: regular }
+        - { attribute: peak_turnover_band, operator: gt, value: 2_crore_to_5_crore }
+    obligation_template:
+      title: Set up e-invoicing and issue e-invoices
+      steps:
+        - Register on an Invoice Registration Portal and enable e-invoicing in the billing software
+        - Issue every B2B invoice with an IRN and QR code from the start date
+      due_in_days: 30
+      evidence_type: sample_e_invoice
+    effective_from: "2026-04-01"
+    source:
+      instrument: Notification No. 10/2023-Central Tax
+      reference: Notification No. 13/2020-Central Tax as amended; 5 crore threshold from 1 August 2023
+      note: E-invoicing applies above 5 crore of aggregate turnover in any year from 2017-18.
+    seed_status: needs_review
+    todo:
+      - Confirm the exempt classes (SEZ units, banking and insurance, goods transport agencies, passenger transport, multiplex cinemas) and add predicates for those the ontology can express.
+
+  - rule_key: eway_bill
+    title: Generate e-way bills for movements of goods
+    summary: >-
+      A registered person that causes movement of goods of consignment value above 50,000
+      rupees generates an e-way bill in FORM GST EWB-01 before the movement starts.
+    regulator: cbic
+    level: registration
+    specification:
+      all_of:
+        - { attribute: generates_eway_bills, operator: eq, value: true }
+    obligation_template:
+      title: Generate e-way bills before moving goods
+      steps:
+        - Register on the e-way bill portal
+        - Generate FORM GST EWB-01 for every consignment above the threshold before dispatch
+      due_in_days: 14
+      evidence_type: eway_bill_sample
+    effective_from: "2026-04-01"
+    source:
+      instrument: CGST Rules, 2017
+      reference: rule 138
+      note: E-way bill for consignment value above 50,000 rupees; some states set a higher intra-state limit.
+    seed_status: needs_review
+    todo:
+      - Confirm the intra-state thresholds by state and whether they need per-state rule versions.

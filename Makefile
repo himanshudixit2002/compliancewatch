@@ -190,7 +190,7 @@ ts-dev: check-pnpm ## next dev (:3000) and whatsapp-bot (:8080) with reload
 	$(PNPM) turbo run dev
 
 # ---- Composition (guide sections 13, 17, 19) -------------------------------------------------
-.PHONY: install lint format typecheck test check eval migrate run worker relay openapi contracts contracts-check hooks ci-lint
+.PHONY: install lint format typecheck test check eval migrate run worker relay seed openapi contracts contracts-check hooks ci-lint
 install: py-sync ts-install ## Install both toolchains
 
 lint: py-lint ts-lint ## Lint both sides (CI step 1)
@@ -228,6 +228,13 @@ run: check-uv ## Run one service with reload: make run SERVICE=identity [PORT=80
 	  $(UV) run --package compliancewatch-$(SERVICE) uvicorn $(PKG).main:app --reload --port $(PORT) \
 	    --reload-dir services/$(SERVICE)/src --reload-dir packages/py-common/src \
 	    --reload-dir packages/domain-kernel/src --reload-dir packages/ontology/src
+
+seed: check-uv ## Load the rulebook seed calendar as draft rule versions: make seed SERVICE=rulebook [ARGS=--check]
+	@[ -n "$(SERVICE)" ] || { echo "usage: make seed SERVICE=rulebook [ARGS=--check]"; exit 1; }
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$(SCHEMA)%2Cpublic"; \
+	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \
+	  $(UV) run --package compliancewatch-$(SERVICE) $(SERVICE)-seed $(ARGS)
 
 worker: check-uv ## Run a service's Temporal worker: make worker SERVICE=pipeline
 	@[ -n "$(SERVICE)" ] || { echo "usage: make worker SERVICE=<pipeline|...>"; exit 1; }
