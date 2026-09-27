@@ -27,7 +27,7 @@
 > the manual fallback, the billing protocol with a Razorpay skeleton behind a flag, OpenTelemetry tracing
 > and metrics with a dev observability stack (collector, Prometheus, Tempo, Grafana dashboard),
 > pnpm + Turborepo workspace with the Next.js web app and
-> the WhatsApp bot, Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 008
+> the WhatsApp bot, paging alert rules with runbooks and a CI link check, dev backup and restore, the MVP deploy profile (Fly.io templates, Vercel config, env matrix) and the one-process demo tenant (`make demo`), Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 008
 > and 012 to 017 (009 to 011 as stubs). No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
 >
 > Source of truth: *ComplianceWatch - Project Foundation (HLD, LLD & Build Guide)*. Section numbers below refer to that guide.
@@ -37,6 +37,51 @@
 ComplianceWatch watches regulators for rule changes, decides which changes apply to one specific business, and turns each into a dated obligation the owner can act on. Launch vertical: Indian SMBs under GST, with FSSAI as the second regulator (section 1).
 
 Repository policies: [LICENSE](LICENSE) (all rights reserved), [SECURITY.md](SECURITY.md) for reporting a vulnerability, [CONTRIBUTING.md](CONTRIBUTING.md) for the branch, commit and layering rules.
+
+## How the pieces fit
+
+```mermaid
+flowchart LR
+  subgraph Sources
+    CBIC[CBIC notifications and circulars]
+    COUNCIL[GST Council press releases]
+    GSTN[GSTN advisories]
+    MAHA[Maharashtra GST]
+  end
+  subgraph Pipeline["pipeline (Temporal workers)"]
+    ADAPT[adapters and polite client] --> PARSE[PDF and HTML parsers]
+    PARSE --> DETECT[detector: kind, change, references]
+    DETECT --> EXTRACT[extractor + validators]
+  end
+  GW[llm-gateway: prompt registry, budgets, fake provider]
+  EVALS[evals: golden sets and harness]
+  RULEBOOK[rulebook: versioned rules, seed calendar, knowledge tables]
+  PROFILE[profile: hierarchy, attributes, GSTIN lookup]
+  ENGINE[applicability-engine]
+  OBLIG[obligation: calendar, reschedules]
+  NOTIF[notification: preferences, quiet hours, templates]
+  IDENT[identity: consents, billing]
+  WEB[web app]
+  BOT[whatsapp-bot]
+  Sources --> ADAPT
+  EXTRACT --> GW
+  EXTRACT --> RULEBOOK
+  EVALS -. gates .-> GW
+  RULEBOOK --> ENGINE
+  PROFILE --> ENGINE
+  ENGINE --> OBLIG
+  OBLIG --> NOTIF
+  NOTIF --> BOT
+  BOT --> NOTIF
+  WEB --> PROFILE
+  WEB --> IDENT
+  WEB --> OBLIG
+```
+
+Events between services travel through the transactional outbox and Redpanda (topics in
+`packages/contracts/events`); every model call goes through the llm-gateway; every tenant
+table has row-level security. `make demo` walks a demo business through the right-hand side of
+the diagram in one process ([docs/onboarding/demo.md](docs/onboarding/demo.md)).
 
 ## Getting started
 
@@ -100,8 +145,12 @@ compliancewatch/
     terraform/               # AWS modules: network, EKS, Aurora, MSK, S3, IAM
     helm/                    # One chart per service, values per environment
     argocd/                  # Application definitions
-    dev/                     # Docker Compose dev-stack assets (init SQL, Temporal dynamic config, collector, Prometheus, Tempo, Grafana)
+    dev/                     # Docker Compose dev-stack assets (init SQL, Temporal dynamic config, collector, Prometheus + alerts, Tempo, Grafana)
+    deploy/                  # MVP deploy profile: Fly.io app templates per service, Vercel for the web app, the env matrix
+    scripts/                 # check_alert_runbooks.py: every alert links a runbook (make runbooks-check)
   docs/legal/                # Draft privacy notice, terms, WhatsApp consent, data map, consent record (to be reviewed by a lawyer)
+  tools/
+    demo/                    # Workspace package cw_demo: the demo tenant end to end (make demo)
   evals/
     golden/                  # Golden sets: extraction/cbic_notifications (index + cases), qa/, applicability/
     harness/                 # Workspace package cw_evals: runner, metrics, thresholds (make eval)
@@ -178,6 +227,9 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | `make check` | lint, typecheck, test, import-linter, uv lock check, contracts check (the same gates CI runs) |
 | `make eval` | Eval harness against `evals/golden`: `EVAL_PROFILE=ci` (default, no tokens) or `nightly` (a real model behind the gateway) |
 | `make label` | Labelling tool for the extraction golden set: `ARGS="check"`, `"index ..."`, `"prepare ..."` |
+| `make demo` | The demo tenant end to end in one process: consent, profile, rules, obligations, a reminder ([docs/onboarding/demo.md](docs/onboarding/demo.md)) |
+| `make runbooks-check` | Every Prometheus alert links an existing runbook (part of `make check`) |
+| `make dev-backup` / `dev-restore FILE=` | pg_dump and pg_restore of the dev database ([docs/runbooks/backup-restore.md](docs/runbooks/backup-restore.md)) |
 | `make hooks` | Install the pre-commit and commit-msg hooks |
 | `make help` | Every target with its description |
 
@@ -222,7 +274,8 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - Accounts the maintainer opens: the Meta WhatsApp business account (bot and channel stay in logging mode), Razorpay (billing answers 503), a GSTIN lookup provider (every registration gets a verify task), Supabase Auth; the legal drafts need a lawyer before onboarding shows them
 - Postgres tables for notification preferences and the sent log (in memory now); the email channel (SES)
 - A service that writes to the outbox (the writer, relay and consumer exist in py-common; the first producer adds the `outbox_event` migration)
-- Alert rules and the runbook links from alerts (the dashboard exists; alerting arrives with the deployment work)
+- Alert rules for source freshness, decision-flip rate, notification failures and LLM budget (their metrics do not exist yet; the API SLO, outbox and worker alerts do, with runbooks)
+- The EKS path of the guide (Terraform, Helm, Argo CD canaries); the MVP profile in `infra/deploy` targets Fly.io and Vercel and has not been applied
 - The ingest workflow wired to the real adapters and the outbox (the adapters, parsers and detector exist and run from `make backfill`; the workflow still runs on the in-memory fakes); OCR for scanned PDFs
 - The 50-document sample rulebook (the seed calendar of standing obligations exists, pending analyst review)
 - Prompt texts for judgement, question answering and classification (extraction exists); the qa and applicability golden sets and their harness suites
