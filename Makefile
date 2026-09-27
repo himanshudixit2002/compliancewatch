@@ -81,9 +81,11 @@ dev: check-docker ## Start Postgres, Redis, Redpanda, Temporal (+UI); waits for 
 	$(COMPOSE) up -d --wait --wait-timeout 180
 	@$(MAKE) --no-print-directory dev-urls
 
-dev-observability: check-docker ## Same as dev plus Langfuse (compose profile: observability)
+dev-observability: check-docker ## Same as dev plus Langfuse, OTel collector, Prometheus, Tempo, Grafana (compose profile: observability)
 	@[ -f .env ] || { cp .env.example .env && echo "created .env from .env.example"; }
 	$(COMPOSE) --profile observability up -d --wait --wait-timeout 240
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	curl -sf "http://localhost:$${OTEL_HEALTH_PORT:-13133}/" >/dev/null && echo "otel-collector healthy" || { echo "error: otel-collector health check failed"; exit 1; }
 	@$(MAKE) --no-print-directory dev-urls
 
 dev-llm: check-docker ## Build and start the fake LLM gateway container (compose profile: llm)
@@ -100,6 +102,9 @@ dev-urls:
 	echo "  Kafka (Redpanda) localhost:$${REDPANDA_KAFKA_PORT:-19092}   schema registry http://localhost:$${REDPANDA_SCHEMA_REGISTRY_PORT:-18081}"; \
 	echo "  Temporal         localhost:$${TEMPORAL_PORT:-7233}   UI http://localhost:$${TEMPORAL_UI_PORT:-8233}"; \
 	echo "  Langfuse         http://localhost:$${LANGFUSE_PORT:-3010}   (make dev-observability only)"; \
+	echo "  OTel collector   localhost:$${OTEL_GRPC_PORT:-4317} gRPC, $${OTEL_HTTP_PORT:-4318} HTTP   (make dev-observability only; CW_OTEL_ENDPOINT=http://localhost:$${OTEL_GRPC_PORT:-4317})"; \
+	echo "  Prometheus       http://localhost:$${PROMETHEUS_PORT:-9090}   (make dev-observability only)"; \
+	echo "  Grafana          http://localhost:$${GRAFANA_PORT:-3030}   (make dev-observability only; dashboard: ComplianceWatch services)"; \
 	echo "  Fake LLM gateway http://localhost:$${FAKE_LLM_PORT:-8090}   (make dev-llm only)"; \
 	echo "Next: make migrate"
 

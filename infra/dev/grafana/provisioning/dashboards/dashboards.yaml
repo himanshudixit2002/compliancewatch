@@ -1,0 +1,10 @@
+# Dashboards are files under infra/dev/grafana/dashboards, mounted read-only into the container.
+apiVersion: 1
+providers:
+  - name: compliancewatch
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

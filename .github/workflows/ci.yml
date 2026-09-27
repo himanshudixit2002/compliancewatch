@@ -236,6 +236,14 @@ jobs:
         run: |
           uv sync --all-packages --locked
           make migrate
+      - name: Observability profile starts and answers (collector, Prometheus, Tempo, Grafana)
+        run: |
+          docker compose --profile observability up -d --wait --wait-timeout 180 otel-collector prometheus tempo grafana
+          curl -sf http://localhost:13133/ | jq -e '.status == "Server available"'
+          curl -sf http://localhost:9090/-/ready
+          curl -sf http://localhost:3030/api/health | jq -e '.database == "ok"'
+          curl -sf http://localhost:3030/api/datasources/uid/tempo/health | jq -e '.status == "OK"'
+          curl -sf http://localhost:3030/api/dashboards/uid/cw-services | jq -e '.dashboard.title == "ComplianceWatch services"'
       - name: Build and smoke the fake LLM gateway image
         run: |
           docker compose --profile llm up -d --build --wait --wait-timeout 180 fake-llm
@@ -249,8 +257,8 @@ jobs:
       - name: Logs and teardown
         if: always()
         run: |
-          docker compose --profile llm logs --no-color | tail -200
-          docker compose --profile llm down -v --remove-orphans
+          docker compose --profile llm --profile observability logs --no-color | tail -200
+          docker compose --profile llm --profile observability down -v --remove-orphans
 
   gitleaks:
     name: Secrets scan (gitleaks)
