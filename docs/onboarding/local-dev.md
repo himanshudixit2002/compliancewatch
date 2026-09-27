@@ -34,15 +34,33 @@ make test
 | Kafka API (Redpanda) | `localhost:19092` | containers use `redpanda:9092`; schema registry `http://localhost:18081`; admin `localhost:19644` |
 | Temporal | `localhost:7233` | UI `http://localhost:8233` |
 | Langfuse (profile `observability`) | `http://localhost:3010` | `make dev-observability`; login `dev@compliancewatch.local` / `dev-password`, keys `pk-lf-dev` / `sk-lf-dev` |
+| Fake LLM gateway (profile `llm`) | `http://localhost:8090` | `make dev-llm`; the `services/llm-gateway` image with the fake provider and an in-memory ledger, no key |
 | Services (`make run`) | `localhost:8001` .. `8010` | identity, profile, rulebook, applicability-engine, obligation, notification, qa, llm-gateway, eval, pipeline; containers listen on 8000 |
 | Web app | `http://localhost:3000` | `pnpm --filter web dev`; `/admin` for the internal tools |
 | WhatsApp bot | `http://localhost:8080` | `pnpm --filter whatsapp-bot dev`; `/health`, `GET/POST /webhook` |
 
-Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPANDA_KAFKA_PORT`, `REDPANDA_SCHEMA_REGISTRY_PORT`, `REDPANDA_ADMIN_PORT`, `TEMPORAL_PORT`, `TEMPORAL_UI_PORT`, `LANGFUSE_PORT`). Other projects on this machine use 5432, 6379, 9092, 8080 and 3000 when they run; change the port in `.env`, not in `docker-compose.yml`.
+Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPANDA_KAFKA_PORT`, `REDPANDA_SCHEMA_REGISTRY_PORT`, `REDPANDA_ADMIN_PORT`, `TEMPORAL_PORT`, `TEMPORAL_UI_PORT`, `LANGFUSE_PORT`, `FAKE_LLM_PORT`). Other projects on this machine use 5432, 6379, 9092, 8080 and 3000 when they run; change the port in `.env`, not in `docker-compose.yml`.
 
 ## Running one service
 
-`make run SERVICE=<dir> [PORT=<n>]` starts uvicorn with reload on the service's dev port and exports `CW_DATABASE_URL` (with `search_path=<schema>,public`) and `CW_DB_SCHEMA` for it. Settings come from `py_common.settings.Settings`: `CW_*` variables, then `.env`, then defaults. Empty values count as unset.
+`make run SERVICE=<dir> [PORT=<n>]` starts uvicorn with reload on the service's dev port and exports `CW_DATABASE_URL` (with `search_path=<schema>,public`) and `CW_DB_SCHEMA` for it. Settings come from `py_common.settings.Settings`: `CW_*` variables, then `.env`, then defaults. Empty values count as unset. `make run` and `make migrate` source `.env` the same way: a variable already in the environment wins over the file, so `CW_LLM_LEDGER=postgres make run SERVICE=llm-gateway` does what it says.
+
+## LLM gateway
+
+`services/llm-gateway` is the only service that calls a language model, and it needs nothing from the stack to start: `make run SERVICE=llm-gateway` serves every route from the deterministic fake provider with an in-memory cost ledger on `http://localhost:8008`. The same thing as a container is `make dev-llm` (compose profile `llm`, port `8090`); other services and CI call that when no real model is wanted.
+
+```bash
+curl -s -X POST http://localhost:8008/v1/llm-gateway/completions \
+  -H 'content-type: application/json' \
+  -d '{"feature":"smoke","prompt":"smoke.echo@1","user":"hello"}'
+```
+
+- **Persist the ledger.** `make dev && make migrate SERVICE=llm-gateway`, then `CW_LLM_LEDGER=postgres make run SERVICE=llm-gateway`; rows land in `llm_gateway.cost_ledger` (`make dev-psql`).
+- **Real models.** Put a Vercel AI Gateway key in `.env` as `CW_AI_GATEWAY_API_KEY` and set `CW_LLM_PROVIDER=vercel`. The key stays in `.env` (git-ignored); the `fake-llm` container never gets one. Override a route with `CW_LLM_ROUTES__<FEATURE>=primary[,fallback]`; naming one model drops the fallback.
+- **Traces.** `make dev-observability`, then in `.env`: `CW_LANGFUSE_HOST=http://localhost:3010`, `CW_LANGFUSE_PUBLIC_KEY=pk-lf-dev`, `CW_LANGFUSE_SECRET_KEY=sk-lf-dev`. Every call shows up as a trace at http://localhost:3010.
+- **API change.** `make openapi SERVICE=llm-gateway` rewrites `packages/contracts/openapi/llm-gateway.v1.json`; the contract test fails until the committed spec matches.
+
+Settings, routes, budgets and errors: [services/llm-gateway/README.md](../../services/llm-gateway/README.md).
 
 ## Migrations
 
@@ -58,6 +76,7 @@ Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPAND
 - **Temporal restarts in a loop.** It needs the `temporal` and `temporal_visibility` databases that `init.sql` creates; if you changed `init.sql` on an existing volume, `make dev-reset`. `DB` must stay `postgres12`.
 - **`docker compose` not found with Homebrew.** Add the `cliPluginsExtraDirs` entry above to `~/.docker/config.json`.
 - **`error getting credentials ... docker-credential-desktop` on every pull.** A leftover `"credsStore": "desktop"` in `~/.docker/config.json` from a previous Docker Desktop install; remove that key (or point it at a helper you have installed) when using Colima.
+- **Integration tests fail with `error while creating mount source path '.../.colima/default/docker.sock'`.** testcontainers' reaper mounts the Docker socket by its host path, which does not exist inside the Colima VM. `make py-test-integration` sets `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` for this; export the same variable when calling `uv run pytest -m integration` directly.
 - **`brew install docker` left no `docker` binary.** Homebrew may leave the formula unlinked when a `docker-desktop` cask is also installed: `brew link --overwrite docker`.
 - **`make dev` fails with a health-check timeout.** `make dev-logs SERVICE=<postgres|redpanda|temporal>`.
 - **`uv sync` says no interpreter for 3.12.** `uv python install 3.12`.
@@ -66,4 +85,4 @@ Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPAND
 
 ## Not in the stack yet
 
-Fake LLM provider container (ships with `services/llm-gateway`), OpenTelemetry collector (`CW_OTEL_ENDPOINT` stays empty), seeded fixtures and the 50-document sample rulebook, Keycloak, Terraform.
+OpenTelemetry collector (`CW_OTEL_ENDPOINT` stays empty), seeded fixtures and the 50-document sample rulebook, Keycloak, Terraform.

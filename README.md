@@ -1,9 +1,11 @@
 # ComplianceWatch monorepo
 
 > **What is here today.** uv workspace with the FastAPI service template for ten services, the shared
-> domain kernel and Ontology v0, pnpm + Turborepo workspace with the Next.js web app and the WhatsApp
-> bot, Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and the first six ADRs. No product
-> features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
+> domain kernel and Ontology v0, the LLM gateway skeleton (routing, prompt registry, cost ledger,
+> budgets, PII masking, Langfuse tracing, fake provider container) with the first committed OpenAPI
+> spec, problem-details errors in py-common, pnpm + Turborepo workspace with the Next.js web app and
+> the WhatsApp bot, Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 006
+> and 008. No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
 >
 > Source of truth: *ComplianceWatch - Project Foundation (HLD, LLD & Build Guide)*. Section numbers below refer to that guide.
 
@@ -17,6 +19,7 @@ make install                  # uv sync --all-packages + pnpm install --frozen-l
 make dev                      # Postgres+pgvector, Redis, Redpanda, Temporal (+UI) via Docker Compose
 make migrate                  # alembic upgrade head for every service, one schema each
 make run SERVICE=identity     # http://localhost:8001/health (ports 8001-8010, table below)
+make run SERVICE=llm-gateway  # http://localhost:8008/v1/llm-gateway/completions with the fake provider
 make test                     # pytest with the coverage gate + vitest
 make check                    # the CI gates: lint, typecheck (incl. tests), test, import-linter, lock check
 ```
@@ -42,7 +45,8 @@ compliancewatch/
     obligation/
     notification/
     qa/
-    llm-gateway/
+    llm-gateway/             # routing, prompt registry, cost ledger, budgets, PII masking, tracing (ADR-008)
+      prompts/               # registry.toml: every prompt with a version, an owner and an eval case
     eval/
     pipeline/                # crawler, detector, parser, extractor, review as Temporal workers
       adapters/              # SourceAdapter implementations, one file per regulator source
@@ -51,10 +55,10 @@ compliancewatch/
       workflows/
   packages/
     contracts/               # OpenAPI specs, event schemas (JSON Schema), generated clients (py + ts)
-      openapi/  events/  clients/python/  clients/typescript/
+      openapi/  events/  clients/python/  clients/typescript/   # openapi/llm-gateway.v1.json is the first spec
     domain-kernel/           # Shared value objects, protocols, ontology model, error types
     ontology/                # GST attribute definitions as YAML (v0.1.0), loader and validator
-    py-common/               # Settings, structured logging, health routes, FastAPI app factory
+    py-common/               # Settings, structured logging, health routes, problem details, FastAPI app factory
     ui/                      # Shared React components and design tokens
   infra/
     terraform/               # AWS modules: network, EKS, Aurora, MSK, S3, IAM
@@ -65,11 +69,11 @@ compliancewatch/
     golden/                  # Golden sets: extraction/, qa/, applicability/ (versioned data files)
     harness/                 # Runner, metrics, thresholds
   docs/
-    adr/                     # Architecture decision records (001 to 006 written, 007 to 011 stubs)
+    adr/                     # Architecture decision records (001 to 006 and 008 written; 007, 009 to 011 stubs)
     runbooks/
     onboarding/              # local-dev.md
   .github/workflows/         # ci.yml (lint, typecheck, tests, dev-stack smoke, gitleaks), pr-checks.yml
-  docker-compose.yml         # Postgres 16 + pgvector, Redis 7, Redpanda, Temporal, Langfuse (profile)
+  docker-compose.yml         # Postgres 16 + pgvector, Redis 7, Redpanda, Temporal, Langfuse and fake-llm (profiles)
   .env.example               # every variable the stack and the services read
   pyproject.toml, uv.lock    # uv workspace root: dev dependency group and all Python tool config
   package.json, pnpm-workspace.yaml, turbo.json   # pnpm + Turborepo workspace
@@ -99,7 +103,7 @@ services/<name>/
   README.md         # what it owns, how to run, who owns it
 ```
 
-Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from `py_common`, and `GET /v1/<name>/ping` from its own router. Python package names are the directory name with hyphens replaced by underscores, with two exceptions chosen so the package never shadows the standard library or a builtin:
+Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from `py_common`, and `GET /v1/<name>/ping` from its own router. Every error leaves as `application/problem+json` (RFC 9457) with a stable `type` URI and the request's `correlation_id`; a service maps its own domain errors to statuses in `create_app(problem_status=...)`. Python package names are the directory name with hyphens replaced by underscores, with two exceptions chosen so the package never shadows the standard library or a builtin:
 
 | Service directory | Package | Dev port (`make run`) | Postgres schema |
 | --- | --- | --- | --- |
@@ -124,9 +128,10 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 
 | Target | What it does |
 | --- | --- |
-| `make dev` / `dev-observability` / `dev-down` / `dev-reset` / `dev-logs` / `dev-ps` / `dev-psql` | Docker Compose dev stack (section 17); `dev-observability` adds Langfuse |
+| `make dev` / `dev-observability` / `dev-llm` / `dev-down` / `dev-reset` / `dev-logs` / `dev-ps` / `dev-psql` | Docker Compose dev stack (section 17); `dev-observability` adds Langfuse, `dev-llm` builds and starts the fake LLM gateway container |
 | `make migrate [SERVICE=x]` | `alembic upgrade head` for every service (or one), each in its own schema |
-| `make run SERVICE=x [PORT=n]` | uvicorn with reload on the service's dev port |
+| `make run SERVICE=x [PORT=n]` | uvicorn with reload on the service's dev port; an explicit environment variable beats `.env` |
+| `make openapi SERVICE=x` | Export the service's OpenAPI spec to `packages/contracts/openapi/<x>.v1.json` (checked by a contract test) |
 | `make test` | pytest (unit + contract, coverage gate on domain and application) and vitest |
 | `make lint` / `typecheck` / `format` | ruff + eslint + prettier; mypy --strict + tsc --strict |
 | `make check` | lint, typecheck, test, import-linter, uv lock check (the same gates CI runs) |
@@ -140,10 +145,10 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | --- | --- | --- |
 | No import from another service's package | import-linter contract in CI | wired |
 | Domain layer imports nothing from infrastructure or third-party I/O | import-linter | wired |
-| Every public endpoint has an OpenAPI schema and a contract test | CI job fails on undocumented routes | later (only template ping routes exist) |
-| Every event has a JSON Schema in packages/contracts and a changelog entry | Schema registry compatibility check in CI | later (no events yet) |
-| Every prompt file has a version, an owner and at least one eval case | Eval harness refuses to run an unregistered prompt | later (no prompt files yet) |
-| Every table with tenant data has tenant_id and an RLS policy | Migration lint script | later (no tables yet) |
+| Every public endpoint has an OpenAPI schema and a contract test | CI job fails on undocumented routes | partly: the llm-gateway spec is committed under `packages/contracts/openapi` and a contract test fails when the served schema drifts (`make openapi`); the other services still have only ping routes |
+| Every event has a JSON Schema in packages/contracts and a changelog entry | Schema registry compatibility check in CI | later (`llm.call.completed` is logged, not published) |
+| Every prompt file has a version, an owner and at least one eval case | Eval harness refuses to run an unregistered prompt | partly: the gateway refuses a prompt that is not in `services/llm-gateway/prompts/registry.toml`; the eval harness is not built |
+| Every table with tenant data has tenant_id and an RLS policy | Migration lint script | later (the first table, `llm_gateway.cost_ledger`, is cross-tenant metering and has no RLS on purpose) |
 | Conventional commits; squash merge; PR template with risk and rollback sections | pre-commit commit-msg hook, PR title check, PR template | wired (branch protection is a repo setting) |
 | Type checking is strict on both sides | mypy --strict, tsc --strict | wired |
 | Test coverage floor 80% on domain and application layers | pytest-cov gate | wired |
@@ -171,8 +176,8 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 
 ## Not in this repository yet
 
-- LLM gateway skeleton with prompt registry, cost ledger and the fake provider container
-- Terraform staging cluster and Keycloak
-- OpenTelemetry collector in the dev stack
+- Terraform staging cluster and Keycloak (the gateway trusts an `x-tenant-id` header until then)
+- OpenTelemetry collector in the dev stack; Kafka outbox for the gateway's events
 - Seeded fixtures and the 50-document sample rulebook
-- Full text for ADR-007 to ADR-011
+- Real prompt texts for extraction, judgement, question answering and classification, and the eval harness
+- Full text for ADR-007 and ADR-009 to ADR-011
