@@ -82,3 +82,10 @@ def freeze_mapping(value: object, name: str) -> Mapping[str, object]:
         if not isinstance(key, str):
             raise InvariantViolationError(f"{name} keys must be strings, got {key!r}")
     return MappingProxyType(dict(value))
+
+
+def require_mapping(value: object, name: str) -> Mapping[str, object]:
+    """Return ``value`` when it is a mapping (any keys); the caller checks the keys."""
+    if not isinstance(value, Mapping):
+        raise InvariantViolationError(f"{name} must be a mapping, got {value.__class__.__name__}")
+    return value

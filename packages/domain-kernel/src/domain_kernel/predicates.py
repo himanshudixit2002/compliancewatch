@@ -10,16 +10,16 @@ disallowed operator, a malformed value) raises instead of becoming a verdict.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 
-from domain_kernel._validation import require_instance, require_text
+from domain_kernel._validation import require_instance, require_mapping, require_text
 from domain_kernel.confidence import CERTAIN, ZERO, Confidence
 from domain_kernel.errors import InvariantViolationError
-from domain_kernel.ontology import ATTRIBUTE_KEY_PATTERN, Ontology, PredicateValue
+from domain_kernel.ontology import ATTRIBUTE_KEY_PATTERN, Ontology, PredicateValue, Scalar
 from domain_kernel.operators import MULTI_VALUE_OPERATORS, Operator
 
 
@@ -251,6 +251,99 @@ def evaluate_predicate(
     outcome = predicate.evaluate(attributes, ontology)
     verdict = "holds" if outcome is Applicability.APPLIES else "does not hold"
     return PredicateResult(predicate, outcome, CERTAIN, f"{predicate.describe()} {verdict}")
+
+
+def specification_to_mapping(specification: Specification) -> dict[str, object]:
+    """The JSON form a rule version stores: ``{"all_of": [...]}``, ``{"any_of": [...]}``,
+    ``{"not": {...}}`` or a predicate ``{"attribute", "operator", "value"}`` /
+    ``{"attribute", "free_text"}``. Decimals and dates become strings; the ontology coerces
+    them back when the predicate is evaluated."""
+    match specification:
+        case AllOf(items=items):
+            return {"all_of": [specification_to_mapping(item) for item in items]}
+        case AnyOf(items=items):
+            return {"any_of": [specification_to_mapping(item) for item in items]}
+        case Not(item=item):
+            return {"not": specification_to_mapping(item)}
+        case Predicate(attribute=attribute, operator=operator, value=value, free_text=free_text):
+            if operator is None or value is None:
+                return {"attribute": attribute, "free_text": free_text}
+            mapping: dict[str, object] = {
+                "attribute": attribute,
+                "operator": operator.value,
+                "value": _json_value(value),
+            }
+            if free_text:
+                mapping["free_text"] = free_text
+            return mapping
+    raise InvariantViolationError(  # pragma: no cover - every Specification subclass is above
+        f"cannot serialise {type(specification).__name__}"
+    )
+
+
+def specification_from_mapping(data: object) -> Specification:
+    """The inverse of ``specification_to_mapping``; a malformed mapping raises."""
+    mapping = require_mapping(data, "specification")
+    keys = set(mapping)
+    if keys == {"all_of"}:
+        return AllOf(tuple(specification_from_mapping(item) for item in _items(mapping["all_of"])))
+    if keys == {"any_of"}:
+        return AnyOf(tuple(specification_from_mapping(item) for item in _items(mapping["any_of"])))
+    if keys == {"not"}:
+        return Not(specification_from_mapping(mapping["not"]))
+    if "attribute" not in keys or not keys <= {"attribute", "operator", "value", "free_text"}:
+        raise InvariantViolationError(
+            f"specification must be all_of, any_of, not or a predicate, got keys {sorted(keys)}"
+        )
+    operator_raw = mapping.get("operator")
+    operator: Operator | None = None
+    if operator_raw is not None:
+        try:
+            operator = Operator(require_text(operator_raw, "specification.operator"))
+        except ValueError as exc:
+            raise InvariantViolationError(
+                f"specification.operator must be one of {[o.value for o in Operator]}"
+            ) from exc
+    value_raw = mapping.get("value")
+    value: PredicateValue | None
+    if value_raw is None:
+        value = None
+    elif isinstance(value_raw, list | tuple):
+        value = tuple(_scalar(item) for item in value_raw)
+    else:
+        value = _scalar(value_raw)
+    return Predicate(
+        attribute=require_text(mapping["attribute"], "specification.attribute"),
+        operator=operator,
+        value=value,
+        free_text=require_instance(mapping.get("free_text", ""), str, "specification.free_text"),
+    )
+
+
+def _items(raw: object) -> Sequence[object]:
+    if isinstance(raw, str | Mapping) or not isinstance(raw, Sequence):
+        raise InvariantViolationError("all_of and any_of take a list of specifications")
+    return raw
+
+
+def _scalar(raw: object) -> Scalar:
+    if isinstance(raw, bool | int | str):
+        return raw
+    if isinstance(raw, Decimal | date) and not isinstance(raw, datetime):
+        return raw
+    if isinstance(raw, float):
+        return Decimal(str(raw))
+    raise InvariantViolationError(
+        f"predicate values must be strings, numbers or booleans, got {type(raw).__name__}"
+    )
+
+
+def _json_value(value: PredicateValue) -> object:
+    if isinstance(value, tuple):
+        return [_json_value(item) for item in value]
+    if isinstance(value, Decimal | date):
+        return str(value)
+    return value
 
 
 def _require_scalar(value: object) -> None:
