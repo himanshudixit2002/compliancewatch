@@ -16,7 +16,7 @@ from ontology._checks import OntologyCheckError, check
 
 __all__ = ["VERSION", "OntologyCheckError", "data_path", "load", "parse"]
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 """Version of the attribute set this package ships; equals ``version`` in the YAML file."""
 
 
