@@ -7,6 +7,7 @@
 #   temporal     auto-setup              gRPC localhost:7233; state lives in the postgres service
 #   temporal-ui                          http://localhost:8233
 #   langfuse     --profile observability http://localhost:3010 (make dev-observability)
+#   fake-llm     --profile llm           http://localhost:8090 (make dev-llm): llm-gateway image, fake provider
 #
 # Host ports and credentials come from .env (copy .env.example). Every ${VAR:-default} has a
 # default so `docker compose config` validates without a .env file.
@@ -149,6 +150,9 @@ services:
       LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-dev@compliancewatch.local}
       LANGFUSE_INIT_USER_NAME: dev
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-dev-password}
+      # Next.js binds to $HOSTNAME, which Docker sets to the container id; listen on every
+      # interface so the loopback healthcheck below can reach it.
+      HOSTNAME: "0.0.0.0"
     ports:
       - "${LANGFUSE_PORT:-3010}:3000"
     healthcheck:
@@ -158,16 +162,30 @@ services:
       retries: 12
       start_period: 60s
 
-  # fake-llm: deliberately not a container in this slice. The deterministic fake provider is part
-  # of services/llm-gateway (guide sections 8 and 19: "fake LLM provider for determinism") and
-  # ships with that slice; run it with `make run SERVICE=llm-gateway` and LLM_PROVIDER=fake.
-  # Reserved shape for that slice (profile `llm`):
-  #
-  # fake-llm:
-  #   profiles: ["llm"]
-  #   build: { context: ., dockerfile: services/llm-gateway/Dockerfile }
-  #   environment: { LLM_PROVIDER: fake }
-  #   ports: ["${FAKE_LLM_PORT:-8090}:8000"]
+  fake-llm:
+    # The llm-gateway image with the deterministic fake provider and an in-memory ledger: what
+    # other services and CI call when no real model is wanted. Profile `llm` (make dev-llm).
+    build:
+      context: .
+      dockerfile: services/llm-gateway/Dockerfile
+    profiles: ["llm"]
+    environment:
+      CW_LLM_PROVIDER: fake
+      CW_LLM_LEDGER: memory
+      CW_LOG_JSON: "true"
+    ports:
+      - "${FAKE_LLM_PORT:-8090}:8000"
+    healthcheck:
+      # The image has no curl; python is already there.
+      test:
+        - CMD
+        - python
+        - "-c"
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
 
 volumes:
   postgres_data:

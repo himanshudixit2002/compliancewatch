@@ -1,0 +1,19 @@
+# Prompt registry of the llm-gateway service.
+#
+# A caller names a prompt as name@version; the gateway refuses anything not listed here. Every
+# entry has an owner and at least one eval case. version is text so that 1.10 and 1.1 stay
+# distinct. sha256 is the digest of the prompt text and is filled in once the text exists.
+
+[[prompts]]
+name = "smoke.echo"
+version = "1"
+owner = "ai-platform"
+eval_cases = 1
+description = "Deterministic echo served by the fake provider; used by tests and the smoke route."
+
+[[prompts]]
+name = "extraction.rule_candidate"
+version = "0"
+owner = "ai-platform"
+eval_cases = 1
+description = "Placeholder entry; the prompt text arrives with the extraction pipeline."

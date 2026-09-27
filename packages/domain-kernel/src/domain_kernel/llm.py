@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 from domain_kernel._validation import (
     freeze_mapping,
@@ -17,7 +18,11 @@ from domain_kernel.ids import TenantId
 
 @dataclass(frozen=True, slots=True)
 class CompletionRequest:
-    """One completion call. ``feature`` and ``prompt_version`` name the prompt in the ledger."""
+    """One completion call. ``feature`` and ``prompt_version`` name the prompt in the ledger.
+
+    ``metadata`` carries caller tags for the trace (a document id, a workflow run): string keys
+    and string values only, never prompt content.
+    """
 
     feature: str
     prompt_version: str
@@ -28,6 +33,7 @@ class CompletionRequest:
     max_tokens: int = 1024
     json_schema: Mapping[str, object] | None = field(default=None, hash=False)
     tenant_id: TenantId | None = None
+    metadata: Mapping[str, str] = field(default_factory=dict, hash=False)
 
     def __post_init__(self) -> None:
         require_text(self.feature, "feature")
@@ -44,6 +50,14 @@ class CompletionRequest:
             object.__setattr__(self, "json_schema", freeze_mapping(self.json_schema, "json_schema"))
         if self.tenant_id is not None:
             require_instance(self.tenant_id, TenantId, "tenant_id")
+        tags: dict[str, str] = {}
+        for key, value in freeze_mapping(self.metadata, "metadata").items():
+            if not isinstance(value, str):
+                raise InvariantViolationError(
+                    f"metadata values must be strings, got {value.__class__.__name__} for {key!r}"
+                )
+            tags[key] = value
+        object.__setattr__(self, "metadata", MappingProxyType(tags))
 
 
 @dataclass(frozen=True, slots=True)

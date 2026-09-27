@@ -27,6 +27,7 @@
 /services/notification/          @himanshudixit2002 # team: Core Product
 /services/qa/                    @himanshudixit2002 # team: AI Platform
 /services/llm-gateway/           @himanshudixit2002 # team: AI Platform
+/services/llm-gateway/prompts/   @himanshudixit2002 # team: AI Platform (registry entries need an owner and an eval case; wording reviewed by a Regulatory Analyst)
 /services/eval/                  @himanshudixit2002 # team: AI Platform
 /services/pipeline/              @himanshudixit2002 # team: Regulatory Intelligence
 /services/pipeline/prompts/      @himanshudixit2002 # team: AI Platform (wording reviewed by a Regulatory Analyst; merged only with a green eval run)

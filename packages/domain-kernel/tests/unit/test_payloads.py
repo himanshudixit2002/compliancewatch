@@ -371,11 +371,24 @@ def test_completion_request_and_response() -> None:
     assert request.max_tokens == 1024
     assert isinstance(request.json_schema, MappingProxyType)
     assert request.tenant_id is None
+    assert request.metadata == {}
+    assert isinstance(request.metadata, MappingProxyType)
     hashed = CompletionRequest("extract", "v3", "sys", "user", "m", 1, 10, None, TenantId.new())
     assert hash(hashed) == hash(hashed)
     response = CompletionResponse("", "model-x", 12, 0)
     assert response.cached is False
     assert response.trace_id == ""
+
+
+def test_completion_request_metadata_is_a_frozen_copy() -> None:
+    tags = {"document_id": "doc-1", "run": "abc"}
+    request = CompletionRequest("extract", "v3", "sys", "user", metadata=tags)
+    tags["document_id"] = "changed"
+    assert request.metadata == {"document_id": "doc-1", "run": "abc"}
+    assert isinstance(request.metadata, MappingProxyType)
+    with pytest.raises(TypeError):
+        request.metadata["run"] = "x"  # type: ignore[index]
+    assert hash(request) == hash(CompletionRequest("extract", "v3", "sys", "user", metadata=tags))
 
 
 @pytest.mark.parametrize(
@@ -393,6 +406,9 @@ def test_completion_request_and_response() -> None:
         ({"max_tokens": 1.5}, "max_tokens must be an integer"),
         ({"json_schema": "{}"}, "json_schema must be a mapping"),
         ({"tenant_id": "t"}, "tenant_id must be TenantId"),
+        ({"metadata": "doc-1"}, "metadata must be a mapping"),
+        ({"metadata": {1: "a"}}, "metadata keys must be strings"),
+        ({"metadata": {"pages": 3}}, "metadata values must be strings, got int for 'pages'"),
     ],
 )
 def test_completion_request_invariants(kwargs: dict[str, object], message: str) -> None:

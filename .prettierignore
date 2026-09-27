@@ -14,6 +14,7 @@ packages/domain-kernel/
 packages/ontology/
 packages/py-common/
 packages/contracts/clients/python/
+packages/contracts/openapi/
 evals/
 infra/
 docs/

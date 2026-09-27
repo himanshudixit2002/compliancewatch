@@ -35,6 +35,9 @@ COPY --from=builder --chown=app:app /app/.venv /app/.venv
 # Alembic needs the scripts at runtime (pre-sync migration job: alembic -c alembic.ini upgrade head)
 COPY --from=builder --chown=app:app /app/services/llm-gateway/alembic.ini /app/alembic.ini
 COPY --from=builder --chown=app:app /app/services/llm-gateway/migrations /app/migrations
+# The wheel does not carry the prompt registry; ship the directory and point the service at it.
+COPY --from=builder --chown=app:app /app/services/llm-gateway/prompts /app/prompts
+ENV CW_LLM_PROMPT_REGISTRY_PATH=/app/prompts/registry.toml
 USER app
 EXPOSE 8000
 CMD ["uvicorn", "llm_gateway.main:app", "--host", "0.0.0.0", "--port", "8000"]

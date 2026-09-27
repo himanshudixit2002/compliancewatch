@@ -14,7 +14,10 @@ def test_health(client: TestClient) -> None:
 def test_ready(client: TestClient) -> None:
     response = client.get("/ready")
     assert response.status_code == 200
-    assert response.json()["status"] == "ready"
+    assert response.json() == {
+        "status": "ready",
+        "checks": {"ledger": True, "prompt_registry": True, "provider": True},
+    }
 
 
 def test_ping(client: TestClient) -> None:
