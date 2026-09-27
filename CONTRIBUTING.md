@@ -75,6 +75,24 @@ themselves with a user agent, respect `robots.txt`, rate-limit politely, and sto
 file, its SHA-256, the fetch time and the source URL. The adapter registry arrives with the
 first adapters; until then this section describes the rule, not existing code.
 
+## Adding an event
+
+Events are contracts: a JSON Schema in `packages/contracts/events/schemas/<topic>.v1.json`
+with `x-version`, `x-producer` and `x-tenant-scoped`, at least one golden message under
+`events/examples/<topic>/`, and a line in `events/CHANGELOG.md`. Then:
+
+1. `make contracts` regenerates the Python and TypeScript clients; commit them with the schema.
+2. Declare the producer's event class in its service domain with `topic` and `schema_version`
+   matching the schema, and write it with `py_common.outbox.OutboxWriter` on the connection
+   that holds the state change. The service's migration creates the table with
+   `create_outbox_table(op)`.
+3. Consumers use `IdempotentConsumer` and `create_processed_event_table(op)`.
+
+Adding an optional field is a minor bump. Removing or renaming a field, adding a required one or
+narrowing an enum is breaking: a new `v2` file next to the old one and an ADR. CI replays the
+base branch's examples against your schemas and asks the Redpanda schema registry; both must
+pass. `packages/contracts/README.md` has the full rules.
+
 ## Adding a prompt
 
 Prompts are versioned files with an owner and at least one eval case. The gateway refuses a

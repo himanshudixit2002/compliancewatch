@@ -31,7 +31,7 @@ make test
 | --- | --- | --- |
 | Postgres 16 + pgvector | `localhost:5432`, user/password/db `cw`/`cw`/`compliancewatch` | one schema per service plus `audit`; `make dev-psql` |
 | Redis 7 | `localhost:6379` | |
-| Kafka API (Redpanda) | `localhost:19092` | containers use `redpanda:9092`; schema registry `http://localhost:18081`; admin `localhost:19644` |
+| Kafka API (Redpanda) | `localhost:19092` | containers use `redpanda:9092`; schema registry `http://localhost:18081`; admin `localhost:19644`; topics are auto-created, dead letters go to `<topic>.dlq` |
 | Temporal | `localhost:7233` | UI `http://localhost:8233` |
 | Langfuse (profile `observability`) | `http://localhost:3010` | `make dev-observability`; login `dev@compliancewatch.local` / `dev-password`, keys `pk-lf-dev` / `sk-lf-dev` |
 | Fake LLM gateway (profile `llm`) | `http://localhost:8090` | `make dev-llm`; the `services/llm-gateway` image with the fake provider and an in-memory ledger, no key |
@@ -44,6 +44,12 @@ Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPAND
 ## Running one service
 
 `make run SERVICE=<dir> [PORT=<n>]` starts uvicorn with reload on the service's dev port and exports `CW_DATABASE_URL` (with `search_path=<schema>,public`) and `CW_DB_SCHEMA` for it. Settings come from `py_common.settings.Settings`: `CW_*` variables, then `.env`, then defaults. Empty values count as unset. `make run` and `make migrate` source `.env` the same way: a variable already in the environment wins over the file, so `CW_LLM_LEDGER=postgres make run SERVICE=llm-gateway` does what it says.
+
+`make relay SERVICE=<dir>` runs the outbox relay for that service's schema with the same
+environment: it publishes the service's `outbox_event` rows to Redpanda and dead-letters to
+`<topic>.dlq` (`docs/runbooks/outbox-relay.md`). Nothing writes to an outbox yet, so the relay
+idles until the first producing service lands. `docker compose exec redpanda rpk topic list`
+shows the topics; `rpk topic consume <topic> -n 1` reads a message.
 
 ## LLM gateway
 

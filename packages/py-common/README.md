@@ -18,7 +18,17 @@ src/py_common/
   request_context.py   # x-request-id middleware; correlation_id_of(request) for handlers and dependencies
   problems.py          # RFC 9457 problem+json handlers, Problem schema, problem_responses() for routers
   app.py               # create_app(service_name, version, routers, problem_status, ...)
+  events.py            # EventMessage (the envelope), to_message/encode/decode, payload_of(event)
+  outbox/
+    schema.py          # outbox_event and processed_event tables; create_*/drop_* helpers for alembic
+    writer.py          # OutboxWriter.write(connection, event): the row commits with the state change
+    store.py           # store protocols; PostgresOutboxStore (FOR UPDATE SKIP LOCKED), PostgresProcessedStore
+    producer.py        # MessageProducer protocol; AiokafkaProducer (idempotent, acks=all)
+    relay.py           # OutboxRelay: publish, retry with backoff, dead-letter; python -m py_common.outbox.relay
+    consumer.py        # IdempotentConsumer: once per event id and consumer group, consumer dead-letter topic
+    testing.py         # FakeProducer, MemoryOutboxStore, MemoryProcessedStore for service tests
 tests/unit/
+tests/integration/     # the outbox against Postgres and Redpanda (testcontainers)
 ```
 
 ## Problem details
@@ -36,6 +46,29 @@ list that does not echo the submitted value, `HTTPException` keeps its status wi
 correlation id. Routers declare the shape in OpenAPI with
 `responses=problem_responses(422, 429)`; the `Problem` schema is published under
 `components.schemas` automatically.
+
+## Events and the outbox
+
+An event is a kernel `DomainEvent` subclass with a `topic` and a `schema_version` that match a
+schema in `packages/contracts/events`. `py_common.events.to_message` turns it into the envelope
+(`EventMessage`), `encode`/`decode` are the bytes on the bus, and `payload_of` converts the
+event's own fields (typed ids, dates, decimals, enums, nested dataclasses, tuples) into JSON.
+
+Producing (ADR-005): a service migration calls `create_outbox_table(op)` once; the use case
+then calls `OutboxWriter().write(connection, event)` on the connection that holds its state
+change, so the row commits or rolls back with it. `partition_key` is the Kafka key (the tenant by
+default for tenant events; pass the aggregate id for regulatory events). A relay process per
+service schema, `make relay SERVICE=<name>` locally, publishes pending rows, retries with
+exponential backoff and moves a message to `<topic>.dlq` after eight failures
+(`docs/runbooks/outbox-relay.md`).
+
+Consuming: a migration calls `create_processed_event_table(op)`; the service runs
+`IdempotentConsumer(group_id=..., store=PostgresProcessedStore(engine, group_id=...),
+handler=..., producer=...)`. The handler receives the decoded `EventMessage` and the unit of
+work, whose `connection` is the transaction that also records the event id, so a redelivery is
+skipped and a handler crash rolls everything back. After three failed attempts the message goes
+to `<topic>.<group>.dlq` and the offset is committed. `py_common.outbox.testing` has the fakes
+service tests use instead of a broker.
 
 ## How to run
 
