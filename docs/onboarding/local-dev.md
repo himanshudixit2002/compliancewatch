@@ -34,12 +34,15 @@ make test
 | Kafka API (Redpanda) | `localhost:19092` | containers use `redpanda:9092`; schema registry `http://localhost:18081`; admin `localhost:19644`; topics are auto-created, dead letters go to `<topic>.dlq` |
 | Temporal | `localhost:7233` | UI `http://localhost:8233` |
 | Langfuse (profile `observability`) | `http://localhost:3010` | `make dev-observability`; login `dev@compliancewatch.local` / `dev-password`, keys `pk-lf-dev` / `sk-lf-dev` |
+| OpenTelemetry collector (profile `observability`) | `localhost:4317` gRPC, `4318` HTTP, health `http://localhost:13133` | set `CW_OTEL_ENDPOINT=http://localhost:4317` in `.env` to export traces and metrics |
+| Prometheus (profile `observability`) | `http://localhost:9090` | scrapes the collector; 2 days of retention |
+| Grafana (profile `observability`) | `http://localhost:3030` | anonymous admin; dashboard "ComplianceWatch services", Explore for Tempo traces |
 | Fake LLM gateway (profile `llm`) | `http://localhost:8090` | `make dev-llm`; the `services/llm-gateway` image with the fake provider and an in-memory ledger, no key |
 | Services (`make run`) | `localhost:8001` .. `8010` | identity, profile, rulebook, applicability-engine, obligation, notification, qa, llm-gateway, eval, pipeline; containers listen on 8000 |
 | Web app | `http://localhost:3000` | `pnpm --filter web dev`; `/admin` for the internal tools |
 | WhatsApp bot | `http://localhost:8080` | `pnpm --filter whatsapp-bot dev`; `/health`, `GET/POST /webhook` |
 
-Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPANDA_KAFKA_PORT`, `REDPANDA_SCHEMA_REGISTRY_PORT`, `REDPANDA_ADMIN_PORT`, `TEMPORAL_PORT`, `TEMPORAL_UI_PORT`, `LANGFUSE_PORT`, `FAKE_LLM_PORT`). Other projects on this machine use 5432, 6379, 9092, 8080 and 3000 when they run; change the port in `.env`, not in `docker-compose.yml`.
+Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPANDA_KAFKA_PORT`, `REDPANDA_SCHEMA_REGISTRY_PORT`, `REDPANDA_ADMIN_PORT`, `TEMPORAL_PORT`, `TEMPORAL_UI_PORT`, `LANGFUSE_PORT`, `OTEL_GRPC_PORT`, `OTEL_HTTP_PORT`, `OTEL_HEALTH_PORT`, `PROMETHEUS_PORT`, `GRAFANA_PORT`, `FAKE_LLM_PORT`). Other projects on this machine use 5432, 6379, 9092, 8080 and 3000 when they run; change the port in `.env`, not in `docker-compose.yml`.
 
 ## Running one service
 
@@ -51,6 +54,20 @@ environment: it publishes the service's `outbox_event` rows to Redpanda and dead
 the relay logs `outbox.table_missing` and exits until the first producing service's migration
 creates it. `docker compose exec redpanda rpk topic list`
 shows the topics; `rpk topic consume <topic> -n 1` reads a message.
+
+`make worker SERVICE=pipeline` runs the service's Temporal worker with the same environment;
+`services/pipeline/README.md` shows how to start the sample workflow and
+`docs/runbooks/temporal-worker.md` what to do when a run fails.
+
+## Traces and metrics
+
+`make dev-observability` adds the OpenTelemetry collector, Prometheus, Tempo and Grafana to
+the stack. Put `CW_OTEL_ENDPOINT=http://localhost:4317` in `.env` (or prefix one command with
+it), run a service or a worker, and open http://localhost:3030: the "ComplianceWatch services"
+dashboard shows request rate, p95 latency and errors per service and the outbox relay counters;
+Explore with the Tempo datasource finds traces by `service.name`. Log lines inside a request or
+an activity carry `trace_id`. A changed `infra/dev/otel/collector.yaml` needs
+`docker compose up -d --force-recreate otel-collector`.
 
 ## LLM gateway
 
@@ -92,4 +109,4 @@ Settings, routes, budgets and errors: [services/llm-gateway/README.md](../../ser
 
 ## Not in the stack yet
 
-OpenTelemetry collector (`CW_OTEL_ENDPOINT` stays empty), seeded fixtures and the 50-document sample rulebook, Keycloak, Terraform.
+Seeded fixtures and the 50-document sample rulebook, Keycloak, Terraform, alert rules.
