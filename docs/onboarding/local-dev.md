@@ -63,6 +63,11 @@ fetches real documents from a regulator site into `var/raw/` (one request per se
 `robots.txt`); `--list-only` just lists. The keys are in
 `services/pipeline/src/pipeline/infrastructure/adapters/registry.py`.
 
+`make eval` runs the eval harness in the `ci` profile (scripted answers and the in-process
+gateway with the fake provider; no tokens, no network) and writes `evals/reports/latest.md`.
+`make label ARGS="check"` validates the golden extraction cases; `make label ARGS="prepare ..."`
+fetches documents for analysts to label (see `evals/golden/extraction/README.md`).
+
 ## Profiles
 
 `make migrate SERVICE=profile` then `make run SERVICE=profile`; every call needs an

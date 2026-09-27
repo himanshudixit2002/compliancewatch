@@ -1,6 +1,6 @@
 # pipeline service
 
-Part of the ComplianceWatch monorepo. **Health routes, migrations wiring, one sample Temporal workflow, and the first source adapters: CBIC notifications and circulars, GST Council press releases, GSTN advisories, Maharashtra GST notifications, with PDF and HTML parsers, a change detector and a backfill command.**
+Part of the ComplianceWatch monorepo. **Health routes, migrations wiring, one sample Temporal workflow, and the first source adapters: CBIC notifications and circulars, GST Council press releases, GSTN advisories, Maharashtra GST notifications, with PDF and HTML parsers, a change detector, a backfill command, the rule extractor with its validators behind the llm-gateway, and the labelling tool for the extraction golden set.**
 Design reference: Project Foundation guide, sections 5, 7, 8, 11 and 14.
 
 - **Owns:** The regulatory intelligence pipeline as Temporal workers: source-crawler (source registry, fetch schedule, raw document store), change-detector (document classification, links to prior documents), doc-parser (clause-level structured text, OCR fallback), rule-extractor (schema-validated RuleCandidates with verified citations), review-service (ReviewTasks, decisions, edit diffs, two-person rule)
@@ -16,6 +16,10 @@ src/pipeline/
   application/     # use cases, event handlers, unit of work; activities.py: the ingest activities
   domain/          # entities, value objects, domain events, repository protocols
   application/detector.py  # document type, change kind, referenced notifications
+  application/extractor.py # LlmRuleExtractor: one gateway call per document, then the validators
+  application/validators.py # citations exist and quote the clause, numbers and dates are in the cited text, predicates fit the ontology
+  domain/candidate.py      # CANDIDATE_SCHEMA (what the model returns, what a label looks like) and its parser
+  domain/numbers.py        # every spelling of an amount or a date a regulator uses (two crore, 21st April, 2026)
   infrastructure/  # SQLAlchemy models, repositories, Kafka; fakes.py: in-memory adapter and parser
     http.py        # PoliteClient: user agent, robots.txt, per-host delay, retries
     raw_store.py   # content-addressed raw file store (local disk; memory for tests)
@@ -23,6 +27,10 @@ src/pipeline/
     parsers/       # PdfParser (pypdf text layer), HtmlParser, language detection, clause split
   workflows/       # Temporal workflows; ingest_document.py: discover, fetch, parse
   backfill.py      # pipeline-backfill: list, fetch, store, parse and detect from the command line
+  label.py         # pipeline-label: index, prepare and check golden extraction cases (make label)
+  infrastructure/gateway.py  # GatewayProvider: the llm-gateway as the kernel's LLMProvider
+  infrastructure/prompts.py  # loads prompts/<name>.v<version>.md; the registry holds its digest
+prompts/           # extraction.rule_candidate.v1.md (owner regulatory-intelligence)
   testing.py       # FixtureTransport: replays tests/fixtures without the network
   worker.py        # python -m pipeline.worker: the Temporal worker on task queue "pipeline"
   main.py          # composition root: create_app(...) from py-common
@@ -89,6 +97,31 @@ tests replay `tests/fixtures/` through `pipeline.testing.FixtureTransport`; noth
 test suite reaches the network. What is not done: OCR, the Kafka `document.discovered` and
 `document.parsed` events from the backfill (the workflow's activities are the seam), a source
 table in Postgres (the registry is code), and adapters for the other states.
+
+## Extraction
+
+`LlmRuleExtractor` renders the parsed document as `[ref] text` lines, sends the registered
+prompt `extraction.rule_candidate@1` with `CANDIDATE_SCHEMA` through the llm-gateway (never a
+provider directly; the gateway checks the prompt reference against its registry, where the
+file's digest is recorded), reads the answer as `CandidateFields` and runs the validators.
+Every model-dependent path is exercised in tests with `pipeline.testing.ScriptedProvider`; the
+eval harness runs the same code against the gateway's fake provider and, nightly, a real one.
+
+The validators are deterministic and never discard a candidate; they attach issues that send it
+to review: `citation_missing_clause`, `citation_quote_not_found`, `amount_not_in_clause`,
+`due_day_not_in_clause`, `due_in_days_not_in_clause`, `date_not_in_cited_clauses`,
+`dates_out_of_order`, `predicate_invalid`, `reference_empty`, plus `output_unparseable` when
+the answer is not a candidate. The numeric check accepts the spellings regulators use: `2 crore`,
+`two crore`, `2,00,00,000`, `twenty-first day of April, 2026`, `21.04.2026`.
+
+```bash
+make label ARGS="check"                                   # every golden case is well formed
+make label ARGS="prepare --index evals/golden/extraction/cbic_notifications/index.yaml --limit 5"
+make eval                                                 # scripted + fake gateway, section 8 gates
+```
+
+The golden set and its workflow are described in `evals/golden/extraction/README.md`; the
+harness in `evals/harness/README.md`.
 
 Doc-literal subdirectories at the service root (guide section 13; the CI eval trigger in section 17 watches `services/pipeline/prompts`):
 
