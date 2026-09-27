@@ -1,0 +1,83 @@
+case_id: 01-2026-central-tax
+label_status: draft
+labelled_by: Claude (draft from the document text; not analyst-reviewed)
+reviewed_by: ''
+source:
+  source_key: cbic_notifications
+  number: 01/2026-Central Tax
+  title: Seeks to extends the due date for furnishing the return in FORM GSTR-3B for the month of March,
+    2026 till the twenty-first day of April, 2026
+  url: https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/gst-ct-01-2026.pdf
+  published_at: '2026-04-21'
+  sha256: 51f5dbee1615f0ec47256abddb11061a348e81b883051e89733a06b062bcebed
+  fetched_at: '2026-09-28T00:00:00+00:00'
+document:
+  doc_type: notification
+  language: en
+  title: '[TO BE PUBLISHED IN THE GAZETTE OF INDIA, EXTRAORDINARY, PART II, SECTION 3, SUB- SECTION (i)]'
+  clauses:
+  - ref: en.p1
+    page: 1
+    text: '[TO BE PUBLISHED IN THE GAZETTE OF INDIA, EXTRAORDINARY, PART II, SECTION 3, SUB- SECTION (i)]'
+  - ref: en.p2
+    page: 1
+    text: GOVERNMENT OF INDIA MINISTRY OF FINANCE DEPARTMENT OF REVENUE CENTRAL BOARD OF INDIRECT TAXES
+      AND CUSTOMS NOTIFICATION No. 01/2026 – Central Tax New Delhi, dated the 21st April, 2026
+  - ref: en.p3
+    page: 1
+    text: G.S.R … (E).— In exercise of the powers conferred by sub -section (6) of section 39 of the Central
+      Goods and Services Tax Act, 2017 (12 of 2017), the Commissioner, on the recommendations of the GST
+      Council, hereby extends the due  date for furnishing the return in FORM GSTR-3B for the month of
+      March, 2026 till the twenty -first day of April, 2026, for the registered persons who are required
+      to furnish return under sub-section (1) of section 39 read with clause (i) of sub -rule (1) of  rule
+      61 of the Central Goods and Services Tax Rules, 2017.
+  - ref: en.p4
+    page: 1
+    text: 2.  This notification shall come into effect from 20th day of April, 2026.
+  - ref: en.p5
+    page: 1
+    text: '[F. No. CBIC-20006/45/2025-GST]'
+  - ref: en.p6
+    page: 1
+    text: (Kangale Shrunkhala Motiram) Director
+detector:
+  doc_kind: notification
+  change_kind: extension
+  references: []
+expected:
+  title: Due date for FORM GSTR-3B for March 2026 extended to 21 April 2026
+  summary: The Commissioner, on the recommendations of the GST Council, extends the due date for furnishing
+    the return in FORM GSTR-3B for the month of March 2026 to 21 April 2026 for registered persons who
+    furnish the return under section 39(1) read with rule 61(1)(i), that is monthly filers.
+  doc_kind: notification
+  change_kind: extension
+  effective_from: '2026-04-20'
+  effective_to: null
+  references: []
+  applies_to:
+  - attribute: registration_type
+    operator: eq
+    value: regular
+    clause_ref: en.p3
+  - attribute: filing_scheme
+    operator: eq
+    value: regular_monthly
+    clause_ref: en.p3
+  obligation:
+    title: File FORM GSTR-3B for March 2026 by 21 April 2026
+    steps:
+    - Furnish the return in FORM GSTR-3B for the month of March, 2026 on or before 21 April 2026
+    evidence_type: filing_acknowledgement
+    due_in_days: null
+    clause_ref: en.p3
+  recurrence: null
+  amounts: []
+  citations:
+  - clause_ref: en.p3
+    quote: extends the due date for furnishing the return in FORM GSTR-3B for the month of March, 2026
+      till the twenty -first day of April, 2026
+  - clause_ref: en.p4
+    quote: This notification shall come into effect from 20th day of April, 2026.
+  confidence: 0.9
+notes: Draft label written from the notification text. An analyst confirms the predicates (monthly filers
+  under section 39(1) and rule 61(1)(i)) before label_status moves to reviewed.

@@ -11,11 +11,13 @@ Design reference: Project Foundation guide, sections 8, 14 and 19.
 ## Layout
 
 ```
-extraction/     # document -> expected RuleCandidate
-qa/             # question -> expected grounded answer and citations (or not_covered)
-applicability/  # (profile, rule version) -> expected decision
+extraction/     # document -> expected RuleCandidate; see extraction/README.md for the format
+  cbic_notifications/index.yaml   # the 50 Central Tax notifications listed for labelling
+  cbic_notifications/cases/*.yaml # one file per document: clauses, detector prefill, expected
+qa/             # question -> expected grounded answer and citations (or not_covered); empty
+applicability/  # (profile, rule version) -> expected decision; empty
 ```
 
 ## How to run
 
-Nothing to run yet.
+`make label ARGS="check"` validates every case; `make eval` scores them (see evals/harness).
