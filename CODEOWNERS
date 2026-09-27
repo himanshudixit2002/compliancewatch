@@ -1,0 +1,46 @@
+# CODEOWNERS - ComplianceWatch monorepo
+# Format: <pattern> <owner>   # team: <intended owning team, guide section 14>
+# GitHub teams do not exist yet, so every line names the single repository owner
+# and the trailing comment records the intended team. Last matching pattern wins,
+# so narrower overrides are listed after broader ones.
+
+# ---- Fallback ---------------------------------------------------------------
+*                                @himanshudixit2002 # team: Platform and Infrastructure
+
+# ---- Root and repo tooling --------------------------------------------------
+/CODEOWNERS                      @himanshudixit2002 # team: Platform and Infrastructure (changes co-approved by CTO)
+/Makefile                        @himanshudixit2002 # team: Platform and Infrastructure
+/.github/                        @himanshudixit2002 # team: Platform and Infrastructure (CI/CD)
+/docs/                           @himanshudixit2002 # team: Platform and Infrastructure (custodian; ADRs approved at the monthly architecture review)
+/docs/runbooks/                  @himanshudixit2002 # team: Platform and Infrastructure (service owners write their runbooks; Platform reviews)
+
+# ---- Apps -------------------------------------------------------------------
+/apps/web/                       @himanshudixit2002 # team: Core Product (review workbench UI: Regulatory Intelligence; tenant admin: Identity and Partner; split by route once routes exist)
+/apps/whatsapp-bot/              @himanshudixit2002 # team: Core Product
+
+# ---- Services ---------------------------------------------------------------
+/services/identity/              @himanshudixit2002 # team: Identity and Partner
+/services/profile/               @himanshudixit2002 # team: Core Product
+/services/rulebook/              @himanshudixit2002 # team: Regulatory Intelligence
+/services/applicability-engine/  @himanshudixit2002 # team: Core Product (deterministic path and fan-out; LLM evaluator: AI Platform)
+/services/obligation/            @himanshudixit2002 # team: Core Product
+/services/notification/          @himanshudixit2002 # team: Core Product
+/services/qa/                    @himanshudixit2002 # team: AI Platform
+/services/llm-gateway/           @himanshudixit2002 # team: AI Platform
+/services/eval/                  @himanshudixit2002 # team: AI Platform
+/services/pipeline/              @himanshudixit2002 # team: Regulatory Intelligence
+/services/pipeline/prompts/      @himanshudixit2002 # team: AI Platform (wording reviewed by a Regulatory Analyst; merged only with a green eval run)
+
+# ---- Packages ---------------------------------------------------------------
+/packages/contracts/             @himanshudixit2002 # team: Platform and Infrastructure (custodian; every consuming team reviews a contract change; add their handles here when teams exist)
+/packages/domain-kernel/         @himanshudixit2002 # team: Platform and Infrastructure (custodian; Phase 0 golden-path deliverable)
+/packages/ontology/              @himanshudixit2002 # team: Core Product (co-approved by Regulatory Intelligence; content proposed by Regulatory Analysts)
+/packages/py-common/             @himanshudixit2002 # team: Platform and Infrastructure
+/packages/ui/                    @himanshudixit2002 # team: Core Product
+
+# ---- Infra ------------------------------------------------------------------
+/infra/                          @himanshudixit2002 # team: Platform and Infrastructure
+
+# ---- Evals ------------------------------------------------------------------
+/evals/golden/                   @himanshudixit2002 # team: Regulatory Analysts (an analyst approves every golden-set addition; AI Platform owns tooling)
+/evals/harness/                  @himanshudixit2002 # team: AI Platform

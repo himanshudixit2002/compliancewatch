@@ -1,0 +1,76 @@
+# ComplianceWatch monorepo .gitignore
+# Lockfiles (uv.lock, pnpm-lock.yaml) and version pins are committed on purpose.
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+
+# ---- Node / pnpm / Turborepo ----
+node_modules/
+.pnpm-store/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# ---- Next.js ----
+.next/
+out/
+next-env.d.ts
+
+# ---- Coverage and test reports ----
+.coverage
+.coverage.*
+coverage/
+htmlcov/
+coverage.xml
+junit.xml
+playwright-report/
+test-results/
+
+# ---- Env and secrets (gitleaks also runs in CI; secrets never live in the repo) ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- Terraform (infra/terraform) ----
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+!*.tfvars.example
+
+# ---- macOS ----
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Icon?
+
+# ---- IDE / editors ----
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---- Logs and temp ----
+*.log
+logs/
+tmp/
+.cache/
