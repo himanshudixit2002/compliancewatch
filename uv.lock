@@ -8,6 +8,7 @@ members = [
     "compliancewatch-applicability-engine",
     "compliancewatch-contracts",
     "compliancewatch-eval",
+    "compliancewatch-evals",
     "compliancewatch-identity",
     "compliancewatch-llm-gateway",
     "compliancewatch-notification",
@@ -402,6 +403,33 @@ requires-dist = [
 ]
 
 [[package]]
+name = "compliancewatch-evals"
+version = "0.1.0"
+source = { editable = "evals/harness" }
+dependencies = [
+    { name = "compliancewatch-llm-gateway" },
+    { name = "compliancewatch-pipeline" },
+    { name = "domain-kernel" },
+    { name = "fastapi" },
+    { name = "httpx2" },
+    { name = "ontology" },
+    { name = "py-common" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "compliancewatch-llm-gateway", editable = "services/llm-gateway" },
+    { name = "compliancewatch-pipeline", editable = "services/pipeline" },
+    { name = "domain-kernel", editable = "packages/domain-kernel" },
+    { name = "fastapi", specifier = ">=0.120" },
+    { name = "httpx2", specifier = ">=2.13" },
+    { name = "ontology", editable = "packages/ontology" },
+    { name = "py-common", editable = "packages/py-common" },
+    { name = "pyyaml", specifier = ">=6.0" },
+]
+
+[[package]]
 name = "compliancewatch-identity"
 version = "0.1.0"
 source = { editable = "services/identity" }
@@ -526,11 +554,13 @@ dependencies = [
     { name = "domain-kernel" },
     { name = "fastapi" },
     { name = "httpx2" },
+    { name = "ontology" },
     { name = "psycopg", extra = ["binary"] },
     { name = "py-common" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pypdf" },
+    { name = "pyyaml" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -541,11 +571,13 @@ requires-dist = [
     { name = "domain-kernel", editable = "packages/domain-kernel" },
     { name = "fastapi", specifier = ">=0.120" },
     { name = "httpx2", specifier = ">=2.13" },
+    { name = "ontology", editable = "packages/ontology" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "py-common", editable = "packages/py-common" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pydantic-settings", specifier = ">=2.10" },
     { name = "pypdf", specifier = ">=6.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35" },
 ]

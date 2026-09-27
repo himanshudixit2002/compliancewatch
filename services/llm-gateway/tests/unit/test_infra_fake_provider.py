@@ -69,7 +69,17 @@ def test_schema_gets_a_placeholder_for_every_required_field() -> None:
     schema = MappingProxyType(
         {
             "type": "object",
-            "required": ["title", "score", "count", "ok", "tags", "extra", "mystery"],
+            "required": [
+                "title",
+                "score",
+                "count",
+                "ok",
+                "tags",
+                "extra",
+                "mystery",
+                "kind",
+                "when",
+            ],
             "properties": {
                 "title": {"type": "string"},
                 "score": {"type": "number"},
@@ -78,13 +88,15 @@ def test_schema_gets_a_placeholder_for_every_required_field() -> None:
                 "tags": {"type": "array"},
                 "extra": {"type": "object"},
                 "mystery": {"description": "no type"},
+                "kind": {"type": "string", "enum": ["notification", "circular"]},
+                "when": {"type": ["string", "null"], "format": "date"},
                 "optional": {"type": "string"},
             },
         }
     )
     response = FakeProvider().complete(
         request(
-            feature="extraction", prompt_version="extraction.rule_candidate@0", json_schema=schema
+            feature="extraction", prompt_version="extraction.rule_candidate@1", json_schema=schema
         )
     )
     assert json.loads(response.text) == {
@@ -95,6 +107,8 @@ def test_schema_gets_a_placeholder_for_every_required_field() -> None:
         "tags": [],
         "extra": {},
         "mystery": None,
+        "kind": "notification",
+        "when": None,
     }
 
 

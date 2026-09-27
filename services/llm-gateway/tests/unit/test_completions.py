@@ -178,10 +178,10 @@ def test_unregistered_prompts_can_be_allowed_by_settings(make_app: AppFactory) -
     assert response.json()["text"] == "fake:hello"
 
 
-def test_version_zero_prompt_on_a_real_route_is_served_by_the_fake(
+def test_the_registered_extraction_prompt_is_served_by_the_fake(
     client: TestClient, wiring: GatewayWiring
 ) -> None:
-    body = _body(feature="extraction", prompt="extraction.rule_candidate@0", user="clause text")
+    body = _body(feature="extraction", prompt="extraction.rule_candidate@1", user="clause text")
     response = client.post(URL, json=body)
     assert response.status_code == 200
     served = response.json()

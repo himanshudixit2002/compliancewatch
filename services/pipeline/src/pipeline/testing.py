@@ -7,11 +7,13 @@ insist on the token header the real site wants.
 """
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx2
+
+from domain_kernel.llm import CompletionRequest, CompletionResponse
 
 Responder = Callable[[httpx2.Request], httpx2.Response]
 
@@ -107,3 +109,20 @@ def recorded_sources(fixtures: Path) -> FixtureTransport:
     )
     transport.file("GET", f"{MAHAGST}/en/notifications", "mahagst/notifications.html", "text/html")
     return transport
+
+
+class ScriptedProvider:
+    """An ``LLMProvider`` that answers from a script: the golden label for a document id, or one
+    text for everything. The harness uses it to prove the scoring; it is not a model."""
+
+    MODEL = "scripted/golden"
+
+    def __init__(self, answers: Mapping[str, str] | None = None, default: str = "{}") -> None:
+        self._answers = dict(answers or {})
+        self._default = default
+        self.requests: list[CompletionRequest] = []
+
+    def complete(self, req: CompletionRequest) -> CompletionResponse:
+        self.requests.append(req)
+        text = self._answers.get(req.metadata.get("document_id", ""), self._default)
+        return CompletionResponse(text=text, model=self.MODEL, input_tokens=0, output_tokens=0)

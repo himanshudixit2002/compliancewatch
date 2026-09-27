@@ -13,7 +13,8 @@ description = "Deterministic echo served by the fake provider; used by tests and
 
 [[prompts]]
 name = "extraction.rule_candidate"
-version = "0"
-owner = "ai-platform"
+version = "1"
+owner = "regulatory-intelligence"
 eval_cases = 1
-description = "Placeholder entry; the prompt text arrives with the extraction pipeline."
+sha256 = "8c31ce19b6225847eb097ed785869bdb68e3208c8c006cc3f3c858d3565d75ce"
+description = "Rule candidate from one parsed document; text in services/pipeline/prompts/extraction.rule_candidate.v1.md, cases in evals/golden/extraction."
