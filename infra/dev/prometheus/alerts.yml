@@ -1,0 +1,62 @@
+# Paging alerts (guide section 18, architecture reference 8.3) that the current metrics can
+# express. Every rule links its runbook; infra/scripts/check_alert_runbooks.py fails CI when a
+# link is missing or points at a file that does not exist. The remaining paging alerts of the
+# guide (source freshness, decision-flip rate, notification failure rate and duplicates, LLM
+# spend past 80% of budget) arrive with the metrics that feed them; docs/runbooks/README.md
+# lists them as pending.
+groups:
+  - name: api-slo
+    rules:
+      - alert: ApiErrorBurnRate
+        expr: |
+          sum by (service_name) (rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[1h]))
+            /
+          sum by (service_name) (rate(http_server_request_duration_seconds_count[1h])) > 0.002
+        for: 15m
+        labels:
+          severity: page
+          team: platform
+        annotations:
+          summary: "{{ $labels.service_name }} burns its availability SLO (5xx share above 0.2% over 1h; 2x the 99.9% budget)"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/api-slo-burn.md
+      - alert: ApiLatencyBurnRate
+        expr: |
+          histogram_quantile(0.95, sum by (le, service_name) (rate(http_server_request_duration_seconds_bucket[1h]))) > 0.6
+        for: 15m
+        labels:
+          severity: page
+          team: platform
+        annotations:
+          summary: "{{ $labels.service_name }} p95 read latency above 600 ms over 1h (2x the 300 ms objective)"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/api-slo-burn.md
+  - name: outbox
+    rules:
+      - alert: OutboxDeadLetters
+        expr: sum by (topic) (increase(outbox_relay_dead_total[30m])) > 0
+        for: 30m
+        labels:
+          severity: page
+          team: platform
+        annotations:
+          summary: "Dead-letter depth above zero for 30 minutes on {{ $labels.topic }}"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/outbox-relay.md
+      - alert: OutboxBacklog
+        expr: max by (service) (outbox_relay_pending) > 1000
+        for: 15m
+        labels:
+          severity: page
+          team: platform
+        annotations:
+          summary: "More than 1000 unpublished outbox rows for 15 minutes in {{ $labels.service }}"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/outbox-relay.md
+  - name: workers
+    rules:
+      - alert: PipelineWorkerSilent
+        expr: absent(otelcol_receiver_accepted_spans_total) == 1
+        for: 30m
+        labels:
+          severity: ticket
+          team: regulatory-intelligence
+        annotations:
+          summary: "No traces have reached the collector for 30 minutes: the worker or the collector is down"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/temporal-worker.md
