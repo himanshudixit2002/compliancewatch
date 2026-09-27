@@ -58,6 +58,10 @@ shows the topics; `rpk topic consume <topic> -n 1` reads a message.
 `make worker SERVICE=pipeline` runs the service's Temporal worker with the same environment;
 `services/pipeline/README.md` shows how to start the sample workflow and
 `docs/runbooks/temporal-worker.md` what to do when a run fails.
+`make backfill SERVICE=pipeline ARGS="--source cbic_notifications --since 2026-01-01 --limit 5"`
+fetches real documents from a regulator site into `var/raw/` (one request per second, honouring
+`robots.txt`); `--list-only` just lists. The keys are in
+`services/pipeline/src/pipeline/infrastructure/adapters/registry.py`.
 
 ## Profiles
 

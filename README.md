@@ -15,7 +15,10 @@
 > spec, problem-details errors in py-common, the event contracts (fourteen topics and the envelope as
 > JSON Schema with generated pydantic and TypeScript types and compatibility checks in CI), the
 > transactional outbox in py-common (writer, Kafka relay with dead letters, idempotent consumer),
-> the Temporal worker scaffold with the pipeline's sample ingest workflow, OpenTelemetry tracing
+> the Temporal worker scaffold with the pipeline's sample ingest workflow, the first source
+> adapters (CBIC notifications and circulars, GST Council press releases, GSTN advisories,
+> Maharashtra GST notifications) with PDF and HTML parsers, a change detector, a backfill command
+> and recorded fixtures, OpenTelemetry tracing
 > and metrics with a dev observability stack (collector, Prometheus, Tempo, Grafana dashboard),
 > pnpm + Turborepo workspace with the Next.js web app and
 > the WhatsApp bot, Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 008
@@ -68,8 +71,10 @@ compliancewatch/
     eval/
     pipeline/                # crawler, detector, parser, extractor, review as Temporal workers
       src/pipeline/workflows/  # ingest_document: the sample workflow; worker.py runs the worker
-      adapters/              # SourceAdapter implementations, one file per regulator source
-      parsers/
+      src/pipeline/infrastructure/adapters/  # one SourceAdapter per regulator site; registry.py
+      src/pipeline/infrastructure/parsers/   # PDF and HTML parsers, language detection
+      src/pipeline/backfill.py  # pipeline-backfill: make backfill SERVICE=pipeline ARGS=...
+      adapters/, parsers/    # pointers to the package directories above
       prompts/               # Versioned prompt files, each with a test
       workflows/             # pointer to src/pipeline/workflows
   packages/
@@ -140,7 +145,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | `eval` | `eval_service` (`eval` is a builtin) | 8009 | `eval` |
 | `pipeline` | `pipeline` | 8010 | `pipeline` |
 
-`services/pipeline/{adapters,parsers,prompts,workflows}` sit directly under the service, as drawn in section 13; the CI eval trigger (section 17) watches `services/pipeline/prompts`. The code directories may move under `src/pipeline/` when the pipeline slice lands.
+`services/pipeline/{adapters,parsers,prompts,workflows}` sit directly under the service, as drawn in section 13; the CI eval trigger (section 17) watches `services/pipeline/prompts`. The code for adapters, parsers and workflows lives under `src/pipeline/` so it is importable; the root directories hold pointers.
 
 ## Ownership (section 14)
 
@@ -205,8 +210,8 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - Terraform staging cluster and Keycloak (the gateway trusts an `x-tenant-id` header until then)
 - A service that writes to the outbox (the writer, relay and consumer exist in py-common; the first producer adds the `outbox_event` migration)
 - Alert rules and the runbook links from alerts (the dashboard exists; alerting arrives with the deployment work)
-- Real pipeline activities: the sample workflow runs on in-memory fakes
-- The 50-document sample rulebook and recorded source fixtures (the seed calendar of standing obligations exists, pending analyst review)
+- The ingest workflow wired to the real adapters and the outbox (the adapters, parsers and detector exist and run from `make backfill`; the workflow still runs on the in-memory fakes); OCR for scanned PDFs
+- The 50-document sample rulebook (the seed calendar of standing obligations exists, pending analyst review)
 - Real prompt texts for extraction, judgement, question answering and classification, and the eval harness
 - Full text for ADR-009 to ADR-011; the identity service itself (ADR-014 decides Supabase Auth for the MVP; nothing is created until the maintainer opens the project)
 - KAG-style reasoning beyond the schema: entity extraction and alignment in the pipeline, the logical-form planner and solver in qa, and its eval gate (ADR-017)
