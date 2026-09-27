@@ -9,6 +9,7 @@ from sqlalchemy import MetaData, engine_from_config, pool
 
 from py_common.logging import configure_logging
 from py_common.settings import Settings
+from rulebook.infrastructure.models import Base
 
 settings = Settings(service_name="rulebook")
 configure_logging(service_name="rulebook-migrations", log_level=settings.log_level)
@@ -17,8 +18,7 @@ config = context.config
 # ConfigParser interpolation: a literal % in the URL must be escaped.
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
-# Point at rulebook.infrastructure.models.Base.metadata once the first model exists.
-target_metadata: MetaData | None = None
+target_metadata: MetaData = Base.metadata
 
 
 def run_migrations_offline() -> None:
