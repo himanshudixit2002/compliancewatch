@@ -8,9 +8,13 @@ SHELL := /bin/bash
 UV ?= uv
 PNPM ?= pnpm
 COMPOSE := docker compose
-PROFILES := --profile observability
+PROFILES := --profile observability --profile llm
 SERVICE ?=
 COV_FAIL_UNDER ?= 80
+# testcontainers starts a reaper container that bind-mounts the Docker socket. With Colima (or any
+# VM-based daemon) the host-side socket path does not exist inside the VM, so name the daemon-side
+# path; a value of the same name in the environment still wins.
+TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE ?= /var/run/docker.sock
 
 # ---- Inventory -------------------------------------------------------------------------------
 SERVICES := identity profile rulebook applicability-engine obligation notification qa llm-gateway eval pipeline
@@ -71,7 +75,7 @@ doctor: ## Print which required tools are present
 	done
 
 # ---- Local stack (guide section 17) ---------------------------------------------------------
-.PHONY: dev dev-observability dev-urls dev-down dev-reset dev-logs dev-ps dev-psql compose-config
+.PHONY: dev dev-observability dev-llm dev-urls dev-down dev-reset dev-logs dev-ps dev-psql compose-config
 dev: check-docker ## Start Postgres, Redis, Redpanda, Temporal (+UI); waits for health, prints endpoints
 	@[ -f .env ] || { cp .env.example .env && echo "created .env from .env.example"; }
 	$(COMPOSE) up -d --wait --wait-timeout 180
@@ -82,14 +86,21 @@ dev-observability: check-docker ## Same as dev plus Langfuse (compose profile: o
 	$(COMPOSE) --profile observability up -d --wait --wait-timeout 240
 	@$(MAKE) --no-print-directory dev-urls
 
+dev-llm: check-docker ## Build and start the fake LLM gateway container (compose profile: llm)
+	@[ -f .env ] || { cp .env.example .env && echo "created .env from .env.example"; }
+	$(COMPOSE) --profile llm up -d --build --wait --wait-timeout 180 fake-llm
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	echo "  fake LLM gateway http://localhost:$${FAKE_LLM_PORT:-8090}/health"
+
 dev-urls:
-	@set -a; [ -f .env ] && . ./.env; set +a; \
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	echo ""; echo "ComplianceWatch dev stack"; \
 	echo "  Postgres         localhost:$${POSTGRES_PORT:-5432}   db=$${POSTGRES_DB:-compliancewatch} user=$${POSTGRES_USER:-cw}"; \
 	echo "  Redis            localhost:$${REDIS_PORT:-6379}"; \
 	echo "  Kafka (Redpanda) localhost:$${REDPANDA_KAFKA_PORT:-19092}   schema registry http://localhost:$${REDPANDA_SCHEMA_REGISTRY_PORT:-18081}"; \
 	echo "  Temporal         localhost:$${TEMPORAL_PORT:-7233}   UI http://localhost:$${TEMPORAL_UI_PORT:-8233}"; \
 	echo "  Langfuse         http://localhost:$${LANGFUSE_PORT:-3010}   (make dev-observability only)"; \
+	echo "  Fake LLM gateway http://localhost:$${FAKE_LLM_PORT:-8090}   (make dev-llm only)"; \
 	echo "Next: make migrate"
 
 dev-down: check-docker ## Stop the stack, keep volumes
@@ -144,7 +155,7 @@ py-test: check-uv ## pytest: unit and contract tests with the coverage gate (no 
 py-test-integration: check-uv ## testcontainers tests; skipped gracefully when Docker is absent
 	@if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then \
 	  echo "docker is not available: skipping integration tests"; exit 0; fi
-	$(UV) run pytest -m integration
+	TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=$(TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE) $(UV) run pytest -m integration
 
 importlint: check-uv ## import-linter contracts: no cross-service imports, domain imports no I/O
 	$(UV) run lint-imports
@@ -174,7 +185,7 @@ ts-dev: check-pnpm ## next dev (:3000) and whatsapp-bot (:8080) with reload
 	$(PNPM) turbo run dev
 
 # ---- Composition (guide sections 13, 17, 19) -------------------------------------------------
-.PHONY: install lint format typecheck test check eval migrate run hooks ci-lint
+.PHONY: install lint format typecheck test check eval migrate run openapi hooks ci-lint
 install: py-sync ts-install ## Install both toolchains
 
 lint: py-lint ts-lint ## Lint both sides (CI step 1)
@@ -191,7 +202,7 @@ eval: ## Eval harness against evals/golden (not built yet; prints a notice)
 	@echo "make eval: the eval harness under evals/harness is not built yet; nothing to run."
 
 migrate: check-uv ## alembic upgrade head for every service, or one: make migrate SERVICE=identity
-	@set -a; [ -f .env ] && . ./.env; set +a; \
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	for svc in $(if $(SERVICE),$(SERVICE),$(SERVICES)); do \
 	  case "$$svc" in \
 	    applicability-engine) schema=applicability ;; \
@@ -206,12 +217,17 @@ migrate: check-uv ## alembic upgrade head for every service, or one: make migrat
 
 run: check-uv ## Run one service with reload: make run SERVICE=identity [PORT=8001]
 	@[ -n "$(SERVICE)" ] || { echo "usage: make run SERVICE=<identity|profile|...> [PORT=8000]"; exit 1; }
-	@set -a; [ -f .env ] && . ./.env; set +a; \
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$(SCHEMA)%2Cpublic"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \
 	  $(UV) run --package compliancewatch-$(SERVICE) uvicorn $(PKG).main:app --reload --port $(PORT) \
 	    --reload-dir services/$(SERVICE)/src --reload-dir packages/py-common/src \
 	    --reload-dir packages/domain-kernel/src --reload-dir packages/ontology/src
+
+openapi: check-uv ## Export a service's OpenAPI spec: make openapi SERVICE=llm-gateway -> packages/contracts/openapi/<svc>.v1.json
+	@[ -n "$(SERVICE)" ] || { echo "usage: make openapi SERVICE=<identity|profile|...>"; exit 1; }
+	$(UV) run --package compliancewatch-$(SERVICE) python -c "import json, pathlib; from $(PKG).main import app; pathlib.Path('packages/contracts/openapi/$(SERVICE).v1.json').write_text(json.dumps(app.openapi(), indent=2, sort_keys=True) + '\n', encoding='utf-8')"
+	@echo "wrote packages/contracts/openapi/$(SERVICE).v1.json"
 
 hooks: ## Install the pre-commit and commit-msg hooks
 	pre-commit install --install-hooks
