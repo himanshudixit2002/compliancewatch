@@ -14,6 +14,7 @@ dev = [
   "pytest-asyncio>=1.1",
   "hypothesis>=6.140",
   "import-linter>=2.5",
+  "types-pyyaml>=6.0.12",
   "httpx2>=2.13",  # Starlette >= 1.7 TestClient transport; httpx 0.x is deprecated there
 ]
 
@@ -122,13 +123,13 @@ source_modules = ["*.infrastructure"]
 forbidden_modules = ["*.application", "*.api"]
 
 [[tool.importlinter.contracts]]
-name = "Domain layers and the domain kernel import no I/O frameworks and no py_common"
+name = "Domain layers and the domain kernel import no I/O frameworks, no YAML and no py_common"
 type = "forbidden"
 source_modules = ["*.domain", "domain_kernel"]
 forbidden_modules = [
   "sqlalchemy", "alembic", "psycopg", "asyncpg", "fastapi", "starlette", "httpx", "requests",
   "httpx2", "aiohttp", "aiokafka", "confluent_kafka", "temporalio", "redis", "boto3", "botocore",
-  "structlog", "py_common",
+  "structlog", "py_common", "yaml",
 ]
 
 [[tool.importlinter.contracts]]
@@ -155,6 +156,6 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "Shared package layering: py_common -> domain_kernel -> ontology"
+name = "Shared package layering: py_common -> ontology -> domain_kernel"
 type = "layers"
-layers = ["py_common", "domain_kernel", "ontology"]
+layers = ["py_common", "ontology", "domain_kernel"]
