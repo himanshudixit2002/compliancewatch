@@ -10,8 +10,8 @@ Design reference: Project Foundation guide, sections 8, 17 and 19.
 
 ## Layout
 
-Flat for now; the in-repo eval harness is a Phase 1 deliverable (CI report), with the dashboard in Phase 3.
+Flat for now; the runner and its CI report arrive with the first golden sets, the dashboard later.
 
 ## How to run
 
-`make eval` prints a notice until the harness lands in Phase 1.
+`make eval` prints a notice until the harness exists.

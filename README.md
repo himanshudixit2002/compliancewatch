@@ -1,8 +1,9 @@
 # ComplianceWatch monorepo
 
-> **Phase 0 tooling is in place.** uv workspace and FastAPI service template, pnpm + Turborepo
-> workspace with the Next.js web app and the WhatsApp bot, Docker Compose dev stack, GitHub Actions
-> CI and pre-commit hooks. No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
+> **What is here today.** uv workspace with the FastAPI service template for ten services, the shared
+> domain kernel and Ontology v0, pnpm + Turborepo workspace with the Next.js web app and the WhatsApp
+> bot, Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and the first six ADRs. No product
+> features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
 >
 > Source of truth: *ComplianceWatch - Project Foundation (HLD, LLD & Build Guide)*. Section numbers below refer to that guide.
 
@@ -51,8 +52,8 @@ compliancewatch/
   packages/
     contracts/               # OpenAPI specs, event schemas (JSON Schema), generated clients (py + ts)
       openapi/  events/  clients/python/  clients/typescript/
-    domain-kernel/           # Shared value objects, protocols, Ontology loader, error types
-    ontology/                # Attribute definitions as YAML, versioned, with a validator
+    domain-kernel/           # Shared value objects, protocols, ontology model, error types
+    ontology/                # GST attribute definitions as YAML (v0.1.0), loader and validator
     py-common/               # Settings, structured logging, health routes, FastAPI app factory
     ui/                      # Shared React components and design tokens
   infra/
@@ -64,7 +65,7 @@ compliancewatch/
     golden/                  # Golden sets: extraction/, qa/, applicability/ (versioned data files)
     harness/                 # Runner, metrics, thresholds
   docs/
-    adr/                     # Architecture decision records, numbered (ADR-001..011 stubs)
+    adr/                     # Architecture decision records (001 to 006 written, 007 to 011 stubs)
     runbooks/
     onboarding/              # local-dev.md
   .github/workflows/         # ci.yml (lint, typecheck, tests, dev-stack smoke, gitleaks), pr-checks.yml
@@ -117,7 +118,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 
 ## Ownership (section 14)
 
-`CODEOWNERS` maps every directory to its owning team. GitHub teams do not exist yet, so every line names the repository owner and records the intended team in a comment. Teams: Regulatory Intelligence, AI Platform, Core Product, Platform and Infrastructure, Identity and Partner, and the Regulatory Analysts (domain). Phase 0 starts with two combined teams: Platform and Pipeline, Product and AI.
+`CODEOWNERS` maps every directory to its owning team. GitHub teams do not exist yet, so every line names the repository owner and records the intended team in a comment. Teams: Regulatory Intelligence, AI Platform, Core Product, Platform and Infrastructure, Identity and Partner, and the Regulatory Analysts (domain). Until those teams are staffed, two combined teams cover them: Platform and Pipeline, and Product and AI.
 
 ## Make targets (section 13)
 
@@ -129,7 +130,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | `make test` | pytest (unit + contract, coverage gate on domain and application) and vitest |
 | `make lint` / `typecheck` / `format` | ruff + eslint + prettier; mypy --strict + tsc --strict |
 | `make check` | lint, typecheck, test, import-linter, uv lock check (the same gates CI runs) |
-| `make eval` | Eval harness against `evals/golden` (arrives in Phase 1; prints a notice today) |
+| `make eval` | Eval harness against `evals/golden` (not built yet; prints a notice) |
 | `make hooks` | Install the pre-commit and commit-msg hooks |
 | `make help` | Every target with its description |
 
@@ -141,7 +142,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | Domain layer imports nothing from infrastructure or third-party I/O | import-linter | wired |
 | Every public endpoint has an OpenAPI schema and a contract test | CI job fails on undocumented routes | later (only template ping routes exist) |
 | Every event has a JSON Schema in packages/contracts and a changelog entry | Schema registry compatibility check in CI | later (no events yet) |
-| Every prompt file has a version, an owner and at least one eval case | Eval harness refuses to run an unregistered prompt | Phase 1 |
+| Every prompt file has a version, an owner and at least one eval case | Eval harness refuses to run an unregistered prompt | later (no prompt files yet) |
 | Every table with tenant data has tenant_id and an RLS policy | Migration lint script | later (no tables yet) |
 | Conventional commits; squash merge; PR template with risk and rollback sections | pre-commit commit-msg hook, PR title check, PR template | wired (branch protection is a repo setting) |
 | Type checking is strict on both sides | mypy --strict, tsc --strict | wired |
@@ -168,10 +169,10 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - Section 20: phased roadmap
 - Section 21: risks, open questions, decision log (ADRs in `docs/adr/`)
 
-## Phase 0 next steps (not in this repository yet)
+## Not in this repository yet
 
-- Domain kernel (section 11 protocols and value objects) and Ontology v0 (about 15 GST attributes)
 - LLM gateway skeleton with prompt registry, cost ledger and the fake provider container
-- Terraform staging cluster, Keycloak, OpenTelemetry collector in the dev stack
-- Seeded fixtures and the 50-document sample rulebook (Phase 1)
-- Full text for ADR-001 to ADR-006
+- Terraform staging cluster and Keycloak
+- OpenTelemetry collector in the dev stack
+- Seeded fixtures and the 50-document sample rulebook
+- Full text for ADR-007 to ADR-011

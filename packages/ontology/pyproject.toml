@@ -1,9 +1,18 @@
 [project]
 name = "ontology"
 version = "0.1.0"
-description = "ComplianceWatch Ontology: attribute definitions as YAML, versioned, with a validator"
+description = "ComplianceWatch Ontology: GST business attributes as versioned YAML, with a loader and validator"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+  "domain-kernel",
+  "pyyaml>=6.0",
+]
+
+[project.scripts]
+ontology-validate = "ontology.validate:main"
+
+[tool.uv.sources]
+domain-kernel = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

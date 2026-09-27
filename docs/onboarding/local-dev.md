@@ -66,4 +66,4 @@ Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPAND
 
 ## Not in the stack yet
 
-Fake LLM provider container (ships with `services/llm-gateway`), OpenTelemetry collector (`CW_OTEL_ENDPOINT` stays empty), seeded fixtures and the 50-document sample rulebook (Phase 1), Keycloak, Terraform.
+Fake LLM provider container (ships with `services/llm-gateway`), OpenTelemetry collector (`CW_OTEL_ENDPOINT` stays empty), seeded fixtures and the 50-document sample rulebook, Keycloak, Terraform.

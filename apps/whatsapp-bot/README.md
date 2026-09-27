@@ -18,4 +18,4 @@ src/app.test.ts   # vitest via app.request(), 80% coverage thresholds
 
 ## How to run
 
-`pnpm --filter whatsapp-bot dev` (Node 22+ runs the TypeScript source directly), `build` then `start`, `test`. Copy `.env.example` to `.env` for `WHATSAPP_VERIFY_TOKEN` and `WHATSAPP_APP_SECRET` (signature verification is a Phase 1 TODO).
+`pnpm --filter whatsapp-bot dev` (Node 22+ runs the TypeScript source directly), `build` then `start`, `test`. Copy `.env.example` to `.env` for `WHATSAPP_VERIFY_TOKEN` and `WHATSAPP_APP_SECRET` (signature verification is still a TODO).

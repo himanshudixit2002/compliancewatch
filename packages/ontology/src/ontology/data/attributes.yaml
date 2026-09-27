@@ -1,0 +1,282 @@
+# ComplianceWatch ontology: the business attributes that GST rule predicates and business
+# profiles are written against. Every profile attribute and every predicate uses a key from
+# this file. `uv run ontology-validate` checks it.
+#
+# House rules:
+#   - keys and enum values are snake_case; GST state codes are two digits and quoted
+#   - ordered_enum values are listed in ascending order; predicates compare by position
+#   - a turnover band "a_to_b" means more than a and up to b, matching how GST law words
+#     its thresholds ("exceeds", "does not exceed")
+#   - definitions are one or two plain sentences and end with a period
+#   - source is gstin_lookup (pre-filled from the GSTIN), user_input (asked at onboarding)
+#     or derived (computed by the profile service from other attributes)
+#   - quote anything YAML would otherwise read as a number or a date ("01", "2019-07-01")
+#
+# Bump `version` on every change; a new attribute also gets `since`.
+version: "0.1.0"
+
+attributes:
+  # ---- Facts the GSTIN lookup pre-fills ---------------------------------------------------
+
+  - key: registration_type
+    type: enum
+    source: gstin_lookup
+    since: "0.1.0"
+    definition: >-
+      The kind of GST registration the business holds, as shown on the GST portal. Where a
+      business holds several registrations this is the one it was onboarded with; unregistered
+      means the business has no GSTIN because it is below the threshold or exempt.
+    allowed_values:
+      - regular
+      - composition
+      - casual
+      - non_resident
+      - isd
+      - tds
+      - tcs
+      - sez_unit
+      - sez_developer
+      - unregistered
+    example: regular
+
+  - key: gstin_status
+    type: enum
+    source: gstin_lookup
+    since: "0.1.0"
+    definition: >-
+      Status of the GSTIN on the GST portal at the last lookup. Suspension and cancellation
+      change which returns are due and what the portal lets the business do.
+    allowed_values:
+      - active
+      - suspended
+      - cancelled
+      - inactive
+    example: active
+
+  - key: registered_since
+    type: date
+    source: gstin_lookup
+    since: "0.1.0"
+    definition: >-
+      Date on which the GST registration took effect, from the registration certificate.
+      Rules that apply only to newly registered businesses compare against this date.
+    example: "2019-07-01"
+
+  - key: state_codes
+    type: enum_set
+    source: gstin_lookup
+    since: "0.1.0"
+    definition: >-
+      Two-digit GST state codes of every state or union territory in which the business holds
+      a registration. The first two digits of a GSTIN give the code; the looked-up GSTIN
+      pre-fills one and the owner adds any others.
+    allowed_values:
+      - "01" # Jammu and Kashmir
+      - "02" # Himachal Pradesh
+      - "03" # Punjab
+      - "04" # Chandigarh
+      - "05" # Uttarakhand
+      - "06" # Haryana
+      - "07" # Delhi
+      - "08" # Rajasthan
+      - "09" # Uttar Pradesh
+      - "10" # Bihar
+      - "11" # Sikkim
+      - "12" # Arunachal Pradesh
+      - "13" # Nagaland
+      - "14" # Manipur
+      - "15" # Mizoram
+      - "16" # Tripura
+      - "17" # Meghalaya
+      - "18" # Assam
+      - "19" # West Bengal
+      - "20" # Jharkhand
+      - "21" # Odisha
+      - "22" # Chhattisgarh
+      - "23" # Madhya Pradesh
+      - "24" # Gujarat
+      - "25" # Daman and Diu (legacy; merged into 26 on 26 January 2020)
+      - "26" # Dadra and Nagar Haveli and Daman and Diu
+      - "27" # Maharashtra
+      - "28" # Andhra Pradesh (legacy code from before the 2014 split; new registrations use 37)
+      - "29" # Karnataka
+      - "30" # Goa
+      - "31" # Lakshadweep
+      - "32" # Kerala
+      - "33" # Tamil Nadu
+      - "34" # Puducherry
+      - "35" # Andaman and Nicobar Islands
+      - "36" # Telangana
+      - "37" # Andhra Pradesh
+      - "38" # Ladakh
+      # 97 (Other Territory) and 99 (Centre Jurisdiction) are not places of business and are
+      # left out until a real registration needs them.
+    example: ["29"]
+
+  - key: constitution
+    type: enum
+    source: gstin_lookup
+    since: "0.1.0"
+    definition: >-
+      Legal form of the business as recorded against the GSTIN, the constitution of business
+      on the registration certificate.
+    allowed_values:
+      - proprietorship
+      - partnership
+      - llp
+      - private_limited
+      - public_limited
+      - huf
+      - trust
+      - society
+      - government
+      - other
+    example: proprietorship
+
+  - key: business_category
+    type: enum
+    source: gstin_lookup
+    since: "0.1.0"
+    definition: >-
+      Main activity of the business, simplified from the nature of business activities recorded
+      on the GST portal. Pick the activity that earns most of the turnover.
+    allowed_values:
+      - manufacturing
+      - wholesale_trade
+      - retail_trade
+      - services
+      - restaurant
+      - works_contract
+      - other
+    example: retail_trade
+
+  # ---- Turnover and filing ----------------------------------------------------------------
+
+  - key: supply_type
+    type: enum
+    source: user_input
+    since: "0.1.0"
+    definition: >-
+      Whether the business supplies goods, services, or both. The registration threshold, the
+      composition scheme limits and the e-way bill rules differ between goods and services.
+    allowed_values:
+      - goods
+      - services
+      - both
+    example: goods
+
+  - key: turnover_band
+    type: ordered_enum
+    source: user_input
+    since: "0.1.0"
+    definition: >-
+      Aggregate turnover in the previous financial year on an all-India PAN basis, as defined in
+      section 2(6) of the CGST Act. Each band runs from its lower bound (exclusive) to its upper
+      bound (inclusive), with bounds at the thresholds GST rules use.
+    allowed_values: &turnover_bands
+      - upto_10_lakh # registration threshold in Manipur, Mizoram, Nagaland and Tripura
+      - 10_lakh_to_20_lakh # registration threshold for services and in other special category states
+      - 20_lakh_to_40_lakh # registration threshold for goods in most states
+      - 40_lakh_to_75_lakh # composition limit in special category states; services composition ends at 50 lakh
+      - 75_lakh_to_1_5_crore # composition limit elsewhere
+      - 1_5_crore_to_2_crore # annual return GSTR-9 optional up to 2 crore
+      - 2_crore_to_5_crore # QRMP, GSTR-9C and 6-digit HSN thresholds sit at 5 crore
+      - 5_crore_to_10_crore # e-invoicing since 1 August 2023
+      - 10_crore_to_20_crore # e-invoicing since 1 October 2022
+      - 20_crore_to_50_crore # e-invoicing since 1 April 2022
+      - 50_crore_to_100_crore # e-invoicing since 1 April 2021
+      - 100_crore_to_500_crore # e-invoicing since 1 January 2021
+      - above_500_crore # e-invoicing since 1 October 2020
+    example: 1_5_crore_to_2_crore
+
+  - key: peak_turnover_band
+    type: ordered_enum
+    source: user_input
+    since: "0.1.0"
+    definition: >-
+      Highest aggregate turnover in any financial year from 2017-18 onwards, in the same bands as
+      turnover_band. E-invoicing and some other rules apply once a threshold has ever been
+      crossed, even if turnover later fell below it.
+    allowed_values: *turnover_bands
+    example: 5_crore_to_10_crore
+
+  - key: return_filing_frequency
+    type: enum
+    source: user_input
+    since: "0.1.0"
+    definition: >-
+      How often the business files GSTR-1 and GSTR-3B. Quarterly means it has opted into the
+      QRMP scheme, which is open up to 5 crore of turnover and moves the due dates.
+    allowed_values:
+      - monthly
+      - quarterly
+    example: monthly
+
+  # ---- Activity flags that notifications condition on -------------------------------------
+
+  - key: makes_inter_state_supplies
+    type: boolean
+    source: user_input
+    since: "0.1.0"
+    definition: >-
+      True when the business supplies goods or services to customers in another state or union
+      territory. Inter-state supply of goods makes registration compulsory regardless of
+      turnover and rules out the composition scheme.
+    example: false
+
+  - key: makes_zero_rated_supplies
+    type: boolean
+    source: user_input
+    since: "0.1.0"
+    definition: >-
+      True when the business exports goods or services or supplies SEZ units or developers.
+      These zero-rated supplies carry their own LUT filing and refund rules.
+    example: false
+
+  - key: ecommerce_role
+    type: enum
+    source: user_input
+    since: "0.1.0"
+    definition: >-
+      Whether the business sells through an e-commerce operator, runs one, or both. Sellers face
+      TCS deduction and registration rules; operators collect TCS and pay the tax on notified
+      services under section 9(5).
+    allowed_values:
+      - none
+      - seller
+      - operator
+      - both
+    example: none
+
+  - key: pays_reverse_charge
+    type: boolean
+    source: user_input
+    since: "0.1.0"
+    definition: >-
+      True when the business receives supplies on which it must pay GST under reverse charge,
+      for example goods transport agency, legal, security or imported services. Such businesses
+      must register regardless of turnover and pay that tax in cash.
+    example: false
+
+  - key: generates_eway_bills
+    type: boolean
+    source: user_input
+    since: "0.1.0"
+    definition: >-
+      True when the business moves goods that need an e-way bill, usually consignments worth
+      more than 50,000 rupees (some states set a higher limit for movement within the state).
+      E-way bill notifications, blocking rules and portal changes apply only to these businesses.
+    example: true
+
+  # ---- Size ---------------------------------------------------------------------------------
+
+  - key: employee_count
+    type: integer
+    source: user_input
+    since: "0.1.0"
+    definition: >-
+      Number of people on the payroll, including part-time and contract staff. GST rules rarely
+      depend on it; it sizes the business and matters to the regulators that come after GST.
+    min: 0
+    max: 100000
+    example: 12

@@ -3,7 +3,7 @@
 Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 8, 14 and 19.
 
-- **Owns:** Golden sets as versioned data files, reviewed like code: extraction (starts at 200 documents), qa (starts at 500 questions), applicability (target 2,000 labelled decisions by Phase 3)
+- **Owns:** Golden sets as versioned data files, reviewed like code: extraction (starts at 200 documents), qa (starts at 500 questions), applicability (target 2,000 labelled decisions)
 - **Owning team:** Regulatory Analysts (an analyst approves every addition); AI Platform owns the tooling (guide section 14)
 - **Consumes:** Review edits, "not covered" answers and user thumbs-down after analyst triage
 - **Emits / publishes:** Versioned golden data consumed by evals/harness

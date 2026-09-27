@@ -13,7 +13,7 @@ SELECT 'CREATE DATABASE langfuse'            WHERE NOT EXISTS (SELECT FROM pg_da
 -- Application database: pgvector once, in public; services keep public on their search_path so
 -- the `vector` type resolves unqualified. Then one schema per service (guide sections 7 and 9).
 -- Section 9's logical prefixes regulatory.* / business.* / work.* map onto these per-service
--- schemas in the Phase 1 migrations; only `audit` is kept literally.
+-- schemas in each service's first migrations; only `audit` is kept literally.
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE SCHEMA IF NOT EXISTS identity;       -- services/identity

@@ -4,8 +4,8 @@ import { Badge } from "./badge";
 
 describe("Badge", () => {
   it("renders its children with the neutral tone by default", () => {
-    render(<Badge>Phase 0</Badge>);
-    const badge = screen.getByText("Phase 0");
+    render(<Badge>Preview</Badge>);
+    const badge = screen.getByText("Preview");
     expect(badge.tagName).toBe("SPAN");
     expect(badge.getAttribute("data-tone")).toBe("neutral");
   });
