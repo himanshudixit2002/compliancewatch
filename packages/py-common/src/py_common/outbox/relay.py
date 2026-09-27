@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from opentelemetry import metrics
 from sqlalchemy import Connection, inspect
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -30,6 +31,16 @@ from py_common.outbox.store import ClaimedMessage, OutboxBatch, OutboxStore, Pos
 from py_common.settings import Settings
 
 log = get_logger(__name__)
+meter = metrics.get_meter("py_common.outbox.relay")
+published_counter = meter.create_counter(
+    "outbox_relay_published_total", description="Outbox rows published to their topic"
+)
+retried_counter = meter.create_counter(
+    "outbox_relay_retried_total", description="Outbox rows scheduled for another attempt"
+)
+dead_counter = meter.create_counter(
+    "outbox_relay_dead_total", description="Outbox rows moved to a dead-letter topic"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +139,7 @@ class OutboxRelay:
         except Exception as exc:
             return await self._failed(batch, message, exc)
         await batch.mark_published(message.id, at=self._clock())
+        published_counter.add(1, {"topic": message.topic})
         return RelayStats(published=1)
 
     async def _failed(
@@ -167,6 +179,7 @@ class OutboxRelay:
                     error=error,
                 )
                 await batch.mark_dead(message.id, attempts=attempts, error=error)
+                dead_counter.add(1, {"topic": message.topic})
                 return RelayStats(dead=1)
         available_at = self._clock() + timedelta(seconds=backoff_seconds(attempts, self._config))
         log.warning(
@@ -180,6 +193,7 @@ class OutboxRelay:
         await batch.mark_retry(
             message.id, attempts=attempts, available_at=available_at, error=error
         )
+        retried_counter.add(1, {"topic": message.topic})
         return RelayStats(retried=1)
 
     async def run_forever(self, stop: asyncio.Event) -> RelayStats:
