@@ -7,7 +7,7 @@ consume them once.
 - ``store``: the store protocols and their Postgres implementations.
 - ``producer``: the producer protocol and the aiokafka adapter.
 - ``relay``: claims pending rows, publishes them, retries with backoff, dead-letters after
-  ``max_attempts``; ``python -m py_common.outbox.relay`` runs it for one service schema.
+  ``max_attempts``; ``python -m py_common.outbox`` runs it for one service schema.
 - ``consumer``: ``IdempotentConsumer`` processes each event id once per consumer group and
   dead-letters what its handler cannot process.
 """

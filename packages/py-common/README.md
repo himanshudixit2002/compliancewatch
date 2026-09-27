@@ -24,7 +24,7 @@ src/py_common/
     writer.py          # OutboxWriter.write(connection, event): the row commits with the state change
     store.py           # store protocols; PostgresOutboxStore (FOR UPDATE SKIP LOCKED), PostgresProcessedStore
     producer.py        # MessageProducer protocol; AiokafkaProducer (idempotent, acks=all)
-    relay.py           # OutboxRelay: publish, retry with backoff, dead-letter; python -m py_common.outbox.relay
+    relay.py           # OutboxRelay: publish, retry with backoff, dead-letter; python -m py_common.outbox
     consumer.py        # IdempotentConsumer: once per event id and consumer group, consumer dead-letter topic
     testing.py         # FakeProducer, MemoryOutboxStore, MemoryProcessedStore for service tests
 tests/unit/

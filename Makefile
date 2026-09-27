@@ -229,7 +229,7 @@ relay: check-uv ## Run the outbox relay for one service's schema: make relay SER
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$(SCHEMA)%2Cpublic"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \
-	  $(UV) run --package compliancewatch-$(SERVICE) python -m py_common.outbox.relay
+	  $(UV) run --package compliancewatch-$(SERVICE) python -m py_common.outbox
 
 openapi: check-uv ## Export a service's OpenAPI spec: make openapi SERVICE=llm-gateway -> packages/contracts/openapi/<svc>.v1.json
 	@[ -n "$(SERVICE)" ] || { echo "usage: make openapi SERVICE=<identity|profile|...>"; exit 1; }

@@ -6,7 +6,7 @@ exponential backoff; after ``max_attempts`` the message is sent to ``<topic>.dlq
 is marked dead only when that send succeeds, so nothing is lost while the broker is down.
 Delivery is at least once: a crash between the send and the commit republishes the row.
 
-``python -m py_common.outbox.relay`` runs it against ``CW_DATABASE_URL`` (whose ``search_path``
+``python -m py_common.outbox`` runs it against ``CW_DATABASE_URL`` (whose ``search_path``
 picks the service schema) and ``CW_KAFKA_BOOTSTRAP`` until SIGTERM or SIGINT.
 """
 
@@ -18,12 +18,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import Connection, inspect
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from domain_kernel.events import utc_now
 from py_common.events import CONTENT_TYPE
 from py_common.logging import configure_logging, get_logger
 from py_common.outbox.producer import AiokafkaProducer, MessageProducer
+from py_common.outbox.schema import OUTBOX_TABLE
 from py_common.outbox.store import ClaimedMessage, OutboxBatch, OutboxStore, PostgresOutboxStore
 from py_common.settings import Settings
 
@@ -194,13 +196,32 @@ class OutboxRelay:
         return total
 
 
-async def run(settings: Settings, *, config: RelayConfig = DEFAULT_CONFIG) -> None:
+async def outbox_table_exists(engine: AsyncEngine) -> bool:
+    """True when ``outbox_event`` is visible on the connection's ``search_path``."""
+
+    def has_table(connection: Connection) -> bool:
+        return inspect(connection).has_table(OUTBOX_TABLE)
+
+    async with engine.connect() as connection:
+        return await connection.run_sync(has_table)
+
+
+async def run(settings: Settings, *, config: RelayConfig = DEFAULT_CONFIG) -> bool:
+    """Run until a signal arrives. Returns False without starting when the table is missing."""
     engine = create_async_engine(settings.database_url)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(signum, stop.set)
     try:
+        if not await outbox_table_exists(engine):
+            log.error(
+                "outbox.table_missing",
+                table=OUTBOX_TABLE,
+                db_schema=settings.db_schema,
+                hint="the service's migration must call create_outbox_table(op) first",
+            )
+            return False
         async with AiokafkaProducer(
             settings.kafka_bootstrap, client_id="cw-outbox-relay"
         ) as producer:
@@ -212,6 +233,7 @@ async def run(settings: Settings, *, config: RelayConfig = DEFAULT_CONFIG) -> No
             )
             total = await relay.run_forever(stop)
             log.info("outbox.relay_stopped", **dataclasses.asdict(total))
+            return True
     finally:
         await engine.dispose()
 
@@ -221,7 +243,8 @@ def main() -> None:
     configure_logging(
         service_name="outbox-relay", log_level=settings.log_level, json_output=settings.log_json
     )
-    asyncio.run(run(settings))
+    if not asyncio.run(run(settings)):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

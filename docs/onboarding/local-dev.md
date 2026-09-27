@@ -47,8 +47,9 @@ Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPAND
 
 `make relay SERVICE=<dir>` runs the outbox relay for that service's schema with the same
 environment: it publishes the service's `outbox_event` rows to Redpanda and dead-letters to
-`<topic>.dlq` (`docs/runbooks/outbox-relay.md`). Nothing writes to an outbox yet, so the relay
-idles until the first producing service lands. `docker compose exec redpanda rpk topic list`
+`<topic>.dlq` (`docs/runbooks/outbox-relay.md`). No service has the `outbox_event` table yet, so
+the relay logs `outbox.table_missing` and exits until the first producing service's migration
+creates it. `docker compose exec redpanda rpk topic list`
 shows the topics; `rpk topic consume <topic> -n 1` reads a message.
 
 ## LLM gateway
