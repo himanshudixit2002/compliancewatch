@@ -12,7 +12,8 @@ Design reference: Project Foundation guide, sections 7 (event contract rules), 1
 
 ```
 openapi/                 # OpenAPI 3.1 specs, public /v1 and internal service APIs
-  llm-gateway.v1.json      # the first one: services/llm-gateway
+  llm-gateway.v1.json      # services/llm-gateway
+  profile.v1.json          # services/profile
 events/
   schemas/               # JSON Schema 2020-12: envelope.v1.json and one <topic>.v1.json per event
   examples/<topic>/      # golden messages (envelope + payload) every check replays
