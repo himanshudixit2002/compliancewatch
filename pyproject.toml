@@ -63,6 +63,11 @@ files = [
 ]
 exclude = ["migrations/versions/"]
 
+[[tool.mypy.overrides]]
+# aiokafka 0.14 has annotations but no py.typed marker
+module = ["aiokafka", "aiokafka.*"]
+ignore_missing_imports = true
+
 [tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true

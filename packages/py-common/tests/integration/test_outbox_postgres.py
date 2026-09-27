@@ -1,0 +1,369 @@
+"""The outbox against Postgres and Redpanda through the real stores and aiokafka. Needs Docker.
+
+Tables are created in a service-style schema through the alembic helpers, exactly as a service
+migration would call them, with the schema on the connection's ``search_path``.
+"""
+
+import asyncio
+import uuid
+from collections.abc import AsyncIterator, Iterator, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import ClassVar
+
+import pytest
+from aiokafka import AIOKafkaConsumer
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from sqlalchemy import Column, MetaData, String, Table, create_engine, inspect, select, text
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.pool import NullPool
+from testcontainers.community.kafka import RedpandaContainer
+from testcontainers.community.postgres import PostgresContainer
+
+from domain_kernel.events import DomainEvent
+from domain_kernel.ids import ObligationId, TenantId
+from py_common.events import EventMessage, decode
+from py_common.outbox import (
+    AiokafkaProducer,
+    ConsumerConfig,
+    IdempotentConsumer,
+    InboundRecord,
+    OutboxRelay,
+    OutboxWriter,
+    Outcome,
+    PostgresOutboxStore,
+    PostgresProcessedStore,
+    PostgresUnitOfWork,
+    RelayConfig,
+    RelayStats,
+    UnitOfWork,
+    create_outbox_table,
+    create_processed_event_table,
+    outbox_event,
+    processed_event,
+)
+
+POSTGRES_IMAGE = "pgvector/pgvector:0.8.6-pg16"
+REDPANDA_IMAGE = "docker.redpanda.com/redpandadata/redpanda:v26.2.3"
+SCHEMA = "outbox_test"
+TOPIC = "obligation.created"
+GROUP = "notification"
+
+handled = Table("handled", MetaData(), Column("title", String(80), primary_key=True))
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ObligationCreated(DomainEvent):
+    topic: ClassVar[str] = TOPIC
+    obligation_id: ObligationId
+    title: str
+
+
+@pytest.fixture(scope="module")
+def database_url() -> Iterator[str]:
+    with PostgresContainer(POSTGRES_IMAGE, driver="psycopg") as container:
+        base_url = container.get_connection_url()
+        engine = create_engine(base_url, poolclass=NullPool)
+        with engine.begin() as connection:
+            connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+        engine.dispose()
+        url = f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
+        engine = create_engine(url, poolclass=NullPool)
+        with engine.begin() as connection:
+            op = Operations(MigrationContext.configure(connection))
+            create_outbox_table(op)
+            create_processed_event_table(op)
+            handled.create(connection)
+        engine.dispose()
+        yield url
+
+
+@pytest.fixture(scope="module")
+def bootstrap() -> Iterator[str]:
+    container = RedpandaContainer(image=REDPANDA_IMAGE)
+    container.start(timeout=60)
+    try:
+        yield container.get_bootstrap_server()
+    finally:
+        container.stop()
+
+
+@pytest.fixture
+async def engine(database_url: str) -> AsyncIterator[AsyncEngine]:
+    engine = create_async_engine(database_url, poolclass=NullPool)
+    async with engine.begin() as connection:
+        await connection.execute(outbox_event.delete())
+        await connection.execute(processed_event.delete())
+        await connection.execute(handled.delete())
+    yield engine
+    await engine.dispose()
+
+
+def write_events(
+    database_url: str, titles: Sequence[str], *, rollback: Sequence[str] = ()
+) -> list[EventMessage]:
+    engine = create_engine(database_url, poolclass=NullPool)
+    writer = OutboxWriter()
+    written: list[EventMessage] = []
+    tenant = TenantId.new()
+    try:
+        with engine.begin() as connection:
+            for title in titles:
+                event = ObligationCreated(
+                    tenant_id=tenant, obligation_id=ObligationId.new(), title=title
+                )
+                written.append(writer.write(connection, event).message)
+        if rollback:
+            with engine.connect() as connection:
+                transaction = connection.begin()
+                for title in rollback:
+                    writer.write(
+                        connection,
+                        ObligationCreated(
+                            tenant_id=tenant, obligation_id=ObligationId.new(), title=title
+                        ),
+                    )
+                transaction.rollback()
+    finally:
+        engine.dispose()
+    return written
+
+
+async def read_topic(bootstrap: str, topic: str, count: int) -> list[object]:
+    """Up to ``count`` records from the start of ``topic``, giving up after thirty seconds."""
+    consumer = AIOKafkaConsumer(
+        topic,
+        bootstrap_servers=bootstrap,
+        group_id=f"reader-{uuid.uuid4().hex}",
+        auto_offset_reset="earliest",
+        enable_auto_commit=False,
+    )
+    await consumer.start()
+    records: list[object] = []
+    try:
+        deadline = asyncio.get_running_loop().time() + 30
+        while len(records) < count and asyncio.get_running_loop().time() < deadline:
+            batches = await consumer.getmany(timeout_ms=1000)
+            for items in batches.values():
+                records.extend(items)
+    finally:
+        await consumer.stop()
+    return records
+
+
+def test_tables_landed_in_the_service_schema(database_url: str) -> None:
+    engine = create_engine(database_url, poolclass=NullPool)
+    try:
+        inspector = inspect(engine)
+        assert {"outbox_event", "processed_event"} <= set(inspector.get_table_names(schema=SCHEMA))
+        assert inspector.get_table_comment("outbox_event", schema=SCHEMA)["text"]
+        indexes = {index["name"] for index in inspector.get_indexes("outbox_event", schema=SCHEMA)}
+        assert indexes == {"ix_outbox_event_pending", "ix_outbox_event_published_at"}
+        checks = {c["name"] for c in inspector.get_check_constraints("outbox_event", schema=SCHEMA)}
+        assert "ck_outbox_event_status" in checks
+        with engine.connect() as connection:
+            jsonb: str = connection.execute(
+                text(
+                    "select data_type from information_schema.columns where table_schema = :s "
+                    "and table_name = 'outbox_event' and column_name = 'message'"
+                ),
+                {"s": SCHEMA},
+            ).scalar_one()
+        assert jsonb == "jsonb"
+    finally:
+        engine.dispose()
+
+
+async def test_relay_publishes_committed_rows_only(
+    database_url: str, bootstrap: str, engine: AsyncEngine
+) -> None:
+    written = write_events(database_url, ["first", "second"], rollback=["never"])
+    async with AiokafkaProducer(bootstrap, client_id="test-relay") as producer:
+        relay = OutboxRelay(store=PostgresOutboxStore(engine), producer=producer)
+        assert await relay.run_once() == RelayStats(claimed=2, published=2)
+        assert await relay.run_once() == RelayStats()
+
+    records = await read_topic(bootstrap, TOPIC, 2)
+    assert len(records) == 2
+    messages = [decode(record.value) for record in records]  # type: ignore[attr-defined]
+    assert [message.payload["title"] for message in messages] == ["first", "second"]
+    assert messages == written
+    first = records[0]
+    assert first.key == str(written[0].tenant_id).encode()  # type: ignore[attr-defined]
+    headers = dict(first.headers)  # type: ignore[attr-defined]
+    assert headers["event_id"] == str(written[0].event_id).encode()
+    assert headers["schema_version"] == b"1.0.0"
+    assert headers["content-type"] == b"application/json"
+
+    async with engine.connect() as connection:
+        rows = (
+            await connection.execute(
+                select(outbox_event.c.status, outbox_event.c.published_at, outbox_event.c.attempts)
+            )
+        ).all()
+    assert len(rows) == 2
+    assert all(row.status == "published" and row.published_at is not None for row in rows)
+    assert all(row.attempts == 0 for row in rows)
+
+
+class FlakyProducer:
+    """Fails the first ``failures`` sends to the main topic, then delegates."""
+
+    def __init__(self, inner: AiokafkaProducer, failures: int) -> None:
+        self._inner = inner
+        self.failures = failures
+
+    async def send(
+        self, topic: str, *, key: bytes, value: bytes, headers: Sequence[tuple[str, bytes]]
+    ) -> None:
+        if topic == TOPIC and self.failures > 0:
+            self.failures -= 1
+            raise ConnectionError("simulated broker outage")
+        await self._inner.send(topic, key=key, value=value, headers=headers)
+
+
+async def test_relay_retries_then_dead_letters(
+    database_url: str, bootstrap: str, engine: AsyncEngine
+) -> None:
+    (written,) = write_events(database_url, ["doomed"])
+    offset = timedelta()
+
+    def clock() -> datetime:
+        return datetime.now(UTC) + offset
+
+    async with AiokafkaProducer(bootstrap, client_id="test-flaky") as inner:
+        producer = FlakyProducer(inner, failures=5)
+        relay = OutboxRelay(
+            store=PostgresOutboxStore(engine),
+            producer=producer,
+            config=RelayConfig(max_attempts=2, base_backoff_seconds=60),
+            clock=clock,
+        )
+        assert await relay.run_once() == RelayStats(claimed=1, retried=1)
+        assert await relay.run_once() == RelayStats(), "not due until the backoff passes"
+        offset += timedelta(seconds=61)
+        assert await relay.run_once() == RelayStats(claimed=1, dead=1)
+
+    async with engine.connect() as connection:
+        row = (await connection.execute(select(outbox_event))).one()
+    assert row.status == "dead"
+    assert row.attempts == 2
+    assert "simulated broker outage" in row.last_error
+    assert row.published_at is None
+
+    (dead,) = await read_topic(bootstrap, TOPIC + ".dlq", 1)
+    headers = dict(dead.headers)  # type: ignore[attr-defined]
+    assert headers["origin_topic"] == TOPIC.encode()
+    assert headers["attempts"] == b"2"
+    assert b"simulated broker outage" in headers["error"]
+    assert decode(dead.value) == written  # type: ignore[attr-defined]
+
+
+async def insert_handled(message: EventMessage, unit: UnitOfWork) -> None:
+    assert isinstance(unit, PostgresUnitOfWork)
+    await unit.connection.execute(handled.insert().values(title=message.payload["title"]))
+
+
+async def test_consumer_processes_each_event_once_in_one_transaction(
+    database_url: str, bootstrap: str, engine: AsyncEngine
+) -> None:
+    (written,) = write_events(database_url, ["once"])
+    record = InboundRecord(
+        topic=TOPIC, partition=0, offset=0, key=b"k", value=written.model_dump_json().encode()
+    )
+    async with AiokafkaProducer(bootstrap, client_id="test-consumer") as producer:
+        consumer = IdempotentConsumer(
+            group_id=GROUP,
+            store=PostgresProcessedStore(engine, group_id=GROUP),
+            handler=insert_handled,
+            producer=producer,
+            config=ConsumerConfig(max_handler_attempts=2, retry_backoff_seconds=0),
+        )
+        assert await consumer.process(record) == Outcome.PROCESSED
+        assert await consumer.process(record) == Outcome.SKIPPED
+
+        async def explode(message: EventMessage, unit: UnitOfWork) -> None:
+            await insert_handled(message, unit)
+            raise RuntimeError("cannot handle")
+
+        (poison,) = write_events(database_url, ["poison"])
+        poison_record = InboundRecord(
+            topic=TOPIC, partition=0, offset=1, key=b"k", value=poison.model_dump_json().encode()
+        )
+        failing = IdempotentConsumer(
+            group_id=GROUP,
+            store=PostgresProcessedStore(engine, group_id=GROUP),
+            handler=explode,
+            producer=producer,
+            config=ConsumerConfig(max_handler_attempts=2, retry_backoff_seconds=0),
+        )
+        assert await failing.process(poison_record) == Outcome.DEAD
+
+    async with engine.connect() as connection:
+        titles: Sequence[str] = (await connection.execute(select(handled.c.title))).scalars().all()
+        processed = (
+            await connection.execute(
+                select(
+                    processed_event.c.consumer_group,
+                    processed_event.c.event_id,
+                    processed_event.c.topic,
+                )
+            )
+        ).all()
+    assert titles == ["once"], "the failed handler's insert rolled back with the unit of work"
+    assert [(row.consumer_group, row.event_id, row.topic) for row in processed] == [
+        (GROUP, written.event_id, TOPIC)
+    ]
+    (dead,) = await read_topic(bootstrap, f"{TOPIC}.{GROUP}.dlq", 1)
+    assert dict(dead.headers)["consumer_group"] == GROUP.encode()  # type: ignore[attr-defined]
+
+
+async def test_consumer_run_reads_from_the_broker_and_commits_offsets(
+    database_url: str, bootstrap: str, engine: AsyncEngine
+) -> None:
+    run_topic = f"obligation.run_{uuid.uuid4().hex[:8]}"
+
+    @dataclass(frozen=True, slots=True, kw_only=True)
+    class Created(DomainEvent):
+        topic: ClassVar[str] = run_topic
+        title: str
+
+    sync_engine = create_engine(database_url, poolclass=NullPool)
+    with sync_engine.begin() as connection:
+        for title in ("a", "b"):
+            OutboxWriter().write(connection, Created(tenant_id=TenantId.new(), title=title))
+    sync_engine.dispose()
+
+    seen: list[str] = []
+    stop = asyncio.Event()
+
+    async def handler(message: EventMessage, unit: UnitOfWork) -> None:
+        seen.append(message.payload["title"])
+        if len(seen) == 2:
+            stop.set()
+
+    group = f"runner-{uuid.uuid4().hex[:8]}"
+    async with AiokafkaProducer(bootstrap, client_id="test-run") as producer:
+        relay = OutboxRelay(store=PostgresOutboxStore(engine), producer=producer)
+        assert (await relay.run_once()).published == 2
+        consumer = IdempotentConsumer(
+            group_id=group,
+            store=PostgresProcessedStore(engine, group_id=group),
+            handler=handler,
+            producer=producer,
+        )
+        handled_count = await asyncio.wait_for(
+            consumer.run(bootstrap_servers=bootstrap, topics=[run_topic], stop=stop), timeout=60
+        )
+        assert handled_count == 2
+        assert seen == ["a", "b"]
+
+        stop_again = asyncio.Event()
+        asyncio.get_running_loop().call_later(3, stop_again.set)
+        again = await asyncio.wait_for(
+            consumer.run(bootstrap_servers=bootstrap, topics=[run_topic], stop=stop_again),
+            timeout=60,
+        )
+        assert again == 0, "committed offsets mean nothing is redelivered"
+        assert seen == ["a", "b"]
