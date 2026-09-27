@@ -15,12 +15,14 @@ venv/
 .ruff_cache/
 .pytest_cache/
 .hypothesis/
+.import_linter_cache/
 
 # ---- Node / pnpm / Turborepo ----
 node_modules/
 .pnpm-store/
 .turbo/
 *.tsbuildinfo
+.eslintcache
 npm-debug.log*
 pnpm-debug.log*
 yarn-error.log*

@@ -1,0 +1,26 @@
+# Root build context for every image (services now, apps later): keep images small and secrets out.
+.git
+.github
+docs
+evals
+infra
+apps
+packages/ui
+**/tests
+**/node_modules
+**/.next
+**/.turbo
+**/dist
+**/coverage
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.hypothesis
+**/.import_linter_cache
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+!**/.env.example
+**/.DS_Store
