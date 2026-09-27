@@ -1,8 +1,10 @@
 # ComplianceWatch monorepo
 
 > **What is here today.** uv workspace with the FastAPI service template for ten services, the shared
-> domain kernel (with the knowledge vocabulary: entity types, relation kinds, canonical names) and
-> Ontology v0, the rulebook's knowledge schema (canonical entities, clause mentions, rule relations),
+> domain kernel (with the knowledge vocabulary: entity types, seven relation kinds, canonical names;
+> the financial year and recurrence value objects) and Ontology 0.2.0 (seventeen GST attributes with
+> their hierarchy level and per-financial-year scoping), the rulebook's knowledge schema (canonical
+> entities, clause mentions, rule relations),
 > the LLM gateway skeleton (routing, prompt registry, cost ledger,
 > budgets, PII masking, Langfuse tracing, fake provider container) with the first committed OpenAPI
 > spec, problem-details errors in py-common, the event contracts (fourteen topics and the envelope as
@@ -72,7 +74,7 @@ compliancewatch/
       clients/python/        # cw_contracts: generated pydantic models (make contracts)
       clients/typescript/    # generated .d.ts per topic and index.ts
     domain-kernel/           # Shared value objects, protocols, ontology model, error types
-    ontology/                # GST attribute definitions as YAML (v0.1.0), loader and validator
+    ontology/                # GST attribute definitions as YAML (0.2.0), loader and validator
     py-common/               # Settings, logging, telemetry, health routes, problem details, app factory, event envelope, outbox, Temporal scaffold
     ui/                      # Shared React components and design tokens
   infra/
