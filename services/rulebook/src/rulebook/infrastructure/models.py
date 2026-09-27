@@ -40,7 +40,7 @@ ENTITY_TYPES: Final[tuple[str, ...]] = tuple(kind.value for kind in EntityType)
 """The ten entity types a canonical entity can have: ``EntityType`` in the kernel."""
 
 RELATION_KINDS: Final[tuple[str, ...]] = tuple(kind.value for kind in RelationKind)
-"""The five typed relations between a rule version and its target: ``RelationKind``."""
+"""The seven typed relations between a rule version and its target: ``RelationKind``."""
 
 RULE_VERSION_TARGET: Final[str] = RULE_VERSION_KIND
 """``to_kind`` when the target is a rule version rather than an entity."""
@@ -170,7 +170,11 @@ class RuleRelationRow(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid)
     from_rule_version_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
-    relation: Mapped[str] = mapped_column(String(24), nullable=False)
+    relation: Mapped[str] = mapped_column(
+        String(24),
+        nullable=False,
+        comment="One of " + ", ".join(RELATION_KINDS),
+    )
     to_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     to_ref: Mapped[str] = mapped_column(Text, nullable=False)
     to_entity_id: Mapped[UUID | None] = mapped_column(
