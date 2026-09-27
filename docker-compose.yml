@@ -1,0 +1,175 @@
+# ComplianceWatch local development stack: the "dev" environment of guide section 17.
+# Compose spec (no `version:` key). Start with `make dev`; see docs/onboarding/local-dev.md.
+#
+#   postgres     pgvector 0.8.6 / PG16   app DB (one schema per service) + temporal, temporal_visibility, langfuse DBs
+#   redis        7.4                     sessions, rate limits, semantic cache keys
+#   redpanda     Kafka API               host clients: localhost:19092; containers: redpanda:9092
+#   temporal     auto-setup              gRPC localhost:7233; state lives in the postgres service
+#   temporal-ui                          http://localhost:8233
+#   langfuse     --profile observability http://localhost:3010 (make dev-observability)
+#
+# Host ports and credentials come from .env (copy .env.example). Every ${VAR:-default} has a
+# default so `docker compose config` validates without a .env file.
+
+name: compliancewatch
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cw}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cw}
+      POSTGRES_DB: ${POSTGRES_DB:-compliancewatch}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Runs once, on an empty volume only. Changed the file? `make dev-reset`.
+      - ./infra/dev/postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      # -h forces TCP. The entrypoint's temporary init-time server listens on the unix socket
+      # only, so a socket-based pg_isready reports "ready" before init.sql has run and
+      # Temporal would start against a cluster without its databases.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7.4.11-alpine
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.2.3
+    command:
+      - redpanda
+      - start
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --default-log-level=info
+      # Two Kafka listeners: `internal` for containers on this compose network, `external` for
+      # the host. The advertised external address must be exactly what a host client dials.
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:${REDPANDA_KAFKA_PORT:-19092}
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --set
+      - redpanda.auto_create_topics_enabled=true
+    ports:
+      - "${REDPANDA_KAFKA_PORT:-19092}:19092"
+      - "${REDPANDA_SCHEMA_REGISTRY_PORT:-18081}:18081"
+      - "${REDPANDA_ADMIN_PORT:-19644}:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  temporal:
+    image: temporalio/auto-setup:1.29.7
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12 # the only Postgres driver name auto-setup accepts; `postgres` was removed
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-cw}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-cw}
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      SKIP_DB_CREATE: "true" # both databases are created by infra/dev/postgres/init.sql
+      TEMPORAL_ADDRESS: temporal:7233
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    volumes:
+      - ./infra/dev/temporal/dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+    ports:
+      - "${TEMPORAL_PORT:-7233}:7233"
+    healthcheck:
+      test:
+        ["CMD-SHELL", "temporal operator cluster health --address temporal:7233 | grep -q SERVING"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+
+  temporal-ui:
+    image: temporalio/ui:2.54.1
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "${TEMPORAL_UI_PORT:-8233}:8080"
+
+  langfuse:
+    # Langfuse v2 (last release 2.95.11): one container on the shared Postgres. v3/v4 need
+    # ClickHouse + MinIO + a worker; switch when services/llm-gateway adopts the Langfuse SDK >= 3.
+    image: langfuse/langfuse:2.95.11
+    profiles: ["observability"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cw}:${POSTGRES_PASSWORD:-cw}@postgres:5432/langfuse
+      NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT:-3010}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-dev-only-nextauth-secret}
+      SALT: ${LANGFUSE_SALT:-dev-only-salt}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_INIT_ORG_ID: compliancewatch
+      LANGFUSE_INIT_ORG_NAME: ComplianceWatch
+      LANGFUSE_INIT_PROJECT_ID: compliancewatch-dev
+      LANGFUSE_INIT_PROJECT_NAME: dev
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-dev}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-dev}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-dev@compliancewatch.local}
+      LANGFUSE_INIT_USER_NAME: dev
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-dev-password}
+    ports:
+      - "${LANGFUSE_PORT:-3010}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/public/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  # fake-llm: deliberately not a container in this slice. The deterministic fake provider is part
+  # of services/llm-gateway (guide sections 8 and 19: "fake LLM provider for determinism") and
+  # ships with that slice; run it with `make run SERVICE=llm-gateway` and LLM_PROVIDER=fake.
+  # Reserved shape for that slice (profile `llm`):
+  #
+  # fake-llm:
+  #   profiles: ["llm"]
+  #   build: { context: ., dockerfile: services/llm-gateway/Dockerfile }
+  #   environment: { LLM_PROVIDER: fake }
+  #   ports: ["${FAKE_LLM_PORT:-8090}:8000"]
+
+volumes:
+  postgres_data:
+  redis_data:
+  redpanda_data:

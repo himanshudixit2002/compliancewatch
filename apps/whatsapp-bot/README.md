@@ -1,6 +1,6 @@
 # whatsapp-bot app
 
-Part of the ComplianceWatch monorepo. **Phase 0 structure-only scaffold: no code yet.**
+Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 7, 12 and 14.
 
 - **Owns:** Webhook receiver and conversation state for the WhatsApp Business Cloud API (TypeScript)
@@ -10,8 +10,12 @@ Design reference: Project Foundation guide, sections 7, 12 and 14.
 
 ## Layout
 
-No internal structure yet: TypeScript scaffold to be generated in Phase 0.
+```
+src/app.ts        # Hono app: GET /health, GET /webhook (Meta handshake), POST /webhook (stub)
+src/index.ts      # @hono/node-server bootstrap, PORT (default 8080)
+src/app.test.ts   # vitest via app.request(), 80% coverage thresholds
+```
 
 ## How to run
 
-Not implemented yet. Driven from the repo root (`make dev`, `make test`; guide section 13) once the service template lands.
+`pnpm --filter whatsapp-bot dev` (Node 22+ runs the TypeScript source directly), `build` then `start`, `test`. Copy `.env.example` to `.env` for `WHATSAPP_VERIFY_TOKEN` and `WHATSAPP_APP_SECRET` (signature verification is a Phase 1 TODO).

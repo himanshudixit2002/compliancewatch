@@ -1,0 +1,13 @@
+[project]
+name = "domain-kernel"
+version = "0.1.0"
+description = "ComplianceWatch shared domain kernel: value objects, protocols, Ontology loader, error types"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/domain_kernel"]

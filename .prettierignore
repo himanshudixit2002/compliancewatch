@@ -1,0 +1,21 @@
+# Generated or vendored
+node_modules/
+pnpm-lock.yaml
+uv.lock
+.next/
+.turbo/
+dist/
+coverage/
+next-env.d.ts
+
+# Python side is formatted by ruff; docs and infra are not prettier's business
+services/
+packages/domain-kernel/
+packages/ontology/
+packages/py-common/
+packages/contracts/clients/python/
+evals/
+infra/
+docs/
+*.md
+CODEOWNERS

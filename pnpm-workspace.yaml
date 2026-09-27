@@ -1,0 +1,19 @@
+# pnpm workspace (guide section 12: pnpm + Turborepo for TypeScript).
+# pnpm >= 10 reads its settings from this file; in pnpm 11 .npmrc is auth/registry only.
+packages:
+  - apps/*
+  - packages/ui
+  - packages/contracts
+
+# Supply chain: no dependency may run install scripts. Each package below ships prebuilt
+# binaries as optional dependencies, so denying its script is safe. strictDepBuilds (pnpm 11
+# default, explicit here) fails the install when a new dependency with a build script appears;
+# review it, then list it with `false` (or `true` only if it must compile).
+allowBuilds:
+  esbuild: false
+  sharp: false
+  unrs-resolver: false
+  "@tailwindcss/oxide": false
+strictDepBuilds: true
+# minimumReleaseAge: 1440 (24 h quarantine for freshly published versions) is the pnpm 11
+# default and is kept deliberately.

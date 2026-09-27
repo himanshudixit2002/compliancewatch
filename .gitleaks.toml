@@ -1,0 +1,12 @@
+# gitleaks configuration (guide section 13: secrets never in the repo).
+# Picked up automatically by the pre-commit hook (repo root) and via GITLEAKS_CONFIG in CI.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Placeholder env files and lockfiles: empty keys and integrity hashes, not secrets"
+paths = [
+  '''(^|/)\.env\.example$''',
+  '''(^|/)pnpm-lock\.yaml$''',
+  '''(^|/)uv\.lock$''',
+]

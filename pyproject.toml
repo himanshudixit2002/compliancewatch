@@ -1,0 +1,160 @@
+[project]
+name = "compliancewatch"
+version = "0.0.0"
+description = "ComplianceWatch monorepo workspace root: shared tooling config and the dev dependency group. Not a package."
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "ruff>=0.14",
+  "mypy>=1.18",
+  "pytest>=8.4",
+  "pytest-cov>=6.2",
+  "pytest-asyncio>=1.1",
+  "hypothesis>=6.140",
+  "import-linter>=2.5",
+  "httpx2>=2.13",  # Starlette >= 1.7 TestClient transport; httpx 0.x is deprecated there
+]
+
+[tool.uv]
+package = false
+required-version = ">=0.8"
+
+[tool.uv.workspace]
+members = ["packages/*", "services/*"]
+exclude = ["packages/ui", "packages/contracts"]
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["packages/*/src", "services/*/src"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "N", "RUF", "PT", "T20", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/versions/*.py" = ["F401"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+pretty = true
+plugins = ["pydantic.mypy"]
+files = [
+  "packages/py-common/src", "packages/domain-kernel/src", "packages/ontology/src",
+  "services/*/src",
+]
+exclude = ["migrations/versions/"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+minversion = "8.4"
+testpaths = ["packages", "services"]
+addopts = "-ra -q --strict-markers --strict-config --import-mode=importlib"
+markers = [
+  "integration: needs Docker (testcontainers); lives under tests/integration",
+  "contract: provider-side contract tests; lives under tests/contract",
+]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+xfail_strict = true
+
+# ---------------------------------------------------------------- coverage
+[tool.coverage.run]
+branch = true
+source = ["packages", "services"]
+omit = ["*/tests/*", "*/migrations/*"]
+relative_files = true
+
+[tool.coverage.report]
+# Guide sections 13 and 19: 80% floor on the domain and application layers only.
+fail_under = 80
+include = ["*/src/*/domain/*", "*/src/*/application/*", "packages/domain-kernel/src/*"]
+include_namespace_packages = true
+show_missing = true
+skip_empty = false
+precision = 1
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "^\\s*\\.\\.\\.\\s*$",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+  "@overload",
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+# ---------------------------------------------------------------- import-linter (guide section 13 conventions table)
+[tool.importlinter]
+root_packages = [
+  "py_common", "domain_kernel", "ontology",
+  "identity", "profile_service", "rulebook", "applicability_engine", "obligation",
+  "notification", "qa", "llm_gateway", "eval_service", "pipeline",
+]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Service layers: api and infrastructure on top (independent), application, then domain"
+type = "layers"
+layers = ["api | infrastructure", "application", "domain"]
+containers = [
+  "identity", "profile_service", "rulebook", "applicability_engine", "obligation",
+  "notification", "qa", "llm_gateway", "eval_service", "pipeline",
+]
+
+[[tool.importlinter.contracts]]
+name = "Infrastructure implements domain protocols only; it never imports application or api"
+type = "forbidden"
+source_modules = ["*.infrastructure"]
+forbidden_modules = ["*.application", "*.api"]
+
+[[tool.importlinter.contracts]]
+name = "Domain layers and the domain kernel import no I/O frameworks and no py_common"
+type = "forbidden"
+source_modules = ["*.domain", "domain_kernel"]
+forbidden_modules = [
+  "sqlalchemy", "alembic", "psycopg", "asyncpg", "fastapi", "starlette", "httpx", "requests",
+  "httpx2", "aiohttp", "aiokafka", "confluent_kafka", "temporalio", "redis", "boto3", "botocore",
+  "structlog", "py_common",
+]
+
+[[tool.importlinter.contracts]]
+name = "Application layers know nothing about HTTP or persistence"
+type = "forbidden"
+source_modules = ["*.application"]
+forbidden_modules = ["sqlalchemy", "alembic", "psycopg", "asyncpg", "fastapi", "starlette"]
+
+[[tool.importlinter.contracts]]
+name = "Services never import each other"
+type = "independence"
+modules = [
+  "identity", "profile_service", "rulebook", "applicability_engine", "obligation",
+  "notification", "qa", "llm_gateway", "eval_service", "pipeline",
+]
+
+[[tool.importlinter.contracts]]
+name = "Shared packages never import a service"
+type = "forbidden"
+source_modules = ["py_common", "domain_kernel", "ontology"]
+forbidden_modules = [
+  "identity", "profile_service", "rulebook", "applicability_engine", "obligation",
+  "notification", "qa", "llm_gateway", "eval_service", "pipeline",
+]
+
+[[tool.importlinter.contracts]]
+name = "Shared package layering: py_common -> domain_kernel -> ontology"
+type = "layers"
+layers = ["py_common", "domain_kernel", "ontology"]

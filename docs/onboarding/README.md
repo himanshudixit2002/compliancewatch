@@ -1,6 +1,6 @@
 # onboarding
 
-Part of the ComplianceWatch monorepo. **Phase 0 structure-only scaffold: no code yet.**
+Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 13, 14 and 17.
 
 - **Owns:** Engineer onboarding: local dev stack (Docker Compose), golden paths, team contacts
@@ -14,4 +14,4 @@ Flat; markdown guides.
 
 ## How to run
 
-Not implemented yet. Driven from the repo root (`make dev`, `make test`; guide section 13) once the service template lands.
+Start with [local-dev.md](local-dev.md).
