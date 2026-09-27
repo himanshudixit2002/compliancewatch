@@ -8,6 +8,7 @@ from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import (
     BusinessId,
     CandidateId,
+    CanonicalEntityId,
     ClauseId,
     CorrelationId,
     DecisionId,
@@ -32,6 +33,7 @@ ID_TYPES: tuple[type[EntityId], ...] = (
     CandidateId,
     RuleId,
     RuleVersionId,
+    CanonicalEntityId,
     DecisionId,
     ObligationId,
     EventId,
@@ -39,9 +41,9 @@ ID_TYPES: tuple[type[EntityId], ...] = (
 )
 
 
-def test_thirteen_distinct_id_kinds() -> None:
-    assert len(ID_TYPES) == 13
-    assert len(set(ID_TYPES)) == 13
+def test_fourteen_distinct_id_kinds() -> None:
+    assert len(ID_TYPES) == 14
+    assert len(set(ID_TYPES)) == 14
 
 
 @pytest.mark.parametrize("kind", ID_TYPES)

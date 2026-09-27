@@ -80,6 +80,11 @@ class RuleVersionId(EntityId):
 
 
 @dataclass(frozen=True, slots=True)
+class CanonicalEntityId(EntityId):
+    """A canonical entity in the knowledge tables: what clause mentions are aligned to."""
+
+
+@dataclass(frozen=True, slots=True)
 class DecisionId(EntityId):
     """An applicability decision."""
 
