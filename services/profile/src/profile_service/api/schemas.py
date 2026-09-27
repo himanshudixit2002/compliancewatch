@@ -174,3 +174,26 @@ class ReviewTaskOut(BaseModel):
             open=task.open,
             created_at=task.created_at,
         )
+
+
+class PrefillIn(Strict):
+    changed_by: UUID | None = None
+
+
+class LookupResultOut(BaseModel):
+    gstin: str
+    legal_name: str
+    trade_name: str
+    registration_type: str
+    gstin_status: str
+    state_code: str
+    constitution: str
+    registered_since: str | None
+
+
+class PrefillOut(BaseModel):
+    node_id: UUID
+    looked_up: bool
+    result: LookupResultOut | None
+    applied: list[str]
+    review_task: UUID | None
