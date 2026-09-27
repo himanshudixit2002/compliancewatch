@@ -10,8 +10,12 @@ from py_common.settings import Settings
 
 
 def default_interceptors() -> list[Interceptor]:
-    """Tracing only; the span provider is whatever ``py_common.telemetry`` configured."""
-    return [TracingInterceptor()]
+    """Tracing only; the span provider is whatever ``py_common.telemetry`` configured.
+
+    Workflow and activity spans are created even when the starter carried no span (a schedule,
+    the CLI, a script), so a worker always shows up in Tempo.
+    """
+    return [TracingInterceptor(always_create_workflow_spans=True)]
 
 
 async def connect(

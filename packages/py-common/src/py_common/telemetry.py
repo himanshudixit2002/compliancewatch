@@ -7,8 +7,14 @@ a span per SQL statement. Log lines carry ``trace_id`` and ``span_id`` through t
 processor in ``py_common.logging``, so a trace in Tempo and its log lines share an id.
 """
 
+import os
 import threading
 from dataclasses import dataclass
+
+# The HTTP instrumentations emit the stable semantic conventions (http.server.request.duration
+# in seconds, http.route, http.response.status_code) only when this is set before they
+# initialise; the Grafana dashboard queries those names. An operator may still override it.
+os.environ.setdefault("OTEL_SEMCONV_STABILITY_OPT_IN", "http")
 
 from fastapi import FastAPI
 from opentelemetry import metrics, trace
@@ -28,6 +34,7 @@ from py_common.settings import Settings
 
 log = get_logger(__name__)
 EXCLUDED_URLS = "health,ready"
+METRIC_EXPORT_INTERVAL_MS = 15_000
 _install_lock = threading.Lock()
 _installed: "Telemetry | None" = None
 
@@ -70,7 +77,10 @@ def build_telemetry(*, service_name: str, version: str, settings: Settings) -> T
     meter_provider = MeterProvider(
         resource=resource,
         metric_readers=[
-            PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=endpoint, insecure=insecure))
+            PeriodicExportingMetricReader(
+                OTLPMetricExporter(endpoint=endpoint, insecure=insecure),
+                export_interval_millis=METRIC_EXPORT_INTERVAL_MS,
+            )
         ],
     )
     return Telemetry(

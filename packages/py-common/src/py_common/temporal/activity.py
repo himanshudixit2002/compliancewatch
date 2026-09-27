@@ -10,6 +10,7 @@ activity id and the attempt.
 """
 
 import asyncio
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
@@ -61,13 +62,28 @@ class ActivityBase[ActivityInput, ActivityOutput](ABC):
 
     async def execute(self, input: ActivityInput) -> ActivityOutput:
         """The template method the worker runs."""
+        started = time.monotonic()
         with structlog.contextvars.bound_contextvars(**_activity_context()):
-            self.validate(input)
-            result = await self.run(input)
+            try:
+                self.validate(input)
+                result = await self.run(input)
+            except Exception as exc:
+                log.warning(
+                    "activity.failed",
+                    activity=self.name,
+                    error=f"{type(exc).__name__}: {exc}",
+                    duration_ms=round((time.monotonic() - started) * 1000),
+                )
+                raise
             try:
                 self.record(input, result)
             except Exception:
                 log.exception("activity.record_failed", activity=self.name)
+            log.info(
+                "activity.completed",
+                activity=self.name,
+                duration_ms=round((time.monotonic() - started) * 1000),
+            )
             return result
 
     def heartbeat(self, *details: Any) -> None:
