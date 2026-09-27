@@ -1,0 +1,23 @@
+{
+  "event_id": "b1c2d3e4-f5a6-4b7c-9d8e-0f1a2b3c4d5e",
+  "topic": "rule.published",
+  "schema_version": "1.0.0",
+  "occurred_at": "2026-10-02T09:12:50+05:30",
+  "tenant_id": null,
+  "correlation_id": "c2d3e4f5-a6b7-4c8d-8e9f-0a1b2c3d4e5f",
+  "causation_id": null,
+  "payload": {
+    "rule_id": "3d4e5f6a-7b8c-4d9e-8f0a-1b2c3d4e5f6a",
+    "rule_version_id": "4e5f6a7b-8c9d-4e0f-9a1b-2c3d4e5f6a7b",
+    "version": 2,
+    "regulator": "cbic",
+    "title": "E-invoicing threshold lowered",
+    "summary": "Businesses above the new turnover band must issue e-invoices.",
+    "effective_from": "2026-11-01",
+    "effective_to": "2027-03-31",
+    "supersedes": ["5f6a7b8c-9d0e-4f1a-8b2c-3d4e5f6a7b8c"],
+    "approved_by": ["1f2a3b4c-5d6e-4f7a-8b8c-9d0e1f2a3b4c", "0e1f2a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b"],
+    "high_impact": true,
+    "attribute_keys": ["turnover_band"]
+  }
+}

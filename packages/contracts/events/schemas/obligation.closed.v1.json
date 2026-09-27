@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:obligation.closed:v1",
+  "title": "obligation.closed",
+  "description": "An obligation reached a closed status, by the user or because it no longer applies. Producer: obligation. Consumers: notification.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "obligation",
+  "x-tenant-scoped": true,
+  "properties": {
+    "obligation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The obligation."
+    },
+    "business_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The business it belongs to."
+    },
+    "rule_version_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The rule version it comes from."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["done", "waived", "closed_not_applicable"],
+      "description": "Closing status."
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "profile_changed",
+        "rule_withdrawn",
+        "rule_superseded",
+        "waived_by_user",
+        "completed"
+      ],
+      "description": "Why it was closed."
+    },
+    "closed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When it was closed."
+    },
+    "closed_by": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "User who closed it; null when the system did."
+    }
+  },
+  "required": ["obligation_id", "business_id", "rule_version_id", "status", "reason", "closed_at"]
+}

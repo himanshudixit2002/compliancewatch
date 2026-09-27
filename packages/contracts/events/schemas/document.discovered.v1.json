@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:document.discovered:v1",
+  "title": "document.discovered",
+  "description": "The crawler fetched a document it had not seen at this source and stored the raw file. Producer: pipeline (source crawler). Consumers: pipeline (change detector).",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "pipeline (source crawler)",
+  "x-tenant-scoped": false,
+  "properties": {
+    "source_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The source the document was listed at."
+    },
+    "document_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The stored document."
+    },
+    "regulator": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Regulator the source belongs to, such as cbic or fssai."
+    },
+    "url": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Where the document was fetched from.",
+      "format": "uri"
+    },
+    "external_ref": {
+      "type": "string",
+      "description": "The source's own reference, such as a notification number; empty when the listing had none."
+    },
+    "title": {
+      "type": "string",
+      "description": "Title as listed at the source; empty when unknown."
+    },
+    "published_at": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "Publication date as listed at the source; null when unknown."
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Digest of the raw bytes."
+    },
+    "media_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Media type of the raw file."
+    },
+    "fetched_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the fetch completed."
+    },
+    "raw_uri": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Where the raw file is stored (object store URI)."
+    }
+  },
+  "required": [
+    "source_id",
+    "document_id",
+    "regulator",
+    "url",
+    "sha256",
+    "media_type",
+    "fetched_at",
+    "raw_uri"
+  ]
+}

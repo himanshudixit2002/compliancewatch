@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:profile.updated:v1",
+  "title": "profile.updated",
+  "description": "A business profile got a new version after one or more attributes changed. Producer: profile. Consumers: applicability-engine.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "profile",
+  "x-tenant-scoped": true,
+  "properties": {
+    "business_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The business whose profile changed."
+    },
+    "profile_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The new profile version."
+    },
+    "changed_attributes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "description": "Ontology keys whose values changed in this version.",
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "ontology_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Ontology version the attributes were validated against."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["user_input", "gstin_lookup", "partner_api", "import"],
+      "description": "Where the change came from."
+    },
+    "changed_by": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "User who made the change; null for automated sources."
+    }
+  },
+  "required": ["business_id", "profile_version", "changed_attributes", "ontology_version", "source"]
+}

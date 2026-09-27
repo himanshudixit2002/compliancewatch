@@ -1,0 +1,15 @@
+[project]
+name = "compliancewatch-contracts"
+version = "0.1.0"
+description = "ComplianceWatch event contracts as pydantic v2 models, generated from packages/contracts/events by `make contracts`"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "pydantic>=2.11",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cw_contracts"]

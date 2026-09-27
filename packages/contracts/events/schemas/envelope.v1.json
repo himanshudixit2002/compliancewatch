@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:envelope:v1",
+  "title": "Event envelope",
+  "description": "What every message on the event bus looks like. The payload is described by the schema for the topic, at the given schema version.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique id of this event; consumers deduplicate on it."
+    },
+    "topic": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "description": "Topic name, object.verb in the past tense; also the Kafka topic."
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Version of the payload schema for this topic."
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the event happened, with a UTC offset."
+    },
+    "tenant_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "The tenant the event belongs to; null for regulatory events."
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Ties together everything one request or workflow caused."
+    },
+    "causation_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "The event_id this event was a direct reaction to; null at the start of a chain."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Topic-specific fields; see the topic's schema."
+    }
+  },
+  "required": [
+    "event_id",
+    "topic",
+    "schema_version",
+    "occurred_at",
+    "tenant_id",
+    "correlation_id",
+    "causation_id",
+    "payload"
+  ],
+  "additionalProperties": false
+}

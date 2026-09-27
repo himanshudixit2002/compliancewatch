@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:rule.superseded:v1",
+  "title": "rule.superseded",
+  "description": "A published rule version was superseded because a newer version's effective_from passed. Producer: rulebook (scheduled when effective dates pass). Consumers: applicability-engine, obligation, qa.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "rulebook (scheduled when effective dates pass)",
+  "x-tenant-scoped": false,
+  "properties": {
+    "rule_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The rule."
+    },
+    "rule_version_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The version that is now superseded."
+    },
+    "superseded_by_rule_version_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The version now in force."
+    },
+    "effective_from": {
+      "type": "string",
+      "format": "date",
+      "description": "The day the newer version took over."
+    }
+  },
+  "required": ["rule_id", "rule_version_id", "superseded_by_rule_version_id", "effective_from"]
+}

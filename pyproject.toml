@@ -15,8 +15,13 @@ dev = [
   "hypothesis>=6.140",
   "import-linter>=2.5",
   "types-pyyaml>=6.0.12",
-  "testcontainers[postgres]>=4.9",
+  "testcontainers[postgres]>=4.15",
   "httpx2>=2.13",  # Starlette >= 1.7 TestClient transport; httpx 0.x is deprecated there
+  # Event contracts (packages/contracts/events): schema checks and the generators behind `make contracts`
+  "jsonschema[format-nongpl]>=4.26",
+  "types-jsonschema>=4.26",
+  "check-jsonschema==0.38.2",
+  "datamodel-code-generator==0.83.0",
 ]
 
 [tool.uv]
@@ -24,20 +29,22 @@ package = false
 required-version = ">=0.8"
 
 [tool.uv.workspace]
-members = ["packages/*", "services/*"]
+members = ["packages/*", "packages/contracts/clients/python", "services/*"]
 exclude = ["packages/ui", "packages/contracts"]
 
 # ---------------------------------------------------------------- ruff
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["packages/*/src", "services/*/src"]
+src = ["packages/*/src", "packages/contracts/clients/python/src", "services/*/src"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "N", "RUF", "PT", "T20", "ASYNC"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/migrations/versions/*.py" = ["F401"]
+# Generated pydantic models: docstrings are the schema text, enum members are the schema values
+"packages/contracts/clients/python/src/cw_contracts/events/*.py" = ["E501", "N815"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -51,6 +58,7 @@ pretty = true
 plugins = ["pydantic.mypy"]
 files = [
   "packages/py-common/src", "packages/domain-kernel/src", "packages/ontology/src",
+  "packages/contracts/clients/python/src", "packages/contracts/scripts",
   "services/*/src",
 ]
 exclude = ["migrations/versions/"]
@@ -102,7 +110,7 @@ output = "coverage.xml"
 # ---------------------------------------------------------------- import-linter (guide section 13 conventions table)
 [tool.importlinter]
 root_packages = [
-  "py_common", "domain_kernel", "ontology",
+  "py_common", "domain_kernel", "ontology", "cw_contracts",
   "identity", "profile_service", "rulebook", "applicability_engine", "obligation",
   "notification", "qa", "llm_gateway", "eval_service", "pipeline",
 ]
@@ -130,7 +138,7 @@ source_modules = ["*.domain", "domain_kernel"]
 forbidden_modules = [
   "sqlalchemy", "alembic", "psycopg", "asyncpg", "fastapi", "starlette", "httpx", "requests",
   "httpx2", "aiohttp", "aiokafka", "confluent_kafka", "temporalio", "redis", "boto3", "botocore",
-  "structlog", "py_common", "yaml", "openai", "langfuse",
+  "structlog", "py_common", "yaml", "openai", "langfuse", "cw_contracts",
 ]
 
 [[tool.importlinter.contracts]]
@@ -162,3 +170,13 @@ forbidden_modules = [
 name = "Shared package layering: py_common -> ontology -> domain_kernel"
 type = "layers"
 layers = ["py_common", "ontology", "domain_kernel"]
+
+[[tool.importlinter.contracts]]
+name = "Generated event contracts depend on pydantic only, never on our packages"
+type = "forbidden"
+source_modules = ["cw_contracts"]
+forbidden_modules = [
+  "py_common", "domain_kernel", "ontology",
+  "identity", "profile_service", "rulebook", "applicability_engine", "obligation",
+  "notification", "qa", "llm_gateway", "eval_service", "pipeline",
+]

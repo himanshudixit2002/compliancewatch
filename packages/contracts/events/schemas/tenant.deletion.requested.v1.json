@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:tenant.deletion.requested:v1",
+  "title": "tenant.deletion.requested",
+  "description": "A tenant asked for its data to be deleted; every service erases what it holds for the tenant before deadline_at, keeping audit records when retain_audit is true. Producer: identity. Consumers: profile, obligation, notification, qa, applicability-engine, llm-gateway.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "identity",
+  "x-tenant-scoped": true,
+  "properties": {
+    "requested_by": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "User who made the request; null when it came through support."
+    },
+    "requested_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the request was recorded."
+    },
+    "deadline_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the deletion must be complete (30 days after the request)."
+    },
+    "retain_audit": {
+      "type": "boolean",
+      "description": "True when audit records stay under the documented exception."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Free-text reason given with the request; empty when none."
+    }
+  },
+  "required": ["requested_at", "deadline_at", "retain_audit"]
+}

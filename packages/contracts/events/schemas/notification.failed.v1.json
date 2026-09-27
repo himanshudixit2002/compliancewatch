@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:notification.failed:v1",
+  "title": "notification.failed",
+  "description": "A channel refused or failed to deliver a notification; will_retry says whether another attempt or channel follows. Producer: notification. Consumers: obligation (audit).",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "notification",
+  "x-tenant-scoped": true,
+  "properties": {
+    "notification_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The notification."
+    },
+    "obligation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The obligation it is about."
+    },
+    "business_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The business it was sent for."
+    },
+    "channel": {
+      "type": "string",
+      "enum": ["whatsapp", "email"],
+      "description": "Delivery channel that failed."
+    },
+    "dedupe_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Idempotency key over rule version, business and channel."
+    },
+    "error": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What the channel reported."
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Attempts made on this channel so far."
+    },
+    "will_retry": {
+      "type": "boolean",
+      "description": "True when another attempt or the fallback channel is scheduled."
+    },
+    "failed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the failure was recorded."
+    }
+  },
+  "required": [
+    "notification_id",
+    "obligation_id",
+    "business_id",
+    "channel",
+    "dedupe_key",
+    "error",
+    "attempts",
+    "will_retry",
+    "failed_at"
+  ]
+}

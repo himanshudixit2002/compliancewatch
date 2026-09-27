@@ -19,7 +19,7 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE ?= /var/run/docker.sock
 # ---- Inventory -------------------------------------------------------------------------------
 SERVICES := identity profile rulebook applicability-engine obligation notification qa llm-gateway eval pipeline
 PY_PACKAGES := py-common domain-kernel ontology
-PY_DIRS := $(addprefix packages/,$(PY_PACKAGES)) $(addprefix services/,$(SERVICES))
+PY_DIRS := $(addprefix packages/,$(PY_PACKAGES)) packages/contracts/clients/python $(addprefix services/,$(SERVICES))
 
 # Service directory -> import package (two exceptions avoid shadowing stdlib/builtins).
 PKG_profile := profile_service
@@ -146,7 +146,7 @@ py-typecheck: check-uv ## mypy --strict per package (src, tests, migrations/env.
 	  echo "mypy $$targets"; \
 	  $(UV) run mypy $$targets || status=1; \
 	done; \
-	$(UV) run mypy conftest.py || status=1; \
+	$(UV) run mypy conftest.py packages/contracts/scripts || status=1; \
 	exit $$status
 
 py-test: check-uv ## pytest: unit and contract tests with the coverage gate (no Docker needed)
@@ -185,7 +185,7 @@ ts-dev: check-pnpm ## next dev (:3000) and whatsapp-bot (:8080) with reload
 	$(PNPM) turbo run dev
 
 # ---- Composition (guide sections 13, 17, 19) -------------------------------------------------
-.PHONY: install lint format typecheck test check eval migrate run openapi hooks ci-lint
+.PHONY: install lint format typecheck test check eval migrate run openapi contracts contracts-check hooks ci-lint
 install: py-sync ts-install ## Install both toolchains
 
 lint: py-lint ts-lint ## Lint both sides (CI step 1)
@@ -196,7 +196,7 @@ typecheck: py-typecheck ts-typecheck ## mypy --strict and tsc --strict (CI step 
 
 test: py-test ts-test ## Unit and contract tests on both sides (CI step 2)
 
-check: lint typecheck test importlint lock-check ## Everything CI runs before integration tests
+check: lint typecheck test importlint lock-check contracts-check ## Everything CI runs before integration tests
 
 eval: ## Eval harness against evals/golden (not built yet; prints a notice)
 	@echo "make eval: the eval harness under evals/harness is not built yet; nothing to run."
@@ -228,6 +228,16 @@ openapi: check-uv ## Export a service's OpenAPI spec: make openapi SERVICE=llm-g
 	@[ -n "$(SERVICE)" ] || { echo "usage: make openapi SERVICE=<identity|profile|...>"; exit 1; }
 	$(UV) run --package compliancewatch-$(SERVICE) python -c "import json, pathlib; from $(PKG).main import app; pathlib.Path('packages/contracts/openapi/$(SERVICE).v1.json').write_text(json.dumps(app.openapi(), indent=2, sort_keys=True) + '\n', encoding='utf-8')"
 	@echo "wrote packages/contracts/openapi/$(SERVICE).v1.json"
+
+contracts: check-uv check-pnpm ## Generate the event clients (pydantic + TypeScript) from packages/contracts/events/schemas
+	$(UV) run python packages/contracts/scripts/generate_events.py
+
+contracts-check: check-uv check-pnpm ## Event schemas pass the 2020-12 metaschema and the generated clients match them
+	$(UV) run check-jsonschema --check-metaschema packages/contracts/events/schemas/*.json
+	@$(MAKE) --no-print-directory contracts
+	@drift=$$(git status --porcelain -- packages/contracts/clients); \
+	if [ -n "$$drift" ]; then echo "$$drift"; echo "error: generated event clients are out of date; commit the output of make contracts"; exit 1; fi
+	@echo "event contracts OK"
 
 hooks: ## Install the pre-commit and commit-msg hooks
 	pre-commit install --install-hooks

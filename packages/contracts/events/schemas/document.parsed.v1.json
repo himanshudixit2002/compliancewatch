@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:document.parsed:v1",
+  "title": "document.parsed",
+  "description": "The parser split a classified document into clauses with stable references; clause text is read from the store, not carried here. Producer: pipeline (document parser). Consumers: pipeline (rule extractor), rulebook.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "pipeline (document parser)",
+  "x-tenant-scoped": false,
+  "properties": {
+    "document_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The parsed document."
+    },
+    "source_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The source it came from."
+    },
+    "doc_type": {
+      "type": "string",
+      "enum": ["notification", "circular", "press_release", "act_amendment"],
+      "description": "Document type decided by the detector."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Title of the document."
+    },
+    "language": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Primary language of the text, as a BCP 47 tag such as en or hi."
+    },
+    "published_at": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "Publication date; null when unknown."
+    },
+    "clause_count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of clauses produced."
+    },
+    "clause_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Stable clause references, in document order.",
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "parser_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Version of the parser that produced the clauses."
+    }
+  },
+  "required": [
+    "document_id",
+    "source_id",
+    "doc_type",
+    "title",
+    "language",
+    "clause_count",
+    "clause_refs",
+    "parser_version"
+  ]
+}
