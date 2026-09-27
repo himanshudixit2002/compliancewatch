@@ -5,10 +5,10 @@ from pathlib import Path
 import pytest
 
 import ontology
-from domain_kernel.ontology import AttributeType, Ontology
+from domain_kernel.ontology import AttributeLevel, AttributeType, Ontology
 from ontology import VERSION, OntologyCheckError, data_path, load, parse
 
-EXPECTED_COUNT = 16
+EXPECTED_COUNT = 17
 _KEY = re.compile(r"[a-z][a-z0-9_]*")
 
 
@@ -38,6 +38,23 @@ def test_spot_checks(loaded: Ontology) -> None:
     employees = loaded.require("employee_count")
     assert employees.type is AttributeType.INTEGER
     assert (employees.minimum, employees.maximum) == (0, 100000)
+
+
+def test_levels_and_financial_year_scoping(loaded: Ontology) -> None:
+    assert loaded.require("turnover_band").level is AttributeLevel.ENTITY
+    assert loaded.require("turnover_band").per_financial_year is True
+    assert loaded.require("peak_turnover_band").per_financial_year is False
+    assert loaded.require("registration_type").level is AttributeLevel.REGISTRATION
+    assert loaded.require("state_codes").level is AttributeLevel.ENTITY
+    scheme = loaded.require("filing_scheme")
+    assert scheme.type is AttributeType.ENUM
+    assert scheme.since == "0.2.0"
+    assert scheme.allowed_values == ("regular_monthly", "regular_qrmp", "composition")
+    assert {attribute.level for attribute in loaded} == {
+        AttributeLevel.ENTITY,
+        AttributeLevel.REGISTRATION,
+    }
+    assert all(attribute.since is not None for attribute in loaded)
 
 
 def test_turnover_bands_ascend(loaded: Ontology) -> None:

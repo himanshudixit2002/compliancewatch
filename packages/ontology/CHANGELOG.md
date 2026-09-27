@@ -3,6 +3,16 @@
 Versions follow semver. A new attribute or allowed value is a minor bump, a removed or renamed
 one is a major bump, wording is a patch.
 
+## 0.2.0 - 2026-09-28
+
+Every attribute declares its `level` in the business hierarchy (ADR-016): `state_codes`,
+`constitution`, `business_category`, `turnover_band`, `peak_turnover_band` and
+`employee_count` at the entity (PAN); every other attribute at the registration (GSTIN).
+`turnover_band` is `per_financial_year`: a profile stores it with the year it is as of.
+New attribute `filing_scheme` (regular_monthly, regular_qrmp, composition), the scheme a
+registration files under. House rules: `since` is required, and a per-financial-year attribute
+lives at the entity level.
+
 ## 0.1.0 - 2026-09-27
 
 First release. Sixteen GST attributes: registration_type, gstin_status, registered_since,

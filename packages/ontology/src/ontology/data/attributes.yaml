@@ -10,10 +10,15 @@
 #   - definitions are one or two plain sentences and end with a period
 #   - source is gstin_lookup (pre-filled from the GSTIN), user_input (asked at onboarding)
 #     or derived (computed by the profile service from other attributes)
+#   - level is the node of the business hierarchy the value belongs to (ADR-016): entity
+#     (the legal entity behind the PAN; inherited by every registration and location under
+#     it), registration (one GSTIN) or location (one place of business)
+#   - per_financial_year marks a value stated for one financial year (a turnover band); the
+#     profile stores it with the year it is as of, and such attributes live at the entity level
 #   - quote anything YAML would otherwise read as a number or a date ("01", "2019-07-01")
 #
 # Bump `version` on every change; a new attribute also gets `since`.
-version: "0.1.0"
+version: "0.2.0"
 
 attributes:
   # ---- Facts the GSTIN lookup pre-fills ---------------------------------------------------
@@ -21,6 +26,7 @@ attributes:
   - key: registration_type
     type: enum
     source: gstin_lookup
+    level: registration
     since: "0.1.0"
     definition: >-
       The kind of GST registration the business holds, as shown on the GST portal. Where a
@@ -42,6 +48,7 @@ attributes:
   - key: gstin_status
     type: enum
     source: gstin_lookup
+    level: registration
     since: "0.1.0"
     definition: >-
       Status of the GSTIN on the GST portal at the last lookup. Suspension and cancellation
@@ -56,6 +63,7 @@ attributes:
   - key: registered_since
     type: date
     source: gstin_lookup
+    level: registration
     since: "0.1.0"
     definition: >-
       Date on which the GST registration took effect, from the registration certificate.
@@ -65,6 +73,7 @@ attributes:
   - key: state_codes
     type: enum_set
     source: gstin_lookup
+    level: entity
     since: "0.1.0"
     definition: >-
       Two-digit GST state codes of every state or union territory in which the business holds
@@ -116,6 +125,7 @@ attributes:
   - key: constitution
     type: enum
     source: gstin_lookup
+    level: entity
     since: "0.1.0"
     definition: >-
       Legal form of the business as recorded against the GSTIN, the constitution of business
@@ -136,6 +146,7 @@ attributes:
   - key: business_category
     type: enum
     source: gstin_lookup
+    level: entity
     since: "0.1.0"
     definition: >-
       Main activity of the business, simplified from the nature of business activities recorded
@@ -155,6 +166,7 @@ attributes:
   - key: supply_type
     type: enum
     source: user_input
+    level: registration
     since: "0.1.0"
     definition: >-
       Whether the business supplies goods, services, or both. The registration threshold, the
@@ -168,6 +180,8 @@ attributes:
   - key: turnover_band
     type: ordered_enum
     source: user_input
+    level: entity
+    per_financial_year: true
     since: "0.1.0"
     definition: >-
       Aggregate turnover in the previous financial year on an all-India PAN basis, as defined in
@@ -192,6 +206,7 @@ attributes:
   - key: peak_turnover_band
     type: ordered_enum
     source: user_input
+    level: entity
     since: "0.1.0"
     definition: >-
       Highest aggregate turnover in any financial year from 2017-18 onwards, in the same bands as
@@ -203,6 +218,7 @@ attributes:
   - key: return_filing_frequency
     type: enum
     source: user_input
+    level: registration
     since: "0.1.0"
     definition: >-
       How often the business files GSTR-1 and GSTR-3B. Quarterly means it has opted into the
@@ -212,11 +228,30 @@ attributes:
       - quarterly
     example: monthly
 
+  - key: filing_scheme
+    type: enum
+    source: user_input
+    level: registration
+    since: "0.2.0"
+    definition: >-
+      The return-filing scheme the registration is under, which decides the forms and the
+      cadence of its returns. A regular taxpayer files monthly, or quarterly with monthly tax
+      payments under QRMP (open up to 5 crore of turnover); a composition taxpayer pays
+      quarterly on CMP-08 and files an annual GSTR-4 instead. return_filing_frequency keeps the
+      cadence of GSTR-1 and GSTR-3B for regular taxpayers; the seed calendar cites the
+      notifications behind each scheme.
+    allowed_values:
+      - regular_monthly
+      - regular_qrmp
+      - composition
+    example: regular_monthly
+
   # ---- Activity flags that notifications condition on -------------------------------------
 
   - key: makes_inter_state_supplies
     type: boolean
     source: user_input
+    level: registration
     since: "0.1.0"
     definition: >-
       True when the business supplies goods or services to customers in another state or union
@@ -227,6 +262,7 @@ attributes:
   - key: makes_zero_rated_supplies
     type: boolean
     source: user_input
+    level: registration
     since: "0.1.0"
     definition: >-
       True when the business exports goods or services or supplies SEZ units or developers.
@@ -236,6 +272,7 @@ attributes:
   - key: ecommerce_role
     type: enum
     source: user_input
+    level: registration
     since: "0.1.0"
     definition: >-
       Whether the business sells through an e-commerce operator, runs one, or both. Sellers face
@@ -251,6 +288,7 @@ attributes:
   - key: pays_reverse_charge
     type: boolean
     source: user_input
+    level: registration
     since: "0.1.0"
     definition: >-
       True when the business receives supplies on which it must pay GST under reverse charge,
@@ -261,6 +299,7 @@ attributes:
   - key: generates_eway_bills
     type: boolean
     source: user_input
+    level: registration
     since: "0.1.0"
     definition: >-
       True when the business moves goods that need an e-way bill, usually consignments worth
@@ -273,6 +312,7 @@ attributes:
   - key: employee_count
     type: integer
     source: user_input
+    level: entity
     since: "0.1.0"
     definition: >-
       Number of people on the payroll, including part-time and contract staff. GST rules rarely

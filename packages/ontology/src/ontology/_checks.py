@@ -2,7 +2,7 @@
 
 import re
 
-from domain_kernel.ontology import AttributeType, Ontology
+from domain_kernel.ontology import AttributeLevel, AttributeType, Ontology
 
 KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 VALUE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_]*$")
@@ -23,10 +23,14 @@ def check(ontology: Ontology) -> list[str]:
             problems.append(f"{key}: key is not snake_case")
         if not attribute.definition.endswith("."):
             problems.append(f"{key}: definition must end with a period")
-        if attribute.since is not None and _semver(attribute.since) > _semver(ontology.version):
+        if attribute.since is None:
+            problems.append(f"{key}: since is required")
+        elif _semver(attribute.since) > _semver(ontology.version):
             problems.append(
                 f"{key}: since {attribute.since} is newer than version {ontology.version}"
             )
+        if attribute.per_financial_year and attribute.level is not AttributeLevel.ENTITY:
+            problems.append(f"{key}: a per_financial_year attribute lives at the entity level")
         if attribute.type in ENUM_TYPES:
             values = attribute.allowed_values or ()
             if len(values) < 2:

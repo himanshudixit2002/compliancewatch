@@ -16,11 +16,12 @@ Design reference: Project Foundation guide, sections 6 and 14.
 
 ## What is here
 
-- `src/ontology/data/attributes.yaml`, version 0.1.0, sixteen attributes:
+- `src/ontology/data/attributes.yaml`, version 0.2.0, seventeen attributes, each with the
+  hierarchy `level` it belongs to (entity or registration; ADR-016):
   - facts the GSTIN lookup pre-fills: `registration_type`, `gstin_status`, `registered_since`,
     `state_codes`, `constitution`, `business_category`
-  - turnover and filing: `supply_type`, `turnover_band`, `peak_turnover_band`,
-    `return_filing_frequency`
+  - turnover and filing: `supply_type`, `turnover_band` (per financial year),
+    `peak_turnover_band`, `return_filing_frequency`, `filing_scheme`
   - activity flags: `makes_inter_state_supplies`, `makes_zero_rated_supplies`, `ecommerce_role`,
     `pays_reverse_charge`, `generates_eway_bills`
   - size: `employee_count`
@@ -31,9 +32,10 @@ Design reference: Project Foundation guide, sections 6 and 14.
   checks a draft instead; a draft is not required to match `VERSION`.
 
 The kernel owns the model and the structural validation: keys, types, sources, allowed values,
-bounds, semver strings and examples. This package adds five house rules on top: keys are
-snake_case; definitions end with a period; `since` is not newer than `version`; enum kinds have
-at least two values; values are snake_case, and state codes are exactly two digits.
+bounds, semver strings and examples. This package adds seven house rules on top: keys are
+snake_case; definitions end with a period; `since` is present and not newer than `version`;
+enum kinds have at least two values; values are snake_case, and state codes are exactly two
+digits; a per-financial-year attribute lives at the entity level.
 
 ## How services use it
 
