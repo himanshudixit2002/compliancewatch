@@ -17,7 +17,7 @@ Design reference: Project Foundation guide, sections 6, 11 and 13.
 | Module | Contents |
 | --- | --- |
 | `errors` | `DomainError` family with stable problem type slugs (`type_uri`, `title`, `detail`) |
-| `ids` | `EntityId` and thirteen typed subclasses (`TenantId`, `BusinessId`, `RuleVersionId`, ...) |
+| `ids` | `EntityId` and fourteen typed subclasses (`TenantId`, `BusinessId`, `RuleVersionId`, `CanonicalEntityId`, ...) |
 | `operators` | `Operator` enum with `symbol`; the ordered, multi-value and set operator groups |
 | `confidence` | `Confidence` in [0, 1], `REVIEW_THRESHOLD`, `CERTAIN` and `ZERO` |
 | `periods` | `EffectivePeriod`: half-open date range with `contains` and `overlaps` |
@@ -35,6 +35,7 @@ Design reference: Project Foundation guide, sections 6, 11 and 13.
 | `llm` | `CompletionRequest`, `CompletionResponse` |
 | `notifications` | `RenderedMessage`, `DeliveryStatus`, `DeliveryReceipt` |
 | `vectors` | `Vector`, `EmbeddedClause`, `ClauseFilter`, `ScoredClause` |
+| `knowledge` | `EntityType`, `RelationKind`, `normalise_name`, `EntityRef`, `Mention`, `RuleRelation`, `RULE_VERSION_KIND`, `RULE_VERSION_ONLY` |
 | `protocols` | `SourceAdapter`, `DocumentParser`, `RuleExtractor`, `PredicateEvaluator`, `NotificationChannel`, `LLMProvider`, `VectorStore`, `RuleReader`, `DecisionRepository`, `WorkflowHandle` |
 
 Every value object is a frozen, slotted dataclass whose `__post_init__` validates and raises
@@ -63,6 +64,24 @@ Every value object is a frozen, slotted dataclass whose `__post_init__` validate
   deterministic leaf with a model-backed one; `evaluate_predicate` is the deterministic leaf
   with a confidence and a reason attached.
 - `Ontology.check_predicate` validates a predicate against the ontology before it is stored.
+
+## Entity names
+
+`normalise_name(type, text)` gives the canonical name alignment keys on. It collapses whitespace
+for every type and then, per type: casefolds a notification or circular number, drops a leading
+"Notification No.", "Circular No.", a bare "No." or "Number", and closes the spaces around `-`
+and `/` (`17/2026-central tax`); drops every space and a leading "Section", "Sec." or "Rule"
+that does not start a longer word (`16(2)(c)`, `36(4)`; "sections" keeps its letters);
+uppercases a form, joins its parts with one hyphen, trims the hyphens at the ends and drops a
+leading "Form" (`GSTR-3B`, also from "- Form GSTR 3B"); keeps only the ASCII digits of an HSN or
+SAC code (`847190`) and of a threshold in whole rupees, dropping a trailing paise fraction first
+(`50000000` from "Rs. 5,00,00,000.50"); reduces a tax rate to its number plus `%` (`18%`, and
+`0.5%` from ".5%"); keeps a two-digit state code and casefolds a state name (`29`, `karnataka`).
+Callers pass ASCII digits: Devanagari and fullwidth digits are dropped. Abbreviations such as
+"Notfn." or "CT" are alias-table work, not normalisation; the docstring has the full rule per
+type. It is idempotent, and `EntityRef` accepts only names it leaves unchanged. `RuleRelation`
+checks the pairing: `supersedes` and `extends_deadline` (`RULE_VERSION_ONLY`) target a rule
+version, the other kinds a rule version or an entity, never the rule version itself.
 
 ## Ontology mapping schema
 

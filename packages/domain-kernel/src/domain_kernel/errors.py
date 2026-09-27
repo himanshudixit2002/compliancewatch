@@ -98,3 +98,10 @@ class UnknownClosureReasonError(DomainError, ValueError):
     def __init__(self, reason: object) -> None:
         self.reason = reason
         super().__init__(f"unknown closure reason {reason!r}")
+
+
+class InvalidRelationError(DomainError, ValueError):
+    """A rule relation whose target kind does not fit the relation, or that points at itself."""
+
+    type_slug = "invalid-rule-relation"
+    title = "Invalid rule relation"
