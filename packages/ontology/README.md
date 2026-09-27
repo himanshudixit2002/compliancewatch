@@ -1,6 +1,6 @@
 # ontology package
 
-Part of the ComplianceWatch monorepo. **Phase 0 structure-only scaffold: no code yet.**
+Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 6, 13 and 14.
 
 - **Owns:** Attribute definitions as YAML, versioned, with a validator (registration_type, turnover_band, state_codes, business_category, employee_count, ...)
@@ -10,8 +10,8 @@ Design reference: Project Foundation guide, sections 6, 13 and 14.
 
 ## Layout
 
-Flat for now; YAML attribute files and the validator arrive with Ontology v0 (about 15 GST attributes) in Phase 0.
+Installable stub (`src/ontology`, package `ontology`); YAML attribute files and the validator arrive with Ontology v0 (about 15 GST attributes).
 
 ## How to run
 
-Not implemented yet. Driven from the repo root (`make dev`, `make test`; guide section 13) once the service template lands.
+`uv run pytest packages/ontology` from the repo root.

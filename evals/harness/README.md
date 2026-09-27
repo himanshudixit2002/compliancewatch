@@ -1,6 +1,6 @@
 # eval harness
 
-Part of the ComplianceWatch monorepo. **Phase 0 structure-only scaffold: no code yet.**
+Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 8, 17 and 19.
 
 - **Owns:** Runner, metrics and thresholds: context recall and precision, grounded-answer rate, citation correctness, extraction acceptance, applicability precision and recall, refusal accuracy, cost per feature
@@ -14,4 +14,4 @@ Flat for now; the in-repo eval harness is a Phase 1 deliverable (CI report), wit
 
 ## How to run
 
-Not implemented yet. Driven from the repo root (`make dev`, `make test`; guide section 13) once the service template lands.
+`make eval` prints a notice until the harness lands in Phase 1.

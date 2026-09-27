@@ -1,6 +1,6 @@
 # py-common package
 
-Part of the ComplianceWatch monorepo. **Phase 0 structure-only scaffold: no code yet.**
+Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 13, 14 and 18.
 
 - **Owns:** Logging, tracing (OpenTelemetry), config, auth middleware, outbox, testing fakes
@@ -10,8 +10,15 @@ Design reference: Project Foundation guide, sections 13, 14 and 18.
 
 ## Layout
 
-Flat for now; Python package layout to be added with the uv workspace in Phase 0.
+```
+src/py_common/
+  settings.py   # pydantic-settings, env_prefix CW_, env_file .env
+  logging.py    # structlog JSON logging bridging stdlib records; correlation_id/tenant_id contextvars
+  health.py     # GET /health and GET /ready router with pluggable readiness checks
+  app.py        # create_app(service_name, version, routers, ...) + request-id middleware
+tests/unit/
+```
 
 ## How to run
 
-Not implemented yet. Driven from the repo root (`make dev`, `make test`; guide section 13) once the service template lands.
+`uv run pytest packages/py-common` from the repo root; consumed by every service as a workspace dependency (`py-common`).

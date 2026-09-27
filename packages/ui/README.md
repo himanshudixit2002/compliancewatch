@@ -1,6 +1,6 @@
 # ui package
 
-Part of the ComplianceWatch monorepo. **Phase 0 structure-only scaffold: no code yet.**
+Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 12, 13 and 15.
 
 - **Owns:** Shared React components and design tokens (Tailwind, shadcn/ui) used by the product and the internal tools
@@ -10,8 +10,12 @@ Design reference: Project Foundation guide, sections 12, 13 and 15.
 
 ## Layout
 
-No internal structure yet: to be generated with the pnpm + Turborepo workspace in Phase 0.
+```
+src/index.ts     # public exports
+src/badge.tsx    # first component: <Badge tone="neutral|success|warning|danger">
+```
+Consumed from source via `exports` and Next's `transpilePackages`; no build step.
 
 ## How to run
 
-Not implemented yet. Driven from the repo root (`make dev`, `make test`; guide section 13) once the service template lands.
+`pnpm --filter @compliancewatch/ui test` (vitest + Testing Library, 80% coverage thresholds), `lint`, `typecheck`.

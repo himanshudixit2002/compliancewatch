@@ -1,6 +1,6 @@
 # runbooks
 
-Part of the ComplianceWatch monorepo. **Phase 0 structure-only scaffold: no code yet.**
+Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, section 18.
 
 - **Owns:** One runbook per alert, linked from the alert itself (a runbook without a link fails CI)
@@ -14,4 +14,4 @@ Flat; one markdown file per alert.
 
 ## How to run
 
-Not implemented yet. Driven from the repo root (`make dev`, `make test`; guide section 13) once the service template lands.
+Nothing to run yet.

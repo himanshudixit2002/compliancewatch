@@ -1,6 +1,6 @@
 # pipeline service
 
-Part of the ComplianceWatch monorepo. **Phase 0 structure-only scaffold: no code yet.**
+Part of the ComplianceWatch monorepo. **Phase 0: service template in place, no domain code yet.**
 Design reference: Project Foundation guide, sections 5, 7, 8, 11 and 14.
 
 - **Owns:** The regulatory intelligence pipeline as Temporal workers: source-crawler (source registry, fetch schedule, raw document store), change-detector (document classification, links to prior documents), doc-parser (clause-level structured text, OCR fallback), rule-extractor (schema-validated RuleCandidates with verified citations), review-service (ReviewTasks, decisions, edit diffs, two-person rule)
@@ -16,13 +16,13 @@ src/pipeline/
   application/     # use cases, event handlers, unit of work
   domain/          # entities, value objects, domain events, repository protocols
   infrastructure/  # SQLAlchemy models, repositories, Kafka, adapters
-  main.py          # composition root (to be added by the service template)
-migrations/        # alembic
+  main.py          # composition root: create_app(...) from py-common
+migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA)
 tests/
   unit/            # domain and application with fakes; no I/O
   integration/     # testcontainers: postgres, kafka
   contract/        # provider-side contract tests for this service's API and events
-pyproject.toml, Dockerfile   # to be added by the service template
+alembic.ini, pyproject.toml, Dockerfile
 ```
 Doc-literal subdirectories at the service root (guide section 13; the CI eval trigger in section 17 watches `services/pipeline/prompts`):
 
@@ -33,8 +33,18 @@ prompts/     # Versioned prompt files, each with a version, an owner and at leas
 workflows/   # Temporal workflows and activities for the five stages
 ```
 
-`adapters/`, `parsers/` and `workflows/` may move under `src/pipeline/` when the service template lands, so that they are importable in the src layout.
+`adapters/`, `parsers/` and `workflows/` may move under `src/pipeline/` when the pipeline slice lands, so that they are importable in the src layout.
 
 ## How to run
 
-Not implemented yet. Driven from the repo root (`make dev`, `make test`; guide section 13) once the service template lands.
+From the repo root:
+
+```bash
+make dev                          # infrastructure (Docker Compose)
+make migrate SERVICE=pipeline
+make run SERVICE=pipeline           # http://localhost:8010/health, /ready, /v1/pipeline/ping
+make test                         # unit + contract tests with the coverage gate
+docker build -f services/pipeline/Dockerfile -t compliancewatch-pipeline .
+```
+
+Package `pipeline`, dev port 8010, Postgres schema `pipeline`. Details: [docs/onboarding/local-dev.md](../../docs/onboarding/local-dev.md).

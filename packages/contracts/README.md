@@ -1,6 +1,6 @@
 # contracts package
 
-Part of the ComplianceWatch monorepo. **Phase 0 structure-only scaffold: no code yet.**
+Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 7 (event contract rules), 10, 13 and 14.
 
 - **Owns:** OpenAPI specs, event schemas (JSON Schema), generated clients (py + ts), and the event changelog
@@ -19,4 +19,4 @@ clients/typescript/  # generated TypeScript clients
 
 ## How to run
 
-Not implemented yet. Driven from the repo root (`make dev`, `make test`; guide section 13) once the service template lands.
+No build yet. `package.json` only makes the workspace resolve; the Python client side joins the uv workspace when the first client is generated.
