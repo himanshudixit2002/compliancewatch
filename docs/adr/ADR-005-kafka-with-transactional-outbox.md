@@ -34,7 +34,9 @@ dead-lettered event after a fix.
   the last line of defence against a duplicate message to a business.
 - The relay is one more moving part (it lives in py-common), it adds a little latency, and the
   outbox table needs pruning.
-- Schema compatibility must be checked in CI so a producer change cannot break a consumer; that
-  check is still to be wired.
+- Schema compatibility must be checked in CI so a producer change cannot break a consumer. Since
+  2026-09-28 CI replays the base branch's golden examples against a pull request's schemas and
+  asks the Redpanda schema registry for a `BACKWARD` verdict; the outbox writer, relay and
+  idempotent consumer live in `py_common.outbox`.
 - Revisit only if event volume stays so low that a Postgres-backed queue would be simpler; the
   fan-out volume is the reason to expect it will not.

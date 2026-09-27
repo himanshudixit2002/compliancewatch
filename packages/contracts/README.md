@@ -11,11 +11,17 @@ Design reference: Project Foundation guide, sections 7 (event contract rules), 1
 ## Layout
 
 ```
-openapi/             # OpenAPI 3.1 specs, public /v1 and internal service APIs
-  llm-gateway.v1.json   # the first one: services/llm-gateway
-events/              # JSON Schema per event topic (object.verb, past tense) with changelog entries
-clients/python/      # generated Python clients
-clients/typescript/  # generated TypeScript clients
+openapi/                 # OpenAPI 3.1 specs, public /v1 and internal service APIs
+  llm-gateway.v1.json      # the first one: services/llm-gateway
+events/
+  schemas/               # JSON Schema 2020-12: envelope.v1.json and one <topic>.v1.json per event
+  examples/<topic>/      # golden messages (envelope + payload) every check replays
+  CHANGELOG.md           # one line per topic per version
+scripts/
+  generate_events.py     # make contracts: writes both clients below
+  check_compat.py        # CI: backward compatibility against the base branch
+clients/python/          # compliancewatch-contracts (import cw_contracts): generated pydantic v2 models
+clients/typescript/      # generated .d.ts per topic plus index.ts (EVENT_TOPICS)
 ```
 
 ## OpenAPI specs
@@ -35,9 +41,51 @@ under `components.schemas` and referenced by each route's error responses. The d
 each problem response is the interpreter's `http.HTTPStatus` phrase, so a Python minor bump that
 rewords a phrase may require regenerating the specs.
 
-## Events and clients
+## Events
 
-No event schema is committed yet; the first topics (`llm.call.completed`, `llm.budget.alarmed`)
-are logged by the gateway and get a schema here when the Kafka outbox lands. No client is
-generated yet: `package.json` only makes the workspace resolve, and the Python client side joins
-the uv workspace when the first client is generated.
+Fourteen topics have a schema: `document.discovered`, `document.parsed`,
+`rule.candidate.created`, `rule.published`, `rule.superseded`, `profile.updated`,
+`applicability.decided`, `obligation.created`, `obligation.due_soon`, `obligation.closed`,
+`obligation.rescheduled`, `notification.sent`, `notification.failed` and
+`tenant.deletion.requested`. The gateway's `llm.call.completed` and `llm.budget.alarmed` are
+still log lines and get a schema when they gain a consumer.
+
+A message on the bus is the envelope (`events/schemas/envelope.v1.json`): `event_id`, `topic`,
+`schema_version`, `occurred_at`, `tenant_id` (null for regulatory events), `correlation_id`,
+`causation_id` and `payload`. Each topic schema describes the payload only. Consumers decode the
+envelope, dispatch on `topic`, and validate `payload` with the topic's model at that
+`schema_version`. `py_common.events` builds and parses the envelope; `py_common.outbox` writes
+and relays it (ADR-005).
+
+Rules, checked in CI:
+
+- Schema files are `<topic>.v<major>.json`, JSON Schema 2020-12, with `$id`
+  `urn:compliancewatch:event:<topic>:v<major>`, `x-version` (semver), `x-producer` and
+  `x-tenant-scoped`. Every property has a description.
+- Payloads are tolerant readers: no `additionalProperties: false`, so a producer can add an
+  optional field (minor bump) without breaking an older consumer. A removed or renamed field,
+  a new required field or a narrowed enum is a breaking change: a new `v<major>` file next to
+  the old one, which stays until every consumer has moved, plus an ADR.
+- Every version has a line in `events/CHANGELOG.md` and every topic at least one example under
+  `events/examples/<topic>/`. The examples are what the backward-compatibility check replays.
+- The clients are generated, never edited: `make contracts` (datamodel-code-generator for
+  Python, json-schema-to-typescript for TypeScript, then this package's own registry and index).
+  `make contracts-check` fails when the committed clients differ from the schemas.
+- On a pull request, `scripts/check_compat.py` validates the base branch's examples against the
+  branch's schemas and refuses a removed file, a downgraded version or a content change without
+  a version bump; the dev-stack job registers the base version of each changed schema in the
+  Redpanda schema registry with `BACKWARD` compatibility and checks the new one with
+  `rpk registry schema check-compatibility`.
+
+Adding a topic: write the schema and an example, add the CHANGELOG line, run `make contracts`,
+commit the generated files, then declare `topic` and `schema_version` on the producer's event
+class and write it through `OutboxWriter`. `packages/py-common/README.md` has the producer and
+consumer side.
+
+## Clients
+
+`clients/python` is the uv workspace member `compliancewatch-contracts`; services import
+`cw_contracts.events` (`TOPICS`, `EventEnvelopeV1`, one model per topic). It depends on pydantic
+only, and import-linter keeps it that way. `clients/typescript/events` exports one interface per
+topic, `EventEnvelope` and the `EVENT_TOPICS` constant; the package's `typecheck` script runs
+`tsc` over them. Both are regenerated by `make contracts`.

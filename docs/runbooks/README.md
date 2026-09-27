@@ -10,8 +10,10 @@ Design reference: Project Foundation guide, section 18.
 
 ## Layout
 
-Flat; one markdown file per alert.
+Flat; one markdown file per alert or operational procedure.
+
+- [outbox-relay.md](outbox-relay.md): events not reaching Kafka, `dead` outbox rows, replay by hand, pruning.
 
 ## How to run
 
-Nothing to run yet.
+Nothing to run yet; the alerts that link these runbooks arrive with the observability stack.

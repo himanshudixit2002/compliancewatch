@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:rule.published:v1",
+  "title": "rule.published",
+  "description": "A reviewed rule version became published and is in force from effective_from. Producer: rulebook (on review approval). Consumers: applicability-engine, notification, qa.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "rulebook (on review approval)",
+  "x-tenant-scoped": false,
+  "properties": {
+    "rule_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The rule the version belongs to."
+    },
+    "rule_version_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The published version."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Version number within the rule."
+    },
+    "regulator": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Regulator the rule belongs to."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Title of the rule version."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Short plain-language summary; empty when none was written."
+    },
+    "effective_from": {
+      "type": "string",
+      "format": "date",
+      "description": "First day the version is in force."
+    },
+    "effective_to": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "Day the version stops being in force (exclusive); null when open."
+    },
+    "supersedes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "description": "Rule version ids this version supersedes.",
+      "uniqueItems": true
+    },
+    "approved_by": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "description": "Users who approved the publication; two for high-impact rules.",
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "high_impact": {
+      "type": "boolean",
+      "description": "True when the rule carries a high-impact tag."
+    },
+    "attribute_keys": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "description": "Ontology attribute keys the predicates reference; the engine's coarse filter.",
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "rule_id",
+    "rule_version_id",
+    "version",
+    "regulator",
+    "title",
+    "effective_from",
+    "supersedes",
+    "approved_by",
+    "high_impact",
+    "attribute_keys"
+  ]
+}

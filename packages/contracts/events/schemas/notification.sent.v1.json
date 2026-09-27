@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:notification.sent:v1",
+  "title": "notification.sent",
+  "description": "A channel accepted a notification for delivery. Producer: notification. Consumers: obligation (audit), eval.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "notification",
+  "x-tenant-scoped": true,
+  "properties": {
+    "notification_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The notification."
+    },
+    "obligation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The obligation it is about."
+    },
+    "business_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The business it was sent for."
+    },
+    "channel": {
+      "type": "string",
+      "enum": ["whatsapp", "email"],
+      "description": "Delivery channel."
+    },
+    "dedupe_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Idempotency key over rule version, business and channel."
+    },
+    "provider_message_id": {
+      "type": "string",
+      "description": "The provider's id for the message; empty when it gives none."
+    },
+    "sent_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the channel accepted it."
+    },
+    "language": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Language the message was rendered in."
+    }
+  },
+  "required": [
+    "notification_id",
+    "obligation_id",
+    "business_id",
+    "channel",
+    "dedupe_key",
+    "sent_at",
+    "language"
+  ]
+}

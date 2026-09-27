@@ -5,7 +5,10 @@
 > Ontology v0, the rulebook's knowledge schema (canonical entities, clause mentions, rule relations),
 > the LLM gateway skeleton (routing, prompt registry, cost ledger,
 > budgets, PII masking, Langfuse tracing, fake provider container) with the first committed OpenAPI
-> spec, problem-details errors in py-common, pnpm + Turborepo workspace with the Next.js web app and
+> spec, problem-details errors in py-common, the event contracts (fourteen topics and the envelope as
+> JSON Schema with generated pydantic and TypeScript types and compatibility checks in CI), the
+> transactional outbox in py-common (writer, Kafka relay with dead letters, idempotent consumer),
+> pnpm + Turborepo workspace with the Next.js web app and
 > the WhatsApp bot, Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 006,
 > 008 and 017 (012 and 013 as stubs). No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
 >
@@ -61,10 +64,13 @@ compliancewatch/
       workflows/
   packages/
     contracts/               # OpenAPI specs, event schemas (JSON Schema), generated clients (py + ts)
-      openapi/  events/  clients/python/  clients/typescript/   # openapi/llm-gateway.v1.json is the first spec
+      openapi/               # llm-gateway.v1.json is the first spec
+      events/                # schemas/<topic>.v1.json, examples/, CHANGELOG.md (fourteen topics + envelope)
+      clients/python/        # cw_contracts: generated pydantic models (make contracts)
+      clients/typescript/    # generated .d.ts per topic and index.ts
     domain-kernel/           # Shared value objects, protocols, ontology model, error types
     ontology/                # GST attribute definitions as YAML (v0.1.0), loader and validator
-    py-common/               # Settings, structured logging, health routes, problem details, FastAPI app factory
+    py-common/               # Settings, logging, health routes, problem details, app factory, event envelope, outbox
     ui/                      # Shared React components and design tokens
   infra/
     terraform/               # AWS modules: network, EKS, Aurora, MSK, S3, IAM
@@ -138,9 +144,11 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | `make migrate [SERVICE=x]` | `alembic upgrade head` for every service (or one), each in its own schema |
 | `make run SERVICE=x [PORT=n]` | uvicorn with reload on the service's dev port; an explicit environment variable beats `.env` |
 | `make openapi SERVICE=x` | Export the service's OpenAPI spec to `packages/contracts/openapi/<x>.v1.json` (checked by a contract test) |
+| `make contracts` / `contracts-check` | Regenerate the event clients from `packages/contracts/events/schemas`; check the schemas and that the committed clients match |
+| `make relay SERVICE=x` | Run the outbox relay for one service's schema against the dev stack |
 | `make test` | pytest (unit + contract, coverage gate on domain and application) and vitest |
 | `make lint` / `typecheck` / `format` | ruff + eslint + prettier; mypy --strict + tsc --strict |
-| `make check` | lint, typecheck, test, import-linter, uv lock check (the same gates CI runs) |
+| `make check` | lint, typecheck, test, import-linter, uv lock check, contracts check (the same gates CI runs) |
 | `make eval` | Eval harness against `evals/golden` (not built yet; prints a notice) |
 | `make hooks` | Install the pre-commit and commit-msg hooks |
 | `make help` | Every target with its description |
@@ -152,7 +160,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | No import from another service's package | import-linter contract in CI | wired |
 | Domain layer imports nothing from infrastructure or third-party I/O | import-linter | wired |
 | Every public endpoint has an OpenAPI schema and a contract test | CI job fails on undocumented routes | partly: the llm-gateway spec is committed under `packages/contracts/openapi` and a contract test fails when the served schema drifts (`make openapi`); the other services still have only ping routes |
-| Every event has a JSON Schema in packages/contracts and a changelog entry | Schema registry compatibility check in CI | later (`llm.call.completed` is logged, not published) |
+| Every event has a JSON Schema in packages/contracts and a changelog entry | Schema registry compatibility check in CI | wired: metaschema, golden examples, generated clients in sync, base-branch examples replayed against the new schemas, and `rpk registry schema check-compatibility` in the dev-stack job (the gateway's two log-only events get schemas with their first consumer) |
 | Every prompt file has a version, an owner and at least one eval case | Eval harness refuses to run an unregistered prompt | partly: the gateway refuses a prompt that is not in `services/llm-gateway/prompts/registry.toml`; the eval harness is not built |
 | Every table with tenant data has tenant_id and an RLS policy | Migration lint script | later (the first table, `llm_gateway.cost_ledger`, is cross-tenant metering and has no RLS on purpose) |
 | Conventional commits; squash merge; PR template with risk and rollback sections | pre-commit commit-msg hook, PR title check, PR template | wired (branch protection is a repo setting) |
@@ -183,7 +191,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 ## Not in this repository yet
 
 - Terraform staging cluster and Keycloak (the gateway trusts an `x-tenant-id` header until then)
-- OpenTelemetry collector in the dev stack; Kafka outbox for the gateway's events
+- OpenTelemetry collector in the dev stack; a service that writes to the outbox (the writer, relay and consumer exist in py-common; the first producer adds the `outbox_event` migration)
 - Seeded fixtures and the 50-document sample rulebook
 - Real prompt texts for extraction, judgement, question answering and classification, and the eval harness
 - Full text for ADR-007 and ADR-009 to ADR-013; ADR-014 to ADR-016 (identity, recurring obligations, business hierarchy)

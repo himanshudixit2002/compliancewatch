@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:obligation.rescheduled:v1",
+  "title": "obligation.rescheduled",
+  "description": "An open obligation's due date changed, usually because the regulator extended or corrected a deadline. Producer: obligation. Consumers: notification.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "obligation",
+  "x-tenant-scoped": true,
+  "properties": {
+    "obligation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The obligation."
+    },
+    "business_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The business it belongs to."
+    },
+    "rule_version_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The rule version it comes from."
+    },
+    "previous_due_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Due date before the change."
+    },
+    "new_due_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Due date after the change."
+    },
+    "reason": {
+      "type": "string",
+      "enum": ["deadline_extended", "corrected", "manual"],
+      "description": "Why the date moved."
+    },
+    "caused_by_rule_version_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "The rule version that changed the deadline; null for a manual change."
+    }
+  },
+  "required": [
+    "obligation_id",
+    "business_id",
+    "rule_version_id",
+    "previous_due_at",
+    "new_due_at",
+    "reason"
+  ]
+}

@@ -1,7 +1,8 @@
 # CI (guide section 17). Implemented: 1 lint + type-check, 2 unit tests with coverage gate,
-# 3 contract checks (import-linter, and the OpenAPI spec per service through its contract test;
-# event-schema compatibility and migration lint are TODO), a compose dev-stack smoke, and secrets
-# scanning. Steps 4-7 are listed as TODO at the end.
+# 3 contract checks (import-linter, the OpenAPI spec per service through its contract test, and
+# the event schemas: metaschema, golden examples, generated clients in sync, backward compatibility
+# against the base branch by example replay and by the Redpanda schema registry; migration lint is
+# TODO), a compose dev-stack smoke, and secrets scanning. Steps 4-7 are listed as TODO at the end.
 name: ci
 
 on:
@@ -32,6 +33,8 @@ jobs:
       python: ${{ steps.filter.outputs.python }}
       typescript: ${{ steps.filter.outputs.typescript }}
       devstack: ${{ steps.filter.outputs.devstack }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+      schemas: ${{ steps.filter.outputs.schemas }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -67,6 +70,19 @@ jobs:
               - '**/*.yml' # prettier --check . also covers YAML outside the packages
               - '**/*.yaml'
               - '.github/workflows/ci.yml'
+            contracts:
+              - 'packages/contracts/**'
+              - 'packages/py-common/**'
+              - 'packages/domain-kernel/**'
+              - 'Makefile'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.github/workflows/ci.yml'
+            schemas:
+              - 'packages/contracts/events/schemas/**'
             devstack:
               - 'docker-compose.yml'
               - 'infra/dev/**'
@@ -75,6 +91,7 @@ jobs:
               - 'Makefile'
               - 'services/*/migrations/**'
               - 'services/*/alembic.ini'
+              - 'packages/contracts/events/schemas/**' # registry compatibility step
               # The fake-llm image is built from these (the llm-gateway Dockerfile copies them)
               - 'services/llm-gateway/**'
               - 'packages/py-common/**'
@@ -105,8 +122,8 @@ jobs:
         run: make py-typecheck
       - name: Contract check - import boundaries (import-linter)
         run: make importlint
-      # TODO(section 17 step 3): event-schema compatibility, migration lint (tenant_id + RLS). The
-      # OpenAPI spec is covered per service by its contract test, which runs in the pytest step.
+      # Section 17 step 3: the OpenAPI spec is covered per service by its contract test (pytest
+      # step); the event schemas by the contracts job below. TODO: migration lint (tenant_id + RLS).
       - name: Unit tests with coverage gate (80% on domain and application layers, guide section 19)
         run: make py-test
       - name: Lockfile is current
@@ -130,6 +147,34 @@ jobs:
       - name: Lint, type-check, unit tests with coverage gate, build (Turborepo, per package)
         run: pnpm turbo run lint typecheck test build
 
+  contracts:
+    name: Event contracts (schemas, examples, generated clients, compatibility)
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the compatibility check reads the base branch's schemas and examples
+      - uses: astral-sh/setup-uv@v10.2.0 # exact tag: astral publishes no floating v10 tag
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - uses: pnpm/action-setup@v6 # pnpm version comes from package.json "packageManager"
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: uv sync --all-packages --locked
+      - run: pnpm install --frozen-lockfile
+      - name: Schemas pass the 2020-12 metaschema and the generated clients match them
+        run: make contracts-check
+      - name: Examples and generated models agree with the schemas
+        run: uv run pytest packages/contracts -q
+      - name: Backward compatible with the base branch (base examples replayed against these schemas)
+        if: github.event_name == 'pull_request'
+        run: uv run python packages/contracts/scripts/check_compat.py --base-ref "origin/${{ github.base_ref }}"
+
   dev-stack:
     name: Dev stack (docker compose smoke + migrations)
     needs: changes
@@ -152,6 +197,37 @@ jobs:
           docker compose exec -T postgres psql -U cw -d compliancewatch -Atc "select extversion from pg_extension where extname = 'vector'" | grep -E '^[0-9]'
           docker compose exec -T redpanda rpk cluster health
           docker compose exec -T temporal temporal operator cluster health --address temporal:7233
+      - name: Event schemas are backward compatible in the Redpanda schema registry
+        # The base branch's version of each schema is registered under <topic>-value with
+        # BACKWARD compatibility, then the PR's version is checked against it. rpk exits 0 either
+        # way, so the JSON verdict decides.
+        if: github.event_name == 'pull_request' && needs.changes.outputs.schemas == 'true'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          rpk() { docker compose exec -T redpanda rpk registry -X registry.hosts=localhost:8081 "$@"; }
+          status=0
+          for schema in packages/contracts/events/schemas/*.json; do
+            name=$(basename "$schema" .json)
+            topic=${name%.v*}
+            subject="${topic}-value"
+            if ! git cat-file -e "origin/$BASE_REF:$schema" 2>/dev/null; then
+              echo "$name: new on this branch, nothing to compare"; continue
+            fi
+            git show "origin/$BASE_REF:$schema" > /tmp/base-schema.json
+            docker compose cp /tmp/base-schema.json redpanda:/tmp/base-schema.json
+            docker compose cp "$schema" redpanda:/tmp/head-schema.json
+            rpk schema create "$subject" --schema /tmp/base-schema.json --type json > /dev/null
+            rpk compatibility-level set "$subject" --level BACKWARD > /dev/null
+            verdict=$(rpk schema check-compatibility "$subject" --schema /tmp/head-schema.json --type json --schema-version latest --format json)
+            if echo "$verdict" | jq -e '.compatible == true' > /dev/null; then
+              echo "$name: compatible"
+            else
+              echo "$name: NOT compatible"; echo "$verdict" | jq .; status=1
+            fi
+          done
+          exit $status
       - uses: astral-sh/setup-uv@v10.2.0 # exact tag: astral publishes no floating v10 tag
         with:
           enable-cache: true

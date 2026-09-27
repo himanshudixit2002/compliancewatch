@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:obligation.due_soon:v1",
+  "title": "obligation.due_soon",
+  "description": "An open obligation's due date is near and a reminder is warranted. Producer: obligation (reminder scheduler). Consumers: notification.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "obligation (reminder scheduler)",
+  "x-tenant-scoped": true,
+  "properties": {
+    "obligation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The obligation."
+    },
+    "business_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The business it belongs to."
+    },
+    "rule_version_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The rule version it comes from."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What the business has to do."
+    },
+    "due_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When it is due."
+    },
+    "days_left": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Whole days between now and the due date."
+    },
+    "reminder_index": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1 for the first reminder, 2 for the second, and so on."
+    }
+  },
+  "required": [
+    "obligation_id",
+    "business_id",
+    "rule_version_id",
+    "title",
+    "due_at",
+    "days_left",
+    "reminder_index"
+  ]
+}

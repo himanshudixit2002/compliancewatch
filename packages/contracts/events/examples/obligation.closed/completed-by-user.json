@@ -1,0 +1,18 @@
+{
+  "event_id": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d",
+  "topic": "obligation.closed",
+  "schema_version": "1.0.0",
+  "occurred_at": "2026-10-01T02:31:05Z",
+  "tenant_id": "5b1f3d2e-7c4a-4e0b-9a6d-1f2e3d4c5b6a",
+  "correlation_id": "c2d3e4f5-a6b7-4c8d-8e9f-0a1b2c3d4e5f",
+  "causation_id": "d3e4f5a6-b7c8-4d9e-9f0a-1b2c3d4e5f6a",
+  "payload": {
+    "obligation_id": "8c9d0e1f-2a3b-4c4d-9e5f-6a7b8c9d0e1f",
+    "business_id": "6a7b8c9d-0e1f-4a2b-9c3d-4e5f6a7b8c9d",
+    "rule_version_id": "4e5f6a7b-8c9d-4e0f-9a1b-2c3d4e5f6a7b",
+    "status": "done",
+    "reason": "completed",
+    "closed_at": "2026-10-20T11:05:00+05:30",
+    "closed_by": "0e1f2a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b"
+  }
+}
