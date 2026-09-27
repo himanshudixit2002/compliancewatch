@@ -5,7 +5,7 @@ from typing import ClassVar
 import pytest
 
 from domain_kernel.errors import InvariantViolationError
-from domain_kernel.events import TOPIC_PATTERN, DomainEvent, utc_now
+from domain_kernel.events import SCHEMA_VERSION_PATTERN, TOPIC_PATTERN, DomainEvent, utc_now
 from domain_kernel.ids import CorrelationId, EventId, ObligationId, TenantId
 
 
@@ -22,10 +22,11 @@ class _Closed(DomainEvent):
             raise InvariantViolationError("reason must not be empty")
 
 
-def _event_class(topic_value: str) -> type[DomainEvent]:
+def _event_class(topic_value: str, version: str = "1.0.0") -> type[DomainEvent]:
     @dataclass(frozen=True, slots=True, kw_only=True)
     class _Event(DomainEvent):
         topic: ClassVar[str] = topic_value
+        schema_version: ClassVar[str] = version
 
     return _Event
 
@@ -41,6 +42,7 @@ def test_envelope_defaults() -> None:
     assert before <= event.occurred_at <= utc_now()
     assert event.topic == "obligation.closed"
     assert type(event).topic == "obligation.closed"
+    assert event.schema_version == "1.0.0"
     assert event.reason == "completed"
     assert _Closed(obligation_id=ObligationId.new()).event_id != event.event_id
 
@@ -63,6 +65,19 @@ def test_valid_topics(topic: str) -> None:
 def test_invalid_topics(topic: str) -> None:
     with pytest.raises(InvariantViolationError, match=r"topic must look like object\.verb"):
         _event_class(topic)()
+
+
+@pytest.mark.parametrize("version", ["1.0.0", "0.1.0", "12.34.56"])
+def test_valid_schema_versions(version: str) -> None:
+    event = _event_class("rule.published", version)()
+    assert type(event).schema_version == version
+    assert SCHEMA_VERSION_PATTERN.fullmatch(version)
+
+
+@pytest.mark.parametrize("version", ["", "1", "1.0", "v1.0.0", "1.0.0-rc1", "1.0.0.0", "a.b.c"])
+def test_invalid_schema_versions(version: str) -> None:
+    with pytest.raises(InvariantViolationError, match="schema_version must be semver"):
+        _event_class("rule.published", version)()
 
 
 def test_naive_datetime_is_rejected() -> None:
@@ -104,6 +119,7 @@ def test_events_are_frozen_keyword_only_and_slotted() -> None:
         _Closed(ObligationId.new())  # type: ignore[arg-type, call-arg]
     assert not hasattr(event, "__dict__")
     assert "topic" not in _Closed.__slots__
+    assert "schema_version" not in _Closed.__slots__
 
 
 def test_causation_chain() -> None:

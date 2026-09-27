@@ -27,7 +27,7 @@ Design reference: Project Foundation guide, sections 6, 11 and 13.
 | `ontology` | `AttributeType`, `AttributeSource`, `AttributeDefinition`, `Ontology`, `ALLOWED_OPERATORS` |
 | `predicates` | `Predicate`, `AllOf`, `AnyOf`, `Not`, `Applicability`, `PredicateResult`, `evaluate_predicate` |
 | `status` | `RuleVersionStatus`, `ObligationStatus`, `ClosureReason`, `TransitionTable`, the two tables |
-| `events` | `DomainEvent` envelope (`event_id`, `occurred_at`, `tenant_id`, `correlation_id`, `causation_id`) |
+| `events` | `DomainEvent` envelope (`event_id`, `occurred_at`, `tenant_id`, `correlation_id`, `causation_id`) with the class-level `topic` and `schema_version` |
 | `profiles` | `ProfileSnapshot`: one version of a profile's attributes |
 | `documents` | `DocumentRef`, `DiscoveredDocument`, `RawDocument`, `Clause`, `ParsedDocument`, `RuleCandidate` |
 | `rules` | `ObligationTemplate`, `RuleVersionSnapshot` (read model of a published version) |

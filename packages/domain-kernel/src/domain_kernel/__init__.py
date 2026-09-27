@@ -29,7 +29,7 @@ from domain_kernel.errors import (
     UnknownAttributeError,
     UnknownClosureReasonError,
 )
-from domain_kernel.events import TOPIC_PATTERN, DomainEvent, utc_now
+from domain_kernel.events import SCHEMA_VERSION_PATTERN, TOPIC_PATTERN, DomainEvent, utc_now
 from domain_kernel.ids import (
     BusinessId,
     CandidateId,
@@ -138,6 +138,7 @@ __all__ = [
     "RULE_VERSION_KIND",
     "RULE_VERSION_ONLY",
     "RULE_VERSION_TRANSITIONS",
+    "SCHEMA_VERSION_PATTERN",
     "SEMVER_PATTERN",
     "SET_OPERATORS",
     "TOPIC_PATTERN",
