@@ -15,6 +15,7 @@ dev = [
   "hypothesis>=6.140",
   "import-linter>=2.5",
   "types-pyyaml>=6.0.12",
+  "testcontainers[postgres]>=4.9",
   "httpx2>=2.13",  # Starlette >= 1.7 TestClient transport; httpx 0.x is deprecated there
 ]
 
@@ -129,14 +130,16 @@ source_modules = ["*.domain", "domain_kernel"]
 forbidden_modules = [
   "sqlalchemy", "alembic", "psycopg", "asyncpg", "fastapi", "starlette", "httpx", "requests",
   "httpx2", "aiohttp", "aiokafka", "confluent_kafka", "temporalio", "redis", "boto3", "botocore",
-  "structlog", "py_common", "yaml",
+  "structlog", "py_common", "yaml", "openai", "langfuse",
 ]
 
 [[tool.importlinter.contracts]]
 name = "Application layers know nothing about HTTP or persistence"
 type = "forbidden"
 source_modules = ["*.application"]
-forbidden_modules = ["sqlalchemy", "alembic", "psycopg", "asyncpg", "fastapi", "starlette"]
+forbidden_modules = [
+  "sqlalchemy", "alembic", "psycopg", "asyncpg", "fastapi", "starlette", "openai", "langfuse",
+]
 
 [[tool.importlinter.contracts]]
 name = "Services never import each other"

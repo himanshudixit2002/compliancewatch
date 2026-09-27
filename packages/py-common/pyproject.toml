@@ -1,14 +1,18 @@
 [project]
 name = "py-common"
 version = "0.1.0"
-description = "ComplianceWatch shared runtime: settings, structured logging, health endpoints, FastAPI app factory"
+description = "ComplianceWatch shared runtime: settings, structured logging, health endpoints, FastAPI app factory, problem details"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.120",
   "pydantic>=2.11",
   "pydantic-settings>=2.10",
   "structlog>=25.4",
+  "domain-kernel",
 ]
+
+[tool.uv.sources]
+domain-kernel = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]
