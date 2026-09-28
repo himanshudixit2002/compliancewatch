@@ -4,13 +4,16 @@
 file, each with ``label_status: draft``. ``pipeline-label prepare`` fetches and parses the
 documents in an index and writes one case file per document: the clauses as the analyst reads
 them, and an ``expected`` block prefilled by the deterministic detector (document kind, change
-kind, references) with every model-dependent field left empty for a person. ``pipeline-label
-check`` reads every case, makes sure the expected block is a valid candidate that cites clauses
-in its own document and passes the validators, and reports how many cases are draft, reviewed
-and approved. Nothing here calls a model.
+kind, references) with every model-dependent field left empty for a person. With ``--record DIR``
+it also saves each fetched file as a replayable fixture, in the shape the CBIC site serves it.
+``pipeline-label check`` reads every case, makes sure the expected block is a valid candidate
+that cites clauses in its own document and passes the validators, and reports how many cases are
+draft, reviewed and approved. Nothing here calls a model.
 """
 
 import argparse
+import base64
+import json
 import re
 import sys
 from collections.abc import Mapping, Sequence
@@ -18,7 +21,6 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
-from uuid import UUID
 
 import yaml
 
@@ -29,8 +31,8 @@ from domain_kernel.documents import (
     DocumentType,
     ParsedDocument,
     RawDocument,
+    document_id_for,
 )
-from domain_kernel.ids import DocumentId
 from domain_kernel.protocols import DocumentParser, SourceAdapter
 from ontology import load as load_ontology
 from pipeline.application.detector import detect
@@ -65,10 +67,6 @@ class GoldenCase:
 
 def slug(text: str) -> str:
     return _SLUG.sub("-", text.casefold()).strip("-")
-
-
-def document_id_for(sha256: str) -> DocumentId:
-    return DocumentId(UUID(sha256[:32]))
 
 
 def write_index(
@@ -166,6 +164,19 @@ def prepare_case(
     return path
 
 
+def record_fixture(raw: RawDocument, directory: Path) -> Path:
+    """Save the fetched bytes as ``{"data": <base64>, "fileName": ...}``, the JSON the CBIC site
+    answers for ``/content/pdf/<fileName>``, under the file's own name plus ``.json``."""
+    marker = "/content/pdf/"
+    url = raw.ref.url
+    file_name = url.split(marker, 1)[1] if marker in url else url.rsplit("/", 1)[-1]
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{file_name.rsplit('/', 1)[-1]}.json"
+    wrapper = {"data": base64.b64encode(raw.content).decode("ascii"), "fileName": file_name}
+    path.write_text(json.dumps(wrapper) + "\n", encoding="utf-8")
+    return path
+
+
 def load_case(path: Path) -> GoldenCase:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
@@ -229,6 +240,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     prepare.add_argument("--index", type=Path, required=True)
     prepare.add_argument("--number", default=None, help="only this document number")
     prepare.add_argument("--limit", type=int, default=None)
+    prepare.add_argument(
+        "--record", type=Path, default=None, help="also save each fetched file as a fixture here"
+    )
     check = commands.add_parser("check", help="validate every case under a golden directory")
     check.add_argument("--golden", type=Path, default=Path("evals/golden/extraction"))
     args = parser.parse_args(argv)
@@ -245,11 +259,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stdout.write(f"{args.out}: {count} documents, all label_status draft\n")
         return 0
     if args.command == "prepare":
-        return _prepare(args.index, args.number, args.limit)
+        return _prepare(args.index, args.number, args.limit, args.record)
     return _check(args.golden)
 
 
-def _prepare(index_path: Path, number: str | None, limit: int | None) -> int:
+def _prepare(
+    index_path: Path, number: str | None, limit: int | None, record: Path | None = None
+) -> int:
     index = read_index(index_path)
     spec = SOURCES[str(index["source_key"])]
     parsers: list[DocumentParser] = [
@@ -279,6 +295,8 @@ def _prepare(index_path: Path, number: str | None, limit: int | None) -> int:
             except (UnparsedDocumentError, OSError) as exc:
                 sys.stdout.write(f"{entry.get('number')}: skipped ({exc})\n")
                 continue
+            if record is not None:
+                sys.stdout.write(f"{entry.get('number')}: recorded {record_fixture(raw, record)}\n")
             entry["case"] = str(path.relative_to(index_path.parent))
             done += 1
             sys.stdout.write(f"{entry.get('number')}: {entry['case']}\n")

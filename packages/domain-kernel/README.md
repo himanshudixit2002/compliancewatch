@@ -17,14 +17,14 @@ Design reference: Project Foundation guide, sections 6, 11 and 13.
 | Module | Contents |
 | --- | --- |
 | `errors` | `DomainError` family with stable problem type slugs (`type_uri`, `title`, `detail`) |
-| `ids` | `EntityId` and fourteen typed subclasses (`TenantId`, `BusinessId`, `RuleVersionId`, `CanonicalEntityId`, ...) |
+| `ids` | `EntityId` and its typed subclasses (`TenantId`, `BusinessId`, `RuleVersionId`, `CanonicalEntityId`, ...); `derive_id` for ids two services must compute alike (UUID version 5 under `ID_NAMESPACE`) |
 | `operators` | `Operator` enum with `symbol`; the ordered, multi-value and set operator groups |
 | `confidence` | `Confidence` in [0, 1], `REVIEW_THRESHOLD`, `CERTAIN` and `ZERO` |
 | `periods` | `EffectivePeriod`: half-open date range with `contains` and `overlaps` |
 | `identifiers` | `Pan` and `Gstin` (state code, PAN and entity code inside the GSTIN; check character not verified) |
 | `financial_year` | `FinancialYear`: India's April-to-March year (`2025-26`), `for_date`, `parse`, `previous`, `next` |
 | `recurrence` | `Frequency`, `Period`, `Recurrence`: the period a date falls in and the due date of each period for a monthly, quarterly or annual duty |
-| `citations` | `Citation`: clause reference, verbatim quote, verified flag |
+| `citations` | `Citation`: clause reference, verbatim quote, verified flag; `quote_match_ratio` / `quote_matches` (folded fuzzy match, threshold 0.85) and `evidence_tokens_missing` (numbers and month names a quote has and its clause lacks) |
 | `channels` | `Channel`: WhatsApp and email |
 | `dedupe` | `DedupeKey` and the notification key (rule version, business, channel) |
 | `ontology` | `AttributeType`, `AttributeSource`, `AttributeLevel`, `AttributeDefinition` (with `level` and `per_financial_year`), `Ontology`, `ALLOWED_OPERATORS` |
@@ -32,7 +32,7 @@ Design reference: Project Foundation guide, sections 6, 11 and 13.
 | `status` | `RuleVersionStatus`, `ObligationStatus`, `ClosureReason`, `TransitionTable`, the two tables |
 | `events` | `DomainEvent` envelope (`event_id`, `occurred_at`, `tenant_id`, `correlation_id`, `causation_id`) with the class-level `topic` and `schema_version` |
 | `profiles` | `ProfileSnapshot`: one version of a profile's attributes, with the financial year its per-year values are as of |
-| `documents` | `DocumentRef`, `DiscoveredDocument`, `RawDocument`, `Clause`, `ParsedDocument`, `RuleCandidate` |
+| `documents` | `DocumentRef`, `DiscoveredDocument`, `RawDocument`, `Clause`, `ParsedDocument` (with `parser_version`), `RuleCandidate`; `document_id_for(sha256)` and `clause_id_for(document_id, clause_ref)`, the ids every service derives the same way |
 | `rules` | `ObligationTemplate`, `RuleVersionSnapshot` (read model of a published version, with an optional `Recurrence`) |
 | `decisions` | `ApplicabilityDecision` |
 | `llm` | `CompletionRequest`, `CompletionResponse` |

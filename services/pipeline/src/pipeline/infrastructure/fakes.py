@@ -13,9 +13,12 @@ from domain_kernel.documents import (
     DocumentType,
     ParsedDocument,
     RawDocument,
+    document_id_for,
 )
 from domain_kernel.errors import InvariantViolationError
-from domain_kernel.ids import DocumentId, SourceId
+from domain_kernel.ids import SourceId
+
+PARSER_VERSION = "fake@1"
 
 SAMPLE_TEXT = (
     "Notification No. 17/2026 - Central Tax\n\n"
@@ -63,11 +66,11 @@ class FakePlainTextParser:
         clauses = tuple(
             Clause(clause_ref=f"p{index}", text=part) for index, part in enumerate(paragraphs, 1)
         )
-        digest = hashlib.sha256(doc.content).hexdigest()
         return ParsedDocument(
-            document_id=DocumentId(UUID(digest[:32])),
+            document_id=document_id_for(hashlib.sha256(doc.content).hexdigest()),
             doc_type=DocumentType.NOTIFICATION,
             title=paragraphs[0] if paragraphs else doc.ref.url,
             clauses=clauses,
             language="en",
+            parser_version=PARSER_VERSION,
         )

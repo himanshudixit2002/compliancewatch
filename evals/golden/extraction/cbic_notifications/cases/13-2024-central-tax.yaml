@@ -1,0 +1,53 @@
+case_id: 13-2024-central-tax
+label_status: draft
+labelled_by: ''
+reviewed_by: ''
+source:
+  source_key: cbic_notifications
+  number: 13/2024-Central Tax
+  title: Seeks to rescind Notification no. 27/2022-Central Tax dated 26.12.2022.
+  url: https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/central-tax-13-2024-11072024.pdf
+  published_at: '2024-07-10'
+  sha256: 388b3f5fcbbae188d74d6a06c3e7d14e4d6d32449beaecfd14d411be266327d0
+  fetched_at: '2026-09-28T14:52:41.502721+00:00'
+document:
+  doc_type: notification
+  language: en
+  title: '[TO BE PUBLISHED IN THE GAZETTE OF INDIA, EXTRAORDINARY, PART II, SECTION 3, SUB-SECTION (i)]'
+  clauses:
+  - ref: en.p1
+    page: 1
+    text: '[TO BE PUBLISHED IN THE GAZETTE OF INDIA, EXTRAORDINARY, PART II, SECTION 3, SUB-SECTION (i)]'
+  - ref: en.p2
+    page: 1
+    text: GOVERNMENT OF INDIA MINISTRY OF FINANCE (DEPARTMENT OF REVENUE) CENTRAL BOARD OF INDIRECT TAXES
+      AND CUSTOMS
+  - ref: en.p3
+    page: 1
+    text: NOTIFICATION No. 13/2024 – Central Tax
+  - ref: en.p4
+    page: 1
+    text: New Delhi, the 10th July, 2024 G.S.R. ......(E).— In pursuance of the powers conferred by sub
+      -rule (4B) of rule 8 of the Central Goods and Services Tax Rules, 2017, the Central Government,
+      on the recommendations of the Council, hereby rescinds the notification of the Government of India
+      in the Ministry of Finance, Department of Revenue, number 27/2022 - Central Tax, dated the 26 th
+      December, 2022 published vide number G.S.R 903(E), in the Gazette of India, Extraordinary, Part
+      II, Section 3, Sub -section (i), dated the 26 th December, 2022, except as respects things done
+      or omitted to be done before such rescission.
+  - ref: en.p5
+    page: 1
+    text: 2. This notification shall come into force from the date of its publication in Official Gazette.
+  - ref: en.p6
+    page: 1
+    text: '[F.No.CBIC-20006/21/2024-GST]'
+  - ref: en.p7
+    page: 1
+    text: (Raghavendra Pal Singh) Director
+detector:
+  doc_kind: notification
+  change_kind: withdrawal
+  references:
+  - 27/2022-central tax
+expected: null
+notes: Fill in expected as a candidate (see evals/golden/extraction/README.md); set label_status to reviewed
+  when done.

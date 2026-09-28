@@ -1,0 +1,97 @@
+case_id: 10-2025-central-tax
+label_status: draft
+labelled_by: ''
+reviewed_by: ''
+source:
+  source_key: cbic_notifications
+  number: 10/2025-Central Tax
+  title: Seeks to amend notification No. 02/2017-Central Tax.
+  url: https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/gst-ct-10-2025.pdf
+  published_at: '2025-03-13'
+  sha256: 2e16eb68a10da9ee819e7ff2ca3254c8fd000d112dbb1c5c7293a11710c548ae
+  fetched_at: '2026-09-28T14:52:38.418914+00:00'
+document:
+  doc_type: notification
+  language: en
+  title: '[To be published in the Gazette of India, Extraordinary, Part II, Section 3, Sub-section (i)]
+    Government of India Ministry of Finance (Department of Revenue) (Central Board of Indirect Taxes and
+    Custo'
+  clauses:
+  - ref: en.p1
+    page: 1
+    text: '[To be published in the Gazette of India, Extraordinary, Part II, Section 3, Sub-section (i)]
+      Government of India Ministry of Finance (Department of Revenue) (Central Board of Indirect Taxes
+      and Customs) Notification No. 10/2025 – Central Tax New Delhi, the 13th March, 2025 G.S.R.....(E).–
+      In exercise of the powers conferred by section 3 read with section 5 of the Central Goods and Services
+      Tax Act, 2017 (12 of 2017) and section 3 of the Integrated Goods and Services Tax Act, 2017 (13
+      of 2017), the Central Government, hereby makes the following further amendments in the notification
+      of the Government of India, in the Ministry of Finance (Department of Revenue), No. 02/2017-Central
+      Tax, published in the Gazette of India, Extraordinary, Part II, Section 3, Sub-section (i), vide
+      number G.S.R. 609(E), dated the 19th June, 2017, namely: - In the said notification, in Table, -'
+  - ref: en.p2
+    page: 1
+    text: '(i) for serial number 7 and the entries relating thereto, the following shall be substituted,
+      namely: - "7.  Alwar Districts of Alwar, Khairthal-Tijara, Kotputli-Behror, Bharatpur, Deeg, Dholpur,
+      Dausa, Karauli, Sawaimadhopur, Sikar and Jhunjhunu in the state of Rajasthan.";'
+  - ref: en.p3
+    page: 1
+    text: (ii) for serial number 23, and the entries relating thereto, the following shall be substituted,
+      namely:-
+  - ref: en.p4
+    page: 1
+    text: “23. Chennai Outer Districts of Viluppuram, Kallakurichi, Thiruvannamalai, Vellore, Tirupathur,
+      Ranipet, Tiruvallur, Kanchipuram, Chengalpattu and areas covered under Pallavaram Cantonment Board
+      excluding Chennai Corporation Zone Nos. I to XV (from Ward No. 1 to 200 in existence as on 01.04.2017)
+      and St. Thomas Mount Cantonment Board in the State of Tamil Nadu”;
+  - ref: en.p5
+    page: 1
+    text: '(iii) for serial number 49 and the entries relating thereto, the following shall be substituted,
+      namely: - “49.  Jaipur Districts of Jaipur, Ajmer, Beawer and Tonk in the state of Rajasthan.";'
+  - ref: en.p6
+    page: 1
+    text: '(iv) for serial number 53 and the entries relating thereto, the following shall be substituted,
+      namely: - "53.  Jodhpur Districts of Jodhpur, Phalodi, Nagaur, Didwana -Kuchaman, Pali, Sirohi,
+      Jalore, Barmer, Balotra, Jaisalmer, Bikaner, Churu, Ganganagar and Hanumangarh in the state of Rajasthan.";'
+  - ref: en.p7
+    page: 1
+    text: (v) for serial number 63, and the entries relating thereto, the following shall be substituted,
+      namely:-
+  - ref: en.p8
+    page: 1
+    text: “63. Madurai Districts of Madurai, Ramanathapuram, Sivagangai, Virudhunagar, Tuticorin, Tirunelveli,
+      Tenkasi, Kanyakumari, Theni, Dindigul (except D. Gudalur Village of Palayam Firka of Vedasandur
+      Taluk) in the State of Tamil Nadu.
+  - ref: en.p9
+    page: 1
+    text: The territorial waters and the seabed and sub soil underlying such waters from where the nearest
+      point of the appropriate baseline is located in the state of Tamil Nadu and the Union territory
+      of Puducherry.”;
+  - ref: en.p10
+    page: 2
+    text: (vi) for serial number 100 and the entries relating thereto, the following shall be substituted,
+      namely:-
+  - ref: en.p11
+    page: 2
+    text: “100. Tiruchirapalli Districts of Tiruchirappalli, Perambalur, Ariyalur, Karur, Pudukottai,
+      Thanjavur, Thiruvarur, Nagapattinam, Mayiladuthurai, Cuddalore, and D. Gudalur village of Palayam
+      Firka of Vedasandur Taluk of Dindigul District in the State of Tamil Nadu.”;
+  - ref: en.p12
+    page: 2
+    text: (vii) for serial number 102 and the entries relating thereto, the following shall be substituted,
+      namely:- "102.  Udaipur Districts of Udaipur, Salumbar, Rajsamand, Bhilwara, Chittorgarh, Pratapgarh,
+      Dungarpur, Banswara, Bundi, Baran, Kota and Jhalawar in the state of Rajasthan."; [F. No. CBIC-20016/8/2025-GST]
+  - ref: en.p13
+    page: 2
+    text: '(Raushan Kumar) Under Secretary to the Government of India. Note: - The principal notification
+      No. 02/2017-Central Tax, was published in the Gazette of India, Extraordinary, vide number G.S.R.
+      609(E), dated the 19 th June, 2017 and was last amended by notification No. 27/2024-Central Tax,
+      published in the Gazette of India, Extraordinary, vide number G.S.R. 729(E), dated the 25th November
+      2024.'
+detector:
+  doc_kind: notification
+  change_kind: amendment
+  references:
+  - 02/2017-central tax
+expected: null
+notes: Fill in expected as a candidate (see evals/golden/extraction/README.md); set label_status to reviewed
+  when done.

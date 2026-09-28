@@ -2,11 +2,11 @@
 
 Numbered ADRs, one file each. Titles and status for ADR-001 to ADR-011 come from the Project
 Foundation guide, section 21 (decision log); ADR-012 and ADR-013 come from the Architecture
-Reference v1.0, section 9.2 (decision log). ADR-001 to ADR-008 and ADR-012 to ADR-017 have their
+Reference v1.0, section 9.2 (decision log). ADR-001 to ADR-008 and ADR-012 to ADR-018 have their
 full text; ADR-009 to ADR-011 are stubs that keep the decision log's one-line rationale until
 they are written. ADR-014 (identity for the MVP), ADR-015 (recurring obligations and deadline
 changes) and ADR-016 (business hierarchy) record decisions of 2026-09-28; ADR-017 the KAG-style
-reasoning decision of the same day. A new ADR is required for every architectural decision and
+reasoning decision of the same day, and ADR-018 how the pipeline hands records to the rulebook. A new ADR is required for every architectural decision and
 for every breaking contract change (guide sections 4 and 14).
 
 - [ADR-001: Monorepo with one directory per service and a shared contracts package](ADR-001-monorepo-one-directory-per-service.md) (Accepted)
@@ -26,3 +26,4 @@ for every breaking contract change (guide sections 4 and 14).
 - [ADR-015: Recurring obligations are materialised per period; deadline changes reschedule open obligations](ADR-015-recurring-obligations-and-deadline-changes.md) (Proposed)
 - [ADR-016: Business hierarchy: legal entity (PAN), registration (GSTIN), location](ADR-016-business-hierarchy-pan-gstin-location.md) (Proposed)
 - [ADR-017: KAG-style reasoning over the rulebook in PostgreSQL](ADR-017-kag-style-reasoning.md) (Proposed)
+- [ADR-018: The pipeline hands regulatory records to the rulebook over its HTTP API](ADR-018-regulatory-records-through-the-rulebook-api.md) (Proposed)

@@ -25,13 +25,17 @@ src/pipeline/
     raw_store.py   # content-addressed raw file store (local disk; memory for tests)
     adapters/      # one SourceAdapter per regulator site; registry.py: keys, ids, doc types
     parsers/       # PdfParser (pypdf text layer), HtmlParser, language detection, clause split
-  workflows/       # Temporal workflows; ingest_document.py: discover, fetch, parse
+  workflows/       # Temporal workflows; ingest_document.py: discover, fetch, parse, register
+  application/knowledge_activities.py  # RegisterDocument: hand the parsed document to the rulebook
+  domain/knowledge.py, domain/ports.py # DocumentRecord and the KnowledgeSink port
+  infrastructure/rulebook_client.py    # HttpRulebook: the rulebook's write API as a KnowledgeSink
+  settings.py      # PipelineSettings: CW_PIPELINE_KNOWLEDGE_ENABLED, CW_RULEBOOK_URL, CW_RULEBOOK_WRITE_TOKEN
   backfill.py      # pipeline-backfill: list, fetch, store, parse and detect from the command line
   label.py         # pipeline-label: index, prepare and check golden extraction cases (make label)
   infrastructure/gateway.py  # GatewayProvider: the llm-gateway as the kernel's LLMProvider
   infrastructure/prompts.py  # loads prompts/<name>.v<version>.md; the registry holds its digest
 prompts/           # extraction.rule_candidate.v1.md (owner regulatory-intelligence)
-  testing.py       # FixtureTransport: replays tests/fixtures without the network
+  testing.py       # FixtureTransport (replays tests/fixtures), ScriptedProvider, MemoryRulebook
   worker.py        # python -m pipeline.worker: the Temporal worker on task queue "pipeline"
   main.py          # composition root: create_app(...) from py-common
 migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA)
@@ -63,6 +67,21 @@ http://localhost:8233 shows the run; with `CW_OTEL_ENDPOINT` set the activity sp
 Unit tests run the activities through `temporalio.testing.ActivityEnvironment`; the integration
 test runs the workflow on a local Temporal dev server (`make py-test-integration`).
 `docs/runbooks/temporal-worker.md` covers a stuck queue or a failed run.
+
+With `IngestRequest(knowledge=True, regulator="CBIC")` and `CW_PIPELINE_KNOWLEDGE_ENABLED=true`
+the workflow runs a fourth activity, `pipeline.register_document`: it parses the fetched bytes
+again and stores the document and its clauses in the rulebook through
+`PUT /v1/rulebook/documents/{id}` (ADR-018), then checks that the rulebook answered with the clause
+ids the kernel derives. The step sits behind `workflow.patched("kag-register-v1")`, so histories
+recorded before it replay unchanged. The flag is off by default (owner regulatory-intelligence;
+it goes when ADR-017 is accepted); off, the activity answers `skipped` without a call. With the
+flag on, the request must name the regulator. A registration that fails (a refused write, a
+rulebook outage longer than the retries) does not fail the ingest: the result says
+`registered=False` with the reason in `registration_error`. A different parse of stored bytes,
+which a parser change can cause, is refused and never retried; the stored clauses stay, since
+mentions and citations point into them. Bump the parser's `PARSER_VERSION` with any change that
+can alter clause text, so the refusal names both versions; what to do with stored documents
+after such a change is an open decision (ADR-018). Deploy the rulebook before the pipeline.
 
 ## Sources
 

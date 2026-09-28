@@ -40,7 +40,7 @@ documents:
   url: https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/gst-ct-17-2025.pdf
   published_at: '2025-10-18'
   label_status: draft
-  case: null
+  case: cases/17-2025-central-tax.yaml
 - number: 16/2025-Central Tax
   title: Seeks to notify clauses (ii), (iii) of section 121, section 122 to section 124 and section 126
     to 134 of Finance Act, 2025 to come into force.
@@ -53,7 +53,7 @@ documents:
   url: https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/centaltax-15-2025.pdf
   published_at: '2025-09-17'
   label_status: draft
-  case: null
+  case: cases/15-2025-central-tax.yaml
 - number: 14/2025-Central Tax
   title: Seeks to notify category of persons under section 54(6).
   url: https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/centaltax-14-2025.pdf
@@ -85,7 +85,7 @@ documents:
   url: https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/gst-ct-10-2025.pdf
   published_at: '2025-03-13'
   label_status: draft
-  case: null
+  case: cases/10-2025-central-tax.yaml
 - number: 09/2025-Central Tax
   title: Seeks to bring rules 2, 8, 24, 27, 32, 37, 38 of the CGST (Amendment) Rules, 2024 in to force
   url: https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/09-2025-ct-eng.pdf
@@ -261,7 +261,7 @@ documents:
   url: https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/central-tax-13-2024-11072024.pdf
   published_at: '2024-07-10'
   label_status: draft
-  case: null
+  case: cases/13-2024-central-tax.yaml
 - number: 12/2024-Central Tax
   title: Seeks to make amendments (Amendment, 2024) to the CGST Rules, 2017.
   url: https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/central-tax-12-2024-11072024.pdf

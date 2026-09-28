@@ -2,12 +2,19 @@ import base64
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 import yaml
 
-from domain_kernel.documents import DiscoveredDocument, DocumentRef, DocumentType, RawDocument
-from pipeline import label
+from domain_kernel.documents import (
+    DiscoveredDocument,
+    DocumentRef,
+    DocumentType,
+    RawDocument,
+    document_id_for,
+)
+from domain_kernel.ids import SourceId
 from pipeline.infrastructure.adapters import SOURCES
 from pipeline.infrastructure.fakes import FakeSourceAdapter
 from pipeline.infrastructure.parsers import PdfParser
@@ -19,6 +26,7 @@ from pipeline.label import (
     main,
     prepare_case,
     read_index,
+    record_fixture,
     slug,
     write_index,
 )
@@ -77,7 +85,7 @@ def test_prepare_case_writes_clauses_and_the_detector_prefill(tmp_path: Path) ->
     case = load_case(path)
     assert not case.is_labelled
     assert check_case(case) == []
-    assert str(case.document.document_id) == str(label.document_id_for(raw.sha256))
+    assert str(case.document.document_id) == str(document_id_for(raw.sha256))
 
 
 def test_the_committed_golden_cases_check_clean() -> None:
@@ -126,3 +134,24 @@ def test_load_case_rejects_bad_files(
 def test_check_command_on_the_repo_golden_set(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["check", "--golden", str(GOLDEN)]) == 0
     assert "50 indexed" in capsys.readouterr().out
+
+
+def test_record_fixture_saves_what_the_cbic_site_serves(tmp_path: Path) -> None:
+    ref = DocumentRef(
+        SourceId(UUID(int=2)),
+        "https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/n-1.pdf",
+    )
+    raw = RawDocument.from_bytes(ref, b"%PDF-1.7 bytes", "application/pdf")
+    path = record_fixture(raw, tmp_path / "cbic")
+    assert path == tmp_path / "cbic" / "n-1.pdf.json"
+    wrapper = json.loads(path.read_text(encoding="utf-8"))
+    assert wrapper["fileName"] == "tax_repository/gst/notifications/n-1.pdf"
+    assert base64.b64decode(wrapper["data"]) == b"%PDF-1.7 bytes"
+
+
+def test_record_fixture_names_other_urls_by_their_last_part(tmp_path: Path) -> None:
+    ref = DocumentRef(SourceId(UUID(int=2)), "https://example.invalid/a/b/notice.pdf")
+    raw = RawDocument.from_bytes(ref, b"x", "application/pdf")
+    path = record_fixture(raw, tmp_path)
+    assert path.name == "notice.pdf.json"
+    assert json.loads(path.read_text(encoding="utf-8"))["fileName"] == "notice.pdf"

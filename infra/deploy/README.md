@@ -50,7 +50,14 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_WHATSAPP_ENABLED`, `CW_WHATSAPP_PHONE_NUMBER_ID`, `CW_WHATSAPP_ACCESS_TOKEN` | - | - | - | - | env / secret / secret | - | - | - | - |
 | `CW_BILLING_PROVIDER`, `CW_RAZORPAY_*` | env / secret | - | - | - | - | - | - | - | - |
 | `CW_IDENTITY_STORE`, `CW_PROFILE_STORE`, `CW_PROFILE_GSTIN_LOOKUP` | env | env | - | - | - | - | - | - | - |
+| `CW_RULEBOOK_STORE` | - | - | env | - | - | - | - | - | - |
+| `CW_RULEBOOK_WRITE_TOKEN` | - | - | secret | - | - | - | secret | - | - |
+| `CW_PIPELINE_KNOWLEDGE_ENABLED`, `CW_RULEBOOK_URL` | - | - | - | - | - | - | env | - | - |
 | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_SEND_ENABLED`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `NOTIFICATION_API_URL` | - | - | - | - | - | - | - | - | secret / secret / env / secret / secret / env |
+
+The pipeline writes regulator documents to the rulebook (ADR-018), so deploy the rulebook before
+the pipeline and give both the same `CW_RULEBOOK_WRITE_TOKEN`; a rulebook without one refuses
+every write.
 
 Every service also reads `CW_ENV`, `CW_LOG_LEVEL` and `CW_LOG_JSON` (env). The tenant comes from
 the `x-tenant-id` header until Supabase Auth issues tokens (ADR-014): the MVP must sit behind

@@ -1,9 +1,10 @@
-"""A transport that answers from the recorded fixtures, for adapter tests and demos.
+"""Test doubles for adapter tests and demos: recorded sources, a scripted model, a rulebook.
 
 ``FixtureTransport`` maps a request to a file under ``tests/fixtures`` (or a literal body) and
 answers 404 for anything else, so a test that reaches an unrecorded URL fails loudly instead of
 touching the network. Routes are exact matches on method and URL; the CBIC listing routes also
-insist on the token header the real site wants.
+insist on the token header the real site wants. ``MemoryRulebook`` stands in for the rulebook's
+write API with the same rules: ids from the kernel, a different parse of stored bytes refused.
 """
 
 import json
@@ -13,7 +14,11 @@ from pathlib import Path
 
 import httpx2
 
+from domain_kernel.documents import ParsedDocument, clause_id_for
+from domain_kernel.ids import DocumentId
 from domain_kernel.llm import CompletionRequest, CompletionResponse
+from pipeline.domain.errors import RulebookConflictError
+from pipeline.domain.knowledge import DocumentRecord, RegisteredDocument
 
 Responder = Callable[[httpx2.Request], httpx2.Response]
 
@@ -24,6 +29,16 @@ GSTCOUNCIL = "https://gstcouncil.gov.in"
 GSTN = "https://www.gst.gov.in"
 MAHAGST = "https://mahagst.gov.in"
 EMPTY_TABLE = "<html><body><table><tbody></tbody></table></body></html>"
+CBIC_PDF = f"{CBIC}/content/pdf/tax_repository/gst/notifications/"
+RECORDED_NOTIFICATIONS: Mapping[str, str] = {
+    "01/2026-Central Tax": "gst-ct-01-2026.pdf",
+    "17/2025-Central Tax": "gst-ct-17-2025.pdf",
+    "15/2025-Central Tax": "centaltax-15-2025.pdf",
+    "10/2025-Central Tax": "gst-ct-10-2025.pdf",
+    "13/2024-Central Tax": "central-tax-13-2024-11072024.pdf",
+}
+"""The CBIC notifications recorded in English, by number, with the file name under ``CBIC_PDF``;
+the fixture is ``cbic/<file name>.json``. 01/2026 is also recorded in Hindi."""
 
 
 @dataclass
@@ -83,13 +98,8 @@ def recorded_sources(fixtures: Path) -> FixtureTransport:
     circulars = f"{CBIC_CIRCULARS}?year={{year}}&page={{page}}{query}Circulars%20CGST"
     transport.cbic_listing(circulars.format(year=2026, page=0), "cbic/circulars-2026-p0.json")
     transport.cbic_listing(circulars.format(year=2026, page=1), None)
-    pdf = f"{CBIC}/content/pdf/tax_repository/gst/notifications/"
-    transport.file(
-        "GET", pdf + "gst-ct-01-2026.pdf", "cbic/gst-ct-01-2026.pdf.json", "application/json"
-    )
-    transport.file(
-        "GET", pdf + "gst-ct-01h-2026.pdf", "cbic/gst-ct-01h-2026.pdf.json", "application/json"
-    )
+    for name in ("gst-ct-01h-2026.pdf", *RECORDED_NOTIFICATIONS.values()):
+        transport.file("GET", CBIC_PDF + name, f"cbic/{name}.json", "application/json")
     archive = f"{GSTCOUNCIL}/archive-press-release?page={{page}}"
     transport.file(
         "GET", archive.format(page=0), "gstcouncil/archive-press-release-page0.html", "text/html"
@@ -126,3 +136,32 @@ class ScriptedProvider:
         self.requests.append(req)
         text = self._answers.get(req.metadata.get("document_id", ""), self._default)
         return CompletionResponse(text=text, model=self.MODEL, input_tokens=0, output_tokens=0)
+
+
+class MemoryRulebook:
+    """A ``KnowledgeSink`` in memory. ``records`` keeps every stored document by id."""
+
+    def __init__(self) -> None:
+        self.records: dict[DocumentId, DocumentRecord] = {}
+        self.calls = 0
+
+    def register_document(self, record: DocumentRecord) -> RegisteredDocument:
+        self.calls += 1
+        document = record.document
+        stored = self.records.get(document.document_id)
+        if stored is not None and _clauses(stored.document) != _clauses(document):
+            raise RulebookConflictError(f"409: document {document.document_id} differs")
+        if stored is None:
+            self.records[document.document_id] = record
+        return RegisteredDocument(
+            document_id=document.document_id,
+            created=stored is None,
+            clause_ids={
+                clause.clause_ref: clause_id_for(document.document_id, clause.clause_ref)
+                for clause in document.clauses
+            },
+        )
+
+
+def _clauses(document: ParsedDocument) -> list[tuple[str, str, int | None]]:
+    return [(c.clause_ref, c.text, c.page) for c in document.clauses]

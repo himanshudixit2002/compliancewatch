@@ -1,11 +1,18 @@
 """HTML into clauses: the visible text of paragraphs, list items, headings and table cells."""
 
 from html.parser import HTMLParser
-from uuid import UUID
 
-from domain_kernel.documents import Clause, DocumentType, ParsedDocument, RawDocument
-from domain_kernel.ids import DocumentId
+from domain_kernel.documents import (
+    Clause,
+    DocumentType,
+    ParsedDocument,
+    RawDocument,
+    document_id_for,
+)
 from pipeline.infrastructure.parsers.text import LANGUAGE_BILINGUAL, renumber, split_clauses
+
+PARSER_VERSION = "html@1"
+"""Bump when a change can alter the clause text or refs this parser gives for the same bytes."""
 
 _BLOCKS = {"title", "p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "td", "th", "div", "br", "tr"}
 _SKIP = {"script", "style"}
@@ -54,11 +61,12 @@ class HtmlParser:
             clauses = renumber(split_clauses(doc.ref.url))
         languages = {clause.language for clause in clauses}
         return ParsedDocument(
-            document_id=DocumentId(UUID(doc.sha256[:32])),
+            document_id=document_id_for(doc.sha256),
             doc_type=self._doc_type,
             title=clauses[0].text[:200],
             clauses=tuple(
                 Clause(clause_ref=clause.ref, text=clause.text, page=None) for clause in clauses
             ),
             language=languages.pop() if len(languages) == 1 else LANGUAGE_BILINGUAL,
+            parser_version=PARSER_VERSION,
         )

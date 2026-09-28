@@ -28,9 +28,9 @@ Two gaps remain. There is no canonical identity for the entities regulator text 
 "Notification 17/2026-Central Tax", "Notfn. No. 17/2026-CT" and "17/2026" are the same
 notification, and today nothing says so, so joins over mention text miss or double count. There
 is also no typed store for the relations between rules and those entities: supersedes, amends,
-refers to, exempts, extends a deadline. Supersession exists as a rule-version status and a
-supersedes link between rule versions, and as a link between documents, but without an evidence
-clause and without the other relation kinds. A question that needs two or three hops with a
+refers to, exempts, extends a deadline, corrects, withdraws. Supersession exists only as a
+rule-version status and as fields of the `rule.published` and `rule.superseded` events, without
+an evidence clause and without the other relation kinds. A question that needs two or three hops with a
 date or a threshold in the middle has no place to execute deterministically. Hybrid RAG returns
 clauses; it does not follow a chain.
 
@@ -43,9 +43,10 @@ and qa services behind the existing service boundaries.
 Schema-constrained facts. The vocabulary is fixed in the domain kernel: the ontology attributes,
 the rule model (rule, rule version, predicate, obligation template) and ten entity types:
 notification, circular, section, rule, form, hsn_code, sac_code, tax_rate, threshold, state.
-Relations between rules and entities use five kinds: supersedes, amends, refers_to, exempts,
-extends_deadline. The kernel checks the pairing: supersedes and extends_deadline target a rule
-version; the other three target a rule version or an entity. The database repeats the vocabulary
+Relations between rules and entities use seven kinds: supersedes, amends, refers_to, exempts,
+extends_deadline, corrects and withdraws (corrects and withdraws since ADR-015). The kernel checks
+the pairing: supersedes, extends_deadline, corrects and withdraws target a rule version; amends,
+refers_to and exempts target a rule version or an entity. The database repeats the vocabulary
 and the pairing, target-coupling and self-relation rules as check constraints; the kernel
 validates the vocabulary, pairing and self-relation rules for every writer, while the entity-id
 coupling is a database-only rule until alignment resolves the reference.
@@ -53,9 +54,11 @@ coupling is a database-only rule until alignment resolves the reference.
 Mutual index. Text to fact: the `clause_entity` table records which canonical entity a clause
 mentions and where in the clause text (span start and end). Fact to text: every row in
 `rule_relation` carries the `clause_id` of the clause that is evidence for the relation, next to
-the existing citations from rule versions to clauses. Both directions are plain foreign keys once
-the clause and rule version tables exist; until then the columns are uuids and the table comments
-say so.
+the citations from rule versions to clauses in the `citation` table. Both directions are plain
+foreign keys: rulebook migration 0004 created `document`, `clause` and `citation` and gave
+`clause_entity` and `rule_relation` their foreign keys to `clause` and `rule_version`. A clause's
+id is derived from its document's digest and its ref (`domain_kernel.documents.clause_id_for`), so
+the pipeline, the rulebook and the vector index agree on it without asking each other.
 
 Logical-form planner and deterministic solver. In the qa service, after the structured layer and
 before hybrid RAG, a planner prompt turns the question into a plan drawn from a closed operator
@@ -75,9 +78,10 @@ against the table; a mention that does not resolve goes to the review queue rath
 a new entity on its own.
 
 Rollout. The planner and solver sit behind the `qa.kag_enabled` flag, default off, with
-per-tenant targeting. The tables and the extraction stage ship first and are additive. As of
-this record, the kernel vocabulary (`domain_kernel.knowledge`) and the three tables (rulebook
-migration 0001) exist; the extraction stage, the planner and the solver follow.
+per-tenant targeting. The tables and the extraction stage ship first and are additive. The
+kernel vocabulary (`domain_kernel.knowledge`) and the knowledge tables exist (rulebook migrations
+0001 to 0004; documents, clauses and citations since 0004), and parsed documents reach the
+rulebook through its API (ADR-018). The extraction stage, the planner and the solver follow.
 
 ## Alternatives considered
 

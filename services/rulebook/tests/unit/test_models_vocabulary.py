@@ -9,9 +9,13 @@ import re
 
 from sqlalchemy import CheckConstraint
 
+from domain_kernel.documents import PARSER_VERSION_PATTERN, DocumentType
 from domain_kernel.knowledge import RULE_VERSION_KIND, RULE_VERSION_ONLY, EntityType, RelationKind
+from rulebook.domain.documents import CLAUSE_REF_PATTERN
 from rulebook.infrastructure.models import (
+    DOCUMENT_TYPES,
     ENTITY_TYPES,
+    MENTION_METHODS,
     RELATION_KINDS,
     RULE_VERSION_ONLY_RELATIONS,
     RULE_VERSION_TARGET,
@@ -79,9 +83,32 @@ def test_pairing_target_and_self_checks_repeat_the_kernel_rules() -> None:
     not_self = _check("rule_relation", "ck_rule_relation_not_self")
     assert not_self == ("NOT (to_kind = 'rule_version' AND to_ref = from_rule_version_id::text)")
 
+    target_version = _check("rule_relation", "ck_rule_relation_target_version")
+    assert target_version == (
+        "((to_kind = 'rule_version') = (to_rule_version_id IS NOT NULL))"
+        " AND (to_rule_version_id IS NULL OR to_ref = to_rule_version_id::text)"
+    )
+
+
+def test_document_and_clause_checks_follow_the_kernel() -> None:
+    assert tuple(kind.value for kind in DocumentType) == DOCUMENT_TYPES
+    doc_type = _check("document", "ck_document_doc_type")
+    assert QUOTED.findall(doc_type) == list(DOCUMENT_TYPES)
+    assert PARSER_VERSION_PATTERN in _check("document", "ck_document_parser_version")
+    assert CLAUSE_REF_PATTERN in _check("clause", "ck_clause_clause_ref")
+    assert QUOTED.findall(_check("clause_entity", "ck_clause_entity_method")) == list(
+        MENTION_METHODS
+    )
+
+
+def test_citation_verification_needs_a_passing_score() -> None:
+    verified = _check("citation", "ck_citation_verified")
+    assert "verified_at IS NOT NULL" in verified
+    assert "match_score >= 0.85" in verified
+
 
 def test_every_check_is_named() -> None:
-    for table in ("canonical_entity", "clause_entity", "rule_relation"):
+    for table in Base.metadata.tables:
         for constraint in Base.metadata.tables[table].constraints:
             if isinstance(constraint, CheckConstraint):
                 assert isinstance(constraint.name, str)

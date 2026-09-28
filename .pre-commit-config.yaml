@@ -15,7 +15,8 @@ repos:
         args: [--allow-multiple-documents]
         exclude: ^infra/helm/.*/templates/ # Go-templated YAML is not valid YAML
       - id: check-added-large-files
-        args: [--maxkb=500]
+        # Recorded regulator PDFs are stored as base64 JSON and reach about 500 KB.
+        args: [--maxkb=600]
       - id: check-merge-conflict
 
   # Python (ruff config lives in the root pyproject.toml)
