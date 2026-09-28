@@ -46,6 +46,16 @@ Row-level security binds only non-superuser roles; see the obligation service RE
 dev-stack caveat. Settings: `CW_PROFILE_STORE` (`postgres` default, `memory`),
 `CW_PROFILE_EVAL_CASES_PATH` (empty keeps the eval seed in the review task only).
 
+## GSTIN lookup
+
+`POST /v1/profile/registrations/{id}/prefill` asks the `GstinLookupProvider` for the
+registration's GSTIN and stores what comes back as attribute values with source
+`gstin_lookup` (registration type, GSTIN status, constitution, registered since). With no
+provider (`CW_PROFILE_GSTIN_LOOKUP=manual`, the default) the person proceeds manually and a
+`verify_registration` review task is opened once per registration; `static` serves a made-up
+demo table. A real provider (GSTN through a GSP, or an aggregator) is an account the
+maintainer opens; it plugs in behind the protocol in `domain/lookup.py`.
+
 ## Layout
 
 ```

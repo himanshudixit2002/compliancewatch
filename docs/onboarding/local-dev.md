@@ -68,6 +68,12 @@ gateway with the fake provider; no tokens, no network) and writes `evals/reports
 `make label ARGS="check"` validates the golden extraction cases; `make label ARGS="prepare ..."`
 fetches documents for analysts to label (see `evals/golden/extraction/README.md`).
 
+Flags for the pieces that need an external account, all off by default in `.env.example`:
+`CW_WHATSAPP_ENABLED` (notification channel), `WHATSAPP_SEND_ENABLED` (the bot's replies),
+`CW_BILLING_PROVIDER` (identity billing; `memory` for a demo), `CW_PROFILE_GSTIN_LOOKUP`
+(`static` for the demo table). `pnpm --filter whatsapp-bot dev` runs the bot on 8080 against
+the notification service on 8006.
+
 ## Profiles
 
 `make migrate SERVICE=profile` then `make run SERVICE=profile`; every call needs an

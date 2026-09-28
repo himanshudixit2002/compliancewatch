@@ -20,7 +20,11 @@
 > Maharashtra GST notifications) with PDF and HTML parsers, a change detector, a backfill command
 > and recorded fixtures, the rule extractor with deterministic validators behind the gateway, the
 > labelling tool and the first extraction golden set (50 CBIC notifications listed, one draft
-> label), the eval harness with `make eval`, a CI gate and a nightly run, OpenTelemetry tracing
+> label), the eval harness with `make eval`, a CI gate and a nightly run, the WhatsApp bot with
+> signature checks, keyword opt-in and opt-out and Hindi replies, the notification service's
+> preferences, quiet hours, template drafts and Cloud API channel behind a flag, consent records
+> in the identity service with the legal drafts in `docs/legal`, the GSTIN lookup protocol with
+> the manual fallback, the billing protocol with a Razorpay skeleton behind a flag, OpenTelemetry tracing
 > and metrics with a dev observability stack (collector, Prometheus, Tempo, Grafana dashboard),
 > pnpm + Turborepo workspace with the Next.js web app and
 > the WhatsApp bot, Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 008
@@ -97,6 +101,7 @@ compliancewatch/
     helm/                    # One chart per service, values per environment
     argocd/                  # Application definitions
     dev/                     # Docker Compose dev-stack assets (init SQL, Temporal dynamic config, collector, Prometheus, Tempo, Grafana)
+  docs/legal/                # Draft privacy notice, terms, WhatsApp consent, data map, consent record (to be reviewed by a lawyer)
   evals/
     golden/                  # Golden sets: extraction/cbic_notifications (index + cases), qa/, applicability/
     harness/                 # Workspace package cw_evals: runner, metrics, thresholds (make eval)
@@ -214,6 +219,8 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 ## Not in this repository yet
 
 - Terraform staging cluster and Keycloak (the gateway trusts an `x-tenant-id` header until then)
+- Accounts the maintainer opens: the Meta WhatsApp business account (bot and channel stay in logging mode), Razorpay (billing answers 503), a GSTIN lookup provider (every registration gets a verify task), Supabase Auth; the legal drafts need a lawyer before onboarding shows them
+- Postgres tables for notification preferences and the sent log (in memory now); the email channel (SES)
 - A service that writes to the outbox (the writer, relay and consumer exist in py-common; the first producer adds the `outbox_event` migration)
 - Alert rules and the runbook links from alerts (the dashboard exists; alerting arrives with the deployment work)
 - The ingest workflow wired to the real adapters and the outbox (the adapters, parsers and detector exist and run from `make backfill`; the workflow still runs on the in-memory fakes); OCR for scanned PDFs

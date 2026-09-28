@@ -25,7 +25,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 LEVELS: Final[tuple[str, ...]] = ("entity", "registration", "location")
 STATES: Final[tuple[str, ...]] = ("known", "unsure", "not_applicable")
 SOURCES: Final[tuple[str, ...]] = ("gstin_lookup", "user_input", "derived")
-REASONS: Final[tuple[str, ...]] = ("not_applicable", "confirm_financial_year")
+REASONS: Final[tuple[str, ...]] = (
+    "not_applicable",
+    "confirm_financial_year",
+    "verify_registration",
+)
 TENANT_SETTING: Final[str] = "app.tenant_id"
 TENANT_TABLES: Final[tuple[str, ...]] = (
     "profile_node",
