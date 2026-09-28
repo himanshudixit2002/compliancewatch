@@ -34,6 +34,7 @@ from rulebook.domain.review import (
     MentionDecision,
     MentionGroup,
     Resolution,
+    ReviewQueueStats,
     ReviewStatus,
 )
 
@@ -73,6 +74,18 @@ class ListGroupItems:
     def run(self, entity_type: EntityType, proposed_name: str) -> tuple[EntityReviewItem, ...]:
         with self._unit_of_work() as uow:
             return uow.reviews.group_items(entity_type, proposed_name)[:MAX_PAGE]
+
+
+class ReadReviewQueueStats:
+    """How many mentions wait for an analyst, per entity type, and since when: the numbers
+    behind the review queue alerts."""
+
+    def __init__(self, unit_of_work: KnowledgeUnitOfWorkFactory) -> None:
+        self._unit_of_work = unit_of_work
+
+    def run(self) -> ReviewQueueStats:
+        with self._unit_of_work() as uow:
+            return uow.reviews.queue_stats()
 
 
 class DecideMentionGroup:

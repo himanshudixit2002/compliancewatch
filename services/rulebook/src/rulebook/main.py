@@ -2,7 +2,8 @@
 
 Guide section 11: wiring of interfaces to implementations happens here, never inside the layers.
 The engine behind the Postgres store connects lazily, so importing the module (``make openapi``)
-needs no database.
+needs no database. With telemetry on, the entity review queue gauges are registered on the
+app's meter provider.
 """
 
 from collections.abc import Callable
@@ -11,7 +12,9 @@ from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
 from domain_kernel.errors import DomainError, InvalidRelationError, InvalidTransitionError
+from domain_kernel.events import utc_now
 from py_common.app import create_app
+from py_common.telemetry import Telemetry
 from rulebook import __version__
 from rulebook.api.router import router
 from rulebook.application.alignment import AlignMentions
@@ -39,7 +42,12 @@ from rulebook.application.relations import (
     RejectRelationCandidate,
     StageRelationCandidates,
 )
-from rulebook.application.review import DecideMentionGroup, ListGroupItems, ListMentionGroups
+from rulebook.application.review import (
+    DecideMentionGroup,
+    ListGroupItems,
+    ListMentionGroups,
+    ReadReviewQueueStats,
+)
 from rulebook.application.rule_versions import ListCitations, ListRulesInForce, ReadRuleVersion
 from rulebook.application.search import ListUnembeddedClauses, SearchClauses, StoreEmbeddings
 from rulebook.domain.errors import (
@@ -78,6 +86,7 @@ from rulebook.domain.errors import (
 from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
 from rulebook.infrastructure.knowledge_repository import PostgresKnowledgeUnitOfWorkFactory
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
+from rulebook.infrastructure.review_metrics import register_review_queue_gauges
 from rulebook.settings import RulebookSettings
 from rulebook.wiring import Wiring
 
@@ -171,6 +180,19 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
     )
 
 
+def install_review_metrics(app: FastAPI, wiring: Wiring) -> bool:
+    """Register the review queue gauges when telemetry is on; whether it did."""
+    telemetry: Telemetry = app.state.telemetry
+    if not telemetry.enabled or telemetry.meter_provider is None:
+        return False
+    register_review_queue_gauges(
+        ReadReviewQueueStats(wiring.unit_of_work).run,
+        utc_now,
+        telemetry.meter_provider.get_meter(SERVICE_NAME, __version__),
+    )
+    return True
+
+
 def build_app(settings: RulebookSettings | None = None) -> FastAPI:
     settings = settings or RulebookSettings(service_name=SERVICE_NAME)
     wiring = build_wiring(settings)
@@ -183,6 +205,7 @@ def build_app(settings: RulebookSettings | None = None) -> FastAPI:
         problem_status=PROBLEM_STATUS,
     )
     app.state.wiring = wiring
+    install_review_metrics(app, wiring)
     return app
 
 

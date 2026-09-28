@@ -89,8 +89,12 @@ rules. `tests/unit/test_models_vocabulary.py` pins the trigger's literal pairs t
 | `POST /v1/rulebook/rule-versions/{id}/withdraw` | Published to withdrawn with `rule.withdrawn` (no withdrawing version, effective today). Needs the token and the flag |
 | `POST /v1/rulebook/maintenance/transitions` | The daily sweep, `{as_of?}` (today in India when empty, never later); returns the versions it moved and the events. Needs the token and the flag |
 
-Nothing is aligned by fuzzy matching and nothing is created without an analyst (ADR-017). The
-queue has no alert yet: someone in Regulatory Intelligence has to watch it.
+Nothing is aligned by fuzzy matching and nothing is created without an analyst (ADR-017). With
+telemetry on, the service reports the gauges `rulebook_entity_review_open_items{entity_type}` and
+`rulebook_entity_review_oldest_open_age_seconds` (read at most once a minute), and two ticket
+alerts watch the queue: `EntityReviewQueueStale` when the oldest open item has waited more than
+48 hours, and `EntityReviewQueueBacklog` when more than 500 items stay open for 6 hours
+(`docs/runbooks/entity-review-queue.md`).
 
 The read routes need no token. A superseded version stays in force for the dates before its
 replacement took effect, so a question about a past date is answered from the version in force
@@ -199,13 +203,13 @@ src/rulebook/
   api/             # routers (documents, review, rule_versions, publication, graph, search), request/response schemas, the write-token dependency
   application/     # use cases: documents.py, alignment.py, review.py, relations.py, rule_versions.py, publication.py, graph.py, search.py; seed_loader.py
   domain/          # documents.py, alignment.py, review.py, relations.py, rule_versions.py, publication.py (the planner), events.py, graph.py, search.py, runs.py, ids.py, errors.py, repository.py, seed.py
-  infrastructure/  # models.py (with the Vector column type), knowledge_repository.py (Postgres unit of work and outbox sink), memory.py, seed_repository.py
+  infrastructure/  # models.py (with the Vector column type), knowledge_repository.py (Postgres unit of work and outbox sink), memory.py, seed_repository.py, review_metrics.py (the review queue gauges)
   settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN, CW_RULEBOOK_PUBLISH_ENABLED
   testing.py       # rulebook_settings() for tests and demos: memory store, known token
   wiring.py        # what the api layer gets from the composition root
   seed.py          # rulebook-seed command
   transitions.py   # rulebook-transitions command (the daily sweep)
-  main.py          # composition root: build_app(settings), store selection, problem statuses
+  main.py          # composition root: build_app(settings), store selection, problem statuses, the review queue gauges when telemetry is on
 seed/gst_calendar.yaml   # the seed calendar
 migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and targets models.Base.metadata
   versions/20260928_0001_knowledge_schema.py   # hand-written, mirrors models.py

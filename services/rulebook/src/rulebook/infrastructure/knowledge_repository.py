@@ -20,7 +20,7 @@ same rules as the use cases.
 
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any, Self
 from uuid import UUID
@@ -92,6 +92,7 @@ from rulebook.domain.review import (
     EntityReviewItem,
     MentionGroup,
     Resolution,
+    ReviewQueueStats,
     ReviewStatus,
 )
 from rulebook.domain.rule_versions import IN_FORCE_STATUSES, CitationRecord, RuleVersionRecord
@@ -423,6 +424,18 @@ class SqlAlchemyReviewRepository:
                 decided_at=item.decided_at,
                 note=item.note,
             )
+        )
+
+    def queue_stats(self) -> ReviewQueueStats:
+        statement = (
+            select(EntityReviewRow.entity_type, func.count(), func.min(EntityReviewRow.created_at))
+            .where(EntityReviewRow.status == ReviewStatus.OPEN.value)
+            .group_by(EntityReviewRow.entity_type)
+        )
+        rows = self._session.execute(statement).all()
+        return ReviewQueueStats(
+            by_type={EntityType(entity_type): int(count) for entity_type, count, _ in rows},
+            oldest_open_at=min((oldest.astimezone(UTC) for _, _, oldest in rows), default=None),
         )
 
 

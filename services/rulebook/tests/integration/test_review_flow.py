@@ -1,5 +1,6 @@
 """The knowledge use cases on the Postgres unit of work, from a registered document to an
-approved rule relation, plus the checks migration 0005 adds. Needs Docker."""
+approved rule relation, plus the checks migration 0005 adds and the review queue numbers.
+Needs Docker."""
 
 import hashlib
 from collections.abc import Iterator
@@ -29,11 +30,21 @@ from rulebook.application.relations import (
     StageRelationCandidates,
     SubmittedCandidate,
 )
-from rulebook.application.review import DecideMentionGroup, ListMentionGroups
+from rulebook.application.review import (
+    DecideMentionGroup,
+    ListMentionGroups,
+    ReadReviewQueueStats,
+)
+from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.documents import StoredDocument
 from rulebook.domain.errors import SupersessionCycleError
 from rulebook.domain.relations import CandidateRejectReason, CandidateStatus
-from rulebook.domain.review import EntityRejectReason, MentionDecision, Resolution
+from rulebook.domain.review import (
+    EntityRejectReason,
+    EntityReviewItem,
+    MentionDecision,
+    Resolution,
+)
 from rulebook.infrastructure.knowledge_repository import PostgresKnowledgeUnitOfWorkFactory
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
@@ -340,3 +351,49 @@ def test_unqualified_mentions_and_late_alignment_on_postgres(
             text("SELECT to_ref FROM rule_relation WHERE candidate_id = :id"), {"id": candidate_id}
         ).scalar_one()
     assert to_ref == "39@cgst-act"
+
+
+def test_queue_stats_count_open_items_by_type_and_find_the_oldest(
+    factory: PostgresKnowledgeUnitOfWorkFactory,
+) -> None:
+    before = ReadReviewQueueStats(factory).run()
+    clause = clause_id_for(DOC, "en.p1")
+    circulars = [
+        EntityReviewItem(
+            review_id=uuid4(),
+            document_id=DOC,
+            clause_id=clause,
+            entity_type=EntityType.CIRCULAR,
+            mention_text="NOTIFICATION",
+            span_start=start,
+            span_end=start + 1,
+            proposed_name=f"c{start}",
+            reason=ReviewReason.NO_MATCH,
+            extractor="grammar@1",
+        )
+        for start in (0, 1)
+    ]
+    with factory() as uow:
+        assert all(uow.reviews.enqueue(item) for item in circulars)
+    long_ago = datetime(2020, 1, 1, tzinfo=UTC)
+    with factory.engine.begin() as connection:
+        connection.execute(
+            text("UPDATE entity_review SET created_at = :at WHERE id = :id"),
+            {"at": long_ago, "id": circulars[0].review_id},
+        )
+
+    stats = ReadReviewQueueStats(factory).run()
+    others: dict[EntityType, int] = {
+        t: n for t, n in before.by_type.items() if t is not EntityType.CIRCULAR
+    }
+    assert stats.by_type == {**others, EntityType.CIRCULAR: 2}
+    assert stats.oldest_open_at == long_ago
+
+    with factory() as uow:
+        uow.reviews.save(
+            circulars[0].reject(EntityRejectReason.OUT_OF_SCOPE, decided_by="analyst", at=NOW)
+        )
+    stats = ReadReviewQueueStats(factory).run()
+    assert stats.by_type == {**others, EntityType.CIRCULAR: 1}
+    assert stats.oldest_open_at is not None
+    assert stats.oldest_open_at > long_ago, "a decided item no longer counts"

@@ -12,7 +12,7 @@ import copy
 import math
 import re
 import threading
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
@@ -50,7 +50,12 @@ from rulebook.domain.publication import (
 )
 from rulebook.domain.relations import CandidateStatus, RelationCandidate
 from rulebook.domain.repository import KnowledgeUnitOfWork
-from rulebook.domain.review import EntityReviewItem, MentionGroup, ReviewStatus
+from rulebook.domain.review import (
+    EntityReviewItem,
+    MentionGroup,
+    ReviewQueueStats,
+    ReviewStatus,
+)
 from rulebook.domain.rule_versions import (
     IN_FORCE_STATUSES,
     CitationRecord,
@@ -125,6 +130,7 @@ class _Tables:
         default_factory=dict
     )
     reviews: dict[UUID, EntityReviewItem] = field(default_factory=dict)
+    queued_at: dict[UUID, datetime] = field(default_factory=dict)
     candidates: dict[UUID, RelationCandidate] = field(default_factory=dict)
     relations: dict[UUID, tuple[RuleRelation, UUID | None]] = field(default_factory=dict)
     rules: dict[str, _Rule] = field(default_factory=dict)
@@ -270,13 +276,15 @@ class MemoryMentionRepository:
 
 
 class MemoryReviewRepository:
-    def __init__(self, tables: _Tables) -> None:
+    def __init__(self, tables: _Tables, clock: Callable[[], datetime] = utc_now) -> None:
         self._tables = tables
+        self._clock = clock
 
     def enqueue(self, item: EntityReviewItem) -> bool:
         if item.review_id in self._tables.reviews:
             return False
         self._tables.reviews[item.review_id] = item
+        self._tables.queued_at[item.review_id] = self._clock()
         return True
 
     def open_groups(
@@ -330,6 +338,17 @@ class MemoryReviewRepository:
 
     def save(self, item: EntityReviewItem) -> None:
         self._tables.reviews[item.review_id] = item
+
+    def queue_stats(self) -> ReviewQueueStats:
+        by_type: dict[EntityType, int] = {}
+        queued: list[datetime] = []
+        for item in self._tables.reviews.values():
+            if item.status is not ReviewStatus.OPEN:
+                continue
+            by_type[item.entity_type] = by_type.get(item.entity_type, 0) + 1
+            if item.review_id in self._tables.queued_at:
+                queued.append(self._tables.queued_at[item.review_id])
+        return ReviewQueueStats(by_type, min(queued, default=None))
 
 
 class MemoryCandidateRepository:
@@ -824,11 +843,11 @@ class MemoryRunRepository:
 
 
 class MemoryUnitOfWork:
-    def __init__(self, tables: _Tables) -> None:
+    def __init__(self, tables: _Tables, clock: Callable[[], datetime] = utc_now) -> None:
         self._documents = MemoryDocumentRepository(tables)
         self._entities = MemoryEntityRepository(tables)
         self._mentions = MemoryMentionRepository(tables)
-        self._reviews = MemoryReviewRepository(tables)
+        self._reviews = MemoryReviewRepository(tables, clock)
         self._candidates = MemoryCandidateRepository(tables)
         self._relations = MemoryRelationRepository(tables)
         self._rules = MemoryRuleCatalog(tables)
@@ -888,11 +907,13 @@ class MemoryUnitOfWork:
 
 
 class MemoryKnowledgeStore:
-    """``store()`` opens a unit of work on a copy of the tables; a clean exit publishes it."""
+    """``store()`` opens a unit of work on a copy of the tables; a clean exit publishes it.
+    ``clock`` stamps review items when they are queued, as ``created_at`` does in Postgres."""
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Callable[[], datetime] = utc_now) -> None:
         self._tables = _Tables()
         self._lock = threading.Lock()
+        self._clock = clock
 
     def __call__(self) -> AbstractContextManager[KnowledgeUnitOfWork]:
         return self._open()
@@ -901,7 +922,7 @@ class MemoryKnowledgeStore:
     def _open(self) -> Iterator[KnowledgeUnitOfWork]:
         with self._lock:
             working = self._tables.copy()
-            yield MemoryUnitOfWork(working)
+            yield MemoryUnitOfWork(working, self._clock)
             self._tables = working
 
     def ping(self) -> bool:

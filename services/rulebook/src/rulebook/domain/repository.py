@@ -23,7 +23,7 @@ from rulebook.domain.graph import (
 )
 from rulebook.domain.publication import PendingReplacement, RuleVersionDecision
 from rulebook.domain.relations import CandidateStatus, RelationCandidate
-from rulebook.domain.review import EntityReviewItem, MentionGroup
+from rulebook.domain.review import EntityReviewItem, MentionGroup, ReviewQueueStats
 from rulebook.domain.rule_versions import CitationRecord, RuleVersionRecord
 from rulebook.domain.runs import ExtractionRun, RuleSummary
 from rulebook.domain.search import CitedClause, ClauseEmbedding
@@ -120,6 +120,10 @@ class ReviewRepository(Protocol):
         ...
 
     def save(self, item: EntityReviewItem) -> None: ...
+
+    def queue_stats(self) -> ReviewQueueStats:
+        """Open items per entity type and the time the oldest open item was queued."""
+        ...
 
 
 class CandidateRepository(Protocol):
