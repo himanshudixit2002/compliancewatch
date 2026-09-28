@@ -11,9 +11,11 @@ class PipelineSettings(Settings):
     flag once ADR-017 is accepted). Off, the worker makes no call to the rulebook.
 
     ``rulebook_url`` and ``rulebook_write_token`` reach the rulebook's write API; the token is
-    the rulebook's ``CW_RULEBOOK_WRITE_TOKEN``.
+    the rulebook's ``CW_RULEBOOK_WRITE_TOKEN``. ``llm_gateway_url`` is where the relation stage's
+    model calls go (``CW_LLM_GATEWAY_URL``).
     """
 
     pipeline_knowledge_enabled: bool = False
     rulebook_url: str = "http://localhost:8003"
     rulebook_write_token: SecretStr | None = None
+    llm_gateway_url: str = "http://localhost:8008"

@@ -2,21 +2,29 @@
 
 Registers the ingest workflow and its activities on the ``pipeline`` task queue against
 ``CW_TEMPORAL_ADDRESS``. Activities run on the in-memory fakes until the source adapters land.
-Registration with the rulebook is wired to ``CW_RULEBOOK_URL`` and only calls it when
-``CW_PIPELINE_KNOWLEDGE_ENABLED`` is on.
+Registration with the rulebook and knowledge extraction are wired to ``CW_RULEBOOK_URL`` and
+``CW_LLM_GATEWAY_URL`` and only call them when ``CW_PIPELINE_KNOWLEDGE_ENABLED`` is on.
 """
 
 import asyncio
-from typing import Any
+from typing import Any, Protocol
 
 from pipeline import __version__
 from pipeline.application.activities import DiscoverDocument, FetchDocument, ParseDocument
-from pipeline.application.knowledge_activities import RegisterDocument
-from pipeline.domain.ports import KnowledgeSink
+from pipeline.application.knowledge_activities import (
+    ExtractMentions,
+    ProposeRelations,
+    RegisterDocument,
+    SubmitRelations,
+)
+from pipeline.application.relations import LlmRelationExtractor, RelationStage
+from pipeline.domain.ports import KnowledgeSink, RulebookReader
 from pipeline.infrastructure.fakes import FakePlainTextParser, FakeSourceAdapter
+from pipeline.infrastructure.gateway import GatewayProvider
+from pipeline.infrastructure.prompts import load_prompt
 from pipeline.infrastructure.rulebook_client import HttpRulebook
 from pipeline.settings import PipelineSettings
-from pipeline.workflows import TASK_QUEUE, IngestDocumentWorkflow
+from pipeline.workflows import TASK_QUEUE, ExtractKnowledgeWorkflow, IngestDocumentWorkflow
 from py_common.logging import configure_logging
 from py_common.telemetry import configure_telemetry
 from py_common.temporal import ActivityBase, WorkerConfig, run_worker
@@ -24,22 +32,40 @@ from py_common.temporal import ActivityBase, WorkerConfig, run_worker
 SERVICE_NAME = "pipeline-worker"
 
 
+class Rulebook(KnowledgeSink, RulebookReader, Protocol):
+    """The rulebook as both the sink and the reader, the way ``HttpRulebook`` is."""
+
+
 def activities(
-    settings: PipelineSettings | None = None, *, sink: KnowledgeSink | None = None
+    settings: PipelineSettings | None = None,
+    *,
+    sink: Rulebook | None = None,
+    stage: RelationStage | None = None,
 ) -> list[ActivityBase[Any, Any]]:
-    """The worker's activities. ``sink`` replaces the rulebook client (tests pass a memory one)."""
+    """The worker's activities. ``sink`` replaces the rulebook client and ``stage`` the relation
+    stage (tests pass memory ones)."""
     settings = settings or PipelineSettings(_env_file=None, service_name=SERVICE_NAME)
     adapter = FakeSourceAdapter.with_sample()
     parser = FakePlainTextParser()
     token = settings.rulebook_write_token
-    rulebook = sink or HttpRulebook(
+    rulebook: Rulebook = sink or HttpRulebook(
         settings.rulebook_url, token=None if token is None else token.get_secret_value()
     )
+    relations = stage or RelationStage(
+        LlmRelationExtractor(
+            GatewayProvider(settings.llm_gateway_url),
+            load_prompt("extraction.rule_relations", "1"),
+        )
+    )
+    enabled = settings.pipeline_knowledge_enabled
     return [
         DiscoverDocument(adapter),
         FetchDocument(adapter),
         ParseDocument(parser),
-        RegisterDocument(parser, rulebook, enabled=settings.pipeline_knowledge_enabled),
+        RegisterDocument(parser, rulebook, enabled=enabled),
+        ExtractMentions(rulebook, rulebook, enabled=enabled),
+        ProposeRelations(rulebook, relations, enabled=enabled),
+        SubmitRelations(rulebook, enabled=enabled),
     ]
 
 
@@ -51,7 +77,7 @@ async def serve(settings: PipelineSettings) -> None:
         await run_worker(
             settings,
             WorkerConfig(task_queue=TASK_QUEUE),
-            workflows=[IngestDocumentWorkflow],
+            workflows=[IngestDocumentWorkflow, ExtractKnowledgeWorkflow],
             activities=activities(settings),
         )
     finally:

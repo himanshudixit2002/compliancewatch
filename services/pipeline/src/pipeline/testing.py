@@ -16,9 +16,18 @@ import httpx2
 
 from domain_kernel.documents import ParsedDocument, clause_id_for
 from domain_kernel.ids import DocumentId
+from domain_kernel.knowledge import EntityType
 from domain_kernel.llm import CompletionRequest, CompletionResponse
-from pipeline.domain.errors import RulebookConflictError
-from pipeline.domain.knowledge import DocumentRecord, RegisteredDocument
+from pipeline.domain.errors import RulebookConflictError, RulebookRejectedError
+from pipeline.domain.knowledge import (
+    AlignmentReport,
+    DocumentRecord,
+    MentionSubmission,
+    RegisteredDocument,
+    RelationSubmission,
+    RuleKey,
+    StagingReport,
+)
 
 Responder = Callable[[httpx2.Request], httpx2.Response]
 
@@ -145,10 +154,21 @@ class ScriptedProvider:
 
 
 class MemoryRulebook:
-    """A ``KnowledgeSink`` in memory. ``records`` keeps every stored document by id."""
+    """The rulebook's write and read API in memory: a ``KnowledgeSink`` and a
+    ``RulebookReader``. ``records`` keeps every stored document by id; mentions resolve when
+    their (type, name) is in ``entities``; submissions are kept for tests to read."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        entities: set[tuple[EntityType, str]] | None = None,
+        rules: tuple[RuleKey, ...] = (),
+    ) -> None:
         self.records: dict[DocumentId, DocumentRecord] = {}
+        self.entities = entities or set()
+        self.rules = rules
+        self.mentions: list[MentionSubmission] = []
+        self.relations: list[RelationSubmission] = []
         self.calls = 0
 
     def register_document(self, record: DocumentRecord) -> RegisteredDocument:
@@ -167,6 +187,39 @@ class MemoryRulebook:
                 for clause in document.clauses
             },
         )
+
+    def submit_mentions(self, submission: MentionSubmission) -> AlignmentReport:
+        document = self.parsed_document(submission.document_id)
+        texts = {clause.clause_ref: clause.text for clause in document.clauses}
+        for mention in submission.mentions:
+            if texts.get(mention.clause_ref, "")[mention.span_start : mention.span_end] != (
+                mention.text
+            ):
+                raise RulebookRejectedError(f"422: span of {mention.text!r} does not match")
+        repeat = submission in self.mentions
+        self.mentions.append(submission)
+        aligned = sum(
+            (m.entity_type, m.proposed_name) in self.entities for m in submission.mentions
+        )
+        if repeat:
+            return AlignmentReport(0, 0, len(submission.mentions))
+        return AlignmentReport(aligned, len(submission.mentions) - aligned, 0)
+
+    def submit_relations(self, submission: RelationSubmission) -> StagingReport:
+        self.parsed_document(submission.document_id)
+        repeat = submission in self.relations
+        self.relations.append(submission)
+        count = len(submission.candidates)
+        return StagingReport(0, count) if repeat else StagingReport(count, 0)
+
+    def parsed_document(self, document_id: DocumentId) -> ParsedDocument:
+        record = self.records.get(document_id)
+        if record is None:
+            raise RulebookRejectedError(f"404: document {document_id} is not stored")
+        return record.document
+
+    def known_rules(self) -> tuple[RuleKey, ...]:
+        return self.rules
 
 
 def _clauses(document: ParsedDocument) -> list[tuple[str, str, int | None]]:
