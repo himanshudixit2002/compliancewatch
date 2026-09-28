@@ -101,11 +101,14 @@ _SAC = re.compile(
 )
 _RATE = re.compile(r"(?<![0-9.])(?P<rate>\d{1,2}(?:\.\d{1,2})?)\s*(?:%|per\s*cent\b|percent\b)")
 _RATE_CONTEXT = re.compile(r"\b(?:rate|tax|cgst|sgst|igst|utgst|cess)\b", re.IGNORECASE)
+_SCALE = r"(?:lakhs?|lacs?|crores?)\b"
 _AMOUNT = re.compile(
     r"(?:\brs\.?|\binr\b|₹|\brupees)\s*(?P<amount>\d[\d,]*(?:\.\d+)?)"
-    r"(?:\s*(?:lakhs?|lacs?|crores?)\b)?",
+    r"(?:\s*" + _SCALE + r"(?:\s*,?\s*(?:and\s+)?\d[\d,]*(?:\.\d+)?\s*" + _SCALE + r")*)?",
     re.IGNORECASE,
 )
+"""A rupee amount with its scale words. A compound amount ("Rs 2 crore 50 lakh") is read whole,
+so the kernel sees all of it and leaves it unnamed for review rather than naming its first part."""
 _AMOUNT_CONTEXT = re.compile(
     r"\b(?:turnover|threshold|exceeds?|exceeding|up\s*to|upto|less\s+than|more\s+than)\b",
     re.IGNORECASE,
@@ -276,7 +279,9 @@ def _match(
 
 def _notifications(text: str, language: str, own_number: str) -> Iterator[GrammarMatch]:
     for match in _NOTIFICATION.finditer(text):
-        series = _SERIES[" ".join(match.group("series").casefold().split())]
+        series = _series(match.group("series"))
+        if series is None:
+            continue
         rate = " (rate)" if match.group("rate") else ""
         number = f"{match.group('number')}/{match.group('year')}"
         name = normalise_name(EntityType.NOTIFICATION, f"{number}-{series}{rate}")
@@ -402,13 +407,19 @@ def _instrument_named(name: str) -> Instrument | None:
     return next((act for pattern, act in _INSTRUMENTS if pattern.fullmatch(name)), None)
 
 
-def _series_act(series: str) -> Instrument | None:
-    series = _SERIES[" ".join(series.casefold().split())]
+def _series(written: str) -> str | None:
+    """The series a notification number names, or ``None`` for a look-alike the case-insensitive
+    pattern let through (a dotless i reads as "i" when ignoring case)."""
+    return _SERIES.get(" ".join(written.casefold().split()))
+
+
+def _series_act(written: str) -> Instrument | None:
+    series = _series(written)
     return {
         "central tax": Instrument.CGST_ACT,
         "integrated tax": Instrument.IGST_ACT,
         "union territory tax": Instrument.UTGST_ACT,
-    }.get(series)
+    }.get(series or "")
 
 
 def _forms(text: str) -> Iterator[GrammarMatch]:

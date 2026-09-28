@@ -344,3 +344,27 @@ def test_every_match_is_its_span_in_order_without_overlap(text: str) -> None:
         assert match.span_end > match.span_start
     for earlier, later in itertools.pairwise(found):
         assert earlier.span_end <= later.span_start
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "turnover exceeding Rs 2 crore 50 lakh in a year",
+        "turnover exceeding Rs. 2 crore and 50 lakh",
+    ],
+)
+def test_a_compound_amount_is_read_whole_and_left_for_review(text: str) -> None:
+    (match,) = find_mentions(text)
+    assert match.entity_type is EntityType.THRESHOLD
+    assert "50 lakh" in match.text
+    assert match.proposed_name == ""
+
+
+def test_rupees_before_a_scaled_amount() -> None:
+    assert names("turnover of Rupees 20 lakh") == [(EntityType.THRESHOLD, "2000000")]
+
+
+def test_a_look_alike_series_is_not_a_notification() -> None:
+    assert names("Notification No. 5/2019-\u0131t dated") == []
+    found = find_mentions("x", own_ref="5/2019-\u0131t")
+    assert found == ()
