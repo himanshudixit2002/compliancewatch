@@ -17,7 +17,7 @@ Design reference: Project Foundation guide, sections 6, 11 and 13.
 | Module | Contents |
 | --- | --- |
 | `errors` | `DomainError` family with stable problem type slugs (`type_uri`, `title`, `detail`) |
-| `ids` | `EntityId` and fourteen typed subclasses (`TenantId`, `BusinessId`, `RuleVersionId`, `CanonicalEntityId`, ...) |
+| `ids` | `EntityId` and its typed subclasses (`TenantId`, `BusinessId`, `RuleVersionId`, `CanonicalEntityId`, ...); `derive_id` for ids two services must compute alike (UUID version 5 under `ID_NAMESPACE`) |
 | `operators` | `Operator` enum with `symbol`; the ordered, multi-value and set operator groups |
 | `confidence` | `Confidence` in [0, 1], `REVIEW_THRESHOLD`, `CERTAIN` and `ZERO` |
 | `periods` | `EffectivePeriod`: half-open date range with `contains` and `overlaps` |
@@ -32,7 +32,7 @@ Design reference: Project Foundation guide, sections 6, 11 and 13.
 | `status` | `RuleVersionStatus`, `ObligationStatus`, `ClosureReason`, `TransitionTable`, the two tables |
 | `events` | `DomainEvent` envelope (`event_id`, `occurred_at`, `tenant_id`, `correlation_id`, `causation_id`) with the class-level `topic` and `schema_version` |
 | `profiles` | `ProfileSnapshot`: one version of a profile's attributes, with the financial year its per-year values are as of |
-| `documents` | `DocumentRef`, `DiscoveredDocument`, `RawDocument`, `Clause`, `ParsedDocument`, `RuleCandidate` |
+| `documents` | `DocumentRef`, `DiscoveredDocument`, `RawDocument`, `Clause`, `ParsedDocument` (with `parser_version`), `RuleCandidate`; `document_id_for(sha256)` and `clause_id_for(document_id, clause_ref)`, the ids every service derives the same way |
 | `rules` | `ObligationTemplate`, `RuleVersionSnapshot` (read model of a published version, with an optional `Recurrence`) |
 | `decisions` | `ApplicabilityDecision` |
 | `llm` | `CompletionRequest`, `CompletionResponse` |

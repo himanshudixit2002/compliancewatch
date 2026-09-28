@@ -7,6 +7,7 @@ from domain_kernel.confidence import CERTAIN, REVIEW_THRESHOLD, ZERO, Confidence
 from domain_kernel.decisions import ApplicabilityDecision
 from domain_kernel.dedupe import DedupeKey
 from domain_kernel.documents import (
+    PARSER_VERSION_PATTERN,
     BBox,
     Clause,
     DiscoveredDocument,
@@ -16,6 +17,8 @@ from domain_kernel.documents import (
     ParsedDocument,
     RawDocument,
     RuleCandidate,
+    clause_id_for,
+    document_id_for,
 )
 from domain_kernel.errors import (
     PROBLEM_TYPE_PREFIX,
@@ -33,6 +36,7 @@ from domain_kernel.events import SCHEMA_VERSION_PATTERN, TOPIC_PATTERN, DomainEv
 from domain_kernel.financial_year import FY_LABEL_PATTERN, FinancialYear
 from domain_kernel.identifiers import GSTIN_PATTERN, PAN_PATTERN, Gstin, Pan
 from domain_kernel.ids import (
+    ID_NAMESPACE,
     BusinessId,
     CandidateId,
     CanonicalEntityId,
@@ -50,6 +54,7 @@ from domain_kernel.ids import (
     SourceId,
     TenantId,
     UserId,
+    derive_id,
 )
 from domain_kernel.knowledge import (
     RULE_VERSION_KIND,
@@ -139,11 +144,13 @@ __all__ = [
     "ENUM_TYPES",
     "FY_LABEL_PATTERN",
     "GSTIN_PATTERN",
+    "ID_NAMESPACE",
     "MULTI_VALUE_OPERATORS",
     "NUMERIC_TYPES",
     "OBLIGATION_TRANSITIONS",
     "ORDERED_OPERATORS",
     "PAN_PATTERN",
+    "PARSER_VERSION_PATTERN",
     "PROBLEM_TYPE_PREFIX",
     "REVIEW_THRESHOLD",
     "RULE_VERSION_KIND",
@@ -251,10 +258,13 @@ __all__ = [
     "Vector",
     "VectorStore",
     "WorkflowHandle",
+    "clause_id_for",
     "close_obligation",
     "closing_status",
     "conjoin",
+    "derive_id",
     "disjoin",
+    "document_id_for",
     "evaluate_predicate",
     "negate",
     "normalise_name",

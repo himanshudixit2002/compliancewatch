@@ -1,11 +1,18 @@
-"""Documents on their way through the pipeline: discovered, fetched, parsed, extracted."""
+"""Documents on their way through the pipeline: discovered, fetched, parsed, extracted.
+
+A document's id is the first half of its SHA-256 digest (``document_id_for``) and a clause's id
+is derived from the document id and the clause ref (``clause_id_for``). Every service that
+stores or points at a clause computes the same ids from the same bytes.
+"""
 
 import hashlib
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Self
+from typing import Final, Self
+from uuid import UUID
 
 from domain_kernel._validation import (
     freeze_mapping,
@@ -19,7 +26,30 @@ from domain_kernel._validation import (
 from domain_kernel.confidence import Confidence
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.events import utc_now
-from domain_kernel.ids import CandidateId, DocumentId, SourceId
+from domain_kernel.ids import CandidateId, ClauseId, DocumentId, SourceId, derive_id
+
+PARSER_VERSION_PATTERN: Final = r"^[a-z][a-z0-9_-]*@[0-9]+$"
+"""A parser's name and version, such as ``pdf@1``. A parser change that can alter clause text
+or refs for the same bytes bumps the number."""
+
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+_PARSER_VERSION = re.compile(PARSER_VERSION_PATTERN)
+
+
+def document_id_for(sha256: str) -> DocumentId:
+    """The id of the document whose bytes have this lowercase hex SHA-256 digest: the first
+    32 hex digits read as a UUID."""
+    digest = require_instance(sha256, str, "sha256")
+    if not _SHA256.fullmatch(digest):
+        raise InvariantViolationError(f"sha256 must be 64 lowercase hex digits, got {digest!r}")
+    return DocumentId(UUID(digest[:32]))
+
+
+def clause_id_for(document_id: DocumentId, clause_ref: str) -> ClauseId:
+    """The id of the clause ``clause_ref`` of ``document_id``; the rulebook stores clauses under
+    it and the knowledge tables, citations and the vector index point at it."""
+    require_instance(document_id, DocumentId, "document_id")
+    return derive_id(ClauseId, "clause", str(document_id), require_text(clause_ref, "clause_ref"))
 
 
 class DocumentType(StrEnum):
@@ -129,7 +159,8 @@ class Clause:
 
 @dataclass(frozen=True, slots=True)
 class ParsedDocument:
-    """A document split into clauses with unique references."""
+    """A document split into clauses with unique references. ``parser_version`` names the
+    parser that produced them (``PARSER_VERSION_PATTERN``); empty when unknown."""
 
     document_id: DocumentId
     doc_type: DocumentType
@@ -137,6 +168,7 @@ class ParsedDocument:
     clauses: tuple[Clause, ...]
     published_at: date | None = None
     language: str = "en"
+    parser_version: str = ""
 
     def __post_init__(self) -> None:
         require_instance(self.document_id, DocumentId, "document_id")
@@ -154,6 +186,9 @@ class ParsedDocument:
         if self.published_at is not None:
             require_date(self.published_at, "published_at")
         require_text(self.language, "language")
+        version = require_instance(self.parser_version, str, "parser_version")
+        if version and not _PARSER_VERSION.fullmatch(version):
+            raise InvariantViolationError(f"parser_version must look like 'pdf@1', got {version!r}")
 
     def find_clause(self, clause_ref: str) -> Clause | None:
         return next((clause for clause in self.clauses if clause.clause_ref == clause_ref), None)

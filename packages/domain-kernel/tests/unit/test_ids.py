@@ -1,11 +1,12 @@
 from collections.abc import Sequence
 from dataclasses import FrozenInstanceError
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
 
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import (
+    ID_NAMESPACE,
     BusinessId,
     CandidateId,
     CanonicalEntityId,
@@ -21,6 +22,7 @@ from domain_kernel.ids import (
     SourceId,
     TenantId,
     UserId,
+    derive_id,
 )
 
 ID_TYPES: tuple[type[EntityId], ...] = (
@@ -105,3 +107,51 @@ def test_base_class_also_works_on_its_own() -> None:
     raw = uuid4()
     assert EntityId(raw) != TenantId(raw)
     assert str(EntityId.parse(str(raw))) == str(raw)
+
+
+def test_id_namespace_is_the_documented_uuid5() -> None:
+    assert uuid5(NAMESPACE_URL, "urn:compliancewatch:id") == ID_NAMESPACE
+
+
+def test_derived_ids_are_stable_typed_and_version_5() -> None:
+    first = derive_id(ClauseId, "clause", "doc", "en.p1")
+    assert first == derive_id(ClauseId, "clause", "doc", "en.p1")
+    assert type(first) is ClauseId
+    assert first.value.version == 5
+    assert first.value == uuid5(ID_NAMESPACE, '["clause","doc","en.p1"]')
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        (("clause", "doc", "en.p1"), ("clause", "doc", "en.p2")),
+        (("clause", "doc", "en.p1"), ("citation", "doc", "en.p1")),
+        (("clause", "a", "bc"), ("clause", "ab", "c")),
+        (("clause", "a,b"), ("clause", "a", "b")),
+    ],
+)
+def test_derived_ids_differ_when_any_word_differs(
+    left: tuple[str, ...], right: tuple[str, ...]
+) -> None:
+    assert derive_id(ClauseId, *left) != derive_id(ClauseId, *right)
+
+
+def test_derived_ids_keep_non_ascii_text() -> None:
+    hindi = derive_id(ClauseId, "clause", "doc", "अधिसूचना")
+    assert hindi.value == uuid5(ID_NAMESPACE, '["clause","doc","अधिसूचना"]')
+
+
+@pytest.mark.parametrize(
+    ("namespace", "parts"),
+    [("", ("a",)), (" ", ("a",)), ("clause", ("",)), ("clause", ("a", "  ")), ("clause", (1,))],
+)
+def test_derive_id_rejects_blank_or_non_text_words(
+    namespace: str, parts: tuple[object, ...]
+) -> None:
+    with pytest.raises(InvariantViolationError, match="non-blank text parts"):
+        derive_id(ClauseId, namespace, *parts)  # type: ignore[arg-type]
+
+
+def test_derive_id_rejects_a_non_text_namespace() -> None:
+    with pytest.raises(InvariantViolationError, match="namespace must be str"):
+        derive_id(ClauseId, 5, "a")  # type: ignore[arg-type]

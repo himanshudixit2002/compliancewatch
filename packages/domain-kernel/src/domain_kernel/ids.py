@@ -1,11 +1,21 @@
-"""Typed identifiers. Each kind is its own class so ids of different things cannot be mixed."""
+"""Typed identifiers. Each kind is its own class so ids of different things cannot be mixed.
 
+Most ids are random (``new``). An id that two services must compute independently for the same
+thing, such as a clause's, is derived instead: ``derive_id`` hashes a namespace word and the
+parts that name the thing with UUID version 5, so the same inputs give the same id everywhere.
+"""
+
+import json
 from dataclasses import dataclass
-from typing import Self
-from uuid import UUID, uuid4
+from typing import Final, Self
+from uuid import UUID, uuid4, uuid5
 
 from domain_kernel._validation import require_instance
 from domain_kernel.errors import InvariantViolationError
+
+ID_NAMESPACE: Final = UUID("feaad2b1-5b8c-532f-aa9a-35fe8e6538fa")
+"""The UUID version 5 namespace of every derived id: ``uuid5(NAMESPACE_URL,
+"urn:compliancewatch:id")``. Changing it changes every derived id."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,3 +122,20 @@ class EventId(EntityId):
 @dataclass(frozen=True, slots=True)
 class CorrelationId(EntityId):
     """Ties together everything one request or workflow caused."""
+
+
+def derive_id[I: EntityId](kind: type[I], namespace: str, *parts: str) -> I:
+    """The id of the thing ``namespace`` and ``parts`` name, the same on every call.
+
+    The name hashed is the compact JSON array ``[namespace, *parts]``, so parts can hold any
+    text without ambiguity about where one ends. The namespace word, not the class, keys the
+    hash: callers pick one word per kind of thing ("clause") and never reuse it.
+    """
+    words = [require_instance(namespace, str, "namespace"), *parts]
+    for index, word in enumerate(words):
+        if not isinstance(word, str) or not word.strip():
+            raise InvariantViolationError(
+                f"derive_id needs non-blank text parts, got {word!r} at position {index}"
+            )
+    name = json.dumps(words, ensure_ascii=False, separators=(",", ":"))
+    return kind(uuid5(ID_NAMESPACE, name))
