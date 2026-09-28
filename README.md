@@ -4,7 +4,10 @@
 > domain kernel (with the knowledge vocabulary: entity types, seven relation kinds, canonical names;
 > the financial year and recurrence value objects) and Ontology 0.2.0 (seventeen GST attributes with
 > their hierarchy level and per-financial-year scoping), the rulebook's knowledge schema (canonical
-> entities, clause mentions, rule relations),
+> entities, clause mentions, rule relations, rules and versions with the seed calendar of thirteen
+> standing GST obligations pending analyst review), the obligation service's domain and use cases
+> (obligations per period, deadline changes, withdrawals, row-level security by tenant, events
+> through the outbox),
 > the LLM gateway skeleton (routing, prompt registry, cost ledger,
 > budgets, PII masking, Langfuse tracing, fake provider container) with the first committed OpenAPI
 > spec, problem-details errors in py-common, the event contracts (fourteen topics and the envelope as
@@ -152,6 +155,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | `make contracts` / `contracts-check` | Regenerate the event clients from `packages/contracts/events/schemas`; check the schemas and that the committed clients match |
 | `make relay SERVICE=x` | Run the outbox relay for one service's schema against the dev stack |
 | `make worker SERVICE=x` | Run the service's Temporal worker (`python -m <package>.worker`) against the dev stack |
+| `make seed SERVICE=rulebook [ARGS=--check]` | Validate the seed calendar, or load it as draft rule versions into the rulebook schema |
 | `make test` | pytest (unit + contract, coverage gate on domain and application) and vitest |
 | `make lint` / `typecheck` / `format` | ruff + eslint + prettier; mypy --strict + tsc --strict |
 | `make check` | lint, typecheck, test, import-linter, uv lock check, contracts check (the same gates CI runs) |
@@ -200,7 +204,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - A service that writes to the outbox (the writer, relay and consumer exist in py-common; the first producer adds the `outbox_event` migration)
 - Alert rules and the runbook links from alerts (the dashboard exists; alerting arrives with the deployment work)
 - Real pipeline activities: the sample workflow runs on in-memory fakes
-- Seeded fixtures and the 50-document sample rulebook
+- The 50-document sample rulebook and recorded source fixtures (the seed calendar of standing obligations exists, pending analyst review)
 - Real prompt texts for extraction, judgement, question answering and classification, and the eval harness
 - Full text for ADR-009 to ADR-011; the identity service itself (ADR-014 decides Supabase Auth for the MVP; nothing is created until the maintainer opens the project)
 - KAG-style reasoning beyond the schema: entity extraction and alignment in the pipeline, the logical-form planner and solver in qa, and its eval gate (ADR-017)

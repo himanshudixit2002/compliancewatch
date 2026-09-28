@@ -494,6 +494,7 @@ version = "0.1.0"
 source = { editable = "services/obligation" }
 dependencies = [
     { name = "alembic" },
+    { name = "domain-kernel" },
     { name = "fastapi" },
     { name = "psycopg", extra = ["binary"] },
     { name = "py-common" },
@@ -506,6 +507,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.16" },
+    { name = "domain-kernel", editable = "packages/domain-kernel" },
     { name = "fastapi", specifier = ">=0.120" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "py-common", editable = "packages/py-common" },
@@ -606,10 +608,12 @@ dependencies = [
     { name = "alembic" },
     { name = "domain-kernel" },
     { name = "fastapi" },
+    { name = "ontology" },
     { name = "psycopg", extra = ["binary"] },
     { name = "py-common" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyyaml" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -619,10 +623,12 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.16" },
     { name = "domain-kernel", editable = "packages/domain-kernel" },
     { name = "fastapi", specifier = ">=0.120" },
+    { name = "ontology", editable = "packages/ontology" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "py-common", editable = "packages/py-common" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pydantic-settings", specifier = ">=2.10" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35" },
 ]

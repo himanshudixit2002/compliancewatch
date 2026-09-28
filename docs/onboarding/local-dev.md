@@ -59,6 +59,22 @@ shows the topics; `rpk topic consume <topic> -n 1` reads a message.
 `services/pipeline/README.md` shows how to start the sample workflow and
 `docs/runbooks/temporal-worker.md` what to do when a run fails.
 
+## Seed calendar
+
+`make migrate SERVICE=rulebook` then `make seed SERVICE=rulebook` loads the thirteen standing
+GST obligations from `services/rulebook/seed/gst_calendar.yaml` as draft rule versions
+(`select rule_key, version, status, seed_status from rulebook.rule_version join rulebook.rule
+on rule.id = rule_id` through `make dev-psql`). `ARGS=--check` validates the file without
+writing. Every version stays `needs_review` until an analyst reviews it.
+
+## Row-level security in the dev stack
+
+Tenant tables (the obligation service's first) carry a policy on `tenant_id`, but the dev
+stack connects as `cw`, the container's superuser, and a superuser bypasses every policy. The
+policy is therefore visible but not enforced locally; the obligation integration test proves it
+through a plain role. A non-superuser application role for the dev stack arrives with the
+deployment work, where every service gets its own role.
+
 ## Traces and metrics
 
 `make dev-observability` adds the OpenTelemetry collector, Prometheus, Tempo and Grafana to

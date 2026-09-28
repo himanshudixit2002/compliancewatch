@@ -96,6 +96,8 @@ from domain_kernel.predicates import (
     disjoin,
     evaluate_predicate,
     negate,
+    specification_from_mapping,
+    specification_to_mapping,
 )
 from domain_kernel.profiles import ProfileSnapshot
 from domain_kernel.protocols import (
@@ -248,5 +250,7 @@ __all__ = [
     "negate",
     "normalise_name",
     "parse_closure_reason",
+    "specification_from_mapping",
+    "specification_to_mapping",
     "utc_now",
 ]
