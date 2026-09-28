@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
-from uuid import UUID
 
 import yaml
 
@@ -29,8 +28,8 @@ from domain_kernel.documents import (
     DocumentType,
     ParsedDocument,
     RawDocument,
+    document_id_for,
 )
-from domain_kernel.ids import DocumentId
 from domain_kernel.protocols import DocumentParser, SourceAdapter
 from ontology import load as load_ontology
 from pipeline.application.detector import detect
@@ -65,10 +64,6 @@ class GoldenCase:
 
 def slug(text: str) -> str:
     return _SLUG.sub("-", text.casefold()).strip("-")
-
-
-def document_id_for(sha256: str) -> DocumentId:
-    return DocumentId(UUID(sha256[:32]))
 
 
 def write_index(

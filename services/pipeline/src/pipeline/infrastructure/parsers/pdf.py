@@ -2,12 +2,16 @@
 unparsed so a person can handle it (OCR is a later adapter)."""
 
 import io
-from uuid import UUID
 
 from pypdf import PdfReader
 
-from domain_kernel.documents import Clause, DocumentType, ParsedDocument, RawDocument
-from domain_kernel.ids import DocumentId
+from domain_kernel.documents import (
+    Clause,
+    DocumentType,
+    ParsedDocument,
+    RawDocument,
+    document_id_for,
+)
 from pipeline.infrastructure.parsers.text import (
     LANGUAGE_BILINGUAL,
     TextClause,
@@ -15,6 +19,9 @@ from pipeline.infrastructure.parsers.text import (
     renumber,
     split_clauses,
 )
+
+PARSER_VERSION = "pdf@1"
+"""Bump when a change can alter the clause text or refs this parser gives for the same bytes."""
 
 
 class UnparsedDocumentError(ValueError):
@@ -45,7 +52,7 @@ class PdfParser:
         language = languages.pop() if len(languages) == 1 else LANGUAGE_BILINGUAL
         title = next((c.text for c in clauses if len(c.text) > 12), clauses[0].text)[:200]
         return ParsedDocument(
-            document_id=DocumentId(UUID(doc.sha256[:32])),
+            document_id=document_id_for(doc.sha256),
             doc_type=self._doc_type,
             title=title,
             clauses=tuple(
@@ -55,4 +62,5 @@ class PdfParser:
             language=language
             if language != LANGUAGE_BILINGUAL
             else detect_language("\n".join(full_text)),
+            parser_version=PARSER_VERSION,
         )

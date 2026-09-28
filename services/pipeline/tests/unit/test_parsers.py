@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pypdf import PdfWriter
 
-from domain_kernel.documents import DocumentRef, DocumentType, RawDocument
+from domain_kernel.documents import DocumentRef, DocumentType, RawDocument, document_id_for
 from domain_kernel.ids import SourceId
 from pipeline.infrastructure.parsers import (
     LANGUAGE_ENGLISH,
@@ -62,6 +62,8 @@ def test_pdf_parser_reads_the_english_cbic_notification() -> None:
     assert parsed.clauses[0].page == 1
     assert "2026" in " ".join(clause.text for clause in parsed.clauses)
     assert len({clause.clause_ref for clause in parsed.clauses}) == len(parsed.clauses)
+    assert parsed.parser_version == "pdf@1"
+    assert parsed.document_id == document_id_for(raw.sha256)
 
 
 def test_pdf_parser_reads_the_hindi_rendering_as_hindi() -> None:
@@ -91,6 +93,7 @@ def test_html_parser_keeps_block_text_and_drops_scripts() -> None:
     assert parser.supports(raw)
     parsed = parser.parse(raw)
     assert parsed.doc_type is DocumentType.PRESS_RELEASE
+    assert parsed.parser_version == "html@1"
     assert [c.text for c in parsed.clauses] == [
         "T",
         "Advisory on filing",

@@ -6,8 +6,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from domain_kernel.documents import DiscoveredDocument, DocumentRef, DocumentType, RawDocument
-from pipeline import label
+from domain_kernel.documents import (
+    DiscoveredDocument,
+    DocumentRef,
+    DocumentType,
+    RawDocument,
+    document_id_for,
+)
 from pipeline.infrastructure.adapters import SOURCES
 from pipeline.infrastructure.fakes import FakeSourceAdapter
 from pipeline.infrastructure.parsers import PdfParser
@@ -77,7 +82,7 @@ def test_prepare_case_writes_clauses_and_the_detector_prefill(tmp_path: Path) ->
     case = load_case(path)
     assert not case.is_labelled
     assert check_case(case) == []
-    assert str(case.document.document_id) == str(label.document_id_for(raw.sha256))
+    assert str(case.document.document_id) == str(document_id_for(raw.sha256))
 
 
 def test_the_committed_golden_cases_check_clean() -> None:

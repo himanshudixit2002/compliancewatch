@@ -120,6 +120,12 @@ async def test_parse_splits_paragraphs_into_clauses(adapter: FakeSourceAdapter) 
     assert parsed.document_id == document_id_for(fetched).value
 
 
+def test_the_fake_parser_names_its_version() -> None:
+    ref = DocumentRef(SourceId(UUID(int=1)), "memory://sample")
+    raw = RawDocument.from_bytes(ref, SAMPLE_TEXT.encode(), "text/plain")
+    assert FakePlainTextParser().parse(raw).parser_version == "fake@1"
+
+
 async def test_parse_refuses_an_unsupported_media_type(adapter: FakeSourceAdapter) -> None:
     discovered = await DiscoverDocument(adapter).execute(
         DiscoverRequest(source_id=adapter.source_id.value, since=SINCE)

@@ -15,6 +15,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from temporalio.common import RetryPolicy
 
 from domain_kernel.documents import DocumentRef, RawDocument
+from domain_kernel.documents import document_id_for as kernel_document_id_for
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import DocumentId, SourceId
 from domain_kernel.protocols import DocumentParser, SourceAdapter
@@ -177,4 +178,4 @@ class ParseDocument(ActivityBase[ParseRequest, Parsed]):
 
 def document_id_for(fetched: Fetched) -> DocumentId:
     """Deterministic per digest: a re-run of the workflow parses the same document id."""
-    return DocumentId(UUID(fetched.sha256[:32]))
+    return kernel_document_id_for(fetched.sha256)
