@@ -24,7 +24,7 @@ Design reference: Project Foundation guide, sections 6, 11 and 13.
 | `identifiers` | `Pan` and `Gstin` (state code, PAN and entity code inside the GSTIN; check character not verified) |
 | `financial_year` | `FinancialYear`: India's April-to-March year (`2025-26`), `for_date`, `parse`, `previous`, `next` |
 | `recurrence` | `Frequency`, `Period`, `Recurrence`: the period a date falls in and the due date of each period for a monthly, quarterly or annual duty |
-| `citations` | `Citation`: clause reference, verbatim quote, verified flag |
+| `citations` | `Citation`: clause reference, verbatim quote, verified flag; `quote_match_ratio` / `quote_matches` (folded fuzzy match, threshold 0.85) and `evidence_tokens_missing` (numbers and month names a quote has and its clause lacks) |
 | `channels` | `Channel`: WhatsApp and email |
 | `dedupe` | `DedupeKey` and the notification key (rule version, business, channel) |
 | `ontology` | `AttributeType`, `AttributeSource`, `AttributeLevel`, `AttributeDefinition` (with `level` and `per_financial_year`), `Ontology`, `ALLOWED_OPERATORS` |

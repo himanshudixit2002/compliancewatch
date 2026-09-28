@@ -2,7 +2,16 @@
 error types and the event envelope. Standard library only."""
 
 from domain_kernel.channels import Channel
-from domain_kernel.citations import Citation
+from domain_kernel.citations import (
+    DASHES,
+    MAX_QUOTE_CHARS,
+    MAX_TEXT_CHARS,
+    QUOTE_MATCH_THRESHOLD,
+    Citation,
+    evidence_tokens_missing,
+    quote_match_ratio,
+    quote_matches,
+)
 from domain_kernel.confidence import CERTAIN, REVIEW_THRESHOLD, ZERO, Confidence
 from domain_kernel.decisions import ApplicabilityDecision
 from domain_kernel.dedupe import DedupeKey
@@ -141,10 +150,13 @@ __all__ = [
     "ALLOWED_OPERATORS",
     "ATTRIBUTE_KEY_PATTERN",
     "CERTAIN",
+    "DASHES",
     "ENUM_TYPES",
     "FY_LABEL_PATTERN",
     "GSTIN_PATTERN",
     "ID_NAMESPACE",
+    "MAX_QUOTE_CHARS",
+    "MAX_TEXT_CHARS",
     "MULTI_VALUE_OPERATORS",
     "NUMERIC_TYPES",
     "OBLIGATION_TRANSITIONS",
@@ -152,6 +164,7 @@ __all__ = [
     "PAN_PATTERN",
     "PARSER_VERSION_PATTERN",
     "PROBLEM_TYPE_PREFIX",
+    "QUOTE_MATCH_THRESHOLD",
     "REVIEW_THRESHOLD",
     "RULE_VERSION_KIND",
     "RULE_VERSION_ONLY",
@@ -266,9 +279,12 @@ __all__ = [
     "disjoin",
     "document_id_for",
     "evaluate_predicate",
+    "evidence_tokens_missing",
     "negate",
     "normalise_name",
     "parse_closure_reason",
+    "quote_match_ratio",
+    "quote_matches",
     "specification_from_mapping",
     "specification_to_mapping",
     "utc_now",
