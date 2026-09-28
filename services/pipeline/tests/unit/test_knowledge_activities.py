@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 
 from domain_kernel.documents import clause_id_for, document_id_for
 from pipeline.application.activities import Fetched, ParseRequest
@@ -14,6 +15,7 @@ from pipeline.domain.errors import KnowledgeContractError, RulebookConflictError
 from pipeline.domain.knowledge import DocumentRecord, RegisteredDocument
 from pipeline.infrastructure.fakes import SAMPLE_TEXT, FakePlainTextParser
 from pipeline.testing import MemoryRulebook
+from pipeline.workflows import IngestRequest
 
 CONTENT = SAMPLE_TEXT.encode()
 
@@ -101,3 +103,13 @@ def test_the_activity_declares_what_a_retry_cannot_fix() -> None:
         "KnowledgeContractError",
         "UnsupportedDocumentError",
     }
+
+
+def test_knowledge_needs_a_regulator_up_front() -> None:
+    since = datetime(2026, 9, 1, tzinfo=UTC)
+    with pytest.raises(ValidationError, match="regulator is required"):
+        IngestRequest(source_id=UUID(int=1), since=since, knowledge=True)
+    with pytest.raises(ValidationError, match="regulator is required"):
+        IngestRequest(source_id=UUID(int=1), since=since, knowledge=True, regulator=" ")
+    assert IngestRequest(source_id=UUID(int=1), since=since).regulator == ""
+    assert IngestRequest(source_id=UUID(int=1), since=since, knowledge=True, regulator="CBIC")

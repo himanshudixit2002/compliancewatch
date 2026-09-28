@@ -13,6 +13,8 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.testing import WorkflowEnvironment
 
 from domain_kernel.ids import DocumentId
+from pipeline.domain.errors import RulebookRejectedError
+from pipeline.domain.knowledge import DocumentRecord, RegisteredDocument
 from pipeline.settings import PipelineSettings
 from pipeline.testing import MemoryRulebook
 from pipeline.worker import activities
@@ -91,3 +93,39 @@ async def test_settings_default_to_the_dev_stack_temporal() -> None:
     settings = Settings(_env_file=None, service_name="pipeline-worker")
     assert settings.temporal_address == "localhost:7233"
     assert settings.temporal_namespace == "default"
+
+
+class RefusingRulebook:
+    def register_document(self, record: DocumentRecord) -> RegisteredDocument:
+        raise RulebookRejectedError("503: rulebook-writes-disabled")
+
+
+async def test_a_failed_registration_is_reported_and_the_ingest_completes(
+    environment: WorkflowEnvironment,
+) -> None:
+    task_queue = f"pipeline-test-{uuid.uuid4().hex[:8]}"
+    settings = PipelineSettings(
+        _env_file=None, service_name="pipeline-worker", pipeline_knowledge_enabled=True
+    )
+    worker = build_worker(
+        environment.client,
+        WorkerConfig(task_queue=task_queue),
+        workflows=[IngestDocumentWorkflow],
+        activities=activities(settings, sink=RefusingRulebook()),
+    )
+    request = IngestRequest(
+        source_id=uuid.UUID(int=1),
+        since=datetime(2026, 9, 1, tzinfo=UTC),
+        knowledge=True,
+        regulator="CBIC",
+    )
+    async with worker:
+        result = await environment.client.execute_workflow(
+            IngestDocumentWorkflow.run,
+            request,
+            id=f"ingest-{uuid.uuid4()}",
+            task_queue=task_queue,
+        )
+    assert result.registered is False
+    assert result.clause_count == 3
+    assert "rulebook-writes-disabled" in result.registration_error
