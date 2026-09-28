@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from domain_kernel._validation import require_instance, require_int, require_text
+from domain_kernel.citations import DASHES
 from domain_kernel.errors import InvalidRelationError, InvariantViolationError
 from domain_kernel.ids import CanonicalEntityId, ClauseId, RuleVersionId
 
@@ -78,6 +79,7 @@ _NON_DIGIT = re.compile(r"\D", re.ASCII)
 _TRAILING_FRACTION = re.compile(r"\.\d+(?=\D*\Z)", re.ASCII)
 _NUMBER = re.compile(r"\d+(?:\.\d+)?|\.\d+", re.ASCII)
 _TWO_DIGIT_CODE = re.compile(r"\d{2}", re.ASCII)
+_DASH_TO_HYPHEN = str.maketrans(dict.fromkeys(DASHES, "-"))
 
 
 def _collapse(text: str) -> str:
@@ -161,8 +163,9 @@ _NORMALISERS: Mapping[EntityType, Callable[[str], str]] = {
 def normalise_name(type: EntityType, text: str) -> str:
     """The canonical name of ``text`` read as an entity of ``type``.
 
-    Deterministic and idempotent. Whitespace is collapsed first for every type, so the spacing
-    of the source text never matters. Per type:
+    Deterministic and idempotent. Every Unicode dash (en dash, em dash, minus sign, ...) reads as
+    ``-`` and whitespace is collapsed first for every type, so neither the dash a PDF uses nor
+    the spacing of the source text matters. Per type:
 
     - ``notification``, ``circular``: casefold, drop a leading "Notification No.", "Circular
       No.", "No." or "Number", and close the spaces around "-" and "/", so "Notification No.
@@ -188,7 +191,7 @@ def normalise_name(type: EntityType, text: str) -> str:
     an empty name.
     """
     kind = require_instance(type, EntityType, "type")
-    return _NORMALISERS[kind](require_instance(text, str, "text"))
+    return _NORMALISERS[kind](require_instance(text, str, "text").translate(_DASH_TO_HYPHEN))
 
 
 @dataclass(frozen=True, slots=True)

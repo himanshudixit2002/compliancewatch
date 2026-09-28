@@ -5,6 +5,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from domain_kernel.citations import DASHES
 from domain_kernel.errors import (
     PROBLEM_TYPE_PREFIX,
     DomainError,
@@ -82,11 +83,14 @@ NAME_TABLE: list[tuple[EntityType, str, str]] = [
     (EntityType.NOTIFICATION, "Notification Number 17/2026", "17/2026"),
     (EntityType.NOTIFICATION, "Notfn. 17/2026-CT", "notfn. 17/2026-ct"),
     (EntityType.NOTIFICATION, "November 2026 list", "november 2026 list"),
+    (EntityType.NOTIFICATION, "NOTIFICATION No. 01/2026 \u2013 Central Tax", "01/2026-central tax"),
+    (EntityType.NOTIFICATION, "01/2026 \u2014 central tax", "01/2026-central tax"),
     (EntityType.CIRCULAR, "Circular No. 123/42/2019-GST", "123/42/2019-gst"),
     (EntityType.CIRCULAR, "Circular No. 123 / 42 / 2019 - GST", "123/42/2019-gst"),
     (EntityType.CIRCULAR, "circular no 123/42/2019-GST", "123/42/2019-gst"),
     (EntityType.CIRCULAR, "CIRCULAR NO.123/42/2019-GST", "123/42/2019-gst"),
     (EntityType.CIRCULAR, "123/42/2019-gst", "123/42/2019-gst"),
+    (EntityType.CIRCULAR, "Circular No. 123/42/2019 \u2013 GST", "123/42/2019-gst"),
     (EntityType.SECTION, "section 16 (2) (c)", "16(2)(c)"),
     (EntityType.SECTION, "Section 16(2)(c)", "16(2)(c)"),
     (EntityType.SECTION, "SECTION 16", "16"),
@@ -111,6 +115,8 @@ NAME_TABLE: list[tuple[EntityType, str, str]] = [
     (EntityType.FORM, "Form Form GSTR-1", "GSTR-1"),
     (EntityType.FORM, "gstr-1", "GSTR-1"),
     (EntityType.FORM, "itc 04", "ITC-04"),
+    (EntityType.FORM, "FORM GSTR\u20133B", "GSTR-3B"),
+    (EntityType.FORM, "GSTR \u2212 1", "GSTR-1"),
     (EntityType.FORM, "forms 1", "FORMS-1"),
     (EntityType.HSN_CODE, "HSN 8471 90", "847190"),
     (EntityType.HSN_CODE, "8471.90", "847190"),
@@ -259,6 +265,14 @@ def test_normalise_name_ignores_spacing(kind: EntityType, text: str) -> None:
     assert normalise_name(kind, f"  {text} \t\n") == expected
     assert normalise_name(kind, text.replace(" ", "  ")) == expected
     assert normalise_name(kind, text.replace(" ", " \n ")) == expected
+
+
+@settings(max_examples=1000)
+@given(ENTITY_TYPES, NAME_TEXT, st.sampled_from(sorted(DASHES)))
+def test_normalise_name_reads_every_dash_as_a_hyphen(
+    kind: EntityType, text: str, dash: str
+) -> None:
+    assert normalise_name(kind, text.replace("-", dash)) == normalise_name(kind, text)
 
 
 @settings(max_examples=1000)
