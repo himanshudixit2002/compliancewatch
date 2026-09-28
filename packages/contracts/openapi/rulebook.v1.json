@@ -1,6 +1,229 @@
 {
   "components": {
     "schemas": {
+      "AlignmentOut": {
+        "properties": {
+          "aligned": {
+            "title": "Aligned",
+            "type": "integer"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "integer"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "aligned",
+          "queued",
+          "unchanged"
+        ],
+        "title": "AlignmentOut",
+        "type": "object"
+      },
+      "ApprovalOut": {
+        "properties": {
+          "candidate_id": {
+            "format": "uuid",
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "rule_relation_id": {
+            "format": "uuid",
+            "title": "Rule Relation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "rule_relation_id"
+        ],
+        "title": "ApprovalOut",
+        "type": "object"
+      },
+      "ApproveIn": {
+        "additionalProperties": false,
+        "properties": {
+          "decided_by": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Decided By",
+            "type": "string"
+          },
+          "from_rule_version_id": {
+            "description": "The new version the relation starts from",
+            "format": "uuid",
+            "title": "From Rule Version Id",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "target_rule_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The affected version, for relations that target one",
+            "title": "Target Rule Version Id"
+          }
+        },
+        "required": [
+          "from_rule_version_id",
+          "decided_by"
+        ],
+        "title": "ApproveIn",
+        "type": "object"
+      },
+      "CandidateIn": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "evidence_clause_ref": {
+            "pattern": "^(?:[a-z]{2,3}\\.)?p[1-9][0-9]{0,3}$",
+            "title": "Evidence Clause Ref",
+            "type": "string"
+          },
+          "evidence_quote": {
+            "maxLength": 400,
+            "minLength": 8,
+            "title": "Evidence Quote",
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/IssueIn"
+            },
+            "maxItems": 50,
+            "title": "Issues",
+            "type": "array"
+          },
+          "needs_review": {
+            "title": "Needs Review",
+            "type": "boolean"
+          },
+          "new_due_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Due On"
+          },
+          "period_label": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period Label"
+          },
+          "quote_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Quote Score",
+            "type": "number"
+          },
+          "relation": {
+            "$ref": "#/components/schemas/RelationKind"
+          },
+          "rule_key": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule Key"
+          },
+          "target_clause_ref": {
+            "pattern": "^(?:[a-z]{2,3}\\.)?p[1-9][0-9]{0,3}$",
+            "title": "Target Clause Ref",
+            "type": "string"
+          },
+          "target_name": {
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Target Name",
+            "type": "string"
+          },
+          "target_span_end": {
+            "minimum": 1.0,
+            "title": "Target Span End",
+            "type": "integer"
+          },
+          "target_span_start": {
+            "minimum": 0.0,
+            "title": "Target Span Start",
+            "type": "integer"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/EntityType"
+          }
+        },
+        "required": [
+          "relation",
+          "target_type",
+          "target_name",
+          "target_clause_ref",
+          "target_span_start",
+          "target_span_end",
+          "evidence_clause_ref",
+          "evidence_quote",
+          "quote_score",
+          "confidence",
+          "needs_review"
+        ],
+        "title": "CandidateIn",
+        "type": "object"
+      },
+      "CandidateRejectReason": {
+        "enum": [
+          "wrong_kind",
+          "wrong_target",
+          "not_in_text",
+          "duplicate",
+          "out_of_scope"
+        ],
+        "title": "CandidateRejectReason",
+        "type": "string"
+      },
+      "CandidateStatus": {
+        "enum": [
+          "open",
+          "approved",
+          "rejected"
+        ],
+        "title": "CandidateStatus",
+        "type": "string"
+      },
       "ClauseIn": {
         "additionalProperties": false,
         "properties": {
@@ -77,6 +300,66 @@
           "text"
         ],
         "title": "ClauseOut",
+        "type": "object"
+      },
+      "DecisionIn": {
+        "additionalProperties": false,
+        "description": "Decide every open mention of one (entity type, proposed name).",
+        "properties": {
+          "decided_by": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Decided By",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/MentionDecision"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The entity to add the name to",
+            "title": "Entity Id"
+          },
+          "entity_type": {
+            "$ref": "#/components/schemas/EntityType"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "proposed_name": {
+            "maxLength": 400,
+            "title": "Proposed Name",
+            "type": "string"
+          },
+          "reject_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityRejectReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "entity_type",
+          "proposed_name",
+          "decision",
+          "decided_by"
+        ],
+        "title": "DecisionIn",
         "type": "object"
       },
       "DocumentIn": {
@@ -302,6 +585,81 @@
         "title": "DocumentType",
         "type": "string"
       },
+      "EntityRejectReason": {
+        "enum": [
+          "not_an_entity",
+          "wrong_type",
+          "text_artifact",
+          "out_of_scope"
+        ],
+        "title": "EntityRejectReason",
+        "type": "string"
+      },
+      "EntityType": {
+        "description": "The ten kinds of entity the knowledge tables hold. Values match the ``type`` column.",
+        "enum": [
+          "notification",
+          "circular",
+          "section",
+          "rule",
+          "form",
+          "hsn_code",
+          "sac_code",
+          "tax_rate",
+          "threshold",
+          "state"
+        ],
+        "title": "EntityType",
+        "type": "string"
+      },
+      "GroupDecisionOut": {
+        "properties": {
+          "entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
+          },
+          "items_closed": {
+            "title": "Items Closed",
+            "type": "integer"
+          },
+          "relation_targets_updated": {
+            "title": "Relation Targets Updated",
+            "type": "integer"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "resolution",
+          "entity_id",
+          "items_closed",
+          "relation_targets_updated"
+        ],
+        "title": "GroupDecisionOut",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -336,6 +694,140 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "IssueIn": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "IssueIn",
+        "type": "object"
+      },
+      "MentionDecision": {
+        "enum": [
+          "create_entity",
+          "add_alias",
+          "reject"
+        ],
+        "title": "MentionDecision",
+        "type": "string"
+      },
+      "MentionGroupOut": {
+        "properties": {
+          "entity_type": {
+            "$ref": "#/components/schemas/EntityType"
+          },
+          "examples": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewItemOut"
+            },
+            "title": "Examples",
+            "type": "array"
+          },
+          "open_count": {
+            "title": "Open Count",
+            "type": "integer"
+          },
+          "proposed_name": {
+            "title": "Proposed Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_type",
+          "proposed_name",
+          "open_count",
+          "examples"
+        ],
+        "title": "MentionGroupOut",
+        "type": "object"
+      },
+      "MentionIn": {
+        "additionalProperties": false,
+        "properties": {
+          "clause_ref": {
+            "pattern": "^(?:[a-z]{2,3}\\.)?p[1-9][0-9]{0,3}$",
+            "title": "Clause Ref",
+            "type": "string"
+          },
+          "entity_type": {
+            "$ref": "#/components/schemas/EntityType"
+          },
+          "proposed_name": {
+            "default": "",
+            "maxLength": 400,
+            "title": "Proposed Name",
+            "type": "string"
+          },
+          "span_end": {
+            "minimum": 1.0,
+            "title": "Span End",
+            "type": "integer"
+          },
+          "span_start": {
+            "minimum": 0.0,
+            "title": "Span Start",
+            "type": "integer"
+          },
+          "text": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "clause_ref",
+          "entity_type",
+          "text",
+          "span_start",
+          "span_end"
+        ],
+        "title": "MentionIn",
+        "type": "object"
+      },
+      "MentionsIn": {
+        "additionalProperties": false,
+        "description": "The mentions an extractor found in one document; the extractor names itself.",
+        "properties": {
+          "extractor": {
+            "examples": [
+              "grammar@1"
+            ],
+            "maxLength": 60,
+            "pattern": "^[a-z][a-z0-9_-]*@[0-9]+$",
+            "title": "Extractor",
+            "type": "string"
+          },
+          "mentions": {
+            "items": {
+              "$ref": "#/components/schemas/MentionIn"
+            },
+            "maxItems": 20000,
+            "title": "Mentions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "extractor",
+          "mentions"
+        ],
+        "title": "MentionsIn",
         "type": "object"
       },
       "Problem": {
@@ -470,6 +962,351 @@
           "metadata_differs"
         ],
         "title": "RegisteredOut",
+        "type": "object"
+      },
+      "RejectIn": {
+        "additionalProperties": false,
+        "properties": {
+          "decided_by": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Decided By",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/CandidateRejectReason"
+          }
+        },
+        "required": [
+          "reason",
+          "decided_by"
+        ],
+        "title": "RejectIn",
+        "type": "object"
+      },
+      "RelationCandidateOut": {
+        "properties": {
+          "candidate_id": {
+            "format": "uuid",
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "decided_by": {
+            "title": "Decided By",
+            "type": "string"
+          },
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "evidence_clause_id": {
+            "format": "uuid",
+            "title": "Evidence Clause Id",
+            "type": "string"
+          },
+          "evidence_quote": {
+            "title": "Evidence Quote",
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/IssueIn"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "needs_review": {
+            "title": "Needs Review",
+            "type": "boolean"
+          },
+          "new_due_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Due On"
+          },
+          "period_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period Label"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "quote_score": {
+            "title": "Quote Score",
+            "type": "number"
+          },
+          "reject_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject Reason"
+          },
+          "relation": {
+            "$ref": "#/components/schemas/RelationKind"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target_entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Entity Id"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          },
+          "target_rule_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Rule Key"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/EntityType"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "document_id",
+          "relation",
+          "target_type",
+          "target_name",
+          "target_entity_id",
+          "target_rule_key",
+          "evidence_clause_id",
+          "evidence_quote",
+          "quote_score",
+          "period_label",
+          "new_due_on",
+          "prompt_version",
+          "model",
+          "confidence",
+          "issues",
+          "needs_review",
+          "status",
+          "reject_reason",
+          "decided_by"
+        ],
+        "title": "RelationCandidateOut",
+        "type": "object"
+      },
+      "RelationKind": {
+        "description": "How a rule version relates to another rule version or to an entity.\n\n``supersedes`` replaces a version from an effective date; ``amends`` changes part of it;\n``refers_to`` cites it or an entity; ``exempts`` carves something out of it;\n``extends_deadline`` moves the due date of a period; ``corrects`` replaces what an earlier\nversion said (a corrigendum); ``withdraws`` rescinds it.",
+        "enum": [
+          "supersedes",
+          "amends",
+          "refers_to",
+          "exempts",
+          "extends_deadline",
+          "corrects",
+          "withdraws"
+        ],
+        "title": "RelationKind",
+        "type": "string"
+      },
+      "RelationsIn": {
+        "additionalProperties": false,
+        "description": "What one run of the relation stage produced for a document, including the run's own\nissues and any model output it could not turn into a candidate.",
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateIn"
+            },
+            "maxItems": 200,
+            "title": "Candidates",
+            "type": "array"
+          },
+          "extractor": {
+            "examples": [
+              "extraction.rule_relations@1"
+            ],
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Extractor",
+            "type": "string"
+          },
+          "model": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Model",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "ok",
+              "needs_review",
+              "no_targets",
+              "unparseable",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "run_issues": {
+            "items": {
+              "$ref": "#/components/schemas/IssueIn"
+            },
+            "maxItems": 200,
+            "title": "Run Issues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "extractor",
+          "outcome"
+        ],
+        "title": "RelationsIn",
+        "type": "object"
+      },
+      "ReviewItemOut": {
+        "properties": {
+          "clause_id": {
+            "format": "uuid",
+            "title": "Clause Id",
+            "type": "string"
+          },
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "mention_text": {
+            "title": "Mention Text",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          },
+          "span_end": {
+            "title": "Span End",
+            "type": "integer"
+          },
+          "span_start": {
+            "title": "Span Start",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "review_id",
+          "document_id",
+          "clause_id",
+          "mention_text",
+          "span_start",
+          "span_end",
+          "reason"
+        ],
+        "title": "ReviewItemOut",
+        "type": "object"
+      },
+      "RuleOut": {
+        "properties": {
+          "regulator": {
+            "title": "Regulator",
+            "type": "string"
+          },
+          "rule_id": {
+            "format": "uuid",
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "rule_key": {
+            "title": "Rule Key",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_key",
+          "rule_id",
+          "regulator",
+          "title"
+        ],
+        "title": "RuleOut",
+        "type": "object"
+      },
+      "StagingOut": {
+        "properties": {
+          "candidate_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Candidate Ids",
+            "type": "array"
+          },
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "unchanged",
+          "candidate_ids"
+        ],
+        "title": "StagingOut",
         "type": "object"
       },
       "ValidationError": {
@@ -770,6 +1607,210 @@
         ]
       }
     },
+    "/v1/rulebook/documents/{document_id}/mentions": {
+      "put": {
+        "operationId": "submit_mentions_v1_rulebook_documents__document_id__mentions_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "in": "header",
+            "name": "x-cw-write-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+              "title": "X-Cw-Write-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MentionsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlignmentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Align the entity mentions found in a document; the unresolved go to review",
+        "tags": [
+          "rulebook",
+          "knowledge"
+        ]
+      }
+    },
+    "/v1/rulebook/documents/{document_id}/relation-candidates": {
+      "put": {
+        "operationId": "submit_relations_v1_rulebook_documents__document_id__relation_candidates_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "in": "header",
+            "name": "x-cw-write-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+              "title": "X-Cw-Write-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelationsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagingOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Stage the relations proposed for a document; idempotent per proposal",
+        "tags": [
+          "rulebook",
+          "knowledge"
+        ]
+      }
+    },
     "/v1/rulebook/ping": {
       "get": {
         "operationId": "ping_v1_rulebook_ping_get",
@@ -792,6 +1833,557 @@
         "summary": "Ping",
         "tags": [
           "rulebook"
+        ]
+      }
+    },
+    "/v1/rulebook/review/entities": {
+      "get": {
+        "operationId": "list_entity_groups_v1_rulebook_review_entities_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "entity_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/EntityType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Entity Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/EntityType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MentionGroupOut"
+                  },
+                  "title": "Response List Entity Groups V1 Rulebook Review Entities Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open entity review groups: one per (entity type, proposed name)",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/review/entities/decisions": {
+      "post": {
+        "operationId": "decide_entity_group_v1_rulebook_review_entities_decisions_post",
+        "parameters": [
+          {
+            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "in": "header",
+            "name": "x-cw-write-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+              "title": "X-Cw-Write-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupDecisionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Create the entity, add the name to one, or reject every open mention of a group",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/review/relations": {
+      "get": {
+        "operationId": "list_relation_candidates_v1_rulebook_review_relations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CandidateStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "open",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "document_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Document Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RelationCandidateOut"
+                  },
+                  "title": "Response List Relation Candidates V1 Rulebook Review Relations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Relation candidates, open ones by default, in id order",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/review/relations/{candidate_id}/approve": {
+      "post": {
+        "operationId": "approve_relation_v1_rulebook_review_relations__candidate_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "in": "header",
+            "name": "x-cw-write-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+              "title": "X-Cw-Write-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Approve a candidate into a rule relation from a rule version not yet published",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/review/relations/{candidate_id}/reject": {
+      "post": {
+        "operationId": "reject_relation_v1_rulebook_review_relations__candidate_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "in": "header",
+            "name": "x-cw-write-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+              "title": "X-Cw-Write-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelationCandidateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Reject a candidate with a reason",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/rules": {
+      "get": {
+        "operationId": "list_rules_v1_rulebook_rules_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RuleOut"
+                  },
+                  "title": "Response List Rules V1 Rulebook Rules Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Rules by key with their latest title",
+        "tags": [
+          "rulebook",
+          "rules"
         ]
       }
     }

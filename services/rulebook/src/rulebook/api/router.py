@@ -2,10 +2,11 @@
 
 from fastapi import APIRouter
 
-from rulebook.api import documents
+from rulebook.api import documents, review
 
 router = APIRouter(prefix="/v1/rulebook", tags=["rulebook"])
 router.include_router(documents.router)
+router.include_router(review.router)
 
 
 @router.get("/ping")
