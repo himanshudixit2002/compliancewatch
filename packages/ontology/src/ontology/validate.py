@@ -42,7 +42,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stderr.write(f"ontology: invalid: {exc}\n")
         return 1
     for attribute in ontology.attributes:
-        sys.stdout.write(f"{attribute.key:<28} {attribute.type.value}\n")
+        scope = attribute.level.value + (" per FY" if attribute.per_financial_year else "")
+        sys.stdout.write(f"{attribute.key:<28} {attribute.type.value:<13} {scope}\n")
     sys.stdout.write(f"ontology {ontology.version}: {len(ontology.attributes)} attributes ok\n")
     return 0
 

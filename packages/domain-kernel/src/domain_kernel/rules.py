@@ -8,6 +8,7 @@ from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import RuleId, RuleVersionId
 from domain_kernel.periods import EffectivePeriod
 from domain_kernel.predicates import Specification
+from domain_kernel.recurrence import Recurrence
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +31,12 @@ class ObligationTemplate:
 
 @dataclass(frozen=True, slots=True)
 class RuleVersionSnapshot:
-    """A rule version as the applicability engine reads it."""
+    """A rule version as the applicability engine reads it.
+
+    ``recurrence`` is set for a duty that repeats (a monthly return); the obligation service
+    then materialises one obligation per period. A one-off duty leaves it ``None`` and uses the
+    template's ``due_in_days``.
+    """
 
     rule_id: RuleId
     rule_version_id: RuleVersionId
@@ -40,6 +46,7 @@ class RuleVersionSnapshot:
     specification: Specification
     effective: EffectivePeriod
     obligation_template: ObligationTemplate
+    recurrence: Recurrence | None = None
 
     def __post_init__(self) -> None:
         require_instance(self.rule_id, RuleId, "rule_id")
@@ -50,6 +57,8 @@ class RuleVersionSnapshot:
         _require_specification(self.specification)
         require_instance(self.effective, EffectivePeriod, "effective")
         require_instance(self.obligation_template, ObligationTemplate, "obligation_template")
+        if self.recurrence is not None:
+            require_instance(self.recurrence, Recurrence, "recurrence")
 
     def is_effective_on(self, as_of: date) -> bool:
         return self.effective.contains(as_of)

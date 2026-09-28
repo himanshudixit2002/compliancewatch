@@ -157,6 +157,10 @@ PAIRING_MATRIX: list[tuple[RelationKind, str, bool]] = [
     (RelationKind.EXEMPTS, RULE_VERSION_KIND, True),
     (RelationKind.EXTENDS_DEADLINE, "entity", False),
     (RelationKind.EXTENDS_DEADLINE, RULE_VERSION_KIND, True),
+    (RelationKind.CORRECTS, "entity", False),
+    (RelationKind.CORRECTS, RULE_VERSION_KIND, True),
+    (RelationKind.WITHDRAWS, "entity", False),
+    (RelationKind.WITHDRAWS, RULE_VERSION_KIND, True),
 ]
 
 
@@ -187,8 +191,11 @@ def test_relation_kind_values_are_the_schema_vocabulary() -> None:
         "refers_to",
         "exempts",
         "extends_deadline",
+        "corrects",
+        "withdraws",
     ]
     assert RelationKind("extends_deadline") is RelationKind.EXTENDS_DEADLINE
+    assert RelationKind("withdraws") is RelationKind.WITHDRAWS
 
 
 def test_rule_version_kind_is_outside_the_entity_types() -> None:
@@ -425,7 +432,16 @@ def test_pairing_matrix_covers_every_kind_twice() -> None:
         (kind, target_kind, allowed)
         for kind in RelationKind
         for target_kind, allowed in (
-            ("entity", kind not in {RelationKind.SUPERSEDES, RelationKind.EXTENDS_DEADLINE}),
+            (
+                "entity",
+                kind
+                not in {
+                    RelationKind.SUPERSEDES,
+                    RelationKind.EXTENDS_DEADLINE,
+                    RelationKind.CORRECTS,
+                    RelationKind.WITHDRAWS,
+                },
+            ),
             (RULE_VERSION_KIND, True),
         )
     )
