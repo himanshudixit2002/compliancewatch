@@ -13,7 +13,12 @@ dependencies = [
   "psycopg[binary]>=3.2",
   "py-common",
   "domain-kernel",
+  "httpx2>=2.13",
+  "pypdf>=6.0",
 ]
+
+[project.scripts]
+pipeline-backfill = "pipeline.backfill:main"
 
 [tool.uv.sources]
 py-common = { workspace = true }
