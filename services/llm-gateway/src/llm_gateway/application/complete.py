@@ -27,7 +27,14 @@ from llm_gateway.domain.errors import (
     UnknownPromptError,
 )
 from llm_gateway.domain.events import EventPublisher, LLMCallCompleted, correlation_id_from
-from llm_gateway.domain.features import CallStatus, CostSource, Feature, parse_feature
+from llm_gateway.domain.features import (
+    CallKind,
+    CallStatus,
+    CostSource,
+    Feature,
+    parse_feature,
+    require_kind,
+)
 from llm_gateway.domain.ledger import CostLedger, LedgerEntry
 from llm_gateway.domain.pricing import Cost, cost_for
 from llm_gateway.domain.prompts import PromptRef, PromptRegistry
@@ -148,11 +155,11 @@ class Complete:
     def run(self, req: CompletionRequest, *, correlation_id: str) -> CompletionOutcome:
         """Serve ``req``.
 
-        A refusal before any provider is tried (unknown feature or prompt, malformed or overlong
-        model or correlation id, budget used up) leaves no ledger row; every error after that has
-        written its row.
+        A refusal before any provider is tried (unknown feature or prompt, an embedding feature,
+        malformed or overlong model or correlation id, budget used up) leaves no ledger row; every
+        error after that has written its row.
         """
-        feature = parse_feature(req.feature)
+        feature = require_kind(parse_feature(req.feature), CallKind.COMPLETION)
         ref = PromptRef.parse(req.prompt_version)
         if self._registry.get(ref.name, ref.version) is None and (
             not self._config.allow_unregistered_prompts

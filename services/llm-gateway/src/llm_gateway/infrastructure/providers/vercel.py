@@ -4,6 +4,11 @@ The gateway's own options travel in ``extra_body``: host filters, zero data rete
 fallback list and the reasoning effort. The actual cost of a call comes back in the message's
 ``provider_metadata``. Every SDK error becomes one of the gateway's domain errors, so the use
 case can tell a fallback attempt from a refusal.
+
+Embeddings go to ``/embeddings`` with ``dimensions`` set to the schema's length (unless the
+setting turns it off for a model that has no such parameter) and ``encoding_format="float"``,
+because the SDK asks for base64 otherwise. Whether the gateway passes ``dimensions`` through is
+unverified; the use case checks every vector's length either way.
 """
 
 import math
@@ -21,17 +26,21 @@ from openai import (
     RateLimitError,
     omit,
 )
+from openai.types import CreateEmbeddingResponse
 from openai.types.chat import (
     ChatCompletion,
     ChatCompletionMessageParam,
     ChatCompletionSystemMessageParam,
     ChatCompletionUserMessageParam,
 )
+from openai.types.create_embedding_response import Usage as EmbeddingUsage
 from openai.types.shared_params import ResponseFormatJSONSchema
 from openai.types.shared_params.response_format_json_schema import JSONSchema
 
 from domain_kernel.errors import DomainError, InvariantViolationError
 from domain_kernel.llm import CompletionRequest
+from domain_kernel.vectors import EMBEDDING_DIMS
+from llm_gateway.domain.embeddings import EmbeddingRequest, EmbeddingResult
 from llm_gateway.domain.errors import (
     BudgetExceededError,
     ProviderResponseError,
@@ -63,10 +72,12 @@ class VercelGatewayProvider:
         *,
         routes: Mapping[Feature, Route],
         zero_data_retention: bool = True,
+        embedding_dimensions_param: bool = True,
     ) -> None:
         self._client = client
         self._routes = routes
         self._zero_data_retention = zero_data_retention
+        self._embedding_dimensions_param = embedding_dimensions_param
 
     @classmethod
     def from_settings(
@@ -78,12 +89,18 @@ class VercelGatewayProvider:
         max_retries: int,
         routes: Mapping[Feature, Route],
         zero_data_retention: bool,
+        embedding_dimensions_param: bool = True,
     ) -> Self:
         """Build the SDK client. ``timeout`` is the client default; each call uses its route's."""
         client = OpenAI(
             api_key=api_key, base_url=base_url, timeout=timeout, max_retries=max_retries
         )
-        return cls(client, routes=routes, zero_data_retention=zero_data_retention)
+        return cls(
+            client,
+            routes=routes,
+            zero_data_retention=zero_data_retention,
+            embedding_dimensions_param=embedding_dimensions_param,
+        )
 
     @property
     def client(self) -> OpenAI:
@@ -105,6 +122,22 @@ class VercelGatewayProvider:
         except APIError as exc:
             raise _map_error(exc) from exc
         return _parse(completion, model)
+
+    def embed(self, req: EmbeddingRequest) -> EmbeddingResult:
+        route = self._routes[parse_feature(req.feature)]
+        model = req.model or route.primary
+        try:
+            response = self._client.embeddings.create(
+                model=model,
+                input=list(req.inputs),
+                dimensions=EMBEDDING_DIMS if self._embedding_dimensions_param else omit,
+                encoding_format="float",
+                extra_body=self._extra_body(route, model),
+                timeout=route.timeout_seconds,
+            )
+        except APIError as exc:
+            raise _map_error(exc) from exc
+        return _parse_embeddings(response, model, len(req.inputs))
 
     def _extra_body(self, route: Route, model: str) -> dict[str, object]:
         """The gateway options for ``model`` on ``route``; empty options are left out.
@@ -202,8 +235,35 @@ def _parse(completion: ChatCompletion, model: str) -> ProviderResponse:
         raise ProviderResponseError(f"gateway response is malformed: {exc.detail}") from exc
 
 
+def _parse_embeddings(response: CreateEmbeddingResponse, model: str, count: int) -> EmbeddingResult:
+    """The vectors in input order; indexes other than ``0..count-1`` are a response error."""
+    data = sorted(response.data, key=lambda item: item.index)
+    indexes = [item.index for item in data]
+    if indexes != list(range(count)):
+        raise ProviderResponseError(
+            f"gateway returned embeddings for indexes {indexes[:8]} of {count} inputs"
+        )
+    usage = getattr(response, "usage", None)
+    gateway = _gateway_metadata(response.model_extra)
+    routing = gateway.get("routing")
+    final_provider = routing.get("finalProvider") if isinstance(routing, Mapping) else None
+    generation_id = gateway.get("generationId")
+    try:
+        return EmbeddingResult(
+            vectors=tuple(tuple(item.embedding) for item in data),
+            model=response.model.strip() or model,
+            input_tokens=usage.prompt_tokens if isinstance(usage, EmbeddingUsage) else 0,
+            provider=final_provider if isinstance(final_provider, str) else PROVIDER_NAME,
+            cost_usd=_cost(gateway.get("cost")),
+            generation_id=generation_id if isinstance(generation_id, str) else "",
+        )
+    except InvariantViolationError as exc:
+        raise ProviderResponseError(f"gateway response is malformed: {exc.detail}") from exc
+
+
 def _gateway_metadata(extra: Mapping[str, Any] | None) -> Mapping[str, object]:
-    """``message.provider_metadata.gateway`` when present and well-formed, else empty."""
+    """``provider_metadata.gateway`` of a message or an embeddings response when present and
+    well-formed, else empty."""
     if not isinstance(extra, Mapping):
         return {}
     provider_metadata = extra.get("provider_metadata")

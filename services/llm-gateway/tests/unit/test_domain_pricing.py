@@ -53,8 +53,12 @@ def test_price_table_is_pinned_and_read_only() -> None:
         "google/gemini-3.1-flash-lite",
         "zai/glm-4.7-flash",
         "fake/echo",
+        "voyage/voyage-3.5-lite",
+        "fake/hash-ngram-512",
     }
     assert PRICE_TABLE["zai/glm-5.3"] == ModelPrice(Decimal("0.50"), Decimal("1.50"))
+    assert PRICE_TABLE["fake/hash-ngram-512"].input_per_million_usd > 0
+    assert PRICE_TABLE["voyage/voyage-3.5-lite"].output_per_million_usd == 0
     with pytest.raises(TypeError):
         PRICE_TABLE["x/y"] = DEFAULT_PRICE  # type: ignore[index]
 

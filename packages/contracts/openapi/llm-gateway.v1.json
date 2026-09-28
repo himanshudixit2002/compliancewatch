@@ -195,6 +195,163 @@
         "title": "CompletionOut",
         "type": "object"
       },
+      "EmbeddingIn": {
+        "additionalProperties": false,
+        "properties": {
+          "feature": {
+            "const": "retrieval",
+            "title": "Feature",
+            "type": "string"
+          },
+          "inputs": {
+            "description": "Texts to embed, one vector each, in order; masked before they leave",
+            "items": {
+              "maxLength": 8000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Inputs",
+            "type": "array"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Trace tags, for example a document id",
+            "title": "Metadata"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "pattern": "^[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model id override as creator/model, for a re-embed; the routing table decides when absent. There is never a fallback",
+            "examples": [
+              "voyage/voyage-3.5-lite"
+            ],
+            "title": "Model"
+          }
+        },
+        "required": [
+          "feature",
+          "inputs"
+        ],
+        "title": "EmbeddingIn",
+        "type": "object"
+      },
+      "EmbeddingOut": {
+        "properties": {
+          "correlation_id": {
+            "title": "Correlation Id",
+            "type": "string"
+          },
+          "cost_inr": {
+            "title": "Cost Inr",
+            "type": "string"
+          },
+          "cost_source": {
+            "title": "Cost Source",
+            "type": "string"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "dims": {
+            "title": "Dims",
+            "type": "integer"
+          },
+          "generation_id": {
+            "title": "Generation Id",
+            "type": "string"
+          },
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "model_requested": {
+            "title": "Model Requested",
+            "type": "string"
+          },
+          "model_served": {
+            "description": "Store it with every vector: only same-model vectors compare",
+            "title": "Model Served",
+            "type": "string"
+          },
+          "pii_masked": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "How many identifiers of each kind were masked before the call",
+            "title": "Pii Masked",
+            "type": "object"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "trace_id": {
+            "title": "Trace Id",
+            "type": "string"
+          },
+          "vectors": {
+            "description": "One vector per input, in input order",
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Vectors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_requested",
+          "model_served",
+          "provider",
+          "dims",
+          "vectors",
+          "input_tokens",
+          "cost_usd",
+          "cost_inr",
+          "cost_source",
+          "latency_ms",
+          "trace_id",
+          "generation_id",
+          "correlation_id",
+          "pii_masked"
+        ],
+        "title": "EmbeddingOut",
+        "type": "object"
+      },
       "Feature": {
         "description": "What a call is for. Routing, budgets and the ledger are keyed by it.",
         "enum": [
@@ -202,7 +359,8 @@
           "judgement",
           "qa",
           "classification",
-          "smoke"
+          "smoke",
+          "retrieval"
         ],
         "title": "Feature",
         "type": "string"
@@ -687,6 +845,99 @@
           }
         },
         "summary": "Run one completion through routing, cache, budget, provider and ledger",
+        "tags": [
+          "llm-gateway"
+        ]
+      }
+    },
+    "/v1/llm-gateway/embeddings": {
+      "post": {
+        "description": "Synchronous and uncached. One model, no fallback: store `model_served` with the vectors.",
+        "operationId": "embeddings_v1_llm_gateway_embeddings_post",
+        "parameters": [
+          {
+            "description": "Tenant UUID; optional until the identity service issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; optional until the identity service issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmbeddingIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Embed texts for retrieval through routing, budget, provider and ledger",
         "tags": [
           "llm-gateway"
         ]

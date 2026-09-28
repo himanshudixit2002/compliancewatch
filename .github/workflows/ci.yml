@@ -303,6 +303,11 @@ jobs:
             -d '{"feature":"smoke","prompt":"smoke.echo@1","user":"ci smoke"}' > completion.json
           cat completion.json
           jq -e '.provider == "fake" and .cached == false' completion.json
+          curl -sf -X POST http://localhost:8090/v1/llm-gateway/embeddings \
+            -H 'content-type: application/json' \
+            -d '{"feature":"retrieval","inputs":["ci smoke"]}' > embedding.json
+          jq 'del(.vectors)' embedding.json
+          jq -e '.dims == 512 and (.vectors[0] | length) == 512' embedding.json
       - name: Logs and teardown
         if: always()
         run: |

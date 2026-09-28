@@ -15,14 +15,17 @@ from domain_kernel.protocols import LLMProvider
 from llm_gateway import __version__
 from llm_gateway.api.router import router
 from llm_gateway.application.complete import Complete
+from llm_gateway.application.embed import Embed
 from llm_gateway.application.metering import BudgetGuard
 from llm_gateway.application.usage import Usage
 from llm_gateway.domain.breaker import CircuitBreaker
 from llm_gateway.domain.budgets import BudgetLimits
 from llm_gateway.domain.cache import ResponseCache
 from llm_gateway.domain.config import GatewayConfig
+from llm_gateway.domain.embeddings import EmbeddingProvider
 from llm_gateway.domain.errors import (
     BudgetExceededError,
+    FeatureMismatchError,
     ProviderResponseError,
     ProviderUnavailableError,
     UnknownFeatureError,
@@ -54,6 +57,7 @@ PROBLEM_STATUS: Mapping[type[DomainError], int] = {
     ProviderResponseError: 502,
     UnknownPromptError: 422,
     UnknownFeatureError: 422,
+    FeatureMismatchError: 422,
 }
 log = get_logger(__name__)
 
@@ -75,21 +79,26 @@ def wire(settings: GatewaySettings) -> GatewayWiring:
 
     fake = FakeProvider()
     providers: dict[str, LLMProvider] = {"fake": fake}
+    embedders: dict[str, EmbeddingProvider] = {"fake": fake}
     if settings.llm_provider == "fake":
         # Every route, whatever model it names, is served in process.
         providers["vercel"] = fake
+        embedders["vercel"] = fake
     else:
         api_key = settings.ai_gateway_api_key
         if api_key is None:  # settings validation refuses this before wiring
             raise ValueError("CW_AI_GATEWAY_API_KEY is required when CW_LLM_PROVIDER=vercel")
-        providers["vercel"] = VercelGatewayProvider.from_settings(
+        vercel = VercelGatewayProvider.from_settings(
             base_url=settings.ai_gateway_base_url,
             api_key=api_key.get_secret_value(),
             timeout=VERCEL_CLIENT_TIMEOUT_SECONDS,
             max_retries=settings.ai_gateway_max_retries,
             routes=routing.mapping,
             zero_data_retention=settings.ai_gateway_zero_data_retention,
+            embedding_dimensions_param=settings.llm_embedding_dimensions_param,
         )
+        providers["vercel"] = vercel
+        embedders["vercel"] = vercel
 
     ledger: MemoryLedger | SqlAlchemyLedger = (
         MemoryLedger()
@@ -115,15 +124,28 @@ def wire(settings: GatewaySettings) -> GatewayWiring:
         if settings.llm_cache_ttl_seconds > 0
         else None
     )
+    # One breaker and one budget guard for both use cases: a model's circuit is the same
+    # whichever route calls it, and a budget alarm fires once per scope and month.
     publisher = LogPublisher()
+    breaker = CircuitBreaker(
+        threshold=settings.llm_breaker_threshold, open_seconds=settings.llm_breaker_open_seconds
+    )
+    budgets = BudgetGuard(ledger=ledger, publisher=publisher, config=config)
     complete = Complete(
         registry=registry,
         providers=providers,
-        breaker=CircuitBreaker(
-            threshold=settings.llm_breaker_threshold, open_seconds=settings.llm_breaker_open_seconds
-        ),
-        budgets=BudgetGuard(ledger=ledger, publisher=publisher, config=config),
+        breaker=breaker,
+        budgets=budgets,
         cache=cache,
+        ledger=ledger,
+        tracer=tracer,
+        publisher=publisher,
+        config=config,
+    )
+    embed = Embed(
+        providers=embedders,
+        breaker=breaker,
+        budgets=budgets,
         ledger=ledger,
         tracer=tracer,
         publisher=publisher,
@@ -134,10 +156,12 @@ def wire(settings: GatewaySettings) -> GatewayWiring:
     return GatewayWiring(
         settings=settings,
         providers=providers,
+        embedders=embedders,
         ledger=ledger,
         registry=registry,
         routing=routing,
         complete=complete,
+        embed=embed,
         usage=usage,
         checks=(
             ("ledger", ledger.ping),

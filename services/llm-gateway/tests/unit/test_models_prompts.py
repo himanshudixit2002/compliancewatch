@@ -48,7 +48,7 @@ def test_extraction_route_carries_the_gateway_filters(client: TestClient) -> Non
 
 
 def test_smoke_route_is_the_fake_without_a_fallback(client: TestClient) -> None:
-    smoke = client.get(MODELS).json()[-1]
+    [smoke] = [route for route in client.get(MODELS).json() if route["feature"] == "smoke"]
     assert smoke == {
         "feature": "smoke",
         "primary": "fake/echo",

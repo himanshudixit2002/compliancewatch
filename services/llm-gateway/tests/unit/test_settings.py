@@ -28,6 +28,7 @@ def test_defaults() -> None:
     assert settings.ai_gateway_base_url == "https://ai-gateway.vercel.sh/v1"
     assert settings.ai_gateway_zero_data_retention is True
     assert settings.ai_gateway_max_retries == 0
+    assert settings.llm_embedding_dimensions_param is True
     assert settings.llm_usd_inr == Decimal("88.00")
     assert settings.llm_tenant_monthly_budget_inr == Decimal("1500")
     assert settings.llm_feature_monthly_budget_inr == Decimal("20000")
@@ -55,7 +56,9 @@ def test_env_prefix_still_applies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CW_LLM_USD_INR", "90.5")
     monkeypatch.setenv("CW_LLM_CACHE_TTL_SECONDS", "0")
     monkeypatch.setenv("CW_LOG_LEVEL", "debug")
+    monkeypatch.setenv("CW_LLM_EMBEDDING_DIMENSIONS_PARAM", "false")
     settings = GatewaySettings()
+    assert settings.llm_embedding_dimensions_param is False
     assert settings.llm_ledger == "postgres"
     assert settings.llm_usd_inr == Decimal("90.5")
     assert settings.llm_cache_ttl_seconds == 0

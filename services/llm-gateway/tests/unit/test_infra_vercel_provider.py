@@ -15,9 +15,12 @@ from openai import (
     RateLimitError,
     omit,
 )
+from openai.types import CreateEmbeddingResponse
 from openai.types.chat import ChatCompletion
 
 from domain_kernel.llm import CompletionRequest
+from domain_kernel.vectors import EMBEDDING_DIMS
+from llm_gateway.domain.embeddings import EmbeddingRequest, EmbeddingResult
 from llm_gateway.domain.errors import (
     BudgetExceededError,
     ProviderResponseError,
@@ -33,6 +36,7 @@ PRIMARY = DEFAULT_ROUTES[Feature.EXTRACTION].primary
 FALLBACK = DEFAULT_ROUTES[Feature.EXTRACTION].models[1]
 QA_PRIMARY = DEFAULT_ROUTES[Feature.QA].primary
 QA_FALLBACK = DEFAULT_ROUTES[Feature.QA].models[1]
+RETRIEVAL = DEFAULT_ROUTES[Feature.RETRIEVAL].primary
 REQUEST = httpx2.Request("POST", "https://ai-gateway.vercel.sh/v1/chat/completions")
 GATEWAY_METADATA: dict[str, Any] = {
     "cost": "0.000123",
@@ -469,6 +473,169 @@ def test_other_exceptions_pass_through_untouched() -> None:
     vercel, _ = provider(RuntimeError("bug"))
     with pytest.raises(RuntimeError, match="bug"):
         vercel.complete(request())
+
+
+# ---- embeddings -------------------------------------------------------------------------------
+
+
+class Embeddings:
+    def __init__(self, outcomes: list[CreateEmbeddingResponse | Exception]) -> None:
+        self.outcomes = outcomes
+        self.calls: list[dict[str, Any]] = []
+
+    def create(self, **kwargs: Any) -> CreateEmbeddingResponse:
+        self.calls.append(kwargs)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+class EmbeddingClient:
+    def __init__(self, *outcomes: CreateEmbeddingResponse | Exception) -> None:
+        self.embeddings = Embeddings(list(outcomes))
+
+
+def embedder(
+    *outcomes: CreateEmbeddingResponse | Exception,
+    zero_data_retention: bool = True,
+    embedding_dimensions_param: bool = True,
+) -> tuple[VercelGatewayProvider, Embeddings]:
+    stub = EmbeddingClient(*outcomes)
+    adapter = VercelGatewayProvider(
+        cast(OpenAI, stub),
+        routes=DEFAULT_ROUTES,
+        zero_data_retention=zero_data_retention,
+        embedding_dimensions_param=embedding_dimensions_param,
+    )
+    return adapter, stub.embeddings
+
+
+def vector(slot: int) -> list[float]:
+    values = [0.0] * EMBEDDING_DIMS
+    values[slot] = 1.0
+    return values
+
+
+def embeddings(
+    *slots: int,
+    indexes: list[int] | None = None,
+    model: str = RETRIEVAL,
+    gateway: dict[str, Any] | None = None,
+    usage: bool = True,
+) -> CreateEmbeddingResponse:
+    """One unit vector per slot; ``indexes`` defaults to the slots' order."""
+    order = indexes if indexes is not None else list(range(len(slots)))
+    payload: dict[str, Any] = {
+        "object": "list",
+        "model": model,
+        "data": [
+            {"object": "embedding", "index": index, "embedding": vector(slot)}
+            for index, slot in zip(order, slots, strict=True)
+        ],
+    }
+    if gateway is not None:
+        payload["provider_metadata"] = {"gateway": gateway}
+    if not usage:
+        return CreateEmbeddingResponse.model_construct(**payload)
+    payload["usage"] = {"prompt_tokens": 12, "total_tokens": 12}
+    return CreateEmbeddingResponse.model_validate(payload)
+
+
+def embedding_request(*inputs: str, model: str | None = None) -> EmbeddingRequest:
+    return EmbeddingRequest(feature="retrieval", inputs=inputs or ("Section 7.",), model=model)
+
+
+def test_embed_sends_float_512_dimensions_and_zero_data_retention() -> None:
+    vercel, calls = embedder(embeddings(0, 1))
+    vercel.embed(embedding_request("Section 7.", "Section 8."))
+
+    [call] = calls.calls
+    assert call == {
+        "model": RETRIEVAL,
+        "input": ["Section 7.", "Section 8."],
+        "dimensions": 512,
+        "encoding_format": "float",
+        "extra_body": {"providerOptions": {"gateway": {"zeroDataRetention": True}}},
+        "timeout": 15.0,
+    }
+
+
+def test_embed_can_leave_out_the_dimensions_parameter() -> None:
+    vercel, calls = embedder(
+        embeddings(0, model="voyage/voyage-3.5"),
+        zero_data_retention=False,
+        embedding_dimensions_param=False,
+    )
+    vercel.embed(embedding_request(model="voyage/voyage-3.5"))
+    [call] = calls.calls
+    assert call["model"] == "voyage/voyage-3.5"
+    assert call["dimensions"] is omit
+    assert call["extra_body"] == {"providerOptions": {"gateway": {"zeroDataRetention": False}}}
+    assert call["timeout"] == 15.0
+
+
+def test_embed_parses_vectors_in_input_order_with_cost_and_host() -> None:
+    gateway = {"cost": "0.000004", "generationId": "gen-7", "routing": {"finalProvider": "voyage"}}
+    vercel, _ = embedder(embeddings(5, 9, indexes=[1, 0], gateway=gateway))
+    result = vercel.embed(embedding_request("a", "b"))
+    assert result == EmbeddingResult(
+        vectors=(tuple(vector(9)), tuple(vector(5))),
+        model=RETRIEVAL,
+        input_tokens=12,
+        provider="voyage",
+        cost_usd=Decimal("0.000004"),
+        generation_id="gen-7",
+    )
+
+
+def test_embed_without_metadata_or_usage_falls_back_to_defaults() -> None:
+    vercel, _ = embedder(embeddings(0, model=" ", usage=False))
+    result = vercel.embed(embedding_request())
+    assert (result.model, result.provider, result.cost_usd, result.generation_id) == (
+        RETRIEVAL,
+        "vercel",
+        None,
+        "",
+    )
+    assert result.input_tokens == 0
+
+
+@pytest.mark.parametrize("indexes", [[0], [0, 0], [1, 2], []])
+def test_embed_refuses_answers_that_do_not_cover_every_input(indexes: list[int]) -> None:
+    response = embeddings(*range(len(indexes)), indexes=indexes)
+    vercel, _ = embedder(response)
+    with pytest.raises(ProviderResponseError, match="embeddings for indexes"):
+        vercel.embed(embedding_request("a", "b"))
+
+
+def test_an_empty_vector_is_a_response_error() -> None:
+    response = CreateEmbeddingResponse.model_validate(
+        {
+            "object": "list",
+            "model": RETRIEVAL,
+            "data": [{"object": "embedding", "index": 0, "embedding": []}],
+            "usage": {"prompt_tokens": 1, "total_tokens": 1},
+        }
+    )
+    vercel, _ = embedder(response)
+    with pytest.raises(ProviderResponseError, match="malformed"):
+        vercel.embed(embedding_request())
+
+
+def test_embed_maps_sdk_errors_like_completions() -> None:
+    vercel, _ = embedder(
+        status_error(429, headers={"retry-after": "3"}, kind=RateLimitError),
+        status_error(400, code="invalid_request"),
+        APIConnectionError(message="refused", request=REQUEST),
+    )
+    with pytest.raises(ProviderUnavailableError, match="rate limit") as info:
+        vercel.embed(embedding_request())
+    assert info.value.retry_after_seconds == 3.0
+    with pytest.raises(ProviderResponseError, match="rejected the request"):
+        vercel.embed(embedding_request())
+    with pytest.raises(ProviderUnavailableError, match="unreachable"):
+        vercel.embed(embedding_request())
 
 
 # ---- construction -----------------------------------------------------------------------------
