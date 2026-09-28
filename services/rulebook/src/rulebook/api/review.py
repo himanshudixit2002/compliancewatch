@@ -21,6 +21,7 @@ from rulebook.api.schemas import (
     RejectIn,
     RelationCandidateOut,
     RelationsIn,
+    ReviewItemOut,
     RuleOut,
     StagingOut,
 )
@@ -74,6 +75,18 @@ def list_entity_groups(
     return [MentionGroupOut.from_group(group) for group in groups]
 
 
+@router.get(
+    "/review/entities/items",
+    summary="Every open mention of one group, with the review ids a decision can name",
+    tags=["review"],
+)
+def list_group_items(
+    wired: Wired, entity_type: EntityType, proposed_name: str = ""
+) -> list[ReviewItemOut]:
+    items = wired.list_group_items.run(entity_type, proposed_name)
+    return [ReviewItemOut.from_item(item) for item in items]
+
+
 @router.post(
     "/review/entities/decisions",
     summary="Create the entity, add the name to one, or reject every open mention of a group",
@@ -90,6 +103,7 @@ def decide_entity_group(body: DecisionIn, wired: Wired) -> GroupDecisionOut:
         entity_id=None if body.entity_id is None else CanonicalEntityId(body.entity_id),
         reject_reason=body.reject_reason,
         note=body.note,
+        review_ids=body.review_ids,
     )
     return GroupDecisionOut.from_decision(decision)
 

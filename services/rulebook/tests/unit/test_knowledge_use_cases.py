@@ -9,7 +9,7 @@ import pytest
 from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.errors import InvalidRelationError, InvariantViolationError
 from domain_kernel.ids import CanonicalEntityId, DocumentId, RuleVersionId, SourceId
-from domain_kernel.knowledge import EntityType, RelationKind
+from domain_kernel.knowledge import EntityRef, EntityType, RelationKind
 from domain_kernel.status import RuleVersionStatus
 from rulebook.application.alignment import AlignMentions, SubmittedMention
 from rulebook.application.documents import RegisterDocument
@@ -22,7 +22,7 @@ from rulebook.application.relations import (
     StageRelationCandidates,
     SubmittedCandidate,
 )
-from rulebook.application.review import DecideMentionGroup, ListMentionGroups
+from rulebook.application.review import DecideMentionGroup, ListGroupItems, ListMentionGroups
 from rulebook.domain.alignment import MatchKind, Resolved, ReviewReason, Unresolved, resolve
 from rulebook.domain.documents import StoredDocument
 from rulebook.domain.errors import (
@@ -307,13 +307,23 @@ def test_an_unqualified_name_cannot_become_an_entity_but_can_be_linked(
     store: MemoryKnowledgeStore,
 ) -> None:
     AlignMentions(store).run(DOC, GRAMMAR, [BARE_SECTION])
+    (item,) = ListGroupItems(store).run(EntityType.SECTION, "39")
     with pytest.raises(NonCanonicalNameError):
         DecideMentionGroup(store, clock).run(
-            EntityType.SECTION, "39", MentionDecision.CREATE_ENTITY, decided_by="a"
+            EntityType.SECTION,
+            "39",
+            MentionDecision.CREATE_ENTITY,
+            decided_by="a",
+            review_ids=[item.review_id],
         )
     target = entity(store, EntityType.SECTION, "39@cgst-act")
     decided = DecideMentionGroup(store, clock).run(
-        EntityType.SECTION, "39", MentionDecision.ADD_ALIAS, decided_by="a", entity_id=target
+        EntityType.SECTION,
+        "39",
+        MentionDecision.ADD_ALIAS,
+        decided_by="a",
+        entity_id=target,
+        review_ids=[item.review_id],
     )
     assert decided.resolution is Resolution.MATCHED
     names = store.entity_names()
@@ -356,26 +366,39 @@ def test_an_alias_needs_an_entity_of_the_same_type(
 
 def test_a_rejection_closes_the_group(store: MemoryKnowledgeStore) -> None:
     AlignMentions(store).run(DOC, GRAMMAR, [BARE_SECTION])
+    (item,) = ListGroupItems(store).run(EntityType.SECTION, "39")
     decided = DecideMentionGroup(store, clock).run(
         EntityType.SECTION,
         "39",
         MentionDecision.REJECT,
         decided_by="a",
         reject_reason=EntityRejectReason.TEXT_ARTIFACT,
+        review_ids=[item.review_id],
     )
     assert (decided.status, decided.items_closed) == (ReviewStatus.REJECTED, 1)
     assert store.mention_count() == 0
 
 
 def test_decisions_need_their_arguments(store: MemoryKnowledgeStore) -> None:
-    AlignMentions(store).run(DOC, GRAMMAR, [BARE_SECTION])
+    AlignMentions(store).run(DOC, GRAMMAR, [BARE_SECTION, SECTION_MENTION])
     decide = DecideMentionGroup(store, clock)
-    with pytest.raises(InvariantViolationError, match="needs a reason"):
+    with pytest.raises(InvariantViolationError, match="decide its mentions by review_ids"):
         decide.run(EntityType.SECTION, "39", MentionDecision.REJECT, decided_by="a")
+    with pytest.raises(InvariantViolationError, match="needs a reason"):
+        decide.run(EntityType.SECTION, "39(6)@cgst-act", MentionDecision.REJECT, decided_by="a")
     with pytest.raises(InvariantViolationError, match="needs the entity"):
-        decide.run(EntityType.SECTION, "39", MentionDecision.ADD_ALIAS, decided_by="a")
+        decide.run(EntityType.SECTION, "39(6)@cgst-act", MentionDecision.ADD_ALIAS, decided_by="a")
     with pytest.raises(ReviewGroupNotFoundError):
         decide.run(EntityType.FORM, "GSTR-9", MentionDecision.CREATE_ENTITY, decided_by="a")
+    with pytest.raises(ReviewGroupNotFoundError, match="not in"):
+        decide.run(
+            EntityType.SECTION,
+            "39",
+            MentionDecision.REJECT,
+            decided_by="a",
+            reject_reason=EntityRejectReason.TEXT_ARTIFACT,
+            review_ids=[UUID(int=4)],
+        )
 
 
 def test_groups_page_by_type_and_name(store: MemoryKnowledgeStore) -> None:
@@ -617,3 +640,111 @@ def test_supersession_cycles_are_found_along_any_path() -> None:
     assert find_supersedes_cycle(edges, c, a) == (a, b, c)
     assert find_supersedes_cycle(edges, a, c) is None
     assert find_supersedes_cycle({}, a, b) is None
+
+
+# ---------------------------------------------------------------- review follow-ups
+
+OTHER_DIGEST = "0" * 63 + "1"
+OTHER = document_id_for(OTHER_DIGEST)
+
+
+def register_other(store: MemoryKnowledgeStore) -> None:
+    RegisterDocument(store).run(
+        StoredDocument(
+            document_id=OTHER,
+            source_id=SourceId(UUID(int=8)),
+            sha256=OTHER_DIGEST,
+            regulator="CBIC",
+            doc_type=DocumentType.NOTIFICATION,
+            url="https://example.invalid/other.pdf",
+            language="en",
+            media_type="application/pdf",
+            parser_version="pdf@1",
+            fetched_at=NOW,
+        ),
+        (Clause("en.p3", P3),),
+    )
+
+
+BARE_TARGET = replace(
+    REFERS,
+    target_name="39",
+    target_span_start=P3.index("section 39"),
+    target_span_end=P3.index("section 39") + 10,
+)
+
+
+def test_an_unqualified_name_is_decided_one_document_at_a_time(
+    store: MemoryKnowledgeStore,
+) -> None:
+    register_other(store)
+    AlignMentions(store).run(DOC, GRAMMAR, [BARE_SECTION])
+    AlignMentions(store).run(OTHER, GRAMMAR, [BARE_SECTION])
+    (ours,) = stage(store, BARE_TARGET)
+    StageRelationCandidates(store).run(OTHER, RelationSubmission(PROMPT, "m", "ok", (BARE_TARGET,)))
+    items = ListGroupItems(store).run(EntityType.SECTION, "39")
+    assert len(items) == 2
+    mine = next(item for item in items if item.document_id == DOC)
+    target = entity(store, EntityType.SECTION, "39@cgst-act")
+    decided = DecideMentionGroup(store, clock).run(
+        EntityType.SECTION,
+        "39",
+        MentionDecision.ADD_ALIAS,
+        decided_by="a",
+        entity_id=target,
+        review_ids=[mine.review_id],
+    )
+    assert (decided.items_closed, decided.relation_targets_updated) == (1, 1)
+    left = ListGroupItems(store).run(EntityType.SECTION, "39")
+    assert [item.document_id for item in left] == [OTHER]
+    aligned = {c.document_id: c.target_entity_id for c in ListRelationCandidates(store).run()}
+    assert aligned == {DOC: target, OTHER: None}
+    assert store.entity_names()[target][2] == ()
+
+    _, version = store.add_rule("r")
+    ApproveRelationCandidate(store, clock).run(ours, version, None, decided_by="a")
+    ((relation, _),) = store.rule_relations()
+    assert relation.to_ref == "39@cgst-act"
+
+
+def test_a_candidate_staged_after_its_mention_was_decided_is_aligned(
+    store: MemoryKnowledgeStore,
+) -> None:
+    AlignMentions(store).run(DOC, GRAMMAR, [BARE_SECTION])
+    (item,) = ListGroupItems(store).run(EntityType.SECTION, "39")
+    target = entity(store, EntityType.SECTION, "39@cgst-act")
+    DecideMentionGroup(store, clock).run(
+        EntityType.SECTION,
+        "39",
+        MentionDecision.ADD_ALIAS,
+        decided_by="a",
+        entity_id=target,
+        review_ids=[item.review_id],
+    )
+    stage(store, BARE_TARGET)
+    (candidate,) = ListRelationCandidates(store).run()
+    assert candidate.target_entity_id == target
+    assert candidate.issues == ()
+
+
+def test_approval_aligns_a_target_resolved_after_staging(store: MemoryKnowledgeStore) -> None:
+    (candidate_id,) = stage(store, REFERS)
+    target = entity(store, EntityType.SECTION, "39(6)@cgst-act")
+    _, version = store.add_rule("r")
+    ApproveRelationCandidate(store, clock).run(candidate_id, version, None, decided_by="a")
+    ((relation, _),) = store.rule_relations()
+    assert relation.target == EntityRef(EntityType.SECTION, "39(6)@cgst-act", target)
+
+
+def test_an_aliased_target_is_recorded_under_its_canonical_name(
+    store: MemoryKnowledgeStore,
+) -> None:
+    form = entity(store, EntityType.FORM, "GSTR-3B")
+    with store() as uow:
+        uow.entities.add_alias(form, "GSTR-3")
+    aliased = replace(REFERS, target_type=EntityType.FORM, target_name="GSTR-3")
+    (candidate_id,) = stage(store, aliased)
+    _, version = store.add_rule("r")
+    ApproveRelationCandidate(store, clock).run(candidate_id, version, None, decided_by="a")
+    ((relation, _),) = store.rule_relations()
+    assert (relation.to_kind, relation.to_ref) == ("form", "GSTR-3B")

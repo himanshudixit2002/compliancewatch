@@ -3,12 +3,18 @@
 A group is every mention that shares an entity type and a proposed name. Creating the entity
 or adding the name as an alias of an existing one resolves every open mention of the group into
 the index, and points open relation candidates that target the name at the entity, all in one
-transaction. A name that cannot be an alias (empty, or a section or rule with no statute) is
-linked to the chosen entity for these mentions only.
+transaction.
+
+A name that cannot name an entity (empty, or a section or rule with no statute) means different
+things in different documents: "section 16" of one notification is not "section 16" of another.
+Such a group is decided mention by mention: the decision names the review items it covers
+(``review_ids``), links only those mentions to the chosen entity, adds no alias, and points only
+the candidates whose target is one of those mentions at the entity.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from uuid import UUID
 
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import CanonicalEntityId
@@ -24,6 +30,7 @@ from rulebook.domain.errors import (
 from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
 from rulebook.domain.review import (
     EntityRejectReason,
+    EntityReviewItem,
     MentionDecision,
     MentionGroup,
     Resolution,
@@ -57,6 +64,17 @@ class ListMentionGroups:
             return uow.reviews.open_groups(entity_type, min(max(limit, 1), MAX_PAGE), after)
 
 
+class ListGroupItems:
+    """Every open mention of one group, for decisions that must name their items."""
+
+    def __init__(self, unit_of_work: KnowledgeUnitOfWorkFactory) -> None:
+        self._unit_of_work = unit_of_work
+
+    def run(self, entity_type: EntityType, proposed_name: str) -> tuple[EntityReviewItem, ...]:
+        with self._unit_of_work() as uow:
+            return uow.reviews.group_items(entity_type, proposed_name)[:MAX_PAGE]
+
+
 class DecideMentionGroup:
     def __init__(self, unit_of_work: KnowledgeUnitOfWorkFactory, clock: Clock = default_clock):
         self._unit_of_work = unit_of_work
@@ -72,7 +90,14 @@ class DecideMentionGroup:
         entity_id: CanonicalEntityId | None = None,
         reject_reason: EntityRejectReason | None = None,
         note: str = "",
+        review_ids: Sequence[UUID] | None = None,
     ) -> GroupDecision:
+        nameable = _can_name(entity_type, proposed_name)
+        if not nameable and not review_ids:
+            raise InvariantViolationError(
+                f"{proposed_name!r} does not name one {entity_type.value} across documents; "
+                "decide its mentions by review_ids"
+            )
         now = self._clock()
         with self._unit_of_work() as uow:
             items = uow.reviews.lock_group(entity_type, proposed_name)
@@ -80,6 +105,13 @@ class DecideMentionGroup:
                 raise ReviewGroupNotFoundError(
                     f"no review items for {entity_type.value} {proposed_name!r}"
                 )
+            if review_ids:
+                wanted = set(review_ids)
+                items = tuple(item for item in items if item.review_id in wanted)
+                if len(items) != len(wanted):
+                    raise ReviewGroupNotFoundError(
+                        f"some review_ids are not in {entity_type.value} {proposed_name!r}"
+                    )
             open_items = [item for item in items if item.status is ReviewStatus.OPEN]
             if not open_items:
                 raise ReviewGroupClosedError(
@@ -114,9 +146,7 @@ class DecideMentionGroup:
                         f"{entity_type.value}"
                     )
                 target = entity_id
-                aliased = _can_name(entity_type, proposed_name) and uow.entities.add_alias(
-                    entity_id, proposed_name
-                )
+                aliased = nameable and uow.entities.add_alias(entity_id, proposed_name)
                 resolution = Resolution.ALIASED if aliased else Resolution.MATCHED
 
             for item in open_items:
@@ -132,7 +162,14 @@ class DecideMentionGroup:
                 uow.reviews.save(
                     item.resolve(target, resolution, decided_by=decided_by, at=now, note=note)
                 )
-            updated = uow.candidates.set_target_entity(entity_type, proposed_name, target)
+            updated = sum(
+                uow.candidates.set_target_entity_at(
+                    item.clause_id, item.span_start, entity_type, target
+                )
+                for item in open_items
+            )
+            if nameable:
+                updated += uow.candidates.set_target_entity(entity_type, proposed_name, target)
             return GroupDecision(
                 ReviewStatus.RESOLVED, resolution, target, len(open_items), updated
             )

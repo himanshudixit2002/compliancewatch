@@ -271,3 +271,48 @@ def test_rules_are_listed(app: FastAPI, client: TestClient) -> None:
 def test_every_write_needs_the_token(client: TestClient, method: str, path: str) -> None:
     response = getattr(client, method)(f"{BASE}{path}", json={})
     assert response.status_code == 401
+
+
+def test_an_unqualified_group_is_decided_by_its_items(registered: TestClient) -> None:
+    start = P3.index("FORM GSTR-3B")
+    bare = form_mention(
+        entity_type="section", text=P3[start : start + 4], span_end=start + 4, proposed_name="4"
+    )
+    registered.put(
+        f"{BASE}/documents/{DOC}/mentions",
+        json={"extractor": "grammar@1", "mentions": [bare]},
+        headers=AUTH,
+    )
+    items = registered.get(
+        f"{BASE}/review/entities/items", params={"entity_type": "section", "proposed_name": "4"}
+    ).json()
+    assert len(items) == 1
+    body = {
+        "entity_type": "section",
+        "proposed_name": "4",
+        "decision": "reject",
+        "reject_reason": "text_artifact",
+        "decided_by": "analyst",
+    }
+    unnamed = registered.post(f"{BASE}/review/entities/decisions", json=body, headers=AUTH)
+    assert unnamed.status_code == 422
+    named = registered.post(
+        f"{BASE}/review/entities/decisions",
+        json={**body, "review_ids": [items[0]["review_id"]]},
+        headers=AUTH,
+    )
+    assert named.status_code == 200
+    assert named.json()["items_closed"] == 1
+
+
+def test_a_backward_candidate_span_is_a_validation_error(registered: TestClient) -> None:
+    response = registered.put(
+        f"{BASE}/documents/{DOC}/relation-candidates",
+        json={
+            "extractor": "p@1",
+            "outcome": "ok",
+            "candidates": [candidate(target_span_start=10, target_span_end=10)],
+        },
+        headers=AUTH,
+    )
+    assert response.status_code == 422

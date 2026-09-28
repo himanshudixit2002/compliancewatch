@@ -143,6 +143,20 @@ class MemoryMentionRepository:
         self._tables.mentions[key] = (mention_text, span_end, method, extractor)
         return True
 
+    def entity_at(
+        self, clause_id: ClauseId, span_start: int, entity_type: EntityType
+    ) -> CanonicalEntityId | None:
+        return next(
+            (
+                entity_id
+                for (clause, entity_id, start) in sorted(self._tables.mentions, key=str)
+                if clause == clause_id
+                and start == span_start
+                and self._tables.entities[entity_id].entity_type is entity_type
+            ),
+            None,
+        )
+
 
 class MemoryReviewRepository:
     def __init__(self, tables: _Tables) -> None:
@@ -187,6 +201,20 @@ class MemoryReviewRepository:
             item
             for item in self._tables.reviews.values()
             if item.entity_type is entity_type and item.proposed_name == proposed_name
+        )
+
+    def group_items(
+        self, entity_type: EntityType, proposed_name: str
+    ) -> tuple[EntityReviewItem, ...]:
+        return tuple(
+            sorted(
+                (
+                    item
+                    for item in self.lock_group(entity_type, proposed_name)
+                    if item.status is ReviewStatus.OPEN
+                ),
+                key=lambda item: str(item.review_id),
+            )
         )
 
     def save(self, item: EntityReviewItem) -> None:
@@ -242,6 +270,28 @@ class MemoryCandidateRepository:
                 updated += 1
         return updated
 
+    def set_target_entity_at(
+        self,
+        clause_id: ClauseId,
+        span_start: int,
+        entity_type: EntityType,
+        entity_id: CanonicalEntityId,
+    ) -> int:
+        updated = 0
+        for candidate_id, candidate in list(self._tables.candidates.items()):
+            if (
+                candidate.status is CandidateStatus.OPEN
+                and candidate.target_entity_id is None
+                and candidate.target_type is entity_type
+                and candidate.target_clause_id == clause_id
+                and candidate.target_span_start == span_start
+            ):
+                self._tables.candidates[candidate_id] = replace(
+                    candidate, target_entity_id=entity_id
+                )
+                updated += 1
+        return updated
+
 
 class MemoryRelationRepository:
     def __init__(self, tables: _Tables) -> None:
@@ -264,6 +314,9 @@ class MemoryRelationRepository:
             ):
                 edges.setdefault(relation.from_rule_version_id, set()).add(relation.target)
         return {source: frozenset(targets) for source, targets in edges.items()}
+
+    def lock_supersession(self) -> None:
+        """Units of work already run one at a time here."""
 
 
 def _edge(relation: RuleRelation) -> tuple[str, str, str, str, str]:

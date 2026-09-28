@@ -23,7 +23,7 @@ from rulebook.application.relations import (
     RejectRelationCandidate,
     StageRelationCandidates,
 )
-from rulebook.application.review import DecideMentionGroup, ListMentionGroups
+from rulebook.application.review import DecideMentionGroup, ListGroupItems, ListMentionGroups
 from rulebook.domain.errors import (
     CandidateClosedError,
     CandidateNotFoundError,
@@ -98,6 +98,7 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
         read_document=ReadDocument(unit_of_work),
         align_mentions=AlignMentions(unit_of_work),
         list_entity_groups=ListMentionGroups(unit_of_work),
+        list_group_items=ListGroupItems(unit_of_work),
         decide_entity_group=DecideMentionGroup(unit_of_work),
         stage_relations=StageRelationCandidates(unit_of_work),
         list_relations=ListRelationCandidates(unit_of_work),

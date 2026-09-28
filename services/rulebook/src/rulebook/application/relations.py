@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from uuid import UUID
 
-from domain_kernel.ids import DocumentId, RuleVersionId
+from domain_kernel.ids import CanonicalEntityId, DocumentId, RuleVersionId
 from domain_kernel.knowledge import EntityType, RelationKind
 from rulebook.application.alignment import Clock, default_clock
 from rulebook.domain.alignment import Resolved, resolve
@@ -38,7 +38,7 @@ from rulebook.domain.relations import (
     find_supersedes_cycle,
     to_rule_relation,
 )
-from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
+from rulebook.domain.repository import KnowledgeUnitOfWork, KnowledgeUnitOfWorkFactory
 from rulebook.domain.runs import ExtractionRun, RuleSummary
 
 MAX_PAGE = 200
@@ -105,12 +105,15 @@ class StageRelationCandidates:
                         f"not a clause of document {document_id}"
                     )
                 issues = list(submitted.issues)
-                outcome = resolve(submitted.target_type, submitted.target_name, uow.entities)
-                if isinstance(outcome, Resolved):
-                    entity_id = outcome.entity_id
-                else:
-                    entity_id = None
-                    issues.append(CandidateIssue("target_unaligned", outcome.reason.value))
+                entity_id = uow.mentions.entity_at(
+                    target_clause.clause_id, submitted.target_span_start, submitted.target_type
+                )
+                if entity_id is None:
+                    outcome = resolve(submitted.target_type, submitted.target_name, uow.entities)
+                    if isinstance(outcome, Resolved):
+                        entity_id = outcome.entity_id
+                    else:
+                        issues.append(CandidateIssue("target_unaligned", outcome.reason.value))
                 rule_key, rule_id = submitted.rule_key, None
                 if rule_key is not None:
                     rule_id = uow.rules.rule_id(rule_key)
@@ -212,8 +215,14 @@ class ApproveRelationCandidate:
                 and uow.rules.version_status(target_rule_version_id) is None
             ):
                 raise UnknownRuleVersionError(str(target_rule_version_id))
-            relation = to_rule_relation(candidate, from_rule_version_id, target_rule_version_id)
+            target_entity = None
+            if target_rule_version_id is None:
+                target_entity = self._target_entity(uow, candidate)
+            relation = to_rule_relation(
+                candidate, from_rule_version_id, target_rule_version_id, target_entity
+            )
             if relation.relation is RelationKind.SUPERSEDES and target_rule_version_id:
+                uow.relations.lock_supersession()
                 cycle = find_supersedes_cycle(
                     uow.relations.supersedes_edges(), from_rule_version_id, target_rule_version_id
                 )
@@ -232,6 +241,24 @@ class ApproveRelationCandidate:
             uow.relations.add(relation, relation_id=relation_id, candidate_id=candidate_id)
             uow.candidates.save(candidate.approve(decided_by=decided_by, at=now, note=note))
         return Approval(candidate_id=candidate_id, rule_relation_id=relation_id)
+
+    @staticmethod
+    def _target_entity(
+        uow: KnowledgeUnitOfWork, candidate: RelationCandidate
+    ) -> tuple[CanonicalEntityId, str] | None:
+        """The entity the candidate's target is now aligned to, with its canonical name: the
+        one staging found, else the one recorded for the target mention since, else the one its
+        name resolves to now. ``None`` while the target is not aligned."""
+        entity_id = candidate.target_entity_id or uow.mentions.entity_at(
+            candidate.target_clause_id, candidate.target_span_start, candidate.target_type
+        )
+        if entity_id is None:
+            outcome = resolve(candidate.target_type, candidate.target_name, uow.entities)
+            entity_id = outcome.entity_id if isinstance(outcome, Resolved) else None
+        if entity_id is None:
+            return None
+        found = uow.entities.get(entity_id)
+        return None if found is None else (entity_id, found[1])
 
 
 class RejectRelationCandidate:

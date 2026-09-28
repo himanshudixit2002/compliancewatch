@@ -127,8 +127,11 @@ def to_rule_relation(
     candidate: RelationCandidate,
     from_version: RuleVersionId,
     target_version: RuleVersionId | None,
+    target_entity: tuple[CanonicalEntityId, str] | None = None,
 ) -> RuleRelation:
-    """The rule relation an approval writes. The kernel checks pairing and self-relation."""
+    """The rule relation an approval writes. ``target_entity`` is the aligned entity with its
+    canonical name, which the relation records instead of the text the candidate carries (an
+    alias, or a number without its statute). The kernel checks pairing and self-relation."""
     needs_version = candidate.relation in RULE_VERSION_ONLY or candidate.target_rule_key
     if needs_version and target_version is None:
         raise TargetVersionRequiredError(
@@ -136,12 +139,12 @@ def to_rule_relation(
         )
     if target_version is not None:
         target: EntityRef | RuleVersionId = target_version
-    elif candidate.target_entity_id is None:
+    elif target_entity is None:
         raise TargetUnresolvedError(
             f"{candidate.target_type.value} {candidate.target_name!r} is not aligned yet"
         )
     else:
-        target = EntityRef(candidate.target_type, candidate.target_name, candidate.target_entity_id)
+        target = EntityRef(candidate.target_type, target_entity[1], target_entity[0])
     return RuleRelation(
         from_rule_version_id=from_version,
         relation=candidate.relation,

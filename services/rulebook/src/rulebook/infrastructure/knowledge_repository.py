@@ -51,6 +51,8 @@ from rulebook.infrastructure.models import (
 )
 
 EXAMPLES_PER_GROUP = 5
+SUPERSESSION_LOCK = 0x72756C6573757073
+"""Advisory lock key held for the rest of a transaction that approves a supersession."""
 
 
 class SqlAlchemyDocumentRepository:
@@ -183,6 +185,22 @@ class SqlAlchemyMentionRepository:
         )
         return self._session.execute(statement).first() is not None
 
+    def entity_at(
+        self, clause_id: ClauseId, span_start: int, entity_type: EntityType
+    ) -> CanonicalEntityId | None:
+        found = self._session.scalar(
+            select(ClauseEntityRow.entity_id)
+            .join(CanonicalEntityRow, CanonicalEntityRow.id == ClauseEntityRow.entity_id)
+            .where(
+                ClauseEntityRow.clause_id == clause_id.value,
+                ClauseEntityRow.span_start == span_start,
+                CanonicalEntityRow.type == entity_type.value,
+            )
+            .order_by(ClauseEntityRow.entity_id)
+            .limit(1)
+        )
+        return None if found is None else CanonicalEntityId(found)
+
 
 class SqlAlchemyReviewRepository:
     def __init__(self, session: Session) -> None:
@@ -245,6 +263,20 @@ class SqlAlchemyReviewRepository:
             )
             .order_by(EntityReviewRow.id)
             .with_for_update()
+        )
+        return tuple(_to_review(row) for row in self._session.scalars(statement))
+
+    def group_items(
+        self, entity_type: EntityType, proposed_name: str
+    ) -> tuple[EntityReviewItem, ...]:
+        statement = (
+            select(EntityReviewRow)
+            .where(
+                EntityReviewRow.status == ReviewStatus.OPEN.value,
+                EntityReviewRow.entity_type == entity_type.value,
+                EntityReviewRow.proposed_name == proposed_name,
+            )
+            .order_by(EntityReviewRow.id)
         )
         return tuple(_to_review(row) for row in self._session.scalars(statement))
 
@@ -328,6 +360,27 @@ class SqlAlchemyCandidateRepository:
         )
         return len(result.all())
 
+    def set_target_entity_at(
+        self,
+        clause_id: ClauseId,
+        span_start: int,
+        entity_type: EntityType,
+        entity_id: CanonicalEntityId,
+    ) -> int:
+        result = self._session.execute(
+            update(RelationCandidateRow)
+            .where(
+                RelationCandidateRow.status == CandidateStatus.OPEN.value,
+                RelationCandidateRow.target_entity_id.is_(None),
+                RelationCandidateRow.target_type == entity_type.value,
+                RelationCandidateRow.target_clause_id == clause_id.value,
+                RelationCandidateRow.target_span_start == span_start,
+            )
+            .values(target_entity_id=entity_id.value)
+            .returning(RelationCandidateRow.id)
+        )
+        return len(result.all())
+
 
 class SqlAlchemyRelationRepository:
     def __init__(self, session: Session) -> None:
@@ -367,6 +420,11 @@ class SqlAlchemyRelationRepository:
             if target is not None:
                 edges.setdefault(RuleVersionId(source), set()).add(RuleVersionId(target))
         return {source: frozenset(targets) for source, targets in edges.items()}
+
+    def lock_supersession(self) -> None:
+        self._session.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"), {"key": SUPERSESSION_LOCK}
+        )
 
 
 class SqlAlchemyRuleCatalog:

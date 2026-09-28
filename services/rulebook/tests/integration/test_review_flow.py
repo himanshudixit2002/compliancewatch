@@ -191,12 +191,15 @@ def test_mentions_review_and_candidates_end_to_end(
         1,
         1,
     )
+    with factory() as uow:
+        bare_ids = [item.review_id for item in uow.reviews.group_items(EntityType.SECTION, "39")]
     rejected = DecideMentionGroup(factory, clock).run(
         EntityType.SECTION,
         "39",
         MentionDecision.REJECT,
         decided_by="analyst",
         reject_reason=EntityRejectReason.TEXT_ARTIFACT,
+        review_ids=bare_ids,
     )
     assert rejected.items_closed == 1
     assert ListMentionGroups(factory).run() == []
@@ -288,3 +291,52 @@ def test_decisions_must_be_complete_in_the_table(
             text("UPDATE entity_review SET status = 'open', decided_at = now() WHERE id = :id"),
             {"id": review_id},
         )
+
+
+def test_unqualified_mentions_and_late_alignment_on_postgres(
+    factory: PostgresKnowledgeUnitOfWorkFactory,
+) -> None:
+    AlignMentions(factory).run(DOC, "grammar@1", [BARE])
+    bare_target = replace(
+        EXTENDS,
+        relation=RelationKind.REFERS_TO,
+        target_type=EntityType.SECTION,
+        target_name="39",
+        target_span_start=BARE.span_start,
+        target_span_end=BARE.span_end,
+        rule_key=None,
+        period_label=None,
+        new_due_on=None,
+        evidence_quote="section 39 of the Central Goods",
+    )
+    (candidate_id,) = (
+        StageRelationCandidates(factory)
+        .run(DOC, RelationSubmission("p@1", "m", "ok", (bare_target,)))
+        .candidate_ids
+    )
+    with factory() as uow:
+        target, _ = uow.entities.create_or_get(EntityType.SECTION, "39@cgst-act")
+        clause = clause_id_for(DOC, "en.p3")
+        assert uow.mentions.add(
+            clause,
+            target,
+            BARE.text,
+            BARE.span_start,
+            BARE.span_end,
+            method="analyst",
+            extractor="",
+        )
+        assert uow.mentions.entity_at(clause, BARE.span_start, EntityType.SECTION) == target
+        assert uow.mentions.entity_at(clause, BARE.span_start, EntityType.FORM) is None
+        assert (
+            uow.candidates.set_target_entity_at(clause, BARE.span_start, EntityType.SECTION, target)
+            == 1
+        )
+        uow.relations.lock_supersession()
+    version = rule(factory, "late_rule", "draft")
+    ApproveRelationCandidate(factory, clock).run(candidate_id, version, None, decided_by="a")
+    with factory.engine.connect() as connection:
+        to_ref: str = connection.execute(
+            text("SELECT to_ref FROM rule_relation WHERE candidate_id = :id"), {"id": candidate_id}
+        ).scalar_one()
+    assert to_ref == "39@cgst-act"

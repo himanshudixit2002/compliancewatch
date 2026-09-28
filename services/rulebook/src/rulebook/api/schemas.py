@@ -218,6 +218,12 @@ class CandidateIn(BaseModel):
     issues: list[IssueIn] = Field(default_factory=list, max_length=50)
     needs_review: bool
 
+    @model_validator(mode="after")
+    def _span_is_forward(self) -> Self:
+        if self.target_span_end <= self.target_span_start:
+            raise ValueError("target_span_end must be greater than target_span_start")
+        return self
+
     def to_submitted(self) -> SubmittedCandidate:
         return SubmittedCandidate(
             relation=self.relation,
@@ -314,6 +320,14 @@ class DecisionIn(BaseModel):
     decision: MentionDecision
     entity_id: UUID | None = Field(default=None, description="The entity to add the name to")
     reject_reason: EntityRejectReason | None = None
+    review_ids: list[UUID] | None = Field(
+        default=None,
+        max_length=200,
+        description=(
+            "The mentions this decision covers. Required for a name that does not name one "
+            "entity across documents (empty, or a section or rule without its statute)"
+        ),
+    )
     decided_by: str = Field(min_length=1, max_length=120)
     note: str = Field(default="", max_length=2_000)
 

@@ -61,6 +61,12 @@ class MentionRepository(Protocol):
         """Record a resolved mention unless it is recorded; whether this call recorded it."""
         ...
 
+    def entity_at(
+        self, clause_id: ClauseId, span_start: int, entity_type: EntityType
+    ) -> CanonicalEntityId | None:
+        """The entity recorded for the mention of this type starting at this point, if any."""
+        ...
+
 
 class ReviewRepository(Protocol):
     def enqueue(self, item: EntityReviewItem) -> bool:
@@ -77,6 +83,12 @@ class ReviewRepository(Protocol):
         self, entity_type: EntityType, proposed_name: str
     ) -> tuple[EntityReviewItem, ...]:
         """Every item of the group, open or decided, locked for this transaction."""
+        ...
+
+    def group_items(
+        self, entity_type: EntityType, proposed_name: str
+    ) -> tuple[EntityReviewItem, ...]:
+        """Every open item of the group, without locking."""
         ...
 
     def save(self, item: EntityReviewItem) -> None: ...
@@ -107,6 +119,17 @@ class CandidateRepository(Protocol):
         """Point open candidates whose target is this unaligned name at the entity; how many."""
         ...
 
+    def set_target_entity_at(
+        self,
+        clause_id: ClauseId,
+        span_start: int,
+        entity_type: EntityType,
+        entity_id: CanonicalEntityId,
+    ) -> int:
+        """Point open unaligned candidates whose target is the mention at this span at the
+        entity; how many."""
+        ...
+
 
 class RelationRepository(Protocol):
     def add(self, relation: RuleRelation, *, relation_id: UUID, candidate_id: UUID | None) -> bool:
@@ -115,6 +138,11 @@ class RelationRepository(Protocol):
 
     def supersedes_edges(self) -> Mapping[RuleVersionId, frozenset[RuleVersionId]]:
         """Each rule version with the versions it supersedes."""
+        ...
+
+    def lock_supersession(self) -> None:
+        """Serialise supersession approvals until the transaction ends, so two approvals
+        cannot each pass the cycle check and together close a cycle."""
         ...
 
 

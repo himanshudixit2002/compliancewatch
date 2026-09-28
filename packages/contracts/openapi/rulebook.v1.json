@@ -351,6 +351,23 @@
                 "type": "null"
               }
             ]
+          },
+          "review_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The mentions this decision covers. Required for a name that does not name one entity across documents (empty, or a section or rule without its statute)",
+            "title": "Review Ids"
           }
         },
         "required": [
@@ -2030,6 +2047,62 @@
           }
         },
         "summary": "Create the entity, add the name to one, or reject every open mention of a group",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/review/entities/items": {
+      "get": {
+        "operationId": "list_group_items_v1_rulebook_review_entities_items_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "entity_type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EntityType"
+            }
+          },
+          {
+            "in": "query",
+            "name": "proposed_name",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Proposed Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewItemOut"
+                  },
+                  "title": "Response List Group Items V1 Rulebook Review Entities Items Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Every open mention of one group, with the review ids a decision can name",
         "tags": [
           "rulebook",
           "review"
