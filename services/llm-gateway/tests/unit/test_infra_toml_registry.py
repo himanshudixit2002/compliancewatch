@@ -37,7 +37,7 @@ def test_the_shipped_registry_loads() -> None:
     )
     assert [str(spec.ref) for spec in registry.list()] == [
         "smoke.echo@1",
-        "extraction.rule_candidate@0",
+        "extraction.rule_candidate@1",
     ]
     assert registry.get("smoke.echo", "2") is None
     assert registry.get("nope.nope", "1") is None

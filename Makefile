@@ -19,7 +19,7 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE ?= /var/run/docker.sock
 # ---- Inventory -------------------------------------------------------------------------------
 SERVICES := identity profile rulebook applicability-engine obligation notification qa llm-gateway eval pipeline
 PY_PACKAGES := py-common domain-kernel ontology
-PY_DIRS := $(addprefix packages/,$(PY_PACKAGES)) packages/contracts/clients/python $(addprefix services/,$(SERVICES))
+PY_DIRS := $(addprefix packages/,$(PY_PACKAGES)) packages/contracts/clients/python $(addprefix services/,$(SERVICES)) evals/harness
 
 # Service directory -> import package (two exceptions avoid shadowing stdlib/builtins).
 PKG_profile := profile_service
@@ -190,7 +190,7 @@ ts-dev: check-pnpm ## next dev (:3000) and whatsapp-bot (:8080) with reload
 	$(PNPM) turbo run dev
 
 # ---- Composition (guide sections 13, 17, 19) -------------------------------------------------
-.PHONY: install lint format typecheck test check eval migrate run worker relay seed openapi contracts contracts-check hooks ci-lint
+.PHONY: install lint format typecheck test check eval label migrate run worker relay seed openapi contracts contracts-check hooks ci-lint
 install: py-sync ts-install ## Install both toolchains
 
 lint: py-lint ts-lint ## Lint both sides (CI step 1)
@@ -203,8 +203,12 @@ test: py-test ts-test ## Unit and contract tests on both sides (CI step 2)
 
 check: lint typecheck test importlint lock-check contracts-check ## Everything CI runs before integration tests
 
-eval: ## Eval harness against evals/golden (not built yet; prints a notice)
-	@echo "make eval: the eval harness under evals/harness is not built yet; nothing to run."
+EVAL_PROFILE ?= ci
+eval: check-uv ## Eval harness against evals/golden: make eval [EVAL_PROFILE=ci|nightly] [ARGS="--provider fake"]
+	$(UV) run --package compliancewatch-evals eval-harness --profile $(EVAL_PROFILE) $(ARGS)
+
+label: check-uv ## Labelling tool: make label ARGS="check" | "index --source cbic_notifications --since 2024-01-01 --out evals/golden/extraction/cbic_notifications/index.yaml" | "prepare --index ..."
+	$(UV) run --package compliancewatch-pipeline pipeline-label $(ARGS)
 
 migrate: check-uv ## alembic upgrade head for every service, or one: make migrate SERVICE=identity
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \

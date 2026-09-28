@@ -35,6 +35,7 @@ jobs:
       devstack: ${{ steps.filter.outputs.devstack }}
       contracts: ${{ steps.filter.outputs.contracts }}
       schemas: ${{ steps.filter.outputs.schemas }}
+      evals: ${{ steps.filter.outputs.evals }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -83,6 +84,18 @@ jobs:
               - '.github/workflows/ci.yml'
             schemas:
               - 'packages/contracts/events/schemas/**'
+            evals:
+              - 'evals/**'
+              - 'services/pipeline/**'
+              - 'services/llm-gateway/prompts/**'
+              - 'services/qa/**'
+              - 'services/applicability-engine/**'
+              - 'packages/domain-kernel/**'
+              - 'packages/ontology/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
             devstack:
               - 'docker-compose.yml'
               - 'infra/dev/**'
@@ -128,6 +141,32 @@ jobs:
         run: make py-test
       - name: Lockfile is current
         run: make lock-check
+
+  evals:
+    name: Evals (golden sets, scripted and fake provider, section 8 gates)
+    needs: changes
+    if: needs.changes.outputs.evals == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --all-packages --locked
+      - name: Golden cases are well formed
+        run: make label ARGS="check"
+      # Section 17 step 5: the harness runs the labelled cases with the scripted answers (proves
+      # the scoring) and the in-process gateway with the fake provider (proves the plumbing, no
+      # tokens). Section 8 thresholds against a real model run nightly (nightly.yml).
+      - name: Eval harness, ci profile
+        run: make eval EVAL_PROFILE=ci
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: eval-report
+          path: evals/reports/
+          if-no-files-found: ignore
 
   typescript:
     name: TypeScript (eslint, tsc, vitest, build)
@@ -290,8 +329,8 @@ jobs:
 # TODO (guide section 17, steps 4-7) - not implemented yet:
 #   4. integration: testcontainers (Postgres, Redpanda, Temporal test server) for affected services,
 #                   e.g. `uv run pytest -m integration` (Docker is available on ubuntu-latest)
-#   5. evals:       run evals/harness when paths change under services/pipeline/prompts/**, services/qa/**,
-#                   services/applicability-engine/** or evals/**; section 8 thresholds block the merge
+#   5. evals:       done for extraction (job "evals" above, nightly.yml for real providers); the qa
+#                   and applicability suites arrive with their golden sets
 #   6. images:      per-service image build, SBOM (syft), Trivy scan, cosign sign, push to ECR
 #   7. deploy:      Argo CD sync to staging, Playwright e2e and k6 smoke against staging
 # -----------------------------------------------------------------------------------------------
