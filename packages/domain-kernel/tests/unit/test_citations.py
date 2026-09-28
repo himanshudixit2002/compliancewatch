@@ -95,6 +95,27 @@ def test_an_honest_quote_misses_no_tokens() -> None:
     assert evidence_tokens_missing(honest, CLAUSE) == ()
 
 
+@pytest.mark.parametrize(
+    ("quote", "text"),
+    [
+        ("Notification No. 15/2025", "NOTIFICATION No. 15/2025 \u2013 Central Tax"),
+        ("GSTR-3B", "FORM GSTR-3B - monthly"),
+        ("FORM GSTR-3B - monthly", "FORM GSTR-3B monthly"),
+        ("GSTR-3B", "FORM GSTR - 3B"),
+        ("GSTR - 3B", "FORM GSTR-3B"),
+        ("sub-section (6) of section 39", "sub -section (6) of section 39"),
+        ("dated 30.09.2026.", "on or before 30.09.2026 the return"),
+    ],
+)
+def test_spacing_and_dashes_do_not_hide_a_present_token(quote: str, text: str) -> None:
+    assert evidence_tokens_missing(quote, text) == ()
+
+
+def test_a_token_must_stand_alone_in_the_text() -> None:
+    assert evidence_tokens_missing("section 9", "section 39") == ("9",)
+    assert evidence_tokens_missing("GSTR-3", "GSTR-3B") == ("gstr-3",)
+
+
 def test_missing_tokens_are_reported_once_in_quote_order() -> None:
     quote = "section 40 and section 40 in March, 2024"
     assert evidence_tokens_missing(quote, CLAUSE) == ("40", "march", "2024")

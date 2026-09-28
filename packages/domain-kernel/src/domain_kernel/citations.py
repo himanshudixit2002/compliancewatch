@@ -69,10 +69,14 @@ class Citation:
             require_instance(self.clause_id, ClauseId, "clause_id")
 
 
+def _fold_spacing(text: str) -> str:
+    """Casefold, every dash as ``-``, single spaces."""
+    return " ".join(text.casefold().translate(_DASH_TO_HYPHEN).split())
+
+
 def _fold(text: str) -> str:
-    """Casefold, every dash as ``-`` with no spaces around it, single spaces elsewhere."""
-    folded = " ".join(text.casefold().translate(_DASH_TO_HYPHEN).split())
-    return _SPACED_HYPHEN.sub("-", folded)
+    """``_fold_spacing`` with no spaces around hyphens: "sub -section" reads "sub-section"."""
+    return _SPACED_HYPHEN.sub("-", _fold_spacing(text))
 
 
 def quote_match_ratio(quote: str, text: str) -> float:
@@ -110,14 +114,19 @@ def evidence_tokens_missing(quote: str, text: str) -> tuple[str, ...]:
 
     A token carries a fact when it has a digit, which covers dates ("30.09.2026"), provisions
     ("39(1)" gives "39" and "1") and form codes ("gstr-3b"), or when it is an English month
-    name. Both sides are folded as for ``quote_match_ratio``; a token counts as present only as
-    a whole token.
+    name. The quote's tokens keep its own spacing, so "15/2025 - Central" gives "15/2025". A token
+    is present when the folded text has it with no letter or digit on either side, so "15/2025"
+    is found in "15/2025 - Central Tax" and "gstr-3b" in "GSTR - 3B".
     """
     folded_text = _fold(require_instance(text, str, "text"))
-    present = set(_TOKEN.findall(folded_text))
     missing: list[str] = []
-    for token in _TOKEN.findall(_fold(require_instance(quote, str, "quote"))):
+    for token in _TOKEN.findall(_fold_spacing(require_instance(quote, str, "quote"))):
         carries_fact = bool(_DIGIT.search(token)) or token in _MONTHS
-        if carries_fact and token not in present and token not in missing:
+        if carries_fact and token not in missing and not _has_token(folded_text, token):
             missing.append(token)
     return tuple(missing)
+
+
+def _has_token(folded_text: str, token: str) -> bool:
+    pattern = rf"(?<![^\W_]){re.escape(_fold(token))}(?![^\W_])"
+    return re.search(pattern, folded_text) is not None
