@@ -1,4 +1,4 @@
-"""The knowledge schema migration against a real Postgres.
+"""The knowledge schema migrations against a real Postgres.
 
 Marked ``integration`` by the root conftest (directory name); needs Docker. One container per
 module, the pgvector image the dev stack uses, and the ``rulebook`` schema created up front the
@@ -6,7 +6,10 @@ way infra/dev/postgres/init.sql does it. Alembic runs the way ``make migrate`` r
 carries the search_path and CW_DB_SCHEMA names the schema that holds alembic_version.
 """
 
+import hashlib
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -20,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from testcontainers.community.postgres import PostgresContainer
 
+from domain_kernel.documents import clause_id_for, document_id_for
 from rulebook.infrastructure.models import (
     ENTITY_TYPES,
     RELATION_KINDS,
@@ -27,7 +31,11 @@ from rulebook.infrastructure.models import (
     Base,
     CanonicalEntityRow,
     ClauseEntityRow,
+    ClauseRow,
+    DocumentRow,
     RuleRelationRow,
+    RuleRow,
+    RuleVersionRow,
 )
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
@@ -35,7 +43,8 @@ IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "rulebook"
 KNOWLEDGE_TABLES = {"canonical_entity", "clause_entity", "rule_relation"}
 RULE_TABLES = {"rule", "rule_version"}
-ALL_TABLES = KNOWLEDGE_TABLES | RULE_TABLES | {"alembic_version"}
+DOCUMENT_TABLES = {"document", "clause", "citation"}
+ALL_TABLES = KNOWLEDGE_TABLES | RULE_TABLES | DOCUMENT_TABLES | {"alembic_version"}
 
 
 @pytest.fixture(scope="module")
@@ -70,6 +79,66 @@ def migrated(alembic_config: Config) -> Config:
     return alembic_config
 
 
+@dataclass(frozen=True)
+class Anchors:
+    """Rows the knowledge tables point at: one clause and three rule versions."""
+
+    clause_id: UUID
+    version: UUID
+    other_version: UUID
+    third_version: UUID
+
+
+@pytest.fixture(scope="module")
+def anchors(migrated: Config, engine: Engine) -> Anchors:
+    digest = hashlib.sha256(b"knowledge schema test document").hexdigest()
+    document_id = document_id_for(digest)
+    clause_id = clause_id_for(document_id, "en.p1").value
+    rule_id = uuid4()
+    versions = [uuid4(), uuid4(), uuid4()]
+    _insert(
+        engine,
+        DocumentRow(
+            id=document_id.value,
+            source_id=uuid4(),
+            sha256=digest,
+            regulator="CBIC",
+            doc_type="notification",
+            url="https://example.invalid/doc.pdf",
+            language="en",
+            media_type="application/pdf",
+            parser_version="pdf@1",
+            fetched_at=datetime(2026, 9, 28, tzinfo=UTC),
+        ),
+        RuleRow(id=rule_id, rule_key=f"test_{uuid4().hex[:8]}", regulator="CBIC", level="entity"),
+    )
+    _insert(
+        engine,
+        ClauseRow(
+            id=clause_id,
+            document_id=document_id.value,
+            clause_ref="en.p1",
+            ordinal=1,
+            text="Notification No. 17/2026-Central Tax",
+            text_sha256=hashlib.sha256(b"Notification No. 17/2026-Central Tax").hexdigest(),
+        ),
+        *(
+            RuleVersionRow(
+                id=version,
+                rule_id=rule_id,
+                version=number,
+                status="draft",
+                title=f"version {number}",
+                specification={},
+                obligation_template={},
+                effective_from=date(2026, 4, 1),
+            )
+            for number, version in enumerate(versions, 1)
+        ),
+    )
+    return Anchors(clause_id, *versions)
+
+
 def _table_names(engine: Engine) -> set[str]:
     return set(inspect(engine).get_table_names(schema=SCHEMA))
 
@@ -94,9 +163,11 @@ def _entity(entity_type: str, aliases: list[str] | None = None) -> CanonicalEnti
     )
 
 
-def _mention(entity: CanonicalEntityRow, span_start: int, span_end: int) -> ClauseEntityRow:
+def _mention(
+    anchors: Anchors, entity: CanonicalEntityRow, span_start: int, span_end: int
+) -> ClauseEntityRow:
     return ClauseEntityRow(
-        clause_id=uuid4(),
+        clause_id=anchors.clause_id,
         entity_id=entity.id,
         mention_text=entity.canonical_name,
         span_start=span_start,
@@ -104,15 +175,17 @@ def _mention(entity: CanonicalEntityRow, span_start: int, span_end: int) -> Clau
     )
 
 
-def _relation(entity: CanonicalEntityRow, kind: str, to_kind: str) -> RuleRelationRow:
+def _relation(
+    anchors: Anchors, entity: CanonicalEntityRow, kind: str, to_kind: str
+) -> RuleRelationRow:
     return RuleRelationRow(
         id=uuid4(),
-        from_rule_version_id=uuid4(),
+        from_rule_version_id=anchors.version,
         relation=kind,
         to_kind=to_kind,
         to_ref=entity.canonical_name,
         to_entity_id=entity.id,
-        clause_id=uuid4(),
+        clause_id=anchors.clause_id,
     )
 
 
@@ -122,7 +195,7 @@ def test_upgrade_head_creates_the_knowledge_tables(migrated: Config, engine: Eng
         version: str = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-    assert version == "0003"
+    assert version == "0004"
 
 
 def test_indexes_by_name_and_access_method(migrated: Config, engine: Engine) -> None:
@@ -150,6 +223,23 @@ def test_indexes_by_name_and_access_method(migrated: Config, engine: Engine) -> 
         "uq_rule_relation_edge",
         "ix_rule_relation_target",
         "ix_rule_relation_source",
+        "ix_rule_relation_to_rule_version",
+        "ix_rule_relation_clause",
+    }
+    assert by_table["document"] == {
+        "pk_document",
+        "uq_document_sha256",
+        "ix_document_source_published",
+    }
+    assert by_table["clause"] == {
+        "pk_clause",
+        "uq_clause_document_id_clause_ref",
+        "uq_clause_document_id_ordinal",
+    }
+    assert by_table["citation"] == {
+        "pk_citation",
+        "ix_citation_rule_version",
+        "ix_citation_clause",
     }
     assert "USING gin (aliases)" in definitions["ix_canonical_entity_aliases"]
     assert "USING btree (entity_id)" in definitions["ix_clause_entity_entity"]
@@ -172,7 +262,11 @@ def test_check_constraints_carry_the_fixed_vocabulary(migrated: Config, engine: 
         assert f"'{entity_type}'" in entity_checks["ck_canonical_entity_type"]
 
     mention_checks = checks("clause_entity")
-    assert set(mention_checks) == {"ck_clause_entity_span_start", "ck_clause_entity_span_end"}
+    assert set(mention_checks) == {
+        "ck_clause_entity_span_start",
+        "ck_clause_entity_span_end",
+        "ck_clause_entity_method",
+    }
     assert "span_start >= 0" in mention_checks["ck_clause_entity_span_start"]
     assert "span_end > span_start" in mention_checks["ck_clause_entity_span_end"]
 
@@ -182,6 +276,7 @@ def test_check_constraints_carry_the_fixed_vocabulary(migrated: Config, engine: 
         "ck_rule_relation_to_kind",
         "ck_rule_relation_pairing",
         "ck_rule_relation_target_entity",
+        "ck_rule_relation_target_version",
         "ck_rule_relation_not_self",
     }
     for relation in RELATION_KINDS:
@@ -206,9 +301,7 @@ def test_check_constraints_carry_the_fixed_vocabulary(migrated: Config, engine: 
     assert "to_ref = from_rule_version_id::text" in not_self
 
 
-def test_keys_unique_constraints_and_deferred_foreign_keys(
-    migrated: Config, engine: Engine
-) -> None:
+def test_keys_unique_constraints_and_foreign_keys(migrated: Config, engine: Engine) -> None:
     inspector = inspect(engine)
 
     def primary_key(table: str) -> list[str]:
@@ -238,21 +331,45 @@ def test_keys_unique_constraints_and_deferred_foreign_keys(
         ]
     }
 
-    mention_fks = inspector.get_foreign_keys("clause_entity", schema=SCHEMA)
-    assert [fk["name"] for fk in mention_fks] == ["fk_clause_entity_entity_id_canonical_entity"]
-    assert mention_fks[0]["constrained_columns"] == ["entity_id"]
-    assert mention_fks[0]["referred_table"] == "canonical_entity"
-    assert mention_fks[0]["options"] == {"ondelete": "RESTRICT"}
+    def foreign_keys(table: str) -> dict[str, tuple[list[str], str, dict[str, str]]]:
+        return {
+            str(fk["name"]): (fk["constrained_columns"], fk["referred_table"], fk["options"])
+            for fk in inspector.get_foreign_keys(table, schema=SCHEMA)
+        }
 
-    relation_fks = inspector.get_foreign_keys("rule_relation", schema=SCHEMA)
-    assert [fk["name"] for fk in relation_fks] == ["fk_rule_relation_to_entity_id_canonical_entity"]
-    assert relation_fks[0]["constrained_columns"] == ["to_entity_id"]
-    assert relation_fks[0]["options"] == {"ondelete": "RESTRICT"}
+    restrict = {"ondelete": "RESTRICT"}
+    assert foreign_keys("clause_entity") == {
+        "fk_clause_entity_entity_id_canonical_entity": (
+            ["entity_id"],
+            "canonical_entity",
+            restrict,
+        ),
+        "fk_clause_entity_clause_id_clause": (["clause_id"], "clause", restrict),
+    }
+    assert foreign_keys("rule_relation") == {
+        "fk_rule_relation_to_entity_id_canonical_entity": (
+            ["to_entity_id"],
+            "canonical_entity",
+            restrict,
+        ),
+        "fk_rule_relation_from_rule_version_id_rule_version": (
+            ["from_rule_version_id"],
+            "rule_version",
+            restrict,
+        ),
+        "fk_rule_relation_to_rule_version_id_rule_version": (
+            ["to_rule_version_id"],
+            "rule_version",
+            restrict,
+        ),
+        "fk_rule_relation_clause_id_clause": (["clause_id"], "clause", restrict),
+    }
 
     for table in ("clause_entity", "rule_relation"):
         comment = inspector.get_table_comment(table, schema=SCHEMA)["text"]
         assert comment is not None
-        assert "no foreign key" in comment
+        assert "no foreign key" not in comment
+        assert "half of the index" in comment
 
 
 def test_models_and_migration_agree(migrated: Config, engine: Engine) -> None:
@@ -266,7 +383,9 @@ def test_models_and_migration_agree(migrated: Config, engine: Engine) -> None:
         assert compare_metadata(context, Base.metadata) == []
 
 
-def test_insert_entity_mention_and_relation_then_query(migrated: Config, engine: Engine) -> None:
+def test_insert_entity_mention_and_relation_then_query(
+    migrated: Config, engine: Engine, anchors: Anchors
+) -> None:
     entity = CanonicalEntityRow(
         id=uuid4(),
         type="notification",
@@ -274,9 +393,9 @@ def test_insert_entity_mention_and_relation_then_query(migrated: Config, engine:
         aliases=["Notification No. 17/2026-Central Tax", "Notfn. 17/2026-CT"],
     )
     bare = _entity("form")
-    clause_id = uuid4()
-    from_version = uuid4()
-    superseded_version = uuid4()
+    clause_id = anchors.clause_id
+    from_version = anchors.version
+    superseded_version = anchors.other_version
     _insert(
         engine,
         entity,
@@ -295,6 +414,7 @@ def test_insert_entity_mention_and_relation_then_query(migrated: Config, engine:
             to_kind="rule_version",
             to_ref=str(superseded_version),
             to_entity_id=None,
+            to_rule_version_id=superseded_version,
             clause_id=clause_id,
         ),
         RuleRelationRow(
@@ -363,37 +483,39 @@ def test_duplicate_type_and_canonical_name_is_rejected(migrated: Config, engine:
 
 @pytest.mark.parametrize(("span_start", "span_end"), [(5, 5), (5, 4), (-1, 3)])
 def test_mention_span_must_be_ordered_and_non_negative(
-    migrated: Config, engine: Engine, span_start: int, span_end: int
+    migrated: Config, engine: Engine, anchors: Anchors, span_start: int, span_end: int
 ) -> None:
     entity = _entity("section")
     with pytest.raises(IntegrityError, match="ck_clause_entity_span"):
-        _insert(engine, entity, _mention(entity, span_start, span_end))
+        _insert(engine, entity, _mention(anchors, entity, span_start, span_end))
 
 
-def test_vocabulary_checks_reject_unknown_values(migrated: Config, engine: Engine) -> None:
+def test_vocabulary_checks_reject_unknown_values(
+    migrated: Config, engine: Engine, anchors: Anchors
+) -> None:
     with pytest.raises(IntegrityError, match="ck_canonical_entity_type"):
         _insert(engine, _entity("colour"))
 
     entity = _entity("circular")
     _insert(engine, entity)
     with pytest.raises(IntegrityError, match="ck_rule_relation_relation"):
-        _insert(engine, _relation(entity, "replaces", "circular"))
+        _insert(engine, _relation(anchors, entity, "replaces", "circular"))
     with pytest.raises(IntegrityError, match="ck_rule_relation_to_kind"):
-        _insert(engine, _relation(entity, "refers_to", "clause"))
+        _insert(engine, _relation(anchors, entity, "refers_to", "clause"))
 
 
 @pytest.mark.parametrize("relation", ["supersedes", "extends_deadline"])
 def test_rule_version_only_relations_cannot_target_an_entity(
-    migrated: Config, engine: Engine, relation: str
+    migrated: Config, engine: Engine, anchors: Anchors, relation: str
 ) -> None:
     entity = _entity("form")
     _insert(engine, entity)
     with pytest.raises(IntegrityError, match="ck_rule_relation_pairing"):
-        _insert(engine, _relation(entity, relation, "form"))
+        _insert(engine, _relation(anchors, entity, relation, "form"))
 
 
 def test_to_entity_id_is_set_exactly_when_the_target_is_an_entity(
-    migrated: Config, engine: Engine
+    migrated: Config, engine: Engine, anchors: Anchors
 ) -> None:
     entity = _entity("section")
     _insert(engine, entity)
@@ -402,12 +524,13 @@ def test_to_entity_id_is_set_exactly_when_the_target_is_an_entity(
             engine,
             RuleRelationRow(
                 id=uuid4(),
-                from_rule_version_id=uuid4(),
+                from_rule_version_id=anchors.version,
                 relation="amends",
                 to_kind="rule_version",
-                to_ref=str(uuid4()),
+                to_ref=str(anchors.other_version),
                 to_entity_id=entity.id,
-                clause_id=uuid4(),
+                to_rule_version_id=anchors.other_version,
+                clause_id=anchors.clause_id,
             ),
         )
     with pytest.raises(IntegrityError, match="ck_rule_relation_target_entity"):
@@ -415,18 +538,20 @@ def test_to_entity_id_is_set_exactly_when_the_target_is_an_entity(
             engine,
             RuleRelationRow(
                 id=uuid4(),
-                from_rule_version_id=uuid4(),
+                from_rule_version_id=anchors.version,
                 relation="refers_to",
                 to_kind="section",
                 to_ref=entity.canonical_name,
                 to_entity_id=None,
-                clause_id=uuid4(),
+                clause_id=anchors.clause_id,
             ),
         )
 
 
-def test_a_rule_version_cannot_relate_to_itself(migrated: Config, engine: Engine) -> None:
-    version = uuid4()
+def test_a_rule_version_cannot_relate_to_itself(
+    migrated: Config, engine: Engine, anchors: Anchors
+) -> None:
+    version = anchors.version
     with pytest.raises(IntegrityError, match="ck_rule_relation_not_self"):
         _insert(
             engine,
@@ -437,7 +562,8 @@ def test_a_rule_version_cannot_relate_to_itself(migrated: Config, engine: Engine
                 to_kind="rule_version",
                 to_ref=str(version),
                 to_entity_id=None,
-                clause_id=uuid4(),
+                to_rule_version_id=version,
+                clause_id=anchors.clause_id,
             ),
         )
 
@@ -471,9 +597,11 @@ def test_alias_lookup_uses_the_gin_index(migrated: Config, engine: Engine) -> No
     assert "ix_canonical_entity_aliases" in "\n".join(plan_lines)
 
 
-def test_entity_referenced_by_a_mention_cannot_be_deleted(migrated: Config, engine: Engine) -> None:
+def test_entity_referenced_by_a_mention_cannot_be_deleted(
+    migrated: Config, engine: Engine, anchors: Anchors
+) -> None:
     entity = _entity("hsn_code")
-    _insert(engine, entity, _mention(entity, 0, 4))
+    _insert(engine, entity, _mention(anchors, entity, 0, 4))
     with pytest.raises(IntegrityError, match="fk_clause_entity_entity_id_canonical_entity"):
         _delete_entity(engine, entity.id)
 

@@ -1,23 +1,26 @@
-"""SQLAlchemy models for the rulebook knowledge tables.
+"""SQLAlchemy models for the rulebook tables: regulator documents and clauses, rules and rule
+versions, citations, and the knowledge tables (canonical entities, mentions, relations).
 
 Table names are unqualified: the connection's search_path (CW_DB_SCHEMA, set by ``make migrate``
-and ``make run``) puts them in the ``rulebook`` schema. The migration under
-``migrations/versions`` is written by hand and mirrors these models constraint for constraint;
-the integration test compares the two.
+and ``make run``) puts them in the ``rulebook`` schema. The migrations under
+``migrations/versions`` are written by hand and mirror these models constraint for constraint;
+the integration test compares the two. Triggers are not modelled: migration 0004 makes
+``document`` and ``clause`` append-only and fixes a citation's identity.
 
-``clause_id`` and ``from_rule_version_id`` are plain uuid columns for now. The ``clause`` and
-``rule_version`` tables do not exist yet; the migration that creates them adds the foreign keys.
 The vocabulary in the CHECK constraints is the kernel's (``domain_kernel.knowledge``), and so are
-the three rules on ``rule_relation``: ``supersedes`` and ``extends_deadline`` target a rule
-version, ``to_entity_id`` is set exactly when the target is an entity, and a rule version never
-relates to itself. The kernel checks the same rules for every writer.
+the rules on ``rule_relation``: the relations in ``RULE_VERSION_ONLY`` target a rule version,
+``to_entity_id`` is set exactly when the target is an entity, ``to_rule_version_id`` exactly
+when it is a rule version, and a rule version never relates to itself. The kernel checks the
+same rules for every writer.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Final
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -25,19 +28,23 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    Numeric,
     PrimaryKeyConstraint,
     String,
     Text,
     UniqueConstraint,
     Uuid,
+    false,
     func,
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from domain_kernel.documents import PARSER_VERSION_PATTERN, DocumentType
 from domain_kernel.knowledge import RULE_VERSION_KIND, RULE_VERSION_ONLY, EntityType, RelationKind
 from domain_kernel.status import RuleVersionStatus
+from rulebook.domain.documents import CLAUSE_REF_PATTERN
 
 ENTITY_TYPES: Final[tuple[str, ...]] = tuple(kind.value for kind in EntityType)
 """The ten entity types a canonical entity can have: ``EntityType`` in the kernel."""
@@ -50,6 +57,12 @@ RULE_VERSION_TARGET: Final[str] = RULE_VERSION_KIND
 
 TARGET_KINDS: Final[tuple[str, ...]] = (RULE_VERSION_TARGET, *ENTITY_TYPES)
 """What a relation can point at: a rule version or an entity of one of the ten types."""
+
+DOCUMENT_TYPES: Final[tuple[str, ...]] = tuple(kind.value for kind in DocumentType)
+"""What a regulator document can be: ``DocumentType`` in the kernel."""
+
+MENTION_METHODS: Final[tuple[str, ...]] = ("grammar", "model", "analyst")
+"""Who found a mention: the pattern grammar, a model, or an analyst in review."""
 
 RULE_VERSION_ONLY_RELATIONS: Final[tuple[str, ...]] = tuple(
     kind.value for kind in RelationKind if kind in RULE_VERSION_ONLY
@@ -92,8 +105,97 @@ class CanonicalEntityRow(Base):
     type: Mapped[str] = mapped_column(String(16), nullable=False)
     canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
     aliases: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
+        comment=(
+            "Alternative names of the same type, each already normalised with normalise_name, "
+            "that resolve to this entity"
+        ),
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DocumentRow(Base):
+    """A regulator document: one row per distinct file, keyed by its digest."""
+
+    __tablename__ = "document"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_document"),
+        UniqueConstraint("sha256", name="uq_document_sha256"),
+        CheckConstraint(sql_in_list("doc_type", DOCUMENT_TYPES), name="ck_document_doc_type"),
+        CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="ck_document_sha256"),
+        CheckConstraint(
+            "replace(id::text, '-', '') = left(sha256, 32)", name="ck_document_id_from_sha256"
+        ),
+        CheckConstraint(
+            f"parser_version ~ '{PARSER_VERSION_PATTERN}'", name="ck_document_parser_version"
+        ),
+        Index("ix_document_source_published", "source_id", "published_at"),
+        {
+            "comment": (
+                "Regulator documents, one row per distinct file; id is the first 32 hex digits "
+                "of sha256. Append-only: a corrected document is a new row, and a re-parse that "
+                "gives different clauses is rejected, not applied."
+            )
+        },
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid)
+    source_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    regulator: Mapped[str] = mapped_column(String(40), nullable=False)
+    doc_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    external_ref: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    language: Mapped[str] = mapped_column(String(8), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    parser_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    published_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    raw_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ClauseRow(Base):
+    """One clause of a document, under the id every service derives for it."""
+
+    __tablename__ = "clause"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_clause"),
+        ForeignKeyConstraint(
+            ["document_id"],
+            ["document.id"],
+            name="fk_clause_document_id_document",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("document_id", "clause_ref", name="uq_clause_document_id_clause_ref"),
+        UniqueConstraint("document_id", "ordinal", name="uq_clause_document_id_ordinal"),
+        CheckConstraint(f"clause_ref ~ '{CLAUSE_REF_PATTERN}'", name="ck_clause_clause_ref"),
+        CheckConstraint("ordinal >= 1", name="ck_clause_ordinal"),
+        CheckConstraint("page IS NULL OR page >= 1", name="ck_clause_page"),
+        CheckConstraint("length(text) > 0", name="ck_clause_text"),
+        {
+            "comment": (
+                "Clauses of a document in order. id is clause_id_for(document id, clause_ref) "
+                "from the kernel, which clause_entity, rule_relation, citation and the vector "
+                "index share. Mention spans are code-point offsets into text. Append-only."
+            )
+        },
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid)
+    document_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    clause_ref: Mapped[str] = mapped_column(String(40), nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    text_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -105,13 +207,20 @@ class ClauseEntityRow(Base):
     __tablename__ = "clause_entity"
     __table_args__ = (
         PrimaryKeyConstraint("clause_id", "entity_id", "span_start", name="pk_clause_entity"),
+        ForeignKeyConstraint(
+            ["clause_id"],
+            ["clause.id"],
+            name="fk_clause_entity_clause_id_clause",
+            ondelete="RESTRICT",
+        ),
         CheckConstraint("span_start >= 0", name="ck_clause_entity_span_start"),
         CheckConstraint("span_end > span_start", name="ck_clause_entity_span_end"),
+        CheckConstraint(sql_in_list("method", MENTION_METHODS), name="ck_clause_entity_method"),
         Index("ix_clause_entity_entity", "entity_id"),
         {
             "comment": (
-                "Entity mentions per clause with character spans. clause_id has no foreign key "
-                "yet: the clause table arrives with a later migration, which adds it."
+                "Entity mentions per clause with half-open code-point spans into clause.text: "
+                "the text-to-fact half of the index. method says who found the mention."
             )
         },
     )
@@ -129,6 +238,11 @@ class ClauseEntityRow(Base):
     mention_text: Mapped[str] = mapped_column(Text, nullable=False)
     span_start: Mapped[int] = mapped_column(Integer, nullable=False)
     span_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    method: Mapped[str] = mapped_column(String(16), nullable=False, server_default="grammar")
+    extractor: Mapped[str] = mapped_column(String(60), nullable=False, server_default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class RuleRelationRow(Base):
@@ -152,6 +266,29 @@ class RuleRelationRow(Base):
             f"NOT (to_kind = '{RULE_VERSION_TARGET}' AND to_ref = from_rule_version_id::text)",
             name="ck_rule_relation_not_self",
         ),
+        CheckConstraint(
+            f"((to_kind = '{RULE_VERSION_TARGET}') = (to_rule_version_id IS NOT NULL))"
+            " AND (to_rule_version_id IS NULL OR to_ref = to_rule_version_id::text)",
+            name="ck_rule_relation_target_version",
+        ),
+        ForeignKeyConstraint(
+            ["from_rule_version_id"],
+            ["rule_version.id"],
+            name="fk_rule_relation_from_rule_version_id_rule_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["to_rule_version_id"],
+            ["rule_version.id"],
+            name="fk_rule_relation_to_rule_version_id_rule_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["clause_id"],
+            ["clause.id"],
+            name="fk_rule_relation_clause_id_clause",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint(
             "from_rule_version_id",
             "relation",
@@ -162,11 +299,13 @@ class RuleRelationRow(Base):
         ),
         Index("ix_rule_relation_target", "relation", "to_ref"),
         Index("ix_rule_relation_source", "from_rule_version_id"),
+        Index("ix_rule_relation_to_rule_version", "to_rule_version_id"),
+        Index("ix_rule_relation_clause", "clause_id"),
         {
             "comment": (
-                "Typed relations between rule versions and entities; clause_id is the evidence. "
-                "from_rule_version_id and clause_id have no foreign keys yet: the rule_version "
-                "and clause tables arrive with a later migration, which adds them."
+                "Typed relations from a rule version to a rule version (to_rule_version_id) or "
+                "an entity (to_entity_id); clause_id is the evidence, the fact-to-text half of "
+                "the index."
             )
         },
     )
@@ -189,6 +328,7 @@ class RuleRelationRow(Base):
         ),
         nullable=True,
     )
+    to_rule_version_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     clause_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -274,3 +414,50 @@ class RuleVersionRow(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CitationRow(Base):
+    """A rule version's citation of a clause, with the quote and its one-way verification."""
+
+    __tablename__ = "citation"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_citation"),
+        ForeignKeyConstraint(
+            ["rule_version_id"],
+            ["rule_version.id"],
+            name="fk_citation_rule_version_id_rule_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["clause_id"], ["clause.id"], name="fk_citation_clause_id_clause", ondelete="RESTRICT"
+        ),
+        CheckConstraint("length(quote) BETWEEN 1 AND 400", name="ck_citation_quote"),
+        CheckConstraint(
+            "match_score IS NULL OR match_score BETWEEN 0 AND 1", name="ck_citation_match_score"
+        ),
+        CheckConstraint(
+            "verified = (verified_at IS NOT NULL)"
+            " AND (NOT verified OR (match_score IS NOT NULL AND match_score >= 0.85))",
+            name="ck_citation_verified",
+        ),
+        Index("ix_citation_rule_version", "rule_version_id"),
+        Index("ix_citation_clause", "clause_id"),
+        {
+            "comment": (
+                "Citations from rule versions to clauses (ADR-006). Every citation of a version "
+                "must be verified before the version is published. Identity columns are fixed; "
+                "only the one-way verification (verified, match_score, verified_at) may be set."
+            )
+        },
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid)
+    rule_version_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    clause_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    quote: Mapped[str] = mapped_column(Text, nullable=False)
+    verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
+    match_score: Mapped[Decimal | None] = mapped_column(Numeric(4, 3), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
