@@ -62,8 +62,15 @@ PROBLEM_STATUS: Mapping[type[DomainError], int] = {
 log = get_logger(__name__)
 
 
-def wire(settings: GatewaySettings) -> GatewayWiring:
-    """Build every adapter and use case from settings. Fails fast on a bad route override."""
+def wire(
+    settings: GatewaySettings, *, completion_provider: LLMProvider | None = None
+) -> GatewayWiring:
+    """Build every adapter and use case from settings. Fails fast on a bad route override.
+
+    ``completion_provider``, when given, serves every completion route in place of the
+    configured providers; embeddings stay on the configured embedder. It is the seam the eval
+    harness uses to put scripted answers through the real completion path.
+    """
     routing = RoutingTable.default().with_overrides(settings.llm_routes)
     registry = TomlPromptRegistry.load(settings.llm_prompt_registry_path)
     config = GatewayConfig(
@@ -99,6 +106,8 @@ def wire(settings: GatewaySettings) -> GatewayWiring:
         )
         providers["vercel"] = vercel
         embedders["vercel"] = vercel
+    if completion_provider is not None:
+        providers = dict.fromkeys(providers, completion_provider)
 
     ledger: MemoryLedger | SqlAlchemyLedger = (
         MemoryLedger()
@@ -172,9 +181,11 @@ def wire(settings: GatewaySettings) -> GatewayWiring:
     )
 
 
-def build_app(settings: GatewaySettings | None = None) -> FastAPI:
+def build_app(
+    settings: GatewaySettings | None = None, *, completion_provider: LLMProvider | None = None
+) -> FastAPI:
     settings = settings or GatewaySettings(service_name=SERVICE_NAME)
-    wiring = wire(settings)
+    wiring = wire(settings, completion_provider=completion_provider)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

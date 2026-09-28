@@ -352,6 +352,10 @@ make py-test-integration                    # testcontainers Postgres for the SQ
 make check                                  # ruff, mypy --strict, import-linter, coverage gate
 ```
 
+`build_app(completion_provider=...)` (and `wire`) serves every completion route from the given
+provider instead of the configured ones, which is how the eval harness puts scripted answers
+through the real completion path; embeddings stay on the configured embedder.
+
 The domain and application layers are covered by the 80 percent gate. The provider tests use a
 stub OpenAI client and real SDK response objects; the Langfuse tests use a stub client. CI builds
 the image and smokes `/health`, `/ready`, one `smoke.echo@1` completion and one embedding of 512
