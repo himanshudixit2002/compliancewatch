@@ -169,6 +169,7 @@ NAME_TABLE: list[tuple[EntityType, str, str]] = [
     (EntityType.THRESHOLD, "INR 5 crores.", "50000000"),
     (EntityType.THRESHOLD, "2 crore rupees", "20000000"),
     (EntityType.THRESHOLD, "1,50 lakh", "15000000"),
+    (EntityType.THRESHOLD, "Rupees 20 lakh", "2000000"),
     (EntityType.STATE, "29", "29"),
     (EntityType.STATE, "Karnataka", "karnataka"),
     (EntityType.STATE, " KARNATAKA ", "karnataka"),

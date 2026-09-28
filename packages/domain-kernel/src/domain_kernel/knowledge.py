@@ -104,7 +104,7 @@ _SCALES: Mapping[str, int] = {
 }
 _SCALE_WORD = re.compile(r"\b(?:lakhs?|lacs?|crores?)\b")
 _SCALED_AMOUNT = re.compile(
-    r"(?:(?:rs\.?|inr|\u20b9)\s*)?([0-9][0-9,]*(?:\.[0-9]+)?)\s*(lakhs?|lacs?|crores?)"
+    r"(?:(?:rs\.?|inr|\u20b9|rupees)\s*)?([0-9][0-9,]*(?:\.[0-9]+)?)\s*(lakhs?|lacs?|crores?)"
     r"(?:\s+rupees)?\.?"
 )
 
