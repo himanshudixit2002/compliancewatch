@@ -44,7 +44,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from domain_kernel.documents import PARSER_VERSION_PATTERN, DocumentType
 from domain_kernel.knowledge import RULE_VERSION_KIND, RULE_VERSION_ONLY, EntityType, RelationKind
 from domain_kernel.status import RuleVersionStatus
+from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.documents import CLAUSE_REF_PATTERN
+from rulebook.domain.relations import CandidateRejectReason, CandidateStatus
+from rulebook.domain.review import EntityRejectReason, Resolution, ReviewStatus
 
 ENTITY_TYPES: Final[tuple[str, ...]] = tuple(kind.value for kind in EntityType)
 """The ten entity types a canonical entity can have: ``EntityType`` in the kernel."""
@@ -62,7 +65,22 @@ DOCUMENT_TYPES: Final[tuple[str, ...]] = tuple(kind.value for kind in DocumentTy
 """What a regulator document can be: ``DocumentType`` in the kernel."""
 
 MENTION_METHODS: Final[tuple[str, ...]] = ("grammar", "model", "analyst")
-"""Who found a mention: the pattern grammar, a model, or an analyst in review."""
+"""Who found a mention or proposed a relation: the grammar, a model, or an analyst."""
+
+EXTRACTION_STAGES: Final[tuple[str, ...]] = ("mentions", "relations")
+EXTRACTION_OUTCOMES: Final[tuple[str, ...]] = (
+    "ok",
+    "needs_review",
+    "no_targets",
+    "unparseable",
+    "failed",
+)
+REVIEW_REASONS: Final[tuple[str, ...]] = tuple(reason.value for reason in ReviewReason)
+REVIEW_STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in ReviewStatus)
+RESOLUTIONS: Final[tuple[str, ...]] = tuple(resolution.value for resolution in Resolution)
+ENTITY_REJECT_REASONS: Final[tuple[str, ...]] = tuple(r.value for r in EntityRejectReason)
+CANDIDATE_STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in CandidateStatus)
+CANDIDATE_REJECT_REASONS: Final[tuple[str, ...]] = tuple(r.value for r in CandidateRejectReason)
 
 RULE_VERSION_ONLY_RELATIONS: Final[tuple[str, ...]] = tuple(
     kind.value for kind in RelationKind if kind in RULE_VERSION_ONLY
@@ -289,6 +307,13 @@ class RuleRelationRow(Base):
             name="fk_rule_relation_clause_id_clause",
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["candidate_id"],
+            ["relation_candidate.id"],
+            name="fk_rule_relation_candidate_id_relation_candidate",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("candidate_id", name="uq_rule_relation_candidate_id"),
         UniqueConstraint(
             "from_rule_version_id",
             "relation",
@@ -330,6 +355,7 @@ class RuleRelationRow(Base):
     )
     to_rule_version_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     clause_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    candidate_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -458,6 +484,270 @@ class CitationRow(Base):
     verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
     match_score: Mapped[Decimal | None] = mapped_column(Numeric(4, 3), nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ExtractionRunRow(Base):
+    """One run of an extraction stage over a document: counts and run-level issues."""
+
+    __tablename__ = "extraction_run"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_extraction_run"),
+        ForeignKeyConstraint(
+            ["document_id"],
+            ["document.id"],
+            name="fk_extraction_run_document_id_document",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(sql_in_list("stage", EXTRACTION_STAGES), name="ck_extraction_run_stage"),
+        CheckConstraint(
+            sql_in_list("outcome", EXTRACTION_OUTCOMES), name="ck_extraction_run_outcome"
+        ),
+        Index("ix_extraction_run_document", "document_id"),
+        {
+            "comment": (
+                "One row per document, stage and extractor: counts and run-level issues, "
+                "including model output that could not become a candidate. The first write "
+                "wins."
+            )
+        },
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid)
+    document_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    stage: Mapped[str] = mapped_column(String(16), nullable=False)
+    extractor: Mapped[str] = mapped_column(String(60), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False, server_default="")
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    counts: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    issues: Mapped[list[object]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class EntityReviewRow(Base):
+    """A mention alignment could not resolve, waiting for or carrying an analyst's decision."""
+
+    __tablename__ = "entity_review"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_entity_review"),
+        ForeignKeyConstraint(
+            ["document_id"],
+            ["document.id"],
+            name="fk_entity_review_document_id_document",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["clause_id"],
+            ["clause.id"],
+            name="fk_entity_review_clause_id_clause",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["resolved_entity_id"],
+            ["canonical_entity.id"],
+            name="fk_entity_review_resolved_entity_id_canonical_entity",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "clause_id",
+            "entity_type",
+            "span_start",
+            name="uq_entity_review_clause_id_entity_type_span_start",
+        ),
+        CheckConstraint(
+            sql_in_list("entity_type", ENTITY_TYPES), name="ck_entity_review_entity_type"
+        ),
+        CheckConstraint("span_start >= 0", name="ck_entity_review_span_start"),
+        CheckConstraint("span_end > span_start", name="ck_entity_review_span_end"),
+        CheckConstraint(sql_in_list("reason", REVIEW_REASONS), name="ck_entity_review_reason"),
+        CheckConstraint(sql_in_list("status", REVIEW_STATUSES), name="ck_entity_review_status"),
+        CheckConstraint(
+            f"resolution IS NULL OR {sql_in_list('resolution', RESOLUTIONS)}",
+            name="ck_entity_review_resolution",
+        ),
+        CheckConstraint(
+            f"reject_reason IS NULL OR {sql_in_list('reject_reason', ENTITY_REJECT_REASONS)}",
+            name="ck_entity_review_reject_reason",
+        ),
+        CheckConstraint(
+            "(status = 'open' AND resolution IS NULL AND resolved_entity_id IS NULL"
+            " AND reject_reason IS NULL AND decided_at IS NULL)"
+            " OR (status = 'resolved' AND resolution IS NOT NULL AND resolved_entity_id IS NOT NULL"
+            " AND reject_reason IS NULL AND decided_at IS NOT NULL)"
+            " OR (status = 'rejected' AND resolution IS NULL AND resolved_entity_id IS NULL"
+            " AND reject_reason IS NOT NULL AND decided_at IS NOT NULL)",
+            name="ck_entity_review_decision",
+        ),
+        Index(
+            "ix_entity_review_open_group",
+            "entity_type",
+            "proposed_name",
+            postgresql_where=text("status = 'open'"),
+        ),
+        Index("ix_entity_review_document", "document_id"),
+        {
+            "comment": (
+                "Mentions alignment could not resolve to exactly one canonical entity, decided "
+                "per (entity_type, proposed_name). Resolving writes clause_entity rows. Global: "
+                "no tenant, no row-level security."
+            )
+        },
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid)
+    document_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    clause_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    mention_text: Mapped[str] = mapped_column(Text, nullable=False)
+    span_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    span_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    proposed_name: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    reason: Mapped[str] = mapped_column(String(24), nullable=False)
+    extractor: Mapped[str] = mapped_column(String(60), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="open")
+    resolution: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    resolved_entity_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    reject_reason: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    decided_by: Mapped[str] = mapped_column(String(120), nullable=False, server_default="")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    note: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RelationCandidateRow(Base):
+    """A relation the model proposed for a document, open until an analyst decides it."""
+
+    __tablename__ = "relation_candidate"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_relation_candidate"),
+        ForeignKeyConstraint(
+            ["document_id"],
+            ["document.id"],
+            name="fk_relation_candidate_document_id_document",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["target_clause_id"],
+            ["clause.id"],
+            name="fk_relation_candidate_target_clause_id_clause",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["evidence_clause_id"],
+            ["clause.id"],
+            name="fk_relation_candidate_evidence_clause_id_clause",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["target_entity_id"],
+            ["canonical_entity.id"],
+            name="fk_relation_candidate_target_entity_id_canonical_entity",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["target_rule_id"],
+            ["rule.id"],
+            name="fk_relation_candidate_target_rule_id_rule",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            sql_in_list("relation", RELATION_KINDS), name="ck_relation_candidate_relation"
+        ),
+        CheckConstraint(
+            sql_in_list("target_type", ENTITY_TYPES), name="ck_relation_candidate_target_type"
+        ),
+        CheckConstraint(
+            "target_span_start >= 0 AND target_span_end > target_span_start",
+            name="ck_relation_candidate_target_span",
+        ),
+        CheckConstraint(
+            "target_rule_id IS NULL OR target_rule_key IS NOT NULL",
+            name="ck_relation_candidate_rule_hint",
+        ),
+        CheckConstraint(
+            "relation = 'extends_deadline' OR (period_label IS NULL AND new_due_on IS NULL)",
+            name="ck_relation_candidate_deadline_detail",
+        ),
+        CheckConstraint(
+            "quote_score BETWEEN 0 AND 1 AND confidence BETWEEN 0 AND 1",
+            name="ck_relation_candidate_scores",
+        ),
+        CheckConstraint(
+            "length(evidence_quote) BETWEEN 8 AND 400", name="ck_relation_candidate_quote"
+        ),
+        CheckConstraint(
+            sql_in_list("method", MENTION_METHODS), name="ck_relation_candidate_method"
+        ),
+        CheckConstraint(
+            sql_in_list("status", CANDIDATE_STATUSES), name="ck_relation_candidate_status"
+        ),
+        CheckConstraint(
+            f"reject_reason IS NULL OR {sql_in_list('reject_reason', CANDIDATE_REJECT_REASONS)}",
+            name="ck_relation_candidate_reject_reason",
+        ),
+        CheckConstraint(
+            "(status = 'open' AND decided_at IS NULL AND reject_reason IS NULL)"
+            " OR (status = 'approved' AND decided_at IS NOT NULL AND reject_reason IS NULL)"
+            " OR (status = 'rejected' AND decided_at IS NOT NULL AND reject_reason IS NOT NULL)",
+            name="ck_relation_candidate_decision",
+        ),
+        Index("ix_relation_candidate_document", "document_id"),
+        Index(
+            "ix_relation_candidate_open",
+            "needs_review",
+            "created_at",
+            postgresql_where=text("status = 'open'"),
+        ),
+        Index("ix_relation_candidate_target", "target_type", "target_name"),
+        {
+            "comment": (
+                "Relations the model proposed for a document before any rule version exists "
+                "for it. An analyst approval turns one into a rule_relation row (ADR-006, "
+                "ADR-017); period_label and new_due_on feed the obligation service's deadline "
+                "change."
+            )
+        },
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid)
+    document_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    relation: Mapped[str] = mapped_column(String(24), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    target_name: Mapped[str] = mapped_column(Text, nullable=False)
+    target_clause_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    target_span_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_span_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_entity_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    target_rule_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    target_rule_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    evidence_clause_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    evidence_quote: Mapped[str] = mapped_column(Text, nullable=False)
+    quote_score: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False)
+    period_label: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    new_due_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    method: Mapped[str] = mapped_column(String(16), nullable=False, server_default="model")
+    prompt_version: Mapped[str] = mapped_column(String(60), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False, server_default="")
+    confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False)
+    issues: Mapped[list[object]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    needs_review: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="open")
+    reject_reason: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    decided_by: Mapped[str] = mapped_column(String(120), nullable=False, server_default="")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    note: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -52,7 +52,7 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_IDENTITY_STORE`, `CW_PROFILE_STORE`, `CW_PROFILE_GSTIN_LOOKUP` | env | env | - | - | - | - | - | - | - |
 | `CW_RULEBOOK_STORE` | - | - | env | - | - | - | - | - | - |
 | `CW_RULEBOOK_WRITE_TOKEN` | - | - | secret | - | - | - | secret | - | - |
-| `CW_PIPELINE_KNOWLEDGE_ENABLED`, `CW_RULEBOOK_URL` | - | - | - | - | - | - | env | - | - |
+| `CW_PIPELINE_KNOWLEDGE_ENABLED`, `CW_RULEBOOK_URL`, `CW_LLM_GATEWAY_URL` | - | - | - | - | - | - | env | - | - |
 | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_SEND_ENABLED`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `NOTIFICATION_API_URL` | - | - | - | - | - | - | - | - | secret / secret / env / secret / secret / env |
 
 The pipeline writes regulator documents to the rulebook (ADR-018), so deploy the rulebook before

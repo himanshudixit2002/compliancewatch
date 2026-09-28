@@ -2,6 +2,7 @@
 
 import dataclasses
 import hashlib
+import json
 from datetime import UTC, date, datetime
 from uuid import UUID
 
@@ -9,12 +10,25 @@ import pytest
 from pydantic import ValidationError
 
 from domain_kernel.documents import clause_id_for, document_id_for
+from domain_kernel.ids import DocumentId
+from domain_kernel.knowledge import EntityType
 from pipeline.application.activities import Fetched, ParseRequest
-from pipeline.application.knowledge_activities import RegisterDocument, RegisterRequest
+from pipeline.application.knowledge_activities import (
+    ExtractMentions,
+    MentionsRequest,
+    ProposeRelations,
+    RegisterDocument,
+    RegisterRequest,
+    RelationsRequest,
+    SubmitRelations,
+)
+from pipeline.application.relations import LlmRelationExtractor, RelationStage
 from pipeline.domain.errors import KnowledgeContractError, RulebookConflictError
-from pipeline.domain.knowledge import DocumentRecord, RegisteredDocument
+from pipeline.domain.issues import Issue
+from pipeline.domain.knowledge import DocumentRecord, RegisteredDocument, RuleKey
+from pipeline.domain.prompt import PromptText
 from pipeline.infrastructure.fakes import SAMPLE_TEXT, FakePlainTextParser
-from pipeline.testing import MemoryRulebook
+from pipeline.testing import MemoryRulebook, ScriptedProvider
 from pipeline.workflows import IngestRequest
 
 CONTENT = SAMPLE_TEXT.encode()
@@ -73,7 +87,7 @@ async def test_the_parsed_title_is_kept_when_the_listing_has_none() -> None:
     assert record.document.published_at is None
 
 
-class WrongIds:
+class WrongIds(MemoryRulebook):
     def register_document(self, record: DocumentRecord) -> RegisteredDocument:
         doc_id = record.document.document_id
         return RegisteredDocument(doc_id, True, {"p1": clause_id_for(doc_id, "p2")})
@@ -113,3 +127,92 @@ def test_knowledge_needs_a_regulator_up_front() -> None:
         IngestRequest(source_id=UUID(int=1), since=since, knowledge=True, regulator=" ")
     assert IngestRequest(source_id=UUID(int=1), since=since).regulator == ""
     assert IngestRequest(source_id=UUID(int=1), since=since, knowledge=True, regulator="CBIC")
+
+
+# ---------------------------------------------------------------- mentions and relations
+
+
+RELATION_ANSWER = json.dumps(
+    {
+        "relations": [
+            {
+                "relation": "extends_deadline",
+                "target_mention": "M2",
+                "rule_key": None,
+                "evidence_clause_ref": "p2",
+                "evidence_quote": "extends the due date for furnishing FORM GSTR-3B",
+                "period": None,
+                "new_due_date": None,
+                "confidence": 0.9,
+            }
+        ]
+    }
+)
+
+
+async def registered(rulebook: MemoryRulebook) -> DocumentId:
+    await RegisterDocument(FakePlainTextParser(), rulebook, enabled=True).run(request())
+    return document_id_for(request().parse.fetched.sha256)
+
+
+def relation_stage(answer: str = RELATION_ANSWER) -> tuple[RelationStage, ScriptedProvider]:
+    provider = ScriptedProvider({}, default=answer)
+    prompt = PromptText("extraction.rule_relations", "1", "regulatory-intelligence", "Relate.")
+    return RelationStage(LlmRelationExtractor(provider, prompt)), provider
+
+
+async def test_mentions_are_found_and_handed_to_alignment() -> None:
+    rulebook = MemoryRulebook(entities={(EntityType.FORM, "GSTR-3B")})
+    doc_id = await registered(rulebook)
+    activity = ExtractMentions(rulebook, rulebook, enabled=True)
+    report = await activity.run(MentionsRequest(document_id=doc_id.value, own_ref="17/2026-CT"))
+    (submission,) = rulebook.mentions
+    assert submission.extractor == "grammar@1"
+    names = [(m.entity_type, m.proposed_name, m.self_ref) for m in submission.mentions]
+    assert (EntityType.FORM, "GSTR-3B", False) in names
+    assert (EntityType.NOTIFICATION, "17/2026-central tax", True) in names
+    assert (EntityType.SECTION, "39@cgst-act", False) in names
+    assert (report.found, report.aligned) == (len(names), 1)
+    assert report.queued == len(names) - 1
+    disabled = await ExtractMentions(rulebook, rulebook, enabled=False).run(
+        MentionsRequest(document_id=doc_id.value)
+    )
+    assert disabled.skipped is True
+
+
+async def test_relations_are_proposed_then_submitted() -> None:
+    rulebook = MemoryRulebook(rules=(RuleKey("gstr3b_monthly", "GSTR-3B"),))
+    doc_id = await registered(rulebook)
+    stage, provider = relation_stage()
+    batch = await ProposeRelations(rulebook, stage, enabled=True).run(
+        RelationsRequest(document_id=doc_id.value, own_ref="17/2026-Central Tax", regulator="CBIC")
+    )
+    assert batch.extractor == "extraction.rule_relations@1"
+    assert batch.model == "scripted/golden"
+    (candidate,) = batch.candidates
+    assert (candidate.relation, candidate.target.proposed_name) == ("extends_deadline", "GSTR-3B")
+    assert "gstr3b_monthly: GSTR-3B" in provider.requests[0].user
+    assert rulebook.relations == []
+
+    report = await SubmitRelations(rulebook, enabled=True).run(batch)
+    assert (report.outcome, report.created, report.unchanged) == (batch.outcome, 1, 0)
+    (submission,) = rulebook.relations
+    assert submission.candidates[0].target.entity_type is EntityType.FORM
+    assert submission.candidates[0].issues == tuple(
+        Issue(i.code, i.detail, i.clause_ref) for i in candidate.issues
+    )
+    again = await SubmitRelations(rulebook, enabled=True).run(batch)
+    assert (again.created, again.unchanged) == (0, 1)
+
+
+async def test_disabled_relation_activities_do_nothing() -> None:
+    rulebook = MemoryRulebook()
+    stage, provider = relation_stage()
+    batch = await ProposeRelations(rulebook, stage, enabled=False).run(
+        RelationsRequest(document_id=UUID(int=1))
+    )
+    assert batch.skipped is True
+    assert provider.requests == []
+    report = await SubmitRelations(rulebook, enabled=True).run(batch)
+    assert report.skipped is True
+    assert rulebook.relations == []

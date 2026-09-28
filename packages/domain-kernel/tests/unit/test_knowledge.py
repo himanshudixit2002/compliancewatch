@@ -5,6 +5,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from domain_kernel.citations import DASHES
 from domain_kernel.errors import (
     PROBLEM_TYPE_PREFIX,
     DomainError,
@@ -16,10 +17,12 @@ from domain_kernel.knowledge import (
     RULE_VERSION_KIND,
     EntityRef,
     EntityType,
+    Instrument,
     Mention,
     RelationKind,
     RuleRelation,
     normalise_name,
+    qualified_name,
 )
 
 ENTITY_TYPES = st.sampled_from(list(EntityType))
@@ -82,11 +85,21 @@ NAME_TABLE: list[tuple[EntityType, str, str]] = [
     (EntityType.NOTIFICATION, "Notification Number 17/2026", "17/2026"),
     (EntityType.NOTIFICATION, "Notfn. 17/2026-CT", "notfn. 17/2026-ct"),
     (EntityType.NOTIFICATION, "November 2026 list", "november 2026 list"),
+    (EntityType.NOTIFICATION, "NOTIFICATION No. 01/2026 \u2013 Central Tax", "01/2026-central tax"),
+    (EntityType.NOTIFICATION, "01/2026 \u2014 central tax", "01/2026-central tax"),
+    (
+        EntityType.NOTIFICATION,
+        "Notification No. 11/2017-Central Tax (Rate)",
+        "11/2017-central tax (rate)",
+    ),
+    (EntityType.NOTIFICATION, "11/2017-central tax(rate)", "11/2017-central tax (rate)"),
+    (EntityType.NOTIFICATION, "11/2017 - Central Tax ( Rate )", "11/2017-central tax (rate)"),
     (EntityType.CIRCULAR, "Circular No. 123/42/2019-GST", "123/42/2019-gst"),
     (EntityType.CIRCULAR, "Circular No. 123 / 42 / 2019 - GST", "123/42/2019-gst"),
     (EntityType.CIRCULAR, "circular no 123/42/2019-GST", "123/42/2019-gst"),
     (EntityType.CIRCULAR, "CIRCULAR NO.123/42/2019-GST", "123/42/2019-gst"),
     (EntityType.CIRCULAR, "123/42/2019-gst", "123/42/2019-gst"),
+    (EntityType.CIRCULAR, "Circular No. 123/42/2019 \u2013 GST", "123/42/2019-gst"),
     (EntityType.SECTION, "section 16 (2) (c)", "16(2)(c)"),
     (EntityType.SECTION, "Section 16(2)(c)", "16(2)(c)"),
     (EntityType.SECTION, "SECTION 16", "16"),
@@ -95,12 +108,16 @@ NAME_TABLE: list[tuple[EntityType, str, str]] = [
     (EntityType.SECTION, "16 (2) (c)", "16(2)(c)"),
     (EntityType.SECTION, "sections 16 and 17", "sections16and17"),
     (EntityType.SECTION, "sectional 16", "sectional16"),
+    (EntityType.SECTION, "section 39 (1) @ CGST-Act", "39(1)@cgst-act"),
+    (EntityType.SECTION, "39(1)@cgst-act", "39(1)@cgst-act"),
+    (EntityType.SECTION, "Section 39(1)@", "39(1)"),
     (EntityType.RULE, "Rule 36 (4)", "36(4)"),
     (EntityType.RULE, "rule 36(4)", "36(4)"),
     (EntityType.RULE, "Rule36(4)", "36(4)"),
     (EntityType.RULE, "36 (4)", "36(4)"),
     (EntityType.RULE, "rules 36 and 37", "rules36and37"),
     (EntityType.RULE, "ruler 36", "ruler36"),
+    (EntityType.RULE, "Rule 61 (1)(i) @ cgst-rules", "61(1)(i)@cgst-rules"),
     (EntityType.FORM, "gstr 3b", "GSTR-3B"),
     (EntityType.FORM, "GSTR-3B", "GSTR-3B"),
     (EntityType.FORM, "Form GSTR 3B", "GSTR-3B"),
@@ -111,6 +128,13 @@ NAME_TABLE: list[tuple[EntityType, str, str]] = [
     (EntityType.FORM, "Form Form GSTR-1", "GSTR-1"),
     (EntityType.FORM, "gstr-1", "GSTR-1"),
     (EntityType.FORM, "itc 04", "ITC-04"),
+    (EntityType.FORM, "FORM GSTR\u20133B", "GSTR-3B"),
+    (EntityType.FORM, "GSTR3B", "GSTR-3B"),
+    (EntityType.FORM, "Form GSTR3B", "GSTR-3B"),
+    (EntityType.FORM, "ITC04", "ITC-04"),
+    (EntityType.FORM, "GST PMT06", "GST-PMT-06"),
+    (EntityType.FORM, "FORM1", "1"),
+    (EntityType.FORM, "GSTR \u2212 1", "GSTR-1"),
     (EntityType.FORM, "forms 1", "FORMS-1"),
     (EntityType.HSN_CODE, "HSN 8471 90", "847190"),
     (EntityType.HSN_CODE, "8471.90", "847190"),
@@ -139,6 +163,13 @@ NAME_TABLE: list[tuple[EntityType, str, str]] = [
     (EntityType.THRESHOLD, "INR 2,00,00,000/-", "20000000"),
     (EntityType.THRESHOLD, "INR 2,00,00,000.50/-", "20000000"),
     (EntityType.THRESHOLD, DEVANAGARI_FIVE_CRORE, ""),
+    (EntityType.THRESHOLD, "Rs. 2 crore", "20000000"),
+    (EntityType.THRESHOLD, "Rs 1.5 Crore", "15000000"),
+    (EntityType.THRESHOLD, "\u20b9 20 lakh", "2000000"),
+    (EntityType.THRESHOLD, "INR 5 crores.", "50000000"),
+    (EntityType.THRESHOLD, "2 crore rupees", "20000000"),
+    (EntityType.THRESHOLD, "1,50 lakh", "15000000"),
+    (EntityType.THRESHOLD, "Rupees 20 lakh", "2000000"),
     (EntityType.STATE, "29", "29"),
     (EntityType.STATE, "Karnataka", "karnataka"),
     (EntityType.STATE, " KARNATAKA ", "karnataka"),
@@ -231,6 +262,9 @@ def test_normalise_name_table(kind: EntityType, text: str, expected: str) -> Non
         (EntityType.SAC_CODE, ""),
         (EntityType.TAX_RATE, "eighteen per cent"),
         (EntityType.THRESHOLD, "five crore"),
+        (EntityType.THRESHOLD, "Rs. 2 crore 50 lakh"),
+        (EntityType.THRESHOLD, "above 2 crore"),
+        (EntityType.SECTION, "@cgst-act"),
         (EntityType.STATE, ""),
     ],
 )
@@ -259,6 +293,14 @@ def test_normalise_name_ignores_spacing(kind: EntityType, text: str) -> None:
     assert normalise_name(kind, f"  {text} \t\n") == expected
     assert normalise_name(kind, text.replace(" ", "  ")) == expected
     assert normalise_name(kind, text.replace(" ", " \n ")) == expected
+
+
+@settings(max_examples=1000)
+@given(ENTITY_TYPES, NAME_TEXT, st.sampled_from(sorted(DASHES)))
+def test_normalise_name_reads_every_dash_as_a_hyphen(
+    kind: EntityType, text: str, dash: str
+) -> None:
+    assert normalise_name(kind, text.replace("-", dash)) == normalise_name(kind, text)
 
 
 @settings(max_examples=1000)
@@ -507,3 +549,38 @@ def test_invalid_relation_error_is_a_domain_value_error() -> None:
     assert error.type_uri == PROBLEM_TYPE_PREFIX + "invalid-rule-relation"
     assert str(error) == "Invalid rule relation"
     assert InvalidRelationError("why").detail == "why"
+
+
+# ---------------------------------------------------------------- instruments
+
+
+def test_instruments_are_the_statutes_a_provision_names() -> None:
+    assert [instrument.value for instrument in Instrument] == [
+        "cgst-act",
+        "igst-act",
+        "utgst-act",
+        "cgst-rules",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("kind", "provision", "instrument", "name"),
+    [
+        (EntityType.SECTION, "39(1)", Instrument.CGST_ACT, "39(1)@cgst-act"),
+        (EntityType.SECTION, "16(2)(c)", Instrument.IGST_ACT, "16(2)(c)@igst-act"),
+        (EntityType.RULE, "61(1)(i)", Instrument.CGST_RULES, "61(1)(i)@cgst-rules"),
+    ],
+)
+def test_a_qualified_name_is_canonical(
+    kind: EntityType, provision: str, instrument: Instrument, name: str
+) -> None:
+    assert qualified_name(provision, instrument) == name
+    assert normalise_name(kind, name) == name
+    assert EntityRef(kind, name).canonical_name == name
+
+
+def test_qualified_name_checks_its_arguments() -> None:
+    with pytest.raises(InvariantViolationError, match="provision must not be blank"):
+        qualified_name("", Instrument.CGST_ACT)
+    with pytest.raises(InvariantViolationError, match="instrument must be Instrument"):
+        qualified_name("39(1)", "cgst-act")  # type: ignore[arg-type]

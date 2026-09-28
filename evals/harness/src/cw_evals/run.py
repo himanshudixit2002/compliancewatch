@@ -14,6 +14,12 @@ from pathlib import Path
 from cw_evals.cases import DEFAULT_GOLDEN, ExtractionSet, load_extraction_set
 from cw_evals.metrics import Aggregate, CaseScore, aggregate, score
 from cw_evals.providers import PROVIDERS, provider_for
+from cw_evals.relations import (
+    RelationAggregate,
+    RelationScore,
+    load_relation_cases,
+    run_relations,
+)
 from cw_evals.report import markdown, write
 from cw_evals.thresholds import GATES, PROFILES, GateResult, evaluate
 from domain_kernel.documents import ExtractionContext
@@ -64,14 +70,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         aggregates[name], scores[name] = run_extraction(
             extraction, name, gateway_url=args.gateway_url
         )
-    gates: list[GateResult] = evaluate(args.profile, aggregates)
-    text = markdown(args.profile, extraction, aggregates, scores, gates)
-    path = write(args.reports, args.profile, text, aggregates, scores, gates)
+    relation_cases = load_relation_cases(args.golden)
+    relation_aggregates: dict[str, RelationAggregate] = {}
+    relation_scores: dict[str, list[RelationScore]] = {}
+    if relation_cases:
+        for name in providers:
+            relation_aggregates[name], relation_scores[name] = run_relations(
+                relation_cases, name, gateway_url=args.gateway_url
+            )
+    gates: list[GateResult] = evaluate(args.profile, aggregates, relation_aggregates)
+    text = markdown(
+        args.profile, extraction, aggregates, scores, gates, relation_aggregates, relation_scores
+    )
+    path = write(
+        args.reports,
+        args.profile,
+        text,
+        aggregates,
+        scores,
+        gates,
+        relation_aggregates,
+        relation_scores,
+    )
     sys.stdout.write(text)
     failed = [g for g in gates if not g.passed]
     sys.stdout.write(f"report: {path}\n")
     if failed:
-        names = ", ".join(f"{g.gate.metric}[{g.gate.provider}]" for g in failed)
+        names = ", ".join(f"{g.gate.suite}.{g.gate.metric}[{g.gate.provider}]" for g in failed)
         sys.stdout.write(f"eval: FAILED {len(failed)} gate(s): {names}\n")
         return 1
     sys.stdout.write(f"eval: {args.profile} gates passed ({len(gates)})\n")

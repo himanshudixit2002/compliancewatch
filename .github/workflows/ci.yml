@@ -88,6 +88,8 @@ jobs:
               - 'evals/**'
               - 'services/pipeline/**'
               - 'services/llm-gateway/prompts/**'
+              - 'services/llm-gateway/src/**'
+              - 'services/rulebook/**'
               - 'services/qa/**'
               - 'services/applicability-engine/**'
               - 'packages/domain-kernel/**'

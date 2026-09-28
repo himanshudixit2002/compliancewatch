@@ -20,6 +20,7 @@ from domain_kernel.ontology import Ontology
 from domain_kernel.operators import Operator
 from domain_kernel.predicates import Predicate
 from pipeline.domain.candidate import CandidateFields
+from pipeline.domain.issues import Issue
 from pipeline.domain.numbers import (
     date_forms,
     normalise,
@@ -27,13 +28,6 @@ from pipeline.domain.numbers import (
     small_number_forms,
     text_has,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class Issue:
-    code: str
-    detail: str
-    clause_ref: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

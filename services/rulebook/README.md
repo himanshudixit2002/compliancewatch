@@ -1,8 +1,9 @@
 # rulebook service
 
 Part of the ComplianceWatch monorepo. Health routes, alembic wiring, regulator documents and
-clauses with a write and read API, the knowledge schema, and the rule tables with the seed
-calendar. No review workbench or rule read API yet.
+clauses with a write and read API, the knowledge schema with entity alignment, the entity review
+queue and relation candidates with their review API, and the rule tables with the seed calendar.
+No publish flow or rule read API for the engine yet.
 Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architecture Reference 3.2, 5.2 and 6.2; ADR-017 and ADR-018.
 
 - **Owns:** Rules, RuleVersions, Documents, Clauses, Citations, embeddings; versioning, supersession graph, hybrid search index, as-of queries;
@@ -14,7 +15,7 @@ Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architectur
 
 ## What is in the database today
 
-Migrations `0001` to `0004` create eight tables in schema `rulebook`:
+Migrations `0001` to `0005` create eleven tables in schema `rulebook`:
 
 | Table | Purpose | Keys |
 | --- | --- | --- |
@@ -25,6 +26,9 @@ Migrations `0001` to `0004` create eight tables in schema `rulebook`:
 | `clause_entity` | A mention of an entity in a clause with its half-open code-point span, and who found it (`method`: grammar, model or analyst; `extractor`) | pk (`clause_id`, `entity_id`, `span_start`); fks to `clause` and `canonical_entity` (restrict) |
 | `rule_relation` | A typed relation (`supersedes`, `amends`, `refers_to`, `exempts`, `extends_deadline`, `corrects`, `withdraws`) from a rule version to a rule version (`to_rule_version_id`) or an entity (`to_entity_id`), with the evidence clause | pk `id`; unique (`from_rule_version_id`, `relation`, `to_kind`, `to_ref`, `clause_id`); fks to `rule_version`, `clause` and `canonical_entity` (restrict); CHECKs `ck_rule_relation_pairing`, `ck_rule_relation_target_entity`, `ck_rule_relation_target_version`, `ck_rule_relation_not_self` |
 | `rule`, `rule_version` | Rules and their versions: status, effective period, predicates, obligation template, recurrence, seed provenance | see migration 0003 |
+| `extraction_run` | One run of an extraction stage over a document: counts and run-level issues, including model output that could not become a candidate | pk `id` (derived from document, stage, extractor); fk `document_id` |
+| `entity_review` | A mention alignment could not resolve, with the reason (`no_match`, `ambiguous_alias`, `empty_name`, `unqualified`) and the analyst's decision | pk `id` (derived from clause, type, start); unique (`clause_id`, `entity_type`, `span_start`); CHECK that a decision is complete; partial index on open groups |
+| `relation_candidate` | A relation the model proposed before any rule version exists: target as named (and aligned entity), evidence clause and quote, confidence, issues, period and new due date for extensions, status | pk `id` (derived from document, relation, target, evidence clause); fks to `document`, `clause`, `canonical_entity`, `rule`; CHECKs on scores, quote length, decision |
 
 The vocabulary in the CHECK constraints is derived from the kernel (`EntityType`, `RelationKind`,
 `RULE_VERSION_KIND`, `DocumentType`, `PARSER_VERSION_PATTERN`). The CHECKs on `rule_relation`
@@ -42,6 +46,18 @@ message if either table has rows (nothing writes them before it).
 | --- | --- |
 | `PUT /v1/rulebook/documents/{document_id}` | Store a parsed document and its clauses. Needs `x-cw-write-token`. 201 when stored now, 200 when the same parse was stored already (with `metadata_differs` naming fields that differ; the stored row wins), 409 for a different parse of stored bytes, 422 when the id is not the digest's first half |
 | `GET /v1/rulebook/documents/{document_id}` | The document with its clauses in order and their ids |
+| `PUT /v1/rulebook/documents/{document_id}/mentions` | Align the mentions an extractor found: each is checked against the stored clause text at its span and must carry a canonical name; resolved ones go to `clause_entity`, the rest to `entity_review`. Needs the token |
+| `PUT /v1/rulebook/documents/{document_id}/relation-candidates` | Stage the relations a run proposed, with the run's issues; idempotent per proposal. Needs the token |
+| `GET /v1/rulebook/review/entities` | Open review groups, one per (entity type, proposed name), with up to five examples |
+| `GET /v1/rulebook/review/entities/items` | Every open mention of one group with its review id |
+| `POST /v1/rulebook/review/entities/decisions` | Create the entity, add the name to an existing one, or reject the group; resolves every open mention of the group and points open candidates at the entity. A name that does not name one entity across documents (empty, or a section or rule without its statute) is decided mention by mention: the decision lists the `review_ids` it covers and adds no alias. Needs the token |
+| `GET /v1/rulebook/review/relations` | Relation candidates, open ones by default |
+| `POST /v1/rulebook/review/relations/{id}/approve` | Approve into a `rule_relation` from a rule version not yet published (and to the target version for supersedes, extends_deadline, corrects, withdraws); refuses supersession cycles. Needs the token |
+| `POST /v1/rulebook/review/relations/{id}/reject` | Reject with a reason. Needs the token |
+| `GET /v1/rulebook/rules` | Rule keys with their latest title, the list the relation prompt may choose a rule from |
+
+Nothing is aligned by fuzzy matching and nothing is created without an analyst (ADR-017). The
+queue has no alert yet: someone in Regulatory Intelligence has to watch it.
 
 Writes fail closed: without `CW_RULEBOOK_WRITE_TOKEN` every write is a 503, and a missing or wrong
 token is a 401. The spec is committed at `packages/contracts/openapi/rulebook.v1.json`
@@ -75,8 +91,8 @@ composition taxpayer) and check every due date the recurrences produce.
 ```
 src/rulebook/
   api/             # routers (documents), request/response schemas, the write-token dependency
-  application/     # use cases: documents.py (register, read); seed_loader.py parses the seed calendar
-  domain/          # documents.py, errors.py, repository.py (protocols), seed.py
+  application/     # use cases: documents.py, alignment.py, review.py, relations.py; seed_loader.py
+  domain/          # documents.py, alignment.py, review.py, relations.py, runs.py, ids.py, errors.py, repository.py, seed.py
   infrastructure/  # models.py, knowledge_repository.py (Postgres unit of work), memory.py, seed_repository.py
   settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN
   testing.py       # rulebook_settings() for tests and demos: memory store, known token
@@ -89,6 +105,7 @@ migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and 
   versions/20260928_0002_relation_kinds.py     # seven relation kinds
   versions/20260928_0003_rule_tables.py        # rule and rule_version
   versions/20260928_0004_documents_clauses_citations.py   # documents, clauses, citations; knowledge FKs
+  versions/20260928_0005_review_queue_relation_candidates.py   # extraction runs, entity review, relation candidates
 tests/
   unit/            # domain, use cases and API on the memory store; test_models_vocabulary.py: model CHECKs against the kernel enums
   integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work
@@ -119,7 +136,8 @@ Check the schema after `make migrate`:
 ```bash
 docker compose exec -T postgres psql -U cw -d compliancewatch -Atc \
   "select table_name from information_schema.tables where table_schema='rulebook' order by 1"
-# alembic_version, canonical_entity, citation, clause, clause_entity, document, rule, rule_relation, rule_version
+# alembic_version, canonical_entity, citation, clause, clause_entity, document, entity_review,
+# extraction_run, relation_candidate, rule, rule_relation, rule_version
 ```
 
 Roll back with `CW_DATABASE_URL=... CW_DB_SCHEMA=rulebook uv run --package compliancewatch-rulebook alembic -c services/rulebook/alembic.ini downgrade base`

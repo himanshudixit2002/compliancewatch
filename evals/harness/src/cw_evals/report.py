@@ -9,6 +9,7 @@ from pathlib import Path
 
 from cw_evals.cases import ExtractionSet
 from cw_evals.metrics import Aggregate, CaseScore
+from cw_evals.relations import RelationAggregate, RelationScore
 from cw_evals.thresholds import GateResult
 
 METRICS = (
@@ -21,6 +22,12 @@ METRICS = (
     "detector_accuracy",
     "parse_rate",
 )
+RELATION_METRICS = (
+    "relation_recall",
+    "relation_precision",
+    "evidence_validity",
+    "relation_parse_rate",
+)
 
 
 def markdown(
@@ -29,6 +36,8 @@ def markdown(
     aggregates: Mapping[str, Aggregate],
     scores: Mapping[str, Sequence[CaseScore]],
     gates: Sequence[GateResult],
+    relations: Mapping[str, RelationAggregate] | None = None,
+    relation_scores: Mapping[str, Sequence[RelationScore]] | None = None,
 ) -> str:
     status = dict(sorted(extraction.by_status().items()))
     lines = [
@@ -44,18 +53,35 @@ def markdown(
     for metric in METRICS:
         cells = [f"{getattr(aggregates[name], metric):.3f}" for name in aggregates]
         lines.append(f"| {metric} | " + " | ".join(cells) + " |")
+    if relations:
+        cases = next(iter(relations.values())).cases
+        lines += [
+            "",
+            f"Relation golden set: {cases} cases.",
+            "",
+            "| Relation metric | " + " | ".join(relations) + " |",
+            "| --- | " + " | ".join("---" for _ in relations) + " |",
+        ]
+        for metric in RELATION_METRICS:
+            cells = [f"{getattr(relations[name], metric):.3f}" for name in relations]
+            lines.append(f"| {metric} | " + " | ".join(cells) + " |")
     lines += [
         "",
-        "| Gate | Provider | Minimum | Value | Result |",
-        "| --- | --- | --- | --- | --- |",
+        "| Gate | Suite | Provider | Minimum | Value | Result |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for result in gates:
         value = "n/a" if result.value is None else f"{result.value:.3f}"
         verdict = "pass" if result.passed else "FAIL"
         lines.append(
-            f"| {result.gate.metric} | {result.gate.provider} | {result.gate.minimum:.2f} "
-            f"| {value} | {verdict} |"
+            f"| {result.gate.metric} | {result.gate.suite} | {result.gate.provider} "
+            f"| {result.gate.minimum:.2f} | {value} | {verdict} |"
         )
+    for name, relation_case_scores in (relation_scores or {}).items():
+        missed = [s for s in relation_case_scores if s.missed]
+        if missed:
+            lines += ["", f"Relations missed with {name}:", ""]
+            lines += [f"- {s.case_id} ({s.label_status}): {', '.join(s.missed)}" for s in missed]
     for name, case_scores in scores.items():
         failing = [s for s in case_scores if not s.accepted]
         if failing:
@@ -77,6 +103,8 @@ def write(
     aggregates: Mapping[str, Aggregate],
     scores: Mapping[str, Sequence[CaseScore]],
     gates: Sequence[GateResult],
+    relations: Mapping[str, RelationAggregate] | None = None,
+    relation_scores: Mapping[str, Sequence[RelationScore]] | None = None,
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -87,8 +115,13 @@ def write(
         "ran_at": stamp,
         "aggregates": {name: asdict(a) for name, a in aggregates.items()},
         "scores": {name: [asdict(s) for s in items] for name, items in scores.items()},
+        "relations": {name: asdict(a) for name, a in (relations or {}).items()},
+        "relation_scores": {
+            name: [asdict(s) for s in items] for name, items in (relation_scores or {}).items()
+        },
         "gates": [
             {
+                "suite": g.gate.suite,
                 "metric": g.gate.metric,
                 "provider": g.gate.provider,
                 "minimum": g.gate.minimum,

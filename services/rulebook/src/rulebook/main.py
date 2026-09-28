@@ -10,15 +10,38 @@ from collections.abc import Callable
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
-from domain_kernel.errors import DomainError
+from domain_kernel.errors import DomainError, InvalidRelationError
 from py_common.app import create_app
 from rulebook import __version__
 from rulebook.api.router import router
+from rulebook.application.alignment import AlignMentions
 from rulebook.application.documents import ReadDocument, RegisterDocument
+from rulebook.application.relations import (
+    ApproveRelationCandidate,
+    ListRelationCandidates,
+    ListRules,
+    RejectRelationCandidate,
+    StageRelationCandidates,
+)
+from rulebook.application.review import DecideMentionGroup, ListGroupItems, ListMentionGroups
 from rulebook.domain.errors import (
+    CandidateClosedError,
+    CandidateNotFoundError,
     DocumentConflictError,
     DocumentIdMismatchError,
+    EntityTypeMismatchError,
+    MentionSpanMismatchError,
+    NonCanonicalNameError,
+    ReviewGroupClosedError,
+    ReviewGroupNotFoundError,
+    RuleVersionNotEditableError,
+    SupersessionCycleError,
+    TargetUnresolvedError,
+    TargetVersionRequiredError,
+    UnknownClauseError,
     UnknownDocumentError,
+    UnknownEntityError,
+    UnknownRuleVersionError,
     WritesDisabledError,
     WriteTokenInvalidError,
 )
@@ -36,6 +59,21 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     UnknownDocumentError: 404,
     WriteTokenInvalidError: 401,
     WritesDisabledError: 503,
+    UnknownClauseError: 422,
+    MentionSpanMismatchError: 422,
+    NonCanonicalNameError: 422,
+    ReviewGroupNotFoundError: 404,
+    ReviewGroupClosedError: 409,
+    UnknownEntityError: 404,
+    EntityTypeMismatchError: 422,
+    CandidateNotFoundError: 404,
+    CandidateClosedError: 409,
+    TargetUnresolvedError: 409,
+    TargetVersionRequiredError: 422,
+    UnknownRuleVersionError: 404,
+    RuleVersionNotEditableError: 409,
+    SupersessionCycleError: 409,
+    InvalidRelationError: 422,
 }
 
 
@@ -58,6 +96,15 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
         store_ready=store_ready,
         register_document=RegisterDocument(unit_of_work),
         read_document=ReadDocument(unit_of_work),
+        align_mentions=AlignMentions(unit_of_work),
+        list_entity_groups=ListMentionGroups(unit_of_work),
+        list_group_items=ListGroupItems(unit_of_work),
+        decide_entity_group=DecideMentionGroup(unit_of_work),
+        stage_relations=StageRelationCandidates(unit_of_work),
+        list_relations=ListRelationCandidates(unit_of_work),
+        approve_relation=ApproveRelationCandidate(unit_of_work),
+        reject_relation=RejectRelationCandidate(unit_of_work),
+        list_rules=ListRules(unit_of_work),
     )
 
 

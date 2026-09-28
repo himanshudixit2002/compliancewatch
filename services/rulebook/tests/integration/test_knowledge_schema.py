@@ -44,7 +44,8 @@ SCHEMA = "rulebook"
 KNOWLEDGE_TABLES = {"canonical_entity", "clause_entity", "rule_relation"}
 RULE_TABLES = {"rule", "rule_version"}
 DOCUMENT_TABLES = {"document", "clause", "citation"}
-ALL_TABLES = KNOWLEDGE_TABLES | RULE_TABLES | DOCUMENT_TABLES | {"alembic_version"}
+REVIEW_TABLES = {"extraction_run", "entity_review", "relation_candidate"}
+ALL_TABLES = KNOWLEDGE_TABLES | RULE_TABLES | DOCUMENT_TABLES | REVIEW_TABLES | {"alembic_version"}
 
 
 @pytest.fixture(scope="module")
@@ -195,7 +196,7 @@ def test_upgrade_head_creates_the_knowledge_tables(migrated: Config, engine: Eng
         version: str = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-    assert version == "0004"
+    assert version == "0005"
 
 
 def test_indexes_by_name_and_access_method(migrated: Config, engine: Engine) -> None:
@@ -225,6 +226,7 @@ def test_indexes_by_name_and_access_method(migrated: Config, engine: Engine) -> 
         "ix_rule_relation_source",
         "ix_rule_relation_to_rule_version",
         "ix_rule_relation_clause",
+        "uq_rule_relation_candidate_id",
     }
     assert by_table["document"] == {
         "pk_document",
@@ -328,7 +330,8 @@ def test_keys_unique_constraints_and_foreign_keys(migrated: Config, engine: Engi
             "to_kind",
             "to_ref",
             "clause_id",
-        ]
+        ],
+        "uq_rule_relation_candidate_id": ["candidate_id"],
     }
 
     def foreign_keys(table: str) -> dict[str, tuple[list[str], str, dict[str, str]]]:
@@ -363,6 +366,11 @@ def test_keys_unique_constraints_and_foreign_keys(migrated: Config, engine: Engi
             restrict,
         ),
         "fk_rule_relation_clause_id_clause": (["clause_id"], "clause", restrict),
+        "fk_rule_relation_candidate_id_relation_candidate": (
+            ["candidate_id"],
+            "relation_candidate",
+            restrict,
+        ),
     }
 
     for table in ("clause_entity", "rule_relation"):

@@ -16,13 +16,14 @@ from domain_kernel.ids import CandidateId
 from domain_kernel.llm import CompletionRequest
 from domain_kernel.ontology import Ontology
 from domain_kernel.protocols import LLMProvider
-from pipeline.application.validators import Issue, ValidationReport, validate
+from pipeline.application.validators import ValidationReport, validate
 from pipeline.domain.candidate import (
     CANDIDATE_SCHEMA,
     CandidateFields,
     CandidateParseError,
     parse_candidate,
 )
+from pipeline.domain.issues import Issue
 from pipeline.domain.prompt import PromptText
 
 FEATURE = "extraction"

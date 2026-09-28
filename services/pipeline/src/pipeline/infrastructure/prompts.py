@@ -2,7 +2,8 @@
 
 The header is the first lines as ``key: value`` (name, version, owner), a blank line, then the
 prompt text. The gateway's registry lists the same name and version with the digest of the
-whole file, so a changed prompt without a registry change is refused at call time.
+whole file. The gateway only checks that ``name@version`` is registered; the digest is checked
+by the harness's registry test, so a changed prompt without a new version and digest fails CI.
 """
 
 import hashlib

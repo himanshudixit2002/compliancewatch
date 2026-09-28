@@ -7,6 +7,7 @@ import pytest
 from cw_evals.cases import load_extraction_set
 from cw_evals.metrics import aggregate, score
 from cw_evals.providers import fake_gateway, provider_for, scripted
+from cw_evals.relations import load_relation_cases, run_relations
 from cw_evals.report import markdown
 from cw_evals.run import main, run_extraction
 from cw_evals.thresholds import GATES, evaluate
@@ -62,12 +63,21 @@ def test_gates_and_report() -> None:
         name: run_extraction(extraction, name, gateway_url="http://unused.test")[0]
         for name in ("scripted", "fake")
     }
-    gates = evaluate("ci", aggregates)
+    relation_cases = load_relation_cases(GOLDEN)
+    relations = {
+        name: run_relations(relation_cases, name, gateway_url="http://unused.test")[0]
+        for name in ("scripted", "fake")
+    }
+    gates = evaluate("ci", aggregates, relations)
     assert all(g.passed for g in gates), [g for g in gates if not g.passed]
+    without_relations = evaluate("ci", aggregates)
+    assert {g.gate.suite for g in without_relations if not g.passed} == {"relations"}
     missing = evaluate("nightly", aggregates)
     assert all(g.value is None and not g.passed for g in missing)
-    text = markdown("ci", extraction, aggregates, {}, gates)
+    text = markdown("ci", extraction, aggregates, {}, gates, relations, {})
     assert "| extraction_acceptance |" in text
+    assert "| relation_recall |" in text
+    assert "Relation golden set: 1 cases." in text
     assert "50 indexed" in text
     assert {g.provider for g in GATES["ci"]} == {"scripted", "fake"}
 
@@ -113,14 +123,27 @@ def test_main_needs_labelled_cases(tmp_path: Path) -> None:
     assert main(["--golden", str(tmp_path), "--reports", str(tmp_path / "r")]) == 1
 
 
-def test_registry_digest_matches_the_prompt_file() -> None:
-    registry = tomllib.loads(REGISTRY.read_text())
-    entry = next(
-        p
-        for p in registry["prompts"]
-        if p["name"] == "extraction.rule_candidate" and p["version"] == "1"
-    )
-    digest = hashlib.sha256(prompt_path("extraction.rule_candidate", "1").read_bytes()).hexdigest()
+PIPELINE_PROMPTS = [
+    entry
+    for entry in tomllib.loads(REGISTRY.read_text())["prompts"]
+    if entry.get("sha256") is not None
+]
+LABELLED_CASES = {
+    "extraction.rule_candidate": lambda: len(load_extraction_set(GOLDEN).labelled),
+    "extraction.rule_relations": lambda: len(load_relation_cases(GOLDEN)),
+}
+
+
+@pytest.mark.parametrize("entry", PIPELINE_PROMPTS, ids=lambda e: f"{e['name']}@{e['version']}")
+def test_registry_digest_matches_the_prompt_file(entry: dict[str, object]) -> None:
+    name, version = str(entry["name"]), str(entry["version"])
+    digest = hashlib.sha256(prompt_path(name, version).read_bytes()).hexdigest()
     assert entry["sha256"] == digest, "update sha256 in services/llm-gateway/prompts/registry.toml"
-    assert entry["eval_cases"] >= 1
-    assert len(load_extraction_set(GOLDEN).labelled) >= entry["eval_cases"]
+    eval_cases = entry["eval_cases"]
+    assert isinstance(eval_cases, int)
+    assert eval_cases >= 1
+    assert LABELLED_CASES[name]() >= eval_cases, f"{name} needs {eval_cases} labelled case(s)"
+
+
+def test_every_prompt_with_a_digest_is_checked() -> None:
+    assert {str(e["name"]) for e in PIPELINE_PROMPTS} == set(LABELLED_CASES)

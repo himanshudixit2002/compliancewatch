@@ -1,0 +1,20 @@
+case_id: 01-2026-central-tax
+label_status: draft
+labelled_by: drafted from the recorded clause text; not yet reviewed by an analyst
+reviewed_by: ""
+own_ref: 01/2026-Central Tax
+extraction_case: extraction/cbic_notifications/cases/01-2026-central-tax.yaml
+expected:
+  relations:
+    - relation: extends_deadline
+      target:
+        type: form
+        name: GSTR-3B
+      evidence_clause_ref: en.p3
+      evidence_quote: hereby extends the due  date for furnishing the return in FORM GSTR-3B for the month of March, 2026 till the twenty -first day of April, 2026
+      period: "2026-03"
+      new_due_date: "2026-04-21"
+notes: >-
+  Only what clause en.p3 states in so many words. The document also cites section 39(6) of the
+  CGST Act as the source of the power and names section 39(1) and rule 61(1)(i) of the CGST Rules
+  for who files; an analyst decides whether those belong in the label as refers_to.

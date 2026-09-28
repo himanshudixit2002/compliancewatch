@@ -72,16 +72,46 @@ and `not_covered` outcome as the rest of the qa service. Only published rule ver
 the question's date are visible to the solver.
 
 Knowledge alignment. A `canonical_entity` table holds one row per (type, canonical name) with an
-alias array. The kernel owns the normalisation rule per type, so the pipeline and the qa service
-derive the same canonical name from the same mention. The extraction stage resolves mentions
-against the table; a mention that does not resolve goes to the review queue rather than creating
-a new entity on its own.
+alias array of names that are already normalised. The kernel owns the normalisation rule per type,
+so the pipeline and the qa service derive the same canonical name from the same mention; a
+section or rule carries its statute (`39(1)@cgst-act`), because a bare number is ambiguous. The
+extraction stage resolves mentions against the table, by canonical name or by the one alias of
+exactly one entity; a mention that does not resolve goes to the review queue
+(`entity_review`) rather than creating a new entity on its own. There is no fuzzy matching. An
+analyst decides a queue group (one entity type and proposed name) by creating the entity, adding
+the name to an existing one, or rejecting it; the decision writes the mentions into
+`clause_entity` in the same transaction. A name that does not name one entity across documents
+(empty, or a section or rule without its statute) is decided mention by mention and never becomes
+an alias. Approval records the aligned entity's canonical name, and aligns a candidate whose
+target was decided after staging.
+
+Relation staging. Relations are found before any rule version exists for the new document, so the
+model's proposals are stored as `relation_candidate` rows at document level: the target as the
+grammar named it (type and canonical name, aligned to an entity once review decides the name),
+the evidence clause and quote, the confidence after the validators, and for `extends_deadline` the
+period and the new due date as the text states them. The prompt (`extraction.rule_relations@1`)
+may only choose targets from the grammar's list and clauses from the document, through a JSON
+schema built per call; the validators check the quote against the clause (fuzzy match of at
+least 0.85 plus the numbers, form codes and month names it carries), the date against the clause,
+and agreement with the change detector. Nothing is dropped: a doubtful proposal is a candidate
+that needs review, and output that cannot become one is kept in `extraction_run`.
+
+Approval. An analyst approves a candidate by naming the rule version it starts from, which must
+not be published yet, and for the relations that target a rule version, the version it targets.
+Approval writes one `rule_relation` row pointing back at the candidate; a supersession that would
+close a cycle is refused. The direction is always from the new, causing version X to the affected
+version Y, which is what the later publish step needs: `rule.published`(X).supersedes lists the
+targets of X's supersedes rows, `rule.superseded` is emitted for Y when X takes effect, an
+`extends_deadline` row becomes the obligation service's deadline change for Y caused by X with the
+candidate's period and due date, `corrects` likewise with reason corrected, and `withdraws`
+withdraws Y.
 
 Rollout. The planner and solver sit behind the `qa.kag_enabled` flag, default off, with
 per-tenant targeting. The tables and the extraction stage ship first and are additive. The
 kernel vocabulary (`domain_kernel.knowledge`) and the knowledge tables exist (rulebook migrations
-0001 to 0004; documents, clauses and citations since 0004), and parsed documents reach the
-rulebook through its API (ADR-018). The extraction stage, the planner and the solver follow.
+0001 to 0005), parsed documents reach the rulebook through its API (ADR-018), and the extraction
+stage (mention grammar, alignment, relation proposals, review and approval) runs in the pipeline
+worker behind `CW_PIPELINE_KNOWLEDGE_ENABLED`, default off. The planner and the solver follow.
 
 ## Alternatives considered
 

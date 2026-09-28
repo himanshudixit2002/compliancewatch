@@ -70,10 +70,12 @@ from domain_kernel.knowledge import (
     RULE_VERSION_ONLY,
     EntityRef,
     EntityType,
+    Instrument,
     Mention,
     RelationKind,
     RuleRelation,
     normalise_name,
+    qualified_name,
 )
 from domain_kernel.llm import CompletionRequest, CompletionResponse
 from domain_kernel.notifications import DeliveryReceipt, DeliveryStatus, RenderedMessage
@@ -220,6 +222,7 @@ __all__ = [
     "FinancialYear",
     "Frequency",
     "Gstin",
+    "Instrument",
     "InvalidAttributeValueError",
     "InvalidOperatorError",
     "InvalidRelationError",
@@ -283,6 +286,7 @@ __all__ = [
     "negate",
     "normalise_name",
     "parse_closure_reason",
+    "qualified_name",
     "quote_match_ratio",
     "quote_matches",
     "specification_from_mapping",

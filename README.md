@@ -7,7 +7,10 @@
 > (fixed ids derived from the digest, append-only, a write API the pipeline calls behind a flag,
 > the fourth committed OpenAPI spec) and knowledge schema (canonical entities, clause mentions,
 > rule relations, citations, rules and versions with the seed calendar of thirteen standing GST
-> obligations pending analyst review), the obligation service's domain and use cases
+> obligations pending analyst review), KAG-style knowledge extraction behind a flag (a mention
+> grammar for notifications, sections, rules, forms, codes, rates, amounts and states; alignment
+> to canonical entities with an analyst review queue; relation proposals through a registered
+> prompt, validated against the clause text and approved into rule relations by an analyst), the obligation service's domain and use cases
 > (obligations per period, deadline changes, withdrawals, row-level security by tenant, events
 > through the outbox), the profile service's business hierarchy (entity, registration, location;
 > attribute values per node and financial year; snapshots for the engine; one-question onboarding;
@@ -283,4 +286,4 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - Prompt texts for judgement, question answering and classification (extraction exists); the qa and applicability golden sets and their harness suites
 - Analyst labels: 45 of the 50 listed CBIC notifications have no case yet, and the five case files (01/2026 with a draft label; 17/2025, 15/2025, 10/2025 and 13/2024 with clauses and detector output only) are unreviewed; the nightly eval needs the `CW_AI_GATEWAY_API_KEY` repository secret
 - Full text for ADR-009 to ADR-011; the identity service itself (ADR-014 decides Supabase Auth for the MVP; nothing is created until the maintainer opens the project)
-- KAG-style reasoning beyond the document store: entity extraction and alignment in the pipeline, the logical-form planner and solver in qa, and its eval gate (ADR-017)
+- KAG-style reasoning beyond extraction: the logical-form planner and solver in qa and its eval gate (ADR-017); a publish flow that turns approved candidates into published versions and events; an alert on the entity review queue

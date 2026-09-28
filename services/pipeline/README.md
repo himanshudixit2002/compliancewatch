@@ -83,6 +83,33 @@ mentions and citations point into them. Bump the parser's `PARSER_VERSION` with 
 can alter clause text, so the refusal names both versions; what to do with stored documents
 after such a change is an open decision (ADR-018). Deploy the rulebook before the pipeline.
 
+## Knowledge extraction (KAG phase 2, ADR-017)
+
+Once a document is registered, the ingest runs the child workflow `pipeline.extract_knowledge`
+(behind `workflow.patched("kag-extract-v1")`, same flag). It has three activities:
+
+1. `pipeline.extract_mentions` runs the mention grammar (`domain/grammar.py`, `grammar@1`) over
+   the stored clauses. The grammar reads notification and circular numbers (and notification
+   numbers in Hindi), sections and sub-sections, rules and sub-rules with their statute
+   (`39(6)@cgst-act`, `61(1)(i)@cgst-rules`), GST forms, HSN and SAC codes after their keyword,
+   tax rates near a tax word, rupee amounts near a threshold word, and state names. It matches
+   the text as parsed, so a mention's span points at exactly its characters. The mentions go to
+   the rulebook, which aligns them or queues them for review.
+2. `pipeline.propose_relations` asks the model, through the gateway with the registered prompt
+   `extraction.rule_relations@1` (`prompts/extraction.rule_relations.v1.md`), which of the
+   grammar's targets the document acts on and how. The JSON schema is built per call, so targets,
+   evidence clauses and rule keys are closed lists. The answer goes through
+   `domain/relations.parse_relations` and the validator chain in
+   `application/relation_validators.py`: quote and date against the clause, target type, and
+   agreement with the change detector. Nothing is written here.
+3. `pipeline.submit_relations` stages the result as relation candidates for review. It is a
+   separate activity, so a failed write is retried without asking the model again.
+
+`application/stages.py` is the stage template (validate, process, check); `MentionStage` and
+`RelationStage` are its two stages, called from the activities. A failed extraction is reported
+in the ingest result (`knowledge_error`) and does not fail the ingest. The relation suite of the
+eval harness (`make eval`) runs the same stages over `evals/golden/relations`.
+
 ## Sources
 
 | Key | Site | Lists | Fetches | Document type |

@@ -7,12 +7,17 @@ fields, and every labelled case must parse. ``nightly`` runs against a real mode
 gateway and gates the guide's section 8 numbers: extraction acceptance at or above 0.90 and
 citation validity at or above 0.95. The fake provider's own scores are reported, never gated:
 it answers placeholders by design.
+
+The relation suite (``suite="relations"``) is gated in ``ci`` the same way: the scripted run must
+find every labelled relation with valid evidence, and the fake provider's answers must parse.
+Its nightly numbers are reported but not gated until at least five cases are reviewed.
 """
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 from cw_evals.metrics import Aggregate
+from cw_evals.relations import RelationAggregate
 
 PROFILES = ("ci", "nightly")
 
@@ -23,6 +28,7 @@ class Gate:
     minimum: float
     provider: str
     """Which provider's aggregate the gate reads."""
+    suite: str = "extraction"
 
 
 GATES: Mapping[str, tuple[Gate, ...]] = {
@@ -32,6 +38,10 @@ GATES: Mapping[str, tuple[Gate, ...]] = {
         Gate("validator_pass_rate", 1.0, "scripted"),
         Gate("detector_accuracy", 0.9, "scripted"),
         Gate("parse_rate", 1.0, "fake"),
+        Gate("relation_recall", 1.0, "scripted", "relations"),
+        Gate("relation_precision", 1.0, "scripted", "relations"),
+        Gate("evidence_validity", 1.0, "scripted", "relations"),
+        Gate("relation_parse_rate", 1.0, "fake", "relations"),
     ),
     "nightly": (
         Gate("extraction_acceptance", 0.90, "gateway"),
@@ -51,10 +61,20 @@ class GateResult:
         return self.value is not None and self.value >= self.gate.minimum
 
 
-def evaluate(profile: str, aggregates: Mapping[str, Aggregate]) -> list[GateResult]:
+def evaluate(
+    profile: str,
+    aggregates: Mapping[str, Aggregate],
+    relations: Mapping[str, RelationAggregate] | None = None,
+) -> list[GateResult]:
+    """Each gate of the profile against the aggregate of its suite and provider; a gate whose
+    aggregate is missing fails."""
+    suites: Mapping[str, Mapping[str, object]] = {
+        "extraction": aggregates,
+        "relations": relations or {},
+    }
     results = []
     for gate in GATES[profile]:
-        aggregate = aggregates.get(gate.provider)
+        aggregate = suites[gate.suite].get(gate.provider)
         value = None if aggregate is None else float(getattr(aggregate, gate.metric))
         results.append(GateResult(gate, value))
     return results
