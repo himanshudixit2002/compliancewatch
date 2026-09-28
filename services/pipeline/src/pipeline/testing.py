@@ -1,9 +1,10 @@
-"""A transport that answers from the recorded fixtures, for adapter tests and demos.
+"""Test doubles for adapter tests and demos: recorded sources, a scripted model, a rulebook.
 
 ``FixtureTransport`` maps a request to a file under ``tests/fixtures`` (or a literal body) and
 answers 404 for anything else, so a test that reaches an unrecorded URL fails loudly instead of
 touching the network. Routes are exact matches on method and URL; the CBIC listing routes also
-insist on the token header the real site wants.
+insist on the token header the real site wants. ``MemoryRulebook`` stands in for the rulebook's
+write API with the same rules: ids from the kernel, a different parse of stored bytes refused.
 """
 
 import json
@@ -13,7 +14,11 @@ from pathlib import Path
 
 import httpx2
 
+from domain_kernel.documents import ParsedDocument, clause_id_for
+from domain_kernel.ids import DocumentId
 from domain_kernel.llm import CompletionRequest, CompletionResponse
+from pipeline.domain.errors import RulebookConflictError
+from pipeline.domain.knowledge import DocumentRecord, RegisteredDocument
 
 Responder = Callable[[httpx2.Request], httpx2.Response]
 
@@ -126,3 +131,32 @@ class ScriptedProvider:
         self.requests.append(req)
         text = self._answers.get(req.metadata.get("document_id", ""), self._default)
         return CompletionResponse(text=text, model=self.MODEL, input_tokens=0, output_tokens=0)
+
+
+class MemoryRulebook:
+    """A ``KnowledgeSink`` in memory. ``records`` keeps every stored document by id."""
+
+    def __init__(self) -> None:
+        self.records: dict[DocumentId, DocumentRecord] = {}
+        self.calls = 0
+
+    def register_document(self, record: DocumentRecord) -> RegisteredDocument:
+        self.calls += 1
+        document = record.document
+        stored = self.records.get(document.document_id)
+        if stored is not None and _clauses(stored.document) != _clauses(document):
+            raise RulebookConflictError(f"409: document {document.document_id} differs")
+        if stored is None:
+            self.records[document.document_id] = record
+        return RegisteredDocument(
+            document_id=document.document_id,
+            created=stored is None,
+            clause_ids={
+                clause.clause_ref: clause_id_for(document.document_id, clause.clause_ref)
+                for clause in document.clauses
+            },
+        )
+
+
+def _clauses(document: ParsedDocument) -> list[tuple[str, str, int | None]]:
+    return [(c.clause_ref, c.text, c.page) for c in document.clauses]

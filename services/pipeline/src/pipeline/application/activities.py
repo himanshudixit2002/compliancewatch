@@ -14,7 +14,7 @@ from uuid import UUID
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from temporalio.common import RetryPolicy
 
-from domain_kernel.documents import DocumentRef, RawDocument
+from domain_kernel.documents import DocumentRef, ParsedDocument, RawDocument
 from domain_kernel.documents import document_id_for as kernel_document_id_for
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import DocumentId, SourceId
@@ -155,17 +155,7 @@ class ParseDocument(ActivityBase[ParseRequest, Parsed]):
         self._parser = parser
 
     async def run(self, input: ParseRequest) -> Parsed:
-        fetched = input.fetched
-        raw = RawDocument(
-            ref=DocumentRef(SourceId(fetched.source_id), fetched.url, fetched.external_ref),
-            content=fetched.content,
-            media_type=fetched.media_type,
-            sha256=fetched.sha256,
-            fetched_at=fetched.fetched_at,
-        )
-        if not self._parser.supports(raw):
-            raise UnsupportedDocumentError(f"no parser for {raw.media_type}")
-        parsed = self._parser.parse(raw)
+        parsed = parse_fetched(self._parser, input.fetched)
         return Parsed(
             document_id=parsed.document_id.value,
             doc_type=parsed.doc_type.value,
@@ -174,6 +164,20 @@ class ParseDocument(ActivityBase[ParseRequest, Parsed]):
             clause_count=len(parsed.clauses),
             clause_refs=[clause.clause_ref for clause in parsed.clauses],
         )
+
+
+def parse_fetched(parser: DocumentParser, fetched: Fetched) -> ParsedDocument:
+    """Parse fetched bytes; ``UnsupportedDocumentError`` when the parser cannot read them."""
+    raw = RawDocument(
+        ref=DocumentRef(SourceId(fetched.source_id), fetched.url, fetched.external_ref),
+        content=fetched.content,
+        media_type=fetched.media_type,
+        sha256=fetched.sha256,
+        fetched_at=fetched.fetched_at,
+    )
+    if not parser.supports(raw):
+        raise UnsupportedDocumentError(f"no parser for {raw.media_type}")
+    return parser.parse(raw)
 
 
 def document_id_for(fetched: Fetched) -> DocumentId:
