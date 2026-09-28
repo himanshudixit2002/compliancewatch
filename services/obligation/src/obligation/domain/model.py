@@ -8,7 +8,7 @@ in one transaction.
 """
 
 from dataclasses import dataclass, replace
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Self
 
 from domain_kernel._validation import require_aware, require_instance, require_text
@@ -21,7 +21,7 @@ from domain_kernel.status import (
     ObligationStatus,
     close_obligation,
 )
-from obligation.domain.errors import ObligationClosedError
+from obligation.domain.errors import ObligationClosedError, ObligationWindowInvalidError
 from obligation.domain.events import (
     ObligationClosed,
     ObligationCreated,
@@ -175,8 +175,45 @@ def period_matches(obligation: Obligation, period_label: str | None) -> bool:
 
 def due_at_end_of_day(day: date, tz: object) -> datetime:
     """The last second of ``day`` in the given timezone: what a date-only deadline means."""
-    from datetime import time, tzinfo
-
     if not isinstance(tz, tzinfo):
         raise InvariantViolationError("tz must be a tzinfo")
     return datetime.combine(day, time(23, 59, 59), tz)
+
+
+MAX_WINDOW_DAYS = 366
+"""The longest due window a read may ask for: a leap financial year."""
+
+
+@dataclass(frozen=True, slots=True)
+class DueWindow:
+    """Days on which obligations fall due, both ends included and either end open.
+
+    Days are days in India: ``bounds`` turns them into instants, the start of ``due_from`` and
+    the start of the day after ``due_to``, the upper bound exclusive.
+    """
+
+    due_from: date | None = None
+    due_to: date | None = None
+
+    def __post_init__(self) -> None:
+        if self.due_from is None or self.due_to is None:
+            return
+        if self.due_from > self.due_to:
+            raise ObligationWindowInvalidError(
+                f"due_from {self.due_from} is after due_to {self.due_to}"
+            )
+        days = (self.due_to - self.due_from).days + 1
+        if days > MAX_WINDOW_DAYS:
+            raise ObligationWindowInvalidError(
+                f"the window spans {days} days; at most {MAX_WINDOW_DAYS} are allowed"
+            )
+
+    def bounds(self, tz: tzinfo) -> tuple[datetime | None, datetime | None]:
+        """``(due_after, due_before)``: due at or after the first, strictly before the second."""
+        after = None if self.due_from is None else datetime.combine(self.due_from, time(), tz)
+        before = (
+            None
+            if self.due_to is None
+            else datetime.combine(self.due_to + timedelta(days=1), time(), tz)
+        )
+        return after, before

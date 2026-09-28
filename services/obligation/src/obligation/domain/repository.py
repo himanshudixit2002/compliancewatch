@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from contextlib import AbstractContextManager
+from datetime import datetime
 from typing import Protocol
 
 from domain_kernel.events import DomainEvent
@@ -21,6 +22,20 @@ class ObligationRepository(Protocol):
     def open_for_rule_version(
         self, rule_version_id: RuleVersionId, period_label: str | None = None
     ) -> Sequence[Obligation]: ...
+
+    def list_for_business(
+        self,
+        business_id: BusinessId,
+        *,
+        due_after: datetime | None,
+        due_before: datetime | None,
+        rule_version_id: RuleVersionId | None,
+        limit: int,
+    ) -> Sequence[Obligation]:
+        """The business's obligations in any status, due at or after ``due_after`` and before
+        ``due_before`` (one without a due date only when neither is given), ordered by due date
+        (none last), period start, creation and id, at most ``limit``."""
+        ...
 
     def add(self, obligation: Obligation) -> None: ...
 
