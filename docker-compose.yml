@@ -192,6 +192,7 @@ services:
       - --storage.tsdb.retention.time=2d
     volumes:
       - ./infra/dev/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/dev/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"

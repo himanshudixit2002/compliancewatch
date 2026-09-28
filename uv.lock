@@ -7,6 +7,7 @@ members = [
     "compliancewatch",
     "compliancewatch-applicability-engine",
     "compliancewatch-contracts",
+    "compliancewatch-demo",
     "compliancewatch-eval",
     "compliancewatch-evals",
     "compliancewatch-identity",
@@ -374,6 +375,37 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "pydantic", specifier = ">=2.11" }]
+
+[[package]]
+name = "compliancewatch-demo"
+version = "0.1.0"
+source = { editable = "tools/demo" }
+dependencies = [
+    { name = "compliancewatch-identity" },
+    { name = "compliancewatch-notification" },
+    { name = "compliancewatch-obligation" },
+    { name = "compliancewatch-profile" },
+    { name = "compliancewatch-rulebook" },
+    { name = "domain-kernel" },
+    { name = "fastapi" },
+    { name = "httpx2" },
+    { name = "ontology" },
+    { name = "py-common" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "compliancewatch-identity", editable = "services/identity" },
+    { name = "compliancewatch-notification", editable = "services/notification" },
+    { name = "compliancewatch-obligation", editable = "services/obligation" },
+    { name = "compliancewatch-profile", editable = "services/profile" },
+    { name = "compliancewatch-rulebook", editable = "services/rulebook" },
+    { name = "domain-kernel", editable = "packages/domain-kernel" },
+    { name = "fastapi", specifier = ">=0.120" },
+    { name = "httpx2", specifier = ">=2.13" },
+    { name = "ontology", editable = "packages/ontology" },
+    { name = "py-common", editable = "packages/py-common" },
+]
 
 [[package]]
 name = "compliancewatch-eval"

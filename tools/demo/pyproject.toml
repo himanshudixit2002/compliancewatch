@@ -1,0 +1,37 @@
+[project]
+name = "compliancewatch-demo"
+version = "0.1.0"
+description = "ComplianceWatch demo tenant: the whole flow in one process, from consent to a WhatsApp reminder"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.120",
+  "httpx2>=2.13",
+  "py-common",
+  "domain-kernel",
+  "ontology",
+  "compliancewatch-identity",
+  "compliancewatch-profile",
+  "compliancewatch-rulebook",
+  "compliancewatch-obligation",
+  "compliancewatch-notification",
+]
+
+[project.scripts]
+cw-demo = "cw_demo.run:main"
+
+[tool.uv.sources]
+py-common = { workspace = true }
+domain-kernel = { workspace = true }
+ontology = { workspace = true }
+compliancewatch-identity = { workspace = true }
+compliancewatch-profile = { workspace = true }
+compliancewatch-rulebook = { workspace = true }
+compliancewatch-obligation = { workspace = true }
+compliancewatch-notification = { workspace = true }
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cw_demo"]

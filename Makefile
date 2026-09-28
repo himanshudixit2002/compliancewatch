@@ -19,7 +19,7 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE ?= /var/run/docker.sock
 # ---- Inventory -------------------------------------------------------------------------------
 SERVICES := identity profile rulebook applicability-engine obligation notification qa llm-gateway eval pipeline
 PY_PACKAGES := py-common domain-kernel ontology
-PY_DIRS := $(addprefix packages/,$(PY_PACKAGES)) packages/contracts/clients/python $(addprefix services/,$(SERVICES)) evals/harness
+PY_DIRS := $(addprefix packages/,$(PY_PACKAGES)) packages/contracts/clients/python $(addprefix services/,$(SERVICES)) evals/harness tools/demo
 
 # Service directory -> import package (two exceptions avoid shadowing stdlib/builtins).
 PKG_profile := profile_service
@@ -123,6 +123,15 @@ dev-ps: check-docker ## Container status and health
 dev-psql: check-docker ## psql into the application database
 	$(COMPOSE) exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
 
+dev-backup: check-docker ## pg_dump the dev database into var/backups/<timestamp>.dump
+	@mkdir -p var/backups; stamp=$$(date -u +%Y%m%dT%H%M%SZ); \
+	$(COMPOSE) exec -T postgres pg_dump -U $${POSTGRES_USER:-cw} -Fc $${POSTGRES_DB:-compliancewatch} > var/backups/$$stamp.dump && echo "wrote var/backups/$$stamp.dump"
+
+dev-restore: check-docker ## Restore the dev database from a dump: make dev-restore FILE=var/backups/x.dump
+	@[ -n "$(FILE)" ] || { echo "usage: make dev-restore FILE=var/backups/<stamp>.dump"; exit 1; }
+	$(COMPOSE) exec -T postgres psql -U $${POSTGRES_USER:-cw} -d postgres -c "DROP DATABASE IF EXISTS $${POSTGRES_DB:-compliancewatch} WITH (FORCE)" -c "CREATE DATABASE $${POSTGRES_DB:-compliancewatch}"
+	$(COMPOSE) exec -T postgres pg_restore -U $${POSTGRES_USER:-cw} -d $${POSTGRES_DB:-compliancewatch} --no-owner < $(FILE) && echo "restored $(FILE)"
+
 compose-config: check-docker-cli ## Validate docker-compose.yml (CLI only, no daemon needed)
 	$(COMPOSE) $(PROFILES) config --quiet && echo "docker-compose.yml OK"
 
@@ -190,7 +199,7 @@ ts-dev: check-pnpm ## next dev (:3000) and whatsapp-bot (:8080) with reload
 	$(PNPM) turbo run dev
 
 # ---- Composition (guide sections 13, 17, 19) -------------------------------------------------
-.PHONY: install lint format typecheck test check eval label migrate run worker relay seed openapi contracts contracts-check hooks ci-lint
+.PHONY: install lint format typecheck test check eval label demo runbooks-check migrate run worker relay seed openapi contracts contracts-check hooks ci-lint
 install: py-sync ts-install ## Install both toolchains
 
 lint: py-lint ts-lint ## Lint both sides (CI step 1)
@@ -201,11 +210,17 @@ typecheck: py-typecheck ts-typecheck ## mypy --strict and tsc --strict (CI step 
 
 test: py-test ts-test ## Unit and contract tests on both sides (CI step 2)
 
-check: lint typecheck test importlint lock-check contracts-check ## Everything CI runs before integration tests
+check: lint typecheck test importlint lock-check contracts-check runbooks-check ## Everything CI runs before integration tests
+
+runbooks-check: check-uv ## Every Prometheus alert links an existing runbook (guide section 18)
+	$(UV) run python infra/scripts/check_alert_runbooks.py
 
 EVAL_PROFILE ?= ci
 eval: check-uv ## Eval harness against evals/golden: make eval [EVAL_PROFILE=ci|nightly] [ARGS="--provider fake"]
 	$(UV) run --package compliancewatch-evals eval-harness --profile $(EVAL_PROFILE) $(ARGS)
+
+demo: check-uv ## The demo tenant end to end in one process (consent, profile, rules, obligations, reminder): make demo [ARGS=--json]
+	CW_LOG_LEVEL=WARNING $(UV) run --package compliancewatch-demo cw-demo --daytime $(ARGS)
 
 label: check-uv ## Labelling tool: make label ARGS="check" | "index --source cbic_notifications --since 2024-01-01 --out evals/golden/extraction/cbic_notifications/index.yaml" | "prepare --index ..."
 	$(UV) run --package compliancewatch-pipeline pipeline-label $(ARGS)
