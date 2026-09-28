@@ -179,10 +179,13 @@ async def test_relay_publishes_committed_rows_only(
     database_url: str, bootstrap: str, engine: AsyncEngine
 ) -> None:
     written = write_events(database_url, ["first", "second"], rollback=["never"])
+    store = PostgresOutboxStore(engine)
+    assert await store.pending() == 2, "the rolled back row was never written"
     async with AiokafkaProducer(bootstrap, client_id="test-relay") as producer:
-        relay = OutboxRelay(store=PostgresOutboxStore(engine), producer=producer)
+        relay = OutboxRelay(store=store, producer=producer)
         assert await relay.run_once() == RelayStats(claimed=2, published=2)
         assert await relay.run_once() == RelayStats()
+    assert await store.pending() == 0
 
     records = await read_topic(bootstrap, TOPIC, 2)
     assert len(records) == 2
@@ -232,18 +235,21 @@ async def test_relay_retries_then_dead_letters(
     def clock() -> datetime:
         return datetime.now(UTC) + offset
 
+    store = PostgresOutboxStore(engine)
     async with AiokafkaProducer(bootstrap, client_id="test-flaky") as inner:
         producer = FlakyProducer(inner, failures=5)
         relay = OutboxRelay(
-            store=PostgresOutboxStore(engine),
+            store=store,
             producer=producer,
             config=RelayConfig(max_attempts=2, base_backoff_seconds=60),
             clock=clock,
         )
         assert await relay.run_once() == RelayStats(claimed=1, retried=1)
         assert await relay.run_once() == RelayStats(), "not due until the backoff passes"
+        assert await store.pending() == 1, "a row backing off is still pending"
         offset += timedelta(seconds=61)
         assert await relay.run_once() == RelayStats(claimed=1, dead=1)
+    assert await store.pending() == 0, "a dead row is not pending"
 
     async with engine.connect() as connection:
         row = (await connection.execute(select(outbox_event))).one()

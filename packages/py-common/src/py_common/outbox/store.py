@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from py_common.outbox.schema import (
@@ -54,6 +54,10 @@ class OutboxBatch(Protocol):
 
 class OutboxStore(Protocol):
     def batch(self) -> AbstractAsyncContextManager[OutboxBatch]: ...
+
+    async def pending(self) -> int:
+        """Rows still to publish: due now or backing off after a failed send."""
+        ...
 
 
 class UnitOfWork(Protocol):
@@ -139,6 +143,15 @@ class PostgresOutboxStore:
 
     def batch(self) -> AbstractAsyncContextManager[OutboxBatch]:
         return self._batch()
+
+    async def pending(self) -> int:
+        statement = (
+            select(func.count())
+            .select_from(outbox_event)
+            .where(outbox_event.c.status == STATUS_PENDING)
+        )
+        async with self._engine.connect() as connection:
+            return int((await connection.execute(statement)).scalar_one())
 
 
 class PostgresUnitOfWork:

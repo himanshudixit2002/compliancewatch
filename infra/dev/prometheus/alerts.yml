@@ -41,13 +41,13 @@ groups:
           summary: "Dead-letter depth above zero for 30 minutes on {{ $labels.topic }}"
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/outbox-relay.md
       - alert: OutboxBacklog
-        expr: max by (service) (outbox_relay_pending) > 1000
+        expr: max by (db_schema) (outbox_relay_pending) > 1000
         for: 15m
         labels:
           severity: page
           team: platform
         annotations:
-          summary: "More than 1000 unpublished outbox rows for 15 minutes in {{ $labels.service }}"
+          summary: "More than 1000 unpublished outbox rows for 15 minutes in schema {{ $labels.db_schema }}"
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/outbox-relay.md
   - name: workers
     rules:
