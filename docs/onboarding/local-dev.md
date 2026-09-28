@@ -59,6 +59,20 @@ shows the topics; `rpk topic consume <topic> -n 1` reads a message.
 `services/pipeline/README.md` shows how to start the sample workflow and
 `docs/runbooks/temporal-worker.md` what to do when a run fails.
 
+## Profiles
+
+`make migrate SERVICE=profile` then `make run SERVICE=profile`; every call needs an
+`x-tenant-id` header with a UUID until the identity service exists:
+
+```bash
+curl -s -X POST http://localhost:8002/v1/profile/registrations \
+  -H 'content-type: application/json' -H 'x-tenant-id: 5b1f3d2e-7c4a-4e0b-9a6d-1f2e3d4c5b6a' \
+  -d '{"gstin":"29ABCDE1234F1Z5","name":"Acme Bengaluru","entity_name":"Acme"}'
+```
+
+Then `PUT /v1/profile/nodes/{id}/attributes`, `GET .../next-question?fy=2025-26` and
+`GET .../snapshot?fy=2025-26`. `CW_PROFILE_STORE=memory` runs the service without Postgres.
+
 ## Seed calendar
 
 `make migrate SERVICE=rulebook` then `make seed SERVICE=rulebook` loads the thirteen standing

@@ -1,12 +1,50 @@
 # profile service
 
-Part of the ComplianceWatch monorepo. **Service template only: health routes, migrations wiring, no domain code yet.**
+Part of the ComplianceWatch monorepo. **The business hierarchy, attribute values per node and financial year, snapshots, one-question onboarding and review tasks exist behind a first API; the GSTIN lookup adapter and the identity token are not built yet.**
 Design reference: Project Foundation guide, sections 6, 7 and 14.
 
 - **Owns:** BusinessProfiles and the Ontology attribute store; validates attributes against the Ontology; versions each change; GSTIN pre-fill. Python package: `profile_service` (the stdlib ships a `profile` module)
 - **Owning team:** Core Product (guide section 14)
 - **Consumes:** Onboarding UI; GSTIN lookup adapter; partner API
-- **Emits / publishes:** profile.updated
+- **Emits / publishes:** profile.updated (through the outbox)
+
+## What is here
+
+The hierarchy of ADR-016: a legal entity keyed by PAN, registrations keyed by GSTIN under it,
+locations under a registration. Every attribute of ontology 0.2.0 declares its level, so a
+value is stored on the node of that level and inherited downward when a snapshot is built for
+the applicability engine. A per-financial-year attribute (the turnover band) is stored once
+per year and the snapshot picks the year asked for.
+
+- `domain/model.py`: `ProfileNode` (`entity`, `registration`, `location` constructors that
+  check the PAN inside the GSTIN and the parent's level), `AttributeRecord` with a state
+  (`known`, `unsure`, `not_applicable`), `apply` (the ontology validates, the version bumps,
+  one `profile.updated` per batch, a review request per `not_applicable` answer), `snapshot`
+  (lineage merged, child values win), `next_question` (the first missing or unsure attribute
+  of the node's level: one question at a time, never a form), `missing_for_year`.
+- `application/registration.py`: entity by PAN, registration by GSTIN (its PAN finds or creates
+  the entity), location under a registration; idempotent on the key.
+- `application/attributes.py`: `SetAttributes` (event to the outbox; a `not_applicable` answer
+  opens a `ReviewTask` and records a golden-case seed through the eval recorder), `NextQuestion`,
+  `BuildSnapshot`, `ConfirmFinancialYear` (one `confirm_financial_year` task per entity and
+  per-year attribute missing for the new year: the April task).
+- `api/`: `POST /v1/profile/{entities,registrations,locations}`, `GET /v1/profile/nodes/{id}`,
+  `PUT /v1/profile/nodes/{id}/attributes`, `GET .../snapshot?fy=2025-26`,
+  `GET .../next-question?fy=`, `GET .../review-tasks`. The tenant is the `x-tenant-id`
+  header (required, 401 without it) until the identity service issues tokens (ADR-014). Errors
+  are problem details; the spec is `packages/contracts/openapi/profile.v1.json`
+  (`make openapi SERVICE=profile`, checked by a contract test).
+- `infrastructure/`: `PostgresUnitOfWorkFactory` (one transaction per call, `app.tenant_id`
+  set for the row-level security policies on all four tables, events through the outbox,
+  eval cases through an optional JSON-lines recorder at `CW_PROFILE_EVAL_CASES_PATH`);
+  `memory.py` is the in-memory twin (`CW_PROFILE_STORE=memory`, the tests and demos).
+- `migrations/versions/20260928_0001_profile_hierarchy.py`: `profile_node`,
+  `profile_attribute`, `profile_version` (history), `review_task`, each with tenant_id and a
+  forced policy, plus the outbox and inbox tables.
+
+Row-level security binds only non-superuser roles; see the obligation service README for the
+dev-stack caveat. Settings: `CW_PROFILE_STORE` (`postgres` default, `memory`),
+`CW_PROFILE_EVAL_CASES_PATH` (empty keeps the eval seed in the review task only).
 
 ## Layout
 

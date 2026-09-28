@@ -21,6 +21,7 @@ Design reference: Project Foundation guide, sections 6, 11 and 13.
 | `operators` | `Operator` enum with `symbol`; the ordered, multi-value and set operator groups |
 | `confidence` | `Confidence` in [0, 1], `REVIEW_THRESHOLD`, `CERTAIN` and `ZERO` |
 | `periods` | `EffectivePeriod`: half-open date range with `contains` and `overlaps` |
+| `identifiers` | `Pan` and `Gstin` (state code, PAN and entity code inside the GSTIN; check character not verified) |
 | `financial_year` | `FinancialYear`: India's April-to-March year (`2025-26`), `for_date`, `parse`, `previous`, `next` |
 | `recurrence` | `Frequency`, `Period`, `Recurrence`: the period a date falls in and the due date of each period for a monthly, quarterly or annual duty |
 | `citations` | `Citation`: clause reference, verbatim quote, verified flag |

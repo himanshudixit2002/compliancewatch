@@ -7,7 +7,9 @@
 > entities, clause mentions, rule relations, rules and versions with the seed calendar of thirteen
 > standing GST obligations pending analyst review), the obligation service's domain and use cases
 > (obligations per period, deadline changes, withdrawals, row-level security by tenant, events
-> through the outbox),
+> through the outbox), the profile service's business hierarchy (entity, registration, location;
+> attribute values per node and financial year; snapshots for the engine; one-question onboarding;
+> review tasks) behind the second committed OpenAPI spec,
 > the LLM gateway skeleton (routing, prompt registry, cost ledger,
 > budgets, PII masking, Langfuse tracing, fake provider container) with the first committed OpenAPI
 > spec, problem-details errors in py-common, the event contracts (fourteen topics and the envelope as
@@ -72,7 +74,7 @@ compliancewatch/
       workflows/             # pointer to src/pipeline/workflows
   packages/
     contracts/               # OpenAPI specs, event schemas (JSON Schema), generated clients (py + ts)
-      openapi/               # llm-gateway.v1.json is the first spec
+      openapi/               # llm-gateway.v1.json and profile.v1.json
       events/                # schemas/<topic>.v1.json, examples/, CHANGELOG.md (fourteen topics + envelope)
       clients/python/        # cw_contracts: generated pydantic models (make contracts)
       clients/typescript/    # generated .d.ts per topic and index.ts
@@ -169,10 +171,10 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | --- | --- | --- |
 | No import from another service's package | import-linter contract in CI | wired |
 | Domain layer imports nothing from infrastructure or third-party I/O | import-linter | wired |
-| Every public endpoint has an OpenAPI schema and a contract test | CI job fails on undocumented routes | partly: the llm-gateway spec is committed under `packages/contracts/openapi` and a contract test fails when the served schema drifts (`make openapi`); the other services still have only ping routes |
+| Every public endpoint has an OpenAPI schema and a contract test | CI job fails on undocumented routes | partly: the llm-gateway and profile specs are committed under `packages/contracts/openapi` and a contract test per service fails when the served schema drifts (`make openapi`); the other services still have only ping routes |
 | Every event has a JSON Schema in packages/contracts and a changelog entry | Schema registry compatibility check in CI | wired: metaschema, golden examples, generated clients in sync, base-branch examples replayed against the new schemas, and `rpk registry schema check-compatibility` in the dev-stack job (the gateway's two log-only events get schemas with their first consumer) |
 | Every prompt file has a version, an owner and at least one eval case | Eval harness refuses to run an unregistered prompt | partly: the gateway refuses a prompt that is not in `services/llm-gateway/prompts/registry.toml`; the eval harness is not built |
-| Every table with tenant data has tenant_id and an RLS policy | Migration lint script | later (the first table, `llm_gateway.cost_ledger`, is cross-tenant metering and has no RLS on purpose) |
+| Every table with tenant data has tenant_id and an RLS policy | Migration lint script | partly: the obligation and profile tables carry forced policies proven by integration tests through a non-superuser role; the lint script is not written (`llm_gateway.cost_ledger` is cross-tenant metering and has no RLS on purpose) |
 | Conventional commits; squash merge; PR template with risk and rollback sections | pre-commit commit-msg hook, PR title check, PR template | wired (branch protection is a repo setting) |
 | Type checking is strict on both sides | mypy --strict, tsc --strict | wired |
 | Test coverage floor 80% on domain and application layers | pytest-cov gate | wired |

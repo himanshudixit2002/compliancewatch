@@ -31,6 +31,7 @@ from domain_kernel.errors import (
 )
 from domain_kernel.events import SCHEMA_VERSION_PATTERN, TOPIC_PATTERN, DomainEvent, utc_now
 from domain_kernel.financial_year import FY_LABEL_PATTERN, FinancialYear
+from domain_kernel.identifiers import GSTIN_PATTERN, PAN_PATTERN, Gstin, Pan
 from domain_kernel.ids import (
     BusinessId,
     CandidateId,
@@ -135,10 +136,12 @@ __all__ = [
     "CERTAIN",
     "ENUM_TYPES",
     "FY_LABEL_PATTERN",
+    "GSTIN_PATTERN",
     "MULTI_VALUE_OPERATORS",
     "NUMERIC_TYPES",
     "OBLIGATION_TRANSITIONS",
     "ORDERED_OPERATORS",
+    "PAN_PATTERN",
     "PROBLEM_TYPE_PREFIX",
     "REVIEW_THRESHOLD",
     "RULE_VERSION_KIND",
@@ -193,6 +196,7 @@ __all__ = [
     "ExtractionContext",
     "FinancialYear",
     "Frequency",
+    "Gstin",
     "InvalidAttributeValueError",
     "InvalidOperatorError",
     "InvalidRelationError",
@@ -209,6 +213,7 @@ __all__ = [
     "Ontology",
     "OntologyDefinitionError",
     "Operator",
+    "Pan",
     "ParsedDocument",
     "Period",
     "Predicate",
