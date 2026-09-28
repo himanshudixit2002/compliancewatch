@@ -1,0 +1,66 @@
+# Nightly evals against a real model (guide section 8: scripted model in CI, real providers
+# nightly). Needs the repository secret CW_AI_GATEWAY_API_KEY (a Vercel AI Gateway key); until the
+# maintainer adds it the job prints what to do and exits green, so the schedule never pages anyone
+# for a missing account.
+name: nightly
+
+on:
+  schedule:
+    - cron: "0 21 * * *" # 02:30 IST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evals-nightly:
+    name: Evals (real provider through the llm-gateway, section 8 thresholds)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --all-packages --locked
+      - name: Provider key present?
+        id: key
+        env:
+          CW_AI_GATEWAY_API_KEY: ${{ secrets.CW_AI_GATEWAY_API_KEY }}
+        run: |
+          if [ -z "$CW_AI_GATEWAY_API_KEY" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Nightly evals skipped"
+              echo
+              echo "No CW_AI_GATEWAY_API_KEY repository secret. Manual steps: create a Vercel AI Gateway key,"
+              echo "add it as the repository secret CW_AI_GATEWAY_API_KEY, then re-run this workflow."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Start the llm-gateway with the real provider
+        if: steps.key.outputs.present == 'true'
+        env:
+          CW_LLM_PROVIDER: vercel
+          CW_AI_GATEWAY_API_KEY: ${{ secrets.CW_AI_GATEWAY_API_KEY }}
+          CW_LLM_LEDGER: memory
+          CW_LOG_JSON: "true"
+        run: |
+          nohup uv run --package compliancewatch-llm-gateway uvicorn llm_gateway.main:app --port 8008 > gateway.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:8008/ready && break
+            sleep 1
+          done
+      - name: Eval harness, nightly profile
+        if: steps.key.outputs.present == 'true'
+        run: make eval EVAL_PROFILE=nightly ARGS="--gateway-url http://localhost:8008"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: eval-report-nightly
+          path: |
+            evals/reports/
+            gateway.log
+          if-no-files-found: ignore

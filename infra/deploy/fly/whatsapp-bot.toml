@@ -1,0 +1,31 @@
+# Fly.io app for the WhatsApp webhook receiver (MVP profile).
+# Create once by hand: fly apps create compliancewatch-whatsapp-bot --org <org>; secrets in infra/deploy/README.md.
+app = "compliancewatch-whatsapp-bot"
+primary_region = "bom"
+
+[build]
+  dockerfile = "apps/whatsapp-bot/Dockerfile"
+
+[env]
+  PORT = "8080"
+  WHATSAPP_REQUIRE_SIGNATURE = "true"
+  WHATSAPP_SEND_ENABLED = "false"
+  NOTIFICATION_API_URL = "http://compliancewatch-notification.internal:8000"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

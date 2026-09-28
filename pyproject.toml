@@ -29,14 +29,14 @@ package = false
 required-version = ">=0.8"
 
 [tool.uv.workspace]
-members = ["packages/*", "packages/contracts/clients/python", "services/*"]
+members = ["packages/*", "packages/contracts/clients/python", "services/*", "evals/harness", "tools/demo"]
 exclude = ["packages/ui", "packages/contracts"]
 
 # ---------------------------------------------------------------- ruff
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["packages/*/src", "packages/contracts/clients/python/src", "services/*/src"]
+src = ["packages/*/src", "packages/contracts/clients/python/src", "services/*/src", "evals/harness/src", "tools/demo/src"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "N", "RUF", "PT", "T20", "ASYNC"]
@@ -59,7 +59,7 @@ plugins = ["pydantic.mypy"]
 files = [
   "packages/py-common/src", "packages/domain-kernel/src", "packages/ontology/src",
   "packages/contracts/clients/python/src", "packages/contracts/scripts",
-  "services/*/src",
+  "services/*/src", "evals/harness/src", "tools/demo/src", "infra/scripts",
 ]
 exclude = ["migrations/versions/"]
 
@@ -76,7 +76,7 @@ warn_required_dynamic_aliases = true
 # ---------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
 minversion = "8.4"
-testpaths = ["packages", "services"]
+testpaths = ["packages", "services", "evals", "tools"]
 addopts = "-ra -q --strict-markers --strict-config --import-mode=importlib"
 markers = [
   "integration: needs Docker (testcontainers); lives under tests/integration",
@@ -89,7 +89,7 @@ xfail_strict = true
 # ---------------------------------------------------------------- coverage
 [tool.coverage.run]
 branch = true
-source = ["packages", "services"]
+source = ["packages", "services", "evals", "tools"]
 omit = ["*/tests/*", "*/migrations/*"]
 relative_files = true
 

@@ -13,11 +13,20 @@ dependencies = [
   "psycopg[binary]>=3.2",
   "py-common",
   "domain-kernel",
+  "httpx2>=2.13",
+  "pypdf>=6.0",
+  "pyyaml>=6.0",
+  "ontology",
 ]
+
+[project.scripts]
+pipeline-backfill = "pipeline.backfill:main"
+pipeline-label = "pipeline.label:main"
 
 [tool.uv.sources]
 py-common = { workspace = true }
 domain-kernel = { workspace = true }
+ontology = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

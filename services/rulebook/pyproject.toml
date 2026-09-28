@@ -13,11 +13,17 @@ dependencies = [
   "psycopg[binary]>=3.2",
   "py-common",
   "domain-kernel",
+  "ontology",
+  "pyyaml>=6.0",
 ]
+
+[project.scripts]
+rulebook-seed = "rulebook.seed:main"
 
 [tool.uv.sources]
 py-common = { workspace = true }
 domain-kernel = { workspace = true }
+ontology = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

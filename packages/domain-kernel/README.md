@@ -21,21 +21,24 @@ Design reference: Project Foundation guide, sections 6, 11 and 13.
 | `operators` | `Operator` enum with `symbol`; the ordered, multi-value and set operator groups |
 | `confidence` | `Confidence` in [0, 1], `REVIEW_THRESHOLD`, `CERTAIN` and `ZERO` |
 | `periods` | `EffectivePeriod`: half-open date range with `contains` and `overlaps` |
+| `identifiers` | `Pan` and `Gstin` (state code, PAN and entity code inside the GSTIN; check character not verified) |
+| `financial_year` | `FinancialYear`: India's April-to-March year (`2025-26`), `for_date`, `parse`, `previous`, `next` |
+| `recurrence` | `Frequency`, `Period`, `Recurrence`: the period a date falls in and the due date of each period for a monthly, quarterly or annual duty |
 | `citations` | `Citation`: clause reference, verbatim quote, verified flag |
 | `channels` | `Channel`: WhatsApp and email |
 | `dedupe` | `DedupeKey` and the notification key (rule version, business, channel) |
-| `ontology` | `AttributeType`, `AttributeSource`, `AttributeDefinition`, `Ontology`, `ALLOWED_OPERATORS` |
+| `ontology` | `AttributeType`, `AttributeSource`, `AttributeLevel`, `AttributeDefinition` (with `level` and `per_financial_year`), `Ontology`, `ALLOWED_OPERATORS` |
 | `predicates` | `Predicate`, `AllOf`, `AnyOf`, `Not`, `Applicability`, `PredicateResult`, `evaluate_predicate` |
 | `status` | `RuleVersionStatus`, `ObligationStatus`, `ClosureReason`, `TransitionTable`, the two tables |
 | `events` | `DomainEvent` envelope (`event_id`, `occurred_at`, `tenant_id`, `correlation_id`, `causation_id`) with the class-level `topic` and `schema_version` |
-| `profiles` | `ProfileSnapshot`: one version of a profile's attributes |
+| `profiles` | `ProfileSnapshot`: one version of a profile's attributes, with the financial year its per-year values are as of |
 | `documents` | `DocumentRef`, `DiscoveredDocument`, `RawDocument`, `Clause`, `ParsedDocument`, `RuleCandidate` |
-| `rules` | `ObligationTemplate`, `RuleVersionSnapshot` (read model of a published version) |
+| `rules` | `ObligationTemplate`, `RuleVersionSnapshot` (read model of a published version, with an optional `Recurrence`) |
 | `decisions` | `ApplicabilityDecision` |
 | `llm` | `CompletionRequest`, `CompletionResponse` |
 | `notifications` | `RenderedMessage`, `DeliveryStatus`, `DeliveryReceipt` |
 | `vectors` | `Vector`, `EmbeddedClause`, `ClauseFilter`, `ScoredClause` |
-| `knowledge` | `EntityType`, `RelationKind`, `normalise_name`, `EntityRef`, `Mention`, `RuleRelation`, `RULE_VERSION_KIND`, `RULE_VERSION_ONLY` |
+| `knowledge` | `EntityType`, `RelationKind` (seven kinds: supersedes, amends, refers_to, exempts, extends_deadline, corrects, withdraws), `normalise_name`, `EntityRef`, `Mention`, `RuleRelation`, `RULE_VERSION_KIND`, `RULE_VERSION_ONLY` |
 | `protocols` | `SourceAdapter`, `DocumentParser`, `RuleExtractor`, `PredicateEvaluator`, `NotificationChannel`, `LLMProvider`, `VectorStore`, `RuleReader`, `DecisionRepository`, `WorkflowHandle` |
 
 Every value object is a frozen, slotted dataclass whose `__post_init__` validates and raises

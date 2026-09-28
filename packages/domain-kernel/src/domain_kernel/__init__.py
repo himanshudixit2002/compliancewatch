@@ -30,16 +30,20 @@ from domain_kernel.errors import (
     UnknownClosureReasonError,
 )
 from domain_kernel.events import SCHEMA_VERSION_PATTERN, TOPIC_PATTERN, DomainEvent, utc_now
+from domain_kernel.financial_year import FY_LABEL_PATTERN, FinancialYear
+from domain_kernel.identifiers import GSTIN_PATTERN, PAN_PATTERN, Gstin, Pan
 from domain_kernel.ids import (
     BusinessId,
     CandidateId,
     CanonicalEntityId,
     ClauseId,
+    ConsentId,
     CorrelationId,
     DecisionId,
     DocumentId,
     EntityId,
     EventId,
+    NotificationId,
     ObligationId,
     RuleId,
     RuleVersionId,
@@ -66,6 +70,7 @@ from domain_kernel.ontology import (
     NUMERIC_TYPES,
     SEMVER_PATTERN,
     AttributeDefinition,
+    AttributeLevel,
     AttributeSource,
     AttributeType,
     AttributeValue,
@@ -94,6 +99,8 @@ from domain_kernel.predicates import (
     disjoin,
     evaluate_predicate,
     negate,
+    specification_from_mapping,
+    specification_to_mapping,
 )
 from domain_kernel.profiles import ProfileSnapshot
 from domain_kernel.protocols import (
@@ -108,6 +115,7 @@ from domain_kernel.protocols import (
     VectorStore,
     WorkflowHandle,
 )
+from domain_kernel.recurrence import Frequency, Period, Recurrence
 from domain_kernel.rules import ObligationTemplate, RuleVersionSnapshot
 from domain_kernel.status import (
     OBLIGATION_TRANSITIONS,
@@ -129,10 +137,13 @@ __all__ = [
     "ATTRIBUTE_KEY_PATTERN",
     "CERTAIN",
     "ENUM_TYPES",
+    "FY_LABEL_PATTERN",
+    "GSTIN_PATTERN",
     "MULTI_VALUE_OPERATORS",
     "NUMERIC_TYPES",
     "OBLIGATION_TRANSITIONS",
     "ORDERED_OPERATORS",
+    "PAN_PATTERN",
     "PROBLEM_TYPE_PREFIX",
     "REVIEW_THRESHOLD",
     "RULE_VERSION_KIND",
@@ -148,6 +159,7 @@ __all__ = [
     "Applicability",
     "ApplicabilityDecision",
     "AttributeDefinition",
+    "AttributeLevel",
     "AttributeSource",
     "AttributeType",
     "AttributeValue",
@@ -164,6 +176,7 @@ __all__ = [
     "CompletionRequest",
     "CompletionResponse",
     "Confidence",
+    "ConsentId",
     "CorrelationId",
     "DecisionId",
     "DecisionRepository",
@@ -184,6 +197,9 @@ __all__ = [
     "EntityType",
     "EventId",
     "ExtractionContext",
+    "FinancialYear",
+    "Frequency",
+    "Gstin",
     "InvalidAttributeValueError",
     "InvalidOperatorError",
     "InvalidRelationError",
@@ -194,13 +210,16 @@ __all__ = [
     "Mention",
     "Not",
     "NotificationChannel",
+    "NotificationId",
     "ObligationId",
     "ObligationStatus",
     "ObligationTemplate",
     "Ontology",
     "OntologyDefinitionError",
     "Operator",
+    "Pan",
     "ParsedDocument",
+    "Period",
     "Predicate",
     "PredicateEvaluator",
     "PredicateKind",
@@ -208,6 +227,7 @@ __all__ = [
     "PredicateValue",
     "ProfileSnapshot",
     "RawDocument",
+    "Recurrence",
     "RelationKind",
     "RenderedMessage",
     "RuleCandidate",
@@ -239,5 +259,7 @@ __all__ = [
     "negate",
     "normalise_name",
     "parse_closure_reason",
+    "specification_from_mapping",
+    "specification_to_mapping",
     "utc_now",
 ]

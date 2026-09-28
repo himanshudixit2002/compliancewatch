@@ -1,0 +1,104 @@
+"""Migration 0001 on Postgres: the consent table, row-level security by tenant, the unit of
+work end to end as a plain database role. Needs Docker."""
+
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import Engine, create_engine, inspect, text
+from testcontainers.community.postgres import PostgresContainer
+
+from domain_kernel.ids import TenantId
+from identity.application.consents import ConsentStatus, RecordConsent
+from identity.domain.consent import ConsentPurpose, ConsentSource
+from identity.infrastructure.repository import PostgresUnitOfWorkFactory
+
+SERVICE_DIR = Path(__file__).resolve().parents[2]
+IMAGE = "pgvector/pgvector:0.8.6-pg16"
+SCHEMA = "identity"
+APP_ROLE = "identity_app"
+APP_PASSWORD = "app-role-for-tests"
+
+
+@pytest.fixture(scope="module")
+def database_url() -> Iterator[str]:
+    with PostgresContainer(IMAGE, driver="psycopg") as postgres:
+        base_url = postgres.get_connection_url()
+        admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
+        with admin.connect() as connection:
+            connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+        admin.dispose()
+        yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
+
+
+@pytest.fixture(scope="module")
+def migrated(database_url: str) -> Iterator[Config]:
+    with pytest.MonkeyPatch.context() as env:
+        env.setenv("CW_DATABASE_URL", database_url)
+        env.setenv("CW_DB_SCHEMA", SCHEMA)
+        config = Config(str(SERVICE_DIR / "alembic.ini"))
+        command.upgrade(config, "head")
+        yield config
+
+
+@pytest.fixture(scope="module")
+def app_engine(database_url: str, migrated: Config) -> Iterator[Engine]:
+    admin = create_engine(database_url, isolation_level="AUTOCOMMIT")
+    with admin.connect() as connection:
+        connection.execute(text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'"))
+        connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
+        connection.execute(
+            text(f"GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA {SCHEMA} TO {APP_ROLE}")
+        )
+    admin.dispose()
+    engine = create_engine(database_url.replace("test:test@", f"{APP_ROLE}:{APP_PASSWORD}@"))
+    yield engine
+    engine.dispose()
+
+
+def test_table_policy_and_isolation(
+    database_url: str, migrated: Config, app_engine: Engine
+) -> None:
+    engine = create_engine(database_url)
+    assert set(inspect(engine).get_table_names(schema=SCHEMA)) == {
+        "consent_record",
+        "alembic_version",
+    }
+    with engine.connect() as connection:
+        policies: list[str] = list(
+            connection.execute(
+                text("SELECT policyname FROM pg_policies WHERE tablename = 'consent_record'")
+            ).scalars()
+        )
+    assert policies == ["consent_record_tenant_isolation"]
+    engine.dispose()
+
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    tenant, other = TenantId.new(), TenantId.new()
+    record = RecordConsent(factory)
+    record.run(
+        tenant,
+        "u",
+        ConsentPurpose.TERMS,
+        granted=True,
+        source=ConsentSource.WEB_ONBOARDING,
+        notice_version="0.1-draft",
+    )
+    record.run(tenant, "u", ConsentPurpose.TERMS, granted=False, source=ConsentSource.SUPPORT)
+    mine = ConsentStatus(factory).run(tenant, "u")
+    assert len(mine.history) == 2
+    assert not mine.granted(ConsentPurpose.TERMS)
+    assert ConsentStatus(factory).run(other, "u").history == ()
+    with app_engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM consent_record")).scalar_one() == 0
+
+
+def test_downgrade_and_upgrade(migrated: Config, database_url: str) -> None:
+    engine = create_engine(database_url)
+    command.downgrade(migrated, "base")
+    assert set(inspect(engine).get_table_names(schema=SCHEMA)) == {"alembic_version"}
+    command.upgrade(migrated, "head")
+    assert "consent_record" in inspect(engine).get_table_names(schema=SCHEMA)
+    engine.dispose()

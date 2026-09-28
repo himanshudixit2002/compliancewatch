@@ -58,6 +58,55 @@ shows the topics; `rpk topic consume <topic> -n 1` reads a message.
 `make worker SERVICE=pipeline` runs the service's Temporal worker with the same environment;
 `services/pipeline/README.md` shows how to start the sample workflow and
 `docs/runbooks/temporal-worker.md` what to do when a run fails.
+`make backfill SERVICE=pipeline ARGS="--source cbic_notifications --since 2026-01-01 --limit 5"`
+fetches real documents from a regulator site into `var/raw/` (one request per second, honouring
+`robots.txt`); `--list-only` just lists. The keys are in
+`services/pipeline/src/pipeline/infrastructure/adapters/registry.py`.
+
+`make eval` runs the eval harness in the `ci` profile (scripted answers and the in-process
+gateway with the fake provider; no tokens, no network) and writes `evals/reports/latest.md`.
+`make label ARGS="check"` validates the golden extraction cases; `make label ARGS="prepare ..."`
+fetches documents for analysts to label (see `evals/golden/extraction/README.md`).
+
+Flags for the pieces that need an external account, all off by default in `.env.example`:
+`CW_WHATSAPP_ENABLED` (notification channel), `WHATSAPP_SEND_ENABLED` (the bot's replies),
+`CW_BILLING_PROVIDER` (identity billing; `memory` for a demo), `CW_PROFILE_GSTIN_LOOKUP`
+(`static` for the demo table). `pnpm --filter whatsapp-bot dev` runs the bot on 8080 against
+the notification service on 8006.
+
+`make demo` needs neither Docker nor accounts: it runs the demo tenant through every service in
+one process and prints the transcript ([demo.md](demo.md)). `make dev-backup` and
+`make dev-restore FILE=...` dump and restore the dev database.
+
+## Profiles
+
+`make migrate SERVICE=profile` then `make run SERVICE=profile`; every call needs an
+`x-tenant-id` header with a UUID until the identity service exists:
+
+```bash
+curl -s -X POST http://localhost:8002/v1/profile/registrations \
+  -H 'content-type: application/json' -H 'x-tenant-id: 5b1f3d2e-7c4a-4e0b-9a6d-1f2e3d4c5b6a' \
+  -d '{"gstin":"29ABCDE1234F1Z5","name":"Acme Bengaluru","entity_name":"Acme"}'
+```
+
+Then `PUT /v1/profile/nodes/{id}/attributes`, `GET .../next-question?fy=2025-26` and
+`GET .../snapshot?fy=2025-26`. `CW_PROFILE_STORE=memory` runs the service without Postgres.
+
+## Seed calendar
+
+`make migrate SERVICE=rulebook` then `make seed SERVICE=rulebook` loads the thirteen standing
+GST obligations from `services/rulebook/seed/gst_calendar.yaml` as draft rule versions
+(`select rule_key, version, status, seed_status from rulebook.rule_version join rulebook.rule
+on rule.id = rule_id` through `make dev-psql`). `ARGS=--check` validates the file without
+writing. Every version stays `needs_review` until an analyst reviews it.
+
+## Row-level security in the dev stack
+
+Tenant tables (the obligation service's first) carry a policy on `tenant_id`, but the dev
+stack connects as `cw`, the container's superuser, and a superuser bypasses every policy. The
+policy is therefore visible but not enforced locally; the obligation integration test proves it
+through a plain role. A non-superuser application role for the dev stack arrives with the
+deployment work, where every service gets its own role.
 
 ## Traces and metrics
 

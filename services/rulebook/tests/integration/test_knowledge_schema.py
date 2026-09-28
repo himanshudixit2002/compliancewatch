@@ -34,7 +34,8 @@ SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "rulebook"
 KNOWLEDGE_TABLES = {"canonical_entity", "clause_entity", "rule_relation"}
-ALL_TABLES = KNOWLEDGE_TABLES | {"alembic_version"}
+RULE_TABLES = {"rule", "rule_version"}
+ALL_TABLES = KNOWLEDGE_TABLES | RULE_TABLES | {"alembic_version"}
 
 
 @pytest.fixture(scope="module")
@@ -121,7 +122,7 @@ def test_upgrade_head_creates_the_knowledge_tables(migrated: Config, engine: Eng
         version: str = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-    assert version == "0001"
+    assert version == "0003"
 
 
 def test_indexes_by_name_and_access_method(migrated: Config, engine: Engine) -> None:
@@ -189,9 +190,13 @@ def test_check_constraints_carry_the_fixed_vocabulary(migrated: Config, engine: 
         assert f"'{to_kind}'" in relation_checks["ck_rule_relation_to_kind"]
     assert len(TARGET_KINDS) == 11
 
+    assert len(RELATION_KINDS) == 7
+    assert "'corrects'" in relation_checks["ck_rule_relation_relation"]
+    assert "'withdraws'" in relation_checks["ck_rule_relation_relation"]
     pairing = relation_checks["ck_rule_relation_pairing"]
-    assert "'supersedes'" in pairing
-    assert "'extends_deadline'" in pairing
+    for kind in ("supersedes", "extends_deadline", "corrects", "withdraws"):
+        assert f"'{kind}'" in pairing
+    assert "'amends'" not in pairing
     assert "'rule_version'" in pairing
     target = relation_checks["ck_rule_relation_target_entity"]
     assert "'rule_version'" in target
