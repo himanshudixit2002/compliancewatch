@@ -4,6 +4,11 @@ Versions follow semver per topic. Adding an optional field is a minor bump, chan
 a field or making one required is a major bump and a new `v<major>` schema file, wording is a
 patch. Every line names the topic and its version.
 
+## 2026-09-29
+
+- rule.withdrawn 1.0.0: first version
+- rule.deadline_changed 1.0.0: first version
+
 ## 2026-09-28
 
 - envelope 1.0.0: first version

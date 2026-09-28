@@ -17,7 +17,7 @@
 > review tasks) behind the second committed OpenAPI spec,
 > the LLM gateway skeleton (routing, prompt registry, cost ledger,
 > budgets, PII masking, Langfuse tracing, fake provider container) with the first committed OpenAPI
-> spec, problem-details errors in py-common, the event contracts (fourteen topics and the envelope as
+> spec, problem-details errors in py-common, the event contracts (sixteen topics and the envelope as
 > JSON Schema with generated pydantic and TypeScript types and compatibility checks in CI), the
 > transactional outbox in py-common (writer, Kafka relay with dead letters, idempotent consumer),
 > the Temporal worker scaffold with the pipeline's sample ingest workflow, the first source
@@ -139,7 +139,7 @@ compliancewatch/
   packages/
     contracts/               # OpenAPI specs, event schemas (JSON Schema), generated clients (py + ts)
       openapi/               # llm-gateway.v1.json and profile.v1.json
-      events/                # schemas/<topic>.v1.json, examples/, CHANGELOG.md (fourteen topics + envelope)
+      events/                # schemas/<topic>.v1.json, examples/, CHANGELOG.md (sixteen topics + envelope)
       clients/python/        # cw_contracts: generated pydantic models (make contracts)
       clients/typescript/    # generated .d.ts per topic and index.ts
     domain-kernel/           # Shared value objects, protocols, ontology model, error types

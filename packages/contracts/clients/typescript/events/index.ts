@@ -12,8 +12,10 @@ export type { ObligationDueSoon } from "./obligation.due_soon.v1";
 export type { ObligationRescheduled } from "./obligation.rescheduled.v1";
 export type { ProfileUpdated } from "./profile.updated.v1";
 export type { RuleCandidateCreated } from "./rule.candidate.created.v1";
+export type { RuleDeadlineChanged } from "./rule.deadline_changed.v1";
 export type { RulePublished } from "./rule.published.v1";
 export type { RuleSuperseded } from "./rule.superseded.v1";
+export type { RuleWithdrawn } from "./rule.withdrawn.v1";
 export type { TenantDeletionRequested } from "./tenant.deletion.requested.v1";
 
 export const ENVELOPE_VERSION = "1.0.0";
@@ -30,8 +32,10 @@ export const EVENT_TOPICS = {
   "obligation.rescheduled": { version: "1.0.0", tenantScoped: true },
   "profile.updated": { version: "1.0.0", tenantScoped: true },
   "rule.candidate.created": { version: "1.0.0", tenantScoped: false },
+  "rule.deadline_changed": { version: "1.0.0", tenantScoped: false },
   "rule.published": { version: "1.0.0", tenantScoped: false },
   "rule.superseded": { version: "1.0.0", tenantScoped: false },
+  "rule.withdrawn": { version: "1.0.0", tenantScoped: false },
   "tenant.deletion.requested": { version: "1.0.0", tenantScoped: true },
 } as const;
 
