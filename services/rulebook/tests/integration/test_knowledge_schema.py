@@ -34,7 +34,8 @@ SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "rulebook"
 KNOWLEDGE_TABLES = {"canonical_entity", "clause_entity", "rule_relation"}
-ALL_TABLES = KNOWLEDGE_TABLES | {"alembic_version"}
+RULE_TABLES = {"rule", "rule_version"}
+ALL_TABLES = KNOWLEDGE_TABLES | RULE_TABLES | {"alembic_version"}
 
 
 @pytest.fixture(scope="module")
@@ -121,7 +122,7 @@ def test_upgrade_head_creates_the_knowledge_tables(migrated: Config, engine: Eng
         version: str = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-    assert version == "0002"
+    assert version == "0003"
 
 
 def test_indexes_by_name_and_access_method(migrated: Config, engine: Engine) -> None:

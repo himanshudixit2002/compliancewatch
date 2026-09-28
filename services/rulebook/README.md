@@ -31,17 +31,43 @@ ten entity types. Three more CHECKs on `rule_relation` repeat the kernel's rules
 and `ck_rule_relation_not_self` (`to_ref` is never the source rule version). Table names are
 unqualified: the connection's `search_path` puts them in `rulebook`.
 
+## Seed calendar
+
+`seed/gst_calendar.yaml` holds the standing GST obligations as draft rule versions: thirteen
+rules (monthly and quarterly GSTR-1 and GSTR-3B, CMP-08, GSTR-4, GSTR-9, GSTR-9C, ITC-04
+half-yearly and yearly, e-invoicing, e-way bills), each with a predicate tree over ontology
+0.2.0 attributes, an obligation template, a recurrence where the duty repeats, the cited
+instrument and reference, `seed_status: needs_review` and the questions an analyst answers
+before publication. Nothing in the seed reaches a business until a version is published
+through the review flow.
+
+```bash
+make seed SERVICE=rulebook ARGS=--check   # validate the file against the packaged ontology
+make seed SERVICE=rulebook                # write draft versions into rule and rule_version
+```
+
+The command is idempotent: a re-run after editing the file updates the draft version in
+place; a version that has left draft is never modified and a changed rule gets a new draft
+version instead (`rulebook.infrastructure.seed_repository`). `rulebook.application.seed_loader`
+parses and checks the file; `rulebook.domain.seed` is the value object. Tests replay the
+calendar against sample profiles (a monthly filer, a QRMP filer in each state group, a
+composition taxpayer) and check every due date the recurrences produce.
+
 ## Layout
 
 ```
 src/rulebook/
   api/             # routers, request/response schemas, auth dependencies
-  application/     # use cases, event handlers, unit of work
-  domain/          # entities, value objects, domain events, repository protocols
-  infrastructure/  # SQLAlchemy models (models.py: Base and the three knowledge rows), repositories, Kafka, adapters
+  application/     # use cases; seed_loader.py parses and checks the seed calendar
+  domain/          # entities, value objects, domain events, repository protocols; seed.py
+  infrastructure/  # SQLAlchemy models (knowledge rows, RuleRow, RuleVersionRow), seed_repository.py
+  seed.py          # rulebook-seed command
   main.py          # composition root: create_app(...) from py-common
+seed/gst_calendar.yaml   # the seed calendar
 migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and targets models.Base.metadata
   versions/20260928_0001_knowledge_schema.py   # hand-written, mirrors models.py
+  versions/20260928_0002_relation_kinds.py     # seven relation kinds
+  versions/20260928_0003_rule_tables.py        # rule and rule_version
 tests/
   unit/            # domain and application with fakes; no I/O. test_models_vocabulary.py: model CHECKs against the kernel enums
   integration/     # testcontainers (pgvector image): test_knowledge_schema.py runs the migration up, down and up

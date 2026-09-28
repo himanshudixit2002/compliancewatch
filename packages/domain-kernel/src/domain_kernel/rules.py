@@ -1,9 +1,11 @@
 """Read model of a published rule version. The Rule aggregate stays in the rulebook service."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
+from typing import Self
 
-from domain_kernel._validation import require_instance, require_int, require_text
+from domain_kernel._validation import require_instance, require_int, require_mapping, require_text
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import RuleId, RuleVersionId
 from domain_kernel.periods import EffectivePeriod
@@ -27,6 +29,36 @@ class ObligationTemplate:
         if self.due_in_days is not None:
             require_int(self.due_in_days, "due_in_days", minimum=0)
         require_instance(self.evidence_type, str, "evidence_type")
+
+    def to_mapping(self) -> dict[str, object]:
+        """JSON-ready form, the inverse of ``from_mapping``."""
+        return {
+            "title": self.title,
+            "steps": list(self.steps),
+            "due_in_days": self.due_in_days,
+            "evidence_type": self.evidence_type,
+        }
+
+    @classmethod
+    def from_mapping(cls, data: object) -> Self:
+        mapping = require_mapping(data, "obligation_template")
+        unknown = set(mapping) - {"title", "steps", "due_in_days", "evidence_type"}
+        if unknown:
+            raise InvariantViolationError(f"obligation_template has unknown keys {sorted(unknown)}")
+        steps = mapping.get("steps", ())
+        if isinstance(steps, str) or not isinstance(steps, Sequence):
+            raise InvariantViolationError("obligation_template.steps must be a list")
+        due_in_days = mapping.get("due_in_days")
+        return cls(
+            title=require_text(mapping.get("title"), "obligation_template.title"),
+            steps=tuple(require_text(step, "obligation_template.steps[]") for step in steps),
+            due_in_days=None
+            if due_in_days is None
+            else require_int(due_in_days, "obligation_template.due_in_days", minimum=0),
+            evidence_type=require_instance(
+                mapping.get("evidence_type", ""), str, "obligation_template.evidence_type"
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
