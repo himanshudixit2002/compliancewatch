@@ -3,9 +3,11 @@
 > **What is here today.** uv workspace with the FastAPI service template for ten services, the shared
 > domain kernel (with the knowledge vocabulary: entity types, seven relation kinds, canonical names;
 > the financial year and recurrence value objects) and Ontology 0.2.0 (seventeen GST attributes with
-> their hierarchy level and per-financial-year scoping), the rulebook's knowledge schema (canonical
-> entities, clause mentions, rule relations, rules and versions with the seed calendar of thirteen
-> standing GST obligations pending analyst review), the obligation service's domain and use cases
+> their hierarchy level and per-financial-year scoping), the rulebook's regulator documents and clauses
+> (fixed ids derived from the digest, append-only, a write API the pipeline calls behind a flag,
+> the fourth committed OpenAPI spec) and knowledge schema (canonical entities, clause mentions,
+> rule relations, citations, rules and versions with the seed calendar of thirteen standing GST
+> obligations pending analyst review), the obligation service's domain and use cases
 > (obligations per period, deadline changes, withdrawals, row-level security by tenant, events
 > through the outbox), the profile service's business hierarchy (entity, registration, location;
 > attribute values per node and financial year; snapshots for the engine; one-question onboarding;
@@ -28,7 +30,7 @@
 > and metrics with a dev observability stack (collector, Prometheus, Tempo, Grafana dashboard),
 > pnpm + Turborepo workspace with the Next.js web app and
 > the WhatsApp bot, paging alert rules with runbooks and a CI link check, dev backup and restore, the MVP deploy profile (Fly.io templates, Vercel config, env matrix) and the one-process demo tenant (`make demo`), Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 008
-> and 012 to 017 (009 to 011 as stubs). No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
+> and 012 to 018 (009 to 011 as stubs). No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
 >
 > Source of truth: *ComplianceWatch - Project Foundation (HLD, LLD & Build Guide)*. Section numbers below refer to that guide.
 >
@@ -239,7 +241,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | --- | --- | --- |
 | No import from another service's package | import-linter contract in CI | wired |
 | Domain layer imports nothing from infrastructure or third-party I/O | import-linter | wired |
-| Every public endpoint has an OpenAPI schema and a contract test | CI job fails on undocumented routes | partly: the llm-gateway and profile specs are committed under `packages/contracts/openapi` and a contract test per service fails when the served schema drifts (`make openapi`); the other services still have only ping routes |
+| Every public endpoint has an OpenAPI schema and a contract test | CI job fails on undocumented routes | partly: the llm-gateway, profile, identity and rulebook specs are committed under `packages/contracts/openapi` and a contract test per service fails when the served schema drifts (`make openapi`); the other services still have only ping routes |
 | Every event has a JSON Schema in packages/contracts and a changelog entry | Schema registry compatibility check in CI | wired: metaschema, golden examples, generated clients in sync, base-branch examples replayed against the new schemas, and `rpk registry schema check-compatibility` in the dev-stack job (the gateway's two log-only events get schemas with their first consumer) |
 | Every prompt file has a version, an owner and at least one eval case | Eval harness refuses to run an unregistered prompt | partly: the gateway refuses a prompt that is not in `services/llm-gateway/prompts/registry.toml`; the eval harness is not built |
 | Every table with tenant data has tenant_id and an RLS policy | Migration lint script | partly: the obligation and profile tables carry forced policies proven by integration tests through a non-superuser role; the lint script is not written (`llm_gateway.cost_ledger` is cross-tenant metering and has no RLS on purpose) |
@@ -279,6 +281,6 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - The ingest workflow wired to the real adapters and the outbox (the adapters, parsers and detector exist and run from `make backfill`; the workflow still runs on the in-memory fakes); OCR for scanned PDFs
 - The 50-document sample rulebook (the seed calendar of standing obligations exists, pending analyst review)
 - Prompt texts for judgement, question answering and classification (extraction exists); the qa and applicability golden sets and their harness suites
-- Analyst labels: 49 of the 50 listed CBIC notifications have no case yet, and the one draft label is unreviewed; the nightly eval needs the `CW_AI_GATEWAY_API_KEY` repository secret
+- Analyst labels: 45 of the 50 listed CBIC notifications have no case yet, and the five case files (01/2026 with a draft label; 17/2025, 15/2025, 10/2025 and 13/2024 with clauses and detector output only) are unreviewed; the nightly eval needs the `CW_AI_GATEWAY_API_KEY` repository secret
 - Full text for ADR-009 to ADR-011; the identity service itself (ADR-014 decides Supabase Auth for the MVP; nothing is created until the maintainer opens the project)
-- KAG-style reasoning beyond the schema: entity extraction and alignment in the pipeline, the logical-form planner and solver in qa, and its eval gate (ADR-017)
+- KAG-style reasoning beyond the document store: entity extraction and alignment in the pipeline, the logical-form planner and solver in qa, and its eval gate (ADR-017)

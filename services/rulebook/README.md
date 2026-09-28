@@ -1,35 +1,52 @@
 # rulebook service
 
-Part of the ComplianceWatch monorepo. Health routes, alembic wiring and the knowledge schema
-(models plus one migration); no domain code, repositories or read API yet.
-Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architecture Reference 3.2 and 5.2.
+Part of the ComplianceWatch monorepo. Health routes, alembic wiring, regulator documents and
+clauses with a write and read API, the knowledge schema, and the rule tables with the seed
+calendar. No review workbench or rule read API yet.
+Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architecture Reference 3.2, 5.2 and 6.2; ADR-017 and ADR-018.
 
-- **Owns:** Rules, RuleVersions, Clauses, embeddings; versioning, supersession graph, hybrid search index, as-of queries;
+- **Owns:** Rules, RuleVersions, Documents, Clauses, Citations, embeddings; versioning, supersession graph, hybrid search index, as-of queries;
   the knowledge tables `canonical_entity`, `clause_entity` and `rule_relation` (aligned entities,
   clause mentions, typed relations between rule versions and entities)
 - **Owning team:** Regulatory Intelligence
-- **Consumes:** rule.published; rulebook read API (served to the engine, Q&A and review service)
+- **Consumes:** parsed documents from the pipeline over `PUT /v1/rulebook/documents/{id}` (ADR-018); rule.published; rulebook read API (served to the engine, Q&A and review service)
 - **Emits / publishes:** rule.superseded (scheduled when effective dates pass)
 
 ## What is in the database today
 
-Migration `0001` creates three tables in schema `rulebook`:
+Migrations `0001` to `0004` create eight tables in schema `rulebook`:
 
 | Table | Purpose | Keys |
 | --- | --- | --- |
-| `canonical_entity` | One row per aligned entity: `type` (ten values), `canonical_name`, `aliases text[]` | pk `id`; unique (`type`, `canonical_name`); GIN index on `aliases` |
-| `clause_entity` | A mention of an entity in a clause with its character span | pk (`clause_id`, `entity_id`, `span_start`); fk `entity_id` to `canonical_entity` (restrict) |
-| `rule_relation` | A typed relation (`supersedes`, `amends`, `refers_to`, `exempts`, `extends_deadline`, `corrects`, `withdraws`) from a rule version to a rule version or an entity, with the evidence clause | pk `id`; unique (`from_rule_version_id`, `relation`, `to_kind`, `to_ref`, `clause_id`); indexes (`relation`, `to_ref`) and (`from_rule_version_id`); fk `to_entity_id` to `canonical_entity` (restrict); CHECKs `ck_rule_relation_pairing`, `ck_rule_relation_target_entity`, `ck_rule_relation_not_self` |
+| `document` | A regulator document, one row per distinct file: source, digest, regulator, type, URL, title, language, parser version, publication and fetch time | pk `id` = first 32 hex digits of `sha256` (CHECK); unique `sha256`; append-only (trigger) |
+| `clause` | The clauses of a document in order, verbatim as parsed | pk `id` = `clause_id_for(document id, clause_ref)`; unique (`document_id`, `clause_ref`) and (`document_id`, `ordinal`); fk `document_id`; append-only (trigger) |
+| `citation` | A rule version's quote of a clause, with a one-way verification (`verified`, `match_score >= 0.85`, `verified_at`) | pk `id`; fks to `rule_version` and `clause`; identity columns fixed by trigger |
+| `canonical_entity` | One row per aligned entity: `type` (ten values), `canonical_name`, `aliases text[]` (normalised names) | pk `id`; unique (`type`, `canonical_name`); GIN index on `aliases` |
+| `clause_entity` | A mention of an entity in a clause with its half-open code-point span, and who found it (`method`: grammar, model or analyst; `extractor`) | pk (`clause_id`, `entity_id`, `span_start`); fks to `clause` and `canonical_entity` (restrict) |
+| `rule_relation` | A typed relation (`supersedes`, `amends`, `refers_to`, `exempts`, `extends_deadline`, `corrects`, `withdraws`) from a rule version to a rule version (`to_rule_version_id`) or an entity (`to_entity_id`), with the evidence clause | pk `id`; unique (`from_rule_version_id`, `relation`, `to_kind`, `to_ref`, `clause_id`); fks to `rule_version`, `clause` and `canonical_entity` (restrict); CHECKs `ck_rule_relation_pairing`, `ck_rule_relation_target_entity`, `ck_rule_relation_target_version`, `ck_rule_relation_not_self` |
+| `rule`, `rule_version` | Rules and their versions: status, effective period, predicates, obligation template, recurrence, seed provenance | see migration 0003 |
 
-The `clause`, `rule` and `rule_version` tables are not there yet. `clause_id` and
-`from_rule_version_id` are plain uuid columns; the migration that creates those tables adds the
-foreign keys. The vocabulary in the CHECK constraints is derived from `domain_kernel.knowledge`
-(`EntityType`, `RelationKind`, `RULE_VERSION_KIND`), and `to_kind` is `rule_version` or one of the
-ten entity types. Three more CHECKs on `rule_relation` repeat the kernel's rules:
-`ck_rule_relation_pairing` (`supersedes`, `extends_deadline`, `corrects` and `withdraws` target a rule version),
-`ck_rule_relation_target_entity` (`to_entity_id` is set exactly when `to_kind` is an entity type)
-and `ck_rule_relation_not_self` (`to_ref` is never the source rule version). Table names are
-unqualified: the connection's `search_path` puts them in `rulebook`.
+The vocabulary in the CHECK constraints is derived from the kernel (`EntityType`, `RelationKind`,
+`RULE_VERSION_KIND`, `DocumentType`, `PARSER_VERSION_PATTERN`). The CHECKs on `rule_relation`
+repeat the kernel's rules: `supersedes`, `extends_deadline`, `corrects` and `withdraws` target a
+rule version; `to_entity_id` is set exactly when `to_kind` is an entity type, `to_rule_version_id`
+exactly when it is `rule_version` (and then `to_ref` is its id); `to_ref` is never the source rule
+version. Table names are unqualified: the connection's `search_path` puts them in `rulebook`.
+
+Migration 0004 adds foreign keys to `clause_entity` and `rule_relation` and stops with a clear
+message if either table has rows (nothing writes them before it).
+
+## API
+
+| Route | What it does |
+| --- | --- |
+| `PUT /v1/rulebook/documents/{document_id}` | Store a parsed document and its clauses. Needs `x-cw-write-token`. 201 when stored now, 200 when the same parse was stored already (with `metadata_differs` naming fields that differ; the stored row wins), 409 for a different parse of stored bytes, 422 when the id is not the digest's first half |
+| `GET /v1/rulebook/documents/{document_id}` | The document with its clauses in order and their ids |
+
+Writes fail closed: without `CW_RULEBOOK_WRITE_TOKEN` every write is a 503, and a missing or wrong
+token is a 401. The spec is committed at `packages/contracts/openapi/rulebook.v1.json`
+(`make openapi SERVICE=rulebook`) and pinned by `tests/contract/test_openapi.py`.
+`CW_RULEBOOK_STORE=memory` runs the service without a database (tests and demos).
 
 ## Seed calendar
 
@@ -57,21 +74,25 @@ composition taxpayer) and check every due date the recurrences produce.
 
 ```
 src/rulebook/
-  api/             # routers, request/response schemas, auth dependencies
-  application/     # use cases; seed_loader.py parses and checks the seed calendar
-  domain/          # entities, value objects, domain events, repository protocols; seed.py
-  infrastructure/  # SQLAlchemy models (knowledge rows, RuleRow, RuleVersionRow), seed_repository.py
+  api/             # routers (documents), request/response schemas, the write-token dependency
+  application/     # use cases: documents.py (register, read); seed_loader.py parses the seed calendar
+  domain/          # documents.py, errors.py, repository.py (protocols), seed.py
+  infrastructure/  # models.py, knowledge_repository.py (Postgres unit of work), memory.py, seed_repository.py
+  settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN
+  testing.py       # rulebook_settings() for tests and demos: memory store, known token
+  wiring.py        # what the api layer gets from the composition root
   seed.py          # rulebook-seed command
-  main.py          # composition root: create_app(...) from py-common
+  main.py          # composition root: build_app(settings), store selection, problem statuses
 seed/gst_calendar.yaml   # the seed calendar
 migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and targets models.Base.metadata
   versions/20260928_0001_knowledge_schema.py   # hand-written, mirrors models.py
   versions/20260928_0002_relation_kinds.py     # seven relation kinds
   versions/20260928_0003_rule_tables.py        # rule and rule_version
+  versions/20260928_0004_documents_clauses_citations.py   # documents, clauses, citations; knowledge FKs
 tests/
-  unit/            # domain and application with fakes; no I/O. test_models_vocabulary.py: model CHECKs against the kernel enums
-  integration/     # testcontainers (pgvector image): test_knowledge_schema.py runs the migration up, down and up
-  contract/        # provider-side contract tests for this service's API and events
+  unit/            # domain, use cases and API on the memory store; test_models_vocabulary.py: model CHECKs against the kernel enums
+  integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work
+  contract/        # test_openapi.py: the served schema equals the committed spec
 alembic.ini, pyproject.toml, Dockerfile
 ```
 
@@ -82,7 +103,7 @@ From the repo root:
 ```bash
 make dev                          # infrastructure (Docker Compose)
 make migrate SERVICE=rulebook     # alembic upgrade head in schema rulebook
-make run SERVICE=rulebook         # http://localhost:8003/health, /ready, /v1/rulebook/ping
+make run SERVICE=rulebook         # http://localhost:8003/health, /ready, /v1/rulebook/ping, /v1/rulebook/documents/{id}
 make test                         # unit + contract tests with the coverage gate
 make py-test-integration          # testcontainers tests; needs Docker
 uv run pytest services/rulebook/tests/integration -q -m integration   # this service only
@@ -98,11 +119,7 @@ Check the schema after `make migrate`:
 ```bash
 docker compose exec -T postgres psql -U cw -d compliancewatch -Atc \
   "select table_name from information_schema.tables where table_schema='rulebook' order by 1"
-# alembic_version, canonical_entity, clause_entity, rule_relation
-docker compose exec -T postgres psql -U cw -d compliancewatch -Atc \
-  "select conname from pg_constraint where conrelid = 'rulebook.rule_relation'::regclass order by 1"
-# ck_rule_relation_not_self, ck_rule_relation_pairing, ck_rule_relation_relation, ck_rule_relation_target_entity,
-# ck_rule_relation_to_kind, fk_rule_relation_to_entity_id_canonical_entity, pk_rule_relation, uq_rule_relation_edge
+# alembic_version, canonical_entity, citation, clause, clause_entity, document, rule, rule_relation, rule_version
 ```
 
 Roll back with `CW_DATABASE_URL=... CW_DB_SCHEMA=rulebook uv run --package compliancewatch-rulebook alembic -c services/rulebook/alembic.ini downgrade base`
