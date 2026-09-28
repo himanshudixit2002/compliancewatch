@@ -4,7 +4,7 @@ Part of the ComplianceWatch monorepo. Workspace package `compliancewatch-evals` 
 `cw_evals`, script `eval-harness`), source under `src/cw_evals/`.
 Design reference: Project Foundation guide, sections 8, 17 and 19.
 
-- **Owns:** Runner, metrics and thresholds: extraction acceptance, field accuracy, reference and predicate F1, citation validity, validator pass rate, detector accuracy (context recall and precision, grounded-answer rate and applicability precision and recall arrive with the qa and applicability golden sets)
+- **Owns:** Runner, metrics and thresholds: extraction acceptance, field accuracy, reference and predicate F1, citation validity, validator pass rate, detector accuracy; for the relation stage (`cw_evals.relations`), relation recall and precision against the label, evidence validity and parse rate (context recall and precision, grounded-answer rate and applicability precision and recall arrive with the qa and applicability golden sets)
 - **Owning team:** AI Platform (guide section 14)
 - **Consumes:** evals/golden; services/pipeline/prompts; the llm-gateway (in process with the fake provider, or over HTTP for a real model)
 - **Emits / publishes:** `evals/reports/latest.md` and `latest.json` (git-ignored), the GitHub step summary, and an exit code that blocks the merge
@@ -25,8 +25,8 @@ harness never holds a provider key.
 
 | Profile | Gates | When |
 | --- | --- | --- |
-| `ci` | scripted: extraction_acceptance = 1, citation_validity = 1, validator_pass_rate = 1, detector_accuracy >= 0.9; fake: parse_rate = 1 | every change under `evals/`, the pipeline, the prompts (CI job `evals`) |
-| `nightly` | gateway: extraction_acceptance >= 0.90, citation_validity >= 0.95, parse_rate >= 0.98 (guide section 8) | `.github/workflows/nightly.yml`, 02:30 IST, once the `CW_AI_GATEWAY_API_KEY` secret exists |
+| `ci` | scripted: extraction_acceptance = 1, citation_validity = 1, validator_pass_rate = 1, detector_accuracy >= 0.9, relation_recall = 1, relation_precision = 1, evidence_validity = 1; fake: parse_rate = 1, relation_parse_rate = 1 | every change under `evals/`, the pipeline, the rulebook, the gateway, the prompts (CI job `evals`) |
+| `nightly` | gateway: extraction_acceptance >= 0.90, citation_validity >= 0.95, parse_rate >= 0.98 (guide section 8); relation numbers reported, not gated, until at least five relation cases are reviewed | `.github/workflows/nightly.yml`, 02:30 IST, once the `CW_AI_GATEWAY_API_KEY` secret exists |
 
 A case is accepted when every labelled field matches (document kind, change kind, effective
 dates, references, predicates, amounts, obligation, recurrence) and the validators raise
