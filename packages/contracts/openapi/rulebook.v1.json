@@ -131,6 +131,7 @@
             "examples": [
               "pdf@1"
             ],
+            "maxLength": 40,
             "pattern": "^[a-z][a-z0-9_-]*@[0-9]+$",
             "title": "Parser Version",
             "type": "string"

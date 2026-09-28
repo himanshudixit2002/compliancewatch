@@ -98,6 +98,7 @@ def test_a_path_id_that_is_not_the_digest_is_422(client: TestClient) -> None:
         {"clauses": [{"clause_ref": "section 1", "text": "x"}]},
         {"clauses": [{"clause_ref": "en.p1", "text": ""}]},
         {"parser_version": "pdf"},
+        {"parser_version": "p" * 39 + "@1"},
         {"sha256": DIGEST.upper()},
         {"fetched_at": "2026-09-28T06:00:00"},
         {"doc_type": "gazette"},

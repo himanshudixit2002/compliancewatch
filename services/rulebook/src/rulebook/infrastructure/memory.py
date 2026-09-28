@@ -1,9 +1,11 @@
 """In-memory unit of work: the store for tests, demos and a rulebook without a database.
 
 Changes made inside a unit of work become visible to others only when the block exits cleanly,
-as with the Postgres store.
+as with the Postgres store. Units of work run one at a time (a lock held for the whole block),
+so two overlapping requests cannot both start from the same tables and lose a write.
 """
 
+import threading
 from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
@@ -58,15 +60,17 @@ class MemoryKnowledgeStore:
 
     def __init__(self) -> None:
         self._tables = _Tables()
+        self._lock = threading.Lock()
 
     def __call__(self) -> AbstractContextManager[KnowledgeUnitOfWork]:
         return self._open()
 
     @contextmanager
     def _open(self) -> Iterator[KnowledgeUnitOfWork]:
-        working = self._tables.copy()
-        yield MemoryUnitOfWork(working)
-        self._tables = working
+        with self._lock:
+            working = self._tables.copy()
+            yield MemoryUnitOfWork(working)
+            self._tables = working
 
     def ping(self) -> bool:
         return True

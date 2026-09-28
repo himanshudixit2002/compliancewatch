@@ -39,7 +39,7 @@ class DocumentIn(BaseModel):
     title: str = Field(default="", max_length=2_000)
     language: str = Field(min_length=1, max_length=8, examples=["en"])
     media_type: str = Field(min_length=1, max_length=80, examples=["application/pdf"])
-    parser_version: str = Field(pattern=PARSER_VERSION_PATTERN, examples=["pdf@1"])
+    parser_version: str = Field(pattern=PARSER_VERSION_PATTERN, max_length=40, examples=["pdf@1"])
     published_at: date | None = None
     fetched_at: AwareDatetime
     raw_uri: str | None = Field(default=None, max_length=2_000)

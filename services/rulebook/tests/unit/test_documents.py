@@ -1,6 +1,7 @@
 """Registering and reading regulator documents on the memory store."""
 
 import hashlib
+import threading
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from uuid import UUID
@@ -187,3 +188,22 @@ def test_a_stored_document_reads_back_as_the_kernel_parsed_document() -> None:
     assert parsed.clauses == CLAUSES
     assert parsed.parser_version == "pdf@1"
     assert parsed.published_at == date(2026, 1, 16)
+
+
+def test_overlapping_units_of_work_do_not_lose_writes(store: MemoryKnowledgeStore) -> None:
+    first, second = document(), document(sha256="0" * 64, document_id=document_id_for("0" * 64))
+    done = threading.Event()
+
+    def register_second() -> None:
+        RegisterDocument(store).run(second, CLAUSES)
+        done.set()
+
+    with store() as uow:
+        uow.documents.add(first)
+        thread = threading.Thread(target=register_second)
+        thread.start()
+        assert not done.wait(0.05), "a second unit of work ran inside the first"
+    thread.join(timeout=5)
+    with store() as uow:
+        assert uow.documents.get(first.document_id) is not None
+        assert uow.documents.get(second.document_id) is not None
