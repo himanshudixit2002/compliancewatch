@@ -3,8 +3,9 @@
 Part of the ComplianceWatch monorepo. Health routes, alembic wiring, regulator documents and
 clauses with a write and read API, the knowledge schema with entity alignment, the entity review
 queue and relation candidates with their review API, the rule tables with the seed calendar, and
-a read API over rule versions, entities, relations and clauses for the Q&A service, and a
-hybrid clause search index (full text and pgvector). No publish flow yet.
+a read API over rule versions, entities, relations and clauses for the Q&A service, a hybrid
+clause search index (full text and pgvector), and the citation, review and publish flow with its
+rule events written through the transactional outbox (behind `CW_RULEBOOK_PUBLISH_ENABLED`).
 Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architecture Reference 3.2, 5.2 and 6.2; ADR-017 and ADR-018.
 
 - **Owns:** Rules, RuleVersions, Documents, Clauses, Citations, embeddings; versioning, supersession graph, hybrid search index, as-of queries;
@@ -12,11 +13,12 @@ Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architectur
   clause mentions, typed relations between rule versions and entities)
 - **Owning team:** Regulatory Intelligence
 - **Consumes:** parsed documents from the pipeline over `PUT /v1/rulebook/documents/{id}` (ADR-018); rule.published; rulebook read API (served to the engine, Q&A and review service)
-- **Emits / publishes:** rule.superseded (scheduled when effective dates pass)
+- **Emits / publishes:** rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed
+  through `outbox_event` (ADR-005); no service consumes them yet
 
 ## What is in the database today
 
-Migrations `0001` to `0006` create twelve tables in schema `rulebook`:
+Migrations `0001` to `0007` create fourteen tables in schema `rulebook`:
 
 | Table | Purpose | Keys |
 | --- | --- | --- |
@@ -27,7 +29,9 @@ Migrations `0001` to `0006` create twelve tables in schema `rulebook`:
 | `canonical_entity` | One row per aligned entity: `type` (ten values), `canonical_name`, `aliases text[]` (normalised names) | pk `id`; unique (`type`, `canonical_name`); GIN index on `aliases` |
 | `clause_entity` | A mention of an entity in a clause with its half-open code-point span, and who found it (`method`: grammar, model or analyst; `extractor`) | pk (`clause_id`, `entity_id`, `span_start`); fks to `clause` and `canonical_entity` (restrict) |
 | `rule_relation` | A typed relation (`supersedes`, `amends`, `refers_to`, `exempts`, `extends_deadline`, `corrects`, `withdraws`) from a rule version to a rule version (`to_rule_version_id`) or an entity (`to_entity_id`), with the evidence clause | pk `id`; unique (`from_rule_version_id`, `relation`, `to_kind`, `to_ref`, `clause_id`); fks to `rule_version`, `clause` and `canonical_entity` (restrict); CHECKs `ck_rule_relation_pairing`, `ck_rule_relation_target_entity`, `ck_rule_relation_target_version`, `ck_rule_relation_not_self` |
-| `rule`, `rule_version` | Rules and their versions: status, effective period, predicates, obligation template, recurrence, seed provenance | see migration 0003 |
+| `rule`, `rule_version` | Rules and their versions: status, effective period, predicates, obligation template, recurrence, seed provenance, `high_impact` and `submitted_at` (the start of the review round) | see migration 0003; the guard trigger of 0007 |
+| `rule_version_decision` | The review and publication audit: submitted, returned, approved, published, withdrawn or superseded, by an analyst (`actor_id`) or caused by another version | pk `id`; fks to `rule_version` (both `rule_version_id` and `caused_by_rule_version_id`); CHECK that one of the two is set; append-only (trigger) |
+| `outbox_event` | py-common's transactional outbox: the rule events, written in the transaction of the change they describe and relayed to Kafka | see `py_common.outbox.schema` |
 | `extraction_run` | One run of an extraction stage over a document: counts and run-level issues, including model output that could not become a candidate | pk `id` (derived from document, stage, extractor); fk `document_id` |
 | `entity_review` | A mention alignment could not resolve, with the reason (`no_match`, `ambiguous_alias`, `empty_name`, `unqualified`) and the analyst's decision | pk `id` (derived from clause, type, start); unique (`clause_id`, `entity_type`, `span_start`); CHECK that a decision is complete; partial index on open groups |
 | `relation_candidate` | A relation the model proposed before any rule version exists: target as named (and aligned entity), evidence clause and quote, confidence, issues, period and new due date for extensions, status | pk `id` (derived from document, relation, target, evidence clause); fks to `document`, `clause`, `canonical_entity`, `rule`; CHECKs on scores, quote length, decision |
@@ -41,6 +45,15 @@ version. Table names are unqualified: the connection's `search_path` puts them i
 
 Migration 0004 adds foreign keys to `clause_entity` and `rule_relation` and stops with a clear
 message if either table has rows (nothing writes them before it).
+
+Migration 0007 puts `rulebook_rule_version_guard` on `rule_version` (BEFORE UPDATE): the status
+moves only along the kernel's `RULE_VERSION_TRANSITIONS` (draft to in_review, in_review to
+approved or back to draft, approved to published, published to superseded or withdrawn); once a
+version is published, superseded or withdrawn its content is frozen and `effective_to` may only
+be set or moved earlier; and approved to published needs `published_at`, at least one verified
+citation and no unverified one, and one distinct approver in `rule_version_decision` since
+`submitted_at`, two when `high_impact`. A writer that bypasses the use cases is held to the same
+rules. `tests/unit/test_models_vocabulary.py` pins the trigger's literal pairs to the kernel.
 
 ## API
 
@@ -68,6 +81,13 @@ message if either table has rows (nothing writes them before it).
 | `GET /v1/rulebook/clauses/unembedded?model=&document_id=&limit=&after=` | Clauses with no embedding from `model`, in clause id order, with their document's metadata (for the embedding text) |
 | `POST /v1/rulebook/search` | Hybrid search, see below |
 | `GET /v1/rulebook/clauses/{id}` | A clause with its document's regulator, type, reference, title, URL, language and date; 404 `rulebook-clause-unknown` when no clause has the id |
+| `PUT /v1/rulebook/rule-versions/{id}/citations` | Cite clauses for a version not yet published: `{citations: [{clause_id, quote}]}` (1 to 50). Every quote must match its clause (`quote_match_ratio >= 0.85`) and carry no number, form code or month name the clause lacks, else 422 `rulebook-citation-not-verified` and nothing is stored. Returns `{added, unchanged, citations}`; a citation's id derives from version, clause and quote. Needs the token |
+| `POST /v1/rulebook/rule-versions/{id}/submit` | Draft to in_review: `{actor_id, high_impact?, note?}`. Starts a new approval round; a high-impact tag, once set, stays. Needs the token |
+| `POST /v1/rulebook/rule-versions/{id}/return` | In_review back to draft: `{actor_id, note?}`. The round's approvals no longer count. Needs the token |
+| `POST /v1/rulebook/rule-versions/{id}/approve` | One approval: `{actor_id, note?}`. The one that completes the round (one approver, two different ones when high impact) moves the version to approved and its seed status to reviewed; the same approver twice is 409 `rulebook-duplicate-approver`. Needs the token |
+| `POST /v1/rulebook/rule-versions/{id}/publish` | Approved to published, applying the version's relations and writing the rule events; see below. `{actor_id, note?}`. Needs the token and the flag |
+| `POST /v1/rulebook/rule-versions/{id}/withdraw` | Published to withdrawn with `rule.withdrawn` (no withdrawing version, effective today). Needs the token and the flag |
+| `POST /v1/rulebook/maintenance/transitions` | The daily sweep, `{as_of?}` (today in India when empty, never later); returns the versions it moved and the events. Needs the token and the flag |
 
 Nothing is aligned by fuzzy matching and nothing is created without an analyst (ADR-017). The
 queue has no alert yet: someone in Regulatory Intelligence has to watch it.
@@ -77,7 +97,8 @@ replacement took effect, so a question about a past date is answered from the ve
 then.
 
 Writes fail closed: without `CW_RULEBOOK_WRITE_TOKEN` every write is a 503, and a missing or wrong
-token is a 401. The spec is committed at `packages/contracts/openapi/rulebook.v1.json`
+token is a 401. Publishing, withdrawing and the sweep also need `CW_RULEBOOK_PUBLISH_ENABLED=true`
+(default off, 503 `rulebook-publishing-disabled`); citing and review work without it. The spec is committed at `packages/contracts/openapi/rulebook.v1.json`
 (`make openapi SERVICE=rulebook`) and pinned by `tests/contract/test_openapi.py`.
 `CW_RULEBOOK_STORE=memory` runs the service without a database (tests and demos).
 
@@ -101,6 +122,53 @@ leg did not find it) and `cited_by`: the published or superseded versions citing
 a verified quote, in force on `as_of` when it is given. The rulebook never calls a model: the
 writer of `PUT /clauses/embeddings` and the reader sending a query vector both embed through the
 LLM gateway.
+
+## Publish lifecycle
+
+A version goes draft, in_review, approved, published (ADR-006): cite its clauses, submit it,
+approve it (one approver; two different ones when `high_impact`), publish it. Every step is one
+transaction that locks the version, checks the move against the kernel's transition table and
+appends a row to `rule_version_decision`; the kernel's `InvalidTransitionError` is a 409. Days
+are days in India: "today" is the date in Asia/Kolkata when the step runs.
+
+Publishing checks, in order (`rulebook.domain.publication.plan_publication`):
+
+1. The version is approved.
+2. It has at least one citation and every citation is verified (409 `rulebook-citations-missing`).
+3. It has the approvals it needs in the current round (409 `rulebook-approvals-missing`).
+4. Each relation from it to another version (X to Y, ADR-017) can take effect:
+   - `supersedes`, `corrects` and `withdraws` replace Y. Y must be published (409
+     `rulebook-relation-target-state`), start before X (409 `rulebook-replacement-dates`) and not
+     be replaced by another published version (409 `rulebook-target-already-replaced`).
+     Publication cuts Y's `effective_to` to X's `effective_from` at once. When X's
+     `effective_from` is today or earlier, Y moves now (to superseded, or withdrawn for
+     `withdraws`) and `rule.superseded` or `rule.withdrawn` goes out with the publication;
+     otherwise Y stays published until the sweep moves it on X's first day. `corrects` is a
+     replacement until a candidate can carry the corrected date.
+   - `extends_deadline` sends `rule.deadline_changed` (reason `deadline_extended`) at
+     publication, with the candidate's `new_due_on`, and its `period_label` when Y recurs (409
+     `rulebook-deadline-detail-missing` without them). Y must be published or superseded.
+5. Once cut, X overlaps no other version of its rule in force (409 `rulebook-overlapping-version`).
+
+`rule.published` lists the targets of X's `supersedes` relations, the approvers and the ontology
+attributes the predicates reference. The events of one publication share a correlation id, the
+follow-on events name `rule.published` as their cause, every rule event has no tenant and the
+rule id as its Kafka key, and all of them are written to `outbox_event` in the publication's
+transaction; `python -m py_common.outbox` relays them. Withdrawing a version that another
+published version replaces later does not restore the replaced version's `effective_to`: publish
+a new version instead. Nothing consumes the events yet; the obligation service's consumer is
+still to be built.
+
+The sweep moves every published version whose replacement's `effective_from` has come, earliest
+replacement first, with its event and a decision naming the replacing version. It is idempotent:
+
+```bash
+CW_RULEBOOK_PUBLISH_ENABLED=true CW_DATABASE_URL=... uv run --package compliancewatch-rulebook rulebook-transitions [--as-of YYYY-MM-DD]
+```
+
+`POST /v1/rulebook/maintenance/transitions` runs the same sweep. With the flag off the command
+prints that nothing moved and exits 0. Seed rules are never published by a migration or the seed
+command; only this flow publishes.
 
 ## Seed calendar
 
@@ -128,14 +196,15 @@ composition taxpayer) and check every due date the recurrences produce.
 
 ```
 src/rulebook/
-  api/             # routers (documents, review, rule_versions, graph, search), request/response schemas, the write-token dependency
-  application/     # use cases: documents.py, alignment.py, review.py, relations.py, rule_versions.py, graph.py, search.py; seed_loader.py
-  domain/          # documents.py, alignment.py, review.py, relations.py, rule_versions.py, graph.py, search.py, runs.py, ids.py, errors.py, repository.py, seed.py
-  infrastructure/  # models.py (with the Vector column type), knowledge_repository.py (Postgres unit of work), memory.py, seed_repository.py
-  settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN
+  api/             # routers (documents, review, rule_versions, publication, graph, search), request/response schemas, the write-token dependency
+  application/     # use cases: documents.py, alignment.py, review.py, relations.py, rule_versions.py, publication.py, graph.py, search.py; seed_loader.py
+  domain/          # documents.py, alignment.py, review.py, relations.py, rule_versions.py, publication.py (the planner), events.py, graph.py, search.py, runs.py, ids.py, errors.py, repository.py, seed.py
+  infrastructure/  # models.py (with the Vector column type), knowledge_repository.py (Postgres unit of work and outbox sink), memory.py, seed_repository.py
+  settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN, CW_RULEBOOK_PUBLISH_ENABLED
   testing.py       # rulebook_settings() for tests and demos: memory store, known token
   wiring.py        # what the api layer gets from the composition root
   seed.py          # rulebook-seed command
+  transitions.py   # rulebook-transitions command (the daily sweep)
   main.py          # composition root: build_app(settings), store selection, problem statuses
 seed/gst_calendar.yaml   # the seed calendar
 migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and targets models.Base.metadata
@@ -145,10 +214,11 @@ migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and 
   versions/20260928_0004_documents_clauses_citations.py   # documents, clauses, citations; knowledge FKs
   versions/20260928_0005_review_queue_relation_candidates.py   # extraction runs, entity review, relation candidates
   versions/20260929_0006_clause_search_index.py   # clause.search_vector, clause_embedding, pgvector in public
+  versions/20260929_0007_publish_flow.py   # high_impact, submitted_at, rule_version_decision, the rule_version guard, outbox_event
 tests/
   unit/            # domain, use cases and API on the memory store; test_models_vocabulary.py: model CHECKs against the kernel enums
-  integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work and its reads; the search index
-  contract/        # test_openapi.py: the served schema equals the committed spec
+  integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work and its reads; the search index; the publish guard, the outbox and the sweep
+  contract/        # test_openapi.py: the served schema equals the committed spec; test_events.py: the rule events match their schemas
 alembic.ini, pyproject.toml, Dockerfile
 ```
 
@@ -160,6 +230,7 @@ From the repo root:
 make dev                          # infrastructure (Docker Compose)
 make migrate SERVICE=rulebook     # alembic upgrade head in schema rulebook
 make run SERVICE=rulebook         # http://localhost:8003/health, /ready, /v1/rulebook/ping, /v1/rulebook/documents/{id}
+make relay SERVICE=rulebook       # relays the rule events in outbox_event to Kafka
 make test                         # unit + contract tests with the coverage gate
 make py-test-integration          # testcontainers tests; needs Docker
 uv run pytest services/rulebook/tests/integration -q -m integration   # this service only
@@ -176,7 +247,8 @@ Check the schema after `make migrate`:
 docker compose exec -T postgres psql -U cw -d compliancewatch -Atc \
   "select table_name from information_schema.tables where table_schema='rulebook' order by 1"
 # alembic_version, canonical_entity, citation, clause, clause_embedding, clause_entity, document,
-# entity_review, extraction_run, relation_candidate, rule, rule_relation, rule_version
+# entity_review, extraction_run, outbox_event, relation_candidate, rule, rule_relation,
+# rule_version, rule_version_decision
 ```
 
 Roll back with `CW_DATABASE_URL=... CW_DB_SCHEMA=rulebook uv run --package compliancewatch-rulebook alembic -c services/rulebook/alembic.ini downgrade base`

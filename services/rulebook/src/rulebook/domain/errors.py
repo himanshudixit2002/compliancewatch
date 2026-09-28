@@ -136,3 +136,74 @@ class EmbeddingDimensionError(DomainError, ValueError):
 
     type_slug = "rulebook-embedding-dimension"
     title = "Embedding has the wrong number of dimensions"
+
+
+class CitationNotVerifiedError(DomainError, ValueError):
+    """A submitted quote is not in its clause: it matches below the threshold, or it carries a
+    number, form code or month name the clause does not. Nothing from the request is stored."""
+
+    type_slug = "rulebook-citation-not-verified"
+    title = "Citation quote not found in its clause"
+
+
+class CitationsMissingError(DomainError, ValueError):
+    """ADR-006: a version is published only with at least one citation, every one verified."""
+
+    type_slug = "rulebook-citations-missing"
+    title = "Rule version needs verified citations"
+
+
+class ApprovalsMissingError(DomainError, ValueError):
+    """ADR-006: one approver, two different ones when the version is high impact."""
+
+    type_slug = "rulebook-approvals-missing"
+    title = "Rule version lacks the approvals it needs"
+
+
+class DuplicateApproverError(DomainError, ValueError):
+    type_slug = "rulebook-duplicate-approver"
+    title = "Approver already approved this review round"
+
+
+class RelationTargetStateError(DomainError, ValueError):
+    """A relation of the version being published targets a version its effect cannot apply to:
+    a replacement needs a published target, a deadline change a published or superseded one."""
+
+    type_slug = "rulebook-relation-target-state"
+    title = "Relation target is in the wrong status"
+
+
+class ReplacementDatesError(DomainError, ValueError):
+    type_slug = "rulebook-replacement-dates"
+    title = "Replacement starts before the version it replaces"
+
+
+class TargetAlreadyReplacedError(DomainError, ValueError):
+    type_slug = "rulebook-target-already-replaced"
+    title = "Target version is replaced by another published version"
+
+
+class DeadlineDetailMissingError(DomainError, ValueError):
+    """An ``extends_deadline`` relation needs the new due date its candidate carried, and the
+    period too when the target recurs."""
+
+    type_slug = "rulebook-deadline-detail-missing"
+    title = "Deadline change lacks its due date or period"
+
+
+class OverlappingVersionError(DomainError, ValueError):
+    """Two versions of one rule would be in force on the same day."""
+
+    type_slug = "rulebook-overlapping-version"
+    title = "Rule version overlaps another version in force"
+
+
+class PublishingDisabledError(DomainError, PermissionError):
+    """``CW_RULEBOOK_PUBLISH_ENABLED`` is off: publishing, withdrawing and the transition sweep
+    are refused, and nothing changes."""
+
+    type_slug = "rulebook-publishing-disabled"
+    title = "Rule publishing is turned off"
+
+    def __init__(self) -> None:
+        super().__init__("set CW_RULEBOOK_PUBLISH_ENABLED to publish, withdraw or sweep")

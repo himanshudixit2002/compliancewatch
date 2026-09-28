@@ -135,7 +135,7 @@ def test_the_migration_fills_existing_clauses_and_goes_down_and_up(
                 " ON n.oid = e.extnamespace WHERE e.extname = 'vector'"
             )
         ).scalar_one()
-    assert (version, extension) == ("0006", "public")
+    assert (version, extension) == ("0007", "public")
 
     command.downgrade(alembic_config, "0005")
     command.upgrade(alembic_config, "head")

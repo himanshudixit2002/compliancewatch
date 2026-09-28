@@ -11,6 +11,11 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from uuid import UUID
 
+from domain_kernel.citations import (
+    QUOTE_MATCH_THRESHOLD,
+    evidence_tokens_missing,
+    quote_match_ratio,
+)
 from domain_kernel.ids import ClauseId, DocumentId, RuleId, RuleVersionId
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.periods import EffectivePeriod
@@ -24,7 +29,8 @@ IN_FORCE_STATUSES = frozenset({RuleVersionStatus.PUBLISHED, RuleVersionStatus.SU
 @dataclass(frozen=True, slots=True)
 class RuleVersionRecord:
     """One rule version with its rule's key, regulator and level. Specification, template and
-    recurrence are the kernel's mapping forms, as stored."""
+    recurrence are the kernel's mapping forms, as stored. ``high_impact`` asks for two
+    different approvers (ADR-006); ``submitted_at`` starts the current review round."""
 
     rule_version_id: RuleVersionId
     rule_id: RuleId
@@ -44,6 +50,8 @@ class RuleVersionRecord:
     seed_status: SeedStatus
     todo: tuple[str, ...]
     published_at: datetime | None = None
+    high_impact: bool = False
+    submitted_at: datetime | None = None
 
     @property
     def effective(self) -> EffectivePeriod:
@@ -69,3 +77,22 @@ def in_force(record: RuleVersionRecord, as_of: date) -> bool:
     """Whether the version was published and ``as_of`` falls in ``[effective_from,
     effective_to)``."""
     return record.status in IN_FORCE_STATUSES and record.effective.contains(as_of)
+
+
+@dataclass(frozen=True, slots=True)
+class QuoteCheck:
+    """How a quote matched its clause: the fuzzy score and the facts it carries that the clause
+    does not. Verified means a score of at least 0.85 and no missing fact (ADR-006)."""
+
+    score: float
+    missing: tuple[str, ...]
+
+    @property
+    def verified(self) -> bool:
+        return self.score >= QUOTE_MATCH_THRESHOLD and not self.missing
+
+
+def check_quote(quote: str, clause_text: str) -> QuoteCheck:
+    return QuoteCheck(
+        quote_match_ratio(quote, clause_text), evidence_tokens_missing(quote, clause_text)
+    )

@@ -13,6 +13,15 @@ from rulebook.application.graph import (
     ReadEntity,
     ResolveEntity,
 )
+from rulebook.application.publication import (
+    AddCitations,
+    ApplyDueTransitions,
+    ApproveVersion,
+    PublishVersion,
+    ReturnToDraft,
+    SubmitForReview,
+    WithdrawVersion,
+)
 from rulebook.application.relations import (
     ApproveRelationCandidate,
     ListRelationCandidates,
@@ -54,3 +63,10 @@ class Wiring:
     store_embeddings: StoreEmbeddings
     list_unembedded: ListUnembeddedClauses
     search_clauses: SearchClauses
+    add_citations: AddCitations
+    submit_version: SubmitForReview
+    return_version: ReturnToDraft
+    approve_version: ApproveVersion
+    publish_version: PublishVersion
+    withdraw_version: WithdrawVersion
+    apply_transitions: ApplyDueTransitions

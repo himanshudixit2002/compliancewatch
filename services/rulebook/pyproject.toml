@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 rulebook-seed = "rulebook.seed:main"
+rulebook-transitions = "rulebook.transitions:main"
 
 [tool.uv.sources]
 py-common = { workspace = true }

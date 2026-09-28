@@ -52,12 +52,25 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_IDENTITY_STORE`, `CW_PROFILE_STORE`, `CW_PROFILE_GSTIN_LOOKUP` | env | env | - | - | - | - | - | - | - |
 | `CW_RULEBOOK_STORE` | - | - | env | - | - | - | - | - | - |
 | `CW_RULEBOOK_WRITE_TOKEN` | - | - | secret | - | - | - | secret | - | - |
+| `CW_RULEBOOK_PUBLISH_ENABLED` | - | - | env (default `false`; owner regulatory-intelligence; removed once the workbench publishes in production and the obligation consumer of the rule events is live) | - | - | - | - | - | - |
 | `CW_PIPELINE_KNOWLEDGE_ENABLED`, `CW_RULEBOOK_URL`, `CW_LLM_GATEWAY_URL` | - | - | - | - | - | - | env | - | - |
 | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_SEND_ENABLED`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `NOTIFICATION_API_URL` | - | - | - | - | - | - | - | - | secret / secret / env / secret / secret / env |
 
 The pipeline writes regulator documents to the rulebook (ADR-018), so deploy the rulebook before
 the pipeline and give both the same `CW_RULEBOOK_WRITE_TOKEN`; a rulebook without one refuses
 every write.
+
+The rulebook writes its rule events (`rule.published`, `rule.superseded`, `rule.withdrawn`,
+`rule.deadline_changed`) to its own `outbox_event` table, so it needs the outbox relay like the
+profile and obligation services: a process running `python -m py_common.outbox` with the
+rulebook's `CW_DATABASE_URL` and the Kafka secrets. A version replaced by one dated in the future
+moves to superseded or withdrawn, with its event, only when the daily sweep runs: schedule a Fly
+machine from the rulebook image running `rulebook-transitions` once a day (for example
+`fly machine run <rulebook image> rulebook-transitions --schedule daily`, with the rulebook's
+secrets and `CW_RULEBOOK_PUBLISH_ENABLED`). The in-force reads do not wait for it, because
+publication already cut the replaced version's `effective_to`; a late run only delays the status
+and the event. The command is idempotent and, with the flag off, moves nothing. Neither the relay
+nor the machine is needed while `CW_RULEBOOK_PUBLISH_ENABLED` is off.
 
 Every service also reads `CW_ENV`, `CW_LOG_LEVEL` and `CW_LOG_JSON` (env). The tenant comes from
 the `x-tenant-id` header until Supabase Auth issues tokens (ADR-014): the MVP must sit behind

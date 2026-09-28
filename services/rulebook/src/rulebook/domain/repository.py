@@ -3,16 +3,17 @@ is no tenant and no row-level security on these tables."""
 
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
-from datetime import date
+from datetime import date, datetime
 from typing import Protocol
 from uuid import UUID
 
-from domain_kernel.ids import CanonicalEntityId, ClauseId, DocumentId, RuleVersionId
+from domain_kernel.ids import CanonicalEntityId, ClauseId, DocumentId, RuleId, RuleVersionId, UserId
 from domain_kernel.knowledge import EntityType, RuleRelation
 from domain_kernel.status import RuleVersionStatus
 from domain_kernel.vectors import ClauseFilter, Vector
 from rulebook.domain.alignment import EntityLookup
 from rulebook.domain.documents import StoredClause, StoredDocument
+from rulebook.domain.events import RuleEvent
 from rulebook.domain.graph import (
     ClauseDetail,
     EntityRecord,
@@ -20,6 +21,7 @@ from rulebook.domain.graph import (
     RelationQuery,
     RelationRecord,
 )
+from rulebook.domain.publication import PendingReplacement, RuleVersionDecision
 from rulebook.domain.relations import CandidateStatus, RelationCandidate
 from rulebook.domain.review import EntityReviewItem, MentionGroup
 from rulebook.domain.rule_versions import CitationRecord, RuleVersionRecord
@@ -194,11 +196,65 @@ class RuleVersionRepository(Protocol):
         """The version in any status."""
         ...
 
+    def lock(self, rule_version_id: RuleVersionId) -> RuleVersionRecord | None:
+        """The version, locked for the rest of the transaction."""
+        ...
+
+    def lock_many(
+        self, rule_version_ids: Sequence[RuleVersionId]
+    ) -> Mapping[RuleVersionId, RuleVersionRecord]:
+        """The versions that exist among ``rule_version_ids``, locked in id order."""
+        ...
+
+    def of_rule(self, rule_id: RuleId) -> Sequence[RuleVersionRecord]:
+        """Every version of the rule, by version number."""
+        ...
+
+    def save_lifecycle(self, record: RuleVersionRecord) -> None:
+        """Write the columns the review and publish flow changes: status, seed status,
+        ``effective_to``, ``published_at``, ``submitted_at`` and ``high_impact``."""
+        ...
+
+    def record_decision(self, decision: RuleVersionDecision) -> None:
+        """Append one row to the version's decision audit."""
+        ...
+
+    def approvers(self, rule_version_id: RuleVersionId, since: datetime) -> frozenset[UserId]:
+        """Who approved the version at or after ``since``, the start of the review round."""
+        ...
+
+    def replaced_by_others(
+        self, rule_version_ids: Sequence[RuleVersionId], excluding: RuleVersionId
+    ) -> frozenset[RuleVersionId]:
+        """The versions among ``rule_version_ids`` that a published or superseded version other
+        than ``excluding`` supersedes, corrects or withdraws."""
+        ...
+
+    def pending_replacements(self, today: date) -> Sequence[PendingReplacement]:
+        """Published versions replaced by a published or superseded version whose
+        ``effective_from`` is on or before ``today``."""
+        ...
+
+    def lock_publication(self) -> None:
+        """Serialise publishing, withdrawing and the sweep until the transaction ends, so two
+        of them cannot both pass the checks on the same versions."""
+        ...
+
 
 class CitationRepository(Protocol):
     def for_version(self, rule_version_id: RuleVersionId) -> tuple[CitationRecord, ...]:
         """The version's citations in document and clause order."""
         ...
+
+    def add(self, citation: CitationRecord) -> bool:
+        """Insert unless a citation with the id exists; whether this call inserted it."""
+        ...
+
+
+class EventSink(Protocol):
+    """Where rule events go inside the transaction: the outbox, keyed by rule."""
+
+    def publish(self, event: RuleEvent) -> None: ...
 
 
 class RuleCatalog(Protocol):
@@ -284,6 +340,9 @@ class KnowledgeUnitOfWork(Protocol):
 
     @property
     def runs(self) -> RunRepository: ...
+
+    @property
+    def events(self) -> EventSink: ...
 
 
 class KnowledgeUnitOfWorkFactory(Protocol):

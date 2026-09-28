@@ -10,11 +10,17 @@ query's terms joined by OR and ranks with ``ts_rank_cd``. The vector leg orders 
 distance over the HNSW index with ``hnsw.ef_search`` raised and pgvector's iterative scan on,
 so filters applied after the index scan still leave enough rows; iterative scan may return rows
 slightly out of order, so the outer query sorts them again.
+
+The review and publish flow locks the versions it changes, and publishing, withdrawing and the
+transition sweep also hold an advisory lock for their transaction. Their events go to
+``outbox_event`` through py-common's ``OutboxWriter`` on the same connection, so an event
+commits or rolls back with the change it describes; the ``rule_version`` trigger checks the
+same rules as the use cases.
 """
 
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Self
 from uuid import UUID
@@ -38,7 +44,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.postgresql import TSQUERY, insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy.pool import NullPool
 
 from domain_kernel.documents import DocumentType
@@ -49,13 +55,17 @@ from domain_kernel.ids import (
     RuleId,
     RuleVersionId,
     SourceId,
+    UserId,
 )
 from domain_kernel.knowledge import EntityRef, EntityType, RelationKind, RuleRelation
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.status import RuleVersionStatus
 from domain_kernel.vectors import ClauseFilter, Vector
+from py_common.outbox import OutboxWriter
 from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.documents import StoredClause, StoredDocument
+from rulebook.domain.errors import UnknownRuleVersionError
+from rulebook.domain.events import RuleEvent
 from rulebook.domain.graph import (
     ClauseDetail,
     EntityRecord,
@@ -63,6 +73,12 @@ from rulebook.domain.graph import (
     MentionSpan,
     RelationQuery,
     RelationRecord,
+)
+from rulebook.domain.publication import (
+    REPLACING,
+    DecisionAction,
+    PendingReplacement,
+    RuleVersionDecision,
 )
 from rulebook.domain.relations import (
     CandidateIssue,
@@ -94,13 +110,17 @@ from rulebook.infrastructure.models import (
     RelationCandidateRow,
     RuleRelationRow,
     RuleRow,
+    RuleVersionDecisionRow,
     RuleVersionRow,
 )
 
 EXAMPLES_PER_GROUP = 5
 SUPERSESSION_LOCK = 0x72756C6573757073
 """Advisory lock key held for the rest of a transaction that approves a supersession."""
+PUBLICATION_LOCK = 0x72756C657075626C
+"""Advisory lock key held for the rest of a transaction that publishes, withdraws or sweeps."""
 PUBLISHED_STATUSES = sorted(status.value for status in IN_FORCE_STATUSES)
+REPLACING_KINDS = sorted(kind.value for kind in REPLACING)
 ENGLISH: ColumnElement[str] = literal_column("'english'::regconfig")
 HNSW_EF_SEARCH = 100
 """Candidates the HNSW scan keeps (pgvector's default is 40): at least the largest pool."""
@@ -669,6 +689,132 @@ class SqlAlchemyRuleVersionRepository:
         ).first()
         return None if row is None else _to_version(*row)
 
+    def lock(self, rule_version_id: RuleVersionId) -> RuleVersionRecord | None:
+        row = self._session.execute(
+            _versions()
+            .where(RuleVersionRow.id == rule_version_id.value)
+            .with_for_update(of=RuleVersionRow)
+        ).first()
+        return None if row is None else _to_version(*row)
+
+    def lock_many(
+        self, rule_version_ids: Sequence[RuleVersionId]
+    ) -> Mapping[RuleVersionId, RuleVersionRecord]:
+        ids = sorted({version.value for version in rule_version_ids}, key=str)
+        if not ids:
+            return {}
+        rows = self._session.execute(
+            _versions()
+            .where(RuleVersionRow.id.in_(ids))
+            .order_by(RuleVersionRow.id)
+            .with_for_update(of=RuleVersionRow)
+        ).all()
+        records = [_to_version(*row) for row in rows]
+        return {record.rule_version_id: record for record in records}
+
+    def of_rule(self, rule_id: RuleId) -> Sequence[RuleVersionRecord]:
+        rows = self._session.execute(
+            _versions()
+            .where(RuleVersionRow.rule_id == rule_id.value)
+            .order_by(RuleVersionRow.version)
+        ).all()
+        return [_to_version(*row) for row in rows]
+
+    def save_lifecycle(self, record: RuleVersionRecord) -> None:
+        row = self._session.get(RuleVersionRow, record.rule_version_id.value)
+        if row is None:
+            raise UnknownRuleVersionError(str(record.rule_version_id))
+        row.status = record.status.value
+        row.seed_status = record.seed_status.value
+        row.effective_to = record.effective_to
+        row.published_at = record.published_at
+        row.submitted_at = record.submitted_at
+        row.high_impact = record.high_impact
+        self._session.flush()
+
+    def record_decision(self, decision: RuleVersionDecision) -> None:
+        self._session.execute(
+            insert(RuleVersionDecisionRow).values(
+                id=decision.decision_id,
+                rule_version_id=decision.rule_version_id.value,
+                action=decision.action.value,
+                from_status=decision.from_status.value,
+                to_status=decision.to_status.value,
+                actor_id=None if decision.actor_id is None else decision.actor_id.value,
+                caused_by_rule_version_id=None
+                if decision.caused_by is None
+                else decision.caused_by.value,
+                note=decision.note,
+                decided_at=decision.decided_at,
+            )
+        )
+
+    def approvers(self, rule_version_id: RuleVersionId, since: datetime) -> frozenset[UserId]:
+        found = self._session.scalars(
+            select(RuleVersionDecisionRow.actor_id)
+            .where(
+                RuleVersionDecisionRow.rule_version_id == rule_version_id.value,
+                RuleVersionDecisionRow.action == DecisionAction.APPROVED.value,
+                RuleVersionDecisionRow.actor_id.is_not(None),
+                RuleVersionDecisionRow.decided_at >= since,
+            )
+            .distinct()
+        )
+        return frozenset(UserId(actor) for actor in found if actor is not None)
+
+    def replaced_by_others(
+        self, rule_version_ids: Sequence[RuleVersionId], excluding: RuleVersionId
+    ) -> frozenset[RuleVersionId]:
+        if not rule_version_ids:
+            return frozenset()
+        found = self._session.scalars(
+            select(RuleRelationRow.to_rule_version_id)
+            .join(RuleVersionRow, RuleVersionRow.id == RuleRelationRow.from_rule_version_id)
+            .where(
+                RuleRelationRow.relation.in_(REPLACING_KINDS),
+                RuleRelationRow.to_rule_version_id.in_([v.value for v in rule_version_ids]),
+                RuleRelationRow.from_rule_version_id != excluding.value,
+                RuleVersionRow.status.in_(PUBLISHED_STATUSES),
+            )
+            .distinct()
+        )
+        return frozenset(RuleVersionId(target) for target in found if target is not None)
+
+    def pending_replacements(self, today: date) -> Sequence[PendingReplacement]:
+        replacing = aliased(RuleVersionRow)
+        target = aliased(RuleVersionRow)
+        rows = self._session.execute(
+            select(
+                RuleRelationRow.relation,
+                target.id,
+                target.rule_id,
+                replacing.id,
+                replacing.effective_from,
+            )
+            .join(replacing, replacing.id == RuleRelationRow.from_rule_version_id)
+            .join(target, target.id == RuleRelationRow.to_rule_version_id)
+            .where(
+                RuleRelationRow.relation.in_(REPLACING_KINDS),
+                replacing.status.in_(PUBLISHED_STATUSES),
+                replacing.effective_from <= today,
+                target.status == RuleVersionStatus.PUBLISHED.value,
+            )
+            .order_by(replacing.effective_from, target.id, replacing.id)
+        ).all()
+        return [
+            PendingReplacement(
+                relation=RelationKind(relation),
+                target_id=RuleVersionId(target_id),
+                target_rule_id=RuleId(target_rule_id),
+                replacing_id=RuleVersionId(replacing_id),
+                replacing_from=replacing_from,
+            )
+            for relation, target_id, target_rule_id, replacing_id, replacing_from in rows
+        ]
+
+    def lock_publication(self) -> None:
+        self._session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PUBLICATION_LOCK})
+
 
 class SqlAlchemyCitationRepository:
     def __init__(self, session: Session) -> None:
@@ -695,6 +841,35 @@ class SqlAlchemyCitationRepository:
             )
             for row, clause_ref, document_id in self._session.execute(statement).all()
         )
+
+    def add(self, citation: CitationRecord) -> bool:
+        statement = (
+            insert(CitationRow)
+            .values(
+                id=citation.citation_id,
+                rule_version_id=citation.rule_version_id.value,
+                clause_id=citation.clause_id.value,
+                quote=citation.quote,
+                verified=citation.verified,
+                match_score=None if citation.match_score is None else _score(citation.match_score),
+                verified_at=citation.verified_at,
+            )
+            .on_conflict_do_nothing()
+            .returning(CitationRow.id)
+        )
+        return self._session.execute(statement).first() is not None
+
+
+class SqlAlchemyEventSink:
+    """Writes each event into ``outbox_event`` on the unit of work's connection, keyed by its
+    rule, so the event commits or rolls back with the change it describes."""
+
+    def __init__(self, session: Session, writer: OutboxWriter) -> None:
+        self._session = session
+        self._writer = writer
+
+    def publish(self, event: RuleEvent) -> None:
+        self._writer.write(self._session.connection(), event, partition_key=event.partition_key)
 
 
 class SqlAlchemyClauseIndex:
@@ -844,7 +1019,7 @@ class SqlAlchemyRunRepository:
 
 
 class SqlAlchemyKnowledgeUnitOfWork:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, writer: OutboxWriter) -> None:
         self._documents = SqlAlchemyDocumentRepository(session)
         self._entities = SqlAlchemyEntityRepository(session)
         self._mentions = SqlAlchemyMentionRepository(session)
@@ -856,6 +1031,7 @@ class SqlAlchemyKnowledgeUnitOfWork:
         self._citations = SqlAlchemyCitationRepository(session)
         self._index = SqlAlchemyClauseIndex(session)
         self._runs = SqlAlchemyRunRepository(session)
+        self._events = SqlAlchemyEventSink(session, writer)
 
     @property
     def documents(self) -> SqlAlchemyDocumentRepository:
@@ -901,12 +1077,17 @@ class SqlAlchemyKnowledgeUnitOfWork:
     def runs(self) -> SqlAlchemyRunRepository:
         return self._runs
 
+    @property
+    def events(self) -> SqlAlchemyEventSink:
+        return self._events
+
 
 class PostgresKnowledgeUnitOfWorkFactory:
     """``factory()`` opens one transaction; the block's clean exit commits it."""
 
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, engine: Engine, *, writer: OutboxWriter | None = None) -> None:
         self._engine = engine
+        self._writer = writer or OutboxWriter()
 
     @classmethod
     def from_url(cls, database_url: str) -> Self:
@@ -922,7 +1103,7 @@ class PostgresKnowledgeUnitOfWorkFactory:
     @contextmanager
     def _open(self) -> Iterator[KnowledgeUnitOfWork]:
         with Session(self._engine, expire_on_commit=False) as session, session.begin():
-            yield SqlAlchemyKnowledgeUnitOfWork(session)
+            yield SqlAlchemyKnowledgeUnitOfWork(session, self._writer)
 
     def ping(self) -> bool:
         with self._engine.connect() as connection:
@@ -1028,6 +1209,8 @@ def _to_version(
         seed_status=SeedStatus(row.seed_status),
         todo=tuple(str(item) for item in row.todo),
         published_at=row.published_at,
+        high_impact=row.high_impact,
+        submitted_at=row.submitted_at,
     )
 
 

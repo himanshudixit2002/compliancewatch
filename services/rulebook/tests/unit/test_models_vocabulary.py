@@ -5,25 +5,48 @@ so this test and the inspector-based integration test are what keep the models, 
 and the kernel in step.
 """
 
+import importlib.util
 import re
+from pathlib import Path
+from types import ModuleType
 
 from sqlalchemy import CheckConstraint
 
 from domain_kernel.documents import PARSER_VERSION_PATTERN, DocumentType
 from domain_kernel.knowledge import RULE_VERSION_KIND, RULE_VERSION_ONLY, EntityType, RelationKind
+from domain_kernel.status import RULE_VERSION_TRANSITIONS, RuleVersionStatus
 from rulebook.domain.documents import CLAUSE_REF_PATTERN
+from rulebook.domain.publication import DecisionAction
 from rulebook.infrastructure.models import (
+    DECISION_ACTIONS,
     DOCUMENT_TYPES,
     ENTITY_TYPES,
     MENTION_METHODS,
     RELATION_KINDS,
     RULE_VERSION_ONLY_RELATIONS,
+    RULE_VERSION_STATUSES,
     RULE_VERSION_TARGET,
     TARGET_KINDS,
     Base,
 )
 
 QUOTED = re.compile(r"'([a-z_]+)'")
+PAIR = re.compile(r"\('([a-z_]+)', '([a-z_]+)'\)")
+PUBLISH_FLOW = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "versions"
+    / "20260929_0007_publish_flow.py"
+)
+
+
+def _publish_flow_migration() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("publish_flow_migration", PUBLISH_FLOW)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _check(table: str, name: str) -> str:
@@ -113,3 +136,31 @@ def test_every_check_is_named() -> None:
             if isinstance(constraint, CheckConstraint):
                 assert isinstance(constraint.name, str)
                 assert constraint.name.startswith(f"ck_{table}_")
+
+
+def test_the_rule_version_guard_allows_exactly_the_kernel_transitions() -> None:
+    guard: str = _publish_flow_migration().GUARD
+    literal_pairs = set(PAIR.findall(guard))
+    kernel_pairs = {
+        (state.value, successor.value)
+        for state in RuleVersionStatus
+        for successor in RULE_VERSION_TRANSITIONS.successors(state)
+    }
+    assert literal_pairs == kernel_pairs
+    assert "OLD.status IN ('published', 'superseded', 'withdrawn')" in guard
+
+
+def test_decision_actions_and_statuses_follow_the_domain() -> None:
+    migration = _publish_flow_migration()
+    assert tuple(action.value for action in DecisionAction) == DECISION_ACTIONS
+    assert migration.DECISION_ACTIONS == DECISION_ACTIONS
+    assert migration.RULE_VERSION_STATUSES == RULE_VERSION_STATUSES
+    assert QUOTED.findall(_check("rule_version_decision", "ck_rule_version_decision_action")) == (
+        list(DECISION_ACTIONS)
+    )
+    for column in ("from_status", "to_status"):
+        body = _check("rule_version_decision", f"ck_rule_version_decision_{column}")
+        assert QUOTED.findall(body) == [status.value for status in RuleVersionStatus]
+    assert _check("rule_version_decision", "ck_rule_version_decision_actor") == (
+        "actor_id IS NOT NULL OR caused_by_rule_version_id IS NOT NULL"
+    )

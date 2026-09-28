@@ -10,7 +10,7 @@ from collections.abc import Callable
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
-from domain_kernel.errors import DomainError, InvalidRelationError
+from domain_kernel.errors import DomainError, InvalidRelationError, InvalidTransitionError
 from py_common.app import create_app
 from rulebook import __version__
 from rulebook.api.router import router
@@ -23,6 +23,15 @@ from rulebook.application.graph import (
     ReadEntity,
     ResolveEntity,
 )
+from rulebook.application.publication import (
+    AddCitations,
+    ApplyDueTransitions,
+    ApproveVersion,
+    PublishVersion,
+    ReturnToDraft,
+    SubmitForReview,
+    WithdrawVersion,
+)
 from rulebook.application.relations import (
     ApproveRelationCandidate,
     ListRelationCandidates,
@@ -34,19 +43,29 @@ from rulebook.application.review import DecideMentionGroup, ListGroupItems, List
 from rulebook.application.rule_versions import ListCitations, ListRulesInForce, ReadRuleVersion
 from rulebook.application.search import ListUnembeddedClauses, SearchClauses, StoreEmbeddings
 from rulebook.domain.errors import (
+    ApprovalsMissingError,
     CandidateClosedError,
     CandidateNotFoundError,
+    CitationNotVerifiedError,
+    CitationsMissingError,
     ClauseNotStoredError,
+    DeadlineDetailMissingError,
     DocumentConflictError,
     DocumentIdMismatchError,
+    DuplicateApproverError,
     EmbeddingDimensionError,
     EntityTypeMismatchError,
     MentionSpanMismatchError,
     NonCanonicalNameError,
+    OverlappingVersionError,
+    PublishingDisabledError,
+    RelationTargetStateError,
+    ReplacementDatesError,
     ReviewGroupClosedError,
     ReviewGroupNotFoundError,
     RuleVersionNotEditableError,
     SupersessionCycleError,
+    TargetAlreadyReplacedError,
     TargetUnresolvedError,
     TargetVersionRequiredError,
     UnknownClauseError,
@@ -87,6 +106,17 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     InvalidRelationError: 422,
     ClauseNotStoredError: 404,
     EmbeddingDimensionError: 422,
+    InvalidTransitionError: 409,
+    CitationNotVerifiedError: 422,
+    CitationsMissingError: 409,
+    ApprovalsMissingError: 409,
+    DuplicateApproverError: 409,
+    RelationTargetStateError: 409,
+    ReplacementDatesError: 409,
+    TargetAlreadyReplacedError: 409,
+    DeadlineDetailMissingError: 409,
+    OverlappingVersionError: 409,
+    PublishingDisabledError: 503,
 }
 
 
@@ -102,6 +132,8 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
 
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)
+
+    publishing = settings.rulebook_publish_enabled
 
     return Wiring(
         settings=settings,
@@ -129,6 +161,13 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
         store_embeddings=StoreEmbeddings(unit_of_work),
         list_unembedded=ListUnembeddedClauses(unit_of_work),
         search_clauses=SearchClauses(unit_of_work),
+        add_citations=AddCitations(unit_of_work),
+        submit_version=SubmitForReview(unit_of_work),
+        return_version=ReturnToDraft(unit_of_work),
+        approve_version=ApproveVersion(unit_of_work),
+        publish_version=PublishVersion(unit_of_work, enabled=publishing),
+        withdraw_version=WithdrawVersion(unit_of_work, enabled=publishing),
+        apply_transitions=ApplyDueTransitions(unit_of_work, enabled=publishing),
     )
 
 

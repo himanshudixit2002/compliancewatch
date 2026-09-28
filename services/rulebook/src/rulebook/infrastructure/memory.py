@@ -3,7 +3,9 @@
 Changes made inside a unit of work become visible to others only when the block exits cleanly,
 as with the Postgres store. Units of work run one at a time (a lock held for the whole block),
 so two overlapping requests cannot both start from the same tables and lose a write. The
-uniqueness rules are the database's: first write wins, a repeat is a no-op.
+uniqueness rules are the database's: first write wins, a repeat is a no-op. Events go to an
+outbox list that is part of the tables, so they are kept or dropped with the unit of work, and
+a status change must follow the kernel's transitions, as the Postgres trigger requires.
 """
 
 import copy
@@ -17,12 +19,21 @@ from datetime import date, datetime
 from uuid import UUID, uuid4
 
 from domain_kernel.events import utc_now
-from domain_kernel.ids import CanonicalEntityId, ClauseId, DocumentId, RuleId, RuleVersionId
+from domain_kernel.ids import (
+    CanonicalEntityId,
+    ClauseId,
+    DocumentId,
+    RuleId,
+    RuleVersionId,
+    UserId,
+)
 from domain_kernel.knowledge import EntityRef, EntityType, RelationKind, RuleRelation
 from domain_kernel.ontology import AttributeLevel
-from domain_kernel.status import RuleVersionStatus
+from domain_kernel.status import RULE_VERSION_TRANSITIONS, RuleVersionStatus
 from domain_kernel.vectors import ClauseFilter, Vector
 from rulebook.domain.documents import StoredClause, StoredDocument
+from rulebook.domain.errors import UnknownRuleVersionError
+from rulebook.domain.events import RuleEvent
 from rulebook.domain.graph import (
     ClauseDetail,
     EntityRecord,
@@ -30,6 +41,12 @@ from rulebook.domain.graph import (
     MentionSpan,
     RelationQuery,
     RelationRecord,
+)
+from rulebook.domain.publication import (
+    REPLACING,
+    DecisionAction,
+    PendingReplacement,
+    RuleVersionDecision,
 )
 from rulebook.domain.relations import CandidateStatus, RelationCandidate
 from rulebook.domain.repository import KnowledgeUnitOfWork
@@ -85,6 +102,8 @@ class _Version:
     seed_status: SeedStatus = SeedStatus.NEEDS_REVIEW
     todo: tuple[str, ...] = ()
     published_at: datetime | None = None
+    high_impact: bool = False
+    submitted_at: datetime | None = None
 
 
 @dataclass
@@ -113,6 +132,8 @@ class _Tables:
     citations: dict[UUID, _Citation] = field(default_factory=dict)
     embeddings: dict[tuple[ClauseId, str], Vector] = field(default_factory=dict)
     runs: dict[UUID, ExtractionRun] = field(default_factory=dict)
+    decisions: list[RuleVersionDecision] = field(default_factory=list)
+    outbox: list[RuleEvent] = field(default_factory=list)
 
     def copy(self) -> "_Tables":
         return copy.deepcopy(self)
@@ -520,6 +541,101 @@ class MemoryRuleVersionRepository:
         version = self._tables.versions.get(rule_version_id)
         return None if version is None else _version_record(self._tables, rule_version_id, version)
 
+    def lock(self, rule_version_id: RuleVersionId) -> RuleVersionRecord | None:
+        """Units of work already run one at a time here."""
+        return self.get(rule_version_id)
+
+    def lock_many(
+        self, rule_version_ids: Sequence[RuleVersionId]
+    ) -> Mapping[RuleVersionId, RuleVersionRecord]:
+        found = (self.get(version_id) for version_id in sorted(set(rule_version_ids), key=str))
+        return {record.rule_version_id: record for record in found if record is not None}
+
+    def of_rule(self, rule_id: RuleId) -> Sequence[RuleVersionRecord]:
+        found = [
+            _version_record(self._tables, version_id, version)
+            for version_id, version in self._tables.versions.items()
+            if version.rule_id == rule_id.value
+        ]
+        return sorted(found, key=lambda record: record.version)
+
+    def save_lifecycle(self, record: RuleVersionRecord) -> None:
+        version = self._tables.versions.get(record.rule_version_id)
+        if version is None:
+            raise UnknownRuleVersionError(str(record.rule_version_id))
+        if record.status is not version.status:
+            RULE_VERSION_TRANSITIONS.assert_transition(version.status, record.status)
+        version.status = record.status
+        version.seed_status = record.seed_status
+        version.effective_to = record.effective_to
+        version.published_at = record.published_at
+        version.submitted_at = record.submitted_at
+        version.high_impact = record.high_impact
+
+    def record_decision(self, decision: RuleVersionDecision) -> None:
+        self._tables.decisions.append(decision)
+
+    def approvers(self, rule_version_id: RuleVersionId, since: datetime) -> frozenset[UserId]:
+        return frozenset(
+            decision.actor_id
+            for decision in self._tables.decisions
+            if decision.rule_version_id == rule_version_id
+            and decision.action is DecisionAction.APPROVED
+            and decision.actor_id is not None
+            and decision.decided_at >= since
+        )
+
+    def replaced_by_others(
+        self, rule_version_ids: Sequence[RuleVersionId], excluding: RuleVersionId
+    ) -> frozenset[RuleVersionId]:
+        wanted = set(rule_version_ids)
+        found: set[RuleVersionId] = set()
+        for relation, _ in self._tables.relations.values():
+            target = relation.target
+            source = self._tables.versions.get(relation.from_rule_version_id)
+            if (
+                relation.relation in REPLACING
+                and isinstance(target, RuleVersionId)
+                and target in wanted
+                and relation.from_rule_version_id != excluding
+                and source is not None
+                and source.status in IN_FORCE_STATUSES
+            ):
+                found.add(target)
+        return frozenset(found)
+
+    def pending_replacements(self, today: date) -> Sequence[PendingReplacement]:
+        pending: list[PendingReplacement] = []
+        for relation, _ in self._tables.relations.values():
+            target_id = relation.target
+            if relation.relation not in REPLACING or not isinstance(target_id, RuleVersionId):
+                continue
+            replacing = self._tables.versions.get(relation.from_rule_version_id)
+            target = self._tables.versions.get(target_id)
+            if (
+                replacing is not None
+                and target is not None
+                and replacing.status in IN_FORCE_STATUSES
+                and replacing.effective_from <= today
+                and target.status is RuleVersionStatus.PUBLISHED
+            ):
+                pending.append(
+                    PendingReplacement(
+                        relation=relation.relation,
+                        target_id=target_id,
+                        target_rule_id=RuleId(target.rule_id),
+                        replacing_id=relation.from_rule_version_id,
+                        replacing_from=replacing.effective_from,
+                    )
+                )
+        return sorted(
+            pending,
+            key=lambda p: (p.replacing_from, str(p.target_id), str(p.replacing_id)),
+        )
+
+    def lock_publication(self) -> None:
+        """Units of work already run one at a time here."""
+
 
 class MemoryClauseIndex:
     """Token overlap for the lexical leg, cosine similarity for the vector leg."""
@@ -645,6 +761,8 @@ def _version_record(
         seed_status=version.seed_status,
         todo=version.todo,
         published_at=version.published_at,
+        high_impact=version.high_impact,
+        submitted_at=version.submitted_at,
     )
 
 
@@ -672,6 +790,27 @@ class MemoryCitationRepository:
             found.append(((str(clause.document_id), clause.ordinal, str(citation_id)), record))
         return tuple(record for _, record in sorted(found, key=lambda item: item[0]))
 
+    def add(self, citation: CitationRecord) -> bool:
+        if citation.citation_id in self._tables.citations:
+            return False
+        self._tables.citations[citation.citation_id] = _Citation(
+            rule_version_id=citation.rule_version_id,
+            clause_id=citation.clause_id,
+            quote=citation.quote,
+            verified=citation.verified,
+            match_score=citation.match_score,
+            verified_at=citation.verified_at,
+        )
+        return True
+
+
+class MemoryEventSink:
+    def __init__(self, tables: _Tables) -> None:
+        self._tables = tables
+
+    def publish(self, event: RuleEvent) -> None:
+        self._tables.outbox.append(event)
+
 
 class MemoryRunRepository:
     def __init__(self, tables: _Tables) -> None:
@@ -697,6 +836,7 @@ class MemoryUnitOfWork:
         self._citations = MemoryCitationRepository(tables)
         self._index = MemoryClauseIndex(tables)
         self._runs = MemoryRunRepository(tables)
+        self._events = MemoryEventSink(tables)
 
     @property
     def documents(self) -> MemoryDocumentRepository:
@@ -742,6 +882,10 @@ class MemoryUnitOfWork:
     def runs(self) -> MemoryRunRepository:
         return self._runs
 
+    @property
+    def events(self) -> MemoryEventSink:
+        return self._events
+
 
 class MemoryKnowledgeStore:
     """``store()`` opens a unit of work on a copy of the tables; a clean exit publishes it."""
@@ -778,6 +922,7 @@ class MemoryKnowledgeStore:
         obligation_template: Mapping[str, object] | None = None,
         recurrence: Mapping[str, object] | None = None,
         published_at: datetime | None = None,
+        high_impact: bool = False,
     ) -> tuple[RuleId, RuleVersionId]:
         """A rule with one version, for tests and demos (the seed command writes real ones).
         The version's content defaults to empty mappings: nothing here is a regulatory fact."""
@@ -795,6 +940,7 @@ class MemoryKnowledgeStore:
             obligation_template=obligation_template,
             recurrence=recurrence,
             published_at=published_at,
+            high_impact=high_impact,
         )
         return rule_id, version_id
 
@@ -811,8 +957,10 @@ class MemoryKnowledgeStore:
         obligation_template: Mapping[str, object] | None = None,
         recurrence: Mapping[str, object] | None = None,
         published_at: datetime | None = None,
+        high_impact: bool = False,
     ) -> RuleVersionId:
-        """The next version of a rule ``add_rule`` created."""
+        """The next version of a rule ``add_rule`` created. A status past draft is set as is,
+        without the review flow; tests that exercise the flow start from a draft."""
         version_id = RuleVersionId.new()
         with self._lock:
             rule = self._tables.rules[rule_key]
@@ -833,6 +981,7 @@ class MemoryKnowledgeStore:
                 effective_from=effective_from,
                 effective_to=effective_to,
                 published_at=published_at,
+                high_impact=high_impact,
             )
         return version_id
 
@@ -885,3 +1034,17 @@ class MemoryKnowledgeStore:
     def runs(self) -> list[ExtractionRun]:
         with self._lock:
             return list(self._tables.runs.values())
+
+    def events(self) -> list[RuleEvent]:
+        """The committed outbox, oldest first."""
+        with self._lock:
+            return list(self._tables.outbox)
+
+    def decisions(self, rule_version_id: RuleVersionId | None = None) -> list[RuleVersionDecision]:
+        """The committed decision audit, oldest first; one version's when it is named."""
+        with self._lock:
+            return [
+                decision
+                for decision in self._tables.decisions
+                if rule_version_id in (None, decision.rule_version_id)
+            ]

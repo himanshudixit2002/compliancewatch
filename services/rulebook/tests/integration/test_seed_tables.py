@@ -1,5 +1,7 @@
 """Migration 0003 and the seed repository on Postgres: draft versions are created, re-runs are
-idempotent, edits update drafts, published versions stay untouched. Needs Docker."""
+idempotent, edits update drafts, versions that left draft stay untouched (a direct move to
+published is refused by the migration 0007 guard, so the test moves one to review). Needs
+Docker."""
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -55,7 +57,7 @@ def test_rule_tables_exist(engine: Engine) -> None:
     } <= checks
 
 
-def test_seed_is_idempotent_updates_drafts_and_respects_published(engine: Engine) -> None:
+def test_seed_is_idempotent_updates_drafts_and_respects_reviewed_versions(engine: Engine) -> None:
     calendar = load_calendar(ontology_package.load())
     repository = SqlAlchemySeedRepository(engine)
     first = repository.apply(calendar, now=datetime(2026, 9, 28, tzinfo=UTC))
@@ -78,8 +80,7 @@ def test_seed_is_idempotent_updates_drafts_and_respects_published(engine: Engine
         assert isinstance(all_of, list)
         assert all_of[0] == {"attribute": "registration_type", "operator": "eq", "value": "regular"}
         assert gstr3b.todo
-        gstr3b.status = "published"
-        gstr3b.published_at = datetime(2026, 9, 29, tzinfo=UTC)
+        gstr3b.status = "in_review"
         session.commit()
 
     edited = load_calendar(
@@ -107,7 +108,7 @@ def test_seed_is_idempotent_updates_drafts_and_respects_published(engine: Engine
             .order_by(RuleVersionRow.version)
         ).all()
         assert [(v.version, v.status, v.title) for v in versions] == [
-            (1, "published", "File FORM GSTR-3B every month"),
+            (1, "in_review", "File FORM GSTR-3B every month"),
             (2, "draft", "File GSTR-3B monthly"),
         ]
 

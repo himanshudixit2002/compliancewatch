@@ -41,6 +41,7 @@ class RuleVersionOut(BaseModel):
     seed_status: SeedStatus
     todo: list[str]
     published_at: datetime | None
+    high_impact: bool = Field(description="Publishing needs two different approvers (ADR-006)")
 
     @classmethod
     def from_record(cls, record: RuleVersionRecord) -> Self:
@@ -63,6 +64,7 @@ class RuleVersionOut(BaseModel):
             seed_status=record.seed_status,
             todo=list(record.todo),
             published_at=record.published_at,
+            high_impact=record.high_impact,
         )
 
 

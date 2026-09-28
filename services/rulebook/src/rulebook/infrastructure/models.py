@@ -6,8 +6,10 @@ Table names are unqualified: the connection's search_path (CW_DB_SCHEMA, set by 
 and ``make run``) puts them in the ``rulebook`` schema. The migrations under
 ``migrations/versions`` are written by hand and mirror these models constraint for constraint;
 the integration test compares the two. Triggers are not modelled: migration 0004 makes
-``document`` and ``clause`` append-only and fixes a citation's identity, and migration 0006 makes
-``clause_embedding`` refuse updates.
+``document`` and ``clause`` append-only and fixes a citation's identity, migration 0006 makes
+``clause_embedding`` refuse updates, and migration 0007 makes ``rule_version_decision``
+append-only and guards ``rule_version`` (status moves, frozen content, publish preconditions).
+The ``outbox_event`` table of the same migration belongs to py-common's metadata, not this one.
 
 The vocabulary in the CHECK constraints is the kernel's (``domain_kernel.knowledge``), and so are
 the rules on ``rule_relation``: the relations in ``RULE_VERSION_ONLY`` target a rule version,
@@ -56,6 +58,7 @@ from domain_kernel.status import RuleVersionStatus
 from domain_kernel.vectors import EMBEDDING_DIMS
 from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.documents import CLAUSE_REF_PATTERN
+from rulebook.domain.publication import DecisionAction
 from rulebook.domain.relations import CandidateRejectReason, CandidateStatus
 from rulebook.domain.review import EntityRejectReason, Resolution, ReviewStatus
 
@@ -457,6 +460,8 @@ class RuleRelationRow(Base):
 RULE_VERSION_STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in RuleVersionStatus)
 """``RuleVersionStatus``: draft, in_review, approved, published, superseded, withdrawn."""
 SEED_STATUSES: Final[tuple[str, ...]] = ("needs_review", "reviewed")
+DECISION_ACTIONS: Final[tuple[str, ...]] = tuple(action.value for action in DecisionAction)
+"""What a decision records: submitted, returned, approved, published, withdrawn, superseded."""
 LEVELS: Final[tuple[str, ...]] = ("entity", "registration", "location")
 
 
@@ -503,8 +508,9 @@ class RuleVersionRow(Base):
         {
             "comment": (
                 "Rule versions. specification, obligation_template and recurrence hold the "
-                "kernel's mapping forms; source and todo come from the seed calendar. Citations "
-                "to clauses arrive with the pipeline."
+                "kernel's mapping forms; source and todo come from the seed calendar. status "
+                "moves only as the kernel's transitions allow, and a published version's content "
+                "is frozen (trigger)."
             )
         },
     )
@@ -533,6 +539,72 @@ class RuleVersionRow(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    high_impact: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=false(),
+        comment="Publishing needs two different approvers (ADR-006)",
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Start of the current review round; approvals before it do not count",
+    )
+
+
+class RuleVersionDecisionRow(Base):
+    """One step of a rule version's review and publication, by an analyst or caused by the
+    version that replaced it."""
+
+    __tablename__ = "rule_version_decision"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_rule_version_decision"),
+        ForeignKeyConstraint(
+            ["rule_version_id"],
+            ["rule_version.id"],
+            name="fk_rule_version_decision_rule_version_id_rule_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["caused_by_rule_version_id"],
+            ["rule_version.id"],
+            name="fk_rule_version_decision_caused_by_rule_version_id",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            sql_in_list("action", DECISION_ACTIONS), name="ck_rule_version_decision_action"
+        ),
+        CheckConstraint(
+            sql_in_list("from_status", RULE_VERSION_STATUSES),
+            name="ck_rule_version_decision_from_status",
+        ),
+        CheckConstraint(
+            sql_in_list("to_status", RULE_VERSION_STATUSES),
+            name="ck_rule_version_decision_to_status",
+        ),
+        CheckConstraint(
+            "actor_id IS NOT NULL OR caused_by_rule_version_id IS NOT NULL",
+            name="ck_rule_version_decision_actor",
+        ),
+        Index("ix_rule_version_decision_version", "rule_version_id", "decided_at"),
+        {
+            "comment": (
+                "The review and publication audit of rule versions (ADR-006): who submitted, "
+                "returned, approved, published or withdrew a version, or which version "
+                "superseded or withdrew it. Append-only (trigger)."
+            )
+        },
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid)
+    rule_version_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    from_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    to_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    caused_by_rule_version_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    note: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class CitationRow(Base):
