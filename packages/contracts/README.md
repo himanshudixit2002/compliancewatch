@@ -17,6 +17,7 @@ openapi/                 # OpenAPI 3.1 specs, public /v1 and internal service AP
   identity.v1.json         # services/identity
   rulebook.v1.json         # services/rulebook
   obligation.v1.json       # services/obligation
+  qa.v1.json               # services/qa
 events/
   schemas/               # JSON Schema 2020-12: envelope.v1.json and one <topic>.v1.json per event
   examples/<topic>/      # golden messages (envelope + payload) every check replays

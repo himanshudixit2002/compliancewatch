@@ -11,6 +11,7 @@ from typing import ClassVar
 from uuid import UUID
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from domain_kernel.ids import BusinessId, TenantId
@@ -28,7 +29,7 @@ from qa.application.structured import StructuredLayer
 from qa.domain.flags import KagTargeting
 from qa.domain.prompt import PromptText
 from qa.domain.records import ClauseRecord, Entity, RuleVersion
-from qa.main import app
+from qa.main import build_app
 from qa.testing import (
     FakeEmbedder,
     MemoryObligations,
@@ -36,8 +37,11 @@ from qa.testing import (
     MemoryRulebook,
     RecordingTracer,
     ScriptedProvider,
+    memory_ports,
+    qa_settings,
     tenant_id,
 )
+from qa.wiring import Ports
 
 TENANT = tenant_id(1)
 OTHER_TENANT = tenant_id(2)
@@ -106,6 +110,17 @@ class World:
     ) -> AskContext:
         request = self.request(question, business=business, as_of=as_of)
         return AskContext(request, self.rulebook, self.profiles)
+
+    def ports(self) -> Ports:
+        return Ports(
+            rulebook=self.rulebook,
+            search=self.rulebook,
+            profiles=self.profiles,
+            obligations=self.obligations,
+            embedder=self.embedder,
+            provider=self.provider,
+            tracer=self.tracer,
+        )
 
     def answerer(self) -> Answerer:
         return Answerer(self.provider, ANSWER)
@@ -233,6 +248,11 @@ def world(ontology: Ontology) -> World:
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
+def app(ontology: Ontology) -> FastAPI:
+    return build_app(qa_settings(), ports=memory_ports(), ontology=ontology)
+
+
+@pytest.fixture
+def client(app: FastAPI) -> Iterator[TestClient]:
     with TestClient(app) as test_client:
         yield test_client

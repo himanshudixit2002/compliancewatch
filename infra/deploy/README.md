@@ -53,7 +53,11 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_RULEBOOK_STORE` | - | - | env | - | - | - | - | - | - |
 | `CW_RULEBOOK_WRITE_TOKEN` | - | - | secret | - | - | - | secret | - | - |
 | `CW_RULEBOOK_PUBLISH_ENABLED` | - | - | env (default `false`; owner regulatory-intelligence; removed once the workbench publishes in production and the obligation consumer of the rule events is live) | - | - | - | - | - | - |
-| `CW_PIPELINE_KNOWLEDGE_ENABLED`, `CW_RULEBOOK_URL`, `CW_LLM_GATEWAY_URL` | - | - | - | - | - | - | env | - | - |
+| `CW_PIPELINE_KNOWLEDGE_ENABLED` | - | - | - | - | - | - | env | - | - |
+| `CW_RULEBOOK_URL`, `CW_LLM_GATEWAY_URL` | - | - | - | - | - | - | env | env (qa) | - |
+| `CW_PROFILE_URL`, `CW_OBLIGATION_URL`, `CW_QA_HTTP_TIMEOUT_SECONDS`, `CW_QA_LLM_TIMEOUT_SECONDS` | - | - | - | - | - | - | - | env (qa) | - |
+| `CW_QA_KAG_ENABLED`, `CW_QA_KAG_TENANTS` | - | - | - | - | - | - | - | env (qa; default `false` and every tenant; owner ai-platform; removed when ADR-017 is Accepted) | - |
+| `CW_QA_PROMPTS_DIR` | - | - | - | - | - | - | - | set by the qa image (`/app/prompts`) | - |
 | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_SEND_ENABLED`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `NOTIFICATION_API_URL` | - | - | - | - | - | - | - | - | secret / secret / env / secret / secret / env |
 
 The pipeline writes regulator documents to the rulebook (ADR-018), so deploy the rulebook before

@@ -1,5 +1,6 @@
-"""Test doubles for tests, demos and the evals: the upstream services in memory, a scripted
-model, a fake embedder and a tracer that keeps its spans.
+"""Test doubles for tests, demos and the evals: settings that ignore the repo ``.env``, the
+upstream services in memory, a scripted model, a fake embedder and a tracer that keeps its
+spans; ``memory_ports`` puts them together for ``build_app(ports=...)``.
 
 ``MemoryRulebook`` answers the rulebook's read API with its rules: the versions in force on a
 date are the published or superseded ones whose period contains it, relations are those from
@@ -17,7 +18,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time
-from typing import Final
+from typing import Any, Final
 from uuid import UUID, uuid4
 
 from domain_kernel.financial_year import FinancialYear
@@ -57,6 +58,8 @@ from qa.domain.records import (
     SearchHit,
     VersionCitation,
 )
+from qa.settings import QaSettings
+from qa.wiring import Ports
 
 PUBLISHED: Final = "published"
 HAS_BEEN_PUBLISHED: Final = frozenset({PUBLISHED, "superseded"})
@@ -64,6 +67,31 @@ _WORD = re.compile(r"[a-z0-9]+(?:[-/.][a-z0-9]+)*")
 _STOP_WORDS: Final = frozenset(
     {"a", "an", "and", "are", "by", "for", "i", "is", "my", "of", "on", "the", "to", "what", "when"}
 )
+
+
+def qa_settings(**overrides: Any) -> QaSettings:
+    """Settings that ignore the repo ``.env``; explicit values win over the environment. The
+    KAG flag keeps its default (off) unless a test turns it on."""
+    values: dict[str, Any] = {"_env_file": None, "service_name": "qa"}
+    values.update(overrides)
+    return QaSettings(**values)
+
+
+def memory_ports(**overrides: Any) -> Ports:
+    """Every port in memory: one ``MemoryRulebook`` for reads and search, empty profiles and
+    obligations, the fake embedder, a ``ScriptedProvider`` with no script, a
+    ``RecordingTracer``. ``overrides`` replace ports by name."""
+    rulebook = MemoryRulebook()
+    ports = Ports(
+        rulebook=rulebook,
+        search=rulebook,
+        profiles=MemoryProfiles(),
+        obligations=MemoryObligations(),
+        embedder=FakeEmbedder(),
+        provider=ScriptedProvider(),
+        tracer=RecordingTracer(),
+    )
+    return replace(ports, **overrides)
 
 
 class MemoryRulebook:
