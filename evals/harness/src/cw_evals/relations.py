@@ -76,6 +76,8 @@ class RelationScore:
     proposed: int
     evidence_ok: int
     missed: tuple[str, ...] = ()
+    candidates: int = 0
+    """Candidates the run staged, counted one by one (``proposed`` counts distinct targets)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +193,7 @@ def score_relations(case: RelationCase, batch: RelationBatch) -> RelationScore:
         proposed=len(proposed),
         evidence_ok=evidence_ok,
         missed=tuple(sorted("/".join(key) for key in expected - proposed)),
+        candidates=len(batch.candidates),
     )
 
 
@@ -203,7 +206,9 @@ def aggregate_relations(scores: Sequence[RelationScore]) -> RelationAggregate:
         relation_parse_rate=_share(sum(s.outcome != "unparseable" for s in scores), cases),
         relation_recall=_share(sum(s.found for s in scores), expected),
         relation_precision=_share(sum(s.found for s in scores), proposed, empty=1.0),
-        evidence_validity=_share(sum(s.evidence_ok for s in scores), proposed, empty=1.0),
+        evidence_validity=_share(
+            sum(s.evidence_ok for s in scores), sum(s.candidates for s in scores), empty=1.0
+        ),
     )
 
 

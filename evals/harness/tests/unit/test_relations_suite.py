@@ -82,3 +82,10 @@ def test_an_unknown_provider_is_refused() -> None:
         relation_provider("nope", [], gateway_url="http://unused.test"),
     ):
         pass
+
+
+def test_evidence_validity_counts_every_candidate() -> None:
+    both_valid = RelationScore("c", "draft", "ok", 1, 1, 1, 2, candidates=2)
+    one_valid = RelationScore("d", "draft", "ok", 1, 1, 1, 1, candidates=2)
+    assert aggregate_relations([both_valid]).evidence_validity == 1.0
+    assert aggregate_relations([both_valid, one_valid]).evidence_validity == 0.75
