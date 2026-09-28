@@ -49,6 +49,9 @@ class SetAttributes:
         self._ontology = ontology
         self._clock = clock
 
+    def now(self) -> datetime:
+        return self._clock()
+
     def run(
         self,
         tenant_id: TenantId,
@@ -68,7 +71,7 @@ class SetAttributes:
                 return SetResult(node, (), ())
             uow.profiles.save(outcome.node)
             uow.events.publish(outcome.event)
-            tasks = tuple(_open_review(uow, tenant_id, request, now) for request in outcome.reviews)
+            tasks = tuple(open_review(uow, tenant_id, request, now) for request in outcome.reviews)
             for request in outcome.reviews:
                 uow.eval_cases.record(_eval_case(outcome.node, request, now))
             return SetResult(outcome.node, outcome.event.changed_attributes, tasks)
@@ -127,11 +130,11 @@ class ConfirmFinancialYear:
                     request = ReviewRequest(entity.id, key, ReviewReason.CONFIRM_FINANCIAL_YEAR, fy)
                     if (entity.id, key, request.reason, fy.label) in existing:
                         continue
-                    opened.append(_open_review(uow, tenant_id, request, now))
+                    opened.append(open_review(uow, tenant_id, request, now))
         return tuple(opened)
 
 
-def _open_review(
+def open_review(
     uow: UnitOfWork, tenant_id: TenantId, request: ReviewRequest, now: datetime
 ) -> BusinessId:
     task = ReviewTask(

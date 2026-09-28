@@ -46,6 +46,8 @@ class ValueState(StrEnum):
 class ReviewReason(StrEnum):
     NOT_APPLICABLE = "not_applicable"
     CONFIRM_FINANCIAL_YEAR = "confirm_financial_year"
+    VERIFY_REGISTRATION = "verify_registration"
+    """The GSTIN lookup was unavailable at onboarding; a person checks the registration."""
 
 
 type AttributeKey = tuple[str, str | None]

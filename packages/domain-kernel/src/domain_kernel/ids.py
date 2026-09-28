@@ -95,6 +95,16 @@ class ObligationId(EntityId):
 
 
 @dataclass(frozen=True, slots=True)
+class NotificationId(EntityId):
+    """One notification about one obligation to one recipient on one channel."""
+
+
+@dataclass(frozen=True, slots=True)
+class ConsentId(EntityId):
+    """One consent record: a grant or a withdrawal."""
+
+
+@dataclass(frozen=True, slots=True)
 class EventId(EntityId):
     """A domain event."""
 

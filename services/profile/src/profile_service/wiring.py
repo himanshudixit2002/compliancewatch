@@ -11,6 +11,7 @@ from profile_service.application.attributes import (
     NextQuestion,
     SetAttributes,
 )
+from profile_service.application.prefill import PrefillFromGstin
 from profile_service.application.registration import RegisterNodes
 from profile_service.domain.repository import UnitOfWorkFactory
 from profile_service.settings import ProfileSettings
@@ -27,3 +28,4 @@ class Wiring:
     next_question: NextQuestion
     build_snapshot: BuildSnapshot
     confirm_financial_year: ConfirmFinancialYear
+    prefill: PrefillFromGstin

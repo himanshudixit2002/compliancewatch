@@ -20,6 +20,7 @@ from profile_service.application.attributes import (
     NextQuestion,
     SetAttributes,
 )
+from profile_service.application.prefill import PrefillFromGstin
 from profile_service.application.registration import RegisterNodes
 from profile_service.domain.errors import (
     AttributeLevelMismatchError,
@@ -28,7 +29,13 @@ from profile_service.domain.errors import (
     ProfileNodeNotFoundError,
     TenantRequiredError,
 )
+from profile_service.domain.lookup import GstinLookupProvider
 from profile_service.domain.repository import UnitOfWorkFactory
+from profile_service.infrastructure.lookup import (
+    DEMO_LOOKUPS,
+    ManualLookupProvider,
+    StaticLookupProvider,
+)
 from profile_service.infrastructure.memory import MemoryStore
 from profile_service.infrastructure.repository import (
     JsonLinesEvalRecorder,
@@ -70,16 +77,23 @@ def wire(settings: ProfileSettings, ontology: Ontology | None = None) -> Wiring:
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)
 
+    lookup: GstinLookupProvider = (
+        StaticLookupProvider(DEMO_LOOKUPS)
+        if settings.profile_gstin_lookup == "static"
+        else ManualLookupProvider()
+    )
+    set_attributes = SetAttributes(unit_of_work, loaded)
     return Wiring(
         settings=settings,
         ontology=loaded,
         unit_of_work=unit_of_work,
         store_ready=store_ready,
         register=RegisterNodes(unit_of_work),
-        set_attributes=SetAttributes(unit_of_work, loaded),
+        set_attributes=set_attributes,
         next_question=NextQuestion(unit_of_work, loaded),
         build_snapshot=BuildSnapshot(unit_of_work),
         confirm_financial_year=ConfirmFinancialYear(unit_of_work, loaded),
+        prefill=PrefillFromGstin(unit_of_work, lookup, set_attributes, loaded),
     )
 
 

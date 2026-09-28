@@ -6,6 +6,7 @@ from typing import Literal
 from py_common.settings import Settings
 
 Store = Literal["memory", "postgres"]
+Lookup = Literal["manual", "static"]
 
 
 class ProfileSettings(Settings):
@@ -15,3 +16,7 @@ class ProfileSettings(Settings):
 
     profile_store: Store = "postgres"
     profile_eval_cases_path: Path | None = None
+    profile_gstin_lookup: Lookup = "manual"
+    """``manual``: no provider, every registration gets a verify_registration task. ``static``:
+    the demo table in ``infrastructure.lookup``. A real GSP or aggregator provider needs an
+    account the maintainer opens; it plugs in behind ``GstinLookupProvider``."""
