@@ -398,4 +398,4 @@ def test_upgrade_refuses_to_add_foreign_keys_over_existing_rows(
         version: str = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-    assert version == "0005"
+    assert version == "0006"

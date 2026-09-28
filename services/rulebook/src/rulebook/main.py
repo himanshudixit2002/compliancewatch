@@ -32,12 +32,14 @@ from rulebook.application.relations import (
 )
 from rulebook.application.review import DecideMentionGroup, ListGroupItems, ListMentionGroups
 from rulebook.application.rule_versions import ListCitations, ListRulesInForce, ReadRuleVersion
+from rulebook.application.search import ListUnembeddedClauses, SearchClauses, StoreEmbeddings
 from rulebook.domain.errors import (
     CandidateClosedError,
     CandidateNotFoundError,
     ClauseNotStoredError,
     DocumentConflictError,
     DocumentIdMismatchError,
+    EmbeddingDimensionError,
     EntityTypeMismatchError,
     MentionSpanMismatchError,
     NonCanonicalNameError,
@@ -84,6 +86,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     SupersessionCycleError: 409,
     InvalidRelationError: 422,
     ClauseNotStoredError: 404,
+    EmbeddingDimensionError: 422,
 }
 
 
@@ -123,6 +126,9 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
         list_entity_clauses=ListEntityClauses(unit_of_work),
         list_rule_relations=ListRelations(unit_of_work),
         read_clause=ReadClause(unit_of_work),
+        store_embeddings=StoreEmbeddings(unit_of_work),
+        list_unembedded=ListUnembeddedClauses(unit_of_work),
+        search_clauses=SearchClauses(unit_of_work),
     )
 
 

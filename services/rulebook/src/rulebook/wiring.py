@@ -22,6 +22,7 @@ from rulebook.application.relations import (
 )
 from rulebook.application.review import DecideMentionGroup, ListGroupItems, ListMentionGroups
 from rulebook.application.rule_versions import ListCitations, ListRulesInForce, ReadRuleVersion
+from rulebook.application.search import ListUnembeddedClauses, SearchClauses, StoreEmbeddings
 from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
 from rulebook.settings import RulebookSettings
 
@@ -50,3 +51,6 @@ class Wiring:
     list_entity_clauses: ListEntityClauses
     list_rule_relations: ListRelations
     read_clause: ReadClause
+    store_embeddings: StoreEmbeddings
+    list_unembedded: ListUnembeddedClauses
+    search_clauses: SearchClauses

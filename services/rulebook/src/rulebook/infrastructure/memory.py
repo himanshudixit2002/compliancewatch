@@ -7,6 +7,8 @@ uniqueness rules are the database's: first write wins, a repeat is a no-op.
 """
 
 import copy
+import math
+import re
 import threading
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
@@ -19,6 +21,7 @@ from domain_kernel.ids import CanonicalEntityId, ClauseId, DocumentId, RuleId, R
 from domain_kernel.knowledge import EntityRef, EntityType, RelationKind, RuleRelation
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.status import RuleVersionStatus
+from domain_kernel.vectors import ClauseFilter, Vector
 from rulebook.domain.documents import StoredClause, StoredDocument
 from rulebook.domain.graph import (
     ClauseDetail,
@@ -38,11 +41,15 @@ from rulebook.domain.rule_versions import (
     in_force,
 )
 from rulebook.domain.runs import ExtractionRun, RuleSummary
+from rulebook.domain.search import CitedClause, ClauseEmbedding
 from rulebook.domain.seed import SeedStatus
 
 EXAMPLES_PER_GROUP = 5
 TEST_EFFECTIVE_FROM = date(2026, 4, 1)
 """Where a test version starts when the test does not say: a date, not a regulatory fact."""
+_TOKEN = re.compile(r"[\w\u0900-\u097f]+")
+"""A word: letters, digits and Devanagari marks, so a Hindi word stays one token."""
+STOP_WORDS = frozenset({"a", "an", "and", "for", "in", "is", "of", "on", "or", "the", "to"})
 
 
 @dataclass
@@ -104,6 +111,7 @@ class _Tables:
     rules: dict[str, _Rule] = field(default_factory=dict)
     versions: dict[RuleVersionId, _Version] = field(default_factory=dict)
     citations: dict[UUID, _Citation] = field(default_factory=dict)
+    embeddings: dict[tuple[ClauseId, str], Vector] = field(default_factory=dict)
     runs: dict[UUID, ExtractionRun] = field(default_factory=dict)
 
     def copy(self) -> "_Tables":
@@ -498,7 +506,9 @@ class MemoryRuleVersionRepository:
     ) -> Sequence[RuleVersionRecord]:
         found = [
             record
-            for record in (self._record(v_id, v) for v_id, v in self._tables.versions.items())
+            for record in (
+                _version_record(self._tables, v_id, v) for v_id, v in self._tables.versions.items()
+            )
             if in_force(record, as_of)
             and rule_key in (None, record.rule_key)
             and regulator in (None, record.regulator)
@@ -508,30 +518,134 @@ class MemoryRuleVersionRepository:
 
     def get(self, rule_version_id: RuleVersionId) -> RuleVersionRecord | None:
         version = self._tables.versions.get(rule_version_id)
-        return None if version is None else self._record(rule_version_id, version)
+        return None if version is None else _version_record(self._tables, rule_version_id, version)
 
-    def _record(self, rule_version_id: RuleVersionId, version: _Version) -> RuleVersionRecord:
-        rule = self._tables.rules[version.rule_key]
-        return RuleVersionRecord(
-            rule_version_id=rule_version_id,
-            rule_id=RuleId(version.rule_id),
-            rule_key=version.rule_key,
-            regulator=rule.regulator,
-            level=rule.level,
-            version=version.version,
-            status=version.status,
-            title=version.title,
-            summary=version.summary,
-            specification=version.specification,
-            obligation_template=version.obligation_template,
-            recurrence=version.recurrence,
-            effective_from=version.effective_from,
-            effective_to=version.effective_to,
-            source=version.source,
-            seed_status=version.seed_status,
-            todo=version.todo,
-            published_at=version.published_at,
+
+class MemoryClauseIndex:
+    """Token overlap for the lexical leg, cosine similarity for the vector leg."""
+
+    def __init__(self, tables: _Tables) -> None:
+        self._tables = tables
+
+    def store(self, model: str, embeddings: Sequence[ClauseEmbedding]) -> tuple[int, int]:
+        stored = 0
+        for embedding in embeddings:
+            key = (embedding.clause_id, model)
+            if key not in self._tables.embeddings:
+                self._tables.embeddings[key] = embedding.vector
+                stored += 1
+        return stored, len(embeddings) - stored
+
+    def unknown_clauses(self, clause_ids: Sequence[ClauseId]) -> frozenset[ClauseId]:
+        return frozenset(c for c in clause_ids if c not in self._tables.clauses)
+
+    def unembedded(
+        self, model: str, document_id: DocumentId | None, limit: int, after: ClauseId | None
+    ) -> Sequence[ClauseDetail]:
+        found = [
+            ClauseDetail(clause, self._tables.documents[clause.document_id])
+            for clause in sorted(self._tables.clauses.values(), key=lambda c: str(c.clause_id))
+            if (clause.clause_id, model) not in self._tables.embeddings
+            and document_id in (None, clause.document_id)
+            and (after is None or str(clause.clause_id) > str(after))
+        ]
+        return found[:limit]
+
+    def lexical(self, text: str, filters: ClauseFilter, pool: int) -> Sequence[ClauseId]:
+        wanted = _tokens(text)
+        scored = [
+            (len(wanted & _tokens(clause.text)), clause.clause_id)
+            for clause in self._tables.clauses.values()
+            if _passes(self._tables.documents[clause.document_id], filters)
+        ]
+        ranked = sorted((s for s in scored if s[0]), key=lambda s: (-s[0], str(s[1])))
+        return [clause_id for _, clause_id in ranked[:pool]]
+
+    def nearest(
+        self, vector: Vector, model: str, filters: ClauseFilter, pool: int
+    ) -> Sequence[ClauseId]:
+        scored = [
+            (_cosine(vector, stored), clause_id)
+            for (clause_id, stored_model), stored in self._tables.embeddings.items()
+            if stored_model == model
+            and _passes(
+                self._tables.documents[self._tables.clauses[clause_id].document_id], filters
+            )
+        ]
+        ranked = sorted(scored, key=lambda s: (-s[0], str(s[1])))
+        return [clause_id for _, clause_id in ranked[:pool]]
+
+    def hits(
+        self, clause_ids: Sequence[ClauseId], as_of: date | None
+    ) -> Mapping[ClauseId, CitedClause]:
+        found: dict[ClauseId, CitedClause] = {}
+        for clause_id in clause_ids:
+            clause = self._tables.clauses[clause_id]
+            citing = {
+                citation.rule_version_id
+                for citation in self._tables.citations.values()
+                if citation.clause_id == clause_id
+                and citation.verified
+                and _cited_in_force(self._tables, citation.rule_version_id, as_of)
+            }
+            found[clause_id] = CitedClause(
+                ClauseDetail(clause, self._tables.documents[clause.document_id]),
+                tuple(sorted(citing, key=str)),
+            )
+        return found
+
+
+def _cited_in_force(tables: _Tables, rule_version_id: RuleVersionId, as_of: date | None) -> bool:
+    version = tables.versions.get(rule_version_id)
+    if version is None or version.status not in IN_FORCE_STATUSES:
+        return False
+    return as_of is None or in_force(_version_record(tables, rule_version_id, version), as_of)
+
+
+def _tokens(text: str) -> frozenset[str]:
+    return frozenset(t for t in _TOKEN.findall(text.casefold()) if t not in STOP_WORDS)
+
+
+def _cosine(first: Vector, second: Vector) -> float:
+    dot = sum(a * b for a, b in zip(first, second, strict=True))
+    return dot / (math.hypot(*first) * math.hypot(*second))
+
+
+def _passes(document: StoredDocument, filters: ClauseFilter) -> bool:
+    return (
+        filters.regulator in (None, document.regulator)
+        and (not filters.doc_types or document.doc_type in filters.doc_types)
+        and (
+            filters.as_of is None
+            or (document.published_at is not None and document.published_at <= filters.as_of)
         )
+    )
+
+
+def _version_record(
+    tables: _Tables, rule_version_id: RuleVersionId, version: _Version
+) -> RuleVersionRecord:
+    rule = tables.rules[version.rule_key]
+    return RuleVersionRecord(
+        rule_version_id=rule_version_id,
+        rule_id=RuleId(version.rule_id),
+        rule_key=version.rule_key,
+        regulator=rule.regulator,
+        level=rule.level,
+        version=version.version,
+        status=version.status,
+        title=version.title,
+        summary=version.summary,
+        specification=version.specification,
+        obligation_template=version.obligation_template,
+        recurrence=version.recurrence,
+        effective_from=version.effective_from,
+        effective_to=version.effective_to,
+        source=version.source,
+        seed_status=version.seed_status,
+        todo=version.todo,
+        published_at=version.published_at,
+    )
 
 
 class MemoryCitationRepository:
@@ -581,6 +695,7 @@ class MemoryUnitOfWork:
         self._rules = MemoryRuleCatalog(tables)
         self._rule_versions = MemoryRuleVersionRepository(tables)
         self._citations = MemoryCitationRepository(tables)
+        self._index = MemoryClauseIndex(tables)
         self._runs = MemoryRunRepository(tables)
 
     @property
@@ -618,6 +733,10 @@ class MemoryUnitOfWork:
     @property
     def citations(self) -> MemoryCitationRepository:
         return self._citations
+
+    @property
+    def index(self) -> MemoryClauseIndex:
+        return self._index
 
     @property
     def runs(self) -> MemoryRunRepository:

@@ -1,11 +1,13 @@
 """SQLAlchemy models for the rulebook tables: regulator documents and clauses, rules and rule
-versions, citations, and the knowledge tables (canonical entities, mentions, relations).
+versions, citations, the knowledge tables (canonical entities, mentions, relations) and the clause
+search index (a full-text column on ``clause`` and the ``clause_embedding`` vectors).
 
 Table names are unqualified: the connection's search_path (CW_DB_SCHEMA, set by ``make migrate``
 and ``make run``) puts them in the ``rulebook`` schema. The migrations under
 ``migrations/versions`` are written by hand and mirror these models constraint for constraint;
 the integration test compares the two. Triggers are not modelled: migration 0004 makes
-``document`` and ``clause`` append-only and fixes a citation's identity.
+``document`` and ``clause`` append-only and fixes a citation's identity, and migration 0006 makes
+``clause_embedding`` refuse updates.
 
 The vocabulary in the CHECK constraints is the kernel's (``domain_kernel.knowledge``), and so are
 the rules on ``rule_relation``: the relations in ``RULE_VERSION_ONLY`` target a rule version,
@@ -14,14 +16,18 @@ when it is a rule version, and a rule version never relates to itself. The kerne
 same rules for every writer.
 """
 
+from collections.abc import Callable, Sequence
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Final
+from typing import Any, Final
 from uuid import UUID
 
 from sqlalchemy import (
+    BindParameter,
     Boolean,
     CheckConstraint,
+    ColumnElement,
+    Computed,
     Date,
     DateTime,
     ForeignKey,
@@ -34,16 +40,20 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    cast,
     false,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
+from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.types import UserDefinedType
 
 from domain_kernel.documents import PARSER_VERSION_PATTERN, DocumentType
 from domain_kernel.knowledge import RULE_VERSION_KIND, RULE_VERSION_ONLY, EntityType, RelationKind
 from domain_kernel.status import RuleVersionStatus
+from domain_kernel.vectors import EMBEDDING_DIMS
 from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.documents import CLAUSE_REF_PATTERN
 from rulebook.domain.relations import CandidateRejectReason, CandidateStatus
@@ -96,6 +106,48 @@ def sql_quoted(values: tuple[str, ...]) -> str:
 def sql_in_list(column: str, values: tuple[str, ...]) -> str:
     """``column IN ('a', 'b')`` for a CHECK constraint over a fixed vocabulary."""
     return f"{column} IN ({sql_quoted(values)})"
+
+
+SEARCH_VECTOR = "to_tsvector('english'::regconfig, text)"
+"""The generated full-text column of ``clause``, written as Postgres reflects it. English
+stemming; a token outside the English dictionary, such as a Devanagari word, stays as written."""
+
+
+class Vector(UserDefinedType[tuple[float, ...]]):
+    """pgvector's ``vector(n)`` without the pgvector package: a value is bound as the text form
+    ``[x,y,...]`` cast to the column type and read back from the same text. The ``vector``
+    type lives in ``public``, which every service keeps on its search_path."""
+
+    cache_ok = True
+
+    def __init__(self, dims: int = EMBEDDING_DIMS) -> None:
+        self.dims = dims
+
+    def get_col_spec(self, **kw: Any) -> str:
+        return f"vector({self.dims})"
+
+    def bind_processor(self, dialect: Dialect) -> Callable[[Sequence[float] | None], str | None]:
+        def process(value: Sequence[float] | None) -> str | None:
+            if value is None:
+                return None
+            return "[" + ",".join(repr(float(component)) for component in value) + "]"
+
+        return process
+
+    def bind_expression(
+        self, bindvalue: BindParameter[tuple[float, ...]]
+    ) -> ColumnElement[tuple[float, ...]]:
+        return cast(bindvalue, self)
+
+    def result_processor(
+        self, dialect: Dialect, coltype: object
+    ) -> Callable[[object], tuple[float, ...] | None]:
+        def process(value: object) -> tuple[float, ...] | None:
+            if value is None:
+                return None
+            return tuple(float(component) for component in str(value).strip("[]").split(","))
+
+        return process
 
 
 class Base(DeclarativeBase):
@@ -198,6 +250,7 @@ class ClauseRow(Base):
         CheckConstraint("ordinal >= 1", name="ck_clause_ordinal"),
         CheckConstraint("page IS NULL OR page >= 1", name="ck_clause_page"),
         CheckConstraint("length(text) > 0", name="ck_clause_text"),
+        Index("ix_clause_search_vector", "search_vector", postgresql_using="gin"),
         {
             "comment": (
                 "Clauses of a document in order. id is clause_id_for(document id, clause_ref) "
@@ -214,6 +267,46 @@ class ClauseRow(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     text_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR, Computed(SEARCH_VECTOR, persisted=True), deferred=True
+    )
+
+
+class ClauseEmbeddingRow(Base):
+    """One clause's embedding from one model: the vector half of the clause search index."""
+
+    __tablename__ = "clause_embedding"
+    __table_args__ = (
+        PrimaryKeyConstraint("clause_id", "model", name="pk_clause_embedding"),
+        ForeignKeyConstraint(
+            ["clause_id"],
+            ["clause.id"],
+            name="fk_clause_embedding_clause_id_clause",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("length(model) > 0", name="ck_clause_embedding_model"),
+        Index(
+            "ix_clause_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+        {
+            "comment": (
+                "Clause embeddings, one per clause and model; vectors from different models "
+                "do not compare. Rows are never updated: a new model means a new row, and a "
+                "retired model's rows may be deleted."
+            )
+        },
+    )
+
+    clause_id: Mapped[UUID] = mapped_column(Uuid)
+    model: Mapped[str] = mapped_column(String(120))
+    embedding: Mapped[tuple[float, ...]] = mapped_column(Vector(EMBEDDING_DIMS), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -45,7 +45,15 @@ KNOWLEDGE_TABLES = {"canonical_entity", "clause_entity", "rule_relation"}
 RULE_TABLES = {"rule", "rule_version"}
 DOCUMENT_TABLES = {"document", "clause", "citation"}
 REVIEW_TABLES = {"extraction_run", "entity_review", "relation_candidate"}
-ALL_TABLES = KNOWLEDGE_TABLES | RULE_TABLES | DOCUMENT_TABLES | REVIEW_TABLES | {"alembic_version"}
+SEARCH_TABLES = {"clause_embedding"}
+ALL_TABLES = (
+    KNOWLEDGE_TABLES
+    | RULE_TABLES
+    | DOCUMENT_TABLES
+    | REVIEW_TABLES
+    | SEARCH_TABLES
+    | {"alembic_version"}
+)
 
 
 @pytest.fixture(scope="module")
@@ -196,7 +204,7 @@ def test_upgrade_head_creates_the_knowledge_tables(migrated: Config, engine: Eng
         version: str = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-    assert version == "0005"
+    assert version == "0006"
 
 
 def test_indexes_by_name_and_access_method(migrated: Config, engine: Engine) -> None:
@@ -237,7 +245,9 @@ def test_indexes_by_name_and_access_method(migrated: Config, engine: Engine) -> 
         "pk_clause",
         "uq_clause_document_id_clause_ref",
         "uq_clause_document_id_ordinal",
+        "ix_clause_search_vector",
     }
+    assert by_table["clause_embedding"] == {"pk_clause_embedding", "ix_clause_embedding_hnsw"}
     assert by_table["citation"] == {
         "pk_citation",
         "ix_citation_rule_version",
@@ -247,6 +257,11 @@ def test_indexes_by_name_and_access_method(migrated: Config, engine: Engine) -> 
     assert "USING btree (entity_id)" in definitions["ix_clause_entity_entity"]
     assert "USING btree (relation, to_ref)" in definitions["ix_rule_relation_target"]
     assert "USING btree (from_rule_version_id)" in definitions["ix_rule_relation_source"]
+    assert "USING gin (search_vector)" in definitions["ix_clause_search_vector"]
+    hnsw = definitions["ix_clause_embedding_hnsw"]
+    assert "USING hnsw (embedding vector_cosine_ops)" in hnsw
+    assert "m='16'" in hnsw
+    assert "ef_construction='64'" in hnsw
 
 
 def test_check_constraints_carry_the_fixed_vocabulary(migrated: Config, engine: Engine) -> None:
@@ -380,6 +395,9 @@ def test_keys_unique_constraints_and_foreign_keys(migrated: Config, engine: Engi
         assert "half of the index" in comment
 
 
+# SQLAlchemy reflects pgvector's vector column as NullType with this warning; alembic skips the
+# type of a NullType column, and the search index test checks the column instead.
+@pytest.mark.filterwarnings("ignore:Did not recognize type 'vector'")
 def test_models_and_migration_agree(migrated: Config, engine: Engine) -> None:
     # Autogenerate compares tables, columns, types, nullability, server defaults, indexes,
     # unique constraints and foreign keys. It does not compare CHECK constraint bodies, so the

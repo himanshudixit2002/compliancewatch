@@ -773,6 +773,89 @@
         "title": "DocumentType",
         "type": "string"
       },
+      "EmbeddingIn": {
+        "additionalProperties": false,
+        "properties": {
+          "clause_id": {
+            "format": "uuid",
+            "title": "Clause Id",
+            "type": "string"
+          },
+          "vector": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 512,
+            "minItems": 512,
+            "title": "Vector",
+            "type": "array"
+          }
+        },
+        "required": [
+          "clause_id",
+          "vector"
+        ],
+        "title": "EmbeddingIn",
+        "type": "object"
+      },
+      "EmbeddingsIn": {
+        "additionalProperties": false,
+        "description": "Clause vectors from one model. ``dims`` must be the rulebook's 512: a model that serves\nanother size is refused, because its vectors would not compare with the stored ones.",
+        "properties": {
+          "dims": {
+            "examples": [
+              512
+            ],
+            "title": "Dims",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EmbeddingIn"
+            },
+            "maxItems": 256,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          },
+          "model": {
+            "examples": [
+              "voyage/voyage-3.5-lite"
+            ],
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "dims",
+          "items"
+        ],
+        "title": "EmbeddingsIn",
+        "type": "object"
+      },
+      "EmbeddingsStoredOut": {
+        "properties": {
+          "stored": {
+            "description": "Embeddings stored now",
+            "title": "Stored",
+            "type": "integer"
+          },
+          "unchanged": {
+            "description": "Clauses that had an embedding from this model already",
+            "title": "Unchanged",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stored",
+          "unchanged"
+        ],
+        "title": "EmbeddingsStoredOut",
+        "type": "object"
+      },
       "EntityOut": {
         "properties": {
           "aliases": {
@@ -2075,6 +2158,187 @@
         "title": "RuleVersionStatus",
         "type": "string"
       },
+      "SearchHitOut": {
+        "properties": {
+          "cited_by": {
+            "description": "Published or superseded rule versions citing the clause with a verified quote, in force on as_of when it is given",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Cited By",
+            "type": "array"
+          },
+          "clause_id": {
+            "format": "uuid",
+            "title": "Clause Id",
+            "type": "string"
+          },
+          "clause_ref": {
+            "title": "Clause Ref",
+            "type": "string"
+          },
+          "doc_type": {
+            "$ref": "#/components/schemas/DocumentType"
+          },
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "lexical_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1-based rank in the lexical leg, if in it",
+            "title": "Lexical Rank"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "regulator": {
+            "title": "Regulator",
+            "type": "string"
+          },
+          "score": {
+            "description": "Reciprocal rank fusion over the two legs",
+            "title": "Score",
+            "type": "number"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "vector_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1-based rank in the vector leg, if in it",
+            "title": "Vector Rank"
+          }
+        },
+        "required": [
+          "clause_id",
+          "document_id",
+          "clause_ref",
+          "text",
+          "regulator",
+          "doc_type",
+          "published_at",
+          "score",
+          "lexical_rank",
+          "vector_rank",
+          "cited_by"
+        ],
+        "title": "SearchHitOut",
+        "type": "object"
+      },
+      "SearchIn": {
+        "additionalProperties": false,
+        "description": "A hybrid search. ``text`` feeds the lexical leg; ``vector``, the text's embedding from\n``model``, feeds the vector leg. ``as_of`` keeps documents published on or before it.",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "doc_types": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentType"
+            },
+            "maxItems": 4,
+            "title": "Doc Types",
+            "type": "array"
+          },
+          "k": {
+            "default": 8,
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "K",
+            "type": "integer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required with a vector",
+            "title": "Model"
+          },
+          "regulator": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regulator"
+          },
+          "text": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "vector": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 512,
+                "minItems": 512,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "SearchIn",
+        "type": "object"
+      },
       "SeedStatus": {
         "enum": [
           "needs_review",
@@ -2241,6 +2505,185 @@
         "summary": "Ready",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/v1/rulebook/clauses/embeddings": {
+      "put": {
+        "operationId": "store_embeddings_v1_rulebook_clauses_embeddings_put",
+        "parameters": [
+          {
+            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "in": "header",
+            "name": "x-cw-write-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+              "title": "X-Cw-Write-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmbeddingsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingsStoredOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Store clause embeddings from one model; a clause's first embedding stays",
+        "tags": [
+          "rulebook",
+          "search"
+        ]
+      }
+    },
+    "/v1/rulebook/clauses/unembedded": {
+      "get": {
+        "operationId": "list_unembedded_v1_rulebook_clauses_unembedded_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "model",
+            "required": true,
+            "schema": {
+              "maxLength": 120,
+              "minLength": 1,
+              "title": "Model",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "document_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Document Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Continue after this clause id",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Continue after this clause id",
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ClauseDetailOut"
+                  },
+                  "title": "Response List Unembedded V1 Rulebook Clauses Unembedded Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clauses with no embedding from a model yet, in clause id order",
+        "tags": [
+          "rulebook",
+          "search"
         ]
       }
     },
@@ -3845,6 +4288,52 @@
         "tags": [
           "rulebook",
           "rules"
+        ]
+      }
+    },
+    "/v1/rulebook/search": {
+      "post": {
+        "operationId": "search_v1_rulebook_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SearchHitOut"
+                  },
+                  "title": "Response Search V1 Rulebook Search Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Hybrid clause search: full text and vectors fused by reciprocal rank",
+        "tags": [
+          "rulebook",
+          "search"
         ]
       }
     }

@@ -3,8 +3,8 @@
 Part of the ComplianceWatch monorepo. Health routes, alembic wiring, regulator documents and
 clauses with a write and read API, the knowledge schema with entity alignment, the entity review
 queue and relation candidates with their review API, the rule tables with the seed calendar, and
-a read API over rule versions, entities, relations and clauses for the Q&A service. No publish
-flow yet.
+a read API over rule versions, entities, relations and clauses for the Q&A service, and a
+hybrid clause search index (full text and pgvector). No publish flow yet.
 Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architecture Reference 3.2, 5.2 and 6.2; ADR-017 and ADR-018.
 
 - **Owns:** Rules, RuleVersions, Documents, Clauses, Citations, embeddings; versioning, supersession graph, hybrid search index, as-of queries;
@@ -16,12 +16,13 @@ Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architectur
 
 ## What is in the database today
 
-Migrations `0001` to `0005` create eleven tables in schema `rulebook`:
+Migrations `0001` to `0006` create twelve tables in schema `rulebook`:
 
 | Table | Purpose | Keys |
 | --- | --- | --- |
 | `document` | A regulator document, one row per distinct file: source, digest, regulator, type, URL, title, language, parser version, publication and fetch time | pk `id` = first 32 hex digits of `sha256` (CHECK); unique `sha256`; append-only (trigger) |
-| `clause` | The clauses of a document in order, verbatim as parsed | pk `id` = `clause_id_for(document id, clause_ref)`; unique (`document_id`, `clause_ref`) and (`document_id`, `ordinal`); fk `document_id`; append-only (trigger) |
+| `clause` | The clauses of a document in order, verbatim as parsed, with `search_vector`, a stored generated `to_tsvector('english', text)` | pk `id` = `clause_id_for(document id, clause_ref)`; unique (`document_id`, `clause_ref`) and (`document_id`, `ordinal`); fk `document_id`; GIN index on `search_vector`; append-only (trigger) |
+| `clause_embedding` | One clause's embedding from one model: `embedding vector(512)` (the kernel's `EMBEDDING_DIMS`) | pk (`clause_id`, `model`); fk `clause_id`; HNSW index for cosine distance; never updated (trigger), a new model means a new row |
 | `citation` | A rule version's quote of a clause, with a one-way verification (`verified`, `match_score >= 0.85`, `verified_at`) | pk `id`; fks to `rule_version` and `clause`; identity columns fixed by trigger |
 | `canonical_entity` | One row per aligned entity: `type` (ten values), `canonical_name`, `aliases text[]` (normalised names) | pk `id`; unique (`type`, `canonical_name`); GIN index on `aliases` |
 | `clause_entity` | A mention of an entity in a clause with its half-open code-point span, and who found it (`method`: grammar, model or analyst; `extractor`) | pk (`clause_id`, `entity_id`, `span_start`); fks to `clause` and `canonical_entity` (restrict) |
@@ -63,19 +64,43 @@ message if either table has rows (nothing writes them before it).
 | `GET /v1/rulebook/entities/{id}` | An entity with its aliases |
 | `GET /v1/rulebook/entities/{id}/clauses?as_of=&limit=` | Clauses that mention the entity with the spans, newest document first (undated last); `as_of` keeps documents published on or before it |
 | `GET /v1/rulebook/relations?from_rule_version_id=&to_rule_version_id=&to_entity_id=&relation=&published_only=&limit=` | Rule relations by either end (at least one id, else 422), with the evidence clause ref and document and, for a deadline extension, the candidate's period and new due date. `published_only` (default true) keeps relations from versions that have been published |
+| `PUT /v1/rulebook/clauses/embeddings` | Store clause vectors from one model: `{model, dims: 512, items: [{clause_id, vector}]}` (1 to 256 items); returns `{stored, unchanged}`. A clause keeps its first embedding per model. A wrong `dims` is 422 `rulebook-embedding-dimension`, an unknown clause 422. Needs the token |
+| `GET /v1/rulebook/clauses/unembedded?model=&document_id=&limit=&after=` | Clauses with no embedding from `model`, in clause id order, with their document's metadata (for the embedding text) |
+| `POST /v1/rulebook/search` | Hybrid search, see below |
 | `GET /v1/rulebook/clauses/{id}` | A clause with its document's regulator, type, reference, title, URL, language and date; 404 `rulebook-clause-unknown` when no clause has the id |
 
 Nothing is aligned by fuzzy matching and nothing is created without an analyst (ADR-017). The
 queue has no alert yet: someone in Regulatory Intelligence has to watch it.
 
 The read routes need no token. A superseded version stays in force for the dates before its
-replacement took effect, so the Q&A service answers a question about a past date from the
-version in force then.
+replacement took effect, so a question about a past date is answered from the version in force
+then.
 
 Writes fail closed: without `CW_RULEBOOK_WRITE_TOKEN` every write is a 503, and a missing or wrong
 token is a 401. The spec is committed at `packages/contracts/openapi/rulebook.v1.json`
 (`make openapi SERVICE=rulebook`) and pinned by `tests/contract/test_openapi.py`.
 `CW_RULEBOOK_STORE=memory` runs the service without a database (tests and demos).
+
+## Search
+
+`POST /v1/rulebook/search` takes `{text, vector?, model?, regulator?, doc_types[], as_of?, k}`
+(`k` 1 to 50, default 8; a `vector` needs the `model` that embedded it, else 422). Two legs each
+draw a pool of `min(200, max(40, 4k))` clauses:
+
+- **Lexical:** the terms of `plainto_tsquery('english', text)` joined by OR against
+  `clause.search_vector`, ranked by `ts_rank_cd`. Text with no searchable term (only stop words)
+  skips this leg.
+- **Vector:** cosine distance to the clauses embedded by the same `model`, over the HNSW index with
+  `hnsw.ef_search = 100` and pgvector's iterative scan, so the filters still leave enough rows.
+
+Reciprocal rank fusion (`1 / (60 + rank)` summed over the legs, ties by clause id) keeps the `k`
+best. The filters apply to both legs: `regulator`, `doc_types`, and `as_of`, which keeps documents
+published on or before it (undated documents are left out then). Each hit carries the clause,
+its document's regulator, type and date, `score`, `lexical_rank` and `vector_rank` (null when the
+leg did not find it) and `cited_by`: the published or superseded versions citing the clause with
+a verified quote, in force on `as_of` when it is given. The rulebook never calls a model: the
+writer of `PUT /clauses/embeddings` and the reader sending a query vector both embed through the
+LLM gateway.
 
 ## Seed calendar
 
@@ -103,10 +128,10 @@ composition taxpayer) and check every due date the recurrences produce.
 
 ```
 src/rulebook/
-  api/             # routers (documents, review, rule_versions, graph), request/response schemas, the write-token dependency
-  application/     # use cases: documents.py, alignment.py, review.py, relations.py, rule_versions.py, graph.py; seed_loader.py
-  domain/          # documents.py, alignment.py, review.py, relations.py, rule_versions.py, graph.py, runs.py, ids.py, errors.py, repository.py, seed.py
-  infrastructure/  # models.py, knowledge_repository.py (Postgres unit of work), memory.py, seed_repository.py
+  api/             # routers (documents, review, rule_versions, graph, search), request/response schemas, the write-token dependency
+  application/     # use cases: documents.py, alignment.py, review.py, relations.py, rule_versions.py, graph.py, search.py; seed_loader.py
+  domain/          # documents.py, alignment.py, review.py, relations.py, rule_versions.py, graph.py, search.py, runs.py, ids.py, errors.py, repository.py, seed.py
+  infrastructure/  # models.py (with the Vector column type), knowledge_repository.py (Postgres unit of work), memory.py, seed_repository.py
   settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN
   testing.py       # rulebook_settings() for tests and demos: memory store, known token
   wiring.py        # what the api layer gets from the composition root
@@ -119,9 +144,10 @@ migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and 
   versions/20260928_0003_rule_tables.py        # rule and rule_version
   versions/20260928_0004_documents_clauses_citations.py   # documents, clauses, citations; knowledge FKs
   versions/20260928_0005_review_queue_relation_candidates.py   # extraction runs, entity review, relation candidates
+  versions/20260929_0006_clause_search_index.py   # clause.search_vector, clause_embedding, pgvector in public
 tests/
   unit/            # domain, use cases and API on the memory store; test_models_vocabulary.py: model CHECKs against the kernel enums
-  integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work and its reads
+  integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work and its reads; the search index
   contract/        # test_openapi.py: the served schema equals the committed spec
 alembic.ini, pyproject.toml, Dockerfile
 ```
@@ -149,8 +175,8 @@ Check the schema after `make migrate`:
 ```bash
 docker compose exec -T postgres psql -U cw -d compliancewatch -Atc \
   "select table_name from information_schema.tables where table_schema='rulebook' order by 1"
-# alembic_version, canonical_entity, citation, clause, clause_entity, document, entity_review,
-# extraction_run, relation_candidate, rule, rule_relation, rule_version
+# alembic_version, canonical_entity, citation, clause, clause_embedding, clause_entity, document,
+# entity_review, extraction_run, relation_candidate, rule, rule_relation, rule_version
 ```
 
 Roll back with `CW_DATABASE_URL=... CW_DB_SCHEMA=rulebook uv run --package compliancewatch-rulebook alembic -c services/rulebook/alembic.ini downgrade base`

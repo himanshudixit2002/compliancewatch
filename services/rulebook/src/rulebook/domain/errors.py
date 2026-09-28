@@ -128,3 +128,11 @@ class ClauseNotStoredError(DomainError, LookupError):
 
     type_slug = "rulebook-clause-unknown"
     title = "Clause not stored"
+
+
+class EmbeddingDimensionError(DomainError, ValueError):
+    """A vector's length is not the one every stored and query vector has (``EMBEDDING_DIMS``):
+    it came from another model or another setting, and would not compare."""
+
+    type_slug = "rulebook-embedding-dimension"
+    title = "Embedding has the wrong number of dimensions"

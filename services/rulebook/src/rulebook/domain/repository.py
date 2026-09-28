@@ -10,6 +10,7 @@ from uuid import UUID
 from domain_kernel.ids import CanonicalEntityId, ClauseId, DocumentId, RuleVersionId
 from domain_kernel.knowledge import EntityType, RuleRelation
 from domain_kernel.status import RuleVersionStatus
+from domain_kernel.vectors import ClauseFilter, Vector
 from rulebook.domain.alignment import EntityLookup
 from rulebook.domain.documents import StoredClause, StoredDocument
 from rulebook.domain.graph import (
@@ -23,6 +24,7 @@ from rulebook.domain.relations import CandidateStatus, RelationCandidate
 from rulebook.domain.review import EntityReviewItem, MentionGroup
 from rulebook.domain.rule_versions import CitationRecord, RuleVersionRecord
 from rulebook.domain.runs import ExtractionRun, RuleSummary
+from rulebook.domain.search import CitedClause, ClauseEmbedding
 
 
 class DocumentRepository(Protocol):
@@ -207,6 +209,42 @@ class RuleCatalog(Protocol):
     def version_status(self, rule_version_id: RuleVersionId) -> RuleVersionStatus | None: ...
 
 
+class ClauseIndex(Protocol):
+    """Clause embeddings and the two search legs over clauses."""
+
+    def store(self, model: str, embeddings: Sequence[ClauseEmbedding]) -> tuple[int, int]:
+        """Insert each clause's embedding under ``model`` unless the clause has one from that
+        model already (a stored embedding is never overwritten); (stored, unchanged)."""
+        ...
+
+    def unknown_clauses(self, clause_ids: Sequence[ClauseId]) -> frozenset[ClauseId]:
+        """The ids no stored clause has."""
+        ...
+
+    def unembedded(
+        self, model: str, document_id: DocumentId | None, limit: int, after: ClauseId | None
+    ) -> Sequence[ClauseDetail]:
+        """Clauses with no embedding from ``model``, in clause id order after ``after``."""
+        ...
+
+    def lexical(self, text: str, filters: ClauseFilter, pool: int) -> Sequence[ClauseId]:
+        """Up to ``pool`` clauses matching any term of ``text``, best full-text rank first;
+        none when the text has no searchable term."""
+        ...
+
+    def nearest(
+        self, vector: Vector, model: str, filters: ClauseFilter, pool: int
+    ) -> Sequence[ClauseId]:
+        """Up to ``pool`` clauses embedded by ``model``, nearest by cosine distance first."""
+        ...
+
+    def hits(
+        self, clause_ids: Sequence[ClauseId], as_of: date | None
+    ) -> Mapping[ClauseId, CitedClause]:
+        """The clauses with their documents and the versions citing them."""
+        ...
+
+
 class RunRepository(Protocol):
     def record(self, run: ExtractionRun) -> bool:
         """Insert unless a run with the id exists; whether this call inserted it."""
@@ -240,6 +278,9 @@ class KnowledgeUnitOfWork(Protocol):
 
     @property
     def citations(self) -> CitationRepository: ...
+
+    @property
+    def index(self) -> ClauseIndex: ...
 
     @property
     def runs(self) -> RunRepository: ...

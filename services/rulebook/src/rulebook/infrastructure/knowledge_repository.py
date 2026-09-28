@@ -1,8 +1,15 @@
 """The Postgres unit of work for regulator documents and the knowledge tables.
 
 Inserts use ``ON CONFLICT DO NOTHING``: documents, clauses, mentions, review items, candidates,
-relations and runs are keyed by ids every writer derives the same way, so a repeated insert is a
-no-op rather than an error. Decisions lock the rows they change (``SELECT ... FOR UPDATE``).
+relations, runs and clause embeddings are keyed by ids every writer derives the same way, so a
+repeated insert is a no-op rather than an error. Decisions lock the rows they change
+(``SELECT ... FOR UPDATE``).
+
+Clause search runs two queries. The lexical leg matches ``clause.search_vector`` against the
+query's terms joined by OR and ranks with ``ts_rank_cd``. The vector leg orders by cosine
+distance over the HNSW index with ``hnsw.ef_search`` raised and pgvector's iterative scan on,
+so filters applied after the index scan still leave enough rows; iterative scan may return rows
+slightly out of order, so the outer query sorts them again.
 """
 
 from collections.abc import Iterator, Mapping, Sequence
@@ -12,8 +19,25 @@ from decimal import Decimal
 from typing import Any, Self
 from uuid import UUID
 
-from sqlalchemy import Engine, Select, and_, create_engine, func, or_, select, text, tuple_, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import (
+    ColumnElement,
+    Engine,
+    Float,
+    Select,
+    Text,
+    and_,
+    bindparam,
+    cast,
+    create_engine,
+    func,
+    literal_column,
+    or_,
+    select,
+    text,
+    tuple_,
+    update,
+)
+from sqlalchemy.dialects.postgresql import TSQUERY, insert
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
@@ -29,6 +53,7 @@ from domain_kernel.ids import (
 from domain_kernel.knowledge import EntityRef, EntityType, RelationKind, RuleRelation
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.status import RuleVersionStatus
+from domain_kernel.vectors import ClauseFilter, Vector
 from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.documents import StoredClause, StoredDocument
 from rulebook.domain.graph import (
@@ -55,10 +80,12 @@ from rulebook.domain.review import (
 )
 from rulebook.domain.rule_versions import IN_FORCE_STATUSES, CitationRecord, RuleVersionRecord
 from rulebook.domain.runs import ExtractionRun, RuleSummary
+from rulebook.domain.search import CitedClause, ClauseEmbedding
 from rulebook.domain.seed import SeedStatus
 from rulebook.infrastructure.models import (
     CanonicalEntityRow,
     CitationRow,
+    ClauseEmbeddingRow,
     ClauseEntityRow,
     ClauseRow,
     DocumentRow,
@@ -74,6 +101,9 @@ EXAMPLES_PER_GROUP = 5
 SUPERSESSION_LOCK = 0x72756C6573757073
 """Advisory lock key held for the rest of a transaction that approves a supersession."""
 PUBLISHED_STATUSES = sorted(status.value for status in IN_FORCE_STATUSES)
+ENGLISH: ColumnElement[str] = literal_column("'english'::regconfig")
+HNSW_EF_SEARCH = 100
+"""Candidates the HNSW scan keeps (pgvector's default is 40): at least the largest pool."""
 
 
 class SqlAlchemyDocumentRepository:
@@ -667,6 +697,129 @@ class SqlAlchemyCitationRepository:
         )
 
 
+class SqlAlchemyClauseIndex:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def store(self, model: str, embeddings: Sequence[ClauseEmbedding]) -> tuple[int, int]:
+        if not embeddings:
+            return 0, 0
+        values = [
+            {"clause_id": e.clause_id.value, "model": model, "embedding": e.vector}
+            for e in embeddings
+        ]
+        inserted = self._session.execute(
+            insert(ClauseEmbeddingRow)
+            .values(values)
+            .on_conflict_do_nothing()
+            .returning(ClauseEmbeddingRow.clause_id)
+        ).all()
+        return len(inserted), len(embeddings) - len(inserted)
+
+    def unknown_clauses(self, clause_ids: Sequence[ClauseId]) -> frozenset[ClauseId]:
+        found = set(
+            self._session.scalars(
+                select(ClauseRow.id).where(ClauseRow.id.in_([c.value for c in clause_ids]))
+            )
+        )
+        return frozenset(c for c in clause_ids if c.value not in found)
+
+    def unembedded(
+        self, model: str, document_id: DocumentId | None, limit: int, after: ClauseId | None
+    ) -> Sequence[ClauseDetail]:
+        embedded = select(ClauseEmbeddingRow.clause_id).where(
+            ClauseEmbeddingRow.clause_id == ClauseRow.id, ClauseEmbeddingRow.model == model
+        )
+        statement = (
+            select(ClauseRow, DocumentRow)
+            .join(DocumentRow, DocumentRow.id == ClauseRow.document_id)
+            .where(~embedded.exists())
+            .order_by(ClauseRow.id)
+            .limit(limit)
+        )
+        if document_id is not None:
+            statement = statement.where(ClauseRow.document_id == document_id.value)
+        if after is not None:
+            statement = statement.where(ClauseRow.id > after.value)
+        return [
+            ClauseDetail(_to_clause(clause), _to_document(document))
+            for clause, document in self._session.execute(statement).all()
+        ]
+
+    def lexical(self, text: str, filters: ClauseFilter, pool: int) -> Sequence[ClauseId]:
+        query = _any_term(text)
+        if not self._session.scalar(select(func.numnode(query))):
+            return []
+        statement = (
+            select(ClauseRow.id)
+            .join(DocumentRow, DocumentRow.id == ClauseRow.document_id)
+            .where(ClauseRow.search_vector.bool_op("@@")(query))
+            .order_by(func.ts_rank_cd(ClauseRow.search_vector, query).desc(), ClauseRow.id)
+            .limit(pool)
+        )
+        return [ClauseId(found) for found in self._session.scalars(_filtered(statement, filters))]
+
+    def nearest(
+        self, vector: Vector, model: str, filters: ClauseFilter, pool: int
+    ) -> Sequence[ClauseId]:
+        self._session.execute(text(f"SET LOCAL hnsw.ef_search = {HNSW_EF_SEARCH}"))
+        self._session.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
+        distance = ClauseEmbeddingRow.embedding.op("<=>", return_type=Float())(
+            bindparam("query_vector", vector, type_=ClauseEmbeddingRow.embedding.type)
+        )
+        ranked = _filtered(
+            select(ClauseEmbeddingRow.clause_id, distance.label("distance"))
+            .join(ClauseRow, ClauseRow.id == ClauseEmbeddingRow.clause_id)
+            .join(DocumentRow, DocumentRow.id == ClauseRow.document_id)
+            .where(ClauseEmbeddingRow.model == model)
+            .order_by(distance)
+            .limit(pool),
+            filters,
+        ).subquery()
+        nearest: Select[UUID] = select(ranked.c.clause_id).order_by(
+            ranked.c.distance, ranked.c.clause_id
+        )
+        return [ClauseId(found) for found in self._session.scalars(nearest)]
+
+    def hits(
+        self, clause_ids: Sequence[ClauseId], as_of: date | None
+    ) -> Mapping[ClauseId, CitedClause]:
+        ids = [clause_id.value for clause_id in clause_ids]
+        if not ids:
+            return {}
+        citing = (
+            select(CitationRow.clause_id, CitationRow.rule_version_id)
+            .join(RuleVersionRow, RuleVersionRow.id == CitationRow.rule_version_id)
+            .where(
+                CitationRow.clause_id.in_(ids),
+                CitationRow.verified.is_(True),
+                RuleVersionRow.status.in_(PUBLISHED_STATUSES),
+            )
+            .distinct()
+            .order_by(CitationRow.clause_id, CitationRow.rule_version_id)
+        )
+        if as_of is not None:
+            citing = citing.where(
+                RuleVersionRow.effective_from <= as_of,
+                or_(RuleVersionRow.effective_to.is_(None), RuleVersionRow.effective_to > as_of),
+            )
+        cited_by: dict[UUID, list[RuleVersionId]] = {}
+        for clause_id, rule_version_id in self._session.execute(citing).all():
+            cited_by.setdefault(clause_id, []).append(RuleVersionId(rule_version_id))
+        rows = self._session.execute(
+            select(ClauseRow, DocumentRow)
+            .join(DocumentRow, DocumentRow.id == ClauseRow.document_id)
+            .where(ClauseRow.id.in_(ids))
+        ).all()
+        return {
+            ClauseId(clause.id): CitedClause(
+                ClauseDetail(_to_clause(clause), _to_document(document)),
+                tuple(cited_by.get(clause.id, ())),
+            )
+            for clause, document in rows
+        }
+
+
 class SqlAlchemyRunRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -701,6 +854,7 @@ class SqlAlchemyKnowledgeUnitOfWork:
         self._rules = SqlAlchemyRuleCatalog(session)
         self._rule_versions = SqlAlchemyRuleVersionRepository(session)
         self._citations = SqlAlchemyCitationRepository(session)
+        self._index = SqlAlchemyClauseIndex(session)
         self._runs = SqlAlchemyRunRepository(session)
 
     @property
@@ -738,6 +892,10 @@ class SqlAlchemyKnowledgeUnitOfWork:
     @property
     def citations(self) -> SqlAlchemyCitationRepository:
         return self._citations
+
+    @property
+    def index(self) -> SqlAlchemyClauseIndex:
+        return self._index
 
     @property
     def runs(self) -> SqlAlchemyRunRepository:
@@ -820,6 +978,26 @@ def _to_clause(row: ClauseRow) -> StoredClause:
         text_sha256=row.text_sha256,
         page=row.page,
     )
+
+
+def _any_term(text: str) -> ColumnElement[str]:
+    """``plainto_tsquery`` with its ANDs turned into ORs: a clause that matches any term is a
+    candidate, and ``ts_rank_cd`` ranks the ones matching more terms, closer together, higher."""
+    return cast(func.replace(cast(func.plainto_tsquery(ENGLISH, text), Text), "&", "|"), TSQUERY)
+
+
+def _filtered[*Row](statement: Select[*Row], filters: ClauseFilter) -> Select[*Row]:
+    """The statement (already joined to ``document``) restricted to the filters; ``as_of``
+    keeps documents published on or before it, so an undated document is left out."""
+    if filters.regulator is not None:
+        statement = statement.where(DocumentRow.regulator == filters.regulator)
+    if filters.doc_types:
+        statement = statement.where(
+            DocumentRow.doc_type.in_(sorted(doc_type.value for doc_type in filters.doc_types))
+        )
+    if filters.as_of is not None:
+        statement = statement.where(DocumentRow.published_at <= filters.as_of)
+    return statement
 
 
 def _versions() -> Select[RuleVersionRow, str, str, str]:
