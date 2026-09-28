@@ -35,7 +35,9 @@ activities:
 - Writes need the shared secret `CW_RULEBOOK_WRITE_TOKEN` in the `x-cw-write-token` header, and
   a rulebook without a token refuses every write (fail closed). Reads need no token.
 - The pipeline side sits behind `CW_PIPELINE_KNOWLEDGE_ENABLED`, default off, and behind
-  `workflow.patched` in the ingest workflow, so recorded workflow histories replay unchanged.
+  `workflow.patched` in the ingest workflow, so recorded workflow histories replay unchanged. A
+  failed registration is reported in the ingest result (`registered=False`,
+  `registration_error`) and does not fail the ingest.
 - The pipeline checks that the rulebook answered with the clause ids the kernel derives, which
   catches a version skew between the two deployments. Deploy the rulebook first.
 
@@ -57,6 +59,11 @@ own one schema's invariants.
 
 - One synchronous dependency from the pipeline worker to the rulebook. A rulebook outage makes
   the registration activity retry with backoff; the rest of the ingest workflow is unaffected.
+- Stored clauses are never replaced: mention spans and citations point into their text. A
+  parser change that alters the text of a stored document makes its re-registration a 409.
+  Whether stored documents are then kept as parsed, or get a second clause set under the new
+  parser version (which would put the parser version into the clause id), is still to be
+  decided, before the first parser change that alters clause text.
 - The rulebook's write routes are reachable on its public Fly app, protected only by the shared
   token until identity issues service tokens (ADR-014). The token must be long and rotated with
   the other secrets.

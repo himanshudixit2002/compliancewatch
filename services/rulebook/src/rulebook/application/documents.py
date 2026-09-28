@@ -1,9 +1,10 @@
 """Register a parsed regulator document and read it back.
 
 Registration is idempotent: the same document with the same clauses returns what is stored, so
-a retried pipeline activity is harmless. A different parse of stored bytes is refused (documents
-are append-only); the fix for a parser change is a new parser version and a decision about the
-old rows, not an overwrite.
+a retried pipeline activity is harmless. A different parse of stored bytes is refused: documents
+and clauses are append-only, and mention spans and citations point into the stored text. What
+happens to stored documents after a parser change is an open decision (ADR-018), never an
+overwrite.
 """
 
 from collections.abc import Mapping, Sequence

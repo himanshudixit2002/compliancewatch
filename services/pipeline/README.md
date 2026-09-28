@@ -74,10 +74,14 @@ again and stores the document and its clauses in the rulebook through
 `PUT /v1/rulebook/documents/{id}` (ADR-018), then checks that the rulebook answered with the clause
 ids the kernel derives. The step sits behind `workflow.patched("kag-register-v1")`, so histories
 recorded before it replay unchanged. The flag is off by default (owner regulatory-intelligence;
-it goes when ADR-017 is accepted); off, the activity answers `skipped` without a call. A
-different parse of stored bytes (a parser change) fails the activity without retries: bump the
-parser's `PARSER_VERSION` and decide what happens to the stored rows. Deploy the rulebook before
-the pipeline.
+it goes when ADR-017 is accepted); off, the activity answers `skipped` without a call. With the
+flag on, the request must name the regulator. A registration that fails (a refused write, a
+rulebook outage longer than the retries) does not fail the ingest: the result says
+`registered=False` with the reason in `registration_error`. A different parse of stored bytes,
+which a parser change can cause, is refused and never retried; the stored clauses stay, since
+mentions and citations point into them. Bump the parser's `PARSER_VERSION` with any change that
+can alter clause text, so the refusal names both versions; what to do with stored documents
+after such a change is an open decision (ADR-018). Deploy the rulebook before the pipeline.
 
 ## Sources
 

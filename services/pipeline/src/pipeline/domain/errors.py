@@ -7,7 +7,9 @@ activities list the ones a retry cannot fix as non-retryable.
 
 class RulebookConflictError(Exception):
     """The rulebook stores this document with other clauses: a parser change made the same bytes
-    parse differently. Retrying cannot help; a person decides (new parser version, new rows)."""
+    parse differently. Retrying cannot help. The stored clauses stay, because mentions and
+    citations point at them; what to do with stored documents after a parser change is a
+    decision for a person (ADR-018)."""
 
 
 class RulebookRejectedError(Exception):
