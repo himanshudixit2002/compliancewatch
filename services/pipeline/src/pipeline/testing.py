@@ -1,23 +1,34 @@
-"""Test doubles for adapter tests and demos: recorded sources, a scripted model, a rulebook.
+"""Test doubles for adapter tests and demos: recorded sources, a scripted model and embedder,
+a rulebook.
 
 ``FixtureTransport`` maps a request to a file under ``tests/fixtures`` (or a literal body) and
 answers 404 for anything else, so a test that reaches an unrecorded URL fails loudly instead of
 touching the network. Routes are exact matches on method and URL; the CBIC listing routes also
 insist on the token header the real site wants. ``MemoryRulebook`` stands in for the rulebook's
-write API with the same rules: ids from the kernel, a different parse of stored bytes refused.
+write API with the same rules: ids from the kernel, a different parse of stored bytes refused,
+a clause's first vector from a model kept.
 """
 
+import hashlib
 import json
-from collections.abc import Callable, Mapping
+import math
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx2
 
 from domain_kernel.documents import ParsedDocument, clause_id_for
-from domain_kernel.ids import DocumentId
+from domain_kernel.ids import ClauseId, DocumentId
 from domain_kernel.knowledge import EntityType
 from domain_kernel.llm import CompletionRequest, CompletionResponse
+from domain_kernel.vectors import EMBEDDING_DIMS, Vector
+from pipeline.domain.embedding import (
+    ClauseToEmbed,
+    ClauseVector,
+    EmbeddingBatch,
+    EmbeddingsStored,
+)
 from pipeline.domain.errors import RulebookConflictError, RulebookRejectedError
 from pipeline.domain.knowledge import (
     AlignmentReport,
@@ -153,10 +164,53 @@ class ScriptedProvider:
         return CompletionResponse(text=text, model=self.MODEL, input_tokens=0, output_tokens=0)
 
 
+def hash_vector(text: str, dims: int = EMBEDDING_DIMS) -> Vector:
+    """A unit vector of ``dims`` components from the SHA-256 of ``text`` in counter mode:
+    deterministic, and the same text always gets the same vector. Not a model: similar texts do
+    not get similar vectors."""
+    stream = b"".join(
+        hashlib.sha256(f"{block}:{text}".encode()).digest() for block in range(dims // 32 + 1)
+    )
+    raw = [byte / 127.5 - 1.0 for byte in stream[:dims]]
+    norm = math.sqrt(sum(x * x for x in raw)) or 1.0
+    return tuple(x / norm for x in raw)
+
+
+class ScriptedEmbedder:
+    """An ``Embedder`` that answers every text with its ``hash_vector``, served by ``model`` (or
+    by the override it is asked for, as the gateway would). ``dims`` other than
+    ``EMBEDDING_DIMS`` stands in for a misconfigured route. Every call is kept in
+    ``requests``."""
+
+    MODEL = "scripted/hash-512"
+
+    def __init__(self, *, model: str = MODEL, dims: int = EMBEDDING_DIMS) -> None:
+        self.model = model
+        self.dims = dims
+        self.requests: list[tuple[tuple[str, ...], str | None, dict[str, str]]] = []
+
+    def embed(
+        self,
+        inputs: Sequence[str],
+        *,
+        model: str | None = None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> EmbeddingBatch:
+        texts = tuple(inputs)
+        self.requests.append((texts, model, dict(metadata or {})))
+        return EmbeddingBatch(
+            model=model or self.model,
+            dims=self.dims,
+            vectors=tuple(hash_vector(text, self.dims) for text in texts),
+            input_tokens=sum(len(text.split()) for text in texts),
+        )
+
+
 class MemoryRulebook:
-    """The rulebook's write and read API in memory: a ``KnowledgeSink`` and a
-    ``RulebookReader``. ``records`` keeps every stored document by id; mentions resolve when
-    their (type, name) is in ``entities``; submissions are kept for tests to read."""
+    """The rulebook's write and read API in memory: a ``KnowledgeSink``, a ``RulebookReader``
+    and a ``ClauseIndexSink``. ``records`` keeps every stored document by id; mentions resolve
+    when their (type, name) is in ``entities``; submissions are kept for tests to read, and
+    vectors in ``embeddings`` by clause id and model."""
 
     def __init__(
         self,
@@ -169,6 +223,7 @@ class MemoryRulebook:
         self.rules = rules
         self.mentions: list[MentionSubmission] = []
         self.relations: list[RelationSubmission] = []
+        self.embeddings: dict[tuple[ClauseId, str], Vector] = {}
         self.calls = 0
 
     def register_document(self, record: DocumentRecord) -> RegisteredDocument:
@@ -221,6 +276,65 @@ class MemoryRulebook:
     def known_rules(self) -> tuple[RuleKey, ...]:
         return self.rules
 
+    def unembedded_clauses(
+        self,
+        model: str,
+        *,
+        document_id: DocumentId | None = None,
+        limit: int = 64,
+        after: ClauseId | None = None,
+    ) -> tuple[ClauseToEmbed, ...]:
+        found = sorted(
+            (
+                clause
+                for record in self.records.values()
+                if document_id is None or record.document.document_id == document_id
+                for clause in _to_embed(record)
+                if (clause.clause_id, model) not in self.embeddings
+                and (after is None or clause.clause_id.value > after.value)
+            ),
+            key=lambda clause: clause.clause_id.value,
+        )
+        return tuple(found[:limit])
+
+    def put_embeddings(
+        self, model: str, dims: int, items: Sequence[ClauseVector]
+    ) -> EmbeddingsStored:
+        if dims != EMBEDDING_DIMS or any(len(item.vector) != dims for item in items):
+            raise RulebookRejectedError(f"422: vectors must have {EMBEDDING_DIMS} components")
+        known = {
+            clause_id_for(record.document.document_id, clause.clause_ref)
+            for record in self.records.values()
+            for clause in record.document.clauses
+        }
+        unknown = [str(item.clause_id) for item in items if item.clause_id not in known]
+        if unknown:
+            raise RulebookRejectedError(f"422: clauses {unknown} are not stored")
+        stored = 0
+        for item in items:
+            if (item.clause_id, model) not in self.embeddings:
+                self.embeddings[item.clause_id, model] = item.vector
+                stored += 1
+        return EmbeddingsStored(stored=stored, unchanged=len(items) - stored)
+
 
 def _clauses(document: ParsedDocument) -> list[tuple[str, str, int | None]]:
     return [(c.clause_ref, c.text, c.page) for c in document.clauses]
+
+
+def _to_embed(record: DocumentRecord) -> list[ClauseToEmbed]:
+    document = record.document
+    return [
+        ClauseToEmbed(
+            clause_id=clause_id_for(document.document_id, clause.clause_ref),
+            document_id=document.document_id,
+            clause_ref=clause.clause_ref,
+            text=clause.text,
+            regulator=record.regulator,
+            doc_type=document.doc_type,
+            external_ref=record.external_ref,
+            title=document.title,
+            published_at=document.published_at,
+        )
+        for clause in document.clauses
+    ]

@@ -18,7 +18,7 @@ from pipeline.domain.errors import RulebookRejectedError
 from pipeline.domain.knowledge import DocumentRecord, RegisteredDocument
 from pipeline.domain.prompt import PromptText
 from pipeline.settings import PipelineSettings
-from pipeline.testing import MemoryRulebook, ScriptedProvider
+from pipeline.testing import MemoryRulebook, ScriptedEmbedder, ScriptedProvider
 from pipeline.worker import activities
 from pipeline.workflows import (
     ExtractKnowledgeWorkflow,
@@ -75,37 +75,51 @@ def scripted_stage() -> RelationStage:
     return RelationStage(LlmRelationExtractor(ScriptedProvider({}, default=ANSWER), prompt))
 
 
-async def test_with_knowledge_the_document_is_registered_in_the_rulebook(
+KNOWLEDGE = PipelineSettings(
+    _env_file=None, service_name="pipeline-worker", pipeline_knowledge_enabled=True
+)
+KNOWLEDGE_REQUEST = IngestRequest(
+    source_id=uuid.UUID(int=1),
+    since=datetime(2026, 9, 1, tzinfo=UTC),
+    knowledge=True,
+    regulator="CBIC",
+)
+
+
+async def ingest(
     environment: WorkflowEnvironment,
-) -> None:
+    settings: PipelineSettings,
+    rulebook: MemoryRulebook,
+    embedder: ScriptedEmbedder,
+) -> IngestResult:
     task_queue = f"pipeline-test-{uuid.uuid4().hex[:8]}"
-    rulebook = MemoryRulebook()
-    settings = PipelineSettings(
-        _env_file=None, service_name="pipeline-worker", pipeline_knowledge_enabled=True
-    )
     worker = build_worker(
         environment.client,
         WorkerConfig(task_queue=task_queue),
         workflows=[IngestDocumentWorkflow, ExtractKnowledgeWorkflow],
-        activities=activities(settings, sink=rulebook, stage=scripted_stage()),
-    )
-    request = IngestRequest(
-        source_id=uuid.UUID(int=1),
-        since=datetime(2026, 9, 1, tzinfo=UTC),
-        knowledge=True,
-        regulator="CBIC",
+        activities=activities(settings, sink=rulebook, stage=scripted_stage(), embedder=embedder),
     )
     async with worker:
-        result = await environment.client.execute_workflow(
+        return await environment.client.execute_workflow(
             IngestDocumentWorkflow.run,
-            request,
+            KNOWLEDGE_REQUEST,
             id=f"ingest-{uuid.uuid4()}",
             task_queue=task_queue,
         )
+
+
+async def test_with_knowledge_the_document_is_registered_in_the_rulebook(
+    environment: WorkflowEnvironment,
+) -> None:
+    rulebook, embedder = MemoryRulebook(), ScriptedEmbedder()
+    result = await ingest(environment, KNOWLEDGE, rulebook, embedder)
     assert result.registered is True
     record = rulebook.records[DocumentId(result.document_id)]
     assert [clause.clause_ref for clause in record.document.clauses] == result.clause_refs
     assert record.regulator == "CBIC"
+    assert (result.clauses_embedded, result.embedding_error) == (3, "")
+    assert {model for _, model in rulebook.embeddings} == {ScriptedEmbedder.MODEL}
+    assert embedder.requests[1][2]["document_id"] == str(result.document_id)
     assert result.knowledge_error == ""
     assert result.mentions_queued >= 2
     assert (result.relations_outcome, result.relations_staged) == ("ok", 1)
@@ -129,30 +143,32 @@ class RefusingRulebook(MemoryRulebook):
 async def test_a_failed_registration_is_reported_and_the_ingest_completes(
     environment: WorkflowEnvironment,
 ) -> None:
-    task_queue = f"pipeline-test-{uuid.uuid4().hex[:8]}"
-    settings = PipelineSettings(
-        _env_file=None, service_name="pipeline-worker", pipeline_knowledge_enabled=True
-    )
-    worker = build_worker(
-        environment.client,
-        WorkerConfig(task_queue=task_queue),
-        workflows=[IngestDocumentWorkflow, ExtractKnowledgeWorkflow],
-        activities=activities(settings, sink=RefusingRulebook(), stage=scripted_stage()),
-    )
-    request = IngestRequest(
-        source_id=uuid.UUID(int=1),
-        since=datetime(2026, 9, 1, tzinfo=UTC),
-        knowledge=True,
-        regulator="CBIC",
-    )
-    async with worker:
-        result = await environment.client.execute_workflow(
-            IngestDocumentWorkflow.run,
-            request,
-            id=f"ingest-{uuid.uuid4()}",
-            task_queue=task_queue,
-        )
+    embedder = ScriptedEmbedder()
+    result = await ingest(environment, KNOWLEDGE, RefusingRulebook(), embedder)
     assert result.registered is False
     assert result.clause_count == 3
     assert "rulebook-writes-disabled" in result.registration_error
+    assert (result.clauses_embedded, embedder.requests) == (0, [])
+    assert result.relations_outcome == "disabled"
+
+
+async def test_a_failed_embedding_is_reported_and_extraction_still_runs(
+    environment: WorkflowEnvironment,
+) -> None:
+    rulebook = MemoryRulebook()
+    result = await ingest(environment, KNOWLEDGE, rulebook, ScriptedEmbedder(dims=256))
+    assert result.registered is True
+    assert result.clauses_embedded == 0
+    assert "256-dimensional vectors" in result.embedding_error
+    assert rulebook.embeddings == {}
+    assert result.knowledge_error == ""
+    assert (result.relations_outcome, result.relations_staged) == ("ok", 1)
+
+
+async def test_with_knowledge_off_nothing_is_embedded(environment: WorkflowEnvironment) -> None:
+    rulebook, embedder = MemoryRulebook(), ScriptedEmbedder()
+    off = PipelineSettings(_env_file=None, service_name="pipeline-worker")
+    result = await ingest(environment, off, rulebook, embedder)
+    assert (result.registered, result.clauses_embedded, result.embedding_error) == (False, 0, "")
+    assert (rulebook.calls, embedder.requests, rulebook.embeddings) == (0, [], {})
     assert result.relations_outcome == "disabled"
