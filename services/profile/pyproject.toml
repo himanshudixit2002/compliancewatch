@@ -1,7 +1,7 @@
 [project]
 name = "compliancewatch-profile"
 version = "0.1.0"
-description = "ComplianceWatch profile service"
+description = "ComplianceWatch profile service: the business hierarchy (entity, registration, location), attribute values per node and financial year, snapshots for the engine"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.120",
@@ -12,10 +12,14 @@ dependencies = [
   "alembic>=1.16",
   "psycopg[binary]>=3.2",
   "py-common",
+  "domain-kernel",
+  "ontology",
 ]
 
 [tool.uv.sources]
 py-common = { workspace = true }
+domain-kernel = { workspace = true }
+ontology = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]
