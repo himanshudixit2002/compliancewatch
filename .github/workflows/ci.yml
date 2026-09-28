@@ -1,9 +1,10 @@
 # CI (guide section 17). Implemented: 1 lint + type-check, 2 unit tests with coverage gate,
 # 3 contract checks (import-linter, the OpenAPI spec per service through its contract test, and
 # the event schemas: metaschema, golden examples, generated clients in sync, backward compatibility
-# against the base branch by example replay and by the Redpanda schema registry; migration lint is
-# TODO), 4 integration tests (testcontainers) for the packages a change affects, a compose
-# dev-stack smoke, and secrets scanning. Steps 5-7 are listed as TODO at the end.
+# against the base branch by example replay and by the Redpanda schema registry; the migration
+# lint's catalog rules in the dev-stack job), 4 integration tests (testcontainers) for the
+# packages a change affects, a compose dev-stack smoke, and secrets scanning. Steps 5-7 are listed
+# as TODO at the end.
 name: ci
 
 on:
@@ -165,7 +166,8 @@ jobs:
       - name: Contract check - import boundaries (import-linter)
         run: make importlint
       # Section 17 step 3: the OpenAPI spec is covered per service by its contract test (pytest
-      # step); the event schemas by the contracts job below. TODO: migration lint (tenant_id + RLS).
+      # step); the event schemas by the contracts job below; tenant_id and row-level security by
+      # the migration lint after the dev-stack job's migrations.
       - name: Unit tests with coverage gate (80% on domain and application layers, guide section 19)
         run: make py-test
       - name: Lockfile is current
@@ -352,6 +354,8 @@ jobs:
         run: |
           uv sync --all-packages --locked
           make migrate
+      - name: Tenant tables have forced row-level security (migration lint, catalog rules)
+        run: make migrations-catalog
       - name: Observability profile starts and answers (collector, Prometheus, Tempo, Grafana)
         run: |
           docker compose --profile observability up -d --wait --wait-timeout 180 otel-collector prometheus tempo grafana

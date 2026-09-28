@@ -151,7 +151,7 @@ py-format: check-uv ## ruff format and ruff check --fix
 	$(UV) run ruff format .
 	$(UV) run ruff check --fix .
 
-py-typecheck: check-uv ## mypy --strict per package (src, tests, migrations/env.py) and the root conftest
+py-typecheck: check-uv ## mypy --strict per package (src, tests, migrations/env.py), the root conftest and the repo scripts
 	@status=0; \
 	for d in $(PY_DIRS); do \
 	  targets="$$d/src"; \
@@ -160,7 +160,7 @@ py-typecheck: check-uv ## mypy --strict per package (src, tests, migrations/env.
 	  echo "mypy $$targets"; \
 	  $(UV) run mypy $$targets || status=1; \
 	done; \
-	$(UV) run mypy conftest.py packages/contracts/scripts || status=1; \
+	$(UV) run mypy conftest.py packages/contracts/scripts infra/scripts || status=1; \
 	exit $$status
 
 py-test: check-uv ## pytest: unit and contract tests with the coverage gate (no Docker needed)
@@ -200,6 +200,11 @@ ts-dev: check-pnpm ## next dev (:3000) and whatsapp-bot (:8080) with reload
 
 # ---- Composition (guide sections 13, 17, 19) -------------------------------------------------
 .PHONY: install lint format typecheck test check eval label demo runbooks-check migrate run worker relay seed openapi contracts contracts-check hooks ci-lint
+# The gates `make check` runs. A package adds its own with `CHECKS += <target>` in its section.
+# The prerequisites of check expand a second time when make runs them (.SECONDEXPANSION below),
+# so a `CHECKS +=` line counts wherever it sits in this file.
+CHECKS := lint typecheck test importlint lock-check contracts-check runbooks-check
+
 install: py-sync ts-install ## Install both toolchains
 
 lint: py-lint ts-lint ## Lint both sides (CI step 1)
@@ -210,7 +215,8 @@ typecheck: py-typecheck ts-typecheck ## mypy --strict and tsc --strict (CI step 
 
 test: py-test ts-test ## Unit and contract tests on both sides (CI step 2)
 
-check: lint typecheck test importlint lock-check contracts-check runbooks-check ## Everything CI runs before integration tests
+.SECONDEXPANSION:
+check: $$(CHECKS) ## Everything CI runs before integration tests (the gates listed in CHECKS)
 
 runbooks-check: check-uv ## Every Prometheus alert links an existing runbook (guide section 18)
 	$(UV) run python infra/scripts/check_alert_runbooks.py
@@ -294,3 +300,15 @@ hooks: ## Install the pre-commit and commit-msg hooks
 ci-lint: ## Validate GitHub Actions workflows and the pre-commit config without running them
 	actionlint -color
 	pre-commit validate-config
+
+# ---- Migration lint (guide section 17: expand-contract; tenant isolation by row-level security)
+.PHONY: migrations-check migrations-catalog
+CHECKS += migrations-check
+
+migrations-check: check-uv ## Migration files: one head per service, names match revisions, downgrades, marked contract steps
+	$(UV) run python infra/scripts/check_migrations.py static
+
+migrations-catalog: check-uv ## After make migrate: tenant tables have forced row-level security (rules in infra/scripts/migration_lint.toml)
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	$(UV) run python infra/scripts/check_migrations.py catalog \
+	  --dsn "postgresql://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}"

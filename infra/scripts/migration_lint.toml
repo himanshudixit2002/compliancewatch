@@ -1,0 +1,47 @@
+# Migration lint, catalog mode (infra/scripts/check_migrations.py, `make migrations-catalog`).
+#
+# Rules, checked after every service has migrated:
+#   R1  a NOT NULL tenant_id means row-level security enabled and forced, and a policy for ALL
+#       commands whose USING and WITH CHECK compare tenant_id with
+#       NULLIF(current_setting('app.tenant_id', true), '');
+#   R2  every table in a tenant schema has tenant_id;
+#   R3  a nullable tenant_id only on an exempt table;
+#   R4  every exemption below matches at least one table.
+# A table in a schema listed in neither group fails too.
+#
+# Exemptions are append-only and land in the same pull request as the migration that needs
+# them, each with the reason the report prints. `table` is schema.table and may use * for any
+# schema. `kind` is "exempt" (the default: R1 to R3 are skipped) or "routing_directory" (reads
+# may cross tenants, but every policy that admits a write must hold the tenant check).
+
+[schemas]
+# Customer data: every table carries tenant_id under row-level security.
+tenant = ["identity", "profile", "obligation", "notification", "applicability", "qa"]
+# Regulatory and platform data shared by every tenant. R1 and R3 still apply to any table here
+# that has a tenant_id column.
+global = ["rulebook", "pipeline", "llm_gateway", "eval", "audit"]
+
+[[exemptions]]
+table = "*.outbox_event"
+reason = """
+The outbox relay reads pending rows across tenants, and tenant_id is null for regulatory events
+(py_common.outbox).
+"""
+
+[[exemptions]]
+table = "*.processed_event"
+reason = """
+Consumer inbox keyed by consumer group and event id: it records which events were handled and
+holds no tenant data (py_common.outbox).
+"""
+
+[[exemptions]]
+table = "*.alembic_version"
+reason = "Alembic's version table: one row naming the schema's migration head."
+
+[[exemptions]]
+table = "llm_gateway.cost_ledger"
+reason = """
+Row-level security is deliberately not applied: the cost dashboard reads this table across
+tenants and tenant_id is NULL for regulatory calls (migration 0001 of llm-gateway).
+"""
