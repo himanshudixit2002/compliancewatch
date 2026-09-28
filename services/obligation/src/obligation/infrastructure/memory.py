@@ -93,6 +93,9 @@ class MemoryStore:
         self.obligations: dict[ObligationId, Obligation] = {}
         self.events: list[DomainEvent] = []
 
+    def ping(self) -> bool:
+        return True
+
     def __call__(self, tenant_id: TenantId) -> AbstractContextManager[UnitOfWork]:
         return self._unit(tenant_id)
 
