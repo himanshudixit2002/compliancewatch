@@ -49,7 +49,7 @@ jobs:
           CW_LOG_JSON: "true"
         run: |
           nohup uv run --package compliancewatch-llm-gateway uvicorn llm_gateway.main:app --port 8008 > gateway.log 2>&1 &
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -sf http://localhost:8008/ready && break
             sleep 1
           done

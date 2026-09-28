@@ -74,6 +74,10 @@ Flags for the pieces that need an external account, all off by default in `.env.
 (`static` for the demo table). `pnpm --filter whatsapp-bot dev` runs the bot on 8080 against
 the notification service on 8006.
 
+`make demo` needs neither Docker nor accounts: it runs the demo tenant through every service in
+one process and prints the transcript ([demo.md](demo.md)). `make dev-backup` and
+`make dev-restore FILE=...` dump and restore the dev database.
+
 ## Profiles
 
 `make migrate SERVICE=profile` then `make run SERVICE=profile`; every call needs an

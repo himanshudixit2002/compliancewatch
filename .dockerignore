@@ -1,11 +1,17 @@
-# Root build context for every image (services now, apps later): keep images small and secrets out.
+# Root build context for every image (services and the whatsapp-bot): keep images small and secrets out.
+# The bot's Dockerfile needs its own sources plus the workspace manifests; apps/web stays out.
 .git
 .github
 docs
 evals
 infra
-apps
-packages/ui
+apps/web/*
+!apps/web/package.json
+packages/ui/*
+!packages/ui/package.json
+apps/whatsapp-bot/dist
+apps/whatsapp-bot/coverage
+apps/whatsapp-bot/.turbo
 **/tests
 **/node_modules
 **/.next
