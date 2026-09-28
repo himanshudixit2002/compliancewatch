@@ -119,6 +119,18 @@ def test_prompts_lists_the_registry_in_file_order(client: TestClient) -> None:
                 "cases in evals/golden/extraction."
             ),
         },
+        {
+            "name": "extraction.rule_relations",
+            "version": "1",
+            "owner": "regulatory-intelligence",
+            "eval_cases": 1,
+            "sha256": "97c4b62619480a6e70e28234a120a2c04ecaf5bd6e2e20cdd7869e7d914f20e7",
+            "description": (
+                "Typed relations from one parsed document to the targets its mention grammar "
+                "found; text in services/pipeline/prompts/extraction.rule_relations.v1.md, "
+                "cases in evals/golden/relations."
+            ),
+        },
     ]
 
 

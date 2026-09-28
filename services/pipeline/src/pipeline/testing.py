@@ -122,19 +122,25 @@ def recorded_sources(fixtures: Path) -> FixtureTransport:
 
 
 class ScriptedProvider:
-    """An ``LLMProvider`` that answers from a script: the golden label for a document id, or one
-    text for everything. The harness uses it to prove the scoring; it is not a model."""
+    """An ``LLMProvider`` that answers from a script: the golden label for a document id (or for
+    a document id and a prompt, ``(document_id, "name@version")``), or one text for everything.
+    The harness uses it to prove the scoring; it is not a model."""
 
     MODEL = "scripted/golden"
 
-    def __init__(self, answers: Mapping[str, str] | None = None, default: str = "{}") -> None:
+    def __init__(
+        self, answers: Mapping[str | tuple[str, str], str] | None = None, default: str = "{}"
+    ) -> None:
         self._answers = dict(answers or {})
         self._default = default
         self.requests: list[CompletionRequest] = []
 
     def complete(self, req: CompletionRequest) -> CompletionResponse:
         self.requests.append(req)
-        text = self._answers.get(req.metadata.get("document_id", ""), self._default)
+        document_id = req.metadata.get("document_id", "")
+        text = self._answers.get(
+            (document_id, req.prompt_version), self._answers.get(document_id, self._default)
+        )
         return CompletionResponse(text=text, model=self.MODEL, input_tokens=0, output_tokens=0)
 
 

@@ -25,7 +25,7 @@ PROVIDERS = ("scripted", "fake", "gateway")
 
 
 def scripted(cases: Sequence[GoldenCase]) -> ScriptedProvider:
-    answers = {
+    answers: dict[str | tuple[str, str], str] = {
         str(case.document.document_id): json.dumps(case.expected, default=str)
         for case in cases
         if case.expected is not None
