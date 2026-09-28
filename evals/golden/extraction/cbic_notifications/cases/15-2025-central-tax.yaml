@@ -1,0 +1,45 @@
+case_id: 15-2025-central-tax
+label_status: draft
+labelled_by: ''
+reviewed_by: ''
+source:
+  source_key: cbic_notifications
+  number: 15/2025-Central Tax
+  title: Seeks to exempt taxpayer with annual turnover less than Rs 2 Crore from filing annual return.
+  url: https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/centaltax-15-2025.pdf
+  published_at: '2025-09-17'
+  sha256: 5546720d0ff3a551ca80fe3e12c8e20e16da0565e5476c3c7a4137b0bf25ac2c
+  fetched_at: '2026-09-28T14:52:35.939318+00:00'
+document:
+  doc_type: notification
+  language: en
+  title: '[TO BE PUBLISHED IN THE GAZETTE OF INDIA, EXTRAORDINARY, PART II, SECTION 3, SUB-SECTION (ii)]'
+  clauses:
+  - ref: en.p1
+    page: 1
+    text: '[TO BE PUBLISHED IN THE GAZETTE OF INDIA, EXTRAORDINARY, PART II, SECTION 3, SUB-SECTION (ii)]'
+  - ref: en.p2
+    page: 1
+    text: GOVERNMENT OF INDIA MINISTRY OF FINANCE DEPARTMENT OF REVENUE CENTRAL BOARD OF INDIRECT TAXES
+      AND CUSTOMS
+  - ref: en.p3
+    page: 1
+    text: NOTIFICATION No. 15/2025 – Central Tax
+  - ref: en.p4
+    page: 1
+    text: New Delhi, the 17th day of September 2025 S.O. ......(E).— In exercise of the powers conferred
+      by the first proviso to sub-section (1) of section 44 of the Central Goods and Services Tax Act,
+      2017 (12 of 2017), the Commissioner, on the recommendations of the Council, in respect of filing
+      of annual return for the financial year 2024-25 onwards, hereby exempts the registered person whose
+      aggregate turnover in any financial year is up to two crore rupees, from filing annual return that
+      said financial year. [F. No CBIC-20001/2/2025-GST]
+  - ref: en.p5
+    page: 1
+    text: (Raushan Kumar) Under Secretary
+detector:
+  doc_kind: notification
+  change_kind: none
+  references: []
+expected: null
+notes: Fill in expected as a candidate (see evals/golden/extraction/README.md); set label_status to reviewed
+  when done.

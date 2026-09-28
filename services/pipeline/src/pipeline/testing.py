@@ -29,6 +29,16 @@ GSTCOUNCIL = "https://gstcouncil.gov.in"
 GSTN = "https://www.gst.gov.in"
 MAHAGST = "https://mahagst.gov.in"
 EMPTY_TABLE = "<html><body><table><tbody></tbody></table></body></html>"
+CBIC_PDF = f"{CBIC}/content/pdf/tax_repository/gst/notifications/"
+RECORDED_NOTIFICATIONS: Mapping[str, str] = {
+    "01/2026-Central Tax": "gst-ct-01-2026.pdf",
+    "17/2025-Central Tax": "gst-ct-17-2025.pdf",
+    "15/2025-Central Tax": "centaltax-15-2025.pdf",
+    "10/2025-Central Tax": "gst-ct-10-2025.pdf",
+    "13/2024-Central Tax": "central-tax-13-2024-11072024.pdf",
+}
+"""The CBIC notifications recorded in English, by number, with the file name under ``CBIC_PDF``;
+the fixture is ``cbic/<file name>.json``. 01/2026 is also recorded in Hindi."""
 
 
 @dataclass
@@ -88,13 +98,8 @@ def recorded_sources(fixtures: Path) -> FixtureTransport:
     circulars = f"{CBIC_CIRCULARS}?year={{year}}&page={{page}}{query}Circulars%20CGST"
     transport.cbic_listing(circulars.format(year=2026, page=0), "cbic/circulars-2026-p0.json")
     transport.cbic_listing(circulars.format(year=2026, page=1), None)
-    pdf = f"{CBIC}/content/pdf/tax_repository/gst/notifications/"
-    transport.file(
-        "GET", pdf + "gst-ct-01-2026.pdf", "cbic/gst-ct-01-2026.pdf.json", "application/json"
-    )
-    transport.file(
-        "GET", pdf + "gst-ct-01h-2026.pdf", "cbic/gst-ct-01h-2026.pdf.json", "application/json"
-    )
+    for name in ("gst-ct-01h-2026.pdf", *RECORDED_NOTIFICATIONS.values()):
+        transport.file("GET", CBIC_PDF + name, f"cbic/{name}.json", "application/json")
     archive = f"{GSTCOUNCIL}/archive-press-release?page={{page}}"
     transport.file(
         "GET", archive.format(page=0), "gstcouncil/archive-press-release-page0.html", "text/html"
