@@ -15,6 +15,7 @@ from domain_kernel.protocols import LLMProvider
 from llm_gateway import __version__
 from llm_gateway.api.router import router
 from llm_gateway.application.complete import Complete
+from llm_gateway.application.metering import BudgetGuard
 from llm_gateway.application.usage import Usage
 from llm_gateway.domain.breaker import CircuitBreaker
 from llm_gateway.domain.budgets import BudgetLimits
@@ -114,16 +115,18 @@ def wire(settings: GatewaySettings) -> GatewayWiring:
         if settings.llm_cache_ttl_seconds > 0
         else None
     )
+    publisher = LogPublisher()
     complete = Complete(
         registry=registry,
         providers=providers,
         breaker=CircuitBreaker(
             threshold=settings.llm_breaker_threshold, open_seconds=settings.llm_breaker_open_seconds
         ),
+        budgets=BudgetGuard(ledger=ledger, publisher=publisher, config=config),
         cache=cache,
         ledger=ledger,
         tracer=tracer,
-        publisher=LogPublisher(),
+        publisher=publisher,
         config=config,
     )
     usage = Usage(ledger=ledger, config=config)

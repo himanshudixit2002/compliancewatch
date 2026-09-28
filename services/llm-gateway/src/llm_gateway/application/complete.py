@@ -7,51 +7,29 @@ because the ledger is what budgets are read from.
 """
 
 import logging
-import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from domain_kernel.errors import DomainError
 from domain_kernel.events import utc_now
-from domain_kernel.ids import TenantId
 from domain_kernel.llm import CompletionRequest, CompletionResponse
 from domain_kernel.protocols import LLMProvider
+from llm_gateway.application.metering import BudgetGuard, error_entry, require_ledger_bounds
 from llm_gateway.domain.breaker import CircuitBreaker
-from llm_gateway.domain.budgets import (
-    BudgetScope,
-    BudgetStatus,
-    budget_scopes,
-    month_of,
-    next_month_start,
-)
 from llm_gateway.domain.cache import ResponseCache, cache_key, is_cacheable
 from llm_gateway.domain.config import GatewayConfig
 from llm_gateway.domain.errors import (
-    BudgetExceededError,
     ProviderResponseError,
     ProviderUnavailableError,
     UnknownPromptError,
 )
-from llm_gateway.domain.events import (
-    BudgetAlarmed,
-    EventPublisher,
-    LLMCallCompleted,
-    correlation_id_from,
-)
+from llm_gateway.domain.events import EventPublisher, LLMCallCompleted, correlation_id_from
 from llm_gateway.domain.features import CallStatus, CostSource, Feature, parse_feature
-from llm_gateway.domain.ledger import (
-    MAX_CORRELATION_ID,
-    MAX_ERROR_TYPE,
-    MAX_MODEL_ID,
-    CostLedger,
-    LedgerEntry,
-    require_bounded,
-)
-from llm_gateway.domain.pricing import Cost, cost_for, quantize_inr, quantize_usd
+from llm_gateway.domain.ledger import CostLedger, LedgerEntry
+from llm_gateway.domain.pricing import Cost, cost_for
 from llm_gateway.domain.prompts import PromptRef, PromptRegistry
 from llm_gateway.domain.providers import ProviderResponse
 from llm_gateway.domain.routing import provider_for, require_model_id
@@ -59,8 +37,6 @@ from llm_gateway.domain.scrub import scrub
 from llm_gateway.domain.tracing import CallRecord, Tracer
 
 log = logging.getLogger(__name__)
-
-_ZERO_COST = Cost(quantize_usd(Decimal(0)), quantize_inr(Decimal(0)), CostSource.ESTIMATE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +124,7 @@ class Complete:
         registry: PromptRegistry,
         providers: Mapping[str, LLMProvider],
         breaker: CircuitBreaker,
+        budgets: BudgetGuard,
         cache: ResponseCache | None,
         ledger: CostLedger,
         tracer: Tracer,
@@ -159,6 +136,7 @@ class Complete:
         self._registry = registry
         self._providers = providers
         self._breaker = breaker
+        self._budgets = budgets
         self._cache = cache
         self._ledger = ledger
         self._tracer = tracer
@@ -166,8 +144,6 @@ class Complete:
         self._config = config
         self._clock = clock
         self._monotonic = monotonic
-        self._alarmed: set[tuple[BudgetScope, str, date]] = set()
-        self._alarm_lock = threading.Lock()
 
     def run(self, req: CompletionRequest, *, correlation_id: str) -> CompletionOutcome:
         """Serve ``req``.
@@ -185,7 +161,7 @@ class Complete:
 
         route = self._config.routes[feature]
         candidates = route.models if req.model is None else (require_model_id(req.model, "model"),)
-        _require_ledger_bounds(candidates, correlation_id)
+        require_ledger_bounds(candidates, correlation_id)
 
         system = scrub(req.system)
         user = scrub(req.user)
@@ -203,7 +179,12 @@ class Complete:
             started_at=self._clock(),
             started=self._monotonic(),
         )
-        self._check_budgets(call)
+        self._budgets.check(
+            tenant_id=req.tenant_id,
+            feature=feature,
+            at=call.started_at,
+            correlation_id=correlation_id,
+        )
 
         key = cache_key(
             model=call.model_requested,
@@ -264,61 +245,6 @@ class Complete:
                     extra={"requested": call.model_requested, "served": served.model},
                 )
         return self._finish(call, entry, replace(served, trace_id=str(entry_id)))
-
-    def _check_budgets(self, call: _Call) -> None:
-        month = month_of(call.started_at)
-        for scope, scope_key in budget_scopes(call.req.tenant_id, call.feature):
-            tenant: TenantId | None = call.req.tenant_id if scope is BudgetScope.TENANT else None
-            feature = call.feature if scope is BudgetScope.FEATURE else None
-            spent = self._ledger.spent_inr(tenant_id=tenant, feature=feature, month=month)
-            status = BudgetStatus(
-                scope=scope,
-                key=scope_key,
-                month=month,
-                spent_inr=spent,
-                limit_inr=self._config.budgets.limit_for(scope),
-                alarm_ratio=self._config.budgets.alarm_ratio,
-            )
-            if status.exceeded:
-                raise BudgetExceededError(
-                    f"{scope.value} budget for {scope_key} is used up for {month:%Y-%m}: "
-                    f"{status.spent_inr} of {status.limit_inr} INR",
-                    scope=scope.value,
-                    spent_inr=status.spent_inr,
-                    limit_inr=status.limit_inr,
-                    resets_at=next_month_start(month),
-                )
-            if status.alarmed:
-                self._alarm_once(status, call)
-
-    def _alarm_once(self, status: BudgetStatus, call: _Call) -> None:
-        marker = (status.scope, status.key, status.month)
-        with self._alarm_lock:
-            if marker in self._alarmed:
-                return
-            self._alarmed.add(marker)
-        log.warning(
-            "llm budget alarm: %s %s at %.0f%% of %s INR for %s",
-            status.scope.value,
-            status.key,
-            status.ratio * 100,
-            status.limit_inr,
-            status.month.strftime("%Y-%m"),
-        )
-        event = BudgetAlarmed(
-            scope=status.scope,
-            key=status.key,
-            month=status.month,
-            spent_inr=status.spent_inr,
-            limit_inr=status.limit_inr,
-            ratio=status.ratio,
-            tenant_id=call.req.tenant_id,
-            correlation_id=correlation_id_from(call.correlation_id),
-        )
-        try:
-            self._publisher.publish(event)
-        except Exception:
-            log.exception("publishing %s failed", BudgetAlarmed.topic)
 
     def _call_provider(
         self, call: _Call, candidates: tuple[str, ...]
@@ -415,35 +341,18 @@ class Complete:
         return CompletionOutcome(response=response, entry=entry, pii_counts=call.pii_counts)
 
     def _fail(self, call: _Call, exc: Exception, *, model: str, provider: str) -> None:
-        """Write the error row and trace it. The event is only for completed calls.
-
-        ``provider`` is the registered name the attempt went to; a failed call has no response
-        to name the host that would have served it.
-        """
-        error_type = exc.type_slug if isinstance(exc, DomainError) else type(exc).__name__
-        entry_id = uuid4()
-        entry = LedgerEntry(
-            id=entry_id,
+        """Write the error row and trace it. The event is only for completed calls."""
+        entry = error_entry(
+            exc,
             occurred_at=call.started_at,
             tenant_id=call.req.tenant_id,
             feature=call.feature,
-            prompt_name=call.ref.name,
-            prompt_version=call.ref.version,
+            ref=call.ref,
             model_requested=call.model_requested,
             model_served=model,
             provider=provider,
-            input_tokens=0,
-            output_tokens=0,
-            cached=False,
-            cost_usd=_ZERO_COST.usd,
-            cost_inr=_ZERO_COST.inr,
-            cost_source=_ZERO_COST.source,
             latency_ms=self._elapsed_ms(call),
             correlation_id=call.correlation_id,
-            trace_id=str(entry_id),
-            generation_id="",
-            status=CallStatus.ERROR,
-            error_type=error_type[:MAX_ERROR_TYPE],
         )
         self._ledger.add(entry)
         self._record(call, entry, output="", error_detail=str(exc))
@@ -465,16 +374,6 @@ class Complete:
             self._tracer.record(record)
         except Exception:
             log.exception("tracing call %s failed", entry.trace_id)
-
-
-def _require_ledger_bounds(candidates: tuple[str, ...], correlation_id: str) -> None:
-    """Refuse what the ledger could not store before anything is spent on the call.
-
-    ``LedgerEntry`` checks the same bounds, but by then the provider has been paid.
-    """
-    require_bounded(correlation_id, "correlation_id", MAX_CORRELATION_ID)
-    for model in candidates:
-        require_bounded(model, "model", MAX_MODEL_ID, required=True)
 
 
 def _as_provider_response(response: CompletionResponse, provider: str) -> ProviderResponse:
