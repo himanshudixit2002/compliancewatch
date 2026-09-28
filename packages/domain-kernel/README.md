@@ -38,7 +38,7 @@ Design reference: Project Foundation guide, sections 6, 11 and 13.
 | `llm` | `CompletionRequest`, `CompletionResponse` |
 | `notifications` | `RenderedMessage`, `DeliveryStatus`, `DeliveryReceipt` |
 | `vectors` | `Vector`, `EmbeddedClause`, `ClauseFilter`, `ScoredClause` |
-| `knowledge` | `EntityType`, `RelationKind` (seven kinds: supersedes, amends, refers_to, exempts, extends_deadline, corrects, withdraws), `normalise_name`, `EntityRef`, `Mention`, `RuleRelation`, `RULE_VERSION_KIND`, `RULE_VERSION_ONLY` |
+| `knowledge` | `EntityType`, `RelationKind` (seven kinds: supersedes, amends, refers_to, exempts, extends_deadline, corrects, withdraws), `normalise_name` (every dash reads as `-`; lakh and crore amounts scaled), `Instrument` and `qualified_name` (`39(1)@cgst-act`), `EntityRef`, `Mention`, `RuleRelation`, `RULE_VERSION_KIND`, `RULE_VERSION_ONLY` |
 | `protocols` | `SourceAdapter`, `DocumentParser`, `RuleExtractor`, `PredicateEvaluator`, `NotificationChannel`, `LLMProvider`, `VectorStore`, `RuleReader`, `DecisionRepository`, `WorkflowHandle` |
 
 Every value object is a frozen, slotted dataclass whose `__post_init__` validates and raises

@@ -11,6 +11,7 @@ to another rule version or to an entity, backed by the clause that states it.
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import StrEnum
 
 from domain_kernel._validation import require_instance, require_int, require_text
@@ -35,6 +36,17 @@ class EntityType(StrEnum):
     TAX_RATE = "tax_rate"
     THRESHOLD = "threshold"
     STATE = "state"
+
+
+class Instrument(StrEnum):
+    """The statute a section or rule number belongs to, written after ``@`` in its canonical
+    name: section 39(1) of the CGST Act is ``39(1)@cgst-act``. A bare number is ambiguous
+    (section 16 of the CGST Act is not section 16 of the IGST Act), so alignment wants one."""
+
+    CGST_ACT = "cgst-act"
+    IGST_ACT = "igst-act"
+    UTGST_ACT = "utgst-act"
+    CGST_RULES = "cgst-rules"
 
 
 class RelationKind(StrEnum):
@@ -80,6 +92,21 @@ _TRAILING_FRACTION = re.compile(r"\.\d+(?=\D*\Z)", re.ASCII)
 _NUMBER = re.compile(r"\d+(?:\.\d+)?|\.\d+", re.ASCII)
 _TWO_DIGIT_CODE = re.compile(r"\d{2}", re.ASCII)
 _DASH_TO_HYPHEN = str.maketrans(dict.fromkeys(DASHES, "-"))
+_RATE_SUFFIX = re.compile(r"\s*\(\s*rate\s*\)")
+_LETTERS_BEFORE_DIGIT = re.compile(r"(?<![A-Z])([A-Z]+)(?=[0-9])")
+_SCALES: Mapping[str, int] = {
+    "lakh": 10**5,
+    "lakhs": 10**5,
+    "lac": 10**5,
+    "lacs": 10**5,
+    "crore": 10**7,
+    "crores": 10**7,
+}
+_SCALE_WORD = re.compile(r"\b(?:lakhs?|lacs?|crores?)\b")
+_SCALED_AMOUNT = re.compile(
+    r"(?:(?:rs\.?|inr|\u20b9)\s*)?([0-9][0-9,]*(?:\.[0-9]+)?)\s*(lakhs?|lacs?|crores?)"
+    r"(?:\s+rupees)?\.?"
+)
 
 
 def _collapse(text: str) -> str:
@@ -93,27 +120,42 @@ def _squash(text: str) -> str:
 
 
 def _document_number(text: str) -> str:
-    """Casefold, drop a leading "notification no.", "circular no." or "no.", and close the
-    spaces around "-" and "/": ``17/2026-central tax``."""
+    """Casefold, drop a leading "notification no.", "circular no." or "no.", close the spaces
+    around "-" and "/", and write a "(Rate)" suffix one way: ``17/2026-central tax``,
+    ``11/2017-central tax (rate)``."""
     text = _DOCUMENT_NUMBER_PREFIX.sub("", _collapse(text.casefold()))
-    return _AROUND_PUNCTUATION.sub(r"\1", text)
+    text = _AROUND_PUNCTUATION.sub(r"\1", text)
+    return _RATE_SUFFIX.sub(" (rate)", text)
+
+
+def _provision(text: str, prefix: re.Pattern[str]) -> str:
+    """The number before the first ``@`` without spaces or its "Section"/"Rule" word, then the
+    instrument after it casefolded without spaces; empty when the number is."""
+    head, at, instrument = text.partition("@")
+    number = prefix.sub("", _squash(head))
+    qualifier = _squash(instrument).casefold()
+    return f"{number}@{qualifier}" if number and at and qualifier else number
 
 
 def _section(text: str) -> str:
     """Drop every space, then a leading "Section" or "Sec." that does not start a longer word:
-    ``section 16 (2) (c)`` becomes ``16(2)(c)``; ``sections 16 and 17`` keeps its letters."""
-    return _SECTION_PREFIX.sub("", _squash(text))
+    ``section 16 (2) (c)`` becomes ``16(2)(c)``; ``sections 16 and 17`` keeps its letters. An
+    instrument after ``@`` stays: ``16(2)(c)@cgst-act``."""
+    return _provision(text, _SECTION_PREFIX)
 
 
 def _rule(text: str) -> str:
-    """Drop every space, then a leading "Rule" that does not start a longer word: ``36(4)``."""
-    return _RULE_PREFIX.sub("", _squash(text))
+    """Drop every space, then a leading "Rule" that does not start a longer word: ``36(4)``,
+    or ``36(4)@cgst-rules`` with an instrument."""
+    return _provision(text, _RULE_PREFIX)
 
 
 def _form(text: str) -> str:
-    """Uppercase, one hyphen between parts and none at the ends, then drop a leading "Form"
-    (however often it repeats) and trim again: ``GSTR-3B``."""
+    """Uppercase, one hyphen between parts and none at the ends, a hyphen between the letters
+    and the digits of a code, then drop a leading "Form" (however often it repeats) and trim
+    again: ``GSTR-3B`` from "gstr 3b" and from "GSTR3B"."""
     text = _SEPARATORS.sub("-", _collapse(text).upper()).strip("-")
+    text = _LETTERS_BEFORE_DIGIT.sub(r"\1-", text)
     return _FORM_PREFIX.sub("", text).strip("-")
 
 
@@ -123,8 +165,17 @@ def _digits(text: str) -> str:
 
 
 def _amount(text: str) -> str:
-    """Whole rupees as ASCII digits: a trailing fraction (paise) goes first, then every other
-    character: ``Rs. 5,00,00,000.50`` becomes ``50000000``."""
+    """Whole rupees as ASCII digits. With "lakh" or "crore" the text must be exactly one scaled
+    amount (``Rs. 2 crore`` becomes ``20000000``, ``1.5 lakh`` ``150000``), anything else with
+    a scale word gives the empty string. Without one, a trailing fraction (paise) goes first,
+    then every other character: ``Rs. 5,00,00,000.50`` becomes ``50000000``."""
+    folded = _collapse(text.casefold())
+    if _SCALE_WORD.search(folded):
+        match = _SCALED_AMOUNT.fullmatch(folded)
+        if match is None:
+            return ""
+        number = Decimal(match.group(1).replace(",", ""))
+        return str(int(number * _SCALES[match.group(2)]))
     return _digits(_TRAILING_FRACTION.sub("", text))
 
 
@@ -160,6 +211,13 @@ _NORMALISERS: Mapping[EntityType, Callable[[str], str]] = {
 }
 
 
+def qualified_name(provision: str, instrument: Instrument) -> str:
+    """A section or rule number with its instrument: ``qualified_name("39(1)", CGST_ACT)`` is
+    ``39(1)@cgst-act``. ``provision`` is the number as ``normalise_name`` gives it."""
+    number = require_text(provision, "provision")
+    return f"{number}@{require_instance(instrument, Instrument, 'instrument').value}"
+
+
 def normalise_name(type: EntityType, text: str) -> str:
     """The canonical name of ``text`` read as an entity of ``type``.
 
@@ -169,18 +227,21 @@ def normalise_name(type: EntityType, text: str) -> str:
 
     - ``notification``, ``circular``: casefold, drop a leading "Notification No.", "Circular
       No.", "No." or "Number", and close the spaces around "-" and "/", so "Notification No.
-      17/2026 - Central Tax" and "17/2026-central tax" both give ``17/2026-central tax``.
+      17/2026 - Central Tax" and "17/2026-central tax" both give ``17/2026-central tax``; a
+      "(Rate)" suffix is always `` (rate)``.
       Abbreviations ("Notfn.", "CT" for "Central Tax") are not expanded: they are alias-table
       work, not normalisation.
     - ``section``, ``rule``: drop every space, then a leading "Section", "Sec." or "Rule" that
       does not start a longer word (``16(2)(c)``, ``36(4)``); "sections" and "sectional" keep
-      their letters.
-    - ``form``: uppercase, one hyphen between parts and none at either end, no leading "Form"
-      (``GSTR-3B`` from "- Form GSTR 3B" as well as from "gstr 3b").
+      their letters. The statute goes after ``@`` (``39(1)@cgst-act``, see ``Instrument``).
+    - ``form``: uppercase, one hyphen between parts and between the letters and digits of a
+      code, none at either end, no leading "Form" (``GSTR-3B`` from "- Form GSTR 3B", from
+      "gstr 3b" and from "GSTR3B").
     - ``hsn_code``, ``sac_code``: ASCII digits only (``847190`` from "8471.90").
     - ``threshold``: an amount in rupees; a trailing fraction (paise) is dropped and the ASCII
-      digits kept (``50000000`` from "Rs. 5,00,00,000.50"). The extractor passes rupees, not
-      lakh or crore.
+      digits kept (``50000000`` from "Rs. 5,00,00,000.50"). One amount in lakh or crore is
+      scaled (``20000000`` from "Rs. 2 crore"); any other text with a scale word ("two crore",
+      "2 crore 50 lakh") gives the empty string rather than a wrong number.
     - ``tax_rate``: the first number without leading or trailing zeros, plus ``%`` (``18%``;
       ``0.5%`` from ".5%").
     - ``state``: a two-digit state code as is, a name casefolded (``29``, ``karnataka``).
