@@ -109,12 +109,14 @@ def test_prompts_lists_the_registry_in_file_order(client: TestClient) -> None:
         },
         {
             "name": "extraction.rule_candidate",
-            "version": "0",
-            "owner": "ai-platform",
+            "version": "1",
+            "owner": "regulatory-intelligence",
             "eval_cases": 1,
-            "sha256": None,
+            "sha256": "8c31ce19b6225847eb097ed785869bdb68e3208c8c006cc3f3c858d3565d75ce",
             "description": (
-                "Placeholder entry; the prompt text arrives with the extraction pipeline."
+                "Rule candidate from one parsed document; text in "
+                "services/pipeline/prompts/extraction.rule_candidate.v1.md, "
+                "cases in evals/golden/extraction."
             ),
         },
     ]

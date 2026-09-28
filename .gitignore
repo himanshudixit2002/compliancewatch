@@ -77,3 +77,4 @@ logs/
 tmp/
 .cache/
 var/
+evals/reports/

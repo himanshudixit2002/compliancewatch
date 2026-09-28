@@ -1,7 +1,8 @@
 """The deterministic provider: what local development, CI and end-to-end tests talk to.
 
 Same request in, same text out, no network. A request with a JSON schema gets a placeholder
-document that fills the schema's required fields; the judgement feature gets an "unsure"
+document that fills the schema's required fields (the first value of an enum, null when the
+type allows it); the judgement feature gets an "unsure"
 verdict; everything else is echoed back. ``fail_next`` injects failures so callers can test
 their fallback paths.
 """
@@ -82,12 +83,22 @@ def _placeholder(schema: Mapping[str, object]) -> dict[str, object]:
         if not isinstance(name, str):
             continue
         prop = properties.get(name) if isinstance(properties, Mapping) else None
-        kind = prop.get("type") if isinstance(prop, Mapping) else None
-        document[name] = _value_for(kind)
+        document[name] = _value_for(prop)
     return document
 
 
-def _value_for(kind: object) -> object:
+def _value_for(prop: object) -> object:
+    """A value of the property's declared type: the first value of an ``enum``, null when the
+    type list allows it, otherwise the first listed type, so a schema with ``enum`` or
+    ``["string", "null"]`` still gets something that fits."""
+    if not isinstance(prop, Mapping):
+        return None
+    choices = prop.get("enum")
+    if isinstance(choices, list | tuple) and choices:
+        return choices[0]
+    kind = prop.get("type")
+    if isinstance(kind, list | tuple):
+        kind = None if "null" in kind or not kind else kind[0]
     match kind:
         case "string":
             return "placeholder"

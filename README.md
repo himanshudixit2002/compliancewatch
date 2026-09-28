@@ -18,7 +18,9 @@
 > the Temporal worker scaffold with the pipeline's sample ingest workflow, the first source
 > adapters (CBIC notifications and circulars, GST Council press releases, GSTN advisories,
 > Maharashtra GST notifications) with PDF and HTML parsers, a change detector, a backfill command
-> and recorded fixtures, OpenTelemetry tracing
+> and recorded fixtures, the rule extractor with deterministic validators behind the gateway, the
+> labelling tool and the first extraction golden set (50 CBIC notifications listed, one draft
+> label), the eval harness with `make eval`, a CI gate and a nightly run, OpenTelemetry tracing
 > and metrics with a dev observability stack (collector, Prometheus, Tempo, Grafana dashboard),
 > pnpm + Turborepo workspace with the Next.js web app and
 > the WhatsApp bot, Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 008
@@ -74,6 +76,9 @@ compliancewatch/
       src/pipeline/infrastructure/adapters/  # one SourceAdapter per regulator site; registry.py
       src/pipeline/infrastructure/parsers/   # PDF and HTML parsers, language detection
       src/pipeline/backfill.py  # pipeline-backfill: make backfill SERVICE=pipeline ARGS=...
+      src/pipeline/label.py     # pipeline-label: golden extraction cases (make label ARGS=...)
+      src/pipeline/application/{extractor,validators}.py  # the extractor behind the gateway and its checks
+      prompts/               # extraction.rule_candidate.v1.md; digest recorded in the gateway registry
       adapters/, parsers/    # pointers to the package directories above
       prompts/               # Versioned prompt files, each with a test
       workflows/             # pointer to src/pipeline/workflows
@@ -93,8 +98,8 @@ compliancewatch/
     argocd/                  # Application definitions
     dev/                     # Docker Compose dev-stack assets (init SQL, Temporal dynamic config, collector, Prometheus, Tempo, Grafana)
   evals/
-    golden/                  # Golden sets: extraction/, qa/, applicability/ (versioned data files)
-    harness/                 # Runner, metrics, thresholds
+    golden/                  # Golden sets: extraction/cbic_notifications (index + cases), qa/, applicability/
+    harness/                 # Workspace package cw_evals: runner, metrics, thresholds (make eval)
   docs/
     adr/                     # Architecture decision records (001 to 008 and 012 to 017 written; 009 to 011 stubs)
     runbooks/
@@ -166,7 +171,8 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | `make test` | pytest (unit + contract, coverage gate on domain and application) and vitest |
 | `make lint` / `typecheck` / `format` | ruff + eslint + prettier; mypy --strict + tsc --strict |
 | `make check` | lint, typecheck, test, import-linter, uv lock check, contracts check (the same gates CI runs) |
-| `make eval` | Eval harness against `evals/golden` (not built yet; prints a notice) |
+| `make eval` | Eval harness against `evals/golden`: `EVAL_PROFILE=ci` (default, no tokens) or `nightly` (a real model behind the gateway) |
+| `make label` | Labelling tool for the extraction golden set: `ARGS="check"`, `"index ..."`, `"prepare ..."` |
 | `make hooks` | Install the pre-commit and commit-msg hooks |
 | `make help` | Every target with its description |
 
@@ -212,6 +218,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - Alert rules and the runbook links from alerts (the dashboard exists; alerting arrives with the deployment work)
 - The ingest workflow wired to the real adapters and the outbox (the adapters, parsers and detector exist and run from `make backfill`; the workflow still runs on the in-memory fakes); OCR for scanned PDFs
 - The 50-document sample rulebook (the seed calendar of standing obligations exists, pending analyst review)
-- Real prompt texts for extraction, judgement, question answering and classification, and the eval harness
+- Prompt texts for judgement, question answering and classification (extraction exists); the qa and applicability golden sets and their harness suites
+- Analyst labels: 49 of the 50 listed CBIC notifications have no case yet, and the one draft label is unreviewed; the nightly eval needs the `CW_AI_GATEWAY_API_KEY` repository secret
 - Full text for ADR-009 to ADR-011; the identity service itself (ADR-014 decides Supabase Auth for the MVP; nothing is created until the maintainer opens the project)
 - KAG-style reasoning beyond the schema: entity extraction and alignment in the pipeline, the logical-form planner and solver in qa, and its eval gate (ADR-017)
