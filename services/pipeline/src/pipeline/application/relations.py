@@ -131,7 +131,8 @@ class RelationStage(PipelineStage[RelationInput, RelationBatch]):
             Issue("relation_item_unusable", f"{item.reason}: {item.raw}") for item in unusable
         )
         candidates, issues = validate_relations(
-            proposals, RelationContext(input.document, targets, input.change_kind)
+            proposals,
+            RelationContext(input.document, targets, input.change_kind, input.mentions),
         )
         run_issues.extend(issues)
         needs_review = bool(run_issues) or any(c.needs_review for c in candidates)

@@ -221,13 +221,17 @@ class ProposeRelations(ActivityBase[RelationsRequest, RelationBatchOut]):
         non_retryable_error_types=["RulebookRejectedError", "KnowledgeContractError"],
     )
 
-    def __init__(self, reader: RulebookReader, stage: RelationStage, *, enabled: bool) -> None:
+    def __init__(
+        self, reader: RulebookReader, stage: RelationStage | None, *, enabled: bool
+    ) -> None:
+        if enabled and stage is None:
+            raise ValueError("an enabled relation activity needs its stage")
         self._reader = reader
         self._stage = stage
         self._enabled = enabled
 
     async def run(self, input: RelationsRequest) -> RelationBatchOut:
-        if not self._enabled:
+        if not self._enabled or self._stage is None:
             return RelationBatchOut(
                 document_id=input.document_id,
                 extractor=RelationStage.version,

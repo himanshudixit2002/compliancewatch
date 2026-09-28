@@ -13,7 +13,7 @@ failing the ingest.
 from typing import Self
 
 from temporalio import workflow
-from temporalio.exceptions import ActivityError, ChildWorkflowError
+from temporalio.exceptions import ActivityError, ChildWorkflowError, WorkflowAlreadyStartedError
 
 with workflow.unsafe.imports_passed_through():
     from pydantic import model_validator
@@ -108,7 +108,7 @@ class IngestDocumentWorkflow:
                     id=f"extract-knowledge-{parsed.document_id}",
                     task_queue=workflow.info().task_queue,
                 )
-            except ChildWorkflowError as error:
+            except (ChildWorkflowError, WorkflowAlreadyStartedError) as error:
                 knowledge_error = str(error.cause or error)[:500]
                 workflow.logger.warning("knowledge extraction failed: %s", knowledge_error)
         return IngestResult(

@@ -35,6 +35,9 @@ COPY --from=builder --chown=app:app /app/.venv /app/.venv
 # Alembic needs the scripts at runtime (pre-sync migration job: alembic -c alembic.ini upgrade head)
 COPY --from=builder --chown=app:app /app/services/pipeline/alembic.ini /app/alembic.ini
 COPY --from=builder --chown=app:app /app/services/pipeline/migrations /app/migrations
+# The worker reads its prompt files from here when CW_PIPELINE_KNOWLEDGE_ENABLED is on.
+COPY --from=builder --chown=app:app /app/services/pipeline/prompts /app/prompts
+ENV CW_PIPELINE_PROMPTS_DIR=/app/prompts
 USER app
 EXPOSE 8000
 CMD ["uvicorn", "pipeline.main:app", "--host", "0.0.0.0", "--port", "8000"]

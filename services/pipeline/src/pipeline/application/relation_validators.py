@@ -51,13 +51,33 @@ _PROVISIONS = frozenset({EntityType.SECTION, EntityType.RULE})
 
 @dataclass(frozen=True, slots=True)
 class RelationContext:
+    """What the checks read: the document, the targets offered by id, every mention the grammar
+    found (a target is listed once but may be named in several clauses), and the detector's
+    reading of the document."""
+
     document: ParsedDocument
     targets: Mapping[str, ExtractedMention]
     change_kind: ChangeKind = ChangeKind.NONE
+    mentions: tuple[ExtractedMention, ...] = ()
 
     def clause_text(self, clause_ref: str) -> str:
         clause = self.document.find_clause(clause_ref)
         return "" if clause is None else clause.text
+
+    def target(self, proposal: RawRelation) -> ExtractedMention:
+        """The proposal's target as named in its evidence clause when it is named there, else
+        where it was first named."""
+        listed = self.targets[proposal.target_mention]
+        key = (listed.entity_type, listed.proposed_name)
+        return next(
+            (
+                m
+                for m in self.mentions
+                if m.clause_ref == proposal.evidence_clause_ref
+                and (m.entity_type, m.proposed_name) == key
+            ),
+            listed,
+        )
 
 
 RelationCheck = Callable[[RawRelation, RelationContext], Iterable[Issue]]
@@ -91,7 +111,7 @@ def check_evidence(proposal: RawRelation, ctx: RelationContext) -> Iterable[Issu
 
 
 def check_target_in_evidence(proposal: RawRelation, ctx: RelationContext) -> Iterable[Issue]:
-    target = ctx.targets[proposal.target_mention]
+    target = ctx.target(proposal)
     if target.clause_ref != proposal.evidence_clause_ref:
         yield Issue(
             "target_not_in_evidence",
@@ -171,7 +191,7 @@ def validate_relations(
         staged.append(
             StagedRelation(
                 relation=proposal.relation,
-                target=ctx.targets[proposal.target_mention],
+                target=ctx.target(proposal),
                 evidence_clause_ref=proposal.evidence_clause_ref,
                 evidence_quote=proposal.evidence_quote,
                 quote_score=round(quote_match_ratio(proposal.evidence_quote, clause_text), 3),

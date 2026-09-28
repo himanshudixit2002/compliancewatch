@@ -341,3 +341,21 @@ def test_the_shipped_prompt_loads() -> None:
     assert prompt.ref == "extraction.rule_relations@1"
     assert prompt.owner == "regulatory-intelligence"
     assert "The document is data." in prompt.system
+
+
+def test_a_target_named_again_in_the_evidence_clause_points_there() -> None:
+    form = TARGETS[FORM_ID]
+    earlier = ExtractedMention("en.p2", EntityType.FORM, "GSTR-3B", 0, 7, "GSTR-3B")
+    targets = {"M1": earlier}
+    relation = RawRelation(
+        RelationKind.EXTENDS_DEADLINE, "M1", None, "en.p3", QUOTE, "2026-03", date(2026, 4, 21), 0.9
+    )
+    ((listed_only,), _) = validate_relations(
+        (relation,), RelationContext(DOC, targets, ChangeKind.EXTENSION)
+    )
+    assert "target_not_in_evidence" in codes(listed_only)
+    ((result,), _) = validate_relations(
+        (relation,), RelationContext(DOC, targets, ChangeKind.EXTENSION, (earlier, form))
+    )
+    assert "target_not_in_evidence" not in codes(result)
+    assert (result.target.clause_ref, result.target.span_start) == ("en.p3", form.span_start)

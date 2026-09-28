@@ -21,7 +21,7 @@ from pipeline.application.relations import LlmRelationExtractor, RelationStage
 from pipeline.domain.ports import KnowledgeSink, RulebookReader
 from pipeline.infrastructure.fakes import FakePlainTextParser, FakeSourceAdapter
 from pipeline.infrastructure.gateway import GatewayProvider
-from pipeline.infrastructure.prompts import load_prompt
+from pipeline.infrastructure.prompts import PROMPTS_DIR, load_prompt
 from pipeline.infrastructure.rulebook_client import HttpRulebook
 from pipeline.settings import PipelineSettings
 from pipeline.workflows import TASK_QUEUE, ExtractKnowledgeWorkflow, IngestDocumentWorkflow
@@ -51,13 +51,15 @@ def activities(
     rulebook: Rulebook = sink or HttpRulebook(
         settings.rulebook_url, token=None if token is None else token.get_secret_value()
     )
-    relations = stage or RelationStage(
-        LlmRelationExtractor(
-            GatewayProvider(settings.llm_gateway_url),
-            load_prompt("extraction.rule_relations", "1"),
-        )
-    )
     enabled = settings.pipeline_knowledge_enabled
+    relations = stage
+    if relations is None and enabled:
+        prompt = load_prompt(
+            "extraction.rule_relations", "1", settings.pipeline_prompts_dir or PROMPTS_DIR
+        )
+        relations = RelationStage(
+            LlmRelationExtractor(GatewayProvider(settings.llm_gateway_url), prompt)
+        )
     return [
         DiscoverDocument(adapter),
         FetchDocument(adapter),
