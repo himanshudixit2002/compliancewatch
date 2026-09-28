@@ -6,6 +6,13 @@ from dataclasses import dataclass
 
 from rulebook.application.alignment import AlignMentions
 from rulebook.application.documents import ReadDocument, RegisterDocument
+from rulebook.application.graph import (
+    ListEntityClauses,
+    ListRelations,
+    ReadClause,
+    ReadEntity,
+    ResolveEntity,
+)
 from rulebook.application.relations import (
     ApproveRelationCandidate,
     ListRelationCandidates,
@@ -14,6 +21,7 @@ from rulebook.application.relations import (
     StageRelationCandidates,
 )
 from rulebook.application.review import DecideMentionGroup, ListGroupItems, ListMentionGroups
+from rulebook.application.rule_versions import ListCitations, ListRulesInForce, ReadRuleVersion
 from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
 from rulebook.settings import RulebookSettings
 
@@ -34,3 +42,11 @@ class Wiring:
     approve_relation: ApproveRelationCandidate
     reject_relation: RejectRelationCandidate
     list_rules: ListRules
+    list_rules_in_force: ListRulesInForce
+    read_rule_version: ReadRuleVersion
+    list_citations: ListCitations
+    resolve_entity: ResolveEntity
+    read_entity: ReadEntity
+    list_entity_clauses: ListEntityClauses
+    list_rule_relations: ListRelations
+    read_clause: ReadClause

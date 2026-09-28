@@ -7,21 +7,38 @@ no-op rather than an error. Decisions lock the rows they change (``SELECT ... FO
 
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
+from datetime import date
 from decimal import Decimal
 from typing import Any, Self
 from uuid import UUID
 
-from sqlalchemy import Engine, and_, create_engine, func, select, text, tuple_, update
+from sqlalchemy import Engine, Select, and_, create_engine, func, or_, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
 from domain_kernel.documents import DocumentType
-from domain_kernel.ids import CanonicalEntityId, ClauseId, DocumentId, RuleVersionId, SourceId
+from domain_kernel.ids import (
+    CanonicalEntityId,
+    ClauseId,
+    DocumentId,
+    RuleId,
+    RuleVersionId,
+    SourceId,
+)
 from domain_kernel.knowledge import EntityRef, EntityType, RelationKind, RuleRelation
+from domain_kernel.ontology import AttributeLevel
 from domain_kernel.status import RuleVersionStatus
 from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.documents import StoredClause, StoredDocument
+from rulebook.domain.graph import (
+    ClauseDetail,
+    EntityRecord,
+    MentionedClause,
+    MentionSpan,
+    RelationQuery,
+    RelationRecord,
+)
 from rulebook.domain.relations import (
     CandidateIssue,
     CandidateRejectReason,
@@ -36,9 +53,12 @@ from rulebook.domain.review import (
     Resolution,
     ReviewStatus,
 )
+from rulebook.domain.rule_versions import IN_FORCE_STATUSES, CitationRecord, RuleVersionRecord
 from rulebook.domain.runs import ExtractionRun, RuleSummary
+from rulebook.domain.seed import SeedStatus
 from rulebook.infrastructure.models import (
     CanonicalEntityRow,
+    CitationRow,
     ClauseEntityRow,
     ClauseRow,
     DocumentRow,
@@ -53,6 +73,7 @@ from rulebook.infrastructure.models import (
 EXAMPLES_PER_GROUP = 5
 SUPERSESSION_LOCK = 0x72756C6573757073
 """Advisory lock key held for the rest of a transaction that approves a supersession."""
+PUBLISHED_STATUSES = sorted(status.value for status in IN_FORCE_STATUSES)
 
 
 class SqlAlchemyDocumentRepository:
@@ -96,6 +117,14 @@ class SqlAlchemyDocumentRepository:
             for clause in clauses
         ]
         self._session.execute(insert(ClauseRow).values(values).on_conflict_do_nothing())
+
+    def clause(self, clause_id: ClauseId) -> ClauseDetail | None:
+        found = self._session.execute(
+            select(ClauseRow, DocumentRow)
+            .join(DocumentRow, DocumentRow.id == ClauseRow.document_id)
+            .where(ClauseRow.id == clause_id.value)
+        ).first()
+        return None if found is None else ClauseDetail(_to_clause(found[0]), _to_document(found[1]))
 
 
 class SqlAlchemyEntityRepository:
@@ -153,6 +182,14 @@ class SqlAlchemyEntityRepository:
         )
         return self._session.execute(statement).first() is not None
 
+    def describe(self, entity_id: CanonicalEntityId) -> EntityRecord | None:
+        row = self._session.get(CanonicalEntityRow, entity_id.value)
+        if row is None:
+            return None
+        return EntityRecord(
+            CanonicalEntityId(row.id), EntityType(row.type), row.canonical_name, tuple(row.aliases)
+        )
+
 
 class SqlAlchemyMentionRepository:
     def __init__(self, session: Session) -> None:
@@ -200,6 +237,47 @@ class SqlAlchemyMentionRepository:
             .limit(1)
         )
         return None if found is None else CanonicalEntityId(found)
+
+    def clauses_mentioning(
+        self, entity_id: CanonicalEntityId, as_of: date | None, limit: int
+    ) -> Sequence[MentionedClause]:
+        mentioned = select(ClauseEntityRow.clause_id).where(
+            ClauseEntityRow.entity_id == entity_id.value
+        )
+        statement = (
+            select(ClauseRow, DocumentRow)
+            .join(DocumentRow, DocumentRow.id == ClauseRow.document_id)
+            .where(ClauseRow.id.in_(mentioned))
+            .order_by(
+                DocumentRow.published_at.desc().nulls_last(), DocumentRow.id, ClauseRow.ordinal
+            )
+            .limit(limit)
+        )
+        if as_of is not None:
+            statement = statement.where(DocumentRow.published_at <= as_of)
+        rows = self._session.execute(statement).all()
+        spans: dict[UUID, list[MentionSpan]] = {}
+        for clause_id, mention_text, span_start, span_end in self._session.execute(
+            select(
+                ClauseEntityRow.clause_id,
+                ClauseEntityRow.mention_text,
+                ClauseEntityRow.span_start,
+                ClauseEntityRow.span_end,
+            )
+            .where(
+                ClauseEntityRow.entity_id == entity_id.value,
+                ClauseEntityRow.clause_id.in_([clause.id for clause, _ in rows]),
+            )
+            .order_by(ClauseEntityRow.clause_id, ClauseEntityRow.span_start)
+        ).all():
+            spans.setdefault(clause_id, []).append(MentionSpan(mention_text, span_start, span_end))
+        return [
+            MentionedClause(
+                ClauseDetail(_to_clause(clause), _to_document(document)),
+                tuple(spans[clause.id]),
+            )
+            for clause, document in rows
+        ]
 
 
 class SqlAlchemyReviewRepository:
@@ -426,6 +504,63 @@ class SqlAlchemyRelationRepository:
             text("SELECT pg_advisory_xact_lock(:key)"), {"key": SUPERSESSION_LOCK}
         )
 
+    def find(self, query: RelationQuery) -> Sequence[RelationRecord]:
+        statement = (
+            select(
+                RuleRelationRow,
+                ClauseRow.clause_ref,
+                ClauseRow.document_id,
+                RelationCandidateRow.period_label,
+                RelationCandidateRow.new_due_on,
+            )
+            .join(ClauseRow, ClauseRow.id == RuleRelationRow.clause_id)
+            .outerjoin(
+                RelationCandidateRow, RelationCandidateRow.id == RuleRelationRow.candidate_id
+            )
+            .order_by(RuleRelationRow.id)
+            .limit(query.limit)
+        )
+        if query.from_rule_version_id is not None:
+            statement = statement.where(
+                RuleRelationRow.from_rule_version_id == query.from_rule_version_id.value
+            )
+        if query.to_rule_version_id is not None:
+            statement = statement.where(
+                RuleRelationRow.to_rule_version_id == query.to_rule_version_id.value
+            )
+        if query.to_entity_id is not None:
+            statement = statement.where(RuleRelationRow.to_entity_id == query.to_entity_id.value)
+        if query.relation is not None:
+            statement = statement.where(RuleRelationRow.relation == query.relation.value)
+        if query.published_only:
+            statement = statement.join(
+                RuleVersionRow, RuleVersionRow.id == RuleRelationRow.from_rule_version_id
+            ).where(RuleVersionRow.status.in_(PUBLISHED_STATUSES))
+        return [
+            RelationRecord(
+                relation_id=row.id,
+                from_rule_version_id=RuleVersionId(row.from_rule_version_id),
+                relation=RelationKind(row.relation),
+                to_kind=row.to_kind,
+                to_ref=row.to_ref,
+                to_rule_version_id=None
+                if row.to_rule_version_id is None
+                else RuleVersionId(row.to_rule_version_id),
+                to_entity_id=None
+                if row.to_entity_id is None
+                else CanonicalEntityId(row.to_entity_id),
+                evidence_clause_id=ClauseId(row.clause_id),
+                evidence_clause_ref=clause_ref,
+                evidence_document_id=DocumentId(document_id),
+                candidate_id=row.candidate_id,
+                period_label=period_label,
+                new_due_on=new_due_on,
+            )
+            for row, clause_ref, document_id, period_label, new_due_on in self._session.execute(
+                statement
+            ).all()
+        ]
+
 
 class SqlAlchemyRuleCatalog:
     def __init__(self, session: Session) -> None:
@@ -467,6 +602,71 @@ class SqlAlchemyRuleCatalog:
         return None if found is None else RuleVersionStatus(found)
 
 
+class SqlAlchemyRuleVersionRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def in_force(
+        self,
+        as_of: date,
+        *,
+        rule_key: str | None,
+        regulator: str | None,
+        limit: int,
+        after: str | None,
+    ) -> Sequence[RuleVersionRecord]:
+        statement = (
+            _versions()
+            .where(
+                RuleVersionRow.status.in_(PUBLISHED_STATUSES),
+                RuleVersionRow.effective_from <= as_of,
+                or_(RuleVersionRow.effective_to.is_(None), RuleVersionRow.effective_to > as_of),
+            )
+            .order_by(RuleRow.rule_key, RuleVersionRow.version)
+            .limit(limit)
+        )
+        if rule_key is not None:
+            statement = statement.where(RuleRow.rule_key == rule_key)
+        if regulator is not None:
+            statement = statement.where(RuleRow.regulator == regulator)
+        if after is not None:
+            statement = statement.where(RuleRow.rule_key > after)
+        return [_to_version(*row) for row in self._session.execute(statement).all()]
+
+    def get(self, rule_version_id: RuleVersionId) -> RuleVersionRecord | None:
+        row = self._session.execute(
+            _versions().where(RuleVersionRow.id == rule_version_id.value)
+        ).first()
+        return None if row is None else _to_version(*row)
+
+
+class SqlAlchemyCitationRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def for_version(self, rule_version_id: RuleVersionId) -> tuple[CitationRecord, ...]:
+        statement = (
+            select(CitationRow, ClauseRow.clause_ref, ClauseRow.document_id)
+            .join(ClauseRow, ClauseRow.id == CitationRow.clause_id)
+            .where(CitationRow.rule_version_id == rule_version_id.value)
+            .order_by(ClauseRow.document_id, ClauseRow.ordinal, CitationRow.id)
+        )
+        return tuple(
+            CitationRecord(
+                citation_id=row.id,
+                rule_version_id=RuleVersionId(row.rule_version_id),
+                clause_id=ClauseId(row.clause_id),
+                document_id=DocumentId(document_id),
+                clause_ref=clause_ref,
+                quote=row.quote,
+                verified=row.verified,
+                match_score=None if row.match_score is None else float(row.match_score),
+                verified_at=row.verified_at,
+            )
+            for row, clause_ref, document_id in self._session.execute(statement).all()
+        )
+
+
 class SqlAlchemyRunRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -499,6 +699,8 @@ class SqlAlchemyKnowledgeUnitOfWork:
         self._candidates = SqlAlchemyCandidateRepository(session)
         self._relations = SqlAlchemyRelationRepository(session)
         self._rules = SqlAlchemyRuleCatalog(session)
+        self._rule_versions = SqlAlchemyRuleVersionRepository(session)
+        self._citations = SqlAlchemyCitationRepository(session)
         self._runs = SqlAlchemyRunRepository(session)
 
     @property
@@ -528,6 +730,14 @@ class SqlAlchemyKnowledgeUnitOfWork:
     @property
     def rules(self) -> SqlAlchemyRuleCatalog:
         return self._rules
+
+    @property
+    def rule_versions(self) -> SqlAlchemyRuleVersionRepository:
+        return self._rule_versions
+
+    @property
+    def citations(self) -> SqlAlchemyCitationRepository:
+        return self._citations
 
     @property
     def runs(self) -> SqlAlchemyRunRepository:
@@ -609,6 +819,37 @@ def _to_clause(row: ClauseRow) -> StoredClause:
         text=row.text,
         text_sha256=row.text_sha256,
         page=row.page,
+    )
+
+
+def _versions() -> Select[RuleVersionRow, str, str, str]:
+    return select(RuleVersionRow, RuleRow.rule_key, RuleRow.regulator, RuleRow.level).join(
+        RuleRow, RuleRow.id == RuleVersionRow.rule_id
+    )
+
+
+def _to_version(
+    row: RuleVersionRow, rule_key: str, regulator: str, level: str
+) -> RuleVersionRecord:
+    return RuleVersionRecord(
+        rule_version_id=RuleVersionId(row.id),
+        rule_id=RuleId(row.rule_id),
+        rule_key=rule_key,
+        regulator=regulator,
+        level=AttributeLevel(level),
+        version=row.version,
+        status=RuleVersionStatus(row.status),
+        title=row.title,
+        summary=row.summary,
+        specification=row.specification,
+        obligation_template=row.obligation_template,
+        recurrence=row.recurrence,
+        effective_from=row.effective_from,
+        effective_to=row.effective_to,
+        source=row.source,
+        seed_status=SeedStatus(row.seed_status),
+        todo=tuple(str(item) for item in row.todo),
+        published_at=row.published_at,
     )
 
 

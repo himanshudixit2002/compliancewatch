@@ -11,18 +11,38 @@ import threading
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field, replace
+from datetime import date, datetime
 from uuid import UUID, uuid4
 
+from domain_kernel.events import utc_now
 from domain_kernel.ids import CanonicalEntityId, ClauseId, DocumentId, RuleId, RuleVersionId
-from domain_kernel.knowledge import EntityType, RelationKind, RuleRelation
+from domain_kernel.knowledge import EntityRef, EntityType, RelationKind, RuleRelation
+from domain_kernel.ontology import AttributeLevel
 from domain_kernel.status import RuleVersionStatus
 from rulebook.domain.documents import StoredClause, StoredDocument
+from rulebook.domain.graph import (
+    ClauseDetail,
+    EntityRecord,
+    MentionedClause,
+    MentionSpan,
+    RelationQuery,
+    RelationRecord,
+)
 from rulebook.domain.relations import CandidateStatus, RelationCandidate
 from rulebook.domain.repository import KnowledgeUnitOfWork
 from rulebook.domain.review import EntityReviewItem, MentionGroup, ReviewStatus
+from rulebook.domain.rule_versions import (
+    IN_FORCE_STATUSES,
+    CitationRecord,
+    RuleVersionRecord,
+    in_force,
+)
 from rulebook.domain.runs import ExtractionRun, RuleSummary
+from rulebook.domain.seed import SeedStatus
 
 EXAMPLES_PER_GROUP = 5
+TEST_EFFECTIVE_FROM = date(2026, 4, 1)
+"""Where a test version starts when the test does not say: a date, not a regulatory fact."""
 
 
 @dataclass
@@ -38,6 +58,36 @@ class _Rule:
     rule_key: str
     regulator: str
     title: str
+    level: AttributeLevel = AttributeLevel.REGISTRATION
+
+
+@dataclass
+class _Version:
+    rule_id: UUID
+    rule_key: str
+    version: int
+    status: RuleVersionStatus
+    title: str
+    summary: str
+    specification: dict[str, object]
+    obligation_template: dict[str, object]
+    recurrence: dict[str, object] | None
+    effective_from: date
+    effective_to: date | None
+    source: dict[str, object] = field(default_factory=dict)
+    seed_status: SeedStatus = SeedStatus.NEEDS_REVIEW
+    todo: tuple[str, ...] = ()
+    published_at: datetime | None = None
+
+
+@dataclass
+class _Citation:
+    rule_version_id: RuleVersionId
+    clause_id: ClauseId
+    quote: str
+    verified: bool
+    match_score: float | None
+    verified_at: datetime | None
 
 
 @dataclass
@@ -52,7 +102,8 @@ class _Tables:
     candidates: dict[UUID, RelationCandidate] = field(default_factory=dict)
     relations: dict[UUID, tuple[RuleRelation, UUID | None]] = field(default_factory=dict)
     rules: dict[str, _Rule] = field(default_factory=dict)
-    versions: dict[RuleVersionId, tuple[UUID, RuleVersionStatus]] = field(default_factory=dict)
+    versions: dict[RuleVersionId, _Version] = field(default_factory=dict)
+    citations: dict[UUID, _Citation] = field(default_factory=dict)
     runs: dict[UUID, ExtractionRun] = field(default_factory=dict)
 
     def copy(self) -> "_Tables":
@@ -79,6 +130,12 @@ class MemoryDocumentRepository:
     def add_clauses(self, clauses: Sequence[StoredClause]) -> None:
         for clause in clauses:
             self._tables.clauses.setdefault(clause.clause_id, clause)
+
+    def clause(self, clause_id: ClauseId) -> ClauseDetail | None:
+        clause = self._tables.clauses.get(clause_id)
+        if clause is None:
+            return None
+        return ClauseDetail(clause, self._tables.documents[clause.document_id])
 
 
 class MemoryEntityRepository:
@@ -121,6 +178,12 @@ class MemoryEntityRepository:
         entity.aliases.append(alias)
         return True
 
+    def describe(self, entity_id: CanonicalEntityId) -> EntityRecord | None:
+        entity = self._tables.entities.get(entity_id)
+        if entity is None:
+            return None
+        return EntityRecord(entity_id, entity.entity_type, entity.name, tuple(entity.aliases))
+
 
 class MemoryMentionRepository:
     def __init__(self, tables: _Tables) -> None:
@@ -156,6 +219,25 @@ class MemoryMentionRepository:
             ),
             None,
         )
+
+    def clauses_mentioning(
+        self, entity_id: CanonicalEntityId, as_of: date | None, limit: int
+    ) -> Sequence[MentionedClause]:
+        spans: dict[ClauseId, list[MentionSpan]] = {}
+        for (clause_id, mentioned, start), (text, end, _, _) in self._tables.mentions.items():
+            if mentioned == entity_id:
+                spans.setdefault(clause_id, []).append(MentionSpan(text, start, end))
+        found: list[MentionedClause] = []
+        for clause_id, mentions in spans.items():
+            clause = self._tables.clauses[clause_id]
+            document = self._tables.documents[clause.document_id]
+            if as_of is not None and (
+                document.published_at is None or document.published_at > as_of
+            ):
+                continue
+            ordered = tuple(sorted(mentions, key=lambda span: span.span_start))
+            found.append(MentionedClause(ClauseDetail(clause, document), ordered))
+        return sorted(found, key=_newest_first)[:limit]
 
 
 class MemoryReviewRepository:
@@ -318,6 +400,59 @@ class MemoryRelationRepository:
     def lock_supersession(self) -> None:
         """Units of work already run one at a time here."""
 
+    def find(self, query: RelationQuery) -> Sequence[RelationRecord]:
+        found: list[RelationRecord] = []
+        for relation_id, (relation, candidate_id) in sorted(
+            self._tables.relations.items(), key=lambda item: str(item[0])
+        ):
+            record = self._record(relation_id, relation, candidate_id)
+            source = self._tables.versions.get(record.from_rule_version_id)
+            if (
+                (query.from_rule_version_id in (None, record.from_rule_version_id))
+                and (query.to_rule_version_id in (None, record.to_rule_version_id))
+                and (query.to_entity_id in (None, record.to_entity_id))
+                and (query.relation in (None, record.relation))
+                and not (
+                    query.published_only
+                    and (source is None or source.status not in IN_FORCE_STATUSES)
+                )
+            ):
+                found.append(record)
+        return found[: query.limit]
+
+    def _record(
+        self, relation_id: UUID, relation: RuleRelation, candidate_id: UUID | None
+    ) -> RelationRecord:
+        evidence = self._tables.clauses[relation.evidence_clause_id]
+        target = relation.target
+        candidate = None if candidate_id is None else self._tables.candidates.get(candidate_id)
+        return RelationRecord(
+            relation_id=relation_id,
+            from_rule_version_id=relation.from_rule_version_id,
+            relation=relation.relation,
+            to_kind=relation.to_kind,
+            to_ref=relation.to_ref,
+            to_rule_version_id=target if isinstance(target, RuleVersionId) else None,
+            to_entity_id=target.entity_id if isinstance(target, EntityRef) else None,
+            evidence_clause_id=evidence.clause_id,
+            evidence_clause_ref=evidence.clause_ref,
+            evidence_document_id=evidence.document_id,
+            candidate_id=candidate_id,
+            period_label=None if candidate is None else candidate.period_label,
+            new_due_on=None if candidate is None else candidate.new_due_on,
+        )
+
+
+def _newest_first(found: MentionedClause) -> tuple[bool, int, str, int]:
+    """Newest document first, undated ones last, then by document and clause order."""
+    published = found.detail.document.published_at
+    return (
+        published is None,
+        0 if published is None else -published.toordinal(),
+        str(found.detail.document.document_id),
+        found.detail.clause.ordinal,
+    )
+
 
 def _edge(relation: RuleRelation) -> tuple[str, str, str, str, str]:
     return (
@@ -345,7 +480,83 @@ class MemoryRuleCatalog:
 
     def version_status(self, rule_version_id: RuleVersionId) -> RuleVersionStatus | None:
         version = self._tables.versions.get(rule_version_id)
-        return None if version is None else version[1]
+        return None if version is None else version.status
+
+
+class MemoryRuleVersionRepository:
+    def __init__(self, tables: _Tables) -> None:
+        self._tables = tables
+
+    def in_force(
+        self,
+        as_of: date,
+        *,
+        rule_key: str | None,
+        regulator: str | None,
+        limit: int,
+        after: str | None,
+    ) -> Sequence[RuleVersionRecord]:
+        found = [
+            record
+            for record in (self._record(v_id, v) for v_id, v in self._tables.versions.items())
+            if in_force(record, as_of)
+            and rule_key in (None, record.rule_key)
+            and regulator in (None, record.regulator)
+            and (after is None or record.rule_key > after)
+        ]
+        return sorted(found, key=lambda record: (record.rule_key, record.version))[:limit]
+
+    def get(self, rule_version_id: RuleVersionId) -> RuleVersionRecord | None:
+        version = self._tables.versions.get(rule_version_id)
+        return None if version is None else self._record(rule_version_id, version)
+
+    def _record(self, rule_version_id: RuleVersionId, version: _Version) -> RuleVersionRecord:
+        rule = self._tables.rules[version.rule_key]
+        return RuleVersionRecord(
+            rule_version_id=rule_version_id,
+            rule_id=RuleId(version.rule_id),
+            rule_key=version.rule_key,
+            regulator=rule.regulator,
+            level=rule.level,
+            version=version.version,
+            status=version.status,
+            title=version.title,
+            summary=version.summary,
+            specification=version.specification,
+            obligation_template=version.obligation_template,
+            recurrence=version.recurrence,
+            effective_from=version.effective_from,
+            effective_to=version.effective_to,
+            source=version.source,
+            seed_status=version.seed_status,
+            todo=version.todo,
+            published_at=version.published_at,
+        )
+
+
+class MemoryCitationRepository:
+    def __init__(self, tables: _Tables) -> None:
+        self._tables = tables
+
+    def for_version(self, rule_version_id: RuleVersionId) -> tuple[CitationRecord, ...]:
+        found: list[tuple[tuple[str, int, str], CitationRecord]] = []
+        for citation_id, citation in self._tables.citations.items():
+            if citation.rule_version_id != rule_version_id:
+                continue
+            clause = self._tables.clauses[citation.clause_id]
+            record = CitationRecord(
+                citation_id=citation_id,
+                rule_version_id=rule_version_id,
+                clause_id=clause.clause_id,
+                document_id=clause.document_id,
+                clause_ref=clause.clause_ref,
+                quote=citation.quote,
+                verified=citation.verified,
+                match_score=citation.match_score,
+                verified_at=citation.verified_at,
+            )
+            found.append(((str(clause.document_id), clause.ordinal, str(citation_id)), record))
+        return tuple(record for _, record in sorted(found, key=lambda item: item[0]))
 
 
 class MemoryRunRepository:
@@ -368,6 +579,8 @@ class MemoryUnitOfWork:
         self._candidates = MemoryCandidateRepository(tables)
         self._relations = MemoryRelationRepository(tables)
         self._rules = MemoryRuleCatalog(tables)
+        self._rule_versions = MemoryRuleVersionRepository(tables)
+        self._citations = MemoryCitationRepository(tables)
         self._runs = MemoryRunRepository(tables)
 
     @property
@@ -397,6 +610,14 @@ class MemoryUnitOfWork:
     @property
     def rules(self) -> MemoryRuleCatalog:
         return self._rules
+
+    @property
+    def rule_versions(self) -> MemoryRuleVersionRepository:
+        return self._rule_versions
+
+    @property
+    def citations(self) -> MemoryCitationRepository:
+        return self._citations
 
     @property
     def runs(self) -> MemoryRunRepository:
@@ -430,13 +651,102 @@ class MemoryKnowledgeStore:
         title: str = "",
         regulator: str = "CBIC",
         status: RuleVersionStatus = RuleVersionStatus.DRAFT,
+        level: AttributeLevel = AttributeLevel.REGISTRATION,
+        effective_from: date = TEST_EFFECTIVE_FROM,
+        effective_to: date | None = None,
+        summary: str = "",
+        specification: Mapping[str, object] | None = None,
+        obligation_template: Mapping[str, object] | None = None,
+        recurrence: Mapping[str, object] | None = None,
+        published_at: datetime | None = None,
     ) -> tuple[RuleId, RuleVersionId]:
-        """A rule with one version, for tests and demos (the seed command writes real ones)."""
-        rule_id, version_id = RuleId(uuid4()), RuleVersionId.new()
+        """A rule with one version, for tests and demos (the seed command writes real ones).
+        The version's content defaults to empty mappings: nothing here is a regulatory fact."""
+        rule_id = RuleId(uuid4())
         with self._lock:
-            self._tables.rules[rule_key] = _Rule(rule_id.value, rule_key, regulator, title)
-            self._tables.versions[version_id] = (rule_id.value, status)
+            self._tables.rules[rule_key] = _Rule(rule_id.value, rule_key, regulator, title, level)
+        version_id = self.add_version(
+            rule_key,
+            title=title,
+            status=status,
+            effective_from=effective_from,
+            effective_to=effective_to,
+            summary=summary,
+            specification=specification,
+            obligation_template=obligation_template,
+            recurrence=recurrence,
+            published_at=published_at,
+        )
         return rule_id, version_id
+
+    def add_version(
+        self,
+        rule_key: str,
+        *,
+        title: str = "",
+        status: RuleVersionStatus = RuleVersionStatus.DRAFT,
+        effective_from: date = TEST_EFFECTIVE_FROM,
+        effective_to: date | None = None,
+        summary: str = "",
+        specification: Mapping[str, object] | None = None,
+        obligation_template: Mapping[str, object] | None = None,
+        recurrence: Mapping[str, object] | None = None,
+        published_at: datetime | None = None,
+    ) -> RuleVersionId:
+        """The next version of a rule ``add_rule`` created."""
+        version_id = RuleVersionId.new()
+        with self._lock:
+            rule = self._tables.rules[rule_key]
+            number = 1 + max(
+                (v.version for v in self._tables.versions.values() if v.rule_id == rule.rule_id),
+                default=0,
+            )
+            self._tables.versions[version_id] = _Version(
+                rule_id=rule.rule_id,
+                rule_key=rule_key,
+                version=number,
+                status=status,
+                title=title,
+                summary=summary,
+                specification=dict(specification or {}),
+                obligation_template=dict(obligation_template or {}),
+                recurrence=None if recurrence is None else dict(recurrence),
+                effective_from=effective_from,
+                effective_to=effective_to,
+                published_at=published_at,
+            )
+        return version_id
+
+    def add_citation(
+        self,
+        rule_version_id: RuleVersionId,
+        clause_id: ClauseId,
+        quote: str,
+        *,
+        verified: bool = True,
+        match_score: float | None = 1.0,
+    ) -> UUID:
+        """A citation of a stored clause, verified unless the test says otherwise."""
+        citation_id = uuid4()
+        with self._lock:
+            self._tables.citations[citation_id] = _Citation(
+                rule_version_id=rule_version_id,
+                clause_id=clause_id,
+                quote=quote,
+                verified=verified,
+                match_score=match_score,
+                verified_at=utc_now() if verified else None,
+            )
+        return citation_id
+
+    def add_entity(
+        self, entity_type: EntityType, name: str, aliases: Sequence[str] = ()
+    ) -> CanonicalEntityId:
+        """A canonical entity with aliases, as an analyst's review would leave it."""
+        entity_id = CanonicalEntityId.new()
+        with self._lock:
+            self._tables.entities[entity_id] = _Entity(entity_type, name, list(aliases))
+        return entity_id
 
     def entity_names(self) -> dict[CanonicalEntityId, tuple[EntityType, str, tuple[str, ...]]]:
         with self._lock:

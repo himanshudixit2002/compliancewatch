@@ -2,8 +2,9 @@
 
 Part of the ComplianceWatch monorepo. Health routes, alembic wiring, regulator documents and
 clauses with a write and read API, the knowledge schema with entity alignment, the entity review
-queue and relation candidates with their review API, and the rule tables with the seed calendar.
-No publish flow or rule read API for the engine yet.
+queue and relation candidates with their review API, the rule tables with the seed calendar, and
+a read API over rule versions, entities, relations and clauses for the Q&A service. No publish
+flow yet.
 Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architecture Reference 3.2, 5.2 and 6.2; ADR-017 and ADR-018.
 
 - **Owns:** Rules, RuleVersions, Documents, Clauses, Citations, embeddings; versioning, supersession graph, hybrid search index, as-of queries;
@@ -55,9 +56,21 @@ message if either table has rows (nothing writes them before it).
 | `POST /v1/rulebook/review/relations/{id}/approve` | Approve into a `rule_relation` from a rule version not yet published (and to the target version for supersedes, extends_deadline, corrects, withdraws); refuses supersession cycles. Needs the token |
 | `POST /v1/rulebook/review/relations/{id}/reject` | Reject with a reason. Needs the token |
 | `GET /v1/rulebook/rules` | Rule keys with their latest title, the list the relation prompt may choose a rule from |
+| `GET /v1/rulebook/rule-versions?as_of=&rule_key=&regulator=&limit=&after=` | Versions in force on `as_of`: published or superseded, with `effective_from <= as_of < effective_to`; ordered by rule key, paged with `after` (a rule key) |
+| `GET /v1/rulebook/rule-versions/{id}` | One version in any status, with its citations |
+| `GET /v1/rulebook/rule-versions/{id}/citations` | The clauses a version cites, with the quote and its verification |
+| `GET /v1/rulebook/entities/resolve?type=&name=` | Normalise the name and resolve it the way alignment does. Always 200 with `status`: `resolved` (with the entity), `ambiguous` (with the candidates sharing the alias), `not_found`, `unqualified` (a section or rule without its statute) or `empty` |
+| `GET /v1/rulebook/entities/{id}` | An entity with its aliases |
+| `GET /v1/rulebook/entities/{id}/clauses?as_of=&limit=` | Clauses that mention the entity with the spans, newest document first (undated last); `as_of` keeps documents published on or before it |
+| `GET /v1/rulebook/relations?from_rule_version_id=&to_rule_version_id=&to_entity_id=&relation=&published_only=&limit=` | Rule relations by either end (at least one id, else 422), with the evidence clause ref and document and, for a deadline extension, the candidate's period and new due date. `published_only` (default true) keeps relations from versions that have been published |
+| `GET /v1/rulebook/clauses/{id}` | A clause with its document's regulator, type, reference, title, URL, language and date; 404 `rulebook-clause-unknown` when no clause has the id |
 
 Nothing is aligned by fuzzy matching and nothing is created without an analyst (ADR-017). The
 queue has no alert yet: someone in Regulatory Intelligence has to watch it.
+
+The read routes need no token. A superseded version stays in force for the dates before its
+replacement took effect, so the Q&A service answers a question about a past date from the
+version in force then.
 
 Writes fail closed: without `CW_RULEBOOK_WRITE_TOKEN` every write is a 503, and a missing or wrong
 token is a 401. The spec is committed at `packages/contracts/openapi/rulebook.v1.json`
@@ -90,9 +103,9 @@ composition taxpayer) and check every due date the recurrences produce.
 
 ```
 src/rulebook/
-  api/             # routers (documents), request/response schemas, the write-token dependency
-  application/     # use cases: documents.py, alignment.py, review.py, relations.py; seed_loader.py
-  domain/          # documents.py, alignment.py, review.py, relations.py, runs.py, ids.py, errors.py, repository.py, seed.py
+  api/             # routers (documents, review, rule_versions, graph), request/response schemas, the write-token dependency
+  application/     # use cases: documents.py, alignment.py, review.py, relations.py, rule_versions.py, graph.py; seed_loader.py
+  domain/          # documents.py, alignment.py, review.py, relations.py, rule_versions.py, graph.py, runs.py, ids.py, errors.py, repository.py, seed.py
   infrastructure/  # models.py, knowledge_repository.py (Postgres unit of work), memory.py, seed_repository.py
   settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN
   testing.py       # rulebook_settings() for tests and demos: memory store, known token
@@ -108,7 +121,7 @@ migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and 
   versions/20260928_0005_review_queue_relation_candidates.py   # extraction runs, entity review, relation candidates
 tests/
   unit/            # domain, use cases and API on the memory store; test_models_vocabulary.py: model CHECKs against the kernel enums
-  integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work
+  integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work and its reads
   contract/        # test_openapi.py: the served schema equals the committed spec
 alembic.ini, pyproject.toml, Dockerfile
 ```

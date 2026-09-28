@@ -120,3 +120,11 @@ class RuleVersionNotEditableError(DomainError, ValueError):
 class SupersessionCycleError(DomainError, ValueError):
     type_slug = "rulebook-supersession-cycle"
     title = "Supersession would form a cycle"
+
+
+class ClauseNotStoredError(DomainError, LookupError):
+    """No clause has this id. ``UnknownClauseError`` is the other case: a clause ref that is
+    not in the document a request names."""
+
+    type_slug = "rulebook-clause-unknown"
+    title = "Clause not stored"

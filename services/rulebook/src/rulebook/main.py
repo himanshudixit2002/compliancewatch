@@ -16,6 +16,13 @@ from rulebook import __version__
 from rulebook.api.router import router
 from rulebook.application.alignment import AlignMentions
 from rulebook.application.documents import ReadDocument, RegisterDocument
+from rulebook.application.graph import (
+    ListEntityClauses,
+    ListRelations,
+    ReadClause,
+    ReadEntity,
+    ResolveEntity,
+)
 from rulebook.application.relations import (
     ApproveRelationCandidate,
     ListRelationCandidates,
@@ -24,9 +31,11 @@ from rulebook.application.relations import (
     StageRelationCandidates,
 )
 from rulebook.application.review import DecideMentionGroup, ListGroupItems, ListMentionGroups
+from rulebook.application.rule_versions import ListCitations, ListRulesInForce, ReadRuleVersion
 from rulebook.domain.errors import (
     CandidateClosedError,
     CandidateNotFoundError,
+    ClauseNotStoredError,
     DocumentConflictError,
     DocumentIdMismatchError,
     EntityTypeMismatchError,
@@ -74,6 +83,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     RuleVersionNotEditableError: 409,
     SupersessionCycleError: 409,
     InvalidRelationError: 422,
+    ClauseNotStoredError: 404,
 }
 
 
@@ -105,6 +115,14 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
         approve_relation=ApproveRelationCandidate(unit_of_work),
         reject_relation=RejectRelationCandidate(unit_of_work),
         list_rules=ListRules(unit_of_work),
+        list_rules_in_force=ListRulesInForce(unit_of_work),
+        read_rule_version=ReadRuleVersion(unit_of_work),
+        list_citations=ListCitations(unit_of_work),
+        resolve_entity=ResolveEntity(unit_of_work),
+        read_entity=ReadEntity(unit_of_work),
+        list_entity_clauses=ListEntityClauses(unit_of_work),
+        list_rule_relations=ListRelations(unit_of_work),
+        read_clause=ReadClause(unit_of_work),
     )
 
 

@@ -3,6 +3,7 @@ is no tenant and no row-level security on these tables."""
 
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
+from datetime import date
 from typing import Protocol
 from uuid import UUID
 
@@ -11,8 +12,16 @@ from domain_kernel.knowledge import EntityType, RuleRelation
 from domain_kernel.status import RuleVersionStatus
 from rulebook.domain.alignment import EntityLookup
 from rulebook.domain.documents import StoredClause, StoredDocument
+from rulebook.domain.graph import (
+    ClauseDetail,
+    EntityRecord,
+    MentionedClause,
+    RelationQuery,
+    RelationRecord,
+)
 from rulebook.domain.relations import CandidateStatus, RelationCandidate
 from rulebook.domain.review import EntityReviewItem, MentionGroup
+from rulebook.domain.rule_versions import CitationRecord, RuleVersionRecord
 from rulebook.domain.runs import ExtractionRun, RuleSummary
 
 
@@ -31,6 +40,10 @@ class DocumentRepository(Protocol):
         """Insert the clauses; ones whose id exists already are left as they are."""
         ...
 
+    def clause(self, clause_id: ClauseId) -> ClauseDetail | None:
+        """One clause with its document, whichever document it is in."""
+        ...
+
 
 class EntityRepository(EntityLookup, Protocol):
     def get(self, entity_id: CanonicalEntityId) -> tuple[EntityType, str] | None:
@@ -43,6 +56,10 @@ class EntityRepository(EntityLookup, Protocol):
 
     def add_alias(self, entity_id: CanonicalEntityId, alias: str) -> bool:
         """Add an alias unless the entity has it; whether it was added."""
+        ...
+
+    def describe(self, entity_id: CanonicalEntityId) -> EntityRecord | None:
+        """The entity with its aliases."""
         ...
 
 
@@ -65,6 +82,13 @@ class MentionRepository(Protocol):
         self, clause_id: ClauseId, span_start: int, entity_type: EntityType
     ) -> CanonicalEntityId | None:
         """The entity recorded for the mention of this type starting at this point, if any."""
+        ...
+
+    def clauses_mentioning(
+        self, entity_id: CanonicalEntityId, as_of: date | None, limit: int
+    ) -> Sequence[MentionedClause]:
+        """Clauses that mention the entity, newest document first (undated ones last), then by
+        document and clause order. With ``as_of``, only documents published on or before it."""
         ...
 
 
@@ -145,6 +169,35 @@ class RelationRepository(Protocol):
         cannot each pass the cycle check and together close a cycle."""
         ...
 
+    def find(self, query: RelationQuery) -> Sequence[RelationRecord]:
+        """Relations matching every id the query names, ordered by relation id."""
+        ...
+
+
+class RuleVersionRepository(Protocol):
+    def in_force(
+        self,
+        as_of: date,
+        *,
+        rule_key: str | None,
+        regulator: str | None,
+        limit: int,
+        after: str | None,
+    ) -> Sequence[RuleVersionRecord]:
+        """Versions in force on ``as_of`` (``rule_versions.in_force``), ordered by rule key then
+        version, with rule keys after ``after``."""
+        ...
+
+    def get(self, rule_version_id: RuleVersionId) -> RuleVersionRecord | None:
+        """The version in any status."""
+        ...
+
+
+class CitationRepository(Protocol):
+    def for_version(self, rule_version_id: RuleVersionId) -> tuple[CitationRecord, ...]:
+        """The version's citations in document and clause order."""
+        ...
+
 
 class RuleCatalog(Protocol):
     def list_rules(self) -> tuple[RuleSummary, ...]: ...
@@ -181,6 +234,12 @@ class KnowledgeUnitOfWork(Protocol):
 
     @property
     def rules(self) -> RuleCatalog: ...
+
+    @property
+    def rule_versions(self) -> RuleVersionRepository: ...
+
+    @property
+    def citations(self) -> CitationRepository: ...
 
     @property
     def runs(self) -> RunRepository: ...
