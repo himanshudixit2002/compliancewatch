@@ -124,6 +124,11 @@ def test_own_number_from_the_listing_is_not_a_reference() -> None:
         ),
         ("read with notification No. 5/2017 - Central Tax (Rate)", ("5/2017-central tax (rate)",)),
         ("nothing to see", ()),
+        (
+            "hereby rescinds notification No. 27/2022 \u2013 Central Tax and Circular No. "
+            "123/42/2019 \u2013 GST",
+            ("123/42/2019-gst", "27/2022-central tax"),
+        ),
     ],
 )
 def test_references_are_canonical_and_unique(text: str, expected: tuple[str, ...]) -> None:

@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from domain_kernel.citations import DASHES
 from domain_kernel.documents import DocumentType, ParsedDocument
 from domain_kernel.knowledge import EntityType, normalise_name
 
@@ -45,14 +46,17 @@ _EXTENSION = re.compile(
     r"|\b(?:due date|time limit)\b.{0,80}\b(?:extend(?:s|ed|ing)?|extension)\b",
     re.IGNORECASE | re.DOTALL,
 )
+_DASH = "[-" + DASHES + "]"
 _NOTIFICATION_REF = re.compile(
     r"(?:notification|circular)\s+(?:no\.?\s*)?"
-    r"(\d{1,3}/\d{4}(?:\s*-\s*[A-Za-z ]+?(?:tax|gst)(?:\s*\(rate\))?)?)"
-    r"|\b(\d{1,3}/\d{4}\s*-\s*(?:central|integrated|union territory)\s+tax(?:\s*\(rate\))?)",
+    r"(\d{1,3}/\d{4}(?:\s*" + _DASH + r"\s*[A-Za-z ]+?(?:tax|gst)(?:\s*\(rate\))?)?)"
+    r"|\b(\d{1,3}/\d{4}\s*" + _DASH + r"\s*(?:central|integrated|union territory)\s+tax"
+    r"(?:\s*\(rate\))?)",
     re.IGNORECASE,
 )
 _CIRCULAR_REF = re.compile(
-    r"circular\s+(?:no\.?\s*)?(\d{1,3}/\d{2}/\d{4}(?:\s*-\s*GST)?)", re.IGNORECASE
+    r"circular\s+(?:no\.?\s*)?(\d{1,3}/\d{2}/\d{4}(?:\s*" + _DASH + r"\s*GST)?)",
+    re.IGNORECASE,
 )
 _PRESS_RELEASE = re.compile(
     r"\b(?:press release|recommendations? of the|council (?:meeting|held))\b", re.IGNORECASE
