@@ -66,4 +66,4 @@ make test                         # unit + contract tests with the coverage gate
 docker build -f services/obligation/Dockerfile -t compliancewatch-obligation .
 ```
 
-Package `obligation`, dev port 8005, Postgres schema `obligation`. Details: [docs/onboarding/local-dev.md](../../docs/onboarding/local-dev.md).
+`CW_OBLIGATION_STORE=memory|postgres` picks the store (memory for tests and demos; the readiness check pings whichever is wired). Package `obligation`, dev port 8005, Postgres schema `obligation`. Details: [docs/onboarding/local-dev.md](../../docs/onboarding/local-dev.md).
