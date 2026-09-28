@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     kafka_bootstrap: str = "localhost:19092"
     redis_url: str = "redis://localhost:6379/0"
     temporal_address: str = "localhost:7233"
+    temporal_namespace: str = "default"
     otel_endpoint: str | None = None
 
     @field_validator("log_level", mode="before")

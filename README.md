@@ -8,6 +8,8 @@
 > spec, problem-details errors in py-common, the event contracts (fourteen topics and the envelope as
 > JSON Schema with generated pydantic and TypeScript types and compatibility checks in CI), the
 > transactional outbox in py-common (writer, Kafka relay with dead letters, idempotent consumer),
+> the Temporal worker scaffold with the pipeline's sample ingest workflow, OpenTelemetry tracing
+> and metrics with a dev observability stack (collector, Prometheus, Tempo, Grafana dashboard),
 > pnpm + Turborepo workspace with the Next.js web app and
 > the WhatsApp bot, Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 006,
 > 008 and 017 (012 and 013 as stubs). No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
@@ -58,10 +60,11 @@ compliancewatch/
       prompts/               # registry.toml: every prompt with a version, an owner and an eval case
     eval/
     pipeline/                # crawler, detector, parser, extractor, review as Temporal workers
+      src/pipeline/workflows/  # ingest_document: the sample workflow; worker.py runs the worker
       adapters/              # SourceAdapter implementations, one file per regulator source
       parsers/
       prompts/               # Versioned prompt files, each with a test
-      workflows/
+      workflows/             # pointer to src/pipeline/workflows
   packages/
     contracts/               # OpenAPI specs, event schemas (JSON Schema), generated clients (py + ts)
       openapi/               # llm-gateway.v1.json is the first spec
@@ -70,13 +73,13 @@ compliancewatch/
       clients/typescript/    # generated .d.ts per topic and index.ts
     domain-kernel/           # Shared value objects, protocols, ontology model, error types
     ontology/                # GST attribute definitions as YAML (v0.1.0), loader and validator
-    py-common/               # Settings, logging, health routes, problem details, app factory, event envelope, outbox
+    py-common/               # Settings, logging, telemetry, health routes, problem details, app factory, event envelope, outbox, Temporal scaffold
     ui/                      # Shared React components and design tokens
   infra/
     terraform/               # AWS modules: network, EKS, Aurora, MSK, S3, IAM
     helm/                    # One chart per service, values per environment
     argocd/                  # Application definitions
-    dev/                     # Docker Compose dev-stack assets (init SQL, Temporal dynamic config)
+    dev/                     # Docker Compose dev-stack assets (init SQL, Temporal dynamic config, collector, Prometheus, Tempo, Grafana)
   evals/
     golden/                  # Golden sets: extraction/, qa/, applicability/ (versioned data files)
     harness/                 # Runner, metrics, thresholds
@@ -140,12 +143,13 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 
 | Target | What it does |
 | --- | --- |
-| `make dev` / `dev-observability` / `dev-llm` / `dev-down` / `dev-reset` / `dev-logs` / `dev-ps` / `dev-psql` | Docker Compose dev stack (section 17); `dev-observability` adds Langfuse, `dev-llm` builds and starts the fake LLM gateway container |
+| `make dev` / `dev-observability` / `dev-llm` / `dev-down` / `dev-reset` / `dev-logs` / `dev-ps` / `dev-psql` | Docker Compose dev stack (section 17); `dev-observability` adds Langfuse, the OpenTelemetry collector, Prometheus, Tempo and Grafana (http://localhost:3030), `dev-llm` builds and starts the fake LLM gateway container |
 | `make migrate [SERVICE=x]` | `alembic upgrade head` for every service (or one), each in its own schema |
 | `make run SERVICE=x [PORT=n]` | uvicorn with reload on the service's dev port; an explicit environment variable beats `.env` |
 | `make openapi SERVICE=x` | Export the service's OpenAPI spec to `packages/contracts/openapi/<x>.v1.json` (checked by a contract test) |
 | `make contracts` / `contracts-check` | Regenerate the event clients from `packages/contracts/events/schemas`; check the schemas and that the committed clients match |
 | `make relay SERVICE=x` | Run the outbox relay for one service's schema against the dev stack |
+| `make worker SERVICE=x` | Run the service's Temporal worker (`python -m <package>.worker`) against the dev stack |
 | `make test` | pytest (unit + contract, coverage gate on domain and application) and vitest |
 | `make lint` / `typecheck` / `format` | ruff + eslint + prettier; mypy --strict + tsc --strict |
 | `make check` | lint, typecheck, test, import-linter, uv lock check, contracts check (the same gates CI runs) |
@@ -191,7 +195,9 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 ## Not in this repository yet
 
 - Terraform staging cluster and Keycloak (the gateway trusts an `x-tenant-id` header until then)
-- OpenTelemetry collector in the dev stack; a service that writes to the outbox (the writer, relay and consumer exist in py-common; the first producer adds the `outbox_event` migration)
+- A service that writes to the outbox (the writer, relay and consumer exist in py-common; the first producer adds the `outbox_event` migration)
+- Alert rules and the runbook links from alerts (the dashboard exists; alerting arrives with the deployment work)
+- Real pipeline activities: the sample workflow runs on in-memory fakes
 - Seeded fixtures and the 50-document sample rulebook
 - Real prompt texts for extraction, judgement, question answering and classification, and the eval harness
 - Full text for ADR-007 and ADR-009 to ADR-013; ADR-014 to ADR-016 (identity, recurring obligations, business hierarchy)

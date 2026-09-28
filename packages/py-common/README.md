@@ -3,7 +3,7 @@
 Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 13, 14 and 18.
 
-- **Owns:** Logging, tracing (OpenTelemetry), config, auth middleware, problem details, outbox, testing fakes
+- **Owns:** Logging, tracing and metrics (OpenTelemetry), config, auth middleware, problem details, outbox, Temporal worker scaffold, testing fakes
 - **Owning team:** Platform and Infrastructure
 - **Consumes:** n/a
 - **Emits / publishes:** Golden-path library consumed by every Python service
@@ -18,6 +18,11 @@ src/py_common/
   request_context.py   # x-request-id middleware; correlation_id_of(request) for handlers and dependencies
   problems.py          # RFC 9457 problem+json handlers, Problem schema, problem_responses() for routers
   app.py               # create_app(service_name, version, routers, problem_status, ...)
+  telemetry.py         # configure_telemetry (OTLP to CW_OTEL_ENDPOINT), instrument_app, instrument_engine
+  temporal/
+    client.py          # connect(settings): pydantic converter + tracing interceptor
+    activity.py        # ActivityBase: validate/run/record, retry policy and timeouts on the class, schedule()
+    worker.py          # WorkerConfig, build_worker, run_worker (stops on SIGTERM/SIGINT)
   events.py            # EventMessage (the envelope), to_message/encode/decode, payload_of(event)
   outbox/
     schema.py          # outbox_event and processed_event tables; create_*/drop_* helpers for alembic
@@ -46,6 +51,46 @@ list that does not echo the submitted value, `HTTPException` keeps its status wi
 correlation id. Routers declare the shape in OpenAPI with
 `responses=problem_responses(422, 429)`; the `Problem` schema is published under
 `components.schemas` automatically.
+
+## Telemetry
+
+`create_app` calls `configure_telemetry`: with `CW_OTEL_ENDPOINT` set (the dev stack's
+collector is `http://localhost:4317` under `make dev-observability`) a tracer and a meter
+provider export over OTLP gRPC, the FastAPI instrumentation adds a span and the HTTP duration
+metric per request (`/health` and `/ready` excluded), and the exporters flush when the app
+shuts down. With the endpoint empty nothing is installed and every span and metric is a no-op.
+Workers call `configure_telemetry` themselves and `telemetry.shutdown()` on exit. A service
+with a SQLAlchemy engine calls `instrument_engine(engine, telemetry)` for a span per statement.
+Log lines inside a recording span carry `trace_id` and `span_id`. The HTTP instrumentation
+emits the stable semantic conventions (`http.server.request.duration` in seconds,
+`http.route`, `http.response.status_code`), which the Grafana dashboard queries.
+
+## Temporal
+
+`py_common.temporal.connect(settings)` returns a client with the pydantic data converter and
+the OpenTelemetry tracing interceptor (spans are created even when the starter carried none).
+An activity is a class:
+
+```python
+class FetchDocument(ActivityBase[Discovered, Fetched]):
+    name = "pipeline.fetch_document"
+    input_type, output_type = Discovered, Fetched
+    start_to_close = timedelta(minutes=5)
+    retry_policy = RetryPolicy(
+        maximum_attempts=5, non_retryable_error_types=["InvariantViolationError"]
+    )
+
+    async def run(self, input: Discovered) -> Fetched: ...
+```
+
+`validate` runs before `run`, `record` after it (a failure there is logged, not raised), and
+`self.heartbeat()` is a no-op outside Temporal so unit tests call `run` directly or through
+`temporalio.testing.ActivityEnvironment`. A workflow calls `FetchDocument.schedule(input)`,
+which applies the class's timeouts and retry policy. A worker registers instances:
+`run_worker(settings, WorkerConfig(task_queue="pipeline"), workflows=[...],
+activities=[FetchDocument(adapter), ...])`; it stops on SIGTERM or SIGINT. The time-skipping
+test server is x86-only; tests use `WorkflowEnvironment.start_local()` (the Temporal CLI dev
+server) instead. `services/pipeline` has the sample workflow.
 
 ## Events and the outbox
 

@@ -7,6 +7,10 @@
 #   temporal     auto-setup              gRPC localhost:7233; state lives in the postgres service
 #   temporal-ui                          http://localhost:8233
 #   langfuse     --profile observability http://localhost:3010 (make dev-observability)
+#   otel-collector --profile observability OTLP gRPC localhost:4317, HTTP 4318 (CW_OTEL_ENDPOINT); metrics for Prometheus on 8889
+#   prometheus   --profile observability http://localhost:9090
+#   tempo        --profile observability traces, reached through Grafana only
+#   grafana      --profile observability http://localhost:3030 (anonymous admin in dev; dashboard "ComplianceWatch services")
 #   fake-llm     --profile llm           http://localhost:8090 (make dev-llm): llm-gateway image, fake provider
 #
 # Host ports and credentials come from .env (copy .env.example). Every ${VAR:-default} has a
@@ -162,6 +166,80 @@ services:
       retries: 12
       start_period: 60s
 
+  otel-collector:
+    # Services export OTLP here (CW_OTEL_ENDPOINT=http://localhost:4317). Traces go on to Tempo,
+    # metrics are scraped by Prometheus from :8889. The image is distroless: no healthcheck; CI
+    # and `make dev-observability` probe the health_check extension on :13133 from the host.
+    # A changed config file needs `docker compose up -d --force-recreate otel-collector`.
+    image: otel/opentelemetry-collector-contrib:0.161.0
+    profiles: ["observability"]
+    command: ["--config=/etc/otelcol/collector.yaml"]
+    volumes:
+      - ./infra/dev/otel/collector.yaml:/etc/otelcol/collector.yaml:ro
+    ports:
+      - "${OTEL_GRPC_PORT:-4317}:4317"
+      - "${OTEL_HTTP_PORT:-4318}:4318"
+      - "${OTEL_HEALTH_PORT:-13133}:13133"
+    depends_on:
+      - tempo
+
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    profiles: ["observability"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=2d
+    volumes:
+      - ./infra/dev/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  tempo:
+    # Single binary with local storage. Its OTLP ports stay inside the compose network: the
+    # collector is the only sender. The image has no shell or wget, so there is no healthcheck;
+    # Grafana's own health check and its Tempo datasource cover it.
+    image: grafana/tempo:3.0.3
+    profiles: ["observability"]
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./infra/dev/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    profiles: ["observability"]
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      tempo:
+        condition: service_started
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SERVER_HTTP_PORT: "3000"
+    volumes:
+      - ./infra/dev/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/dev/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3030}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   fake-llm:
     # The llm-gateway image with the deterministic fake provider and an in-memory ledger: what
     # other services and CI call when no real model is wanted. Profile `llm` (make dev-llm).
@@ -191,3 +269,6 @@ volumes:
   postgres_data:
   redis_data:
   redpanda_data:
+  prometheus_data:
+  tempo_data:
+  grafana_data:

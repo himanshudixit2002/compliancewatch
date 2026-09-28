@@ -1,7 +1,7 @@
 [project]
 name = "compliancewatch-pipeline"
 version = "0.1.0"
-description = "ComplianceWatch pipeline service"
+description = "ComplianceWatch pipeline service: regulatory documents in, rule candidates out, as Temporal workflows"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.120",
@@ -12,10 +12,12 @@ dependencies = [
   "alembic>=1.16",
   "psycopg[binary]>=3.2",
   "py-common",
+  "domain-kernel",
 ]
 
 [tool.uv.sources]
 py-common = { workspace = true }
+domain-kernel = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

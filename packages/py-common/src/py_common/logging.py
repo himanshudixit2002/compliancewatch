@@ -2,7 +2,8 @@
 
 One structlog ``ProcessorFormatter`` renders both structlog events and stdlib records (uvicorn,
 sqlalchemy, alembic), so every line carries ``timestamp``, ``level``, ``logger``, ``event``,
-``service``, ``correlation_id`` and ``tenant_id``. Request-scoped fields are bound via contextvars.
+``service``, ``correlation_id`` and ``tenant_id``, plus ``trace_id`` and ``span_id`` inside a
+recording OpenTelemetry span. Request-scoped fields are bound via contextvars.
 """
 
 import logging
@@ -10,6 +11,8 @@ import sys
 from typing import TextIO
 
 import structlog
+from opentelemetry import trace
+from opentelemetry.trace import format_span_id, format_trace_id
 from structlog.typing import EventDict, Processor, WrappedLogger
 
 _CONTEXT_FIELDS = ("correlation_id", "tenant_id")
@@ -29,6 +32,15 @@ def _ensure_context_fields(_: WrappedLogger, __: str, event_dict: EventDict) -> 
     return event_dict
 
 
+def add_trace_context(_: WrappedLogger, __: str, event_dict: EventDict) -> EventDict:
+    """The current span's ids, when a span is recording (no-op without telemetry)."""
+    context = trace.get_current_span().get_span_context()
+    if context.is_valid:
+        event_dict.setdefault("trace_id", format_trace_id(context.trace_id))
+        event_dict.setdefault("span_id", format_span_id(context.span_id))
+    return event_dict
+
+
 def configure_logging(
     *,
     service_name: str,
@@ -44,6 +56,7 @@ def configure_logging(
         structlog.processors.TimeStamper(fmt="iso", utc=True, key="timestamp"),
         _add_service(service_name),
         _ensure_context_fields,
+        add_trace_context,
         structlog.processors.StackInfoRenderer(),
     ]
     renderer: Processor
