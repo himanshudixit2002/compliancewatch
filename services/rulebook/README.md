@@ -49,7 +49,8 @@ message if either table has rows (nothing writes them before it).
 | `PUT /v1/rulebook/documents/{document_id}/mentions` | Align the mentions an extractor found: each is checked against the stored clause text at its span and must carry a canonical name; resolved ones go to `clause_entity`, the rest to `entity_review`. Needs the token |
 | `PUT /v1/rulebook/documents/{document_id}/relation-candidates` | Stage the relations a run proposed, with the run's issues; idempotent per proposal. Needs the token |
 | `GET /v1/rulebook/review/entities` | Open review groups, one per (entity type, proposed name), with up to five examples |
-| `POST /v1/rulebook/review/entities/decisions` | Create the entity, add the name to an existing one, or reject the group; resolves every open mention of the group and points open candidates at the entity. Needs the token |
+| `GET /v1/rulebook/review/entities/items` | Every open mention of one group with its review id |
+| `POST /v1/rulebook/review/entities/decisions` | Create the entity, add the name to an existing one, or reject the group; resolves every open mention of the group and points open candidates at the entity. A name that does not name one entity across documents (empty, or a section or rule without its statute) is decided mention by mention: the decision lists the `review_ids` it covers and adds no alias. Needs the token |
 | `GET /v1/rulebook/review/relations` | Relation candidates, open ones by default |
 | `POST /v1/rulebook/review/relations/{id}/approve` | Approve into a `rule_relation` from a rule version not yet published (and to the target version for supersedes, extends_deadline, corrects, withdraws); refuses supersession cycles. Needs the token |
 | `POST /v1/rulebook/review/relations/{id}/reject` | Reject with a reason. Needs the token |

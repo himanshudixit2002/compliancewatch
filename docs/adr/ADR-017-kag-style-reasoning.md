@@ -80,7 +80,10 @@ exactly one entity; a mention that does not resolve goes to the review queue
 (`entity_review`) rather than creating a new entity on its own. There is no fuzzy matching. An
 analyst decides a queue group (one entity type and proposed name) by creating the entity, adding
 the name to an existing one, or rejecting it; the decision writes the mentions into
-`clause_entity` in the same transaction.
+`clause_entity` in the same transaction. A name that does not name one entity across documents
+(empty, or a section or rule without its statute) is decided mention by mention and never becomes
+an alias. Approval records the aligned entity's canonical name, and aligns a candidate whose
+target was decided after staging.
 
 Relation staging. Relations are found before any rule version exists for the new document, so the
 model's proposals are stored as `relation_candidate` rows at document level: the target as the
