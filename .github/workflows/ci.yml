@@ -281,6 +281,14 @@ jobs:
           curl -sf http://localhost:13133/ | jq -e '.status == "Server available"'
           curl -sf http://localhost:9090/-/ready
           curl -sf http://localhost:3030/api/health | jq -e '.database == "ok"'
+          # Tempo answers its datasource health check only once its ingester has joined the ring,
+          # which can take longer than the container's start; give it up to two minutes.
+          for _ in $(seq 1 24); do
+            if curl -sf http://localhost:3030/api/datasources/uid/tempo/health | jq -e '.status == "OK"'; then
+              break
+            fi
+            sleep 5
+          done
           curl -sf http://localhost:3030/api/datasources/uid/tempo/health | jq -e '.status == "OK"'
           curl -sf http://localhost:3030/api/dashboards/uid/cw-services | jq -e '.dashboard.title == "ComplianceWatch services"'
       - name: Build and smoke the fake LLM gateway image
