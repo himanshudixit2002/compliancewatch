@@ -312,3 +312,14 @@ migrations-catalog: check-uv ## After make migrate: tenant tables have forced ro
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	$(UV) run python infra/scripts/check_migrations.py catalog \
 	  --dsn "postgresql://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}"
+
+# ---- Alert rules (guide section 18) ---------------------------------------------------------
+.PHONY: alerts-check
+# promtool from the Prometheus image the compose stack runs, so the rules are checked by the same
+# version that loads them.
+PROMETHEUS_IMAGE = $(shell awk '/image: prom\/prometheus:/ { print $$2; exit }' docker-compose.yml)
+PROMTOOL = docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/dev/prometheus:/rules:ro" $(PROMETHEUS_IMAGE)
+
+alerts-check: check-docker ## promtool: alert rules parse and their unit tests pass (infra/dev/prometheus/alerts.test.yml)
+	$(PROMTOOL) check rules /rules/alerts.yml
+	$(PROMTOOL) test rules /rules/alerts.test.yml

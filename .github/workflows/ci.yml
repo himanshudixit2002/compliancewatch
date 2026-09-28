@@ -2,9 +2,10 @@
 # 3 contract checks (import-linter, the OpenAPI spec per service through its contract test, and
 # the event schemas: metaschema, golden examples, generated clients in sync, backward compatibility
 # against the base branch by example replay and by the Redpanda schema registry; the migration
-# lint's catalog rules in the dev-stack job), 4 integration tests (testcontainers) for the
-# packages a change affects, a compose dev-stack smoke, and secrets scanning. Steps 5-7 are listed
-# as TODO at the end.
+# lint's file rules in the ops job and its catalog rules in the dev-stack job), 4 integration tests
+# (testcontainers) for the packages a change affects, an ops job (runbook links, promtool rules,
+# actionlint), a compose dev-stack smoke, and secrets scanning. Steps 5-7 are listed as TODO at
+# the end.
 name: ci
 
 on:
@@ -38,6 +39,7 @@ jobs:
       contracts: ${{ steps.filter.outputs.contracts }}
       schemas: ${{ steps.filter.outputs.schemas }}
       evals: ${{ steps.filter.outputs.evals }}
+      ops: ${{ steps.filter.outputs.ops }}
       integration_targets: ${{ steps.integration.outputs.targets }}
     steps:
       - uses: actions/checkout@v7
@@ -119,6 +121,14 @@ jobs:
               - 'uv.lock'
               - '.python-version'
               - '.github/workflows/ci.yml'
+            ops:
+              - 'infra/**'
+              - 'docs/runbooks/**'
+              - 'services/*/migrations/**'
+              - '.github/**'
+              - 'Makefile'
+              - 'pyproject.toml'
+              - 'docker-compose.yml' # alerts-check runs promtool from the compose Prometheus image
       - uses: dorny/paths-filter@v4
         id: changed
         with:
@@ -166,8 +176,8 @@ jobs:
       - name: Contract check - import boundaries (import-linter)
         run: make importlint
       # Section 17 step 3: the OpenAPI spec is covered per service by its contract test (pytest
-      # step); the event schemas by the contracts job below; tenant_id and row-level security by
-      # the migration lint after the dev-stack job's migrations.
+      # step); the event schemas by the contracts job below; migration files by the ops job, and
+      # tenant_id and row-level security by the migration lint after the dev-stack migrations.
       - name: Unit tests with coverage gate (80% on domain and application layers, guide section 19)
         run: make py-test
       - name: Lockfile is current
@@ -292,6 +302,29 @@ jobs:
             echo "::error::pytest collected no integration tests under $TARGET"
           fi
           exit "$status"
+
+  ops:
+    name: Ops (runbook links, migration lint, promtool rules, actionlint)
+    needs: changes
+    if: needs.changes.outputs.ops == 'true'
+    runs-on: ubuntu-latest # Docker runs promtool and actionlint from their images
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0 # exact tag: astral publishes no floating v10 tag
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --all-packages --locked
+      - name: Every alert links an existing runbook
+        run: make runbooks-check
+      - name: Migration files (one head per service, names, downgrades, marked contract steps)
+        run: make migrations-check
+      - name: Alert rules pass promtool check and their unit tests (alerts.test.yml)
+        run: make alerts-check
+      # The same check as `make ci-lint`, from the image so the runner needs no install. The
+      # image bundles shellcheck, so run: scripts are linted too.
+      - name: Workflows pass actionlint
+        run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
 
   dev-stack:
     name: Dev stack (docker compose smoke + migrations)
