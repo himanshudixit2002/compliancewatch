@@ -20,6 +20,7 @@ from domain_kernel.documents import (
     RuleCandidate,
 )
 from domain_kernel.errors import InvariantViolationError
+from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ids import (
     BusinessId,
     CandidateId,
@@ -37,6 +38,7 @@ from domain_kernel.operators import Operator
 from domain_kernel.periods import EffectivePeriod
 from domain_kernel.predicates import Applicability, Predicate, PredicateResult
 from domain_kernel.profiles import ProfileSnapshot
+from domain_kernel.recurrence import Recurrence
 from domain_kernel.rules import ObligationTemplate, RuleVersionSnapshot
 from domain_kernel.vectors import ClauseFilter, EmbeddedClause, ScoredClause
 
@@ -564,3 +566,21 @@ def test_clause_filter_and_score_invariants() -> None:
         ScoredClause(DocumentId.new(), 0.5)  # type: ignore[arg-type]
     with _raises("score must be a finite number"):
         ScoredClause(ClauseId.new(), float("inf"))
+
+
+def test_profile_snapshot_as_of_financial_year() -> None:
+    snapshot = ProfileSnapshot(
+        BusinessId.new(), TenantId.new(), 1, {"turnover_band": "x"}, as_of_fy=FinancialYear(2025)
+    )
+    assert snapshot.as_of_fy == FinancialYear(2025)
+    assert ProfileSnapshot(BusinessId.new(), TenantId.new(), 1, {}).as_of_fy is None
+    with pytest.raises(InvariantViolationError, match="as_of_fy must be FinancialYear"):
+        ProfileSnapshot(BusinessId.new(), TenantId.new(), 1, {}, as_of_fy="2025-26")  # type: ignore[arg-type]
+
+
+def test_rule_version_snapshot_recurrence() -> None:
+    assert _snapshot().recurrence is None
+    recurring = _snapshot(recurrence=Recurrence.monthly(20))
+    assert recurring.recurrence == Recurrence.monthly(20)
+    with pytest.raises(InvariantViolationError, match="recurrence must be Recurrence"):
+        _snapshot(recurrence="monthly")

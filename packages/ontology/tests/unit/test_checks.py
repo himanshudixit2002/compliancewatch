@@ -30,6 +30,8 @@ def test_clean_attribute_passes() -> None:
         ({"allowed_values": ["goods"]}, "at least two"),
         ({"allowed_values": ["goods", "Bad Value"]}, "malformed"),
         ({"key": "state_codes", "type": "enum_set", "allowed_values": ["29", "1"]}, "malformed"),
+        ({"since": None}, "since is required"),
+        ({"per_financial_year": True}, "entity level"),
     ],
 )
 def test_each_rule_reports(overrides: dict[str, object], expected: str) -> None:

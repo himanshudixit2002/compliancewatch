@@ -37,7 +37,12 @@ def test_module_constants_are_the_kernel_enums() -> None:
     assert RULE_VERSION_TARGET == RULE_VERSION_KIND
     assert (RULE_VERSION_KIND, *ENTITY_TYPES) == TARGET_KINDS
     assert set(RULE_VERSION_ONLY_RELATIONS) == {kind.value for kind in RULE_VERSION_ONLY}
-    assert RULE_VERSION_ONLY_RELATIONS == ("supersedes", "extends_deadline")
+    assert RULE_VERSION_ONLY_RELATIONS == (
+        "supersedes",
+        "extends_deadline",
+        "corrects",
+        "withdraws",
+    )
     assert len(TARGET_KINDS) == 11
 
 
@@ -60,7 +65,8 @@ def test_relation_and_to_kind_checks_list_the_kernel_vocabulary() -> None:
 def test_pairing_target_and_self_checks_repeat_the_kernel_rules() -> None:
     pairing = _check("rule_relation", "ck_rule_relation_pairing")
     assert pairing == (
-        "relation NOT IN ('supersedes', 'extends_deadline') OR to_kind = 'rule_version'"
+        "relation NOT IN ('supersedes', 'extends_deadline', 'corrects', 'withdraws') "
+        "OR to_kind = 'rule_version'"
     )
     assert set(QUOTED.findall(pairing)) == {
         *(kind.value for kind in RULE_VERSION_ONLY),
