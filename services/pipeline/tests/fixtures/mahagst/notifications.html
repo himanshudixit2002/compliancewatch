@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>MAHAGST</title>
+    <link rel="shortcut icon" type="image/ico" href="https://www.mahagst.gov.in/public/frontfiles/images/favicon.png">
+    <link rel="stylesheet" href="https://www.mahagst.gov.in/public/web-portal/css/css-bootstrap.min.css" />
+    <link rel="stylesheet" href="https://www.mahagst.gov.in/public//assets/icomoon/style.css" />
+    <link rel="stylesheet" href="https://www.mahagst.gov.in/public/web-portal/slick/slick.css" />
+    <link rel="stylesheet" href="https://www.mahagst.gov.in/public/web-portal/css/css-style.css/" />
+    <!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery-confirm/3.3.4/jquery-confirm.min.css"> -->
+    <link rel="stylesheet" href="https://www.mahagst.gov.in/public/web-portal/css/jquery-confirm.min.css">
+    <!-- <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> -->
+    <script src="https://www.mahagst.gov.in/public/web-portal/js/chart.js"></script>
+
+        <script>
+    window.navBackUrl = "https:\/\/www.mahagst.gov.in";
+
+    window.goBack = function () {
+        window.location.href = window.navBackUrl;
+    };
+
+    (function () {
+        try {
+            var native = window.history.back.bind(window.history);
+            var nativeGo = window.history.go.bind(window.history);
+
+            Object.defineProperty(window.history, 'back', {
+                configurable: true,
+                writable: true,
+                value: window.goBack,
+            });
+
+            Object.defineProperty(window.history, 'go', {
+                configurable: true,
+                writable: true,
+                value: function (delta) {
+                    if (delta === -1) {
+                        window.goBack();
+                        return;
+                    }
+
+                    return nativeGo(delta);
+                },
+            });
+
+            window.historyBackNative = native;
+        } catch (e) {
+        }
+    })();
+</script>
+</head>
+
+<body>
+    <style>
+    .shivaji-logo {
+        width: auto;
+        max-width: none;
+        flex-shrink: 0;
+    }
+</style>
+
+<style>
+    .shivaji-logo {
+        width: auto;
+        max-width: none;
+        flex-shrink: 0;
+    }
+</style>
+
+<header class="main-header header-style-one">
+    <div class="header-top bg-white w-100" style="width:100%;">
+        <div class="auto-container" style="background-color: #fff; width:100%;">
+            <div class="inner-container clearfix d-flex flex-wrap justify-content-between align-items-center w-100" style="width:100%;">
+
+                <!-- Hamburger button visible only on small screens -->
+                <!-- <button class="navbar-toggler d-lg-none" type="button" data-bs-toggle="collapse"
+                    data-bs-target="#headerMenu">
+                    <span class="navbar-toggler-icon"></span>
+                </button> -->
+
+                <!-- Collapsible content -->
+                <div class="collapse d-lg-flex flex-wrap w-100 justify-content-between align-items-center row" id="headerMenu" style="width:100%;">
+
+                    <!-- Left Side -->
+                    <div class="top-left flex-grow-1 col-xxl-6 col-xl-12">
+                        <ul class="info-list list-unstyled d-flex flex-wrap align-items-center mb-0 w-100 justify-content-between">
+                            <li>
+                                <form class="d-flex search-box"
+                                    role="search"
+                                    method="GET"
+                                    action="https://www.mahagst.gov.in/mr/search">
+
+                                    <div class="input-group">
+                                        <input
+                                            class="form-control pri-form border-start-0"
+                                            type="search"
+                                            name="search"
+                                            value=""
+                                            placeholder="शोधा"
+                                            required>
+
+                                        <button type="submit" class="btn border bg-white">
+                                            <i class="priya-search text-dark"></i>
+                                        </button>
+                                    </div>
+                                </form>
+                            </li>
+                             <li>
+                                 <a  href="javascript:void(0)"
+                                    class="languageAlterCls text-icon text-danger"  data-lang="mr" >मराठी /</a>
+                                <a  href="javascript:void(0)"
+                                    class="languageAlterCls text-icon "  data-lang="en"> English</a>
+                             </li>
+                            <li><a href="#SkipContent" class="text-icon">Skip to Main</a></li>
+                            <!--                             <li><a href="https://www.facebook.com/mahagstd/">
+                                                                  <img src="https://www.mahagst.gov.in/public/uploads/socialmedias/1760225139facebook.png" class="social-logo" />
+                                                            </a></li>
+                             -->
+                            <li><a href="https://www.facebook.com/mahagstd/">
+                                <img src="https://www.mahagst.gov.in/public/web-portal/images/facebook.png" class="social-logo">
+                            </a></li>
+
+                            <li><a href="#" class="text-icon">Access Reader</a></li>
+                        </ul>
+                    </div>
+                    <!-- Right Side -->
+                    <div class="top-right flex-shrink-0 col-xxl-6 col-xl-12">
+                        <ul class="info-list list-unstyled d-flex flex-wrap align-items-center mb-0 w-100 justify-content-between">
+                            <li>
+                                <i class="ico-box font priya-font-plus"></i>
+                                <i class="ico-box font priya-font-normal"></i>
+                                <i class="ico-box font priya-font-minus"></i>
+                                <i class="ico-box bg-dark" onclick="setTheme('dark')"></i>
+                                <i class="ico-box bg-white" onclick="setTheme('light')"></i>
+                                <i class="ico-box priya-rotate-left clr" title="Reset Color Theme"></i>
+                            </li>
+                            <li>
+                                <a href="https://www.mahagst.gov.in/mr/lms" class="text-icon">
+                                    Help
+                                    <img src="https://www.mahagst.gov.in/public/web-portal/images/question.png" class="header-icons">
+                                </a>
+                            </li>
+                            <li class="employee-conner-style"><a href="https://www.mahagst.gov.in/employee-corner-login" class="text-icon">Employee Corner<img src="https://www.mahagst.gov.in/public/web-portal/images/man.png"
+                                        class="header-icons"></a></li>
+                            <li><a href="https://www.mahagst.gov.in/mr/rti-faqs" class="text-icon">FAQ<img src="https://www.mahagst.gov.in/public/web-portal/images/help.png"
+                                        class="header-icons"></a></li>
+                            <li><a href="https://www.mahagst.gov.in/mr/sitemap" class="text-icon">Sitemap<img src="https://www.mahagst.gov.in/public/web-portal/images/sitemap.png"
+                                        class="header-icons"></a></li>
+                        </ul>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="header2">
+        <!-- <h6>Important Updates:</h6><p> Jurisdiction Update from 10th Dec-2024 to 31st March 2025  --- Periodicity of the PTRC dealer for F.Y. 2025-26 is available in "What's New" section.--</p> -->
+        <h6>Important Updates:</h6>
+        <div class="marquee w-100">
+            <div class="marquee-text">
+                                                          <a class="fs-10 text-white" target="blank" href="https://www.mahagst.gov.in/public/uploads/notifications/17884439196a997d0f0b2daPT Cancellation User Manual.pdf">*** Cancellation application for Registration under PT Act is now Available ***</a>
+
+                    <a class="fs-10 text-white" href="https://www.mahagst.gov.in/mr/notifications">*** व्यापाऱ्यांना आता MVAT व CST अधिनियमांतर्गत नोंदणी दाखला दुरुस्ती (Amendment) तसेच नोंदणी दाखला रद्द (Cancellation) करण्यासाठी अर्ज करता येईल. सविस्तर कार्यपद्धतीसाठी कृपया मार्गदर्शिका व कार्यपद्धती (Manuals and Procedure) पृष्ठावरील वापरकर्ता मार्गदर्शिका (User Manual) आणि मानक कार्यपद्धती (SOP) यांचा संदर्भ घ्यावा. ***</a>
+                                                                             <a class="fs-10 text-white" target="blank" href="https://www.mahagst.gov.in/public/uploads/notifications/17790976246a0ae01889eabMVAT_CST_PERIODICITY_2026-27.xlsx">*** MVAT_CST return filing periodicity for F.Y.-2026-27 is available in ‘Whats New’ section  ***</a>
+                                                                             <a class="fs-10 text-white" target="blank" href="https://www.mahagst.gov.in/public/uploads/notifications/177606869669dca8584ad36PTRC_PERIODICITY_FOR_2026-27.xlsx">*** PTRC return filing periodicity for F.Y.-2026-27 is now available in ‘Whats New’ section ***</a>
+                                                                             <a class="fs-10 text-white" target="blank" href="https://www.mahagst.gov.in/public/uploads/notifications/177384084369baa9cba19ecHelpdesk Module - User Manual.pdf">*** Helpdesk Service Request - User Manual ***</a>
+                                                                             <a class="fs-10 text-white" target="blank" href="https://www.mahagst.gov.in/public/uploads/notifications/17706424076989dbe7a436be-CST Declartions - User Manual.pdf">*** e-CST Declaration now available (Download Manual) ***</a>
+                                                                             <a class="fs-10 text-white" target="blank" href="https://www.mahagst.gov.in/public/uploads/notifications/17823054786a3bd2c6c8b51Refund User Manual.pdf">***   Refund Facility is available for dealers from 03.02.2026   ***</a>
+                                                                             <a class="fs-10 text-white" target="blank" href="https://www.mahagst.gov.in/public/uploads/notifications/177305683769aeb34581a0bPT_Reset_Password and Update Mobile No,EMail ID - User Manual.pdf">*** PT Reset Password User Manual ***</a>
+                                                                             <a class="fs-10 text-white" target="blank" href="https://www.mahagst.gov.in/public/uploads/notifications/176484557369316805c7988Appointment of retired Assistant Commissioner of State Tax Group A and equivalent Group A officers (pay scale below S 25) on contractual basis.pdf">***    सेवानिवृत्त राज्यकर सहायक आयुक्त गट-अ व समकक्ष गट-अ अधिकारी (वेतनस्तर एस-25 पेक्षा कमी) यांची करारपद्धतीने नियुक्ती    ***</a>
+                                                                             <a class="fs-10 text-white" target="blank" href="https://www.mahagst.gov.in/public/uploads/notifications/17663891486948f59c9e02bReset_Password and Update Mobile No,Mail ID - User Manual.pdf">*** Reset Password User Manual ***</a>
+                                                </div>
+        </div>
+    </div>
+        <div class="custom-top-header container-fluid px-3">
+        <div class="row align-items-center overflow-hidden w-100">
+            <div class="col-lg-4 col-sm-10">
+                <div class="row">
+                    <div class="col-lg-3 col-sm-3 d-none d-sm-flex align-items-center ps-5">
+                        <a class="d-flex align-items-center" href="https://www.mahagst.gov.in">
+                            <img src="https://www.mahagst.gov.in/public/web-portal/images/shivajimaharaj.png"
+                                alt="Shivaji Maharaj"
+                                class="dept-logo justify-content-end shivaji-logo" style="height:120px; object-fit: contain;"/>
+                        </a>
+                    </div>
+                    <div class="col-lg-9 col-sm-10 d-flex align-items-center justify-content-center">
+                        <div class="dept-text">
+                            <!--                             <div class="line1" >वस्तू व सेवा कर विभाग </div>
+                                                        <div class="line2" style=text-align:center;> महाराष्ट्र शासन </div>
+                                                        <div class="line3" > कर भरा, राष्ट्र घडवा</div>
+                             -->
+                            <div class="line1" style="text-align:center;">वस्तू व सेवा कर विभाग</div>
+                            <div class="line2" style="text-align:center;">महाराष्ट्र शासन</div>
+                            <div class="line3">कर भरा, राष्ट्र घडवा</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-2 col-sm-2 d-flex justify-content-center align-items-center">
+                <!--                     <img src="https://www.mahagst.gov.in/public/uploads/sitesettings/1759912108_68e620ac6de397.87775974departmentlogo.png" alt="1759912108_68e620ac6de397.87775974departmentlogo.png" class="dept-logo" />
+                 -->
+                <!-- <img src="https://www.mahagst.gov.in/public/web-portal/images/goi(5).png" alt="Department Logo" class="dept-logo " /> -->
+                <img src="https://www.mahagst.gov.in/public/web-portal/images/GOI_Emblem.png" alt="National Emblem" class="dept-logo " />
+            </div>
+            <div class="col-lg-6 col-sm-12">
+                <div class="row">
+                    <div class="col-lg-9 col-sm-8">
+                        <!--                             <img src="https://www.mahagst.gov.in/public/uploads/homebanners/5396431771248576_Shri.-removebg-preview.png"
+                            alt="6925021771248576_Hon_ble-removebg-preview.png"
+                            class="ministers-banner" />
+                         -->
+                        <img src="https://www.mahagst.gov.in/public/web-portal/images/Banner_Ministers_Marathi.png"
+                        alt="Banner" class="ministers-banner">
+                    </div>
+                    <div class="col-lg-3 col-sm-4 d-none d-sm-flex justify-content-end align-items-center">
+                        <img src="https://www.mahagst.gov.in/public/web-portal/images/dept-logo.png" alt="Department Logo" class="dept-logo"
+                            style="object-fit: contain;" />
+                    </div>
+                </div>
+                <!-- <img src="https://www.mahagst.gov.in/public/web-portal/images/gst.png" alt="Department Logo" class="dept-logo" /> -->
+            </div>
+        </div>
+    </div>
+
+    <div class="header-upper">
+        <div class="auto-container clearfix d-flex justify-content-end">
+            <!-- <div class="col-md-1 d-flex align-items-center justify-content-center">
+                <div class="timer text-center" id="time"></div>
+            </div> -->
+
+            <div class="col-md-11 nav-outer clearfix d-flex justify-content-end">
+                <div class="mobile-nav-toggler">
+                    <span class="icon flaticon-menu"></span>
+                </div>
+
+                <nav class="main-menu navbar navbar-expand-lg">
+                    <div class="container-fluid p-0">
+                    <!-- Navbar Toggler -->
+                    <button class="navbar-toggler" type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#navbarSupportedContent"
+                            aria-controls="navbarSupportedContent"
+                            aria-expanded="false"
+                            aria-label="Toggle navigation">
+                        <span class="navbar-toggler-icon"></span>
+                    </button>
+
+                    <!-- Navbar Links -->
+                    <div class="collapse navbar-collapse clearfix" id="navbarSupportedContent">
+                        <ul class="navbar-nav ms-auto navigation clearfix">
+                        <li class="nav-item">
+                            <a href="https://www.mahagst.gov.in" class="nav-link active" style="font-size:14px">
+                            <i class="priya-home"></i> <span>मुख्यपृष्ठ</span>
+                            </a>
+                        </li>
+                        <li class="dropdown"><a href="javascript:void(0)" target="" class=""><span>विभागाविषयी</span></a><ul><li class=""><a href="https://www.mahagst.gov.in/mr/profiles" target="" class=""><span>परिचय</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/vision-and-mission" target="" class=""><span>ध्येय आणि उद्धिष्ट</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/organization-structure" target="" class=""><span>विभागाची संरचना</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/department-at-a-glance" target="" class=""><span>विभागाबद्दल संक्षिप्त माहिती</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/location-of-offices" target="" class=""><span>कार्यालयांचे स्थान</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/statistics" target="" class=""><span>आकडेवारी</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/budget" target="" class=""><span>अर्थसंकल्प</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/employee-id-card-verification" target="" class=""><span>कर्मचारी ओळखपत्र पडताळणी</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/gallery" target="" class=""><span>गॅलरी</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/notifications" target="" class=""><span>महत्वाची माहिती</span></a></li></ul></li><li class="dropdown has-mega-menu"><a href="javascript:void(0)" target="">वस्तू आणि सेवा कर</a><div class="mega-menu"><div class="row"><div class="col-md-3 pt-3"><div class="mega-box"><h4>वस्तू व सेवाकर कायदे</h4><ul><li><a href="https://www.mahagst.gov.in/mr/gst-acts-mgst" target="">महाराष्ट्र वस्तू आणि सेवा कर</a></li><li><a href="https://www.mahagst.gov.in/mr/gst-acts-cgst" target="">केंद्रीय वस्तू आणि सेवा कर</a></li><li><a href="https://www.mahagst.gov.in/mr/gst-acts-igst" target="">एकीकृत वस्तू आणि सेवा कर</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>नियम</h4><ul><li><a href="https://www.mahagst.gov.in/mr/gst-rules-mgst" target="">महाराष्ट्र वस्तू आणि सेवा कर</a></li><li><a href="https://www.mahagst.gov.in/mr/gst-rules-cgst" target="">केंद्रीय वस्तू आणि सेवा कर</a></li><li><a href="https://www.mahagst.gov.in/mr/gst-rules-igst" target="">एकीकृत वस्तू आणि सेवा कर</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>अधिसूचना व शासन निर्णय</h4><ul><li><a href="https://www.mahagst.gov.in/mr/gst-notifications-mgst" target="">महाराष्ट्र वस्तू आणि सेवा कर</a></li><li><a href="https://www.mahagst.gov.in/mr/gst-notifications-cgst" target="">केंद्रीय वस्तू आणि सेवा कर</a></li><li><a href="https://www.mahagst.gov.in/mr/gst-notifications-igst" target="">एकीकृत वस्तू आणि सेवा कर</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>परिपत्रके</h4><ul><li><a href="https://www.mahagst.gov.in/mr/gst-circulars-mgst" target="">महाराष्ट्र वस्तू आणि सेवा कर</a></li><li><a href="https://www.mahagst.gov.in/mr/gst-circulars-cgst" target="">केंद्रीय वस्तू आणि सेवा कर</a></li><li><a href="https://www.mahagst.gov.in/mr/gst-circulars-igst" target="">एकीकृत वस्तू आणि सेवा कर</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>अग्रीम निर्णय</h4><ul><li><a href="https://www.mahagst.gov.in/mr/gst-advance-ruling" target="">अग्रीम निर्णय</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>जीएसटी दर</h4><ul><li><a href="https://www.mahagst.gov.in/mr/gst-rate-schedule" target="">वस्तू आणि सेवा कर दर परिशिष्ट</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>इतर</h4><ul><li><a href="https://www.mahagst.gov.in/mr/gst-manuals-and-procedure" target="">मार्गदर्शिका व कार्यपद्धती</a></li></ul></div></div></div></div></li><li class="dropdown has-mega-menu"><a href="javascript:void(0)" target="">मूल्यवर्धित कर / केंद्रीय विक्री कर</a><div class="mega-menu"><div class="row"><div class="col-md-3 pt-3"><div class="mega-box"><h4>कायदा</h4><ul><li><a href="https://www.mahagst.gov.in/mr/vat-and-cst-acts" target="">VAT  and CST कायदे</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>नियम</h4><ul><li><a href="https://www.mahagst.gov.in/mr/vat-and-cst-rules" target="">व्हॅट आणि सीएसटी
+ नियम</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>दर परिशिष्ट</h4><ul><li><a href="https://www.mahagst.gov.in/mr/vat-and-cst-rate-schedule" target="">व्हॅट आणि सीएसटी
+ दर परिशिष्ट</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>अग्रीम निर्णय</h4><ul><li><a href="https://www.mahagst.gov.in/mr/vat-and-cst-advance-ruling" target="">व्हॅट आणि सीएसटी
+ अग्रीम निर्णय</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>अधिसूचना</h4><ul><li><a href="https://www.mahagst.gov.in/mr/vat-notifications" target="">मूल्यवर्धित कर अधिसूचना</a></li><li><a href="https://www.mahagst.gov.in/mr/vat-gr" target="">मूल्यवर्धित कर शासन निर्णय</a></li><li><a href="https://www.mahagst.gov.in/mr/cst-notifications" target="">केंद्रीय विक्री कर अधिसूचना</a></li><li><a href="https://www.mahagst.gov.in/mr/cst-gr" target="">केंद्रीय विक्री कर शासन निर्णय</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>परिपत्रके</h4><ul><li><a href="https://www.mahagst.gov.in/mr/vat-trade-circulars" target="">मूल्यवर्धित कर परिपत्रके</a></li><li><a href="https://www.mahagst.gov.in/mr/cst-trade-circulars" target="">केंद्रीय विक्री कर परिपत्रके</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>इतर</h4><ul><li><a href="https://www.mahagst.gov.in/mr/vat-and-cst-determination-of-disputed-question" target="">विवादित प्रश्नाचा निर्णय</a></li><li><a href="https://www.mahagst.gov.in/mr/vat-and-cst-forms" target="">नमुने</a></li><li><a href="https://www.mahagst.gov.in/mr/vat-and-cst-acts-judgement" target="">व्हॅट व इतर कायद्यांअंतर्गत न्यायनिर्णय</a></li><li><a href="https://www.mahagst.gov.in/mr/vat-and-cst-acts-schedule" target="">व्हॅट व इतर कायद्यांअंतर्गत परिशिष्टे</a></li></ul></div></div>
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <div class="text-center">
+                                <a href="https://www.mahagst.gov.in/mr/lms"
+                                class="lms-menu-btn"
+                                style="
+                                        display:inline-flex;
+                                        flex-direction:column;
+                                        align-items:center;
+                                        justify-content:center;
+                                        min-width:290px;
+                                        padding:16px 24px;
+                                        border:3px solid #7dbb52;
+                                        border-radius:18px;
+                                        background:#395723;
+                                        color:#fff;
+                                        text-decoration:none;
+                                ">
+                                    <i class="priya-book"></i>
+                                    <span>MAHAGST Portal<br>Learning Management System (LMS)</span>
+                                    <small>User Manuals • Guide Videos • FAQs</small>
+                                </a>
+                            </div>
+                        </div>
+                    </div></div></div></li><li class="dropdown has-mega-menu"><a href="javascript:void(0)" target="">व्यवसाय कर</a><div class="mega-menu"><div class="row"><div class="col-md-3 pt-3"><div class="mega-box"><h4>कायदा</h4><ul><li><a href="https://www.mahagst.gov.in/mr/pt-acts" target="">व्यवसाय कर व इतर कायदे</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>नियम</h4><ul><li><a href="https://www.mahagst.gov.in/mr/pt-rules" target="">व्यवसाय कर व इतर नियम</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>अधिसूचना</h4><ul><li><a href="https://www.mahagst.gov.in/mr/profession-tax-and-allied-acts-notifications" target="">व्यवसाय कर व इतर कायदे अधिसूचना</a></li><li><a href="https://www.mahagst.gov.in/mr/profession-tax-and-allied-acts-gr" target="">व्यवसाय कर व इतर कायदे शासन निर्णय</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>दर</h4><ul><li><a href="https://www.mahagst.gov.in/mr/profession-tax-and-other-rate-schedule" target="">व्यवसाय कर व इतर कायदे दर परिशिष्ट</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>इतर</h4><ul><li><a href="https://www.mahagst.gov.in/mr/profession-tax-forms" target="">नमुने</a></li></ul></div></div><div class="col-md-3 pt-3"><div class="mega-box"><h4>परिपत्रके</h4><ul><li><a href="https://www.mahagst.gov.in/mr/profession-tax-and-allied-acts-trade-circulars" target="">व्यवसाय कर व इतर कायदे परिपत्रके</a></li></ul></div></div></div></div></li><li class="dropdown"><a href="javascript:void(0)" target="" class=""><span>लोकसेवा हक्क अधिनियम</span></a><ul><li class=""><a href="https://www.mahagst.gov.in/mr/about-rts" target="" class=""><span>लोकसेवा हक्क अधिनियम विषयी</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/rts-act" target="" class=""><span>कायदा</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/rts-rules" target="" class=""><span>नियम</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/list-of-services" target="" class=""><span>अधिसूचित सेवांची यादी</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/notificationgrforms" target="" class=""><span>अधिसूचना / शासन निर्णय / नमुने</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/designated-officer" target="" class=""><span>पदनिर्देशित अधिकारी</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/appellate-authority" target="" class=""><span>अपिलीय प्राधिकारी</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/faqs-information" target="" class=""><span>नेहमीचे प्रश्न/ माहिती</span></a></li></ul></li><li class="dropdown"><a href="javascript:void(0)" target="" class=""><span>माहितीचा अधिकार</span></a><ul><li class=""><a href="https://www.mahagst.gov.in/mr/rti-act" target="" class=""><span>कायदा</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/rti-rules" target="" class=""><span>नियम</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/rti-information" target="" class=""><span>माहिती</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/rti-pio" target="" class=""><span>माहिती अधिकाऱ्यांविषयी</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/rti-appellate-authority" target="" class=""><span>अपिलीय प्राधिकारी</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/rti-faqs" target="" class=""><span>नेहेमीचे प्रश्न (माहितीचा अधिकार)</span></a></li></ul></li><li class="dropdown"><a href="javascript:void(0)" target="" class=""><span>कर दर</span></a><ul><li class=""><a href="https://cbic-gst.gov.in/gst-goods-services-rates.html" target="_blank" class="ext-class"><span>वस्तूंसाठी जीएसटी दर</span></a></li><li class=""><a href="https://cbic-gst.gov.in/gst-goods-services-rates.html" target="_blank" class="ext-class"><span>सेवांसाठी जीएसटी दर</span></a></li><li class=""><a href="https://www.mahagst.gov.in/public/uploads/menufiles/MVAT Schedule Rate English upto 31.03.2025_0.pdf" target="_blank" class=""><span>मूल्यवर्धित कर दर</span></a></li><li class=""><a href="https://www.mahagst.gov.in/public/uploads/menufiles/PT Rate Schedule updated upto 31.03.2025 (1) (1).pdf" target="_blank" class=""><span>व्यावसायिक दर</span></a></li></ul></li><li class=""><a href="https://www.mahagst.gov.in/mr/citizens-charter" target="" class=""><span>नागरिकांची सनद</span></a></li><li class=""><a href="https://www.mahagst.gov.in/mr/contact-us" target="" class=""><span>कार्यालयांची माहिती</span></a></li>                        </ul>
+                    </div>
+                    </div>
+                </nav>
+                </div>
+
+
+        </div>
+    </div>
+</header>    <div class="submit-loader">
+        <div class="spinner"></div>
+        <div class="progressbar"></div>
+        <span>Processing...</span>
+    </div>
+    <div id="SkipContent"></div>
+
+    <div class="container-fluid1">
+    <div class="row">
+           <!-- Main Content -->
+             <div class="custom-content container col-md-10 ps-5">
+
+<div class="py-5">
+    <!-- Pills navigation -->
+    <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
+                    <li class="nav-item" role="presentation">
+                <button
+                    class="nav-link active"
+                    id="pills-1-tab"
+                    data-bs-toggle="pill"
+                    data-bs-target="#pills-1"
+                    type="button"
+                    role="tab"
+                    aria-controls="pills-1"
+                    aria-selected="true">
+                    Advertisement
+                </button>
+            </li>
+                    <li class="nav-item" role="presentation">
+                <button
+                    class="nav-link "
+                    id="pills-2-tab"
+                    data-bs-toggle="pill"
+                    data-bs-target="#pills-2"
+                    type="button"
+                    role="tab"
+                    aria-controls="pills-2"
+                    aria-selected="false">
+                    Notice
+                </button>
+            </li>
+                    <li class="nav-item" role="presentation">
+                <button
+                    class="nav-link "
+                    id="pills-3-tab"
+                    data-bs-toggle="pill"
+                    data-bs-target="#pills-3"
+                    type="button"
+                    role="tab"
+                    aria-controls="pills-3"
+                    aria-selected="false">
+                    Tenders
+                </button>
+            </li>
+            </ul>
+
+    <!-- Pills content -->
+    <div class="tab-content p-4 bg-white" id="pills-tabContent">
+                    <div
+                class="tab-pane fade show active"
+                id="pills-1"
+                role="tabpanel"
+                aria-labelledby="pills-1-tab"
+                tabindex="0">
+
+                <h1 class="mt-4"></h1>
+                <hr>
+
+                <!-- Table -->
+                <div class="container my-4">
+                    <table class="table table-bordered table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th scope="col">Sr No</th>
+                                <th scope="col">Subject</th>
+                                <th scope="col">File</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                                                      <tr>
+                                <td>1</td>
+                                  <td>***    सेवानिवृत्त राज्यकर सहायक आयुक्त गट-अ व समकक्ष गट-अ अधिकारी (वेतनस्तर एस-25 पेक्षा कमी) यांची करारपद्धतीने नियुक्ती    ***</td>
+                                <td>
+                                      <a href="https://www.mahagst.gov.in/public/uploads/notifications/176484557369316805c7988Appointment of retired Assistant Commissioner of State Tax Group A and equivalent Group A officers (pay scale below S 25) on contractual basis.pdf" download>
+        <i class="priya-download"></i>
+    </a>
+                                </td>
+
+                            </tr>
+                                                    </tbody>
+                    </table>
+                </div>
+                <!-- /Table -->
+            </div>
+                    <div
+                class="tab-pane fade "
+                id="pills-2"
+                role="tabpanel"
+                aria-labelledby="pills-2-tab"
+                tabindex="0">
+
+                <h1 class="mt-4"></h1>
+                <hr>
+
+                <!-- Table -->
+                <div class="container my-4">
+                    <table class="table table-bordered table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th scope="col">Sr No</th>
+                                <th scope="col">Subject</th>
+                                <th scope="col">File</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                                                      <tr>
+                                <td>1</td>
+                                  <td>*** Reset Password User Manual ***</td>
+                                <td>
+                                      <a href="https://www.mahagst.gov.in/public/uploads/notifications/17663891486948f59c9e02bReset_Password and Update Mobile No,Mail ID - User Manual.pdf" download>
+        <i class="priya-download"></i>
+    </a>
+                                </td>
+
+                            </tr>
+                                                       <tr>
+                                <td>2</td>
+                                  <td>*** PT Reset Password User Manual ***</td>
+                                <td>
+                                      <a href="https://www.mahagst.gov.in/public/uploads/notifications/177305683769aeb34581a0bPT_Reset_Password and Update Mobile No,EMail ID - User Manual.pdf" download>
+        <i class="priya-download"></i>
+    </a>
+                                </td>
+
+                            </tr>
+                                                       <tr>
+                                <td>3</td>
+                                  <td>***   Refund Facility is available for dealers from 03.02.2026   ***</td>
+                                <td>
+                                      <a href="https://www.mahagst.gov.in/public/uploads/notifications/17823054786a3bd2c6c8b51Refund User Manual.pdf" download>
+        <i class="priya-download"></i>
+    </a>
+                                </td>
+
+                            </tr>
+                                                       <tr>
+                                <td>4</td>
+                                  <td>*** e-CST Declaration now available (Download Manual) ***</td>
+                                <td>
+                                      <a href="https://www.mahagst.gov.in/public/uploads/notifications/17706424076989dbe7a436be-CST Declartions - User Manual.pdf" download>
+        <i class="priya-download"></i>
+    </a>
+                                </td>
+
+                            </tr>
+                                                       <tr>
+                                <td>5</td>
+                                  <td>*** Helpdesk Service Request - User Manual ***</td>
+                                <td>
+                                      <a href="https://www.mahagst.gov.in/public/uploads/notifications/177384084369baa9cba19ecHelpdesk Module - User Manual.pdf" download>
+        <i class="priya-download"></i>
+    </a>
+                                </td>
+
+                            </tr>
+                                                       <tr>
+                                <td>6</td>
+                                  <td>*** PTRC return filing periodicity for F.Y.-2026-27 is now available in ‘Whats New’ section ***</td>
+                                <td>
+                                      <a href="https://www.mahagst.gov.in/public/uploads/notifications/177606869669dca8584ad36PTRC_PERIODICITY_FOR_2026-27.xlsx" download>
+        <i class="priya-download"></i>
+    </a>
+                                </td>
+
+                            </tr>
+                                                       <tr>
+                                <td>7</td>
+                                  <td>*** MVAT_CST return filing periodicity for F.Y.-2026-27 is available in ‘Whats New’ section  ***</td>
+                                <td>
+                                      <a href="https://www.mahagst.gov.in/public/uploads/notifications/17790976246a0ae01889eabMVAT_CST_PERIODICITY_2026-27.xlsx" download>
+        <i class="priya-download"></i>
+    </a>
+                                </td>
+
+                            </tr>
+                                                       <tr>
+                                <td>8</td>
+                                  <td>*** व्यापाऱ्यांना आता MVAT व CST अधिनियमांतर्गत नोंदणी दाखला दुरुस्ती (Amendment) तसेच नोंदणी दाखला रद्द (Cancellation) करण्यासाठी अर्ज करता येईल. सविस्तर कार्यपद्धतीसाठी कृपया मार्गदर्शिका व कार्यपद्धती (Manuals and Procedure) पृष्ठावरील वापरकर्ता मार्गदर्शिका (User Manual) आणि मानक कार्यपद्धती (SOP) यांचा संदर्भ घ्यावा. ***</td>
+                                <td>
+                                                                  </td>
+
+                            </tr>
+                                                       <tr>
+                                <td>9</td>
+                                  <td>*** Cancellation application for Registration under PT Act is now Available ***</td>
+                                <td>
+                                      <a href="https://www.mahagst.gov.in/public/uploads/notifications/17884439196a997d0f0b2daPT Cancellation User Manual.pdf" download>
+        <i class="priya-download"></i>
+    </a>
+                                </td>
+
+                            </tr>
+                                                    </tbody>
+                    </table>
+                </div>
+                <!-- /Table -->
+            </div>
+                    <div
+                class="tab-pane fade "
+                id="pills-3"
+                role="tabpanel"
+                aria-labelledby="pills-3-tab"
+                tabindex="0">
+
+                <h1 class="mt-4"></h1>
+                <hr>
+
+                <!-- Table -->
+                <div class="container my-4">
+                    <table class="table table-bordered table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th scope="col">Sr No</th>
+                                <th scope="col">Subject</th>
+                                <th scope="col">File</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                                                   </tbody>
+                    </table>
+                </div>
+                <!-- /Table -->
+            </div>
+            </div>
+</div>
+
+             </div>
+             <style>
+    /* Left Collapsible Menu */
+    .custom-side-menu {
+        width: 250px;
+        position: fixed;
+        top: 0;
+        left: -250px;
+        /* hidden except handle */
+        border-top-right-radius: 2rem;
+        border-bottom-right-radius: 2rem;
+        top: 25%;
+        height: auto;
+        background-color: var(--color12);
+        border-right: 1px solid #dee2e6;
+        transition: left 0.3s ease;
+        z-index: 1050;
+        padding: 1rem 0.5rem 1rem 1rem;
+    }
+
+    .custom-side-menu.custom-open {
+        left: 0;
+    }
+
+    /* Handle (sliver protruding) */
+    .custom-menu-handle {
+        position: absolute;
+        top: 20%;
+        right: -20px;
+        width: 20px;
+        height: 80px;
+        background-color: var(--color10);
+        border: #php000 1px solid;
+        color: white;
+        border-radius: 0 5px 5px 0;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.9rem;
+
+        text-orientation: mixed;
+    }
+
+    /* Right Sidebar */
+    .custom-sidebar {
+        /* width: 250px; */
+
+        top: 0;
+        right: 0;
+        bottom: 0;
+        background: #f8f9fa;
+        border-left: 1px solid #dee2e6;
+        padding: 1rem;
+        overflow-y: auto;
+    }
+
+
+</style>
+
+<!-- Right Sidebar -->
+<div class="custom-sidebar col-md-2">
+    <!-- <h5>Quick Links</h5> -->
+         <ul class="request-list">
+        <!-- <li><a href="https://www.mahagst.gov.in/mr/">Awards and Achievements</a></li>
+        <li><a href="https://www.mahagst.gov.in/mr/">Important Events</a></li>
+        <li><a href="https://www.mahagst.gov.in/mr/">Ease of Doing Business</a></li>
+        <li><a href="https://www.mahagst.gov.in/mr/">News and Media Box</a></li>
+        <li><a href="https://www.mahagst.gov.in/mr/">Information for Dealers</a></li>
+        <li><a href="https://www.mahagst.gov.in/mr/">Alerts</a></li>
+        <li><a href="https://www.mahagst.gov.in/mr/">External Websites</a></li> -->
+    </ul>
+</div>
+
+<!-- Left Collapsible Menu -->
+<div id="customSideMenu" class="custom-side-menu">
+    <div class="custom-menu-handle" id="customMenuToggle">&gt;</div>
+    <!-- <h5 class="ms-2">Navigation</h5> -->
+    <ul class="nav flex-column card-links">
+        <li class="nav-item"><a href="https://www.mahagst.gov.in/mr/" class="nav-link">GST Return Filing</a></li>
+        <li class="nav-item"><a href="https://www.mahagst.gov.in/mr/" class="nav-link">Apply for Amnesty Scheme</a></li>
+        <li class="nav-item"><a href="https://www.mahagst.gov.in/mr/" class="nav-link">FAQ</a></li>
+        <li class="nav-item"><a href="https://www.mahagst.gov.in/mr/" class="nav-link">May I help you?</a></li>
+        <li class="nav-item"><a href="https://www.mahagst.gov.in/mr/" class="nav-link">What's New</a></li>
+    </ul>
+</div>
+
+<script>
+    const customSideMenu = document.getElementById("customSideMenu");
+    const customToggleBtn = document.getElementById("customMenuToggle");
+
+    customToggleBtn.addEventListener("click", () => {
+        customSideMenu.classList.toggle("custom-open");
+    });
+</script>
+;
+        </div>
+    </div>
+    <!-- footer aded by ganeswar -->
+
+<footer class="modern-footer overflow-hidden">
+
+  <div class="row pb-1">
+    <div class="col-md-12">
+      <div class="row">
+        <div class="col-md-4 p-0">
+          <div class="footer-box-2">
+            <!-- <a href="https://www.mahagst.gov.in/mr/disclaimer"> Disclaimer</a> -->
+            <a href="https://www.mahagst.gov.in/mr/disclaimer">Disclaimer</a>
+          </div>
+        </div>
+        <div class="col-md-4 p-0">
+          <div class="footer-box-2">
+            <!-- <a href="https://www.mahagst.gov.in/mr/terms-conditions">Terms &amp; Conditions</a> -->
+            <a href="https://www.mahagst.gov.in/mr/terms-conditions">Terms & Conditions</a>
+          </div>
+        </div>
+        <div class="col-md-4 p-0">
+          <div class="footer-box-2">
+            <!-- <a href="https://www.mahagst.gov.in/mr/support"> Support</a> -->
+            <a href="https://www.mahagst.gov.in/mr/support">Support</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="row pb-1 pt-2 footer-box-3">
+    <div class="col-md-9">
+      <h4>Referral Links</h4>
+
+      <hr style="margin: 0px">
+      <div class="row">
+        <!-- Dynamic links in the footer -->
+        <!--           <div class="col-md-3">
+            <ul>
+              <li><a href="https://www.gst.gov.in/">GST Portal</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://www.cbic.gov.in/">CBIC</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://maharashtra.gov.in/">Government of Maharashtra</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://gstcouncil.gov.in/">GST Council</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://einvoice1.gst.gov.in/">e-Invoice</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://mahakosh.gov.in/index.html">Mahakosh</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://gstcouncil.gov.in/gstat">GSTAT</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://ewaybillgst.gov.in/">e-WayBill</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://www.incometax.gov.in/iec/foportal/">Income Tax Department (ITD)</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://www.digilocker.gov.in">DigiLocker (Document Storage)</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://mahakosh.gov.in">Directorate of Accounts and Treasuries</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://dor.gov.in/">Ministry of Finance - Dept. of Revenue</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://tdscpc.gov.in/">TRACES</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://web.umang.gov.in/landing/">UMANG App Portal</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://www.mahaonline.gov.in/">MahaOnline</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://www.cert-in.org.in">Cybersecurity Information</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://exciseservices.mahaonline.gov.in/">Maharashtra State Excise</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://www.bharatbillpay.com/">Bharat Bill Payment System</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://www.digitalindia.gov.in/">Digital India Portal</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://pgportal.gov.in/">CPGRAMS</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://mahaegs.maharashtra.gov.in/">Lokseva Guarantee Act Portal</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://data.maharashtra.gov.in/">Digital State Data Portal</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://rti.maharashtra.gov.in/">RTI Maharashtra</a></li>
+            </ul>
+          </div>
+                  <div class="col-md-3">
+            <ul>
+              <li><a href="https://aaplesarkar.mahaonline.gov.in/">Aaple Sarkar Portal</a></li>
+            </ul>
+          </div>
+         -->
+
+        <!-- Static links in footer -->
+        <div class="row">
+          <div class="col-md-3">
+              <ul><li><a href="https://www.gst.gov.in/" target="_blank">GSTN Portal</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://www.cbic.gov.in/" target="_blank">CBIC</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://maharashtra.gov.in/" target="_blank">Government of Maharashtra</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://gstcouncil.gov.in/" target="_blank">GST Council</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://einvoice1.gst.gov.in/" target="_blank">e-Invoice</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://mahakosh.gov.in/index.html" target="_blank">Mahakosh</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://gstcouncil.gov.in/gstat" target="_blank">GSTAT</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://ewaybillgst.gov.in/" target="_blank">e-WayBill</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://www.incometax.gov.in/iec/foportal/" target="_blank">Income Tax Department (ITD)</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://www.digilocker.gov.in" target="_blank">DigiLocker (Document Storage)</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://mahakosh.gov.in" target="_blank">Directorate of Accounts and Treasuries</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://dor.gov.in/" target="_blank">Ministry of Finance - Dept. of Revenue</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://traces.tdscpc.gov.in/" target="_blank">TRACES</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://web.umang.gov.in/landing/" target="_blank">UMANG App Portal</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://www.mahaonline.gov.in/" target="_blank">MahaOnline</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://www.cert-in.org.in" target="_blank">Cybersecurity Information</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://exciseservices.mahaonline.gov.in/" target="_blank">Maharashtra State Excise</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://www.bharatbillpay.com/" target="_blank">Bharat Bill Payment System</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://www.digitalindia.gov.in/" target="_blank">Digital India Portal</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://pgportal.gov.in/" target="_blank">CPGRAMS</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://mahaegs.maharashtra.gov.in/" target="_blank">Lokseva Guarantee Act Portal</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://data.maharashtra.gov.in/" target="_blank">Digital State Data Portal</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://rti.maharashtra.gov.in/" target="_blank">RTI Maharashtra</a></li></ul>
+          </div>
+
+          <div class="col-md-3">
+              <ul><li><a href="https://aaplesarkar.mahaonline.gov.in/" target="_blank">Aaple Sarkar Portal</a></li></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <!-- <h4>Contact Us</h4> -->
+      <h4>Contact Us</h4>
+      <hr style="margin: 0px">
+      <ul>
+        <!-- <li><strong>OFFICE ADDRESS:-</strong><br>
+            <p>
+              Old Building GST BHAVAN, MAZGAON, MUMBAI <br>               Pincode : 400010 <br>               Contact : 022-23760796 <br>
+            </p>
+        </li> -->
+        <li><strong>OFFICE ADDRESS:-</strong><br>
+            <p>
+              OFFICE OF THE COMMISSIONER OF STATE TAX, 8th FLOOR, NEW BUILDING, GST BHAVAN, MAZGAON, MUMBAI-10
+            </p>
+        </li>
+      </ul>
+    </div>
+
+
+    <div class="col-md-3"></div>
+  </div>
+
+
+
+
+  <div class="row">
+    <div class="footer-box-4 w-100">
+      <div class="container-fluid">
+        <div class="row flex-wrap" style="width:100%">
+          <div class="col-md-2 d-flex justify-content-center align-items-center mb-2 mb-md-0">
+            <span class="fw-bold">Last Updated:&nbsp; </span><span>28/09/2026</span>
+          </div>
+          <!-- <div class="col-md-4 d-flex justify-content-center align-items-center mb-2 mb-md-0 text-center">
+            <span class="fw-bold">©2025. This is the official website of Department of Goods and Services Tax, Government of Maharashtra. All rights             reserved. Powered By Orient Technologies Ltd.</span>
+          </div> -->
+          <div class="col-md-4 d-flex justify-content-center align-items-center mb-2 mb-md-0 text-center">
+            <span class="fw-bold">©2025. This is the official website of Department of Goods and Services Tax, Government of Maharashtra. All rights reserved. Powered By Orient Technologies Ltd.</span>
+          </div>
+          <div class="col-md-3 d-flex justify-content-center align-items-center mb-2 mb-md-0">
+            <span class="fw-bold">Total Visitor Count:&nbsp; </span><span id="visitorCount"> 354693</span>
+          </div>
+          <div class="col-md-3 d-flex justify-content-center align-items-center">
+            <img src="https://www.mahagst.gov.in/public/web-portal/images/indian-gov-logo.png" class="powered-logo p-1 rounded-2 bg-white float-right me-2">
+            <img src="https://www.mahagst.gov.in/public/web-portal/images/wc.png" class="powered-logo p-1 rounded-2 bg-white float-right">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</footer>
+
+
+
+
+
+
+<!-- Default footer -->
+
+<!-- <script type="text/javascript" src="/mvat_ui/js/js-md5.js"></script> -->
+
+
+<!-- <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/slick-carousel@1.8.1/slick/slick.min.js"></script> -->
+<script src="https://www.mahagst.gov.in/public/web-portal/js/jquery-3.7.1.min.js"></script>
+<script src="https://www.mahagst.gov.in/public/web-portal/slick/slick.min.js"></script>
+
+<!-- Bootstrap JS -->
+<!-- <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script> -->
+<script src="https://www.mahagst.gov.in/public/web-portal/js/bootstrap.bundle.min.js"></script>
+
+<script src="https://www.mahagst.gov.in/public/web-portal/js/pr-marquee.js"></script>
+<script src="https://www.mahagst.gov.in/public/web-portal/slick/slick.min.js"></script>
+<script src="https://www.mahagst.gov.in/public/web-portal/js/js-pr-theme.js"></script>
+<script src="https://www.mahagst.gov.in/public/web-portal/js/nonlogin-header.js/"></script>
+<script src="https://www.mahagst.gov.in/public/web-portal/js/calculate-3.0.js"></script>
+<script src="https://www.mahagst.gov.in/public/web-portal/js/multiselect-dropdown.js"></script>
+<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-confirm/3.3.4/jquery-confirm.min.js"></script> -->
+    <script>
+
+      function submitPtecPopup(event) {
+        event.preventDefault();
+
+        const selected = document.querySelector('input[name="ptecRadio"]:checked');
+
+        switch (selected.value) {
+          case "new":
+            window.location.href = "ptec-registration.php";
+            break;
+          case "existing":
+            window.location.href = "ptec-login.php";
+            break;
+          default:
+            alert("Unknown option selected.");
+        }
+
+      }
+
+      function submitPtrcPopup(event) {
+        event.preventDefault();
+
+        const selected = document.querySelector('input[name="ptrcRadio"]:checked');
+
+        switch (selected.value) {
+          case "new":
+            window.location.href = "ptrc-registration.php";
+            break;
+          case "existing":
+            window.location.href = "ptrc-login.php";
+            break;
+          default:
+            alert("Unknown option selected.");
+        }
+
+      }
+
+      document.getElementById('readMoreBtn').addEventListener('click', function () {
+        const hiddenSections = document.querySelectorAll('.more-links');
+        hiddenSections.forEach(section => section.classList.toggle('d-none'));
+
+        // Toggle button text
+        if (this.textContent === "More...") {
+          this.textContent = "Less...";
+        } else {
+          this.textContent = "More...";
+        }
+      });
+
+        document.addEventListener('DOMContentLoaded', function() {
+
+
+                    });
+
+
+    </script>
+
+    <script type="text/javascript">
+         var siteURL = "https://www.mahagst.gov.in";
+         var pagetoken = "redacted-page-token";
+         $('button[onclick="history.back()"]').addClass('btn-outline-secondary');
+    </script>
+</body>
+</html>

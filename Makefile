@@ -236,6 +236,10 @@ seed: check-uv ## Load the rulebook seed calendar as draft rule versions: make s
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \
 	  $(UV) run --package compliancewatch-$(SERVICE) $(SERVICE)-seed $(ARGS)
 
+backfill: check-uv ## Backfill one regulator source into var/raw: make backfill SERVICE=pipeline ARGS="--source cbic_notifications --since 2026-01-01"
+	@[ "$(SERVICE)" = "pipeline" ] || { echo "usage: make backfill SERVICE=pipeline ARGS=\"--source <key> [--since YYYY-MM-DD] [--limit N] [--list-only]\""; exit 1; }
+	@$(UV) run --package compliancewatch-pipeline pipeline-backfill $(ARGS)
+
 worker: check-uv ## Run a service's Temporal worker: make worker SERVICE=pipeline
 	@[ -n "$(SERVICE)" ] || { echo "usage: make worker SERVICE=<pipeline|...>"; exit 1; }
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
