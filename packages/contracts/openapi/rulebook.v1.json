@@ -5,7 +5,7 @@
         "additionalProperties": false,
         "properties": {
           "actor_id": {
-            "description": "The analyst taking the step",
+            "description": "The analyst taking the step; a signed-in user's token overrides it",
             "format": "uuid",
             "title": "Actor Id",
             "type": "string"
@@ -70,6 +70,7 @@
         "additionalProperties": false,
         "properties": {
           "decided_by": {
+            "description": "Who decided; a signed-in user's token overrides it with that user's id",
             "maxLength": 120,
             "minLength": 1,
             "title": "Decided By",
@@ -608,6 +609,7 @@
         "description": "Decide every open mention of one (entity type, proposed name).",
         "properties": {
           "decided_by": {
+            "description": "Who decided; a signed-in user's token overrides it with that user's id",
             "maxLength": 120,
             "minLength": 1,
             "title": "Decided By",
@@ -1843,6 +1845,7 @@
         "additionalProperties": false,
         "properties": {
           "decided_by": {
+            "description": "Who decided; a signed-in user's token overrides it with that user's id",
             "maxLength": 120,
             "minLength": 1,
             "title": "Decided By",
@@ -2861,7 +2864,7 @@
         "additionalProperties": false,
         "properties": {
           "actor_id": {
-            "description": "The analyst taking the step",
+            "description": "The analyst taking the step; a signed-in user's token overrides it",
             "format": "uuid",
             "title": "Actor Id",
             "type": "string"
@@ -3005,6 +3008,13 @@
         "title": "ValidationIssue",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "description": "An access token from the identity service. Read when CW_AUTH_MODE is dual or token; required when it is token.",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -3070,7 +3080,7 @@
         "operationId": "store_embeddings_v1_rulebook_clauses_embeddings_put",
         "parameters": [
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs rulebook:write",
             "in": "header",
             "name": "x-cw-write-token",
             "required": false,
@@ -3083,7 +3093,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs rulebook:write",
               "title": "X-Cw-Write-Token"
             }
           }
@@ -3129,6 +3139,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -3150,6 +3170,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Store clause embeddings from one model; a clause's first embedding stays",
         "tags": [
           "rulebook",
@@ -3376,7 +3401,7 @@
             }
           },
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs rulebook:write",
             "in": "header",
             "name": "x-cw-write-token",
             "required": false,
@@ -3389,7 +3414,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs rulebook:write",
               "title": "X-Cw-Write-Token"
             }
           }
@@ -3445,6 +3470,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "409": {
             "content": {
               "application/problem+json": {
@@ -3476,6 +3511,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Register a parsed regulator document; idempotent for the same clauses",
         "tags": [
           "rulebook",
@@ -3498,7 +3538,7 @@
             }
           },
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs rulebook:write",
             "in": "header",
             "name": "x-cw-write-token",
             "required": false,
@@ -3511,7 +3551,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs rulebook:write",
               "title": "X-Cw-Write-Token"
             }
           }
@@ -3557,6 +3597,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -3588,6 +3638,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Align the entity mentions found in a document; the unresolved go to review",
         "tags": [
           "rulebook",
@@ -3610,7 +3665,7 @@
             }
           },
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs rulebook:write",
             "in": "header",
             "name": "x-cw-write-token",
             "required": false,
@@ -3623,7 +3678,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs rulebook:write",
               "title": "X-Cw-Write-Token"
             }
           }
@@ -3669,6 +3724,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -3700,6 +3765,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Stage the relations proposed for a document; idempotent per proposal",
         "tags": [
           "rulebook",
@@ -3907,7 +3977,7 @@
         "operationId": "apply_transitions_v1_rulebook_maintenance_transitions_post",
         "parameters": [
           {
-            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
             "in": "header",
             "name": "x-cw-review-token",
             "required": false,
@@ -3920,7 +3990,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
               "title": "X-Cw-Review-Token"
             }
           }
@@ -3966,6 +4036,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -3987,6 +4067,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Move replaced versions whose replacement has taken effect (the daily sweep)",
         "tags": [
           "rulebook",
@@ -4228,6 +4313,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -4239,6 +4344,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Open entity review groups: one per (entity type, proposed name)",
         "tags": [
           "rulebook",
@@ -4251,7 +4361,7 @@
         "operationId": "decide_entity_group_v1_rulebook_review_entities_decisions_post",
         "parameters": [
           {
-            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
             "in": "header",
             "name": "x-cw-review-token",
             "required": false,
@@ -4264,7 +4374,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
               "title": "X-Cw-Review-Token"
             }
           }
@@ -4310,6 +4420,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -4351,6 +4471,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create the entity, add the name to one, or reject every open mention of a group",
         "tags": [
           "rulebook",
@@ -4396,6 +4521,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -4407,6 +4552,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Every open mention of one group, with the review ids a decision can name",
         "tags": [
           "rulebook",
@@ -4497,6 +4647,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -4508,6 +4678,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Relation candidates, open ones by default, in id order",
         "tags": [
           "rulebook",
@@ -4530,7 +4705,7 @@
             }
           },
           {
-            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
             "in": "header",
             "name": "x-cw-review-token",
             "required": false,
@@ -4543,7 +4718,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
               "title": "X-Cw-Review-Token"
             }
           }
@@ -4589,6 +4764,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -4630,6 +4815,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Approve a candidate into a rule relation from a draft rule version",
         "tags": [
           "rulebook",
@@ -4652,7 +4842,7 @@
             }
           },
           {
-            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
             "in": "header",
             "name": "x-cw-review-token",
             "required": false,
@@ -4665,7 +4855,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
               "title": "X-Cw-Review-Token"
             }
           }
@@ -4711,6 +4901,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -4752,6 +4952,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Reject a candidate with a reason",
         "tags": [
           "rulebook",
@@ -4941,7 +5146,7 @@
             }
           },
           {
-            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
             "in": "header",
             "name": "x-cw-review-token",
             "required": false,
@@ -4954,7 +5159,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
               "title": "X-Cw-Review-Token"
             }
           }
@@ -5000,6 +5205,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -5041,6 +5256,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Approve a version under review; high-impact versions need two different approvers",
         "tags": [
           "rulebook",
@@ -5119,7 +5339,7 @@
             }
           },
           {
-            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
             "in": "header",
             "name": "x-cw-review-token",
             "required": false,
@@ -5132,7 +5352,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
               "title": "X-Cw-Review-Token"
             }
           }
@@ -5178,6 +5398,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -5219,6 +5449,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Cite clauses for a draft version; every quote must be in its clause",
         "tags": [
           "rulebook",
@@ -5241,7 +5476,7 @@
             }
           },
           {
-            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
             "in": "header",
             "name": "x-cw-review-token",
             "required": false,
@@ -5254,7 +5489,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
               "title": "X-Cw-Review-Token"
             }
           }
@@ -5300,6 +5535,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -5341,6 +5586,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Publish an approved version, apply its relations and write the rule events",
         "tags": [
           "rulebook",
@@ -5363,7 +5613,7 @@
             }
           },
           {
-            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
             "in": "header",
             "name": "x-cw-review-token",
             "required": false,
@@ -5376,7 +5626,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
               "title": "X-Cw-Review-Token"
             }
           }
@@ -5422,6 +5672,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -5463,6 +5723,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Send a version under review or approved back to draft; starts a new round",
         "tags": [
           "rulebook",
@@ -5485,7 +5750,7 @@
             }
           },
           {
-            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
             "in": "header",
             "name": "x-cw-review-token",
             "required": false,
@@ -5498,7 +5763,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
               "title": "X-Cw-Review-Token"
             }
           }
@@ -5544,6 +5809,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -5585,6 +5860,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Submit a draft for review; starts a new approval round",
         "tags": [
           "rulebook",
@@ -5607,7 +5887,7 @@
             }
           },
           {
-            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
             "in": "header",
             "name": "x-cw-review-token",
             "required": false,
@@ -5620,7 +5900,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
               "title": "X-Cw-Review-Token"
             }
           }
@@ -5666,6 +5946,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -5707,6 +5997,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Withdraw a published version with rule.withdrawn, effective today",
         "tags": [
           "rulebook",

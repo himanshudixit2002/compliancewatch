@@ -135,7 +135,23 @@ stored) and does not fail the ingest.
 `pipeline-embed` runs the same stage over every document: it catches up clauses registered
 before this step, and with `--model` fills a new model's vectors before the gateway's route
 (`CW_LLM_ROUTES__RETRIEVAL`) switches to it. It uses the worker's `CW_RULEBOOK_URL`,
-`CW_RULEBOOK_WRITE_TOKEN` and `CW_LLM_GATEWAY_URL`.
+`CW_RULEBOOK_WRITE_TOKEN`, `CW_LLM_GATEWAY_URL` and service client.
+
+## Service token
+
+Once `CW_SERVICE_CLIENT_SECRET` is set, every call the worker and `pipeline-embed` make to the
+rulebook and the gateway carries the pipeline's own access token (`Authorization: Bearer`),
+which the identity service issues for client `CW_SERVICE_CLIENT_ID` (`make worker` defaults it
+to `pipeline`). The client needs the rulebook:write scope for the writes and llm:call for the
+model calls; locally identity creates it from `identity_dev_clients.toml`. The token is cached
+until a minute before it expires, and a 401 fetches a new one and resends the request once.
+When identity cannot issue a token, a rulebook call fails as an outage and a gateway call as a
+gateway error, and the activity retries.
+
+The rulebook's writes still carry `CW_RULEBOOK_WRITE_TOKEN` while it is set, so the same worker
+runs against a rulebook in `header` mode (which reads the write token), `dual` mode (the bearer
+when one is sent) and `token` mode (the bearer alone). Unset the write token once the rulebook
+runs in `token` mode. Without the client secret the worker sends no bearer and behaves as before.
 
 ```bash
 uv run --package compliancewatch-pipeline pipeline-embed --limit 500

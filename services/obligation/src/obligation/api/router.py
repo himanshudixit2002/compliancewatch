@@ -1,4 +1,8 @@
-"""Routes of the obligation service. Business logic lives in application use cases."""
+"""Routes of the obligation service. Business logic lives in application use cases.
+
+The read route acts for the request's tenant (``deps.Tenant``): the tenant a user's access token
+names, the one a service with tenant:act names in ``x-tenant-id``, or without a token the header's.
+"""
 
 from datetime import date
 from typing import Annotated
@@ -24,7 +28,7 @@ async def ping() -> dict[str, str]:
 @router.get(
     "/obligations",
     summary="A business's obligations, due date first, optionally inside a window of days",
-    responses=problem_responses(401, 422),
+    responses=problem_responses(401, 403, 422),
 )
 def list_obligations(
     tenant: Tenant,

@@ -59,7 +59,9 @@ class CitationsOut(BaseModel):
 class ActorIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    actor_id: UUID = Field(description="The analyst taking the step")
+    actor_id: UUID = Field(
+        description="The analyst taking the step; a signed-in user's token overrides it"
+    )
     note: str = Field(default="", max_length=2_000)
 
 

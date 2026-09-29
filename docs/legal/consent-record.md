@@ -23,7 +23,7 @@ number asked for by writing a keyword to the WhatsApp number, before anyone has 
 | `purpose` | One of `terms`, `privacy_notice`, `profile_processing`, `whatsapp_reminders`, `email_reminders`, `analytics` |
 | `notice_version` | The version line of the notice or terms the person saw (required when granting) |
 | `granted` | true for consent, false for withdrawal |
-| `source` | `web_onboarding`, `whatsapp_keyword`, `api`, `support` |
+| `source` | `web_onboarding`, `web_settings` (changed later on the web settings pages), `whatsapp_keyword`, `api`, `support` |
 | `recorded_at` | When we recorded it (UTC) |
 | `evidence` | Free text: the checkbox label shown, the keyword received, the support ticket |
 | `recorded_by` | The user or system component that wrote it |

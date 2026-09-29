@@ -1,6 +1,18 @@
 """Shared domain kernel: value objects, the predicate algebra, status machines, protocols,
 error types and the event envelope. Standard library only."""
 
+from domain_kernel.access import (
+    ANONYMOUS,
+    MAX_CLIENT_ID_CHARS,
+    MFA_REQUIRED_ROLES,
+    REGULATORY_ROLES,
+    TENANT_ADMIN_ROLES,
+    TENANT_MEMBER_ROLES,
+    Principal,
+    PrincipalKind,
+    Role,
+    Scope,
+)
 from domain_kernel.channels import Channel
 from domain_kernel.citations import (
     DASHES,
@@ -160,6 +172,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "ALLOWED_OPERATORS",
+    "ANONYMOUS",
     "ATTRIBUTE_KEY_PATTERN",
     "CERTAIN",
     "DASHES",
@@ -169,8 +182,10 @@ __all__ = [
     "GSTIN_PATTERN",
     "ID_NAMESPACE",
     "LANGUAGE_PATTERN",
+    "MAX_CLIENT_ID_CHARS",
     "MAX_QUOTE_CHARS",
     "MAX_TEXT_CHARS",
+    "MFA_REQUIRED_ROLES",
     "MULTI_VALUE_OPERATORS",
     "NUMERIC_TYPES",
     "OBLIGATION_TRANSITIONS",
@@ -179,6 +194,7 @@ __all__ = [
     "PARSER_VERSION_PATTERN",
     "PROBLEM_TYPE_PREFIX",
     "QUOTE_MATCH_THRESHOLD",
+    "REGULATORY_ROLES",
     "REVIEW_THRESHOLD",
     "RULE_VERSION_KIND",
     "RULE_VERSION_ONLY",
@@ -186,6 +202,8 @@ __all__ = [
     "SCHEMA_VERSION_PATTERN",
     "SEMVER_PATTERN",
     "SET_OPERATORS",
+    "TENANT_ADMIN_ROLES",
+    "TENANT_MEMBER_ROLES",
     "TOPIC_PATTERN",
     "ZERO",
     "AllOf",
@@ -262,11 +280,14 @@ __all__ = [
     "PredicateKind",
     "PredicateResult",
     "PredicateValue",
+    "Principal",
+    "PrincipalKind",
     "ProfileSnapshot",
     "RawDocument",
     "Recurrence",
     "RelationKind",
     "RenderedMessage",
+    "Role",
     "RuleCandidate",
     "RuleExtractor",
     "RuleId",
@@ -276,6 +297,7 @@ __all__ = [
     "RuleVersionSnapshot",
     "RuleVersionStatus",
     "Scalar",
+    "Scope",
     "ScoredClause",
     "SourceAdapter",
     "SourceId",

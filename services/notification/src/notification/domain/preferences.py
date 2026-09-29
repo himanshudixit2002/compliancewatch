@@ -30,6 +30,8 @@ class ConsentSource(StrEnum):
     WEB_ONBOARDING = "web_onboarding"
     API = "api"
     SUPPORT = "support"
+    WEB_SETTINGS = "web_settings"
+    """Changed later on the web settings pages, not at onboarding."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -16,6 +16,9 @@ dependencies = [
   "httpx2>=2.13",
 ]
 
+[project.scripts]
+identity-admin = "identity.admin:main"
+
 [tool.uv.sources]
 py-common = { workspace = true }
 domain-kernel = { workspace = true }

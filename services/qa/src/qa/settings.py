@@ -18,8 +18,10 @@ class QaSettings(Settings):
     Off, or for a tenant not listed, no question costs a planner call.
 
     ``rulebook_url``, ``profile_url``, ``obligation_url`` and ``llm_gateway_url`` are the
-    services the answers are built from; every model call goes through the gateway. Reads time
-    out after ``qa_http_timeout_seconds``, completions after ``qa_llm_timeout_seconds`` and the
+    services the answers are built from; every model call goes through the gateway. With
+    py-common's ``CW_SERVICE_CLIENT_SECRET`` set, every call to them carries qa's own access
+    token from the identity service; its client needs llm:call and tenant:act. Reads time out
+    after ``qa_http_timeout_seconds``, completions after ``qa_llm_timeout_seconds`` and the
     question's embedding after ``qa_embedding_timeout_seconds``. The model timeouts outlast the
     gateway's own budget for the call, so the gateway's fallback model has time to answer: the
     qa route gives the primary and the fallback 8 s each, the retrieval route 15 s.

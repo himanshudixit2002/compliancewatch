@@ -7,6 +7,17 @@ documentation is a patch; a break (see `BREAKING.md`) is a major bump and a new 
 next to this one. The change that bumps the version adds its section here, and the build fails
 while the version in `public.meta.json` has no section.
 
+## 0.1.1
+
+Documentation of verified access tokens, with no change to the operations:
+
+- Every business operation documents 403: a caller whose access token lacks a tenant member
+  role, or a service without the `tenant:act` scope, or an `x-tenant-id` header naming another
+  tenant than the user's token.
+- `x-tenant-id` says that a user's token names the tenant and a service names it in the header.
+- The `bearerAuth` scheme says when a token is required (`CW_AUTH_MODE` token, as in
+  production) and that header mode takes the tenant from `x-tenant-id` instead.
+
 ## 0.1.0
 
 First version, from the profile service:

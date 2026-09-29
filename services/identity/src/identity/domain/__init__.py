@@ -1,1 +1,1 @@
-"""Domain of the identity service: consent records and billing."""
+"""Domain of the identity service: tenants, users and roles, consent records and billing."""

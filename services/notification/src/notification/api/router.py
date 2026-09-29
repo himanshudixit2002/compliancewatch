@@ -4,14 +4,15 @@ Preferences are keyed by channel and address and carry no tenant: an opt-out typ
 WhatsApp arrives before we know which tenant the number belongs to, and must be honoured
 either way. The address in the path is normalised first, so ``919876543210`` and
 ``+91 98765 43210`` are one record; an address that cannot be normalised is a 422 problem.
-Sends are tenant data and need the header.
+A service token needs the notification:preferences scope for them. Sends are tenant data and
+need a tenant; a service token needs notification:send, and tenant:act to name the tenant.
 """
 
 from fastapi import APIRouter, HTTPException, status
 
 from domain_kernel.channels import Channel
 from domain_kernel.ids import BusinessId, NotificationId, ObligationId
-from notification.api.deps import Tenant, Wired
+from notification.api.deps import PreferenceAccess, SendTenant, Wired
 from notification.api.schemas import (
     PreferenceIn,
     PreferenceOut,
@@ -35,7 +36,8 @@ async def ping() -> dict[str, str]:
 @router.put(
     "/preferences/{channel}/{recipient}",
     summary="Record an opt-in or opt-out for a channel and recipient",
-    responses=problem_responses(422),
+    dependencies=[PreferenceAccess],
+    responses=problem_responses(401, 403, 422),
 )
 def set_preference(
     channel: Channel, recipient: str, body: PreferenceIn, wired: Wired
@@ -57,7 +59,8 @@ def set_preference(
 @router.get(
     "/preferences/{channel}/{recipient}",
     summary="The recorded preference, 404 when the recipient never opted in or out",
-    responses=problem_responses(404, 422),
+    dependencies=[PreferenceAccess],
+    responses=problem_responses(401, 403, 404, 422),
 )
 def get_preference(channel: Channel, recipient: str, wired: Wired) -> PreferenceOut:
     preference = wired.get_preference.run(channel, recipient)
@@ -73,9 +76,9 @@ def get_preference(channel: Channel, recipient: str, wired: Wired) -> Preference
         "A failed delivery stays queued and the service retries it; sending the same request "
         "again is a duplicate. In quiet hours the notification is queued for their end."
     ),
-    responses=problem_responses(401, 422, 503),
+    responses=problem_responses(401, 403, 422, 503),
 )
-def send(body: SendIn, tenant: Tenant, wired: Wired) -> SendOut:
+def send(body: SendIn, tenant: SendTenant, wired: Wired) -> SendOut:
     request = NotificationRequest(
         notification_id=NotificationId(body.notification_id),
         tenant_id=tenant,

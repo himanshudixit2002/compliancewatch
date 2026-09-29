@@ -4,7 +4,9 @@ Registers the ingest workflow and its activities on the ``pipeline`` task queue 
 ``CW_TEMPORAL_ADDRESS``. Activities run on the in-memory fakes until the source adapters land.
 Registration with the rulebook, clause embedding and knowledge extraction are wired to
 ``CW_RULEBOOK_URL`` and ``CW_LLM_GATEWAY_URL`` and only call them when
-``CW_PIPELINE_KNOWLEDGE_ENABLED`` is on.
+``CW_PIPELINE_KNOWLEDGE_ENABLED`` is on. Both clients carry the worker's own access token once
+``CW_SERVICE_CLIENT_SECRET`` is set (client ``CW_SERVICE_CLIENT_ID``, which needs rulebook:write
+and llm:call), and the rulebook's writes also carry ``CW_RULEBOOK_WRITE_TOKEN`` while it is set.
 """
 
 import asyncio
@@ -28,6 +30,7 @@ from pipeline.infrastructure.prompts import PROMPTS_DIR, load_prompt
 from pipeline.infrastructure.rulebook_client import HttpRulebook
 from pipeline.settings import PipelineSettings
 from pipeline.workflows import TASK_QUEUE, ExtractKnowledgeWorkflow, IngestDocumentWorkflow
+from py_common.auth import service_auth_from
 from py_common.logging import configure_logging
 from py_common.telemetry import configure_telemetry
 from py_common.temporal import ActivityBase, WorkerConfig, run_worker
@@ -51,9 +54,12 @@ def activities(
     settings = settings or PipelineSettings(_env_file=None, service_name=SERVICE_NAME)
     adapter = FakeSourceAdapter.with_sample()
     parser = FakePlainTextParser()
+    auth = service_auth_from(settings)
     token = settings.rulebook_write_token
     rulebook: Rulebook = sink or HttpRulebook(
-        settings.rulebook_url, token=None if token is None else token.get_secret_value()
+        settings.rulebook_url,
+        token=None if token is None else token.get_secret_value(),
+        auth=auth,
     )
     enabled = settings.pipeline_knowledge_enabled
     relations = stage
@@ -62,11 +68,13 @@ def activities(
             "extraction.rule_relations", "1", settings.pipeline_prompts_dir or PROMPTS_DIR
         )
         relations = RelationStage(
-            LlmRelationExtractor(GatewayProvider(settings.llm_gateway_url), prompt)
+            LlmRelationExtractor(GatewayProvider(settings.llm_gateway_url, auth=auth), prompt)
         )
     embedding = None
     if enabled:
-        embedding = EmbeddingStage(embedder or GatewayEmbedder(settings.llm_gateway_url), rulebook)
+        embedding = EmbeddingStage(
+            embedder or GatewayEmbedder(settings.llm_gateway_url, auth=auth), rulebook
+        )
     return [
         DiscoverDocument(adapter),
         FetchDocument(adapter),

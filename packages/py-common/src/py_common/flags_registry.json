@@ -2,6 +2,25 @@
   "_generated": "Generated from packages/flags/registry.json by make flags; do not edit.",
   "flags": [
     {
+      "name": "auth.mode",
+      "type": "string",
+      "default": "header",
+      "values": [
+        "header",
+        "dual",
+        "token"
+      ],
+      "owner": "platform",
+      "description": "How a Python service reads its caller (CW_AUTH_MODE): header takes the tenant from x-tenant-id as before tokens existed, dual verifies a bearer token from the identity service when a request carries one and otherwise behaves as header, token requires a bearer token on every route that reads the caller (probes, sign-in and reads that are the same for everyone stay open). Production refuses anything but token.",
+      "removal": "Delete header and dual once staging and production run token, after web sign-in (G68) and the bot and pipeline service credentials are live; production already refuses anything but token.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_AUTH_MODE",
+      "services": [
+        "py-common"
+      ]
+    },
+    {
       "name": "flags.provider",
       "type": "string",
       "default": "env",
@@ -18,6 +37,24 @@
       "services": [
         "py-common",
         "flags"
+      ]
+    },
+    {
+      "name": "identity.auth_provider",
+      "type": "string",
+      "default": "fake",
+      "values": [
+        "fake",
+        "supabase"
+      ],
+      "owner": "identity-partner",
+      "description": "The identity provider people sign in with (CW_AUTH_PROVIDER): fake signs provider tokens in the identity process for local runs and tests, supabase verifies Supabase Auth tokens and manages accounts through its admin API. Production refuses fake.",
+      "removal": "Kept as the provider selector (keycloak slots in for the Kubernetes profile). fake is refused when CW_ENV=prod, and the dev provider-token route only answers with fake in local or test.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_AUTH_PROVIDER",
+      "services": [
+        "identity"
       ]
     },
     {

@@ -1,6 +1,6 @@
 # profile service
 
-Part of the ComplianceWatch monorepo. **The business hierarchy, attribute values per node and financial year, snapshots, one-question onboarding and review tasks exist behind a first API, with the public business API and `GET /v1/ontology` on top; the GSTIN provider account and the identity token do not exist yet, so the HTTP lookup stays off and the tenant comes from a header.**
+Part of the ComplianceWatch monorepo. **The business hierarchy, attribute values per node and financial year, snapshots, one-question onboarding and review tasks exist behind a first API, with the public business API and `GET /v1/ontology` on top; the GSTIN provider account does not exist yet, so the HTTP lookup stays off. The tenant comes from a verified access token or, while `CW_AUTH_MODE` is `header` (the default), from the `x-tenant-id` header.**
 Design reference: Project Foundation guide, sections 6, 7 and 14.
 
 - **Owns:** BusinessProfiles and the Ontology attribute store; validates attributes against the Ontology; versions each change; GSTIN pre-fill. Python package: `profile_service` (the stdlib ships a `profile` module)
@@ -31,8 +31,8 @@ per year and the snapshot picks the year asked for.
 - `api/`: `POST /v1/profile/{entities,registrations,locations}`, `GET /v1/profile/nodes/{id}`,
   `PUT /v1/profile/nodes/{id}/attributes`, `GET .../snapshot?fy=2025-26`,
   `GET .../next-question?fy=`, `GET .../review-tasks`,
-  `POST /v1/profile/financial-year-confirmations`. The tenant is the `x-tenant-id`
-  header (required, 401 without it) until the identity service issues tokens (ADR-014). Errors
+  `POST /v1/profile/financial-year-confirmations`. Every route but the ping acts for one
+  tenant (see Authentication below; 401 `tenant-required` without one). Errors
   are problem details; the spec is `packages/contracts/openapi/profile.v1.json`
   (`make openapi SERVICE=profile`, checked by a contract test).
 - `infrastructure/`: `PostgresUnitOfWorkFactory` (one transaction per call, `app.tenant_id`
@@ -75,8 +75,25 @@ These routes and `GET /v1/ontology` are the profile's part of the public API spe
 `packages/contracts/openapi/public.v1.json` (`make openapi-public` after
 `make openapi SERVICE=profile`), and of the generated Python models in
 `cw_contracts.rest.public_v1`, which `tests/contract/test_public_client.py` sends and reads.
-`x-roles` names `owner`, `staff`, `ca_admin`, `ca_staff` and `compliance_lead`; it is metadata
-until the identity service enforces it, and the tenant is the `x-tenant-id` header until then.
+`x-roles` names `owner`, `staff`, `ca_admin`, `ca_staff` and `compliance_lead`, which a caller an
+access token names must hold (see Authentication).
+
+## Authentication
+
+The caller comes from `py_common.auth` by `CW_AUTH_MODE` (`api/deps.py`):
+
+- `header` (the default): no token is read. The tenant is the `x-tenant-id` header, and
+  `changed_by` in a body names who changed a value, as before tokens existed.
+- `dual`: a request with a bearer token is served as in `token` mode, and one without it as in
+  `header` mode. A bad token is a 401 `auth-token-invalid` whatever the header says.
+- `token`: a bearer token is required (401 `auth-token-required`).
+
+With a token, a user's token names the tenant: the header may be left out, and one naming another
+tenant is a 403 `auth-tenant-mismatch`. The user needs a tenant member role (`owner`, `staff`,
+`ca_admin`, `ca_staff` or `compliance_lead`), else a 403 `auth-forbidden`, and is recorded as who
+changed the values (the body's `changed_by` is ignored). A service names the tenant in
+`x-tenant-id` and needs the `tenant:act` scope; its changes name no user. `GET /v1/ontology` reads
+no token in any mode. `tests/unit/test_auth_mode.py` covers the three modes.
 
 The idempotency keys live in the `idempotency_key` table for 24 hours after the response is
 recorded; a request that dies before recording frees its key after 5 minutes. Keys are stored

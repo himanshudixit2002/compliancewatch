@@ -1,3 +1,4 @@
+import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -139,6 +140,32 @@ def test_the_memory_store_keeps_nothing_from_a_failed_unit_of_work() -> None:
     assert store.records == []
     with store() as uow:
         assert uow.channel_consents.by_message(WHATSAPP, "") is None
+
+
+def test_overlapping_units_of_work_keep_both_records() -> None:
+    """The second unit waits for the first to commit instead of starting from the same copy of
+    the records and dropping the first one."""
+    store = MemoryChannelStore()
+    done = threading.Event()
+
+    def record_second() -> None:
+        RecordChannelConsent(store, clock=Clock()).run(
+            WHATSAPP, NUMBER, REMINDERS, granted=False, source=KEYWORD, message_id="wamid.2"
+        )
+        done.set()
+
+    with store() as uow:
+        uow.channel_consents.add(
+            ChannelConsentRecord(
+                ConsentId.new(), WHATSAPP, NUMBER, REMINDERS, False, KEYWORD, NOW, message_id="m"
+            )
+        )
+        thread = threading.Thread(target=record_second)
+        thread.start()
+        assert not done.wait(0.05), "a second unit of work ran inside the first"
+    thread.join(timeout=5)
+    assert done.is_set()
+    assert [record.message_id for record in store.records] == ["m", "wamid.2"]
 
 
 def test_record_invariants() -> None:

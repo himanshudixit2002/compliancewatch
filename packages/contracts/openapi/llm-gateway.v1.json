@@ -697,6 +697,13 @@
         "title": "ValidationIssue",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "description": "An access token from the identity service. Read when CW_AUTH_MODE is dual or token; required when it is token.",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -763,7 +770,7 @@
         "operationId": "completions_v1_llm_gateway_completions_post",
         "parameters": [
           {
-            "description": "Tenant UUID; optional until the identity service issues tokens",
+            "description": "Tenant UUID the call is for, which attributes its cost; empty for regulatory work. A service names a tenant only with the tenant:act scope, and a user's token already names one.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -777,7 +784,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; optional until the identity service issues tokens",
+              "description": "Tenant UUID the call is for, which attributes its cost; empty for regulatory work. A service names a tenant only with the tenant:act scope, and a user's token already names one.",
               "title": "X-Tenant-Id"
             }
           }
@@ -813,6 +820,26 @@
             },
             "description": "Bad Request"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -854,6 +881,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Run one completion through routing, cache, budget, provider and ledger",
         "tags": [
           "llm-gateway"
@@ -866,7 +898,7 @@
         "operationId": "embeddings_v1_llm_gateway_embeddings_post",
         "parameters": [
           {
-            "description": "Tenant UUID; optional until the identity service issues tokens",
+            "description": "Tenant UUID the call is for, which attributes its cost; empty for regulatory work. A service names a tenant only with the tenant:act scope, and a user's token already names one.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -880,7 +912,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; optional until the identity service issues tokens",
+              "description": "Tenant UUID the call is for, which attributes its cost; empty for regulatory work. A service names a tenant only with the tenant:act scope, and a user's token already names one.",
               "title": "X-Tenant-Id"
             }
           }
@@ -916,6 +948,26 @@
             },
             "description": "Bad Request"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -957,6 +1009,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Embed texts for retrieval through routing, budget, provider and ledger",
         "tags": [
           "llm-gateway"
@@ -980,8 +1037,33 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "The routing table with overrides applied",
         "tags": [
           "llm-gateway"
@@ -1030,8 +1112,33 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Registered prompts",
         "tags": [
           "llm-gateway"
@@ -1040,11 +1147,11 @@
     },
     "/v1/llm-gateway/usage": {
       "get": {
-        "description": "Tenant budget when a tenant is given (a feature narrows the sum), else the feature budget.",
+        "description": "Tenant budget when a tenant is given (a feature narrows the sum), else the feature budget.\nA signed-in operator reads any tenant's spend by ``tenant_id``; their own tenant is the\ninternal one, so it is no default.",
         "operationId": "usage_v1_llm_gateway_usage_get",
         "parameters": [
           {
-            "description": "Defaults to the x-tenant-id header; empty means all",
+            "description": "Defaults to the x-tenant-id header (not to a signed-in user's own tenant); empty means all",
             "in": "query",
             "name": "tenant_id",
             "required": false,
@@ -1058,7 +1165,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Defaults to the x-tenant-id header; empty means all",
+              "description": "Defaults to the x-tenant-id header (not to a signed-in user's own tenant); empty means all",
               "title": "Tenant Id"
             }
           },
@@ -1100,7 +1207,7 @@
             }
           },
           {
-            "description": "Tenant UUID; optional until the identity service issues tokens",
+            "description": "Tenant UUID the call is for, which attributes its cost; empty for regulatory work. A service names a tenant only with the tenant:act scope, and a user's token already names one.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -1114,7 +1221,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; optional until the identity service issues tokens",
+              "description": "Tenant UUID the call is for, which attributes its cost; empty for regulatory work. A service names a tenant only with the tenant:act scope, and a user's token already names one.",
               "title": "X-Tenant-Id"
             }
           }
@@ -1130,6 +1237,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -1141,6 +1268,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Spend against one monthly budget, by tenant or by feature",
         "tags": [
           "llm-gateway"

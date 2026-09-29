@@ -1,5 +1,13 @@
 """The rulebook's HTTP API as the pipeline's ``KnowledgeSink``, ``RulebookReader`` and
-``ClauseIndexSink``."""
+``ClauseIndexSink``.
+
+Writes carry the rulebook's shared write token (``x-cw-write-token``) while one is configured,
+and every request carries the pipeline's own access token once ``CW_SERVICE_CLIENT_SECRET`` is
+set (``auth``, from ``py_common.auth.service_auth_from``). Both go out during the move from
+shared tokens to service tokens: a rulebook in ``header`` mode reads the write token, one in
+``dual`` or ``token`` mode the bearer, which needs the rulebook:write scope. A token the identity
+service could not issue is ``RulebookUnavailableError``, retried like an unreachable rulebook.
+"""
 
 from collections.abc import Mapping, Sequence
 from datetime import date
@@ -26,6 +34,7 @@ from pipeline.domain.knowledge import (
     RuleKey,
     StagingReport,
 )
+from py_common.auth import ServiceTokenUnavailableError
 
 DOCUMENTS_PATH = "/v1/rulebook/documents/{document_id}"
 MENTIONS_PATH = DOCUMENTS_PATH + "/mentions"
@@ -40,19 +49,22 @@ outage, so it is not retried."""
 
 
 class HttpRulebook:
-    """``base_url`` is ``CW_RULEBOOK_URL``; ``token`` the shared write token. Pass ``client`` to
-    talk to an in-process app (a FastAPI ``TestClient``) instead of the network."""
+    """``base_url`` is ``CW_RULEBOOK_URL``; ``token`` the shared write token and ``auth`` the
+    service's token auth (None sends no bearer). Pass ``client`` to talk to an in-process app (a
+    FastAPI ``TestClient``) instead of the network; ``auth`` applies to it too."""
 
     def __init__(
         self,
         base_url: str = "http://localhost:8003",
         *,
         token: str | None = None,
+        auth: httpx2.Auth | None = None,
         client: httpx2.Client | None = None,
         timeout_seconds: float = 30.0,
     ) -> None:
         self._client = client or httpx2.Client(base_url=base_url, timeout=timeout_seconds)
         self._token = token
+        self._auth = auth
 
     def register_document(self, record: DocumentRecord) -> RegisteredDocument:
         document = record.document
@@ -197,13 +209,16 @@ class HttpRulebook:
         params: Mapping[str, str | int] | None = None,
     ) -> Any:
         headers = {WRITE_TOKEN_HEADER: self._token} if self._token and method != "get" else {}
+        auth = httpx2.USE_CLIENT_DEFAULT if self._auth is None else self._auth
         try:
             if method == "get":
-                response = self._client.get(path, params=dict(params or {}))
+                response = self._client.get(path, params=dict(params or {}), auth=auth)
             else:
-                response = self._client.put(path, json=dict(body or {}), headers=headers)
+                response = self._client.put(path, json=dict(body or {}), headers=headers, auth=auth)
         except httpx2.TransportError as exc:
             raise RulebookUnavailableError(f"rulebook unreachable: {exc}") from exc
+        except ServiceTokenUnavailableError as exc:
+            raise RulebookUnavailableError(f"no service token for the rulebook: {exc}") from exc
         if response.status_code in (200, 201):
             return response.json()
         detail = f"{response.status_code}: {response.text[:500]}"

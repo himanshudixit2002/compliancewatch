@@ -67,7 +67,7 @@ curl -s http://localhost:8008/health; curl -s http://localhost:8008/ready; curl 
 | --- | --- |
 | `POST /v1/llm-gateway/completions` | One completion through prompt check, PII masking, budget check, cache, breaker, provider (with fallback), ledger, trace and event. Synchronous. |
 | `POST /v1/llm-gateway/embeddings` | Vectors for 1 to 64 texts through PII masking, budget check, breaker, provider (one model, no fallback), vector check, ledger, trace and event. Synchronous, never cached. See [Embeddings](#embeddings). |
-| `GET /v1/llm-gateway/usage` | Spend for one UTC month. `tenant_id` (query, defaults to the header) gives the tenant scope; `feature` alone gives the feature scope; neither is a 422. `month=YYYY-MM` defaults to the current month. |
+| `GET /v1/llm-gateway/usage` | Spend for one UTC month. `tenant_id` (query, defaults to the header but not to a signed-in user's tenant) gives the tenant scope; `feature` alone gives the feature scope; neither is a 422. `month=YYYY-MM` defaults to the current month. |
 | `GET /v1/llm-gateway/models` | The routing table: per feature the primary and fallback model, provider filters, sort, reasoning effort, timeout and whether the row is a default or an override. |
 | `GET /v1/llm-gateway/prompts` | The prompt registry: name, version, owner, eval case count, sha256 and description. |
 | `GET /health`, `GET /ready`, `GET /v1/llm-gateway/ping` | From py-common and the router. `/ready` runs the checks `ledger`, `prompt_registry` and `provider`. |
@@ -90,8 +90,25 @@ no tenant, which only the feature budget governs. A value that is not a UUID is 
 and minted otherwise (the client value is then not echoed); it comes back in the response header
 and body and in every log line.
 
-The tenant header is a dev-stage limitation: the identity service and Keycloak will replace it
-with a token, and the header will stop being trusted.
+### Authentication
+
+The caller comes from `py_common.auth` by `CW_AUTH_MODE` (`api/deps.py`). In `header` mode (the
+default) no token is read and every route works as described above; in `dual` mode a request
+with a bearer token is served as in `token` mode and one without it as in `header` mode; in
+`token` mode a bearer is required (401 `auth-token-required`). With a token:
+
+| Routes | Who may call |
+| --- | --- |
+| `POST /completions`, `POST /embeddings` | a service with `llm:call`; users call models only through a service |
+| `GET /usage`, `GET /models`, `GET /prompts` | a user with a regulatory role (`analyst`, `reviewer` or `admin`) or a service with `llm:call` |
+
+Anyone else is a 403 `auth-forbidden`. The tenant stays optional: a service names one in
+`x-tenant-id` only with the `tenant:act` scope (a 403 without it), and regulatory work names none.
+A signed-in operator reads a tenant's spend with `tenant_id`; their own tenant, the internal one,
+is no default, and an `x-tenant-id` naming another tenant is a 403 `auth-tenant-mismatch`. So in
+token mode a tenant's user cannot read any spend, which closes the header-mode finding in
+`tools/demo/tests/unit/test_cross_tenant.py`. `tests/unit/test_auth_mode.py` covers the three
+modes.
 
 ### Errors
 
@@ -101,6 +118,9 @@ Every error is `application/problem+json` (RFC 9457) with a stable `type` URI, t
 | `type` (`urn:compliancewatch:problem:` + slug) | Status | When |
 | --- | --- | --- |
 | `request-invalid` | 422 | Body or header validation failed; `errors[].loc` names the field |
+| `auth-token-required`, `auth-token-invalid` | 401 | Dual or token mode: no bearer where one is required, or one that fails verification (see [Authentication](#authentication)) |
+| `auth-forbidden`, `auth-tenant-mismatch` | 403 | The token lacks the scope or role, a service names a tenant without `tenant:act`, or a user's header names another tenant |
+| `auth-keys-unavailable` | 503 | Identity's signing keys could not be fetched and none are cached |
 | `llm-prompt-unregistered` | 422 | The `name@version` is not in the registry |
 | `llm-feature-unknown` | 422 | Startup only: a `CW_LLM_ROUTES__*` override naming an unknown feature stops the process from wiring. The API answers an unknown `feature` with `request-invalid` |
 | `llm-feature-mismatch` | 422 | A completion for `retrieval`, the one feature the embeddings route serves |
@@ -373,7 +393,6 @@ dimensions.
   bake-off that would justify the default routes
 - Redis cache and semantic cache; the cache is exact match in memory per process
 - Kafka outbox for `llm.call.completed`; events are logged only
-- Tenant from a token: `x-tenant-id` is trusted until the identity service exists
 - Queueing non-urgent work when a budget is exhausted; callers get a 429 today
 - `Idempotency-Key`, streaming responses, a second real provider adapter
 - Eval harness that refuses an unregistered prompt; the gateway does, the harness does not exist

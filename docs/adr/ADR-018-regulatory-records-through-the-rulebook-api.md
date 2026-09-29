@@ -80,3 +80,27 @@ own one schema's invariants.
 - No `document.parsed` event is emitted yet; nothing consumes it today.
 - Revisit when the pipeline gets its own tables, or when the write volume makes a synchronous
   call the bottleneck.
+
+## Addendum 2026-09-29: service tokens and analyst roles replace the shared tokens
+
+Identity now issues access tokens (ADR-014's addendum), and the rulebook reads them by
+`CW_AUTH_MODE`. Its writes fall into two kinds:
+
+- **Pipeline writes** (documents, mentions, relation candidates, clause embeddings) take the
+  write token or a service token with the `rulebook:write` scope. The pipeline's worker and
+  `pipeline-embed` send the service token once `CW_SERVICE_CLIENT_SECRET` is set, and the write
+  token while it is configured.
+- **Analyst actions** take the review token or a signed-in user with the route's roles: entity
+  review decisions, relation approvals and rejections and the sweep take `analyst`, `reviewer` or
+  `admin`; citations and submit take `analyst` or `rulebook:write`; return takes `analyst`,
+  `reviewer` or `rulebook:write`; approve, publish and withdraw take `reviewer`. The rulebook
+  README has the table.
+
+The shared tokens open routes only in `header` and `dual` mode; in `token` mode, which production
+requires, only an access token does. When a token names a user, the rulebook records that user
+as `decided_by` or `actor_id` and ignores the body's value, so the two approvals of a high-impact
+version come from two people rather than from whatever ids the caller sent. A service, which is
+no person, still names the actor in the body. Regulatory sessions carry a second factor, which
+identity enforces when it issues them. The consequence above about approver ids asserted by the
+caller therefore holds only while an environment runs `header` mode, or `dual` mode without a
+token.

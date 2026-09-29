@@ -8,6 +8,7 @@ from fastapi import APIRouter, FastAPI
 from starlette.types import Lifespan
 
 from domain_kernel.errors import DomainError
+from py_common.auth.fastapi import Authenticator
 from py_common.health import ReadinessCheck, build_health_router
 from py_common.logging import configure_logging
 from py_common.problems import install_problem_handlers
@@ -25,6 +26,7 @@ def create_app(
     readiness_checks: Sequence[tuple[str, ReadinessCheck]] = (),
     lifespan: Lifespan[FastAPI] | None = None,
     problem_status: Mapping[type[DomainError], int] | None = None,
+    authenticator: Authenticator | None = None,
 ) -> FastAPI:
     """Build the service app.
 
@@ -32,6 +34,10 @@ def create_app(
     apply underneath. Every error leaves as ``application/problem+json``. ``tenant_id`` is bound by
     the service's own auth dependency. Telemetry exports to ``CW_OTEL_ENDPOINT`` when it is set
     and is flushed when the app shuts down, after the service's own ``lifespan``.
+
+    ``authenticator`` is how ``py_common.auth.fastapi`` reads callers. By default it follows
+    ``CW_AUTH_MODE`` and the ``CW_AUTH_*`` settings; the identity service passes one that
+    verifies against its own keys in the process.
     """
     settings = settings or Settings(service_name=service_name)
     configure_logging(
@@ -45,6 +51,7 @@ def create_app(
     )
     app.state.settings = settings
     app.state.telemetry = telemetry
+    app.state.authenticator = authenticator or Authenticator.from_settings(settings)
     app.add_middleware(RequestContextMiddleware)
     install_problem_handlers(app, problem_status or {})
     app.include_router(

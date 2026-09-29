@@ -136,6 +136,8 @@ export type paths = {
     /**
      * Spend against one monthly budget, by tenant or by feature
      * @description Tenant budget when a tenant is given (a feature narrows the sum), else the feature budget.
+     *     A signed-in operator reads any tenant's spend by ``tenant_id``; their own tenant is the
+     *     internal one, so it is no default.
      */
     get: operations["usage_v1_llm_gateway_usage_get"];
     put?: never;
@@ -500,7 +502,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Tenant UUID; optional until the identity service issues tokens */
+        /** @description Tenant UUID the call is for, which attributes its cost; empty for regulatory work. A service names a tenant only with the tenant:act scope, and a user's token already names one. */
         "x-tenant-id"?: string | null;
       };
       path?: never;
@@ -523,6 +525,24 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -572,7 +592,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Tenant UUID; optional until the identity service issues tokens */
+        /** @description Tenant UUID the call is for, which attributes its cost; empty for regulatory work. A service names a tenant only with the tenant:act scope, and a user's token already names one. */
         "x-tenant-id"?: string | null;
       };
       path?: never;
@@ -595,6 +615,24 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -658,6 +696,24 @@ export interface operations {
           "application/json": components["schemas"]["ModelRouteOut"][];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
     };
   };
   ping_v1_llm_gateway_ping_get: {
@@ -700,6 +756,24 @@ export interface operations {
           "application/json": components["schemas"]["PromptOut"][];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
     };
   };
   usage_v1_llm_gateway_usage_get: {
@@ -709,11 +783,11 @@ export interface operations {
         feature?: components["schemas"]["Feature"] | null;
         /** @description YYYY-MM in UTC; defaults to the current month */
         month?: string | null;
-        /** @description Defaults to the x-tenant-id header; empty means all */
+        /** @description Defaults to the x-tenant-id header (not to a signed-in user's own tenant); empty means all */
         tenant_id?: string | null;
       };
       header?: {
-        /** @description Tenant UUID; optional until the identity service issues tokens */
+        /** @description Tenant UUID the call is for, which attributes its cost; empty for regulatory work. A service names a tenant only with the tenant:act scope, and a user's token already names one. */
         "x-tenant-id"?: string | null;
       };
       path?: never;
@@ -728,6 +802,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UsageOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
       /** @description Unprocessable Entity */

@@ -289,8 +289,8 @@ def test_the_backfill_embeds_every_document(
         "PipelineSettings",
         lambda service_name: PipelineSettings(_env_file=None, service_name=service_name),
     )
-    monkeypatch.setattr(embed, "HttpRulebook", lambda url, token: rulebook)
-    monkeypatch.setattr(embed, "GatewayEmbedder", lambda url: embedder)
+    monkeypatch.setattr(embed, "HttpRulebook", lambda url, **_: rulebook)
+    monkeypatch.setattr(embed, "GatewayEmbedder", lambda url, **_: embedder)
     assert embed.main(["--limit", "5"]) == 0
     assert capsys.readouterr().out == f"{ScriptedEmbedder.MODEL}: embedded 5, unchanged 0\n"
     assert embed.main(["--model", "voyage/voyage-3.5-lite"]) == 0

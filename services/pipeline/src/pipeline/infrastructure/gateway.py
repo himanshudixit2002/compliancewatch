@@ -1,12 +1,21 @@
 """The llm-gateway as an ``LLMProvider`` and an ``Embedder``: every model call the pipeline
-makes goes through it."""
+makes goes through it.
+
+Once ``CW_SERVICE_CLIENT_SECRET`` is set every call carries the pipeline's own access token
+(``auth``, from ``py_common.auth.service_auth_from``); a gateway in ``token`` mode takes model
+calls only from a service with the llm:call scope, and a named tenant (``x-tenant-id``) also needs
+tenant:act. A token the identity service could not issue is a ``GatewayError``, which the
+activities retry like any other failed call.
+"""
 
 from collections.abc import Mapping, Sequence
+from typing import Any
 
 import httpx2
 
 from domain_kernel.llm import CompletionRequest, CompletionResponse
 from pipeline.domain.embedding import EmbeddingBatch
+from py_common.auth import ServiceTokenUnavailableError
 
 COMPLETIONS_PATH = "/v1/llm-gateway/completions"
 EMBEDDINGS_PATH = "/v1/llm-gateway/embeddings"
@@ -17,18 +26,48 @@ class GatewayError(RuntimeError):
     """The gateway refused or failed the call; the body is the problem detail."""
 
 
+def _post(
+    client: httpx2.Client,
+    path: str,
+    body: Mapping[str, object],
+    *,
+    tenant_id: str | None,
+    auth: httpx2.Auth | None,
+) -> Any:
+    """POST ``body`` and return the JSON of a 200; anything else is a ``GatewayError``."""
+    headers = {"x-tenant-id": tenant_id} if tenant_id else {}
+    try:
+        response = client.post(
+            path,
+            json=dict(body),
+            headers=headers,
+            auth=httpx2.USE_CLIENT_DEFAULT if auth is None else auth,
+        )
+    except ServiceTokenUnavailableError as exc:
+        raise GatewayError(f"no service token for the gateway: {exc}") from exc
+    if response.status_code != 200:
+        raise GatewayError(f"{response.status_code}: {response.text[:500]}")
+    return response.json()
+
+
 class GatewayProvider:
+    """``base_url`` is ``CW_LLM_GATEWAY_URL`` and ``auth`` the service's token auth (None sends no
+    bearer). Pass ``client`` to talk to an in-process app or a mock transport; ``auth`` applies
+    to it too."""
+
     def __init__(
         self,
         base_url: str = "http://localhost:8008",
         *,
         client: httpx2.Client | None = None,
         tenant_id: str | None = None,
+        auth: httpx2.Auth | None = None,
         timeout_seconds: float = 120.0,
     ) -> None:
         self._client = client or httpx2.Client(base_url=base_url, timeout=timeout_seconds)
         self._base_url = "" if client is not None else base_url
         self._tenant_id = tenant_id
+        self._auth = auth
 
     def complete(self, req: CompletionRequest) -> CompletionResponse:
         body: dict[str, object] = {
@@ -44,11 +83,9 @@ class GatewayProvider:
             body["model"] = req.model
         if req.json_schema is not None:
             body["json_schema"] = _plain(req.json_schema)
-        headers = {"x-tenant-id": self._tenant_id} if self._tenant_id else {}
-        response = self._client.post(COMPLETIONS_PATH, json=body, headers=headers)
-        if response.status_code != 200:
-            raise GatewayError(f"{response.status_code}: {response.text[:500]}")
-        data = response.json()
+        data = _post(
+            self._client, COMPLETIONS_PATH, body, tenant_id=self._tenant_id, auth=self._auth
+        )
         return CompletionResponse(
             text=str(data["text"]),
             model=str(data["model_served"]),
@@ -64,7 +101,8 @@ class GatewayProvider:
 
 class GatewayEmbedder:
     """The gateway's embeddings route for the retrieval feature. The answer is read as sent;
-    whether it fits the rulebook (length, count, model) is the embedding stage's check."""
+    whether it fits the rulebook (length, count, model) is the embedding stage's check. ``auth``
+    is the service's token auth, as for ``GatewayProvider``."""
 
     def __init__(
         self,
@@ -72,10 +110,12 @@ class GatewayEmbedder:
         *,
         client: httpx2.Client | None = None,
         tenant_id: str | None = None,
+        auth: httpx2.Auth | None = None,
         timeout_seconds: float = 60.0,
     ) -> None:
         self._client = client or httpx2.Client(base_url=base_url, timeout=timeout_seconds)
         self._tenant_id = tenant_id
+        self._auth = auth
 
     def embed(
         self,
@@ -89,11 +129,9 @@ class GatewayEmbedder:
             body["model"] = model
         if metadata:
             body["metadata"] = dict(metadata)
-        headers = {"x-tenant-id": self._tenant_id} if self._tenant_id else {}
-        response = self._client.post(EMBEDDINGS_PATH, json=body, headers=headers)
-        if response.status_code != 200:
-            raise GatewayError(f"{response.status_code}: {response.text[:500]}")
-        data = response.json()
+        data = _post(
+            self._client, EMBEDDINGS_PATH, body, tenant_id=self._tenant_id, auth=self._auth
+        )
         return EmbeddingBatch(
             model=str(data["model_served"]),
             dims=int(data["dims"]),

@@ -163,6 +163,28 @@ def test_consents_round_trip(client: TestClient) -> None:
     assert other["history"] == []
 
 
+def test_a_consent_changed_on_the_web_settings_pages_keeps_its_source(client: TestClient) -> None:
+    withdrawn = client.post(
+        "/v1/identity/consents",
+        json={
+            "subject": "settings-user",
+            "purpose": "analytics",
+            "granted": False,
+            "source": "web_settings",
+            "evidence": "toggle: Share usage analytics",
+        },
+        headers=TENANT,
+    )
+    assert withdrawn.status_code == 201, withdrawn.text
+    assert withdrawn.json()["source"] == "web_settings"
+    summary = client.get(
+        "/v1/identity/consents", params={"subject": "settings-user"}, headers=TENANT
+    ).json()
+    assert [(state["purpose"], state["source"]) for state in summary["states"]] == [
+        ("analytics", "web_settings")
+    ]
+
+
 def test_billing_with_the_memory_provider(client: TestClient) -> None:
     plans = client.get("/v1/identity/billing/plans").json()
     assert [p["key"] for p in plans] == ["owner_monthly", "ca_seat_monthly"]

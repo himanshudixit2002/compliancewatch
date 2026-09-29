@@ -103,7 +103,7 @@ class ReceiptsDisabledError(DomainError):
     type_slug: ClassVar[str] = "notification-receipts-disabled"
     title: ClassVar[str] = "Notification receipts disabled"
 
-    def __init__(self, setting: str) -> None:
+    def __init__(self, setting: str = "CW_NOTIFICATION_BOT_TOKEN") -> None:
         super().__init__(f"delivery receipts are refused until {setting} is set")
 
 

@@ -1,12 +1,16 @@
 """Request and response bodies of the identity API."""
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from domain_kernel.access import MAX_CLIENT_ID_CHARS, Principal, Role, Scope
 from identity.application.channel_consents import ChannelConsentSummary
 from identity.application.consents import ConsentSummary
+from identity.application.sessions import ServiceSession, Session
+from identity.application.tenancy import CreatedTenant
 from identity.domain.billing import PLANS, Plan, Subscription
 from identity.domain.channel_consent import (
     MESSAGE_ID_MAX_LENGTH,
@@ -14,6 +18,14 @@ from identity.domain.channel_consent import (
     ConsentChannel,
 )
 from identity.domain.consent import ConsentPurpose, ConsentRecord, ConsentSource, ConsentState
+from identity.domain.tenancy import (
+    MAX_NAME_CHARS,
+    Tenant,
+    TenantKind,
+    TenantStatus,
+    User,
+    UserStatus,
+)
 
 E164_PATTERN = r"^\+?[1-9][0-9]{7,14}$"
 """A phone number in E.164 form, the plus optional: the pattern of notification's schema."""
@@ -30,7 +42,10 @@ class ConsentIn(Strict):
     source: ConsentSource
     notice_version: str = Field(default="", max_length=40, description="Required when granting")
     evidence: str = Field(default="", max_length=2000)
-    recorded_by: UUID | None = None
+    recorded_by: UUID | None = Field(
+        default=None,
+        description="Who recorded it; ignored when an access token names the caller",
+    )
 
 
 class ConsentOut(BaseModel):
@@ -198,3 +213,223 @@ class WebhookOut(BaseModel):
     kind: str
     provider_subscription_id: str
     status: str | None
+
+
+# ---------------------------------------------------------------- sign-in and tokens
+
+PROVIDER_TOKEN_MAX_CHARS = 8192
+CLIENT_ID_PATTERN = r"^[a-z0-9][a-z0-9._-]*$"
+EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+
+class SessionIn(Strict):
+    provider_token: str = Field(
+        min_length=1,
+        max_length=PROVIDER_TOKEN_MAX_CHARS,
+        description="The identity provider's token for the person who signed in",
+    )
+
+
+class SessionOut(BaseModel):
+    access_token: str = Field(description="An ES256 access token; send it as a bearer token")
+    token_type: Literal["Bearer"] = "Bearer"
+    expires_in: int = Field(description="Seconds until the token expires")
+    tenant_id: UUID
+    user_id: UUID
+    roles: list[Role]
+    mfa: bool = Field(description="Whether the person signed in with a second factor")
+
+    @classmethod
+    def from_session(cls, session: Session) -> "SessionOut":
+        principal = session.principal
+        return cls(
+            access_token=session.token.token,
+            expires_in=session.token.expires_in,
+            tenant_id=session.tenant.id.value,
+            user_id=session.user.id.value,
+            roles=sorted(principal.roles),
+            mfa=principal.mfa,
+        )
+
+
+class ServiceTokenIn(Strict):
+    client_id: str = Field(min_length=1, max_length=MAX_CLIENT_ID_CHARS, pattern=CLIENT_ID_PATTERN)
+    client_secret: str = Field(min_length=1, max_length=256)
+
+
+class ServiceTokenOut(BaseModel):
+    access_token: str = Field(description="An ES256 access token; send it as a bearer token")
+    token_type: Literal["Bearer"] = "Bearer"
+    expires_in: int = Field(description="Seconds until the token expires")
+    scopes: list[Scope]
+
+    @classmethod
+    def from_session(cls, session: ServiceSession) -> "ServiceTokenOut":
+        return cls(
+            access_token=session.token.token,
+            expires_in=session.token.expires_in,
+            scopes=sorted(session.principal.scopes),
+        )
+
+
+class JwkOut(BaseModel):
+    """One public signing key (RFC 7517): an EC key on the P-256 curve."""
+
+    kty: str
+    crv: str
+    x: str
+    y: str
+    kid: str
+    use: str
+    alg: str
+
+
+class JwksOut(BaseModel):
+    keys: list[JwkOut]
+
+
+class TenantOut(BaseModel):
+    id: UUID
+    kind: TenantKind
+    name: str
+    region: str
+    status: TenantStatus
+    created_at: datetime
+
+    @classmethod
+    def from_tenant(cls, tenant: Tenant) -> "TenantOut":
+        return cls(
+            id=tenant.id.value,
+            kind=tenant.kind,
+            name=tenant.name,
+            region=tenant.region,
+            status=tenant.status,
+            created_at=tenant.created_at,
+        )
+
+
+class UserOut(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    email: str
+    phone: str
+    display_name: str
+    roles: list[Role]
+    status: UserStatus
+    session_version: int
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_user(cls, user: User) -> "UserOut":
+        return cls(
+            id=user.id.value,
+            tenant_id=user.tenant_id.value,
+            email=user.contact.email,
+            phone=user.contact.phone,
+            display_name=user.display_name,
+            roles=sorted(user.roles),
+            status=user.status,
+            session_version=user.session_version,
+            created_at=user.created_at,
+            updated_at=user.updated_at,
+        )
+
+
+class MeOut(BaseModel):
+    """The signed-in user as the access token names them, checked against the store."""
+
+    kind: Literal["user"] = "user"
+    user_id: UUID
+    tenant: TenantOut
+    roles: list[Role]
+    session_version: int
+    mfa: bool = Field(description="Whether the person signed in with a second factor")
+    email: str
+    phone: str
+    display_name: str
+
+    @classmethod
+    def from_session(cls, principal: Principal, tenant: Tenant, user: User) -> "MeOut":
+        return cls(
+            user_id=user.id.value,
+            tenant=TenantOut.from_tenant(tenant),
+            roles=sorted(principal.roles),
+            session_version=principal.session_version,
+            mfa=principal.mfa,
+            email=user.contact.email,
+            phone=user.contact.phone,
+            display_name=user.display_name,
+        )
+
+
+class DevProviderTokenIn(Strict):
+    email: str | None = Field(default=None, max_length=254, pattern=EMAIL_PATTERN)
+    phone: str | None = Field(default=None, pattern=E164_PATTERN, description="E.164 number")
+    aal: Literal["aal1", "aal2"] = Field(
+        default="aal1", description="aal2 stands for a sign-in with a second factor"
+    )
+
+    @model_validator(mode="after")
+    def _one_contact(self) -> "DevProviderTokenIn":
+        if not self.email and not self.phone:
+            raise ValueError("give the email address or the phone number to sign in with")
+        return self
+
+
+class DevProviderTokenOut(BaseModel):
+    provider_token: str = Field(description="A fake provider token for POST /v1/identity/sessions")
+    subject: str
+
+
+class TenantIn(Strict):
+    kind: Literal["business", "ca_firm"]
+    name: str = Field(min_length=1, max_length=MAX_NAME_CHARS)
+    provider_token: str = Field(
+        min_length=1,
+        max_length=PROVIDER_TOKEN_MAX_CHARS,
+        description="The identity provider's token of the person signing up",
+    )
+    display_name: str = Field(default="", max_length=MAX_NAME_CHARS)
+
+
+class CreatedTenantOut(BaseModel):
+    tenant: TenantOut
+    user: UserOut
+    session: SessionOut
+
+    @classmethod
+    def from_created(cls, created: CreatedTenant) -> "CreatedTenantOut":
+        return cls(
+            tenant=TenantOut.from_tenant(created.tenant),
+            user=UserOut.from_user(created.user),
+            session=SessionOut.from_session(created.session),
+        )
+
+
+# ---------------------------------------------------------------- tenant admin
+
+
+class InviteIn(Strict):
+    email: str | None = Field(default=None, max_length=254, pattern=EMAIL_PATTERN)
+    phone: str | None = Field(default=None, pattern=E164_PATTERN, description="E.164 number")
+    display_name: str = Field(default="", max_length=MAX_NAME_CHARS)
+    roles: list[Role] = Field(
+        min_length=1, description="Roles the tenant's kind allows; at least one"
+    )
+
+    @model_validator(mode="after")
+    def _one_contact(self) -> "InviteIn":
+        if not self.email and not self.phone:
+            raise ValueError("give the email address or the phone number to invite")
+        return self
+
+
+class RolesIn(Strict):
+    roles: list[Role] = Field(
+        min_length=1, description="The roles the user holds instead; the tenant's kind allows them"
+    )
+
+
+class UsersOut(BaseModel):
+    items: list[UserOut] = Field(description="The tenant's users, oldest first")

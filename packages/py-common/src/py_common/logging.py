@@ -2,8 +2,10 @@
 
 One structlog ``ProcessorFormatter`` renders both structlog events and stdlib records (uvicorn,
 sqlalchemy, alembic), so every line carries ``timestamp``, ``level``, ``logger``, ``event``,
-``service``, ``correlation_id`` and ``tenant_id``, plus ``trace_id`` and ``span_id`` inside a
-recording OpenTelemetry span. Request-scoped fields are bound via contextvars.
+``service``, ``correlation_id``, ``tenant_id`` and ``actor``, plus ``trace_id`` and ``span_id``
+inside a recording OpenTelemetry span. Request-scoped fields are bound via contextvars; ``actor``
+names who acted (``user:<uuid>``, ``service:<client>`` or ``anonymous``) and is bound by
+``py_common.auth.context``, and a field nothing bound is null.
 """
 
 import logging
@@ -15,7 +17,7 @@ from opentelemetry import trace
 from opentelemetry.trace import format_span_id, format_trace_id
 from structlog.typing import EventDict, Processor, WrappedLogger
 
-_CONTEXT_FIELDS = ("correlation_id", "tenant_id")
+_CONTEXT_FIELDS = ("correlation_id", "tenant_id", "actor")
 
 
 def _add_service(service_name: str) -> Processor:

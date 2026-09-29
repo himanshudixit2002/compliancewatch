@@ -5,6 +5,10 @@ Schemathesis generates valid and invalid requests from the served schema, which
 Each response must not be a server error, and its status code, content type and body must be
 the ones the spec documents.
 
+That app runs in header mode. The tenant's routes run again in token mode, with an owner's access
+token from a ``TestIssuer`` and no tenant header, so a generated ``x-tenant-id`` meets the tenant
+check.
+
 Only the operations in ``OPERATIONS`` run: those served when these tests arrived. A change that
 adds an operation opts it in here. An operation that cannot pass yet, for a defect or because it
 needs a redesign, goes in ``EXCLUDED`` with the reason.
@@ -22,8 +26,11 @@ from schemathesis.specs.openapi.checks import (
     status_code_conformance,
 )
 
+from domain_kernel.access import Role
+from domain_kernel.ids import TenantId
 from profile_service.main import build_app
 from profile_service.settings import ProfileSettings
+from py_common.auth.testing import TestIssuer, bearer
 
 TENANT_ID = "7d0f4d56-2a8e-4c1b-9f3e-5b6a1c2d3e4f"
 OPERATIONS = frozenset(
@@ -50,6 +57,7 @@ OPERATIONS = frozenset(
         "POST /v1/profile/registrations/{node_id}/prefill",
     }
 )
+TOKEN_OPERATIONS = OPERATIONS - {"GET /health", "GET /ready", "GET /v1/profile/ping"}
 EXCLUDED: dict[str, str] = {}
 CHECKS = cast(
     list[CheckFunction],
@@ -67,11 +75,25 @@ schema = schemathesis.openapi.from_asgi("/openapi.json", app).include(
     func=lambda ctx: ctx.operation.label in OPERATIONS and ctx.operation.label not in EXCLUDED
 )
 
+ISSUER = TestIssuer()
+OWNER_TOKEN = ISSUER.user(TenantId.new(), [Role.OWNER])
+token_app = build_app(
+    ProfileSettings(
+        _env_file=None,
+        service_name="profile",
+        profile_store="memory",
+        **ISSUER.settings_overrides("token"),
+    )
+)
+token_schema = schemathesis.openapi.from_asgi("/openapi.json", token_app).include(
+    func=lambda ctx: ctx.operation.label in TOKEN_OPERATIONS
+)
+
 
 def test_every_listed_operation_is_served() -> None:
     paths = app.openapi()["paths"]
     labels = {f"{method.upper()} {path}" for path, item in paths.items() for method in item}
-    assert labels >= OPERATIONS | EXCLUDED.keys()
+    assert labels >= OPERATIONS | EXCLUDED.keys() | TOKEN_OPERATIONS
 
 
 @schema.parametrize()
@@ -83,3 +105,12 @@ def test_every_listed_operation_is_served() -> None:
 )
 def test_responses_conform_to_the_spec(case: schemathesis.Case[Any]) -> None:
     case.call_and_validate(headers={"x-tenant-id": TENANT_ID}, checks=CHECKS)
+
+
+@token_schema.parametrize()
+@settings(
+    max_examples=EXAMPLES,
+    suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow],
+)
+def test_signed_in_responses_conform_to_the_spec(case: schemathesis.Case[Any]) -> None:
+    case.call_and_validate(headers=bearer(OWNER_TOKEN), checks=CHECKS)

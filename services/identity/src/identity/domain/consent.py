@@ -5,7 +5,6 @@ and purpose is the current state. A grant carries the ``notice_version`` the per
 a changed notice is a new consent, never a silent edit (docs/legal/consent-record.md).
 """
 
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -29,6 +28,8 @@ class ConsentSource(StrEnum):
     WHATSAPP_KEYWORD = "whatsapp_keyword"
     API = "api"
     SUPPORT = "support"
+    WEB_SETTINGS = "web_settings"
+    """Changed later on the web settings pages, not at onboarding."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,12 +77,3 @@ class ConsentRepository(Protocol):
     def history(self, subject: str, purpose: ConsentPurpose | None = None) -> list[ConsentRecord]:
         """Oldest first."""
         ...
-
-
-class UnitOfWork(Protocol):
-    @property
-    def consents(self) -> ConsentRepository: ...
-
-
-class UnitOfWorkFactory(Protocol):
-    def __call__(self, tenant_id: TenantId) -> AbstractContextManager[UnitOfWork]: ...

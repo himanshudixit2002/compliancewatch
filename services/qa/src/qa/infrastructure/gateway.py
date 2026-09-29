@@ -8,6 +8,12 @@ embedding that fails, or that does not have the rulebook's ``EMBEDDING_DIMS`` co
 ``DependencyUnavailableError``, and hybrid search then runs on full text alone. A call the
 gateway refuses because a budget is used up (429) is ``ModelBudgetExceededError``: a completion
 refused so ends the question, an embedding refused so leaves search to full text.
+
+Once ``CW_SERVICE_CLIENT_SECRET`` is set every call carries the qa service's own access token
+(``auth``); a gateway in ``token`` mode takes model calls only from a service with llm:call, and
+the tenant header also needs tenant:act. A token the identity service could not issue fails the
+call the same way: ``GatewayError`` for a completion, ``DependencyUnavailableError`` for an
+embedding.
 """
 
 from collections.abc import Mapping
@@ -18,6 +24,7 @@ import httpx2
 from domain_kernel.ids import TenantId
 from domain_kernel.llm import CompletionRequest, CompletionResponse
 from domain_kernel.vectors import EMBEDDING_DIMS
+from py_common.auth import ServiceTokenUnavailableError
 from qa.domain.errors import DependencyUnavailableError, GatewayError
 from qa.domain.records import QueryEmbedding
 from qa.infrastructure.http import JsonHttp, budget_exceeded, http_client, reading
@@ -29,14 +36,19 @@ SERVICE: Final = "llm-gateway"
 
 
 class GatewayProvider:
+    """``base_url`` is ``CW_LLM_GATEWAY_URL`` and ``auth`` the service's token auth (None sends
+    no token)."""
+
     def __init__(
         self,
         base_url: str = "http://localhost:8008",
         *,
         client: httpx2.Client | None = None,
+        auth: httpx2.Auth | None = None,
         timeout_seconds: float = 20.0,
     ) -> None:
         self._client = http_client(base_url, timeout_seconds, client)
+        self._auth = auth
 
     def complete(self, req: CompletionRequest) -> CompletionResponse:
         body: dict[str, object] = {
@@ -53,10 +65,13 @@ class GatewayProvider:
         if req.json_schema is not None:
             body["json_schema"] = _plain(req.json_schema)
         headers = _tenant(req.tenant_id)
+        auth = httpx2.USE_CLIENT_DEFAULT if self._auth is None else self._auth
         try:
-            response = self._client.post(COMPLETIONS_PATH, json=body, headers=headers)
+            response = self._client.post(COMPLETIONS_PATH, json=body, headers=headers, auth=auth)
         except httpx2.TransportError as exc:
             raise GatewayError(f"unreachable: {exc}") from exc
+        except ServiceTokenUnavailableError as exc:
+            raise GatewayError(f"no service token: {exc}") from exc
         if response.status_code == 429:
             raise budget_exceeded(SERVICE, response)
         if response.status_code != 200:
@@ -79,16 +94,18 @@ class GatewayProvider:
 
 
 class HttpEmbedder:
-    """The question's vector from the retrieval feature; the route picks the model."""
+    """The question's vector from the retrieval feature; the route picks the model. ``auth`` is
+    the service's token auth (None sends no token)."""
 
     def __init__(
         self,
         base_url: str = "http://localhost:8008",
         *,
         client: httpx2.Client | None = None,
+        auth: httpx2.Auth | None = None,
         timeout_seconds: float = 20.0,
     ) -> None:
-        self._http = JsonHttp(http_client(base_url, timeout_seconds, client), SERVICE)
+        self._http = JsonHttp(http_client(base_url, timeout_seconds, client), SERVICE, auth=auth)
 
     def embed(
         self, text: str, *, tenant: TenantId | None, metadata: Mapping[str, str]

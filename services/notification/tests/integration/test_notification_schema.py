@@ -1,7 +1,8 @@
 """Migration 0001 on Postgres: the tables, row-level security by tenant on the tenant tables, the
 store's repositories, recipients with their address directory, one row per dedupe key under
 concurrent writes, the work index under two dispatchers, the consumer's transaction, queueing and
-dispatching a batch and a digest, the retention sweep, and the outbox. Needs Docker.
+dispatching a batch and a digest, the retention sweep, and the outbox; and migration 0002, which
+adds the web_settings source. Needs Docker.
 
 The store runs as a plain database role, not the container's superuser: a superuser bypasses
 row-level security whatever the table says, so the service's runtime role must never be one.
@@ -21,7 +22,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import Connection, Engine, create_engine, inspect, select, text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from testcontainers.community.postgres import PostgresContainer
 
 from domain_kernel.channels import Channel
@@ -1263,6 +1264,41 @@ async def test_the_worker_queues_an_obligation_event_in_its_inbox_transaction(
     )
     assert outbox_topics(engine, tenant) == ["notification.sent"]
     purge(factory, tenant)
+
+
+def _source_check(engine: Engine) -> str:
+    with engine.connect() as connection:
+        return str(
+            connection.execute(
+                text(
+                    "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                    "WHERE conname = 'ck_channel_preference_source'"
+                )
+            ).scalar_one()
+        )
+
+
+def test_web_settings_is_a_source_and_the_downgrade_keeps_the_preference(
+    migrated: Config, engine: Engine, factory: PostgresUnitOfWorkFactory
+) -> None:
+    address = "settings@example.com"
+    preference = ChannelPreference(
+        Channel.EMAIL, address, False, ConsentSource.WEB_SETTINGS, NOON_IST
+    )
+    with factory.shared() as unit:
+        unit.preferences.save(preference)
+    with factory(TenantId.new()) as unit:
+        assert unit.preferences.get(Channel.EMAIL, address) == preference
+
+    with pytest.raises(IntegrityError, match="ck_channel_preference_source"):
+        command.downgrade(migrated, "0001")
+    assert "web_settings" in _source_check(engine), "the failed downgrade changed nothing"
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM channel_preference WHERE source = 'web_settings'"))
+    command.downgrade(migrated, "0001")
+    assert "web_settings" not in _source_check(engine)
+    command.upgrade(migrated, "head")
+    assert "web_settings" in _source_check(engine)
 
 
 def test_downgrade_and_upgrade(migrated: Config, engine: Engine) -> None:

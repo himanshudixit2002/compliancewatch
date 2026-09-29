@@ -28,7 +28,7 @@ def test_every_exported_name_resolves_once() -> None:
 
 def test_every_public_module_is_exported() -> None:
     modules = _public_modules()
-    assert len(modules) == 24
+    assert len(modules) == 25
     exported = set(domain_kernel.__all__)
     for module_name in modules:
         module = importlib.import_module(module_name)

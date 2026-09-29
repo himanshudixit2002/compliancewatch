@@ -1,32 +1,41 @@
-"""Request-scoped dependencies: the tenant from the header (required here) and the wiring."""
+"""Request-scoped dependencies: the caller and its tenant, and the wiring.
 
-from collections.abc import AsyncIterator
+The caller comes from ``py_common.auth.fastapi`` by ``CW_AUTH_MODE``. ``Tenant`` is the tenant a
+member of it reads obligations for:
+
+- a user's access token names the tenant, and an ``x-tenant-id`` header naming another is a 403
+  ``auth-tenant-mismatch``; the user needs one of the tenant member roles;
+- a service (the qa service, reading the obligations a question is about) names the tenant in
+  ``x-tenant-id`` and needs the tenant:act scope;
+- without a token (``header`` mode, or ``dual`` mode without one) the header names the tenant, as
+  before tokens existed.
+
+Obligations are tenant data, so no tenant at all is this service's own 401
+``obligation-tenant-required``.
+"""
+
 from typing import Annotated
-from uuid import UUID
 
-import structlog
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Request
 
+from domain_kernel.access import TENANT_MEMBER_ROLES, Principal, Scope
 from domain_kernel.ids import TenantId
 from obligation.domain.errors import ObligationTenantRequiredError
 from obligation.wiring import Wiring
+from py_common.auth.fastapi import require_roles, tenant_scope
+
+member = require_roles(TENANT_MEMBER_ROLES, scopes={Scope.TENANT_ACT})
+"""A user with a tenant member role or a service with tenant:act; the anonymous principal of
+``header`` mode passes."""
+tenant_of_request = tenant_scope(True, ObligationTenantRequiredError)
 
 
-async def tenant_id_from_header(
-    x_tenant_id: Annotated[
-        UUID | None,
-        Header(description="Tenant UUID; required until the identity service issues tokens"),
-    ] = None,
-) -> AsyncIterator[TenantId]:
-    """Obligations are tenant data, so the header is required: a missing one is a 401 problem."""
-    if x_tenant_id is None:
-        raise ObligationTenantRequiredError()
-    tenant_id = TenantId(x_tenant_id)
-    structlog.contextvars.bind_contextvars(tenant_id=str(tenant_id))
-    try:
-        yield tenant_id
-    finally:
-        structlog.contextvars.unbind_contextvars("tenant_id")
+async def member_tenant(
+    principal: Annotated[Principal, Depends(member)],
+    tenant: Annotated[TenantId, Depends(tenant_of_request)],
+) -> TenantId:
+    """The request's tenant, once the caller is known to be one of its members."""
+    return tenant
 
 
 def wiring(request: Request) -> Wiring:
@@ -34,5 +43,5 @@ def wiring(request: Request) -> Wiring:
     return wired
 
 
-Tenant = Annotated[TenantId, Depends(tenant_id_from_header)]
+Tenant = Annotated[TenantId, Depends(member_tenant)]
 Wired = Annotated[Wiring, Depends(wiring)]
