@@ -30,6 +30,9 @@ src/app/globals.css Tailwind v4 plus the UI kit's token file (@compliancewatch/u
 src/instrumentation.ts  onRequestError writes one JSON line (digest, route, x-request-id) to stderr
 next.config.ts      typed routes, security headers; eslint.config.mjs: Next flat config plus repo rules
 vitest.config.mts   jsdom, Testing Library, 80% coverage floor (route files are covered by e2e)
+playwright.config.ts  Playwright against `next start` on PORT with CW_WEB_ENV=test; chromium only
+e2e/                fixtures.ts (the axe check failing on serious or critical) and one spec per live page,
+                    plus a11y.spec.ts over every registered page; tsconfig.scripts.json type-checks them
 ```
 
 Import rules (checked by `src/test/architecture.test.ts` over the real tree): `app` imports
@@ -66,6 +69,18 @@ no `loading.tsx` above the catch-alls on purpose: a loading boundary above `notF
 the page with status 200, so a later package adds `loading.tsx` beside each page that fetches.
 `CW_WEB_ENV` is read directly by `server/runtime.ts` (unset means local; an unknown value is
 treated as prod) until the validated environment module lands.
+
+## End-to-end tests
+
+The Playwright suite visits the built app without any service: the public pages, the admin
+home, the design catalogue (group by group) and every waiting or planned page through the
+catch-alls, with `AxeBuilder` failing a page on any serious or critical finding. Once per
+machine: `pnpm --filter web e2e:install` (downloads Chromium; the package has no install script).
+Then `pnpm --filter web build && PORT=3200 pnpm --filter web e2e` (any free port; the config
+starts `next start` there with `CW_WEB_ENV=test`, or reuses a server already on it outside CI).
+Every live page entry in the registry names its spec files under `e2e`, and the registry test
+checks they exist. Playwright reports land in `playwright-report/` and `test-results/`, both
+git-ignored.
 
 ## How to run
 

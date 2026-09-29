@@ -29,11 +29,11 @@ describe("homeSectionsFor", () => {
     });
     const business = sections.find((section) => section.key === "business");
     expect(business?.label).toBe("Your business");
-    const obligations = business?.items.find((item) => item.id === "owner.obligations");
-    expect(obligations).toEqual({
-      id: "owner.obligations",
-      title: "Obligations",
-      href: "/b/b1/obligations",
+    const changes = business?.items.find((item) => item.id === "owner.changes");
+    expect(changes).toEqual({
+      id: "owner.changes",
+      title: "Changes",
+      href: "/b/b1/changes",
       status: "waiting",
     });
   });

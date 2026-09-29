@@ -95,18 +95,23 @@ export function publicNav(currentPath?: string): NavLink[] {
   return PUBLIC_NAV_IDS.map((id) => toLink(screenById(id), ctx));
 }
 
-function sectionsFor(groups: readonly NavGroupKey[], ctx: NavContext): NavSection[] {
+function sectionsFor(
+  groups: readonly NavGroupKey[],
+  ctx: NavContext,
+  screens: readonly Screen[],
+): NavSection[] {
   const params = ctx.params ?? {};
   return groups
     .map((key) => {
-      const items = SCREENS.filter(
-        (screen) =>
-          screen.nav?.group === key &&
-          screen.kind === "page" &&
-          isVisibleTo(screen, ctx.roles, ctx.tenantKind) &&
-          flagAllows(screen, ctx) &&
-          hasParams(screen, params),
-      )
+      const items = screens
+        .filter(
+          (screen) =>
+            screen.nav?.group === key &&
+            screen.kind === "page" &&
+            isVisibleTo(screen, ctx.roles, ctx.tenantKind) &&
+            flagAllows(screen, ctx) &&
+            hasParams(screen, params),
+        )
         .sort((a, b) => (a.nav?.order ?? 0) - (b.nav?.order ?? 0))
         .map((screen) => toLink(screen, ctx));
       return { key, label: NAV_GROUPS[key], items };
@@ -115,13 +120,13 @@ function sectionsFor(groups: readonly NavGroupKey[], ctx: NavContext): NavSectio
 }
 
 /** The tenant shell's navigation: business, clients, settings and account groups. */
-export function navFor(ctx: NavContext): NavSection[] {
-  return sectionsFor(APP_GROUPS, ctx);
+export function navFor(ctx: NavContext, screens: readonly Screen[] = SCREENS): NavSection[] {
+  return sectionsFor(APP_GROUPS, ctx, screens);
 }
 
 /** The admin shell's grouped tools; empty for a non-regulatory session. */
-export function adminNavFor(ctx: NavContext): NavSection[] {
-  return sectionsFor(ADMIN_GROUPS, ctx);
+export function adminNavFor(ctx: NavContext, screens: readonly Screen[] = SCREENS): NavSection[] {
+  return sectionsFor(ADMIN_GROUPS, ctx, screens);
 }
 
 export interface Crumb {

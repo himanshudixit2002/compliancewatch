@@ -8,7 +8,8 @@ import {
   navFor,
   publicNav,
 } from "./nav.ts";
-import { SCREENS } from "./screens.ts";
+import { SCREENS, screenById } from "./screens.ts";
+import type { Screen } from "./screens.ts";
 
 describe("publicNav", () => {
   it("links the home page and the sitemap for every visitor and marks the current one", () => {
@@ -29,27 +30,30 @@ describe("navFor", () => {
       roles: ["owner"],
       tenantKind: "business",
       params: { businessId: "b1" },
-      currentPath: "/b/b1/calendar",
+      currentPath: "/b/b1/changes",
     });
     const business = withBusiness.find((section) => section.key === "business");
     expect(business?.label).toBe(NAV_GROUPS.business);
-    expect(business?.items.map((item) => item.href)).toEqual([
-      "/b/b1/obligations",
-      "/b/b1/calendar",
-      "/b/b1/changes",
-      "/b/b1/reminders",
-    ]);
-    expect(business?.items.find((item) => item.active)?.id).toBe("owner.calendar");
+    expect(business?.items.map((item) => item.href)).toEqual(["/b/b1/changes", "/b/b1/reminders"]);
+    expect(business?.items.find((item) => item.active)?.id).toBe("owner.changes");
   });
 
   it("shows a flagged screen only when its flag reads on", () => {
+    const flagged: Screen = {
+      ...screenById("owner.changes"),
+      id: "owner.flagged",
+      route: "/b/[businessId]/flagged",
+      flag: "web.qa_enabled",
+    };
+    const screens = [...SCREENS, flagged];
     const ctx = { roles: ["owner"] as const, params: { businessId: "b1" } };
-    const off = navFor(ctx).flatMap((section) => section.items.map((item) => item.id));
-    expect(off).not.toContain("owner.ask");
-    const on = navFor({ ...ctx, isFlagEnabled: (flag) => flag === "web.qa_enabled" }).flatMap(
-      (section) => section.items.map((item) => item.id),
-    );
-    expect(on).toContain("owner.ask");
+    const off = navFor(ctx, screens).flatMap((section) => section.items.map((item) => item.id));
+    expect(off).not.toContain("owner.flagged");
+    const on = navFor(
+      { ...ctx, isFlagEnabled: (flag) => flag === "web.qa_enabled" },
+      screens,
+    ).flatMap((section) => section.items.map((item) => item.id));
+    expect(on).toContain("owner.flagged");
   });
 
   it("filters by role and tenant kind", () => {

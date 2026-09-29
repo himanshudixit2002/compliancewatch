@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    // Playwright specs and the plain-Node generators import shared/config through its explicit
+    // ".ts" relative imports; nothing here is emitted.
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "noEmit": true,
+    "jsx": "preserve"
+  },
+  "include": ["playwright.config.ts", "e2e/**/*.ts", "scripts/**/*.ts"]
+}

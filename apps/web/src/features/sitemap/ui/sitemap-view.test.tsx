@@ -17,10 +17,12 @@ describe("SitemapView", () => {
     expect(screen.getByRole("link", { name: "Terms of service" }).getAttribute("href")).toBe(
       "/legal/terms-of-service",
     );
-    const ask = container.querySelector("[data-screen='owner.ask']");
-    expect(ask?.textContent).toContain("POST /v1/qa/ask");
-    expect(ask?.textContent).toContain("KAG track");
-    expect(ask?.querySelector("a")).toBeNull();
+    const stats = container.querySelector("[data-screen='admin.review.stats']");
+    expect(stats?.textContent).toContain("GET /v1/rulebook/review/stats");
+    expect(stats?.textContent).toContain("KAG track");
+    expect(stats?.querySelector("a")?.getAttribute("href")).toBe("/admin/review/stats");
+    const obligation = container.querySelector("[data-screen='owner.obligation']");
+    expect(obligation?.querySelector("a")).toBeNull();
     expect(container.querySelector("[data-screen='system.health']")?.textContent).toContain(
       "route handler",
     );

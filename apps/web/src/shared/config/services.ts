@@ -33,6 +33,9 @@ export const SERVICES_WITH_SPECS: readonly ServiceName[] = [
   "identity",
   "profile",
   "rulebook",
+  "obligation",
+  "notification",
+  "qa",
   "llm-gateway",
 ];
 

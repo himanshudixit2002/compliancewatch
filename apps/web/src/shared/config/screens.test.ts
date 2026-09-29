@@ -2,7 +2,6 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, posix, relative, resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FLAG_NAMES } from "./flags.ts";
-import { NOTIFICATION_ROUTES } from "./notification-routes.ts";
 import { ROLES, TENANT_KINDS, isRole } from "./roles.ts";
 import {
   SCREENS,
@@ -29,7 +28,7 @@ interface OpenApiDocument {
   paths: Record<string, Record<string, unknown>>;
 }
 
-/** Every "service METHOD path" the committed specs (and the hand-kept notification list) offer. */
+/** Every "service METHOD path" the committed specs offer. */
 function committedRoutes(): Set<string> {
   const keys = new Set<string>();
   for (const service of SERVICES_WITH_SPECS) {
@@ -44,7 +43,6 @@ function committedRoutes(): Set<string> {
       }
     }
   }
-  for (const route of NOTIFICATION_ROUTES) keys.add(routeKey(route));
   return keys;
 }
 
@@ -232,7 +230,7 @@ describe("routes", () => {
     expect(matchScreen("/admin/review/task-9")?.screen.id).toBe("admin.review.task");
     expect(matchScreen("/settings/team/")?.screen.id).toBe("owner.settings.team");
     expect(matchScreen("/nowhere")).toBeNull();
-    expect(matchScreen("/b/x/ask")?.screen.kind).toBe("page");
+    expect(matchScreen("/b/x/changes")?.screen.kind).toBe("page");
   });
 
   it("fills route parameters in hrefFor and refuses a missing one", () => {
@@ -247,7 +245,7 @@ describe("routes", () => {
   it("filters screens by roles and tenant kind", () => {
     expect(screensFor(null).every((screen) => screen.roles === "public")).toBe(true);
     const owner = screensFor(["owner"], "business").map((screen) => screen.id);
-    expect(owner).toContain("owner.obligations");
+    expect(owner).toContain("owner.changes");
     expect(owner).toContain("system.home");
     expect(owner).not.toContain("admin.home");
     expect(owner).not.toContain("ca.clients");

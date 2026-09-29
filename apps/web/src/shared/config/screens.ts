@@ -15,6 +15,10 @@ import type { HttpMethod, RouteRef, ServiceName } from "./services.ts";
  *   waiting  at least one awaited route or file is absent; no page.tsx (the catch-all serves it)
  *   planned  every awaited route is unscheduled ("unplanned"); no page.tsx
  * A waiting entry whose awaits have all landed fails the test with "backend merged".
+ * A screen whose every route already exists is added together with its page: the registry has
+ * no status for a built backend without a page, so such a screen is absent until its package
+ * builds it (the obligation list and calendar, ask, and the rule version, canonical entity,
+ * relations graph and clause search tools are in that state today).
  *
  * Files in this directory use explicit ".ts" relative imports and no "@/" alias so the docs
  * generator can load them under plain Node.
@@ -111,10 +115,9 @@ const unscheduled = (
   ref = "indicative path; no design exists",
 ): AwaitedRoute => ({ service, method, path, owner: "unplanned", ref });
 
-const OBLIGATIONS_LIST = kagTrack("obligation", "GET", "/v1/obligation/obligations");
-const RULE_VERSIONS = kagTrack("rulebook", "GET", "/v1/rulebook/rule-versions");
-const RULE_VERSION = kagTrack("rulebook", "GET", "/v1/rulebook/rule-versions/{rule_version_id}");
-const RELATIONS = kagTrack("rulebook", "GET", "/v1/rulebook/relations");
+const RULE_VERSIONS = uses("rulebook", "GET", "/v1/rulebook/rule-versions");
+const RULE_VERSION = uses("rulebook", "GET", "/v1/rulebook/rule-versions/{rule_version_id}");
+const RELATIONS = uses("rulebook", "GET", "/v1/rulebook/relations");
 const ONTOLOGY = servicesTrack("WP12", "profile", "GET", "/v1/ontology");
 const RAW_DOCUMENT = servicesTrack(
   "WP18",
@@ -164,7 +167,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [],
     status: "live",
-    e2e: [],
+    e2e: ["home.spec.ts", "a11y.spec.ts"],
     guideRef: "10, 15",
   },
   {
@@ -191,7 +194,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [],
     status: "live",
-    e2e: [],
+    e2e: ["sitemap.spec.ts", "a11y.spec.ts"],
     guideRef: "14, 15",
   },
   {
@@ -204,7 +207,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [],
     status: "live",
-    e2e: [],
+    e2e: ["design.spec.ts", "a11y.spec.ts"],
     guideRef: "12",
     notes: "Every UI kit component with example data; a 404 unless CW_WEB_ENV is local or test.",
   },
@@ -218,7 +221,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [],
     status: "live",
-    e2e: [],
+    e2e: ["legal.spec.ts"],
     guideRef: "16",
     notes: "Rendered from docs/legal under the draft banner; an unknown name is a 404.",
   },
@@ -232,7 +235,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [],
     status: "live",
-    e2e: [],
+    e2e: ["forbidden.spec.ts", "a11y.spec.ts"],
     guideRef: "15, 16",
     notes:
       "The redirect target of a failed role gate; public so an ended session can still read it.",
@@ -247,7 +250,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [],
     status: "live",
-    e2e: [],
+    e2e: ["not-available.spec.ts", "a11y.spec.ts"],
     guideRef: "15",
     notes: "Catch-all serving every waiting or planned tenant screen from its registry entry.",
   },
@@ -261,7 +264,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [],
     status: "live",
-    e2e: [],
+    e2e: ["health.spec.ts"],
     guideRef: "17",
   },
   {
@@ -404,21 +407,6 @@ const SCREEN_LIST = [
   },
   // ---- owner ------------------------------------------------------------------------------
   {
-    id: "owner.obligations",
-    kind: "page",
-    route: "/b/[businessId]/obligations",
-    title: "Obligations",
-    section: "owner",
-    roles: MEMBERS,
-    tenantKinds: BUSINESS_TENANTS,
-    uses: [],
-    awaits: [OBLIGATIONS_LIST],
-    status: "waiting",
-    e2e: [],
-    guideRef: "F8",
-    nav: { group: "business", order: 1 },
-  },
-  {
     id: "owner.obligation",
     kind: "page",
     route: "/b/[businessId]/obligations/[obligationId]",
@@ -426,10 +414,9 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [],
+    uses: [RULE_VERSION],
     awaits: [
       kagTrack("obligation", "GET", "/v1/obligation/obligations/{obligation_id}"),
-      RULE_VERSION,
       servicesTrack(
         "WP23",
         "obligation",
@@ -458,7 +445,6 @@ const SCREEN_LIST = [
     status: "waiting",
     e2e: [],
     guideRef: "F8, F11, 8, 16",
-    parent: "owner.obligations",
   },
   {
     id: "owner.evidence",
@@ -478,21 +464,6 @@ const SCREEN_LIST = [
     parent: "owner.obligation",
   },
   {
-    id: "owner.calendar",
-    kind: "page",
-    route: "/b/[businessId]/calendar",
-    title: "Calendar",
-    section: "owner",
-    roles: MEMBERS,
-    tenantKinds: BUSINESS_TENANTS,
-    uses: [],
-    awaits: [OBLIGATIONS_LIST],
-    status: "waiting",
-    e2e: [],
-    guideRef: "F8",
-    nav: { group: "business", order: 2 },
-  },
-  {
     id: "owner.changes",
     kind: "page",
     route: "/b/[businessId]/changes",
@@ -500,10 +471,8 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [],
+    uses: [RULE_VERSIONS, RELATIONS],
     awaits: [
-      RULE_VERSIONS,
-      RELATIONS,
       servicesTrack("WP29", "rulebook", "GET", "/v1/changes"),
       servicesTrack("WP26", "applicability-engine", "GET", "/v1/changes/{rule_version_id}/impact"),
     ],
@@ -511,22 +480,6 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "2 uc2, 10",
     nav: { group: "business", order: 3 },
-  },
-  {
-    id: "owner.ask",
-    kind: "page",
-    route: "/b/[businessId]/ask",
-    title: "Ask",
-    section: "owner",
-    roles: MEMBERS,
-    tenantKinds: BUSINESS_TENANTS,
-    flag: "web.qa_enabled",
-    uses: [],
-    awaits: [kagTrack("qa", "POST", "/v1/qa/ask")],
-    status: "waiting",
-    e2e: [],
-    guideRef: "2 uc3, F10; ADR-012",
-    nav: { group: "business", order: 4 },
   },
   {
     id: "owner.reminders",
@@ -586,7 +539,6 @@ const SCREEN_LIST = [
     status: "planned",
     e2e: [],
     guideRef: "8",
-    parent: "owner.ask",
   },
   {
     id: "owner.settings.notification-recipients",
@@ -760,7 +712,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [],
     status: "live",
-    e2e: [],
+    e2e: ["admin-home.spec.ts", "a11y.spec.ts"],
     guideRef: "14, 15, 17",
   },
   {
@@ -774,7 +726,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [],
     status: "live",
-    e2e: [],
+    e2e: ["not-available.spec.ts", "a11y.spec.ts"],
     guideRef: "15",
     parent: "admin.home",
     notes: "Catch-all serving every waiting or planned admin tool from its registry entry.",
@@ -796,49 +748,6 @@ const SCREEN_LIST = [
     parent: "admin.home",
   },
   {
-    id: "admin.rulebook.versions",
-    kind: "page",
-    route: "/admin/rulebook/versions",
-    title: "Rule versions",
-    section: "admin",
-    roles: REGULATORY,
-    tenantKinds: ["internal"],
-    uses: [],
-    awaits: [RULE_VERSIONS],
-    status: "waiting",
-    e2e: [],
-    guideRef: "15",
-    nav: { group: "rulebook", order: 1 },
-    parent: "admin.home",
-  },
-  {
-    id: "admin.rulebook.version",
-    kind: "page",
-    route: "/admin/rulebook/versions/[ruleVersionId]",
-    title: "Rule version",
-    section: "admin",
-    roles: REGULATORY,
-    tenantKinds: ["internal"],
-    flag: "web.publish_actions",
-    uses: [],
-    awaits: [
-      RULE_VERSION,
-      kagTrack("rulebook", "GET", "/v1/rulebook/rule-versions/{rule_version_id}/citations"),
-      kagTrack("rulebook", "PUT", "/v1/rulebook/rule-versions/{rule_version_id}/citations"),
-      kagTrack("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/submit"),
-      kagTrack("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/return"),
-      kagTrack("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/approve"),
-      kagTrack("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/publish"),
-      kagTrack("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/withdraw"),
-      kagTrack("rulebook", "GET", "/v1/rulebook/clauses/{clause_id}"),
-      RELATIONS,
-    ],
-    status: "waiting",
-    e2e: [],
-    guideRef: "ADR-006, F4, 6",
-    parent: "admin.rulebook.versions",
-  },
-  {
     id: "admin.rulebook.canonical",
     kind: "page",
     route: "/admin/rulebook/entities/canonical",
@@ -846,65 +755,12 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
-    awaits: [
-      kagTrack("rulebook", "GET", "/v1/rulebook/entities"),
-      kagTrack("rulebook", "GET", "/v1/rulebook/entities/resolve"),
-    ],
+    uses: [uses("rulebook", "GET", "/v1/rulebook/entities/resolve")],
+    awaits: [kagTrack("rulebook", "GET", "/v1/rulebook/entities")],
     status: "waiting",
     e2e: [],
     guideRef: "15",
     nav: { group: "rulebook", order: 2 },
-    parent: "admin.home",
-  },
-  {
-    id: "admin.rulebook.canonical-entity",
-    kind: "page",
-    route: "/admin/rulebook/entities/canonical/[entityId]",
-    title: "Canonical entity",
-    section: "admin",
-    roles: REGULATORY,
-    tenantKinds: ["internal"],
-    uses: [],
-    awaits: [
-      kagTrack("rulebook", "GET", "/v1/rulebook/entities/{entity_id}"),
-      kagTrack("rulebook", "GET", "/v1/rulebook/entities/{entity_id}/clauses"),
-    ],
-    status: "waiting",
-    e2e: [],
-    guideRef: "15",
-    parent: "admin.rulebook.canonical",
-  },
-  {
-    id: "admin.rulebook.relations-graph",
-    kind: "page",
-    route: "/admin/rulebook/relations/graph",
-    title: "Relations graph",
-    section: "admin",
-    roles: REGULATORY,
-    tenantKinds: ["internal"],
-    uses: [],
-    awaits: [RELATIONS, RULE_VERSION],
-    status: "waiting",
-    e2e: [],
-    guideRef: "15; ADR-017",
-    nav: { group: "rulebook", order: 3 },
-    parent: "admin.home",
-  },
-  {
-    id: "admin.rulebook.search",
-    kind: "page",
-    route: "/admin/rulebook/search",
-    title: "Clause search",
-    section: "admin",
-    roles: REGULATORY,
-    tenantKinds: ["internal"],
-    uses: [],
-    awaits: [kagTrack("rulebook", "POST", "/v1/rulebook/search")],
-    status: "waiting",
-    e2e: [],
-    guideRef: "ADR-012",
-    nav: { group: "rulebook", order: 4 },
     parent: "admin.home",
   },
   {
@@ -936,7 +792,7 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [uses("rulebook", "GET", "/v1/rulebook/documents/{document_id}")],
+    uses: [uses("rulebook", "GET", "/v1/rulebook/documents/{document_id}"), RULE_VERSION],
     awaits: [
       servicesTrack("WP21", "rulebook", "GET", "/v1/rulebook/review/tasks/{task_id}"),
       servicesTrack("WP21", "rulebook", "POST", "/v1/rulebook/review/tasks/{task_id}/draft"),
@@ -944,7 +800,6 @@ const SCREEN_LIST = [
       servicesTrack("WP21", "rulebook", "POST", "/v1/rulebook/review/tasks/{task_id}/decide"),
       ONTOLOGY,
       RAW_DOCUMENT,
-      RULE_VERSION,
     ],
     status: "waiting",
     e2e: [],
@@ -990,11 +845,10 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [RELATIONS],
     awaits: [
       servicesTrack("WP24", "rulebook", "GET", "/v1/rulebook/error-reports"),
       servicesTrack("WP24", "rulebook", "POST", "/v1/rulebook/error-reports/{report_id}/decision"),
-      RELATIONS,
     ],
     status: "waiting",
     e2e: [],
@@ -1215,10 +1069,9 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [RULE_VERSIONS],
     awaits: [
       ONTOLOGY,
-      RULE_VERSIONS,
       servicesTrack("WP30", "profile", "GET", "/v1/profile/admin/attribute-usage"),
     ],
     status: "waiting",
@@ -1338,7 +1191,7 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [RULE_VERSIONS],
     awaits: [
       servicesTrack("WP26", "applicability-engine", "GET", "/v1/applicability-engine/fan-outs"),
       servicesTrack(
@@ -1349,7 +1202,6 @@ const SCREEN_LIST = [
       ),
       servicesTrack("WP26", "applicability-engine", "GET", "/v1/applicability-engine/fan-out-hold"),
       servicesTrack("WP26", "applicability-engine", "PUT", "/v1/applicability-engine/fan-out-hold"),
-      RULE_VERSIONS,
     ],
     status: "waiting",
     e2e: [],
@@ -1365,7 +1217,7 @@ const SCREEN_LIST = [
     section: "admin",
     roles: ["reviewer", "admin"],
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [uses("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/withdraw")],
     awaits: [
       servicesTrack(
         "WP26",
@@ -1385,7 +1237,6 @@ const SCREEN_LIST = [
         "POST",
         "/v1/applicability-engine/fan-outs/{rule_version_id}/cancel",
       ),
-      kagTrack("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/withdraw"),
     ],
     status: "waiting",
     e2e: [],

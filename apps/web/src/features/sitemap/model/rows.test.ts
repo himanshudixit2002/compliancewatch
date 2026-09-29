@@ -16,7 +16,7 @@ describe("sitemapSections", () => {
   it("links static pages, leaves parameterised and non-page routes as text", () => {
     expect(toSitemapRow(screenById("system.sitemap")).href).toBe("/sitemap");
     expect(toSitemapRow(screenById("admin.review")).href).toBe("/admin/review");
-    expect(toSitemapRow(screenById("owner.obligations")).href).toBeNull();
+    expect(toSitemapRow(screenById("owner.changes")).href).toBeNull();
     expect(toSitemapRow(screenById("system.health")).href).toBeNull();
     expect(toSitemapRow(screenById("owner.report-error")).kind).toBe("component");
   });
@@ -29,9 +29,11 @@ describe("sitemapSections", () => {
       "/legal/terms-of-service",
       "/legal/whatsapp-consent",
     ]);
-    const ask = toSitemapRow(screenById("owner.ask"));
-    expect(ask.waitsFor).toEqual([{ method: "POST", path: "/v1/qa/ask", owner: "KAG track" }]);
-    expect(ask.roles).toContain("Owner");
+    const stats = toSitemapRow(screenById("admin.review.stats"));
+    expect(stats.waitsFor).toEqual([
+      { method: "GET", path: "/v1/rulebook/review/stats", owner: "KAG track" },
+    ]);
+    expect(stats.roles).toContain("Analyst");
     const flags = toSitemapRow(screenById("admin.flags"));
     expect(flags.waitsFor[0]?.method).toBe("file");
   });
