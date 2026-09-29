@@ -34,7 +34,7 @@ test.describe("businesses list", () => {
     await signInThroughForm(page, newTenantPersona());
     await page.goto("/businesses");
     await expect(page.getByRole("heading", { level: 1, name: "Businesses" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "No business yet" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "No business yet" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Get started" })).toHaveAttribute(
       "href",
       "/onboarding",
