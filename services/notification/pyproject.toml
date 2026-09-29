@@ -13,6 +13,7 @@ dependencies = [
   "psycopg[binary]>=3.2",
   "py-common",
   "domain-kernel",
+  "compliancewatch-contracts",
   "httpx2>=2.13",
   "opentelemetry-api==1.45.0",
 ]
@@ -20,6 +21,7 @@ dependencies = [
 [tool.uv.sources]
 py-common = { workspace = true }
 domain-kernel = { workspace = true }
+compliancewatch-contracts = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

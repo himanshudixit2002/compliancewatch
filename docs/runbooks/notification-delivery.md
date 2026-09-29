@@ -6,7 +6,13 @@ quiet hours again, gathers what goes to one person and business into one summary
 message with the rule version's facts from the rulebook, and hands it to the channel. A failed
 attempt is retried after 60 s and again after 300 s; the third failure fails the notification
 and queues a fallback on the recipient's next open address on another channel. `POST /send`
-goes through the same queue and dispatcher. Two alerts link here:
+goes through the same queue and dispatcher.
+
+The worker (`python -m notification.worker`, locally `make worker SERVICE=notification`) runs the
+dispatcher every `CW_NOTIFICATION_DISPATCH_INTERVAL_SECONDS` and consumes the obligation events
+in group `notification.obligations`; an event it cannot read goes to
+`<topic>.notification.obligations.dlq`. Its log says `notification.event_queued` per event and
+`notification.dispatched` per run that sent anything. Two alerts link here:
 [NotificationDeliveryFailures](#notificationdeliveryfailures) and
 [NotificationDuplicateSent](#notificationduplicatesent).
 

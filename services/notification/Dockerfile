@@ -13,6 +13,7 @@ COPY pyproject.toml uv.lock .python-version ./
 COPY packages/py-common/pyproject.toml packages/py-common/
 COPY packages/domain-kernel/pyproject.toml packages/domain-kernel/
 COPY packages/ontology/pyproject.toml packages/ontology/
+COPY packages/contracts/clients/python/pyproject.toml packages/contracts/clients/python/
 COPY services/notification/pyproject.toml services/notification/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-workspace --package compliancewatch-notification
@@ -21,6 +22,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY packages/py-common/ packages/py-common/
 COPY packages/domain-kernel/ packages/domain-kernel/
 COPY packages/ontology/ packages/ontology/
+COPY packages/contracts/clients/python/ packages/contracts/clients/python/
 COPY services/notification/ services/notification/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable --package compliancewatch-notification

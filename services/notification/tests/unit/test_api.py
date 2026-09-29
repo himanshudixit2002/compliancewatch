@@ -4,9 +4,10 @@ from fastapi.testclient import TestClient
 
 from domain_kernel.channels import Channel
 from domain_kernel.ids import NotificationId, TenantId
+from notification.composition import WHATSAPP_DISABLED, wire
 from notification.domain.notification import DeliveryState
 from notification.domain.preferences import ConsentSource
-from notification.main import WHATSAPP_DISABLED, build_app, wire
+from notification.main import build_app
 from notification.testing import (
     NOON_IST,
     FakeChannel,

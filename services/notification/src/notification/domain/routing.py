@@ -1,4 +1,16 @@
-"""What an obligation event tells the service to send.
+"""What an obligation event tells the service to send, and whether it sends anything.
+
+``EVENT_ROUTES`` maps each obligation event, by topic and reason, to the template it sends and
+the occasion that keys it, or to None when it sends nothing. The deadline changes reuse the
+templates ``templates.CHANGE_TEMPLATES`` names (ADR-015):
+
+- ``obligation.created``: ``change_card`` (a rule now applies);
+- ``obligation.due_soon``: ``obligation_due_soon``, one per reminder number;
+- ``obligation.rescheduled``: ``obligation_deadline_extended`` or ``obligation_corrected``;
+  a manual reschedule sends nothing;
+- ``obligation.closed``: ``obligation_withdrawn`` when the rule was withdrawn,
+  ``obligation_closed`` when the business profile changed or a newer rule version replaced the
+  rule; the user's own completion or waiver sends nothing.
 
 ``ObligationNotice`` is one event as the service acts on it: the tenant and the business whose
 recipients hear about it, the occasion (which also makes each recipient's dedupe key), the
@@ -16,10 +28,57 @@ The dispatcher turns these into the template's values when it sends (``domain.va
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 from domain_kernel._validation import freeze_mapping, require_instance, require_text
 from domain_kernel.ids import BusinessId, TenantId
-from notification.domain.occasions import Occasion
+from notification.domain.occasions import Occasion, OccasionKind
+from notification.domain.templates import (
+    CHANGE_CARD,
+    CHANGE_TEMPLATES,
+    CLOSED,
+    DUE_SOON,
+    SILENT_CHANGES,
+)
+
+CREATED_TOPIC = "obligation.created"
+DUE_SOON_TOPIC = "obligation.due_soon"
+RESCHEDULED_TOPIC = "obligation.rescheduled"
+CLOSED_TOPIC = "obligation.closed"
+TOPICS = (CREATED_TOPIC, DUE_SOON_TOPIC, RESCHEDULED_TOPIC, CLOSED_TOPIC)
+"""The obligation topics the service consumes."""
+
+
+@dataclass(frozen=True, slots=True)
+class Route:
+    template_key: str
+    occasion: OccasionKind
+
+
+_OCCASIONS = {RESCHEDULED_TOPIC: OccasionKind.RESCHEDULE, CLOSED_TOPIC: OccasionKind.CLOSURE}
+
+EVENT_ROUTES: Mapping[tuple[str, str | None], Route | None] = MappingProxyType(
+    {
+        (CREATED_TOPIC, None): Route(CHANGE_CARD, OccasionKind.CHANGE_CARD),
+        (DUE_SOON_TOPIC, None): Route(DUE_SOON, OccasionKind.REMINDER),
+        **{
+            (topic, reason): Route(key, _OCCASIONS[topic])
+            for (topic, reason), key in CHANGE_TEMPLATES.items()
+        },
+        **dict.fromkeys(SILENT_CHANGES),
+        (CLOSED_TOPIC, "profile_changed"): Route(CLOSED, OccasionKind.CLOSURE),
+        (CLOSED_TOPIC, "rule_superseded"): Route(CLOSED, OccasionKind.CLOSURE),
+        (CLOSED_TOPIC, "completed"): None,
+        (CLOSED_TOPIC, "waived_by_user"): None,
+    }
+)
+"""Each obligation event, by topic and reason (None for the topics without one), and what it
+sends; None sends nothing."""
+
+
+def route(topic: str, reason: str | None = None) -> Route | None:
+    """The route of an event, or None when it sends nothing or is not one the table knows."""
+    return EVENT_ROUTES.get((topic, reason))
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

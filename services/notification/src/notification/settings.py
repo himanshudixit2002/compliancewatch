@@ -8,7 +8,7 @@ and every WhatsApp send fails with that reason (docs/runbooks/whatsapp.md lists 
 ``notification_batch_window_seconds`` is how long a notification waits for others to the same
 person, so they go as one summary; it adds to the delivery time, and 0 sends each one alone.
 ``rulebook_url`` is where the facts of a change card come from, and ``web_base_url`` the web app
-the messages link to.
+the messages link to. The worker sends what is due every ``notification_dispatch_interval_seconds``.
 """
 
 from typing import Literal
@@ -29,5 +29,6 @@ class NotificationSettings(Settings):
     quiet_hours_start: str = "21:00"
     quiet_hours_end: str = "08:00"
     notification_batch_window_seconds: int = Field(default=300, ge=0, le=3600)
+    notification_dispatch_interval_seconds: float = Field(default=5.0, gt=0, le=300)
     rulebook_url: str = "http://localhost:8003"
     web_base_url: str = "http://localhost:3000"

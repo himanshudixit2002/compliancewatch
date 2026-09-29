@@ -9,10 +9,11 @@ Each test uses its own tenants, and the tests that claim work use their own year
 what they leave, because a claim sees every tenant's due work.
 """
 
+import json
 import threading
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -33,6 +34,7 @@ from domain_kernel.ids import (
     TenantId,
     UserId,
 )
+from notification import worker
 from notification.application.dispatch import DeliveryOutcome, DispatchDue
 from notification.application.enqueue import Enqueued, EnqueueNotifications
 from notification.application.preferences import SetOptIn
@@ -49,6 +51,7 @@ from notification.domain.model import NotificationRequest, Outcome
 from notification.domain.notification import DeliveryState, Notification
 from notification.domain.occasions import Occasion, OccasionKind
 from notification.domain.policy import BatchPolicy
+from notification.domain.ports import RuleVersionFacts
 from notification.domain.preferences import (
     ChannelPreference,
     ConsentSource,
@@ -839,6 +842,80 @@ def test_queued_notifications_go_out_as_one_batch(
     assert [e.id for e in work.claim(limit=10, now=leased.available_at + LEASE, lease=LEASE)] == [
         leased.id
     ]
+    purge(factory, tenant)
+
+
+EXAMPLES = SERVICE_DIR.parents[1] / "packages" / "contracts" / "events" / "examples"
+
+
+async def test_the_worker_queues_an_obligation_event_in_its_inbox_transaction(
+    factory: PostgresUnitOfWorkFactory, app_engine: Engine, engine: Engine
+) -> None:
+    tenant, business = TenantId.new(), BusinessId.new()
+    now = datetime(2005, 5, 5, 6, 30, tzinfo=UTC)
+    RegisterRecipient(factory, clock=lambda: now).run(
+        RecipientRegistration(
+            tenant_id=tenant,
+            recipient_id=RecipientId.new(),
+            role=RecipientRole.OWNER,
+            addresses=[(Channel.WHATSAPP, "+91 98765 00005")],
+            businesses=[BusinessLink(business, "Acme Traders")],
+        )
+    )
+    SetOptIn(factory, clock=lambda: now).run(
+        Channel.WHATSAPP, "+919876500005", opted_in=True, source=ConsentSource.API
+    )
+    data = json.loads(
+        (EXAMPLES / "obligation.created" / "filing-with-due-date.json").read_text(encoding="utf-8")
+    )
+    data.update(event_id=str(uuid4()), tenant_id=str(tenant))
+    data["payload"].update(obligation_id=str(uuid4()), business_id=str(business))
+    message = EventMessage.model_validate(data)
+    enqueue = EnqueueNotifications(factory, batch=BatchPolicy(window_seconds=0), clock=lambda: now)
+    consumer = IdempotentConsumer(
+        group_id=worker.GROUP_ID,
+        store=SyncProcessedStore(app_engine, group_id=worker.GROUP_ID),
+        handler=sync_handler(worker.obligation_handler(enqueue)),
+        producer=FakeProducer(),
+    )
+    assert await consumer.process(_record(message, 10)) is ConsumerOutcome.PROCESSED
+    assert await consumer.process(_record(message, 11)) is ConsumerOutcome.SKIPPED
+
+    with factory(tenant) as unit:
+        (queued,) = unit.notifications.page(business, limit=10)
+    assert (queued.template_key, queued.state) == ("change_card", DeliveryState.QUEUED)
+    with engine.connect() as connection:
+        inbox = connection.execute(
+            select(processed_event.c.event_id).where(
+                processed_event.c.consumer_group == worker.GROUP_ID,
+                processed_event.c.event_id == message.event_id,
+            )
+        ).all()
+    assert len(inbox) == 1
+
+    channel = FakeChannel(clock=lambda: now)
+    facts = RuleVersionFacts(
+        title="File FORM GSTR-3B every month",
+        summary="A monthly filer furnishes FORM GSTR-3B.",
+        effective_from=date(2026, 4, 1),
+    )
+    rule = RuleVersionId(UUID(data["payload"]["rule_version_id"]))
+    dispatch = DispatchDue(
+        factory,
+        PostgresWorkIndex(app_engine),
+        {Channel.WHATSAPP: channel},
+        rules=FakeRuleVersionReader({rule: facts}),
+        web_base_url="https://app.example",
+        clock=lambda: now,
+    )
+    (delivery,) = dispatch.run()
+    assert delivery.outcome is DeliveryOutcome.SENT
+    (message_sent,) = channel.sent
+    assert message_sent.body.startswith(
+        "What changed for Acme Traders: A monthly filer furnishes FORM GSTR-3B. It applies to "
+        "you from 1 Apr 2026."
+    )
+    assert outbox_topics(engine, tenant) == ["notification.sent"]
     purge(factory, tenant)
 
 
