@@ -1,0 +1,1867 @@
+{
+  "components": {
+    "schemas": {
+      "AnswerIn": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of_fy": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{4}-[0-9]{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "2025-26; required for an attribute stated per financial year",
+            "title": "As Of Fy"
+          },
+          "key": {
+            "description": "Ontology key",
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Key",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ValueState",
+            "default": "known"
+          },
+          "value": {
+            "description": "The value; absent for unsure or not_applicable",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "AnswerIn",
+        "type": "object"
+      },
+      "AttributeOut": {
+        "properties": {
+          "as_of_fy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of Fy"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/AttributeSource"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ValueState"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "state",
+          "as_of_fy",
+          "source",
+          "updated_at"
+        ],
+        "title": "AttributeOut",
+        "type": "object"
+      },
+      "AttributeSource": {
+        "description": "Where a profile gets the value from.",
+        "enum": [
+          "gstin_lookup",
+          "user_input",
+          "derived"
+        ],
+        "title": "AttributeSource",
+        "type": "string"
+      },
+      "BusinessChangeIn": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of_fy": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{4}-[0-9]{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "2025-26; required for an attribute stated per financial year",
+            "title": "As Of Fy"
+          },
+          "key": {
+            "description": "Ontology key",
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Key",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The registration or location the answer is for, needed when the business has several; without it the attribute's level picks the node",
+            "title": "Node Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ValueState",
+            "default": "known"
+          },
+          "value": {
+            "description": "The value; absent for unsure or not_applicable",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "BusinessChangeIn",
+        "type": "object"
+      },
+      "BusinessCreatedOut": {
+        "properties": {
+          "business": {
+            "$ref": "#/components/schemas/BusinessOut"
+          },
+          "created": {
+            "description": "False when the tenant already had this business",
+            "title": "Created",
+            "type": "boolean"
+          },
+          "onboarding": {
+            "$ref": "#/components/schemas/OnboardingOut"
+          },
+          "prefill": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrefillOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the GSTIN filled in; null without one"
+          }
+        },
+        "required": [
+          "business",
+          "created",
+          "prefill",
+          "onboarding"
+        ],
+        "title": "BusinessCreatedOut",
+        "type": "object"
+      },
+      "BusinessIn": {
+        "additionalProperties": false,
+        "properties": {
+          "answers": {
+            "description": "First answers, stored with the business",
+            "items": {
+              "$ref": "#/components/schemas/AnswerIn"
+            },
+            "maxItems": 100,
+            "title": "Answers",
+            "type": "array"
+          },
+          "gstin": {
+            "anyOf": [
+              {
+                "maxLength": 17,
+                "minLength": 15,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GSTIN, any case or spacing. Its PAN makes the business, and the registration is pre-filled from the GSTIN and the GSTIN lookup",
+            "title": "Gstin"
+          },
+          "name": {
+            "description": "The name the business goes by",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "pan": {
+            "anyOf": [
+              {
+                "maxLength": 12,
+                "minLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "PAN, any case or spacing; enough on its own when there is no GSTIN yet",
+            "title": "Pan"
+          },
+          "registration_name": {
+            "default": "",
+            "description": "Name of the registration; the business name when empty",
+            "maxLength": 200,
+            "title": "Registration Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "BusinessIn",
+        "type": "object"
+      },
+      "BusinessOut": {
+        "properties": {
+          "attributes": {
+            "description": "Values stored on the legal entity",
+            "items": {
+              "$ref": "#/components/schemas/AttributeOut"
+            },
+            "title": "Attributes",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "description": "The business id: the node id of its legal entity",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pan": {
+            "title": "Pan",
+            "type": "string"
+          },
+          "registrations": {
+            "description": "Its GSTIN registrations, oldest first",
+            "items": {
+              "$ref": "#/components/schemas/NodeOut"
+            },
+            "title": "Registrations",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "pan",
+          "version",
+          "created_at",
+          "updated_at",
+          "attributes",
+          "registrations"
+        ],
+        "title": "BusinessOut",
+        "type": "object"
+      },
+      "BusinessPatchIn": {
+        "additionalProperties": false,
+        "properties": {
+          "changes": {
+            "description": "Answers to store; all of them or none are stored",
+            "items": {
+              "$ref": "#/components/schemas/BusinessChangeIn"
+            },
+            "maxItems": 100,
+            "title": "Changes",
+            "type": "array"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rename",
+            "title": "Name"
+          }
+        },
+        "title": "BusinessPatchIn",
+        "type": "object"
+      },
+      "BusinessSummaryOut": {
+        "properties": {
+          "gstins": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Gstins",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pan": {
+            "title": "Pan",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "pan",
+          "gstins",
+          "updated_at"
+        ],
+        "title": "BusinessSummaryOut",
+        "type": "object"
+      },
+      "ItemState": {
+        "description": "Where one question stands: no value yet, an unsure answer, or an answer.",
+        "enum": [
+          "missing",
+          "unsure",
+          "known",
+          "not_applicable"
+        ],
+        "title": "ItemState",
+        "type": "string"
+      },
+      "LookupResultOut": {
+        "properties": {
+          "business_category": {
+            "default": "",
+            "description": "The category the activities map to, empty when none or several do; stored only while profile.gstin_category_prefill is on",
+            "title": "Business Category",
+            "type": "string"
+          },
+          "constitution": {
+            "title": "Constitution",
+            "type": "string"
+          },
+          "gstin": {
+            "title": "Gstin",
+            "type": "string"
+          },
+          "gstin_status": {
+            "title": "Gstin Status",
+            "type": "string"
+          },
+          "legal_name": {
+            "title": "Legal Name",
+            "type": "string"
+          },
+          "nature_of_business": {
+            "description": "The registry's activities, as it words them",
+            "items": {
+              "type": "string"
+            },
+            "title": "Nature Of Business",
+            "type": "array"
+          },
+          "registered_since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registered Since"
+          },
+          "registration_type": {
+            "title": "Registration Type",
+            "type": "string"
+          },
+          "state_code": {
+            "title": "State Code",
+            "type": "string"
+          },
+          "trade_name": {
+            "title": "Trade Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gstin",
+          "legal_name",
+          "trade_name",
+          "registration_type",
+          "gstin_status",
+          "state_code",
+          "constitution",
+          "registered_since"
+        ],
+        "title": "LookupResultOut",
+        "type": "object"
+      },
+      "NodeOut": {
+        "properties": {
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/AttributeOut"
+            },
+            "title": "Attributes",
+            "type": "array"
+          },
+          "created": {
+            "default": false,
+            "title": "Created",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "level",
+          "key",
+          "name",
+          "parent_id",
+          "version",
+          "attributes"
+        ],
+        "title": "NodeOut",
+        "type": "object"
+      },
+      "OnboardingOut": {
+        "properties": {
+          "answered": {
+            "title": "Answered",
+            "type": "integer"
+          },
+          "as_of_fy": {
+            "description": "The financial year per-year questions are asked for",
+            "title": "As Of Fy",
+            "type": "string"
+          },
+          "business_id": {
+            "format": "uuid",
+            "title": "Business Id",
+            "type": "string"
+          },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuestionOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The one question to ask now; null when complete"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "business_id",
+          "as_of_fy",
+          "answered",
+          "total",
+          "complete",
+          "next"
+        ],
+        "title": "OnboardingOut",
+        "type": "object"
+      },
+      "OntologyAttributeOut": {
+        "properties": {
+          "definition": {
+            "description": "What the attribute means; the ontology's own words",
+            "title": "Definition",
+            "type": "string"
+          },
+          "example": {
+            "title": "Example"
+          },
+          "help": {
+            "title": "Help",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "level": {
+            "description": "entity, registration or location: the node holding the value",
+            "title": "Level",
+            "type": "string"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "per_financial_year": {
+            "title": "Per Financial Year",
+            "type": "boolean"
+          },
+          "question": {
+            "description": "How onboarding asks for it; empty for a derived one",
+            "title": "Question",
+            "type": "string"
+          },
+          "source": {
+            "description": "gstin_lookup, user_input or derived",
+            "title": "Source",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "values": {
+            "description": "Allowed values with their labels, in order",
+            "items": {
+              "$ref": "#/components/schemas/OptionOut"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "type",
+          "level",
+          "source",
+          "per_financial_year",
+          "definition",
+          "question",
+          "help",
+          "values"
+        ],
+        "title": "OntologyAttributeOut",
+        "type": "object"
+      },
+      "OntologyOut": {
+        "properties": {
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/OntologyAttributeOut"
+            },
+            "title": "Attributes",
+            "type": "array"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "operators_by_type": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "The operators a rule predicate may use on each attribute type",
+            "title": "Operators By Type",
+            "type": "object"
+          },
+          "review_status": {
+            "description": "needs_review until an analyst has read the wording",
+            "title": "Review Status",
+            "type": "string"
+          },
+          "version": {
+            "description": "The attribute set's version, which rules are written against",
+            "title": "Version",
+            "type": "string"
+          },
+          "wording_version": {
+            "title": "Wording Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "wording_version",
+          "language",
+          "review_status",
+          "operators_by_type",
+          "attributes"
+        ],
+        "title": "OntologyOut",
+        "type": "object"
+      },
+      "OptionOut": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "OptionOut",
+        "type": "object"
+      },
+      "Page_BusinessSummaryOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BusinessSummaryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Send as cursor to read the next page; null on the last page",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[BusinessSummaryOut]",
+        "type": "object"
+      },
+      "PrefillOut": {
+        "properties": {
+          "applied": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Applied",
+            "type": "array"
+          },
+          "looked_up": {
+            "title": "Looked Up",
+            "type": "boolean"
+          },
+          "node_id": {
+            "format": "uuid",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LookupResultOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_task": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Task"
+          }
+        },
+        "required": [
+          "node_id",
+          "looked_up",
+          "result",
+          "applied",
+          "review_task"
+        ],
+        "title": "PrefillOut",
+        "type": "object"
+      },
+      "Problem": {
+        "description": "The body of every error response.",
+        "properties": {
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Correlation Id"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ValidationIssue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Errors"
+          },
+          "instance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Instance"
+          },
+          "status": {
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status"
+        ],
+        "title": "Problem",
+        "type": "object"
+      },
+      "QuestionOut": {
+        "properties": {
+          "as_of_fy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The financial year a per-year answer is for",
+            "title": "As Of Fy"
+          },
+          "help": {
+            "title": "Help",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "node_id": {
+            "description": "The entity or registration the answer is stored on",
+            "format": "uuid",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "options": {
+            "description": "Allowed values with their labels, in order",
+            "items": {
+              "$ref": "#/components/schemas/OptionOut"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "per_financial_year": {
+            "title": "Per Financial Year",
+            "type": "boolean"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ItemState",
+            "description": "missing or unsure"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "level",
+          "key",
+          "state",
+          "per_financial_year",
+          "as_of_fy",
+          "type",
+          "question",
+          "help",
+          "options"
+        ],
+        "title": "QuestionOut",
+        "type": "object"
+      },
+      "RegistrationAddIn": {
+        "additionalProperties": false,
+        "properties": {
+          "gstin": {
+            "description": "GSTIN, any case or spacing; it must carry the business's PAN",
+            "maxLength": 17,
+            "minLength": 15,
+            "title": "Gstin",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "description": "Name of the registration; the business name when empty",
+            "maxLength": 200,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gstin"
+        ],
+        "title": "RegistrationAddIn",
+        "type": "object"
+      },
+      "RegistrationCreatedOut": {
+        "properties": {
+          "business": {
+            "$ref": "#/components/schemas/BusinessOut"
+          },
+          "created": {
+            "description": "False when the business already held this GSTIN",
+            "title": "Created",
+            "type": "boolean"
+          },
+          "prefill": {
+            "$ref": "#/components/schemas/PrefillOut"
+          },
+          "registration": {
+            "$ref": "#/components/schemas/NodeOut"
+          }
+        },
+        "required": [
+          "business",
+          "registration",
+          "created",
+          "prefill"
+        ],
+        "title": "RegistrationCreatedOut",
+        "type": "object"
+      },
+      "ValidationIssue": {
+        "description": "One failed check on the request. The submitted value is not echoed back.",
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Loc",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Msg",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationIssue",
+        "type": "object"
+      },
+      "ValueState": {
+        "enum": [
+          "known",
+          "unsure",
+          "not_applicable"
+        ],
+        "title": "ValueState",
+        "type": "string"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "description": "An access token from the identity service. Until it issues tokens, the services take the tenant from the x-tenant-id header.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "The ComplianceWatch public API, v1 (guide section 10): the operations the services tag public, merged into one spec by `make openapi-public`. Each operation names the service that serves it in x-service and the tenant roles that may call it in x-roles. Errors are problem details (RFC 9457). A POST that creates something takes an Idempotency-Key header, and a list answers one page at a time with limit and cursor. CHANGELOG.md next to this file lists the changes per version.",
+    "title": "ComplianceWatch public API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/businesses": {
+      "get": {
+        "operationId": "list_businesses_v1_businesses_get",
+        "parameters": [
+          {
+            "description": "Keeps the businesses whose name, PAN or GSTIN contains this, any case",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keeps the businesses whose name, PAN or GSTIN contains this, any case",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 200",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Items per page, 1 to 200",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page; absent for the first page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_cursor of the previous page; absent for the first page",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Tenant UUID; required until the identity service issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; required until the identity service issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_BusinessSummaryOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "The tenant's businesses by name, a page at a time",
+        "tags": [
+          "public",
+          "businesses"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
+        ],
+        "x-service": "profile"
+      },
+      "post": {
+        "description": "A GSTIN makes the business from the PAN inside it and pre-fills the registration from the\nGSTIN lookup; a PAN alone makes the business with no registration. The answers are stored\nwith it, and the first onboarding question comes back. A business the tenant already has\n(the same PAN) is answered with ``created`` false.",
+        "operationId": "create_business_v1_businesses_post",
+        "parameters": [
+          {
+            "description": "Tenant UUID; required until the identity service issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; required until the identity service issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          },
+          {
+            "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 8,
+                  "pattern": "^[!-~]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BusinessIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessCreatedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          }
+        },
+        "summary": "Create a business from its GSTIN, or from its PAN alone",
+        "tags": [
+          "public",
+          "businesses"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
+        ],
+        "x-service": "profile"
+      }
+    },
+    "/v1/businesses/{business_id}": {
+      "get": {
+        "operationId": "read_business_v1_businesses__business_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "business_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Business Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID; required until the identity service issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; required until the identity service issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "One business with its registrations and stored values",
+        "tags": [
+          "public",
+          "businesses"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
+        ],
+        "x-service": "profile"
+      },
+      "patch": {
+        "description": "All or nothing: one value the ontology refuses stores none of the changes. Every node\nthat changed publishes ``profile.updated``, which recomputes the business's obligations.",
+        "operationId": "update_business_v1_businesses__business_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "business_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Business Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID; required until the identity service issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; required until the identity service issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BusinessPatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Store answers across the business and its registrations, or rename it",
+        "tags": [
+          "public",
+          "businesses"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
+        ],
+        "x-service": "profile"
+      }
+    },
+    "/v1/businesses/{business_id}/onboarding": {
+      "get": {
+        "operationId": "onboarding_v1_businesses__business_id__onboarding_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "business_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Business Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID; required until the identity service issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; required until the identity service issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "The next onboarding question with its wording and options, and the progress",
+        "tags": [
+          "public",
+          "businesses"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
+        ],
+        "x-service": "profile"
+      }
+    },
+    "/v1/businesses/{business_id}/registrations": {
+      "post": {
+        "operationId": "add_registration_v1_businesses__business_id__registrations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "business_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Business Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID; required until the identity service issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; required until the identity service issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          },
+          {
+            "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 8,
+                  "pattern": "^[!-~]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationAddIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationCreatedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          }
+        },
+        "summary": "Add a GSTIN registration to a business and pre-fill it",
+        "tags": [
+          "public",
+          "businesses"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
+        ],
+        "x-service": "profile"
+      }
+    },
+    "/v1/ontology": {
+      "get": {
+        "operationId": "read_ontology_v1_ontology_get",
+        "parameters": [
+          {
+            "description": "The ETag of a copy the client holds",
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The ETag of a copy the client holds",
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OntologyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "Not Modified: the ETag in If-None-Match is still current; no body"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "The profile attributes with their questions, labelled values and rule operators",
+        "tags": [
+          "public",
+          "ontology"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
+        ],
+        "x-service": "profile"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}
