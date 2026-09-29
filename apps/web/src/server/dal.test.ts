@@ -10,6 +10,7 @@ import {
   requireAdmin,
   requireRole,
   requireScreen,
+  requireScreenSession,
   requireSession,
   requireTenantKind,
   sessionForRender,
@@ -182,6 +183,22 @@ describe("requireScreen", () => {
     await expect(requireScreen(review)).rejects.toThrow(NotFoundSignal);
     await signedInAs({ roles: ["reviewer"], tenantKind: "internal" });
     expect(await requireScreen(review)).toMatchObject({ roles: ["reviewer"] });
+
+    const team = screenById("admin.team");
+    await signedInAs({ roles: ["analyst"], tenantKind: "internal" });
+    await expect(requireScreen(team)).rejects.toThrow(NotFoundSignal);
+    await signedInAs({ roles: ["admin"], tenantKind: "internal" });
+    expect(await requireScreen(team)).toMatchObject({ roles: ["admin"] });
+  });
+});
+
+describe("requireScreenSession", () => {
+  it("returns the claims for a gated entry and refuses a public one", async () => {
+    const account = screenById("account.home");
+    await redirectsTo(requireScreenSession(account), "/sign-in?next=%2Faccount");
+    await signedInAs({ roles: ["staff"], tenantKind: "business" });
+    expect(await requireScreenSession(account)).toMatchObject({ roles: ["staff"] });
+    await expect(requireScreenSession(screenById("system.home"))).rejects.toThrow(/is public/);
   });
 });
 

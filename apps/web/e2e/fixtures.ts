@@ -1,6 +1,9 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test as base } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Browser, BrowserContext, Page } from "@playwright/test";
+import type { Role, TenantKind } from "../src/shared/config/roles.ts";
+import { isVisibleTo } from "../src/shared/config/screens.ts";
+import type { Screen } from "../src/shared/config/screens.ts";
 
 /** Impacts that fail a page; moderate and minor findings are reported by the unit-level axe. */
 export const FAILING_IMPACTS: readonly string[] = ["serious", "critical"];
@@ -30,18 +33,137 @@ export async function seriousViolations(page: Page, include?: string): Promise<V
     }));
 }
 
-export interface A11yFixtures {
-  /** Fails the test when the page, or the given selector, has a serious or critical finding. */
-  checkA11y: (include?: string) => Promise<void>;
+/** What the fake sign-in form is filled with. */
+export interface Persona {
+  key: string;
+  tenantKind: TenantKind;
+  roles: readonly Role[];
+  displayName: string;
+  tenantId?: string;
 }
 
-export const test = base.extend<A11yFixtures>({
+export const OWNER: Persona = {
+  key: "owner",
+  tenantKind: "business",
+  roles: ["owner"],
+  displayName: "Example owner",
+};
+
+export const COMPLIANCE_LEAD: Persona = {
+  key: "compliance-lead",
+  tenantKind: "business",
+  roles: ["compliance_lead"],
+  displayName: "Example compliance lead",
+};
+
+export const CA_ADMIN: Persona = {
+  key: "ca-admin",
+  tenantKind: "ca_firm",
+  roles: ["ca_admin"],
+  displayName: "Example CA admin",
+  tenantId: "00000000-0000-4000-8000-00000000000c",
+};
+
+export const ANALYST: Persona = {
+  key: "analyst",
+  tenantKind: "internal",
+  roles: ["analyst"],
+  displayName: "Example analyst",
+};
+
+export const ADMIN: Persona = {
+  key: "admin",
+  tenantKind: "internal",
+  roles: ["admin"],
+  displayName: "Example admin",
+};
+
+/** The personas the sweep tries, in order; the first one a screen admits is used. */
+export const PERSONAS: readonly Persona[] = [OWNER, COMPLIANCE_LEAD, CA_ADMIN, ADMIN];
+
+/** The first persona that may open the screen, or null for a public one. */
+export function personaFor(screen: Screen): Persona | null {
+  if (screen.roles === "public") return null;
+  const persona = PERSONAS.find((candidate) =>
+    isVisibleTo(screen, candidate.roles, candidate.tenantKind),
+  );
+  if (persona === undefined) throw new Error(`no persona may open ${screen.id}`);
+  return persona;
+}
+
+const ROLE_LABELS: Readonly<Record<Role, string>> = {
+  owner: "Owner",
+  staff: "Staff",
+  ca_admin: "CA admin",
+  ca_staff: "CA staff",
+  compliance_lead: "Compliance lead",
+  analyst: "Analyst",
+  reviewer: "Reviewer",
+  admin: "Admin",
+};
+
+/** Fills and submits the fake sign-in form on the page; resolves once the redirect landed. */
+export async function signInThroughForm(
+  page: Page,
+  persona: Persona,
+  next?: string,
+): Promise<void> {
+  await page.goto(next === undefined ? "/sign-in" : `/sign-in?next=${encodeURIComponent(next)}`);
+  await page.getByLabel("Tenant kind").selectOption(persona.tenantKind);
+  for (const role of persona.roles) {
+    await page.getByRole("checkbox", { name: ROLE_LABELS[role] }).check();
+  }
+  await page.getByLabel("Display name").fill(persona.displayName);
+  if (persona.tenantId !== undefined) await page.getByLabel("Tenant id").fill(persona.tenantId);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.waitForURL((url) => !url.pathname.startsWith("/sign-in"));
+}
+
+type StorageState = Awaited<ReturnType<BrowserContext["storageState"]>>;
+
+const STATES = new Map<string, Promise<StorageState>>();
+
+/** Signs the persona in once per worker (through the form) and returns the cookies to reuse. */
+export function storageStateFor(
+  browser: Browser,
+  baseURL: string,
+  persona: Persona,
+): Promise<StorageState> {
+  let state = STATES.get(persona.key);
+  if (state === undefined) {
+    state = (async () => {
+      const context = await browser.newContext({ baseURL });
+      const page = await context.newPage();
+      await signInThroughForm(page, persona);
+      const saved = await context.storageState();
+      await context.close();
+      return saved;
+    })();
+    STATES.set(persona.key, state);
+  }
+  return state;
+}
+
+export interface Fixtures {
+  /** Fails the test when the page, or the given selector, has a serious or critical finding. */
+  checkA11y: (include?: string) => Promise<void>;
+  /** Gives the page the persona's session (signed in once per worker through the fake form). */
+  signIn: (persona: Persona) => Promise<void>;
+}
+
+export const test = base.extend<Fixtures>({
   // Playwright calls the second argument "use"; it is named differently here so the React hooks
   // lint rule does not read it as a hook call.
   checkA11y: async ({ page }, provide) => {
     await provide(async (include) => {
       const violations = await seriousViolations(page, include);
       expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
+    });
+  },
+  signIn: async ({ browser, baseURL, page }, provide) => {
+    await provide(async (persona) => {
+      const state = await storageStateFor(browser, baseURL ?? "http://localhost:3000", persona);
+      await page.context().addCookies(state.cookies);
     });
   },
 });

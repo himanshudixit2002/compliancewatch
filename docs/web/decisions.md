@@ -160,7 +160,7 @@ by its entry; `next` is honoured only as a same-origin path (`safeNext`); the re
 come from the registry through `signInHref`, `forbiddenHref` and `homeFor` in
 `shared/config/nav.ts`, which is why `/businesses` has a waiting entry today.
 
-## D-015: One sign-in port; the fake adapter exists only in local and test
+## D-016: One sign-in port; the fake adapter exists only in local and test
 
 2026-09-29. The identity provider (ADR-014) and its routes are not on `main`, but every page
 behind a role needs a session to be built and tested against. `server/auth/provider.ts`
@@ -176,3 +176,18 @@ the real one is a drop-in; the second factor a fake session asserts is documente
 not verified; the fake adapter keeps its name and file when the identity work replaces its body
 with the dev provider tokens and the session exchange; failures are `Result` errors with
 web-local problems, mapped to a form's `ActionState` like a service failure.
+
+## D-017: Sign-out is a POST route handler; the sign-in form gets its action and options as props
+
+2026-09-29. Two small choices the later screens copy. Sign-out is `POST /sign-out`
+(`app/sign-out/route.ts`): the shells and the account page submit a plain form to it, so it
+works without JavaScript, the handler expires the cookie on the redirect response, refuses a
+request whose `Origin` is another site, and any other method is a 405; there is no sign-out
+server action to keep in step. The sign-in form (`features/auth/ui/dev-sign-in-form.tsx`) is a
+client component and the layer rule keeps client components to `shared`, `entities` and their
+own directory, so the page passes it the `signIn` server action and the options the model built
+(`signInFormOptions()`: the input names, the tenant kinds, the roles per kind) as props instead
+of importing them. Consequences: a form's vocabulary lives in the feature's `model/` and is
+unit-tested there; the client bundle carries no config module; the tenant shell's header shows
+the business and account groups of the navigation for a session (settings pages stay reachable
+from the sitemap until a settings menu exists).

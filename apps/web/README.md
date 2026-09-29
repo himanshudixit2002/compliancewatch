@@ -3,9 +3,9 @@
 Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 10, 12, 14 and 15.
 
-- **Owns:** Next.js 16 app: owner portal, CA dashboard, and the /admin internal tools (review workbench, source manager, pipeline console, eval dashboard, prompt and model registry, ontology editor, tenant admin, impact explorer, notification console, cost dashboard, backfill and replay, feature flag console). On `main`: the foundation (screen registry, roles, navigation, i18n, helpers), the public pages, the `/admin` tool list, the not-available pages for every screen whose backend is absent, the legal pages and the design catalogue
+- **Owns:** Next.js 16 app: owner portal, CA dashboard, and the /admin internal tools (review workbench, source manager, pipeline console, eval dashboard, prompt and model registry, ontology editor, tenant admin, impact explorer, notification console, cost dashboard, backfill and replay, feature flag console). On `main`: the foundation (screen registry, roles, navigation, i18n, helpers), the server-side data layer (validated environment, typed clients, the encrypted session cookie, the gates, the sign-in provider port with its fake adapter), the public pages, the sign-in, sign-out and account pages, the `/admin` tool list behind its gate, the not-available pages for every screen whose backend is absent, the legal pages and the design catalogue
 - **Owning team:** Core Product; the `/admin` routes belong to Regulatory Intelligence (CODEOWNERS) (guide section 14)
-- **Consumes:** the services' REST APIs through a server-only layer (the browser never calls a service; no page calls one yet); `docs/legal` at build time; packages/ui
+- **Consumes:** the services' REST APIs through a server-only layer (the browser never calls a service; no page calls one yet); the session cookie it encrypts itself; `docs/legal` at build time; packages/ui
 - **Emits / publishes:** n/a (UI)
 
 The reasoning behind the layout, the design system, the tests and the screen procedure is in
@@ -15,13 +15,17 @@ The reasoning behind the layout, the design system, the tests and the screen pro
 
 ```
 src/app/            route files only: page.tsx is gate, query, render; layouts, error, global-error, not-found
-  (public)/         home, /sitemap, /legal/[doc], /forbidden, /design under the visitor shell
-  (app)/            tenant screens under AppShell; [...slug] serves unbuilt tenant screens
-  admin/            /admin home and layout under AdminShell; [...slug] serves unbuilt tools
+  (public)/         home, /sitemap, /legal/[doc], /forbidden, /design, /sign-in under the visitor shell
+  (app)/            tenant screens under the session-aware shell: /account (with loading.tsx); [...slug] serves
+                    unbuilt tenant screens behind the entry's roles
+  admin/            /admin home and layout under AdminShell, behind requireAdmin; [...slug] serves unbuilt
+                    tools
+  sign-out/         POST handler: clears the session cookie and returns to /sign-in (GET is a 405)
   api/health/       liveness handler {status, version, commit}
 src/features/       one directory per screen family: model/, ui/, index.ts (ports, gateway, queries and
                     actions join when a feature reads data); today: home, sitemap, legal, not-available,
-                    admin-home, system-pages, design-catalogue
+                    admin-home, system-pages, design-catalogue, auth (the fake sign-in form, the signIn action,
+                    the seed-state query), account
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
                     problem/ types the RFC 9457 body every service returns (from the generated contracts);
                     session/ the session claims, the render-safe view and the time helpers
@@ -42,7 +46,8 @@ src/shared/config/  the screen registry (screens.ts), roles and permissions, fla
 src/shared/lib/     IST dates, financial years, money and decimal strings, humanise, identifiers, pagination, urls,
                     action-state (what a server action returns to a form)
 src/shared/i18n/    messages/en.json and the typed t(); another locale falls back key by key
-src/shared/ui/      app-level compositions over the UI kit: the two shells over next/link, breadcrumbs, the status chip
+src/shared/ui/      app-level compositions over the UI kit: the two shells over next/link, breadcrumbs, the status chip,
+                    the session menu and the sign-out form
 src/test/           vitest setup, the architecture rules and test, the docs/web/screens.md drift test,
                     fake-fetch.ts (a recording fetch with problem+json answers for client and gateway tests),
                     fake-cookies.ts (the cookie store next/headers resolves to in session and gate tests)
@@ -54,8 +59,9 @@ scripts/screens-doc.mts generates docs/web/screens.md from the registry (screens
 e2e/                fixtures.ts (the axe check failing on serious or critical) and one spec per live page,
                     plus a11y.spec.ts over every registered page; tsconfig.scripts.json type-checks them
 next.config.ts      typed routes, security headers; eslint.config.mjs: Next flat config plus repo rules
-vitest.config.mts   jsdom, Testing Library, 80% coverage floor (route files are covered by e2e)
-playwright.config.ts  Playwright against `next start` on PORT with CW_WEB_ENV=test; chromium only
+vitest.config.mts   jsdom, Testing Library, 80% coverage floor (route files and proxy.ts are covered by e2e)
+playwright.config.ts  Playwright against `next start` on PORT with CW_WEB_ENV=test, the fake provider and a fixed
+                    session secret; chromium only
 .env.example        every CW_WEB_* variable the app reads, with its default; copy to .env.local
 ```
 
@@ -99,17 +105,28 @@ the process environment at the first request (never at import or build time), ke
 result, and refuses a bad value with the variable's name; unset means the documented default
 (`CW_WEB_ENV` local, the services on their canonical ports 8001-8010). The service clients
 (`server/api`) are typed from the generated contracts and used only on the server; no page calls one
-yet, and no session or gate exists: every page renders for every visitor.
+yet.
+
+Sessions and gates: `/sign-in` renders the fake provider's form (`CW_WEB_AUTH_PROVIDER=fake`,
+local and test only; unset shows "Sign-in is not configured" with the variable's name), the
+`signIn` action asks the provider port for the claims and writes `cw_session`, a jose-encrypted
+httpOnly cookie (`CW_WEB_SESSION_SECRET`, eight hours), and the visitor lands on the requested
+`next` or on the role's home (`/admin` for analysts, reviewers and admins; `/businesses` for
+every tenant role). `server/dal.ts` decrypts the cookie once per request and every page calls
+its gate first: anonymous to `/sign-in?next=`, a wrong role to `/forbidden`, a tenant role under
+`/admin` to a 404. `src/proxy.ts` sends a request without any cookie to sign-in before the
+render. `/account` shows the session facts; `POST /sign-out` clears the cookie.
 
 ## End-to-end tests
 
-The Playwright suite visits the built app without any service: the public pages, the admin
-home, the design catalogue (group by group) and every planned, waiting or ready page through
-the catch-alls, with `AxeBuilder` failing a page on any serious or critical finding. Once per
+The Playwright suite visits the built app without any service: the public pages, the sign-in,
+account and admin pages after signing in through the fake form, the design catalogue (group by
+group) and every planned, waiting or ready page through the catch-alls as the first persona its
+roles admit, with `AxeBuilder` failing a page on any serious or critical finding. Once per
 machine: `make web-e2e-install` (downloads Chromium; the package has no install script). Then
 `make web-e2e` builds the app and runs the suite on `WEB_PORT` from the root `.env` (3000 unless
-changed; the config starts `next start` there with `CW_WEB_ENV=test`, or reuses a server already
-on it outside CI). Every live page entry in the registry names its spec files under `e2e`, and
+changed; the config starts `next start` there with `CW_WEB_ENV=test`, the fake provider and a
+fixed session secret, or reuses a server already on it outside CI). Every live page entry in the registry names its spec files under `e2e`, and
 the registry test checks they exist. Playwright reports land in `playwright-report/` and
 `test-results/`, both git-ignored. On CI the `web-e2e` job runs the same suite.
 

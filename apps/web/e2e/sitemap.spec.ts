@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { ANALYST, expect, test } from "./fixtures";
 
 test.describe("sitemap", () => {
   test("lists every section with routes, roles, status and awaited routes", async ({
@@ -17,7 +17,8 @@ test.describe("sitemap", () => {
     await checkA11y();
   });
 
-  test("links a waiting tool to its not-available notice", async ({ page }) => {
+  test("links a waiting tool to its not-available notice", async ({ page, signIn }) => {
+    await signIn(ANALYST);
     await page.goto("/sitemap");
     await page.getByRole("link", { name: "Review queue" }).click();
     await expect(page).toHaveURL(/\/admin\/review$/);

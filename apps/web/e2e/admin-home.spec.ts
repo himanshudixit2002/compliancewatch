@@ -1,8 +1,10 @@
-import { expect, test } from "./fixtures";
+import { ANALYST, expect, test } from "./fixtures";
 
-// No session or allow-list exists yet: /admin renders for every visitor in local and test.
-// The session package adds the sign-in redirect and the owner 404; the proxy adds the CIDR gate.
 test.describe("admin home", () => {
+  test.beforeEach(async ({ signIn }) => {
+    await signIn(ANALYST);
+  });
+
   test("lists the internal tools from the registry with their status and services", async ({
     page,
     checkA11y,

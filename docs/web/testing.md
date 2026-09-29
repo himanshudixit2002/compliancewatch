@@ -6,7 +6,8 @@ called directly. The Playwright suite covers what unit tests cannot: the route f
 `page.tsx` is an async server component that needs a request), the shells with real
 navigation, the built app's headers and status codes, and page-level accessibility. Both levels
 run axe. No test uses a mock service, and no e2e test uses a mock of anything: the suite on
-`main` visits only pages that need no service.
+`main` visits only pages that need no service, and signs in through the real sign-in form on
+the fake provider where a page needs a session.
 
 ## Unit tests
 
@@ -51,6 +52,10 @@ outside `src` and outside the floor.
 | `shared/i18n`                    | every `t("...")` literal in `src` exists in `en.json`; interpolation; the key-by-key fallback                                               |
 | `shared/lib`                     | IST rendering, financial-year labels, decimal money, identifiers, `safeNext`                                                               |
 | `server/legal.ts`                | version and title extraction, and that no file in `docs/legal` contains a raw HTML tag (marked does not sanitise)                          |
+| `server/session.ts`, `dal.ts`    | the cookie round trip (tamper, expiry, wrong key, wrong shape), the cookie attributes per environment, each gate's redirect or 404 (the cookie store from `src/test/fake-cookies.ts`) |
+| `server/auth/*`                  | `providerFor` per variable value; the fake adapter's validation, stable user id, second-factor assertion and refusal outside local and test |
+| `features/auth`                  | the form (roles per kind, the busy state, the errors it shows) with a fake action; the action's cookie and redirect; the seed-state reader |
+| `src/proxy.ts`                   | the matcher through `next/experimental/testing/server` and the pass-or-redirect decision for every registry page (excluded from the coverage floor) |
 | `src/test/architecture.test.ts`  | the layer rules over the real tree                                                                                                         |
 | `src/test/screens-doc.test.ts`   | `docs/web/screens.md` equals the generator's output; the awaits audit                                                                      |
 | `packages/ui` tokens             | `contrast.test.ts` (4.5:1 text, 3:1 UI, both schemes), `tokens.test.ts` (the two dark blocks agree), `tokens.build.test.ts` (the utilities compile) |
@@ -59,28 +64,39 @@ outside `src` and outside the floor.
 ## End-to-end tests
 
 `apps/web/playwright.config.ts` runs the specs in `apps/web/e2e` against `next start` on `PORT`
-(3000 unless set) with `CW_WEB_ENV=test`, chromium only, and waits for `/api/health` before the
-first test. Outside CI it reuses a server already listening on that port. On CI it retries once
-and writes the HTML report. `e2e/fixtures.ts` extends `test` with `checkA11y(selector?)`, which
-runs `AxeBuilder` on the page (or one selector) and fails on any finding of impact `serious` or
-`critical`; moderate and minor findings are the unit level's business.
+(3000 unless set) with `CW_WEB_ENV=test`, `CW_WEB_AUTH_PROVIDER=fake` and a fixed session
+secret (32 bytes of `e2e`; it keys the cookies of one run and is not a secret), chromium only,
+and waits for `/api/health` before the first test. Outside CI it reuses a server already
+listening on that port. On CI it retries once and writes the HTML report. `e2e/fixtures.ts`
+extends `test` with `checkA11y(selector?)`, which runs `AxeBuilder` on the page (or one
+selector) and fails on any finding of impact `serious` or `critical` (moderate and minor
+findings are the unit level's business), and with `signIn(persona)`: the personas (`OWNER`,
+`COMPLIANCE_LEAD`, `CA_ADMIN`, `ANALYST`, `ADMIN`) are signed in once per worker through the
+fake form and their cookies are added to the test's context, so a spec that needs a session
+starts with `await signIn(ANALYST)`; `signInThroughForm(page, persona, next?)` drives the form
+itself for the specs that test it.
 
 The specs on `main`:
 
-| Spec                    | Covers                                                                                                                                                                                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `a11y.spec.ts`          | every page in the registry except the catch-alls and the legal route: live pages by their route, planned, waiting and ready pages through the catch-all with `example` for each parameter; one h1, status 200, the notice on non-live pages, axe |
-| `home.spec.ts`          | the landing links, the skip link moving focus to `main`, the sign-in link leading to the waiting notice                                                                                                                                          |
-| `sitemap.spec.ts`       | one table per section, a waiting tool's awaited route and owner, a ready tool's chip, the link to its notice                                                                                                                                     |
-| `legal.spec.ts`         | each listed document under the draft banner with its `-draft` version; an unlisted document is a 404                                                                                                                                             |
-| `design.spec.ts`        | every catalogue section with axe, the theme control, dialogs (focus, Escape, the ten-character reason), the calendar keys                                                                                                                        |
-| `admin-home.spec.ts`    | the tool list with status (waiting and ready) and service READMEs, the environment banner, sidebar navigation marking the current tool                                                                                                           |
-| `not-available.spec.ts` | an admin tool's awaited routes and breadcrumbs, a parameterised tenant route through the catch-all, a planned tool's sentence and note, a ready tool's sentence and what it will use, real 404s                                                  |
-| `forbidden.spec.ts`     | the page and its two links                                                                                                                                                                                                                       |
-| `health.spec.ts`        | the health JSON, the static security headers, no `x-powered-by`                                                                                                                                                                                  |
+| Spec                     | Covers                                                                                                                                                    |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `a11y.spec.ts`           | every page in the registry except the catch-alls and the legal route, grouped by the first persona its roles and tenant kinds admit (public pages without a session): live pages by their route, planned, waiting and ready pages through the catch-all with `example` for each parameter; one h1, status 200, the notice on non-live pages, axe |
+| `home.spec.ts`           | the landing links, the skip link moving focus to `main`, the sign-in link leading to the form                                                              |
+| `sign-in.spec.ts`        | the redirect with `next` from a gated page, the server's field errors, an owner signing in, returning to `/account`, the account menu and signing out, the role homes (`/businesses`, `/admin`), a signed-in visit to `/sign-in`, the roles following the tenant kind, `/sign-out` as POST only with the origin check |
+| `account.spec.ts`        | the session facts in IST, the copy controls, the note on `/me`, the header name linking to `/account`                                                     |
+| `admin-gate.spec.ts`     | anonymous `/admin` to sign-in with `next`, a 404 for a tenant role on every admin path, an analyst opening the tools without the admin-only entries and a 404 on one of them |
+| `sitemap.spec.ts`        | one table per section, a waiting tool's awaited route and owner, a ready tool's chip, the link to its notice                                              |
+| `legal.spec.ts`          | each listed document under the draft banner with its `-draft` version; an unlisted document is a 404                                                        |
+| `design.spec.ts`         | every catalogue section with axe, the theme control, dialogs (focus, Escape, the ten-character reason), the calendar keys                                   |
+| `admin-home.spec.ts`     | as an analyst: the tool list with status (waiting and ready) and service READMEs, the environment banner, sidebar navigation marking the current tool     |
+| `not-available.spec.ts`  | an admin tool's awaited routes and breadcrumbs, a parameterised tenant route through the catch-all, `/forbidden` for the wrong tenant kind, a planned tool's sentence and note, a ready tool's sentence and what it will use, real 404s with and without a session |
+| `forbidden.spec.ts`      | the page and its two links                                                                                                                                |
+| `health.spec.ts`         | the health JSON, the static security headers, no `x-powered-by`                                                                                            |
 
 Every live page entry in the registry names its spec files in `e2e`, and `screens.test.ts`
-checks they exist. A spec is named after what it covers, not after the registry id.
+checks they exist. A spec is named after what it covers, not after the registry id. The
+`web-e2e` CI job runs the same command; the fake provider and the fixed secret come from the
+Playwright config, so the job needs no extra variable for them.
 
 ## Running things
 

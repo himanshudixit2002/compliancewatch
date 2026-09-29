@@ -20,8 +20,10 @@ import { decryptSession, readSessionCookie } from "./session";
  *   requireSession()       claims, or a redirect to /sign-in?next=
  *   requireRole(roles)     claims holding one of the roles, or /sign-in (anonymous) or
  *                          /forbidden (wrong role); "public" returns the optional session
- *   requireScreen(screen)  requireRole with the entry's roles and tenant kinds; admin
- *                          entries go through requireAdmin
+ *   requireScreen(screen)  requireRole with the entry's roles and tenant kinds; an admin
+ *                          entry goes through requireAdmin and answers 404 to a regulatory
+ *                          role the entry does not list; requireScreenSession is the same
+ *                          for an entry that is never public
  *   requireAdmin()         a regulatory role, or notFound(): a tenant role must not learn
  *                          that a tool exists
  *   sessionForRender()     the render-safe view for shells and pages, never the token
@@ -89,7 +91,12 @@ export async function requireScreen(
   screen: Screen,
   params: Readonly<Record<string, string>> = {},
 ): Promise<SessionClaims | null> {
-  if (screen.section === "admin") return requireAdmin({ next: hrefFor(screen, params) });
+  if (screen.section === "admin") {
+    // An admin tool narrower than the regulatory set (admin only) is a 404 to the others too.
+    const session = await requireAdmin({ next: hrefFor(screen, params) });
+    if (screen.roles !== "public" && !hasRole(session, screen.roles)) notFound();
+    return session;
+  }
   const session = await requireRole(screen.roles, { next: hrefFor(screen, params) });
   if (
     session !== null &&
@@ -98,6 +105,17 @@ export async function requireScreen(
   ) {
     redirect(forbiddenHref());
   }
+  return session;
+}
+
+/** requireScreen for an entry that is never public; a public entry here is a programming error. */
+export async function requireScreenSession(
+  screen: Screen,
+  params: Readonly<Record<string, string>> = {},
+): Promise<SessionClaims> {
+  if (screen.roles === "public") throw new Error(`${screen.id} is public; use requireScreen`);
+  const session = await requireScreen(screen, params);
+  if (session === null) redirect(signInHref(hrefFor(screen, params)));
   return session;
 }
 
