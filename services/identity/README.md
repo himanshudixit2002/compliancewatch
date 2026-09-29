@@ -73,9 +73,11 @@ Roles depend on the tenant's kind: a business has owners, staff and compliance l
 CA admins, CA staff and compliance leads; the internal tenant has analysts, reviewers and admins.
 Tenant admins (owners, CA admins, and admins of the internal tenant) manage users. With a verified
 token the admin's own session version is checked against the store first, so an admin whose roles
-changed a moment ago is refused at once; in header mode, and dual mode without a token, the tenant
-header names the tenant as on every tenant route. The last active admin of a tenant can be neither
-demoted nor disabled. The internal tenant is set up once by an operator with
+changed a moment ago is refused at once. In dual mode these routes need the token (401
+`auth-token-required` without one), since the users and roles they store outlive the switch to
+token mode. In header mode the tenant header names the tenant as on every tenant route, and an
+anonymous caller grants no owner, CA admin, analyst, reviewer or admin role (403
+`auth-forbidden`). The last active admin of a tenant can be neither demoted nor disabled. The internal tenant is set up once by an operator with
 `identity-admin bootstrap-internal`, which creates its first admin at the identity provider; that
 admin enrols a second factor there before signing in, then invites the analysts and reviewers.
 

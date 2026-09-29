@@ -153,6 +153,27 @@ def test_without_a_token_the_tenant_header_is_trusted_and_nobody_is_named(team: 
         team.list.run(TenantId.new(), ANONYMOUS)
 
 
+def test_without_a_token_nobody_grants_an_admin_or_regulatory_role(team: Team) -> None:
+    with pytest.raises(AuthForbiddenError, match="owner"):
+        team.invite.run(
+            team.tenant.id, ANONYMOUS, contact=Contact(phone=STAFF_PHONE), roles=[Role.OWNER]
+        )
+    assert team.provider.lookup(team.provider.subject_for(Contact(phone=STAFF_PHONE))) is None
+    staff = team.invite.run(
+        team.tenant.id, ANONYMOUS, contact=Contact(phone=STAFF_PHONE), roles=[Role.STAFF]
+    )
+    with pytest.raises(AuthForbiddenError, match="owner"):
+        team.change.run(team.tenant.id, ANONYMOUS, staff.id, [Role.OWNER])
+    lead = team.change.run(team.tenant.id, ANONYMOUS, staff.id, [Role.COMPLIANCE_LEAD])
+    assert lead.roles == {Role.COMPLIANCE_LEAD}
+    promoted = team.change.run(team.tenant.id, team.as_owner, staff.id, [Role.OWNER])
+    assert promoted.roles == {Role.OWNER}
+    kept = team.change.run(
+        team.tenant.id, ANONYMOUS, team.owner.id, [Role.OWNER, Role.COMPLIANCE_LEAD]
+    )
+    assert kept.roles == {Role.OWNER, Role.COMPLIANCE_LEAD}, "a role already held is no grant"
+
+
 def test_invitations_refuse_roles_the_kind_lacks_and_taken_addresses(team: Team) -> None:
     with pytest.raises(RoleNotAllowedError):
         team.invite.run(
@@ -315,6 +336,58 @@ def test_the_team_routes_in_header_mode() -> None:
         unknown = client.get(USERS, headers={"x-tenant-id": str(uuid4())})
         assert unknown.status_code == 404
         assert unknown.json()["type"].endswith(":identity-tenant-not-found")
+
+
+def test_header_mode_grants_no_admin_role_to_an_anonymous_caller() -> None:
+    with TestClient(build_app(identity_settings())) as client:
+        created = signed_up(client)
+        tenant = {"x-tenant-id": created["tenant"]["id"]}
+        owner = client.post(
+            USERS, json={"email": "owner2@acme.example", "roles": ["owner"]}, headers=tenant
+        )
+        assert owner.status_code == 403, owner.text
+        assert owner.json()["type"].endswith(":auth-forbidden")
+        staff = client.post(
+            USERS, json={"email": "staff@acme.example", "roles": ["staff"]}, headers=tenant
+        ).json()
+        promoted = client.put(
+            f"{USERS}/{staff['id']}/roles", json={"roles": ["owner"]}, headers=tenant
+        )
+        assert promoted.status_code == 403, promoted.text
+
+
+def test_dual_mode_user_routes_need_the_token() -> None:
+    with TestClient(build_app(identity_settings(auth_mode="dual"))) as client:
+        created = signed_up(client)
+        owner = bearer(created["session"]["access_token"])
+        tenant = {"x-tenant-id": created["tenant"]["id"]}
+        staff = client.post(USERS, json={"phone": STAFF_PHONE, "roles": ["staff"]}, headers=owner)
+        assert staff.status_code == 201, staff.text
+        staff_id = staff.json()["id"]
+        as_staff = bearer(
+            client.post(
+                "/v1/identity/sessions",
+                json={"provider_token": provider_token(client, STAFF_PHONE)},
+            ).json()["access_token"]
+        )
+        own_roles = f"{USERS}/{staff_id}/roles"
+        refused = client.put(own_roles, json={"roles": ["owner"]}, headers=as_staff)
+        assert refused.status_code == 403
+        for method, path, body in (
+            ("put", own_roles, {"roles": ["owner"]}),
+            ("post", f"{USERS}/{created['user']['id']}/disable", None),
+            ("post", USERS, {"email": "reviewer@acme.example", "roles": ["staff"]}),
+            ("get", USERS, None),
+        ):
+            anonymous = client.request(method, path, json=body, headers=tenant)
+            assert anonymous.status_code == 401, (path, anonymous.text)
+            assert anonymous.json()["type"].endswith(":auth-token-required")
+            assert anonymous.headers["www-authenticate"] == "Bearer"
+        listed = client.get(USERS, headers=owner).json()["items"]
+        assert [(user["roles"], user["status"]) for user in listed] == [
+            (["owner"], "active"),
+            (["staff"], "active"),
+        ]
 
 
 def test_a_service_principal_is_refused_by_the_use_cases(team: Team) -> None:

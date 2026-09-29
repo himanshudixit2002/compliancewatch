@@ -6,15 +6,19 @@ session. It reads no bearer token: the person has no session until the tenant ex
 
 The user routes need a tenant admin: an owner, a CA admin, or an admin of the internal tenant.
 With a verified token the caller's session version is checked against the store, so a revoked
-admin is refused at once. In header mode (and dual mode without a token) the tenant header names
-the tenant, as on every tenant route; production runs token mode.
+admin is refused at once. Outside header mode they need that token: in dual mode a request without
+one is a 401, not the anonymous caller other tenant routes still serve, because the users and
+roles it would store outlive the switch to token mode. In header mode the tenant header names the
+tenant, as on every tenant route, and an anonymous caller grants no admin or regulatory role;
+production runs token mode.
 """
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 
-from domain_kernel.access import TENANT_ADMIN_ROLES, Role
+from domain_kernel.access import TENANT_ADMIN_ROLES, Principal, Role
 from domain_kernel.ids import UserId
 from identity.api.deps import Tenant, Wired
 from identity.api.schemas import (
@@ -26,13 +30,30 @@ from identity.api.schemas import (
     UsersOut,
 )
 from identity.domain.tenancy import Contact, TenantKind
-from py_common.auth.fastapi import CurrentPrincipal, require_roles
+from py_common.auth.errors import AuthTokenRequiredError
+from py_common.auth.fastapi import CurrentPrincipal, authenticator_of, require_roles
 from py_common.problems import problem_responses
 
 router = APIRouter(prefix="/v1/identity", tags=["identity"])
 
-TenantAdmin = Depends(require_roles(TENANT_ADMIN_ROLES, Role.ADMIN))
-"""An owner, a CA admin or an admin of the internal tenant; a service is refused."""
+admin_roles = require_roles(TENANT_ADMIN_ROLES, Role.ADMIN)
+
+
+async def tenant_admin(
+    request: Request, principal: Annotated[Principal, Depends(admin_roles)]
+) -> Principal:
+    """An owner, a CA admin or an admin of the internal tenant; a service is refused. Only
+    header mode lets the anonymous caller through: in dual mode a request without a token is a
+    401, as it is in token mode."""
+    if not principal.is_authenticated and authenticator_of(request).mode != "header":
+        raise AuthTokenRequiredError(
+            "Managing users needs a tenant admin's access token as Authorization: Bearer <token>"
+        )
+    return principal
+
+
+TenantAdmin = Depends(tenant_admin)
+"""The guard of the user routes (``tenant_admin``)."""
 
 
 @router.post(

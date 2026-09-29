@@ -12,9 +12,11 @@ who signs in with a second factor, so that sign-up needs one too.
 A tenant admin (an owner, a CA admin, or an admin of the internal tenant) lists the tenant's users,
 invites one, changes a user's roles or disables one. When a verified token names the caller, its
 session version is checked against the store first, so an admin whose roles changed a moment ago
-is refused at once, and the caller is ``changed_by`` on the event. Without a token (header mode,
-or dual mode without one) the tenant header names the tenant as it does on every tenant route,
-and ``changed_by`` is empty. ``InviteUser`` creates the person's account at the identity provider
+is refused at once, and the caller is ``changed_by`` on the event. Without a token (header mode;
+the routes refuse a request without one in dual mode) the tenant header names the tenant as it
+does on every tenant route, and ``changed_by`` is empty. Such an anonymous caller grants no admin
+or regulatory role (``SIGNED_IN_GRANTS``): identity would put the role in the tokens it signs,
+which the other services trust. ``InviteUser`` creates the person's account at the identity provider
 first and removes it again when the user cannot be stored. A change of roles and disabling each
 bump the user's session version; every change publishes user.role.changed. The last active admin
 of a tenant can be neither demoted nor disabled.
@@ -24,8 +26,9 @@ from collections.abc import Callable, Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Final
 
-from domain_kernel.access import Principal, Role
+from domain_kernel.access import REGULATORY_ROLES, TENANT_ADMIN_ROLES, Principal, Role
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.events import utc_now
 from domain_kernel.ids import TenantId, UserId
@@ -55,6 +58,9 @@ from py_common.auth.errors import AuthForbiddenError
 
 SIGN_UP_KINDS = (TenantKind.BUSINESS, TenantKind.CA_FIRM)
 """Sign-up creates businesses and CA firms; an operator sets up the internal tenant."""
+SIGNED_IN_GRANTS: Final = TENANT_ADMIN_ROLES | REGULATORY_ROLES
+"""Roles only an admin a verified token names may grant: those that manage a tenant's users and
+those that curate the rulebook."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +177,16 @@ def _changed_by(admin: User | None) -> UserId | None:
     return None if admin is None else admin.id
 
 
+def check_grant(actor: Principal, granted: Iterable[Role]) -> None:
+    """Refuse an anonymous ``actor`` granting any of ``SIGNED_IN_GRANTS``."""
+    refused = sorted(role.value for role in SIGNED_IN_GRANTS.intersection(granted))
+    if refused and not actor.is_authenticated:
+        raise AuthForbiddenError(
+            f"granting {', '.join(refused)} needs a tenant admin's access token, which identity "
+            "reads only when CW_AUTH_MODE is dual or token"
+        )
+
+
 class ListUsers:
     def __init__(self, unit_of_work: UnitOfWorkFactory) -> None:
         self._unit_of_work = unit_of_work
@@ -205,6 +221,7 @@ class InviteUser:
         with self._unit_of_work(tenant_id) as uow:
             tenant, _ = admin_context(uow, tenant_id, actor)
         wanted = allowed_roles(tenant.kind, roles)
+        check_grant(actor, wanted)
         subject = self._provider.provision(
             email=contact.email, phone=contact.phone, display_name=display_name.strip()
         )
@@ -264,12 +281,14 @@ class ChangeRoles:
         self, tenant_id: TenantId, actor: Principal, user_id: UserId, roles: Iterable[Role]
     ) -> User:
         """The user with ``roles``; the same roles again change nothing and publish nothing."""
+        wanted = frozenset(roles)
         with self._unit_of_work(tenant_id) as uow:
             tenant, admin = admin_context(uow, tenant_id, actor)
             user = uow.users.get(user_id)
             if user is None:
                 raise UserNotFoundError(str(user_id))
-            changed = user.with_roles(roles, tenant, colleagues=uow.users.list(), at=self._clock())
+            check_grant(actor, wanted - user.roles)
+            changed = user.with_roles(wanted, tenant, colleagues=uow.users.list(), at=self._clock())
             if changed is user:
                 return user
             uow.users.save(changed)
