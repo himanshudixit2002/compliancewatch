@@ -264,7 +264,7 @@ export interface operations {
         rule_version_id?: string | null;
       };
       header?: {
-        /** @description Tenant UUID; required until the identity service issues tokens */
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
       path?: never;
@@ -283,6 +283,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

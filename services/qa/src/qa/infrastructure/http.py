@@ -7,6 +7,11 @@ success is ``DependencyUnavailableError`` with the service, the status and the s
 body: a transport error, a 5xx, a refusal, or an answer that is not JSON or
 not the shape the reader expects. Retrying is the caller's choice; a question fails fast.
 Tests pass their own ``httpx2.Client`` (a ``MockTransport`` or a FastAPI ``TestClient``).
+
+Every request carries the qa service's own access token once ``CW_SERVICE_CLIENT_SECRET`` is set
+(``auth``, from ``py_common.auth.service_auth_from``, applied per request so an injected client
+is left as it is). A token the identity service could not issue is
+``DependencyUnavailableError`` too: without it the other services would refuse the call.
 """
 
 from collections.abc import Iterator, Mapping
@@ -15,6 +20,7 @@ from typing import Any, Final
 
 import httpx2
 
+from py_common.auth import ServiceTokenUnavailableError
 from qa.domain.errors import DependencyUnavailableError, ModelBudgetExceededError
 
 DETAIL_CHARS: Final = 300
@@ -23,9 +29,14 @@ type Params = Mapping[str, str | int]
 
 
 class JsonHttp:
-    def __init__(self, client: httpx2.Client, service: str) -> None:
+    """JSON calls to ``service`` over ``client``, with ``auth`` (None sends no token)."""
+
+    def __init__(
+        self, client: httpx2.Client, service: str, *, auth: httpx2.Auth | None = None
+    ) -> None:
         self._client = client
         self.service = service
+        self._auth = auth
 
     def get(
         self,
@@ -57,9 +68,12 @@ class JsonHttp:
                 params=dict(params or {}),
                 json=None if body is None else dict(body),
                 headers=dict(headers or {}),
+                auth=httpx2.USE_CLIENT_DEFAULT if self._auth is None else self._auth,
             )
         except httpx2.TransportError as exc:
             raise DependencyUnavailableError(f"{self.service} unreachable: {exc}") from exc
+        except ServiceTokenUnavailableError as exc:
+            raise DependencyUnavailableError(f"no service token for {self.service}: {exc}") from exc
         if response.status_code == 404:
             return None
         if response.status_code == 429:

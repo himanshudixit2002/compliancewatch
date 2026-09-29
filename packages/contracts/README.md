@@ -116,8 +116,8 @@ a name two services use for different schemas gets each service's name as a pref
 (`ProfileProblem`), with every reference following the rename. The same path and method in two
 services, or an `operationId` used twice, fails the build. The spec's `info` comes from
 `public.meta.json`, and every operation requires the `bearerAuth` scheme, the identity
-service's access token; until identity issues tokens the services read the tenant from the
-`x-tenant-id` header.
+service's access token; while `CW_AUTH_MODE` is `header`, the default, the services read the
+tenant from the `x-tenant-id` header instead.
 
 The build also holds each public operation to the API rules and fails with one line per
 operation that breaks one:
@@ -144,11 +144,11 @@ regenerated REST models together.
 
 ## Events
 
-Sixteen topics have a schema: `document.discovered`, `document.parsed`,
+Eighteen topics have a schema: `document.discovered`, `document.parsed`,
 `rule.candidate.created`, `rule.published`, `rule.superseded`, `rule.withdrawn`,
 `rule.deadline_changed`, `profile.updated`, `applicability.decided`, `obligation.created`,
 `obligation.due_soon`, `obligation.closed`, `obligation.rescheduled`, `notification.sent`,
-`notification.failed` and `tenant.deletion.requested`. The gateway's `llm.call.completed` and
+`notification.failed`, `tenant.created`, `tenant.deletion.requested` and `user.role.changed`. The gateway's `llm.call.completed` and
 `llm.budget.alarmed` are still log lines and get a schema when they gain a consumer; until then
 they are listed, with the reason, in `LOG_ONLY_TOPICS` in `scripts/check_topics.py`.
 

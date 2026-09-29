@@ -1,10 +1,10 @@
 """A tenant's notifications: a business's history page by page, one notification, and a resend.
 
-Notifications are tenant data: every route needs the ``x-tenant-id`` header and sees only its
-tenant's notifications. The history is newest first; ``state`` keeps one state, and the
-``cursor`` of a page's ``next_cursor`` reads the next. Only a notification that failed for good
-can be resent; it is queued again and the dispatcher sends it within seconds, checking consent
-and quiet hours as it does for any other.
+Notifications are tenant data: every route acts for one tenant (``deps.Tenant``: a user's token
+names it, otherwise the ``x-tenant-id`` header) and sees only its tenant's notifications. The
+history is newest first; ``state`` keeps one state, and the ``cursor`` of a page's ``next_cursor``
+reads the next. Only a notification that failed for good can be resent; it is queued again and the
+dispatcher sends it within seconds, checking consent and quiet hours as it does for any other.
 """
 
 from typing import Annotated
@@ -32,7 +32,7 @@ def _keyset(notification: Notification) -> NotificationKeyset:
 @router.get(
     "/notifications",
     summary="A business's notifications, newest first, a page at a time",
-    responses=problem_responses(401, 422),
+    responses=problem_responses(401, 403, 422),
 )
 def list_notifications(
     tenant: Tenant,
@@ -59,7 +59,7 @@ def list_notifications(
 @router.get(
     "/notifications/{notification_id}",
     summary="One notification of the tenant, 404 when it has none by that id",
-    responses=problem_responses(401, 404),
+    responses=problem_responses(401, 403, 404),
 )
 def get_notification(notification_id: UUID, tenant: Tenant, wired: Wired) -> NotificationOut:
     found = wired.get_notification.run(tenant, NotificationId(notification_id))
@@ -69,7 +69,7 @@ def get_notification(notification_id: UUID, tenant: Tenant, wired: Wired) -> Not
 @router.post(
     "/notifications/{notification_id}/resend",
     summary="Queue a notification that failed for good again; 409 in any other state",
-    responses=problem_responses(401, 404, 409),
+    responses=problem_responses(401, 403, 404, 409),
 )
 def resend_notification(notification_id: UUID, tenant: Tenant, wired: Wired) -> NotificationOut:
     return NotificationOut.from_notification(

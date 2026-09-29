@@ -116,11 +116,43 @@ withdraw and the sweep) need `CW_RULEBOOK_REVIEW_TOKEN` in `x-cw-review-token` i
 one. The write token does not open the analyst's routes, so a leaked pipeline secret cannot
 approve or publish a rule; give the two different values. The review token is still a shared
 secret, not an identity: the `actor_id` and `decided_by` in the bodies are asserted by the caller
-until the identity service issues them. Publishing, withdrawing and the sweep also need
+(see Authentication below for access tokens, which name the actor). Publishing, withdrawing and
+the sweep also need
 `CW_RULEBOOK_PUBLISH_ENABLED=true` (default off, 503 `rulebook-publishing-disabled`); citing and
 review work without it. The spec is committed at `packages/contracts/openapi/rulebook.v1.json`
 (`make openapi SERVICE=rulebook`) and pinned by `tests/contract/test_openapi.py`.
 `CW_RULEBOOK_STORE=memory` runs the service without a database (tests and demos).
+
+### Authentication
+
+The caller comes from `py_common.auth` by `CW_AUTH_MODE` (`api/deps.py`), and every write is one
+of two kinds. `PipelineWrite` (documents, mentions, relation candidates, clause embeddings) takes a
+service token with `rulebook:write`. `AnalystWrite` takes a signed-in user with the route's roles:
+
+| Routes | Roles (or scope) |
+| --- | --- |
+| entity review decisions, relation approvals and rejections, the sweep | `analyst`, `reviewer` or `admin` |
+| `PUT .../citations`, `POST .../submit` | `analyst`, or a service with `rulebook:write` |
+| `POST .../return` | `analyst` or `reviewer`, or a service with `rulebook:write` |
+| `POST .../approve`, `.../publish`, `.../withdraw` | `reviewer` |
+
+- `header` (the default): no token is read; the two shared tokens guard the writes as above.
+- `dual`: a request with a bearer token is served by its scope or roles, and one without it by
+  the shared tokens. An unset shared token then asks for an access token (401
+  `auth-token-required`) instead of answering 503.
+- `token`: only a bearer opens the writes (401 `auth-token-required` without one); the shared
+  tokens are refused.
+
+A caller a token names but who lacks the role or scope is a 403 `auth-forbidden`, whatever shared
+token it also sends. A signed-in user is recorded as who decided a review (`decided_by`, their
+user id) or took a step on a version (`actor_id`), and the body's value is ignored, so the two
+approvals of a high-impact version come from two people; a service, which is no person, still
+names the actor in the body. The review queues (`GET /v1/rulebook/review/entities`, `.../items`
+and `GET /v1/rulebook/review/relations`) need an `analyst`, `reviewer` or `admin` token in token
+mode, and such a token when a bearer is sent in dual mode; without a token they stay open. The
+rest of the read API needs no token in any mode. Sessions of regulatory
+roles carry a second factor, which identity enforces when it issues them.
+`tests/unit/test_auth_mode.py` covers the three modes.
 
 ## Search
 

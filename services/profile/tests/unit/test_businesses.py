@@ -1,6 +1,7 @@
 """The business API on the memory store: the use cases (create, update, read, list, add a
 registration) and the routes under /v1/businesses with idempotency keys and pagination."""
 
+import threading
 from collections.abc import Iterator
 from typing import Any
 from uuid import uuid4
@@ -359,6 +360,25 @@ def test_the_list_pages_by_name_and_filters_by_name_pan_or_gstin(service: Servic
         service.list.run(OTHER_TENANT, after=alpha.id, limit=2)
     with pytest.raises(ValueError, match="at least 1"):
         service.list.run(TENANT, limit=0)
+
+
+def test_two_businesses_created_in_parallel_are_both_kept(service: Service) -> None:
+    """Overlapping units of work of one tenant: the second waits for the first to commit instead
+    of starting from the same copy of the store and dropping the first business."""
+    done = threading.Event()
+
+    def create_bravo() -> None:
+        service.create.run(TENANT, name="Bravo", pan=PAN_BRAVO)
+        done.set()
+
+    with service.store(TENANT) as uow:
+        uow.profiles.add(ProfileNode.entity(tenant_id=TENANT, pan=PAN_ALPHA, name="Alpha", at=NOW))
+        thread = threading.Thread(target=create_bravo)
+        thread.start()
+        assert not done.wait(0.05), "a second unit of work ran inside the first"
+    thread.join(timeout=5)
+    assert done.is_set()
+    assert names(service.list.run(TENANT, limit=5)) == ["Alpha", "Bravo"]
 
 
 def test_a_registration_is_added_under_its_pan_and_prefilled(service: Service) -> None:

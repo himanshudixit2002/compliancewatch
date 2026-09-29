@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query
 
 from domain_kernel.ids import ClauseId, DocumentId
 from py_common.problems import problem_responses
-from rulebook.api.deps import Wired, WriteAccess
+from rulebook.api.deps import PipelineAccess, Wired
 from rulebook.api.read_schemas import ClauseDetailOut
 from rulebook.api.search_schemas import EmbeddingsIn, EmbeddingsStoredOut, SearchHitOut, SearchIn
 
@@ -17,8 +17,8 @@ router = APIRouter(tags=["search"])
 @router.put(
     "/clauses/embeddings",
     summary="Store clause embeddings from one model; a clause's first embedding stays",
-    dependencies=[WriteAccess],
-    responses=problem_responses(401, 422, 503),
+    dependencies=[PipelineAccess],
+    responses=problem_responses(401, 403, 422, 503),
 )
 def store_embeddings(body: EmbeddingsIn, wired: Wired) -> EmbeddingsStoredOut:
     report = wired.store_embeddings.run(

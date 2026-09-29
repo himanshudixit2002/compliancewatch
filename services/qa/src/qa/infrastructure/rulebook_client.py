@@ -31,17 +31,19 @@ SERVICE: Final = "rulebook"
 
 
 class HttpRulebook:
-    """``base_url`` is ``CW_RULEBOOK_URL``. Pass ``client`` to talk to an in-process app (a
-    FastAPI ``TestClient``) instead of the network."""
+    """``base_url`` is ``CW_RULEBOOK_URL`` and ``auth`` the service's token auth (None sends no
+    token). Pass ``client`` to talk to an in-process app (a FastAPI ``TestClient``) instead of the
+    network."""
 
     def __init__(
         self,
         base_url: str = "http://localhost:8003",
         *,
         client: httpx2.Client | None = None,
+        auth: httpx2.Auth | None = None,
         timeout_seconds: float = 5.0,
     ) -> None:
-        self._http = JsonHttp(http_client(base_url, timeout_seconds, client), SERVICE)
+        self._http = JsonHttp(http_client(base_url, timeout_seconds, client), SERVICE, auth=auth)
 
     def rules_in_force(
         self, as_of: date, *, rule_key: str | None = None, regulator: str | None = None

@@ -150,6 +150,7 @@
                 "type": "null"
               }
             ],
+            "description": "The user who changed the values; ignored when an access token names the caller",
             "title": "Changed By"
           },
           "changes": {
@@ -1025,6 +1026,7 @@
                 "type": "null"
               }
             ],
+            "description": "The user who changed the values; ignored when an access token names the caller",
             "title": "Changed By"
           }
         },
@@ -1548,6 +1550,13 @@
         "title": "ValueState",
         "type": "string"
       }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "description": "An access token from the identity service. Read when CW_AUTH_MODE is dual or token; required when it is token.",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -1667,7 +1676,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -1681,7 +1690,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -1707,6 +1716,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -1718,6 +1737,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "The tenant's businesses by name, a page at a time",
         "tags": [
           "public",
@@ -1736,7 +1760,7 @@
         "operationId": "create_business_v1_businesses_post",
         "parameters": [
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -1750,7 +1774,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           },
@@ -1810,6 +1834,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "409": {
             "content": {
               "application/problem+json": {
@@ -1841,6 +1875,11 @@
             "description": "Precondition Required"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create a business from its GSTIN, or from its PAN alone",
         "tags": [
           "public",
@@ -1870,7 +1909,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -1884,7 +1923,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -1910,6 +1949,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -1931,6 +1980,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "One business with its registrations and stored values",
         "tags": [
           "public",
@@ -1959,7 +2013,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -1973,7 +2027,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -2019,6 +2073,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -2040,6 +2104,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Store answers across the business and its registrations, or rename it",
         "tags": [
           "public",
@@ -2069,7 +2138,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -2083,7 +2152,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -2109,6 +2178,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -2130,6 +2209,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "The next onboarding question with its wording and options, and the progress",
         "tags": [
           "public",
@@ -2159,7 +2243,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -2173,7 +2257,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           },
@@ -2233,6 +2317,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -2274,6 +2368,11 @@
             "description": "Precondition Required"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Add a GSTIN registration to a business and pre-fill it",
         "tags": [
           "public",
@@ -2366,7 +2465,7 @@
         "operationId": "create_entity_v1_profile_entities_post",
         "parameters": [
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -2380,7 +2479,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -2426,6 +2525,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -2437,6 +2546,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Register a legal entity by PAN",
         "tags": [
           "profile"
@@ -2449,7 +2563,7 @@
         "operationId": "confirm_financial_year_v1_profile_financial_year_confirmations_post",
         "parameters": [
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -2463,7 +2577,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -2516,6 +2630,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -2527,6 +2651,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Open a confirm_financial_year review task per entity and missing per-year value",
         "tags": [
           "profile"
@@ -2538,7 +2667,7 @@
         "operationId": "create_location_v1_profile_locations_post",
         "parameters": [
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -2552,7 +2681,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -2598,6 +2727,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -2619,6 +2758,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Register a place of business under a registration",
         "tags": [
           "profile"
@@ -2640,7 +2784,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -2654,7 +2798,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -2680,6 +2824,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -2701,6 +2855,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "One node with its stored attribute values",
         "tags": [
           "profile"
@@ -2722,7 +2881,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -2736,7 +2895,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -2782,6 +2941,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -2803,6 +2972,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Store attribute values, unsure answers and does-not-apply answers",
         "tags": [
           "profile"
@@ -2836,7 +3010,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -2850,7 +3024,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -2876,6 +3050,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -2897,6 +3081,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "One attribute to ask for next, or none when the level is complete",
         "tags": [
           "profile"
@@ -2918,7 +3107,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -2932,7 +3121,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -2962,6 +3151,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -2983,6 +3182,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Open review tasks of a node",
         "tags": [
           "profile"
@@ -3023,7 +3227,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -3037,7 +3241,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -3063,6 +3267,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -3084,6 +3298,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "The attributes the engine evaluates: inherited down the lineage, for one year",
         "tags": [
           "profile"
@@ -3120,7 +3339,7 @@
         "operationId": "create_registration_v1_profile_registrations_post",
         "parameters": [
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -3134,7 +3353,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -3180,6 +3399,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -3191,6 +3420,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Register a GSTIN; its PAN finds or creates the entity",
         "tags": [
           "profile"
@@ -3212,7 +3446,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until the identity service issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -3226,7 +3460,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until the identity service issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -3272,6 +3506,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -3293,6 +3537,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Pre-fill a registration from its GSTIN and the GSTIN lookup, or open a verify_registration task",
         "tags": [
           "profile"

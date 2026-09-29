@@ -20,6 +20,8 @@ dependencies = [
   "opentelemetry-instrumentation-fastapi==0.66b0",
   "opentelemetry-instrumentation-sqlalchemy==0.66b0",
   "openfeature-sdk==0.10.0",
+  "pyjwt[crypto]>=2.10",  # py_common.auth: ES256 access tokens and JWKS
+  "httpx2>=2.13",  # py_common.auth: JWKS fetches and service tokens from identity
   "domain-kernel",
 ]
 

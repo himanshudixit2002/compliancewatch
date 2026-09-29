@@ -22,6 +22,7 @@ from identity.api.schemas import (
 from identity.domain.billing import PLANS
 from identity.domain.channel_consent import ConsentChannel
 from identity.domain.errors import BillingDisabledError
+from py_common.auth.fastapi import CurrentPrincipal
 from py_common.problems import problem_responses
 
 router = APIRouter(prefix="/v1/identity", tags=["identity"])
@@ -36,9 +37,17 @@ async def ping() -> dict[str, str]:
     "/consents",
     summary="Record a consent or a withdrawal (append-only)",
     status_code=status.HTTP_201_CREATED,
-    responses=problem_responses(401, 422),
+    responses=problem_responses(401, 403, 422),
 )
-def record_consent(body: ConsentIn, tenant: Tenant, wired: Wired) -> ConsentOut:
+def record_consent(
+    body: ConsentIn, tenant: Tenant, principal: CurrentPrincipal, wired: Wired
+) -> ConsentOut:
+    """A caller a verified token names is who recorded the consent (None for a service), and the
+    body's ``recorded_by`` is ignored; without a token the body names them, as before."""
+    if principal.is_authenticated:
+        recorded_by = principal.user_id
+    else:
+        recorded_by = None if body.recorded_by is None else UserId(body.recorded_by)
     record = wired.record_consent.run(
         tenant,
         body.subject,
@@ -47,7 +56,7 @@ def record_consent(body: ConsentIn, tenant: Tenant, wired: Wired) -> ConsentOut:
         source=body.source,
         notice_version=body.notice_version,
         evidence=body.evidence,
-        recorded_by=None if body.recorded_by is None else UserId(body.recorded_by),
+        recorded_by=recorded_by,
     )
     return ConsentOut.from_record(record)
 
@@ -55,7 +64,7 @@ def record_consent(body: ConsentIn, tenant: Tenant, wired: Wired) -> ConsentOut:
 @router.get(
     "/consents",
     summary="The current state per purpose for a subject, with the full history",
-    responses=problem_responses(401),
+    responses=problem_responses(401, 403),
 )
 def consent_status(
     subject: Annotated[str, Query(min_length=1, max_length=254)], tenant: Tenant, wired: Wired
@@ -69,7 +78,7 @@ def consent_status(
     status_code=status.HTTP_201_CREATED,
     responses={
         200: {"model": ChannelConsentOut, "description": "The message was recorded already"},
-        **problem_responses(401, 422, 503),
+        **problem_responses(401, 403, 422, 503),
     },
     dependencies=[ChannelAccess],
 )
@@ -94,7 +103,7 @@ def record_channel_consent(
 @router.get(
     "/channel-consents/{channel}/{subject}",
     summary="A number's current state per purpose on a channel, with the history (service token)",
-    responses=problem_responses(401, 422, 503),
+    responses=problem_responses(401, 403, 422, 503),
     dependencies=[ChannelAccess],
 )
 def channel_consent_status(
@@ -114,7 +123,7 @@ def plans() -> list[PlanOut]:
     "/billing/subscriptions",
     summary="Start a subscription with the billing provider",
     status_code=status.HTTP_201_CREATED,
-    responses=problem_responses(401, 422, 503),
+    responses=problem_responses(401, 403, 422, 503),
 )
 def start_subscription(body: SubscriptionIn, tenant: Tenant, wired: Wired) -> SubscriptionOut:
     if wired.start_subscription is None:

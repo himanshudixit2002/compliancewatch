@@ -11,7 +11,8 @@ public API (guide section 10):
   a name two services use for different content is prefixed with each service's name in
   PascalCase (``Problem`` becomes ``ProfileProblem``) and every reference follows the rename;
 - ``info`` comes from ``openapi/public.meta.json``, and the ``bearerAuth`` security scheme is
-  added and required on every operation.
+  added and required on every operation. An operation's own ``security`` (the service's
+  ``HTTPBearer``, declared where it reads tokens) is left out, since ``bearerAuth`` covers it.
 
 The public operations must follow the API rules, and the build fails with one line per
 operation that does not:
@@ -52,8 +53,8 @@ SERVICE_SPEC = re.compile(r"(?P<service>[a-z0-9][a-z0-9-]*)\.v1\.json")
 SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
 PROBLEM_MEDIA = "application/problem+json"
-# The tenant roles an operation may name in x-roles. The identity service will own the role list;
-# until then this follows the tenant-member roles the profile service declares.
+# The tenant roles an operation may name in x-roles: TENANT_MEMBER_ROLES of domain_kernel.access,
+# listed here because this script uses the standard library only.
 ROLES = ("owner", "staff", "ca_admin", "ca_staff", "compliance_lead")
 SECURITY_SCHEME = "bearerAuth"
 BEARER_AUTH = {
@@ -61,8 +62,9 @@ BEARER_AUTH = {
     "scheme": "bearer",
     "bearerFormat": "JWT",
     "description": (
-        "An access token from the identity service. Until it issues tokens, the services take the"
-        " tenant from the x-tenant-id header."
+        "An access token from the identity service; a user's token names the tenant. It is"
+        " required when CW_AUTH_MODE is token, as in production; in header mode the services take"
+        " the tenant from the x-tenant-id header instead."
     ),
 }
 REF_PREFIX = "#/components/"
@@ -264,10 +266,9 @@ def build(specs: Mapping[str, Mapping[str, Any]], meta: Mapping[str, Any]) -> di
                 first = operation_ids.setdefault(operation_id, label)
                 if first != label:
                     problems.append(f"{label}: operationId {operation_id} is also {first}")
-            paths.setdefault(path, {})[method] = {
-                **rewrite(operation, names[service]),
-                "x-service": service,
-            }
+            copied = rewrite(operation, names[service])
+            copied.pop("security", None)
+            paths.setdefault(path, {})[method] = {**copied, "x-service": service}
     if problems:
         raise BuildError(problems)
     components.setdefault("securitySchemes", {})[SECURITY_SCHEME] = BEARER_AUTH

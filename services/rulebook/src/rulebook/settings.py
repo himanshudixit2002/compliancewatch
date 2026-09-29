@@ -21,7 +21,9 @@ class RulebookSettings(Settings):
     ``x-cw-review-token`` for review decisions, relation approvals, citations, the version
     lifecycle and the sweep. The write token does not open those routes; unset, they are refused
     (503). It is a shared secret, not an identity: the approver ids in the bodies are asserted by
-    the caller until the identity service exists.
+    the caller. With ``CW_AUTH_MODE`` dual or token, an access token opens the writes instead (the
+    pipeline's with rulebook:write, an analyst's with the route's regulatory role) and a user's
+    token names the actor; token mode refuses both shared secrets (``api.deps``).
 
     ``rulebook_publish_enabled`` turns on publishing and withdrawing rule versions and the daily
     transition sweep (``CW_RULEBOOK_PUBLISH_ENABLED``, default off; owner

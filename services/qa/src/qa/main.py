@@ -2,9 +2,11 @@
 
 Guide section 11: wiring of interfaces to implementations happens here, never inside the layers.
 The answers are built from the rulebook, profile and obligation services and the llm-gateway,
-over HTTP; tests and evals pass their own ``Ports`` (memory fakes and a scripted model). Both
-prompt files are read when the app is built, from ``CW_QA_PROMPTS_DIR`` or the source tree, and
-the ``prompts`` readiness check reads them again. The ontology is the packaged one.
+over HTTP, every call with the qa service's own access token once ``CW_SERVICE_CLIENT_SECRET`` is
+set; tests and evals pass their own ``Ports`` (memory fakes and a scripted model). The caller and
+its tenant come from ``py_common.auth`` by ``CW_AUTH_MODE`` (``api.deps``). Both prompt files
+are read when the app is built, from ``CW_QA_PROMPTS_DIR`` or the source tree, and the
+``prompts`` readiness check reads them again. The ontology is the packaged one.
 """
 
 from datetime import date, datetime
@@ -18,6 +20,7 @@ from domain_kernel.ids import TenantId
 from domain_kernel.ontology import Ontology
 from ontology import load as load_ontology
 from py_common.app import create_app
+from py_common.auth import service_auth_from
 from qa import __version__
 from qa.api.router import router
 from qa.application.answerer import Answerer
@@ -61,14 +64,15 @@ def http_ports(settings: QaSettings) -> Ports:
     reads = settings.qa_http_timeout_seconds
     completions = settings.qa_llm_timeout_seconds
     embeddings = settings.qa_embedding_timeout_seconds
-    rulebook = HttpRulebook(settings.rulebook_url, timeout_seconds=reads)
+    auth = service_auth_from(settings)
+    rulebook = HttpRulebook(settings.rulebook_url, auth=auth, timeout_seconds=reads)
     return Ports(
         rulebook=rulebook,
         search=rulebook,
-        profiles=HttpProfiles(settings.profile_url, timeout_seconds=reads),
-        obligations=HttpObligations(settings.obligation_url, timeout_seconds=reads),
-        embedder=HttpEmbedder(settings.llm_gateway_url, timeout_seconds=embeddings),
-        provider=GatewayProvider(settings.llm_gateway_url, timeout_seconds=completions),
+        profiles=HttpProfiles(settings.profile_url, auth=auth, timeout_seconds=reads),
+        obligations=HttpObligations(settings.obligation_url, auth=auth, timeout_seconds=reads),
+        embedder=HttpEmbedder(settings.llm_gateway_url, auth=auth, timeout_seconds=embeddings),
+        provider=GatewayProvider(settings.llm_gateway_url, auth=auth, timeout_seconds=completions),
         tracer=OtelTracer(),
     )
 

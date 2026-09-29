@@ -155,7 +155,7 @@ source_modules = ["*.domain", "domain_kernel"]
 forbidden_modules = [
   "sqlalchemy", "alembic", "psycopg", "asyncpg", "fastapi", "starlette", "httpx", "requests",
   "httpx2", "aiohttp", "aiokafka", "confluent_kafka", "temporalio", "redis", "boto3", "botocore",
-  "structlog", "py_common", "yaml", "openai", "langfuse", "cw_contracts",
+  "structlog", "py_common", "yaml", "openai", "langfuse", "cw_contracts", "jwt", "cryptography",
 ]
 
 [[tool.importlinter.contracts]]
@@ -200,6 +200,21 @@ forbidden_modules = [
   "fastapi", "starlette", "sqlalchemy", "alembic", "psycopg",
   "py_common.telemetry", "py_common.outbox", "py_common.runtime", "py_common.app",
   "py_common.health", "py_common.problems", "py_common.request_context", "py_common.migrations",
+]
+
+[[tool.importlinter.contracts]]
+# Application layers import the principal, the token issuer and the service token source from
+# py_common.auth; import-linter follows indirect imports, so one import of FastAPI from these
+# modules would break the application-layer contract above. Only py_common.auth.fastapi may.
+name = "py_common.auth imports no web or database framework outside py_common.auth.fastapi"
+type = "forbidden"
+source_modules = [
+  "py_common.auth.context", "py_common.auth.errors", "py_common.auth.keys",
+  "py_common.auth.service_tokens", "py_common.auth.tokens", "py_common.auth.testing",
+]
+forbidden_modules = [
+  "fastapi", "starlette", "sqlalchemy", "alembic", "psycopg",
+  "py_common.auth.fastapi", "py_common.app", "py_common.problems", "py_common.telemetry",
 ]
 
 [[tool.importlinter.contracts]]

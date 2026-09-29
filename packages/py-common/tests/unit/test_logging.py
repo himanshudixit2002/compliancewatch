@@ -27,16 +27,38 @@ def test_json_line_carries_service_and_context_fields() -> None:
     assert "timestamp" in record
     assert record["correlation_id"] is None
     assert record["tenant_id"] is None
+    assert record["actor"] is None
 
 
 def test_bound_contextvars_appear_on_every_line() -> None:
     buffer = io.StringIO()
     configure_logging(service_name="test-svc", stream=buffer)
-    with structlog.contextvars.bound_contextvars(correlation_id="abc", tenant_id="t1"):
+    with structlog.contextvars.bound_contextvars(
+        correlation_id="abc", tenant_id="t1", actor="service:pipeline"
+    ):
         get_logger("py_common.tests").warning("inside")
     record = _last_record(buffer)
     assert record["correlation_id"] == "abc"
     assert record["tenant_id"] == "t1"
+    assert record["actor"] == "service:pipeline"
+
+
+def test_every_line_carries_the_actor_null_when_unbound() -> None:
+    buffer = io.StringIO()
+    configure_logging(service_name="test-svc", stream=buffer)
+    log = get_logger("py_common.tests")
+    log.info("before")
+    with structlog.contextvars.bound_contextvars(actor="anonymous"):
+        log.info("during")
+        logging.getLogger("uvicorn.access").info("foreign during")
+    log.info("after")
+    lines = [json.loads(line) for line in buffer.getvalue().splitlines() if line.strip()]
+    assert [(line["event"], line["actor"]) for line in lines] == [
+        ("before", None),
+        ("during", "anonymous"),
+        ("foreign during", "anonymous"),
+        ("after", None),
+    ]
 
 
 def test_stdlib_records_are_rendered_through_the_same_formatter() -> None:

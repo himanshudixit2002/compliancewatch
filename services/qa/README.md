@@ -90,7 +90,7 @@ when ADR-017 is Accepted. Off, or for a tenant not listed, there is no planner c
 
 ## API
 
-`POST /v1/qa/ask` with `x-tenant-id` (required):
+`POST /v1/qa/ask` for a tenant (see Who may ask, below):
 
 ```json
 {"question": "When is my GSTR-3B due?", "as_of": "2026-04-10",
@@ -109,7 +109,8 @@ when ADR-017 is Accepted. Off, or for a tenant not listed, there is no planner c
 ```
 
 `plan` is the validated plan whenever there was one, even when hybrid answered. Problems: 401
-`qa-tenant-required`, 404 `qa-business-not-found` (a `business_node_id` the tenant does not
+`qa-tenant-required` (no tenant), 401 `auth-token-required` or `auth-token-invalid` and 403
+`auth-forbidden` or `auth-tenant-mismatch` (see below), 404 `qa-business-not-found` (a `business_node_id` the tenant does not
 have), 422 `qa-question-invalid` or `request-invalid`, 429 `qa-model-budget-exceeded` (the
 gateway refused a model call because a monthly budget is used up; `Retry-After` is the
 gateway's), 503 `qa-dependency-unavailable` (a service the answer depends on failed, including
@@ -117,13 +118,38 @@ the gateway while answering). An embedding refused for its budget leaves the sea
 text. The spec is
 `packages/contracts/openapi/qa.v1.json`.
 
+### Who may ask
+
+The caller and its tenant come from `py_common.auth` by `CW_AUTH_MODE` (`api/deps.py`):
+
+- `header` (the default): `x-tenant-id` names the tenant, and no token is read.
+- `dual`: a bearer token is verified when the request carries one, and then counts as in
+  `token` mode; without one the header counts, as in `header` mode.
+- `token`: a bearer token is required. A user's token names the tenant, and the user needs one
+  of the tenant member roles (owner, staff, ca_admin, ca_staff, compliance_lead); an
+  `x-tenant-id` naming another tenant is a 403 `auth-tenant-mismatch`. A service names the
+  tenant in `x-tenant-id` and needs the tenant:act scope. Anyone else is a 403 `auth-forbidden`.
+
+### Service token
+
+Once `CW_SERVICE_CLIENT_SECRET` is set, every call qa makes to the rulebook, profile, obligation
+and the gateway carries its own access token (`Authorization: Bearer`), which the identity
+service issues for client `CW_SERVICE_CLIENT_ID` (`make run` defaults it to `qa`). The client
+needs llm:call for the model calls and tenant:act, because profile, obligation and the gateway's
+ledger are read and charged for the question's tenant, which qa names in `x-tenant-id`; locally
+identity creates it from `identity_dev_clients.toml`. The token is cached until a minute before
+it expires, and a 401 fetches a new one and resends the request once. When identity cannot issue
+a token the call fails like an unreachable service (`qa-dependency-unavailable`, or the planner's
+fallback for a plan). Without the secret no token is sent, as before.
+
 ## Ports, prompts, traces and evals
 
 - **Ports** (`domain/ports.py`): `RulebookReader` and `ClauseSearch` (`HttpRulebook`),
   `ProfileReader` (`HttpProfiles`), `ObligationReader` (`HttpObligations`), `Embedder`
   (`HttpEmbedder`, which checks for 512 dimensions), the kernel's `LLMProvider`
-  (`GatewayProvider`, the tenant per request) and `Tracer` (`OtelTracer`). A transport error
-  or a 5xx is `DependencyUnavailableError`; a 404 is nothing. `testing.py` has the memory fakes,
+  (`GatewayProvider`, the tenant per request) and `Tracer` (`OtelTracer`). Each HTTP adapter
+  takes `auth`, the service token. A transport error, a 5xx or a missing service token is
+  `DependencyUnavailableError`; a 404 is nothing. `testing.py` has the memory fakes,
   a `ScriptedProvider` keyed by `(question_id, prompt ref)`, a `RecordingTracer` and
   `memory_ports()`; `build_app(settings, ports=..., ontology=...)` takes them.
 - **Prompts**: `prompts/qa.plan.v1.md` and `prompts/qa.answer.v1.md`, read when the app starts

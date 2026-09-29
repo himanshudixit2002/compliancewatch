@@ -2,7 +2,8 @@
 
 A business is a legal entity with its GSTIN registrations, and its id is the entity's node id.
 Creating routes take an ``Idempotency-Key``: a retry with the same key and body gets the first
-response back for 24 hours. Every route lists the roles that may call it as ``x-roles``.
+response back for 24 hours. Every route lists the roles that may call it as ``x-roles``, which a
+caller an access token names must hold, and a signed-in user's changes are recorded as theirs.
 """
 
 from typing import Annotated
@@ -24,7 +25,7 @@ from profile_service.api.business_schemas import (
     RegistrationAddIn,
     RegistrationCreatedOut,
 )
-from profile_service.api.deps import PUBLIC_ROUTE, Tenant, Wired
+from profile_service.api.deps import PUBLIC_ROUTE, Caller, Tenant, Wired
 from profile_service.domain.errors import ProfileNodeNotFoundError
 from py_common.idempotency.fastapi import IDEMPOTENCY_RESPONSES, IdempotencyKey, run_idempotent
 from py_common.pagination import InvalidCursorError, Page, Pagination, page_of
@@ -33,8 +34,8 @@ from py_common.problems import problem_responses
 router = APIRouter(prefix="/v1/businesses", tags=["public", "businesses"])
 
 LIST_SCOPE = "profile.businesses"
-READ_PROBLEMS = problem_responses(401, 404, 422)
-CREATE_PROBLEMS = {**problem_responses(401, 422), **IDEMPOTENCY_RESPONSES}
+READ_PROBLEMS = problem_responses(401, 403, 404, 422)
+CREATE_PROBLEMS = {**problem_responses(401, 403, 422), **IDEMPOTENCY_RESPONSES}
 
 
 class BusinessCursor(BaseModel):
@@ -53,7 +54,7 @@ class BusinessCursor(BaseModel):
     openapi_extra=PUBLIC_ROUTE,
 )
 def create_business(
-    body: BusinessIn, tenant: Tenant, key: IdempotencyKey, wired: Wired
+    body: BusinessIn, tenant: Tenant, key: IdempotencyKey, caller: Caller, wired: Wired
 ) -> JSONResponse:
     """A GSTIN makes the business from the PAN inside it and pre-fills the registration from the
     GSTIN lookup; a PAN alone makes the business with no registration. The answers are stored
@@ -68,6 +69,7 @@ def create_business(
             gstin=None if body.gstin is None else Gstin.parse(body.gstin),
             registration_name=body.registration_name,
             answers=[answer.answer() for answer in body.answers],
+            by=caller.user_id,
         )
         return BusinessCreatedOut.from_created(created, wired.ontology, wired.wording)
 
@@ -77,7 +79,7 @@ def create_business(
 @router.get(
     "",
     summary="The tenant's businesses by name, a page at a time",
-    responses=problem_responses(401, 422),
+    responses=problem_responses(401, 403, 422),
     openapi_extra=PUBLIC_ROUTE,
 )
 def list_businesses(
@@ -131,7 +133,7 @@ def read_business(business_id: UUID, tenant: Tenant, wired: Wired) -> BusinessOu
     openapi_extra=PUBLIC_ROUTE,
 )
 def update_business(
-    business_id: UUID, body: BusinessPatchIn, tenant: Tenant, wired: Wired
+    business_id: UUID, body: BusinessPatchIn, tenant: Tenant, caller: Caller, wired: Wired
 ) -> BusinessOut:
     """All or nothing: one value the ontology refuses stores none of the changes. Every node
     that changed publishes ``profile.updated``, which recomputes the business's obligations."""
@@ -140,6 +142,7 @@ def update_business(
         BusinessId(business_id),
         answers=[change.answer() for change in body.changes],
         name=body.name,
+        by=caller.user_id,
     )
     return BusinessOut.from_business(business)
 
@@ -170,11 +173,16 @@ def add_registration(
     body: RegistrationAddIn,
     tenant: Tenant,
     key: IdempotencyKey,
+    caller: Caller,
     wired: Wired,
 ) -> JSONResponse:
     def produce() -> RegistrationCreatedOut:
         added = wired.add_registration.run(
-            tenant, BusinessId(business_id), Gstin.parse(body.gstin), name=body.name
+            tenant,
+            BusinessId(business_id),
+            Gstin.parse(body.gstin),
+            name=body.name,
+            by=caller.user_id,
         )
         return RegistrationCreatedOut.from_added(added)
 

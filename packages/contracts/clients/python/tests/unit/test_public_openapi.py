@@ -139,6 +139,14 @@ def test_only_components_the_operations_reach_are_copied() -> None:
     assert "SnapshotOut" not in schemas
 
 
+@pytest.mark.parametrize("operation", public_operations(), ids=ids)
+def test_every_public_operation_takes_the_spec_wide_bearer_token(
+    operation: tuple[str, str, dict[str, Any]],
+) -> None:
+    assert "security" not in operation[2]
+    assert list(PUBLIC["components"]["securitySchemes"]) == ["bearerAuth"]
+
+
 # ---- the builder -------------------------------------------------------------------------------
 
 
@@ -226,6 +234,20 @@ def test_the_build_keeps_public_operations_and_the_components_they_reach(workspa
     assert sorted(document["components"]["schemas"]) == ["Part", "Problem", "Thing"]
     assert document["info"] == {"title": "Public", "version": "1.2.0"}
     assert build(workspace, "--check")[0].returncode == 0
+
+
+def test_an_operations_own_security_is_left_to_the_spec_wide_bearer_token(
+    workspace: Path,
+) -> None:
+    secured = {**operation("list_things"), "security": [{"HTTPBearer": []}]}
+    alpha = spec({"/v1/things": {"get": secured}})
+    alpha["components"]["securitySchemes"] = {"HTTPBearer": {"type": "http", "scheme": "bearer"}}
+    write(workspace, "alpha.v1.json", alpha)
+    result, document = build(workspace)
+    assert result.returncode == 0, result.stderr
+    assert "security" not in document["paths"]["/v1/things"]["get"]
+    assert document["security"] == [{"bearerAuth": []}]
+    assert list(document["components"]["securitySchemes"]) == ["bearerAuth"]
 
 
 def test_identical_components_are_shared_and_clashing_ones_are_prefixed(workspace: Path) -> None:

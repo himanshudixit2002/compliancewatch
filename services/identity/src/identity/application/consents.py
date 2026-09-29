@@ -6,14 +6,9 @@ from datetime import datetime
 
 from domain_kernel.events import utc_now
 from domain_kernel.ids import ConsentId, TenantId, UserId
-from identity.domain.consent import (
-    ConsentPurpose,
-    ConsentRecord,
-    ConsentSource,
-    ConsentState,
-    UnitOfWorkFactory,
-)
+from identity.domain.consent import ConsentPurpose, ConsentRecord, ConsentSource, ConsentState
 from identity.domain.errors import NoticeVersionRequiredError
+from identity.domain.repository import UnitOfWorkFactory
 
 
 @dataclass(frozen=True, slots=True)

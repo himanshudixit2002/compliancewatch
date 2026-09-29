@@ -21,7 +21,8 @@ shows as missing data rather than as an empty queue.
    (rulebook_entity_review_open_items)`. One type growing points at one extractor or one kind of
    document; every type growing points at a batch of new documents.
 2. Which groups: `GET /v1/rulebook/review/entities?entity_type=<type>` lists the open groups,
-   one per (entity type, proposed name), with the open count and five examples each. A few
+   one per (entity type, proposed name), with the open count and five examples each (in token
+   mode with an analyst's, reviewer's or admin's access token). A few
    groups holding most of the items usually means one name recurs across many clauses; one
    decision closes all of them.
 3. Why they were queued, in the database (`make dev-psql` locally, schema `rulebook`):
@@ -36,8 +37,9 @@ shows as missing data rather than as an empty queue.
 
 - Decide the largest groups first: `POST /v1/rulebook/review/entities/decisions` creates the
   entity, adds the name as an alias of an existing one, or rejects the group, and resolves every
-  open mention of it in one transaction. It needs `x-cw-review-token` (`CW_RULEBOOK_REVIEW_TOKEN`);
-  the pipeline's write token is refused.
+  open mention of it in one transaction. It needs `x-cw-review-token` (`CW_RULEBOOK_REVIEW_TOKEN`)
+  or an access token with the `analyst`, `reviewer` or `admin` role, which is the only way in once
+  the rulebook runs `CW_AUTH_MODE=token`; the pipeline's write token and service token are refused.
 - `unqualified` and `empty_name` groups are decided mention by mention:
   `GET /v1/rulebook/review/entities/items?entity_type=<type>&proposed_name=<name>` returns the
   review ids, and the decision lists the ones it covers in `review_ids`.

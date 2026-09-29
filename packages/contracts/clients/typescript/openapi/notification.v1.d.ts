@@ -267,7 +267,7 @@ export type components = {
      * @description How the opt-in or opt-out reached us.
      * @enum {string}
      */
-    ConsentSource: "whatsapp_keyword" | "web_onboarding" | "api" | "support";
+    ConsentSource: "whatsapp_keyword" | "web_onboarding" | "api" | "support" | "web_settings";
     /**
      * DeliveryState
      * @enum {string}
@@ -836,7 +836,7 @@ export interface operations {
         state?: components["schemas"]["DeliveryState"] | null;
       };
       header?: {
-        /** @description Tenant UUID; required until identity issues tokens */
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
       path?: never;
@@ -862,6 +862,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unprocessable Entity */
       422: {
         headers: {
@@ -877,7 +886,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Tenant UUID; required until identity issues tokens */
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
       path: {
@@ -898,6 +907,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -929,7 +947,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Tenant UUID; required until identity issues tokens */
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
       path: {
@@ -950,6 +968,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -1029,6 +1056,24 @@ export interface operations {
           "application/json": components["schemas"]["PreferenceOut"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -1076,6 +1121,24 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -1158,7 +1221,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret of the WhatsApp bot (CW_NOTIFICATION_BOT_TOKEN) */
+        /** @description Shared secret of the WhatsApp bot (CW_NOTIFICATION_BOT_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs the notification:receipts scope */
         "x-cw-bot-token"?: string | null;
       };
       path?: never;
@@ -1197,6 +1260,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unprocessable Entity */
       422: {
         headers: {
@@ -1228,7 +1300,7 @@ export interface operations {
         limit?: number;
       };
       header?: {
-        /** @description Tenant UUID; required until identity issues tokens */
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
       path?: never;
@@ -1254,6 +1326,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unprocessable Entity */
       422: {
         headers: {
@@ -1269,7 +1350,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Tenant UUID; required until identity issues tokens */
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
       path: {
@@ -1290,6 +1371,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -1321,7 +1411,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Tenant UUID; required until identity issues tokens */
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
       path: {
@@ -1362,6 +1452,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unprocessable Entity */
       422: {
         headers: {
@@ -1377,7 +1476,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Tenant UUID; required until identity issues tokens */
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
       path: {
@@ -1396,6 +1495,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -1427,7 +1535,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Tenant UUID; required until identity issues tokens */
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
       path?: never;
@@ -1459,6 +1567,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

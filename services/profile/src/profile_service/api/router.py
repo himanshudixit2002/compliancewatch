@@ -1,4 +1,7 @@
-"""Routes of the profile service. Business logic lives in the application use cases."""
+"""Routes of the profile service. Business logic lives in the application use cases.
+
+Every route but the ping acts for the request's tenant (``deps.Tenant``). Who changed a value is
+the user an access token names; the body's ``changed_by`` counts only without a token."""
 
 from typing import Annotated
 from uuid import UUID
@@ -7,8 +10,8 @@ from fastapi import APIRouter, Query, status
 
 from domain_kernel.financial_year import FinancialYear
 from domain_kernel.identifiers import Gstin, Pan
-from domain_kernel.ids import BusinessId, UserId
-from profile_service.api.deps import Now, Tenant, Wired
+from domain_kernel.ids import BusinessId
+from profile_service.api.deps import Caller, Now, Tenant, Wired, changed_by
 from profile_service.api.schemas import (
     FY_PATTERN,
     AttributesIn,
@@ -42,7 +45,7 @@ async def ping() -> dict[str, str]:
     "/entities",
     summary="Register a legal entity by PAN",
     status_code=status.HTTP_201_CREATED,
-    responses=problem_responses(401, 422),
+    responses=problem_responses(401, 403, 422),
 )
 def create_entity(body: EntityIn, tenant: Tenant, wired: Wired) -> NodeOut:
     registered = wired.register.entity(tenant, Pan.parse(body.pan), body.name)
@@ -53,7 +56,7 @@ def create_entity(body: EntityIn, tenant: Tenant, wired: Wired) -> NodeOut:
     "/registrations",
     summary="Register a GSTIN; its PAN finds or creates the entity",
     status_code=status.HTTP_201_CREATED,
-    responses=problem_responses(401, 422),
+    responses=problem_responses(401, 403, 422),
 )
 def create_registration(body: RegistrationIn, tenant: Tenant, wired: Wired) -> NodeOut:
     registered = wired.register.registration(
@@ -66,7 +69,7 @@ def create_registration(body: RegistrationIn, tenant: Tenant, wired: Wired) -> N
     "/locations",
     summary="Register a place of business under a registration",
     status_code=status.HTTP_201_CREATED,
-    responses=problem_responses(401, 404, 422),
+    responses=problem_responses(401, 403, 404, 422),
 )
 def create_location(body: LocationIn, tenant: Tenant, wired: Wired) -> NodeOut:
     registered = wired.register.location(
@@ -78,7 +81,7 @@ def create_location(body: LocationIn, tenant: Tenant, wired: Wired) -> NodeOut:
 @router.get(
     "/nodes/{node_id}",
     summary="One node with its stored attribute values",
-    responses=problem_responses(401, 404),
+    responses=problem_responses(401, 403, 404),
 )
 def get_node(node_id: UUID, tenant: Tenant, wired: Wired) -> NodeOut:
     with wired.unit_of_work(tenant) as uow:
@@ -91,15 +94,17 @@ def get_node(node_id: UUID, tenant: Tenant, wired: Wired) -> NodeOut:
 @router.put(
     "/nodes/{node_id}/attributes",
     summary="Store attribute values, unsure answers and does-not-apply answers",
-    responses=problem_responses(401, 404, 422),
+    responses=problem_responses(401, 403, 404, 422),
 )
-def set_attributes(node_id: UUID, body: AttributesIn, tenant: Tenant, wired: Wired) -> SetResultOut:
+def set_attributes(
+    node_id: UUID, body: AttributesIn, tenant: Tenant, caller: Caller, wired: Wired
+) -> SetResultOut:
     result = wired.set_attributes.run(
         tenant,
         BusinessId(node_id),
         [change.to_change() for change in body.changes],
         source=ChangeSource(body.source),
-        by=None if body.changed_by is None else UserId(body.changed_by),
+        by=changed_by(caller, body.changed_by),
     )
     return SetResultOut(
         node=NodeOut.from_node(result.node),
@@ -111,7 +116,7 @@ def set_attributes(node_id: UUID, body: AttributesIn, tenant: Tenant, wired: Wir
 @router.get(
     "/nodes/{node_id}/snapshot",
     summary="The attributes the engine evaluates: inherited down the lineage, for one year",
-    responses=problem_responses(401, 404, 422),
+    responses=problem_responses(401, 403, 404, 422),
 )
 def snapshot(
     node_id: UUID,
@@ -130,7 +135,7 @@ def snapshot(
 @router.get(
     "/nodes/{node_id}/next-question",
     summary="One attribute to ask for next, or none when the level is complete",
-    responses=problem_responses(401, 404, 422),
+    responses=problem_responses(401, 403, 404, 422),
 )
 def next_question(
     node_id: UUID,
@@ -154,7 +159,7 @@ def next_question(
 @router.get(
     "/nodes/{node_id}/review-tasks",
     summary="Open review tasks of a node",
-    responses=problem_responses(401, 404),
+    responses=problem_responses(401, 403, 404),
 )
 def review_tasks(node_id: UUID, tenant: Tenant, wired: Wired) -> list[ReviewTaskOut]:
     with wired.unit_of_work(tenant) as uow:
@@ -170,19 +175,19 @@ def review_tasks(node_id: UUID, tenant: Tenant, wired: Wired) -> list[ReviewTask
         "Pre-fill a registration from its GSTIN and the GSTIN lookup, or open a "
         "verify_registration task"
     ),
-    responses=problem_responses(401, 404, 422),
+    responses=problem_responses(401, 403, 404, 422),
 )
-def prefill(node_id: UUID, body: PrefillIn, tenant: Tenant, wired: Wired) -> PrefillOut:
-    result = wired.prefill.run(
-        tenant, BusinessId(node_id), by=None if body.changed_by is None else UserId(body.changed_by)
-    )
+def prefill(
+    node_id: UUID, body: PrefillIn, tenant: Tenant, caller: Caller, wired: Wired
+) -> PrefillOut:
+    result = wired.prefill.run(tenant, BusinessId(node_id), by=changed_by(caller, body.changed_by))
     return PrefillOut.from_result(result)
 
 
 @router.post(
     "/financial-year-confirmations",
     summary="Open a confirm_financial_year review task per entity and missing per-year value",
-    responses=problem_responses(401, 422),
+    responses=problem_responses(401, 403, 422),
 )
 def confirm_financial_year(
     tenant: Tenant,

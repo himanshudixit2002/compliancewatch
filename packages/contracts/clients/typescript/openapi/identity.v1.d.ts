@@ -35,6 +35,23 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/identity/.well-known/jwks.json": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The public keys access tokens are signed with (RFC 7517) */
+    get: operations["jwks_v1_identity__well_known_jwks_json_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/identity/billing/plans": {
     parameters: {
       query?: never;
@@ -130,8 +147,46 @@ export type paths = {
     /** The current state per purpose for a subject, with the full history */
     get: operations["consent_status_v1_identity_consents_get"];
     put?: never;
-    /** Record a consent or a withdrawal (append-only) */
+    /**
+     * Record a consent or a withdrawal (append-only)
+     * @description A caller a verified token names is who recorded the consent (None for a service), and the
+     *     body's ``recorded_by`` is ignored; without a token the body names them, as before.
+     */
     post: operations["record_consent_v1_identity_consents_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/identity/dev/provider-tokens": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Sign a fake provider token (fake provider, local and test only) */
+    post: operations["dev_provider_token_v1_identity_dev_provider_tokens_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/identity/me": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The signed-in user: tenant, roles, session version and second factor */
+    get: operations["me_v1_identity_me_get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -148,6 +203,109 @@ export type paths = {
     /** Router liveness */
     get: operations["ping_v1_identity_ping_get"];
     put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/identity/service-tokens": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Exchange a service client's id and secret for a service token */
+    post: operations["issue_service_token_v1_identity_service_tokens_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/identity/sessions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Exchange an identity provider token for an access token */
+    post: operations["exchange_session_v1_identity_sessions_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/identity/tenants": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Sign up: create a business or CA firm tenant with its first user and a session */
+    post: operations["create_tenant_v1_identity_tenants_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/identity/users": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The tenant's users (tenant admins) */
+    get: operations["list_users_v1_identity_users_get"];
+    put?: never;
+    /** Invite a user: their account at the identity provider, then the user (tenant admins) */
+    post: operations["invite_user_v1_identity_users_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/identity/users/{user_id}/disable": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Disable a user; they cannot sign in and their sessions are revoked (tenant admins) */
+    post: operations["disable_user_v1_identity_users__user_id__disable_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/identity/users/{user_id}/roles": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Change a user's roles; older sessions of the user are revoked (tenant admins) */
+    put: operations["change_roles_v1_identity_users__user_id__roles_put"];
     post?: never;
     delete?: never;
     options?: never;
@@ -255,7 +413,10 @@ export type components = {
        */
       notice_version?: string;
       purpose: components["schemas"]["ConsentPurpose"];
-      /** Recorded By */
+      /**
+       * Recorded By
+       * @description Who recorded it; ignored when an access token names the caller
+       */
       recorded_by?: string | null;
       source: components["schemas"]["ConsentSource"];
       /**
@@ -304,7 +465,7 @@ export type components = {
      * ConsentSource
      * @enum {string}
      */
-    ConsentSource: "web_onboarding" | "whatsapp_keyword" | "api" | "support";
+    ConsentSource: "web_onboarding" | "whatsapp_keyword" | "api" | "support" | "web_settings";
     /** ConsentStateOut */
     ConsentStateOut: {
       /** Granted */
@@ -328,6 +489,39 @@ export type components = {
       /** Subject */
       subject: string;
     };
+    /** CreatedTenantOut */
+    CreatedTenantOut: {
+      session: components["schemas"]["SessionOut"];
+      tenant: components["schemas"]["TenantOut"];
+      user: components["schemas"]["UserOut"];
+    };
+    /** DevProviderTokenIn */
+    DevProviderTokenIn: {
+      /**
+       * Aal
+       * @description aal2 stands for a sign-in with a second factor
+       * @default aal1
+       * @enum {string}
+       */
+      aal?: "aal1" | "aal2";
+      /** Email */
+      email?: string | null;
+      /**
+       * Phone
+       * @description E.164 number
+       */
+      phone?: string | null;
+    };
+    /** DevProviderTokenOut */
+    DevProviderTokenOut: {
+      /**
+       * Provider Token
+       * @description A fake provider token for POST /v1/identity/sessions
+       */
+      provider_token: string;
+      /** Subject */
+      subject: string;
+    };
     /** HealthResponse */
     HealthResponse: {
       /** Service */
@@ -336,6 +530,84 @@ export type components = {
       status: string;
       /** Version */
       version: string;
+    };
+    /** InviteIn */
+    InviteIn: {
+      /**
+       * Display Name
+       * @default
+       */
+      display_name?: string;
+      /** Email */
+      email?: string | null;
+      /**
+       * Phone
+       * @description E.164 number
+       */
+      phone?: string | null;
+      /**
+       * Roles
+       * @description Roles the tenant's kind allows; at least one
+       */
+      roles: components["schemas"]["Role"][];
+    };
+    /**
+     * JwkOut
+     * @description One public signing key (RFC 7517): an EC key on the P-256 curve.
+     */
+    JwkOut: {
+      /** Alg */
+      alg: string;
+      /** Crv */
+      crv: string;
+      /** Kid */
+      kid: string;
+      /** Kty */
+      kty: string;
+      /** Use */
+      use: string;
+      /** X */
+      x: string;
+      /** Y */
+      y: string;
+    };
+    /** JwksOut */
+    JwksOut: {
+      /** Keys */
+      keys: components["schemas"]["JwkOut"][];
+    };
+    /**
+     * MeOut
+     * @description The signed-in user as the access token names them, checked against the store.
+     */
+    MeOut: {
+      /** Display Name */
+      display_name: string;
+      /** Email */
+      email: string;
+      /**
+       * Kind
+       * @default user
+       * @constant
+       */
+      kind?: "user";
+      /**
+       * Mfa
+       * @description Whether the person signed in with a second factor
+       */
+      mfa: boolean;
+      /** Phone */
+      phone: string;
+      /** Roles */
+      roles: components["schemas"]["Role"][];
+      /** Session Version */
+      session_version: number;
+      tenant: components["schemas"]["TenantOut"];
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
     };
     /** PlanOut */
     PlanOut: {
@@ -391,6 +663,117 @@ export type components = {
       /** Status */
       status: string;
     };
+    /**
+     * Role
+     * @description What a person may do in their tenant. Business tenants have owners, staff and compliance
+     *     leads; CA firms have CA admins, CA staff and compliance leads; the internal tenant has the
+     *     regulatory analysts, reviewers and admins.
+     * @enum {string}
+     */
+    Role:
+      | "owner"
+      | "staff"
+      | "ca_admin"
+      | "ca_staff"
+      | "compliance_lead"
+      | "analyst"
+      | "reviewer"
+      | "admin";
+    /** RolesIn */
+    RolesIn: {
+      /**
+       * Roles
+       * @description The roles the user holds instead; the tenant's kind allows them
+       */
+      roles: components["schemas"]["Role"][];
+    };
+    /**
+     * Scope
+     * @description What a service client may do. Scopes are granted to clients, never to people.
+     * @enum {string}
+     */
+    Scope:
+      | "tenant:act"
+      | "rulebook:write"
+      | "notification:send"
+      | "notification:preferences"
+      | "notification:receipts"
+      | "llm:call"
+      | "identity:channel-consents"
+      | "entitlements:read"
+      | "data:export";
+    /** ServiceTokenIn */
+    ServiceTokenIn: {
+      /** Client Id */
+      client_id: string;
+      /** Client Secret */
+      client_secret: string;
+    };
+    /** ServiceTokenOut */
+    ServiceTokenOut: {
+      /**
+       * Access Token
+       * @description An ES256 access token; send it as a bearer token
+       */
+      access_token: string;
+      /**
+       * Expires In
+       * @description Seconds until the token expires
+       */
+      expires_in: number;
+      /** Scopes */
+      scopes: components["schemas"]["Scope"][];
+      /**
+       * Token Type
+       * @default Bearer
+       * @constant
+       */
+      token_type?: "Bearer";
+    };
+    /** SessionIn */
+    SessionIn: {
+      /**
+       * Provider Token
+       * @description The identity provider's token for the person who signed in
+       */
+      provider_token: string;
+    };
+    /** SessionOut */
+    SessionOut: {
+      /**
+       * Access Token
+       * @description An ES256 access token; send it as a bearer token
+       */
+      access_token: string;
+      /**
+       * Expires In
+       * @description Seconds until the token expires
+       */
+      expires_in: number;
+      /**
+       * Mfa
+       * @description Whether the person signed in with a second factor
+       */
+      mfa: boolean;
+      /** Roles */
+      roles: components["schemas"]["Role"][];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Token Type
+       * @default Bearer
+       * @constant
+       */
+      token_type?: "Bearer";
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
+    };
     /** SubscriptionIn */
     SubscriptionIn: {
       /** Email */
@@ -416,6 +799,102 @@ export type components = {
       /** Status */
       status: string;
     };
+    /** TenantIn */
+    TenantIn: {
+      /**
+       * Display Name
+       * @default
+       */
+      display_name?: string;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "business" | "ca_firm";
+      /** Name */
+      name: string;
+      /**
+       * Provider Token
+       * @description The identity provider's token of the person signing up
+       */
+      provider_token: string;
+    };
+    /**
+     * TenantKind
+     * @enum {string}
+     */
+    TenantKind: "business" | "ca_firm" | "internal";
+    /** TenantOut */
+    TenantOut: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      kind: components["schemas"]["TenantKind"];
+      /** Name */
+      name: string;
+      /** Region */
+      region: string;
+      status: components["schemas"]["TenantStatus"];
+    };
+    /**
+     * TenantStatus
+     * @enum {string}
+     */
+    TenantStatus: "active" | "deletion_requested" | "erased";
+    /** UserOut */
+    UserOut: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Display Name */
+      display_name: string;
+      /** Email */
+      email: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Phone */
+      phone: string;
+      /** Roles */
+      roles: components["schemas"]["Role"][];
+      /** Session Version */
+      session_version: number;
+      status: components["schemas"]["UserStatus"];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /** UsersOut */
+    UsersOut: {
+      /**
+       * Items
+       * @description The tenant's users, oldest first
+       */
+      items: components["schemas"]["UserOut"][];
+    };
+    /**
+     * UserStatus
+     * @enum {string}
+     */
+    UserStatus: "active" | "disabled";
     /**
      * ValidationIssue
      * @description One failed check on the request. The submitted value is not echoed back.
@@ -495,6 +974,26 @@ export interface operations {
       };
     };
   };
+  jwks_v1_identity__well_known_jwks_json_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["JwksOut"];
+        };
+      };
+    };
+  };
   plans_v1_identity_billing_plans_get: {
     parameters: {
       query?: never;
@@ -519,7 +1018,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Tenant UUID; required until the identity service issues tokens */
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
       path?: never;
@@ -551,6 +1050,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -631,7 +1139,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret of the caller (CW_IDENTITY_CHANNEL_TOKEN) */
+        /** @description Shared secret of the caller (CW_IDENTITY_CHANNEL_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs the identity:channel-consents scope */
         "x-cw-service-token"?: string | null;
       };
       path?: never;
@@ -679,6 +1187,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unprocessable Entity */
       422: {
         headers: {
@@ -703,7 +1220,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret of the caller (CW_IDENTITY_CHANNEL_TOKEN) */
+        /** @description Shared secret of the caller (CW_IDENTITY_CHANNEL_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs the identity:channel-consents scope */
         "x-cw-service-token"?: string | null;
       };
       path: {
@@ -726,6 +1243,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -759,7 +1285,7 @@ export interface operations {
         subject: string;
       };
       header?: {
-        /** @description Tenant UUID; required until the identity service issues tokens */
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
       path?: never;
@@ -785,6 +1311,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unprocessable Entity */
       422: {
         headers: {
@@ -800,7 +1335,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Tenant UUID; required until the identity service issues tokens */
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
       path?: never;
@@ -839,6 +1374,116 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  dev_provider_token_v1_identity_dev_provider_tokens_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DevProviderTokenIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DevProviderTokenOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  me_v1_identity_me_get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MeOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unprocessable Entity */
       422: {
         headers: {
@@ -868,6 +1513,515 @@ export interface operations {
           "application/json": {
             [key: string]: string;
           };
+        };
+      };
+    };
+  };
+  issue_service_token_v1_identity_service_tokens_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ServiceTokenIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ServiceTokenOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  exchange_session_v1_identity_sessions_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SessionIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  create_tenant_v1_identity_tenants_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CreatedTenantOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  list_users_v1_identity_users_get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UsersOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  invite_user_v1_identity_users_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InviteIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UserOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  disable_user_v1_identity_users__user_id__disable_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UserOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  change_roles_v1_identity_users__user_id__roles_put: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RolesIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UserOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
     };

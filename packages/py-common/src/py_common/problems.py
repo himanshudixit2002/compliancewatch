@@ -26,6 +26,14 @@ from domain_kernel.errors import (
     InvariantViolationError,
     UnknownAttributeError,
 )
+from py_common.auth.errors import (
+    AuthForbiddenError,
+    AuthKeysUnavailableError,
+    AuthTenantMismatchError,
+    AuthTokenInvalidError,
+    AuthTokenRequiredError,
+    ServiceTokenUnavailableError,
+)
 from py_common.flags import UnknownFlagError
 from py_common.idempotency.errors import (
     IDEMPOTENCY_KEY_HEADER,
@@ -49,6 +57,12 @@ DEFAULT_STATUS_BY_ERROR: Mapping[type[DomainError], int] = {
     IdempotencyKeyReusedError: 422,
     IdempotencyRequestInFlightError: 409,
     UnknownFlagError: 500,
+    AuthTokenRequiredError: 401,
+    AuthTokenInvalidError: 401,
+    AuthForbiddenError: 403,
+    AuthTenantMismatchError: 403,
+    AuthKeysUnavailableError: 503,
+    ServiceTokenUnavailableError: 503,
 }
 MISSING_HEADER_ERRORS: Mapping[str, type[DomainError]] = {
     IDEMPOTENCY_KEY_HEADER.lower(): IdempotencyKeyRequiredError,

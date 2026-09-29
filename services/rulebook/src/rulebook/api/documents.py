@@ -6,7 +6,7 @@ from fastapi import APIRouter, Response, status
 
 from domain_kernel.ids import DocumentId
 from py_common.problems import problem_responses
-from rulebook.api.deps import Wired, WriteAccess
+from rulebook.api.deps import PipelineAccess, Wired
 from rulebook.api.schemas import DocumentIn, DocumentOut, RegisteredOut
 
 router = APIRouter(tags=["documents"])
@@ -15,10 +15,10 @@ router = APIRouter(tags=["documents"])
 @router.put(
     "/documents/{document_id}",
     summary="Register a parsed regulator document; idempotent for the same clauses",
-    dependencies=[WriteAccess],
+    dependencies=[PipelineAccess],
     responses={
         status.HTTP_201_CREATED: {"model": RegisteredOut, "description": "Stored now"},
-        **problem_responses(401, 409, 422, 503),
+        **problem_responses(401, 403, 409, 422, 503),
     },
 )
 def register_document(

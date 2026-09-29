@@ -6,8 +6,9 @@ tenant-owned, and then answers 401 to a request without ``x-tenant-id`` whatever
 body, or exempt with the reason written next to it. A route in neither list fails the suite
 with its name, so whoever adds a route classifies it. The rulebook holds regulatory data every
 tenant reads, so its writes need the write token (the pipeline) or the review token (analyst
-actions) instead of a tenant. The llm-gateway is shared
-infrastructure and is recorded with its reasons and one open finding.
+actions) instead of a tenant, and with an access token rulebook:write or a regulatory role.
+The llm-gateway is shared infrastructure and is recorded with its reasons and one open finding,
+which token mode closes.
 
 The probes at the end seed data as tenant A through the API and read it as tenant B. The
 Postgres proofs (forced row-level security under a plain role) stay in each service's
@@ -24,6 +25,8 @@ from fastapi import FastAPI
 from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
 
+from domain_kernel.access import Role, Scope
+from domain_kernel.ids import TenantId
 from identity.main import build_app as build_identity
 from identity.testing import identity_settings
 from llm_gateway.main import build_app as build_gateway
@@ -34,6 +37,7 @@ from obligation.main import build_app as build_obligation
 from obligation.settings import ObligationSettings
 from profile_service.main import build_app as build_profile
 from profile_service.settings import ProfileSettings
+from py_common.auth.testing import TestIssuer, bearer
 from qa.main import build_app as build_qa
 from qa.testing import memory_ports, qa_settings
 from rulebook.main import build_app as build_rulebook
@@ -74,6 +78,11 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "POST /v1/identity/consents",
             "GET /v1/identity/consents",
             "POST /v1/identity/billing/subscriptions",
+            "GET /v1/identity/me",
+            "GET /v1/identity/users",
+            "POST /v1/identity/users",
+            "PUT /v1/identity/users/{user_id}/roles",
+            "POST /v1/identity/users/{user_id}/disable",
         }
     ),
     "profile": frozenset(
@@ -119,7 +128,8 @@ SERVICE_TOKEN = (
 )
 PREFERENCE = (
     "an opt-out typed on WhatsApp arrives before the number is linked to a tenant and must be "
-    "honoured either way; preferences are keyed by channel and recipient"
+    "honoured either way; preferences are keyed by channel and recipient, and a service token "
+    "needs the notification:preferences scope"
 )
 
 EXEMPT_ROUTES: dict[str, dict[str, str]] = {
@@ -130,6 +140,25 @@ EXEMPT_ROUTES: dict[str, dict[str, str]] = {
         "POST /v1/identity/billing/webhook": (
             "called by the billing provider, which names no tenant; the body is verified "
             "against the webhook signature before it is read"
+        ),
+        "POST /v1/identity/sessions": (
+            "sign-in: the caller has no session yet, so no tenant; the identity provider's token "
+            "in the body names the person, and the tenant is the one their user belongs to"
+        ),
+        "POST /v1/identity/tenants": (
+            "sign-up creates the tenant, so there is none to name yet; the identity provider's "
+            "token in the body names the person who becomes its first user"
+        ),
+        "POST /v1/identity/service-tokens": (
+            "service clients belong to no tenant; the client id and secret in the body are "
+            "checked, and a service acts for a tenant later only with the tenant:act scope"
+        ),
+        "GET /v1/identity/.well-known/jwks.json": (
+            "the public keys every service verifies tokens with, the same for every caller"
+        ),
+        "POST /v1/identity/dev/provider-tokens": (
+            "development sign-in: signs a fake provider token for a phone number or an email "
+            "address, answers only with the fake provider in local and test, and 404 elsewhere"
         ),
     },
     "profile": {
@@ -147,7 +176,7 @@ EXEMPT_ROUTES: dict[str, dict[str, str]] = {
             "delivery statuses and inbound times forwarded by the WhatsApp bot, which knows only "
             "Meta's message ids and numbers; the service finds each tenant by the message id, and "
             "the bot's shared token (x-cw-bot-token) guards the route: 503 until it is set, 401 "
-            "without it"
+            "without it; a service token needs the notification:receipts scope"
         ),
         "POST /v1/notification/receipts/email": (
             "SES bounces, complaints and deliveries posted by SNS, which names no tenant; the "
@@ -184,11 +213,18 @@ GATEWAY_ROUTES: dict[str, str] = {
         "regulatory work (pipeline extraction) has no tenant, and it only attributes cost"
     ),
     "GET /v1/llm-gateway/usage": (
-        "an operator read of spend against a budget; see the finding below: tenant_id in the "
-        "query reads any tenant's spend"
+        "an operator read of spend against a budget; with a token it needs a regulatory role or "
+        "llm:call, and see the finding below for header mode: tenant_id in the query reads any "
+        "tenant's spend"
     ),
-    "GET /v1/llm-gateway/models": "the routing table, the same for every caller",
-    "GET /v1/llm-gateway/prompts": "the prompt registry, the same for every caller",
+    "GET /v1/llm-gateway/models": (
+        "the routing table, the same for every caller; with a token it needs a regulatory role "
+        "or llm:call"
+    ),
+    "GET /v1/llm-gateway/prompts": (
+        "the prompt registry, the same for every caller; with a token it needs a regulatory role "
+        "or llm:call"
+    ),
     "POST /v1/llm-gateway/embeddings": (
         "shared infrastructure like completions: clause embedding for the search index has no "
         "tenant, and the tenant header, when sent, only attributes cost"
@@ -305,7 +341,7 @@ def test_every_rulebook_write_needs_the_write_or_the_review_token() -> None:
             ), route
 
 
-def gateway_app() -> FastAPI:
+def gateway_app(**overrides: Any) -> FastAPI:
     return build_gateway(
         GatewaySettings(
             _env_file=None,
@@ -316,6 +352,7 @@ def gateway_app() -> FastAPI:
             langfuse_host=None,
             langfuse_public_key=None,
             langfuse_secret_key=None,
+            **overrides,
         )
     )
 
@@ -328,8 +365,9 @@ def test_the_gateway_routes_are_recorded_as_shared_infrastructure() -> None:
     strict=True,
     raises=AssertionError,
     reason=(
-        "open finding: GET /v1/llm-gateway/usage?tenant_id= reads any tenant's spend; it is an "
-        "operator read until the gateway checks roles or is reachable only on a private network"
+        "open finding in header mode: GET /v1/llm-gateway/usage?tenant_id= reads any tenant's "
+        "spend; token mode checks roles (the test below), so it closes when the gateway runs in "
+        "token mode"
     ),
 )
 def test_tenant_b_cannot_read_the_spend_of_tenant_a_at_the_gateway() -> None:
@@ -346,6 +384,25 @@ def test_tenant_b_cannot_read_the_spend_of_tenant_a_at_the_gateway() -> None:
             "/v1/llm-gateway/usage", params={"tenant_id": str(TENANT_A)}, headers=AS_B
         )
     assert read.status_code in {401, 403, 404} or Decimal(read.json()["spent_inr"]) == 0
+
+
+def test_a_user_of_tenant_b_cannot_read_the_spend_of_tenant_a_in_token_mode() -> None:
+    issuer = TestIssuer()
+    as_qa = bearer(issuer.service("qa", [Scope.LLM_CALL, Scope.TENANT_ACT]))
+    as_b = bearer(issuer.user(TenantId(TENANT_B), [Role.OWNER]))
+    with TestClient(gateway_app(**issuer.settings_overrides("token"))) as gateway:
+        completion = gateway.post(
+            "/v1/llm-gateway/completions",
+            json={"feature": "smoke", "prompt": "smoke.echo@1", "user": "hello " * 40},
+            headers={**AS_A, **as_qa},
+        )
+        if completion.status_code != 200 or Decimal(completion.json()["cost_inr"]) <= 0:
+            pytest.fail(f"the completion of tenant A cost nothing: {completion.text}")
+        read = gateway.get(
+            "/v1/llm-gateway/usage", params={"tenant_id": str(TENANT_A)}, headers=as_b
+        )
+    assert read.status_code == 403
+    assert read.json()["type"].endswith(":auth-forbidden")
 
 
 def test_tenant_b_cannot_reach_a_recipient_of_tenant_a(clients: dict[str, TestClient]) -> None:

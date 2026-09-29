@@ -1,23 +1,32 @@
+import type { BearerSource } from "./auth.ts";
+import { DEFAULT_IDENTITY_API_URL, authorizedFetch } from "./auth.ts";
 import type { ConsentLedger, PreferencesClient, QaClient, Sender } from "./conversation.ts";
 import { maskNumber } from "./conversation.ts";
 import type { ReceiptsBody, ReceiptsClient } from "./receipts.ts";
 import type { Language } from "./replies.ts";
 
+export { DEFAULT_IDENTITY_API_URL } from "./auth.ts";
+
 type Fetch = typeof fetch;
 
 /** The version line of docs/legal/whatsapp-consent.md: the notice a keyword opt-in agrees to. */
 export const DEFAULT_NOTICE_VERSION = "whatsapp-consent 0.1-draft";
-export const DEFAULT_IDENTITY_API_URL = "http://localhost:8001";
 export const DEFAULT_NOTIFICATION_API_URL = "http://localhost:8006";
 
-/** The notification service's preference endpoints; recipient is the E.164 number. */
+/**
+ * The notification service's preference endpoints; recipient is the E.164 number. With a token
+ * source every call carries the bot's service token, which notification needs in token mode (the
+ * notification:preferences scope); without one no authorization is sent.
+ */
 export class HttpPreferencesClient implements PreferencesClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: Fetch;
+  private readonly tokens: BearerSource | null;
 
-  constructor(baseUrl: string, fetchImpl: Fetch = fetch) {
+  constructor(baseUrl: string, fetchImpl: Fetch = fetch, tokens: BearerSource | null = null) {
     this.baseUrl = baseUrl;
     this.fetchImpl = fetchImpl;
+    this.tokens = tokens;
   }
 
   private url(phone: string): string {
@@ -25,7 +34,7 @@ export class HttpPreferencesClient implements PreferencesClient {
   }
 
   async setOptIn(phone: string, optedIn: boolean, language: Language): Promise<void> {
-    const res = await this.fetchImpl(this.url(phone), {
+    const res = await authorizedFetch(this.fetchImpl, this.tokens, this.url(phone), {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ opted_in: optedIn, source: "whatsapp_keyword", language }),
@@ -34,7 +43,7 @@ export class HttpPreferencesClient implements PreferencesClient {
   }
 
   async isOptedIn(phone: string): Promise<boolean> {
-    const res = await this.fetchImpl(this.url(phone));
+    const res = await authorizedFetch(this.fetchImpl, this.tokens, this.url(phone));
     if (res.status === 404) return false;
     if (!res.ok) throw new Error(`preferences: ${res.status}`);
     const body = (await res.json()) as { opted_in?: unknown };
@@ -44,52 +53,63 @@ export class HttpPreferencesClient implements PreferencesClient {
 
 /**
  * The notification service's receipt route: the statuses and inbound times of a webhook delivery,
- * with the bot's shared token (NOTIFICATION_BOT_TOKEN here, CW_NOTIFICATION_BOT_TOKEN there).
+ * with the bot's shared token (NOTIFICATION_BOT_TOKEN here, CW_NOTIFICATION_BOT_TOKEN there) when
+ * it is set, and the bot's service token (the notification:receipts scope) when a token source
+ * is given. Both go out while both are configured, so the same bot works against notification in
+ * header mode (the shared token), dual mode and token mode (the bearer).
  */
 export class HttpReceiptsClient implements ReceiptsClient {
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly fetchImpl: Fetch;
+  private readonly tokens: BearerSource | null;
 
-  constructor(baseUrl: string, token: string, fetchImpl: Fetch = fetch) {
+  constructor(
+    baseUrl: string,
+    token: string,
+    fetchImpl: Fetch = fetch,
+    tokens: BearerSource | null = null,
+  ) {
     this.baseUrl = baseUrl;
     this.token = token;
     this.fetchImpl = fetchImpl;
+    this.tokens = tokens;
   }
 
   async forward(body: ReceiptsBody): Promise<void> {
-    const res = await this.fetchImpl(
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (this.token !== "") headers["x-cw-bot-token"] = this.token;
+    const res = await authorizedFetch(
+      this.fetchImpl,
+      this.tokens,
       `${this.baseUrl.replace(/\/$/, "")}/v1/notification/receipts/whatsapp`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-cw-bot-token": this.token },
-        body: JSON.stringify(body),
-      },
+      { method: "POST", headers, body: JSON.stringify(body) },
     );
     if (!res.ok) throw new Error(`receipts: ${res.status}`);
   }
 }
 
-/** What runs without NOTIFICATION_BOT_TOKEN: nothing is forwarded. */
+/** What runs without NOTIFICATION_BOT_TOKEN or a service token: nothing is forwarded. */
 export class NoReceiptsForwarding implements ReceiptsClient {
   async forward(): Promise<void> {}
 }
 
 /**
- * The receipts client the environment allows. Without NOTIFICATION_BOT_TOKEN the bot still runs,
- * but warns once that delivery statuses and inbound times stay with it: the notification
- * service then never sees a message delivered, and treats every number as outside the 24-hour
- * window.
+ * The receipts client the environment allows. Without NOTIFICATION_BOT_TOKEN and without a
+ * service token the bot still runs, but warns once that delivery statuses and inbound times stay
+ * with it: the notification service then never sees a message delivered, and treats every
+ * number as outside the 24-hour window.
  */
 export function receiptsClient(
   env: Readonly<Record<string, string | undefined>>,
   fetchImpl: Fetch = fetch,
   warn: (line: string) => void = console.warn,
+  tokens: BearerSource | null = null,
 ): ReceiptsClient {
   const token = env.NOTIFICATION_BOT_TOKEN ?? "";
-  if (token === "") {
+  if (token === "" && tokens === null) {
     warn(
-      "whatsapp-bot: NOTIFICATION_BOT_TOKEN is not set; delivery statuses and inbound times are not forwarded to notification",
+      "whatsapp-bot: NOTIFICATION_BOT_TOKEN is not set and there is no service token (BOT_SERVICE_CLIENT_SECRET); delivery statuses and inbound times are not forwarded to notification",
     );
     return new NoReceiptsForwarding();
   }
@@ -97,13 +117,16 @@ export function receiptsClient(
     env.NOTIFICATION_API_URL || DEFAULT_NOTIFICATION_API_URL,
     token,
     fetchImpl,
+    tokens,
   );
 }
 
 /**
  * The identity service's channel consents: every keyword opt-in or opt-out becomes a consent
  * record keyed by the number, with the message as evidence. Identity refuses the call without
- * the shared service token (CW_IDENTITY_CHANNEL_TOKEN there, IDENTITY_SERVICE_TOKEN here).
+ * the shared service token (CW_IDENTITY_CHANNEL_TOKEN there, IDENTITY_SERVICE_TOKEN here) in
+ * header mode, and without the bot's service token (the identity:channel-consents scope) in token
+ * mode; each goes out when it is configured.
  */
 export class HttpConsentLedger implements ConsentLedger {
   private readonly baseUrl: string;
@@ -111,6 +134,7 @@ export class HttpConsentLedger implements ConsentLedger {
   private readonly noticeVersion: string;
   private readonly fetchImpl: Fetch;
   private readonly now: () => Date;
+  private readonly tokens: BearerSource | null;
 
   constructor(
     baseUrl: string,
@@ -118,12 +142,14 @@ export class HttpConsentLedger implements ConsentLedger {
     noticeVersion = DEFAULT_NOTICE_VERSION,
     fetchImpl: Fetch = fetch,
     now: () => Date = () => new Date(),
+    tokens: BearerSource | null = null,
   ) {
     this.baseUrl = baseUrl;
     this.token = token;
     this.noticeVersion = noticeVersion;
     this.fetchImpl = fetchImpl;
     this.now = now;
+    this.tokens = tokens;
   }
 
   async record(
@@ -134,11 +160,15 @@ export class HttpConsentLedger implements ConsentLedger {
     language: Language,
   ): Promise<void> {
     const at = this.now().toISOString();
-    const res = await this.fetchImpl(
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (this.token !== "") headers["x-cw-service-token"] = this.token;
+    const res = await authorizedFetch(
+      this.fetchImpl,
+      this.tokens,
       `${this.baseUrl.replace(/\/$/, "")}/v1/identity/channel-consents`,
       {
         method: "POST",
-        headers: { "content-type": "application/json", "x-cw-service-token": this.token },
+        headers,
         body: JSON.stringify({
           channel: "whatsapp",
           subject: phone,
@@ -173,24 +203,29 @@ export class NoConsentLedger implements ConsentLedger {
 /**
  * The ledger the environment asks for. WHATSAPP_CONSENT_RECORDING_ENABLED is off by default
  * (owner core-product; removed once the lawyer confirms keyword opt-in is valid consent). On,
- * it needs IDENTITY_SERVICE_TOKEN, and the bot refuses to start without it rather than switch
- * reminders on with no record.
+ * it needs IDENTITY_SERVICE_TOKEN or a service token (BOT_SERVICE_CLIENT_SECRET), and the bot
+ * refuses to start without either rather than switch reminders on with no record.
  */
 export function consentLedger(
   env: Readonly<Record<string, string | undefined>>,
   fetchImpl: Fetch = fetch,
   log: (line: string) => void = console.log,
+  tokens: BearerSource | null = null,
 ): ConsentLedger {
   if (env.WHATSAPP_CONSENT_RECORDING_ENABLED !== "true") return new NoConsentLedger(log);
   const token = env.IDENTITY_SERVICE_TOKEN ?? "";
-  if (token === "") {
-    throw new Error("WHATSAPP_CONSENT_RECORDING_ENABLED=true needs IDENTITY_SERVICE_TOKEN");
+  if (token === "" && tokens === null) {
+    throw new Error(
+      "WHATSAPP_CONSENT_RECORDING_ENABLED=true needs IDENTITY_SERVICE_TOKEN or BOT_SERVICE_CLIENT_SECRET",
+    );
   }
   return new HttpConsentLedger(
     env.IDENTITY_API_URL || DEFAULT_IDENTITY_API_URL,
     token,
     env.WHATSAPP_NOTICE_VERSION || DEFAULT_NOTICE_VERSION,
     fetchImpl,
+    undefined,
+    tokens,
   );
 }
 

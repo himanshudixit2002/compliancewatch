@@ -15,10 +15,12 @@ class PipelineSettings(Settings):
 
     ``rulebook_url`` and ``rulebook_write_token`` reach the rulebook's write API; the token is
     the rulebook's ``CW_RULEBOOK_WRITE_TOKEN``. ``llm_gateway_url`` is where the relation stage's
-    model calls and the clause embeddings go (``CW_LLM_GATEWAY_URL``). ``pipeline_prompts_dir``
-    is where the prompt files are when the package is installed away from the source tree (the
-    image sets ``CW_PIPELINE_PROMPTS_DIR=/app/prompts``); the worker reads them only with the
-    flag on.
+    model calls and the clause embeddings go (``CW_LLM_GATEWAY_URL``). With py-common's
+    ``CW_SERVICE_CLIENT_SECRET`` set, both clients also carry the pipeline's own access token
+    from the identity service; its client needs the rulebook:write and llm:call scopes.
+    ``pipeline_prompts_dir`` is where the prompt files are when the package is installed away
+    from the source tree (the image sets ``CW_PIPELINE_PROMPTS_DIR=/app/prompts``); the worker
+    reads them only with the flag on.
     """
 
     pipeline_knowledge_enabled: bool = False

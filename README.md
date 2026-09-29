@@ -26,7 +26,7 @@
 > review tasks) behind the second committed OpenAPI spec, and its public business API (create from a GSTIN or a PAN with an Idempotency-Key, the tenant's list by cursor, an onboarding checklist with worded questions) with `GET /v1/ontology` over the draft English wording of every attribute, all merged into the public API spec (`public.v1.json`, with a changelog, the API rules checked on every public route, and generated Python models),
 > the LLM gateway skeleton (routing, prompt registry, cost ledger,
 > budgets, PII masking, Langfuse tracing, fake provider container, embeddings for retrieval) with the first committed OpenAPI
-> spec, problem-details errors, cursor pagination and idempotency keys in py-common, feature flags (a registry with owners, defaults and expiry dates checked by `make flags-check`, OpenFeature in Python and TypeScript with env and Unleash providers), the event contracts (sixteen topics and the envelope as
+> spec, problem-details errors, cursor pagination and idempotency keys in py-common, feature flags (a registry with owners, defaults and expiry dates checked by `make flags-check`, OpenFeature in Python and TypeScript with env and Unleash providers), the event contracts (eighteen topics and the envelope as
 > JSON Schema with generated pydantic and TypeScript types and compatibility checks in CI), the
 > transactional outbox in py-common (writer, Kafka relay with dead letters, idempotent consumer),
 > the Temporal worker scaffold with the pipeline's sample ingest workflow, the first source
@@ -39,7 +39,7 @@
 > baseline), the WhatsApp bot with
 > signature checks, keyword opt-in and opt-out and Hindi replies, the notification service's
 > recipients per business, Postgres store under row-level security and worker (obligation events to change cards, reminders and closures with batching, quiet hours, retries, a fallback channel, daily digests for owners and CA firms and a retention sweep), delivery receipts with WhatsApp's 24-hour window, template drafts, and the Cloud API and SMTP email channels behind flags, consent records
-> and WhatsApp keyword consents in the identity service with the legal drafts in `docs/legal`, the GSTIN lookup protocol with
+> and WhatsApp keyword consents in the identity service with the legal drafts in `docs/legal`, sign-in (tenants, users and roles in identity, a fake identity provider locally and a Supabase adapter, ES256 access tokens and service tokens every service verifies behind `CW_AUTH_MODE`, and a secret-rotation runbook), the GSTIN lookup protocol with
 > the manual fallback and an HTTP provider behind a flag (state codes derived from the GSTIN, the business category behind a second flag), the billing protocol with a Razorpay skeleton behind a flag, OpenTelemetry tracing
 > and metrics with a dev observability stack (collector, Prometheus, Tempo, Grafana dashboard),
 > pnpm + Turborepo workspace with the Next.js web app and
@@ -78,7 +78,7 @@ flowchart LR
   ENGINE[applicability-engine]
   OBLIG[obligation: calendar, reschedules]
   NOTIF[notification: preferences, quiet hours, templates]
-  IDENT[identity: consents, billing]
+  IDENT[identity: tenants, sign-in, tokens, consents, billing]
   WEB[web app]
   BOT[whatsapp-bot]
   Sources --> ADAPT
@@ -158,7 +158,7 @@ compliancewatch/
     contracts/               # OpenAPI specs, event schemas (JSON Schema), generated clients (py + ts)
       openapi/               # <service>.v1.json for identity, profile, rulebook, notification, llm-gateway,
                              # obligation and qa; BREAKING.md
-      events/                # schemas/<topic>.v1.json, examples/, CHANGELOG.md (sixteen topics + envelope)
+      events/                # schemas/<topic>.v1.json, examples/, CHANGELOG.md (eighteen topics + envelope)
       clients/python/        # cw_contracts: generated pydantic models (make contracts)
       clients/typescript/    # generated .d.ts per topic and index.ts
     domain-kernel/           # Shared value objects, protocols, ontology model, error types
@@ -298,10 +298,10 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 ## Not in this repository yet
 
 - The repository settings in [docs/onboarding/repository-settings.md](docs/onboarding/repository-settings.md) (the required `CI gate` check, title-only squash merges, Dependabot security updates, secret scanning, private vulnerability reporting) until the owner applies them; an API scan (DAST) of the running services, which arrives with the deployable stack
-- Terraform staging cluster and Keycloak (the gateway trusts an `x-tenant-id` header until then)
-- Accounts the maintainer opens: the Meta WhatsApp business account (bot and channel stay in logging mode), Razorpay (billing answers 503), a GSTIN lookup provider (every registration gets a verify task until the HTTP provider's field mapping is checked against its sandbox), Supabase Auth, a hosted Unleash (flags come from the environment until then); the legal drafts need a lawyer before onboarding shows them
-- Analyst review of the draft ontology wording and of the GSTIN nature-of-business to category mapping; enforcement of the public routes' `x-roles` (the identity service); the daily purge of expired idempotency keys (`python -m py_common.idempotency purge`, for the deploy to schedule); TypeScript types for the REST APIs (the web UI track will generate them from the committed specs)
-- For notifications: Meta's approval of the templates (all drafts, so WhatsApp reaches only numbers that wrote in the last 24 hours and anyone else falls back to email), the analyst review of their Hindi copy, the in-region SES sending domain with its SNS feedback subscription (email stays off until then), the web pages the messages link to (`/obligations`), and service auth on the rulebook reader
+- Terraform staging cluster and Keycloak (services trust the `x-tenant-id` header while `CW_AUTH_MODE=header`, the default; production accepts only `token`)
+- Accounts the maintainer opens: the Meta WhatsApp business account (bot and channel stay in logging mode), Razorpay (billing answers 503), a GSTIN lookup provider (every registration gets a verify task until the HTTP provider's field mapping is checked against its sandbox), Supabase Auth (manual steps in `services/identity/README.md`; the fake provider signs people in locally until then), a hosted Unleash (flags come from the environment until then); the legal drafts need a lawyer before onboarding shows them
+- Analyst review of the draft ontology wording and of the GSTIN nature-of-business to category mapping; the daily purge of expired idempotency keys (`python -m py_common.idempotency purge`, for the deploy to schedule); TypeScript types for the REST APIs (the web UI track will generate them from the committed specs)
+- For notifications: Meta's approval of the templates (all drafts, so WhatsApp reaches only numbers that wrote in the last 24 hours and anyone else falls back to email), the analyst review of their Hindi copy, the in-region SES sending domain with its SNS feedback subscription (email stays off until then), and the web pages the messages link to (`/obligations`)
 - Alert rules for source freshness, decision-flip rate and LLM budget (their metrics do not exist yet; the API SLO, outbox, worker, entity review queue and notification delivery alerts do, with runbooks)
 - The EKS path of the guide (Terraform, Helm, Argo CD canaries); the MVP profile in `infra/deploy` targets Fly.io and Vercel and has not been applied
 - The ingest workflow wired to the real adapters and the outbox (the adapters, parsers and detector exist and run from `make backfill`; the workflow still runs on the in-memory fakes); OCR for scanned PDFs
@@ -313,4 +313,4 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - The obligation service's consumer of the rule events (`rule.deadline_changed`, `rule.withdrawn`, `rule.superseded`): published changes reach the outbox but do not yet move or close any obligation
 - In qa: the fourth, agentic layer of ADR-012 and a reranker; a router so single-hop questions skip the planner (with the KAG flag on, every question past the structured layer costs a planner call)
 - The applicability engine's API (qa's solver evaluates rule predicates with the kernel until it exists)
-- Full text for ADR-009 to ADR-011; the identity service itself (ADR-014 decides Supabase Auth for the MVP; nothing is created until the maintainer opens the project). Until it exists the rulebook's review token is a shared secret and the approver ids in review and publish requests are asserted by the caller (ADR-018)
+- Full text for ADR-009 to ADR-011; the Supabase project (ADR-014 decides Supabase Auth for the MVP; nothing is created until the maintainer opens it). Until an environment runs `CW_AUTH_MODE=token` the rulebook's review token is a shared secret and the approver ids in review and publish requests are asserted by the caller (ADR-018); the web app does not sign in with tokens yet

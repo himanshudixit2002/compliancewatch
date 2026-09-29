@@ -1,6 +1,12 @@
 """In-memory repository, unit of work and eval recorder: the fakes for tests and the app
-before Postgres."""
+before Postgres.
 
+A unit of work works on a copy of the store and replaces it when the block exits cleanly. Units
+run one at a time (a store-level lock held from open to commit or rollback), so two overlapping
+requests cannot both start from the same copy and lose each other's writes.
+"""
+
+import threading
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from uuid import UUID
@@ -169,15 +175,17 @@ class MemoryStore:
         self.tasks: dict[BusinessId, ReviewTask] = {}
         self.events: list[DomainEvent] = []
         self.eval_cases: list[Mapping[str, object]] = []
+        self._lock = threading.Lock()
 
     def __call__(self, tenant_id: TenantId) -> AbstractContextManager[UnitOfWork]:
         return self._unit(tenant_id)
 
     @contextmanager
     def _unit(self, tenant_id: TenantId) -> Iterator[UnitOfWork]:
-        uow = MemoryUnitOfWork(self, tenant_id)
-        yield uow
-        uow.commit()
+        with self._lock:
+            uow = MemoryUnitOfWork(self, tenant_id)
+            yield uow
+            uow.commit()
 
     def ping(self) -> bool:
         return True
