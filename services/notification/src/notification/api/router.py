@@ -68,7 +68,11 @@ def get_preference(channel: Channel, recipient: str, wired: Wired) -> Preference
 
 @router.post(
     "/send",
-    summary="Send one notification: dedupe, consent, quiet hours, render, deliver",
+    summary="Send one notification now: dedupe, consent, quiet hours, queue, deliver",
+    description=(
+        "A failed delivery stays queued and the service retries it; sending the same request "
+        "again is a duplicate. In quiet hours the notification is queued for their end."
+    ),
     responses=problem_responses(401, 422, 503),
 )
 def send(body: SendIn, tenant: Tenant, wired: Wired) -> SendOut:
@@ -83,7 +87,7 @@ def send(body: SendIn, tenant: Tenant, wired: Wired) -> SendOut:
         params=body.params,
         language=body.language,
     )
-    return SendOut.from_outcome(wired.send.run(request, attempt=body.attempt))
+    return SendOut.from_outcome(wired.send.run(request))
 
 
 @router.get("/templates", summary="Every message template with its approval status")

@@ -1,7 +1,7 @@
 """Migration 0001 on Postgres: the tables, row-level security by tenant on the tenant tables, the
 store's repositories, recipients with their address directory, one row per dedupe key under
-concurrent writes, the work index under two dispatchers, the consumer's transaction, and the
-outbox. Needs Docker.
+concurrent writes, the work index under two dispatchers, the consumer's transaction, queueing and
+dispatching a batch, and the outbox. Needs Docker.
 
 The store runs as a plain database role, not the container's superuser: a superuser bypasses
 row-level security whatever the table says, so the service's runtime role must never be one.
@@ -25,7 +25,16 @@ from testcontainers.community.postgres import PostgresContainer
 
 from domain_kernel.channels import Channel
 from domain_kernel.dedupe import DedupeKey
-from domain_kernel.ids import BusinessId, NotificationId, ObligationId, TenantId, UserId
+from domain_kernel.ids import (
+    BusinessId,
+    NotificationId,
+    ObligationId,
+    RuleVersionId,
+    TenantId,
+    UserId,
+)
+from notification.application.dispatch import DeliveryOutcome, DispatchDue
+from notification.application.enqueue import Enqueued, EnqueueNotifications
 from notification.application.preferences import SetOptIn
 from notification.application.recipients import (
     GetRecipient,
@@ -33,12 +42,13 @@ from notification.application.recipients import (
     RegisterRecipient,
     RemoveRecipient,
 )
-from notification.application.send import SendNotification
+from notification.application.send import SendNow
 from notification.domain.errors import RecipientNotFoundError
 from notification.domain.ids import DispatchId, RecipientId
 from notification.domain.model import NotificationRequest, Outcome
 from notification.domain.notification import DeliveryState, Notification
-from notification.domain.occasions import OccasionKind
+from notification.domain.occasions import Occasion, OccasionKind
+from notification.domain.policy import BatchPolicy
 from notification.domain.preferences import (
     ChannelPreference,
     ConsentSource,
@@ -48,9 +58,10 @@ from notification.domain.preferences import (
 )
 from notification.domain.recipients import BusinessLink, DigestMode, RecipientRole
 from notification.domain.repository import DirectoryEntry, PageAfter, WorkEntry
+from notification.domain.routing import ObligationNotice
 from notification.infrastructure.repository import PostgresUnitOfWorkFactory, SqlAlchemyUnitOfWork
 from notification.infrastructure.work_index import PostgresWorkIndex, claim_rows
-from notification.testing import NOON_IST, FakeChannel
+from notification.testing import NOON_IST, FakeChannel, FakeRuleVersionReader
 from py_common.events import EventMessage, to_message
 from py_common.outbox import (
     ConsumerConfig,
@@ -675,12 +686,34 @@ async def test_the_consumer_commits_the_notification_with_its_inbox_row(
     purge(factory, tenant)
 
 
+def outbox_topics(engine: Engine, tenant: TenantId) -> list[str]:
+    with engine.connect() as connection:
+        topics: Sequence[str] = (
+            connection.execute(
+                select(outbox_event.c.topic)
+                .where(outbox_event.c.tenant_id == tenant.value)
+                .order_by(outbox_event.c.topic)
+            )
+            .scalars()
+            .all()
+        )
+    return list(topics)
+
+
 def test_sends_write_their_outbox_rows_for_sent_and_failed(
     factory: PostgresUnitOfWorkFactory, engine: Engine
 ) -> None:
     tenant = TenantId.new()
     channel = FakeChannel(clock=lambda: NOON_IST)
-    send = SendNotification(factory, {Channel.WHATSAPP: channel}, clock=lambda: NOON_IST)
+    dispatch = DispatchDue(
+        factory,
+        factory.work_index,
+        {Channel.WHATSAPP: channel},
+        rules=FakeRuleVersionReader(),
+        web_base_url="https://app.example",
+        clock=lambda: NOON_IST,
+    )
+    send = SendNow(factory, dispatch, clock=lambda: NOON_IST)
     SetOptIn(factory, clock=lambda: NOON_IST).run(
         Channel.WHATSAPP, "+91 98765 00001", opted_in=True, source=ConsentSource.API
     )
@@ -703,28 +736,109 @@ def test_sends_write_their_outbox_rows_for_sent_and_failed(
     assert send.run(ok).outcome is Outcome.SENT
     assert send.run(ok).outcome is Outcome.DUPLICATE
     channel.fail_next = 1
-    assert send.run(request(), attempt=2).outcome is Outcome.FAILED
+    retried = request()
+    assert send.run(retried).outcome is Outcome.FAILED
 
     with factory(tenant) as unit:
         stored = unit.notifications.get(ok.notification_id)
+        waiting = unit.notifications.get(retried.notification_id)
     assert stored is not None
     assert (stored.state, stored.address, stored.provider_message_id) == (
         DeliveryState.SENT,
         "+919876500001",
         "fake-1",
     )
-    assert PostgresWorkIndex(factory.engine).tenant_for_provider_message("fake-1") == tenant
+    assert waiting is not None
+    assert (waiting.state, waiting.attempts, waiting.available_at) == (
+        DeliveryState.QUEUED,
+        1,
+        NOON_IST + timedelta(seconds=60),
+    )
     with engine.connect() as connection:
-        topics: Sequence[str] = (
-            connection.execute(
-                select(outbox_event.c.topic)
-                .where(outbox_event.c.tenant_id == tenant.value)
-                .order_by(outbox_event.c.topic)
-            )
-            .scalars()
-            .all()
+        work = connection.execute(
+            text("SELECT status, lease_until FROM work_index WHERE id = :id"),
+            {"id": retried.notification_id.value},
+        ).one()
+    assert (work.status, work.lease_until) == ("pending", None), "the send's lease ended"
+    assert PostgresWorkIndex(factory.engine).tenant_for_provider_message("fake-1") == tenant
+    assert outbox_topics(engine, tenant) == ["notification.failed", "notification.sent"]
+    purge(factory, tenant)
+
+
+def test_queued_notifications_go_out_as_one_batch(
+    factory: PostgresUnitOfWorkFactory, app_engine: Engine, engine: Engine
+) -> None:
+    tenant, business, rule = TenantId.new(), BusinessId.new(), RuleVersionId.new()
+    base = datetime(2003, 3, 3, 6, 30, tzinfo=UTC)
+    clock = [base]
+    RegisterRecipient(factory, clock=lambda: base).run(
+        RecipientRegistration(
+            tenant_id=tenant,
+            recipient_id=RecipientId.new(),
+            role=RecipientRole.OWNER,
+            addresses=[(Channel.WHATSAPP, "+91 98765 00003")],
+            businesses=[BusinessLink(business, "Acme Traders")],
         )
-    assert list(topics) == ["notification.failed", "notification.sent"]
+    )
+    SetOptIn(factory, clock=lambda: base).run(
+        Channel.WHATSAPP, "+919876500003", opted_in=True, source=ConsentSource.API
+    )
+    enqueue = EnqueueNotifications(
+        factory, batch=BatchPolicy(window_seconds=300), clock=lambda: clock[0]
+    )
+
+    def notice(occasion: Occasion, template_key: str, title: str) -> ObligationNotice:
+        return ObligationNotice(
+            tenant_id=tenant,
+            business_id=business,
+            occasion=occasion,
+            template_key=template_key,
+            params={
+                "title": title,
+                "rule_version_id": str(rule),
+                "close_reason": "profile_changed",
+            },
+        )
+
+    card = notice(Occasion.change_card(ObligationId.new(), rule), "change_card", "File GSTR-3B")
+    assert enqueue.run(card) == Enqueued(queued=1)
+    clock[0] = base + timedelta(seconds=60)
+    closure = notice(Occasion.closure(ObligationId.new()), "obligation_closed", "File CMP-08")
+    assert enqueue.run(closure) == Enqueued(queued=1)
+    assert enqueue.run(card) == Enqueued(duplicates=1), "the store keeps the key unique"
+
+    channel = FakeChannel(clock=lambda: base + timedelta(seconds=300))
+    dispatch = DispatchDue(
+        factory,
+        PostgresWorkIndex(app_engine),
+        {Channel.WHATSAPP: channel},
+        rules=FakeRuleVersionReader(),
+        web_base_url="https://app.example",
+        clock=lambda: base + timedelta(seconds=300),
+    )
+    (delivery,) = dispatch.run()
+    assert delivery.outcome is DeliveryOutcome.SENT
+    (message,) = channel.sent
+    assert message.body.startswith(
+        "Updates for Acme Traders. Changes to your compliance calendar: 2. New - File GSTR-3B; "
+        "Closed - File CMP-08."
+    )
+    with factory(tenant) as unit:
+        sent = unit.notifications.page(business, limit=10)
+    assert {n.state for n in sent} == {DeliveryState.SENT}
+    assert len({n.dispatch_id for n in sent}) == 1
+    assert outbox_topics(engine, tenant) == ["notification.sent", "notification.sent"]
+    assert PostgresWorkIndex(app_engine).tenant_for_provider_message("fake-1") == tenant
+
+    leased = item(1, tenant, at=base + timedelta(days=1))
+    with factory(tenant) as unit:
+        assert unit.notifications.add_if_absent(leased)
+        unit.work.add(WorkEntry.of(leased), lease_until=leased.available_at + LEASE)
+    work = PostgresWorkIndex(app_engine)
+    assert work.claim(limit=10, now=leased.available_at, lease=LEASE) == [], "leased when added"
+    assert [e.id for e in work.claim(limit=10, now=leased.available_at + LEASE, lease=LEASE)] == [
+        leased.id
+    ]
     purge(factory, tenant)
 
 

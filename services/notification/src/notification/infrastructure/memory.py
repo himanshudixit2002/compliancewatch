@@ -268,14 +268,14 @@ class MemoryWorkQueue:
         self._state = state
         self._tenant_id = tenant_id
 
-    def add(self, entry: WorkEntry) -> None:
+    def add(self, entry: WorkEntry, *, lease_until: datetime | None = None) -> None:
         if entry.tenant_id != self._tenant_id:
             raise ValueError(f"work entry {entry.id} belongs to another tenant")
         if entry.id not in self._state.notifications:
             raise ValueError(f"work entry {entry.id} has no notification")
         if entry.id in self._state.work:
             raise ValueError(f"duplicate work entry {entry.id}")
-        self._state.work[entry.id] = WorkRow(entry)
+        self._state.work[entry.id] = WorkRow(entry, lease_until=lease_until)
 
     def complete(self, notification_id: NotificationId, *, provider_message_id: str = "") -> None:
         row = self._state.work.get(notification_id)

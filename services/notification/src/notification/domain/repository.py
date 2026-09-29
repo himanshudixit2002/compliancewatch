@@ -228,7 +228,10 @@ class WorkEntry:
 class WorkQueue(Protocol):
     """The work queue entries of the unit of work's notifications, written in its transaction."""
 
-    def add(self, entry: WorkEntry) -> None: ...
+    def add(self, entry: WorkEntry, *, lease_until: datetime | None = None) -> None:
+        """Queue the entry; with ``lease_until`` it is leased to the caller until then, as a
+        claim would lease it, so that no dispatcher takes it meanwhile."""
+        ...
 
     def complete(self, notification_id: NotificationId, *, provider_message_id: str = "") -> None:
         """Nothing more to do; the provider's message id stays to route its receipts."""

@@ -147,6 +147,14 @@ TEMPLATES: tuple[MessageTemplate, ...] = (
         "अब आपको ComplianceWatch के संदेश WhatsApp पर नहीं मिलेंगे। फिर से शुरू करने के लिए START लिखें।",
     ),
     MessageTemplate(
+        "obligation_created",
+        _EMAIL,
+        "en",
+        "{business_name}: a new obligation applies to you. {title}, due {due_date}.\n\n"
+        + _EMAIL_FOOTER,
+        subject="New obligation: {title}",
+    ),
+    MessageTemplate(
         "obligation_due_soon",
         _EMAIL,
         "en",
@@ -473,6 +481,33 @@ def phrase(name: str, language: str) -> str:
     if found is None:
         raise UnknownTemplateError(f"phrase {name}", language)
     return found
+
+
+MONTHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "en": ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+        "hi": (
+            "जनवरी",
+            "फ़रवरी",
+            "मार्च",
+            "अप्रैल",
+            "मई",
+            "जून",
+            "जुलाई",
+            "अगस्त",
+            "सितंबर",
+            "अक्टूबर",
+            "नवंबर",
+            "दिसंबर",
+        ),
+    }
+)
+"""Month names as dates in messages spell them, such as '25 Oct 2026', by language."""
+
+
+def month_name(month: int, language: str) -> str:
+    """The name of ``month`` (1 to 12) in ``language``, or in English when it has none."""
+    return (MONTHS.get(language) or MONTHS["en"])[month - 1]
 
 
 SUMMARY_LINES: Mapping[tuple[str, str], str] = MappingProxyType(

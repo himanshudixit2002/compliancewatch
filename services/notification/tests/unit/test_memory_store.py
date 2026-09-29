@@ -198,6 +198,17 @@ def test_work_is_claimed_once_per_lease_then_completed_or_rescheduled() -> None:
         work.claim(limit=0, now=now, lease=LEASE)
 
 
+def test_an_entry_added_with_a_lease_is_not_claimed_before_it_ends() -> None:
+    store = MemoryStore()
+    leased = item(1)
+    with store(TENANT) as unit:
+        assert unit.notifications.add_if_absent(leased)
+        unit.work.add(WorkEntry.of(leased), lease_until=NOON_IST + LEASE)
+    assert store.work_index.claim(limit=10, now=NOON_IST, lease=LEASE) == []
+    claimed = store.work_index.claim(limit=10, now=NOON_IST + LEASE, lease=LEASE)
+    assert [entry.id for entry in claimed] == [leased.id]
+
+
 def test_consents_inbound_times_and_suppressions() -> None:
     store = MemoryStore()
     preference = ChannelPreference(Channel.WHATSAPP, PHONE, True, ConsentSource.API, NOON_IST)

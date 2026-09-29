@@ -55,3 +55,13 @@ class RecipientNotFoundError(DomainError):
 
     def __init__(self, recipient_id: str) -> None:
         super().__init__(f"no recipient {recipient_id} in this tenant")
+
+
+class DependencyUnavailableError(DomainError):
+    """A service the notification service reads from, such as the rulebook, did not answer."""
+
+    type_slug: ClassVar[str] = "notification-dependency-unavailable"
+    title: ClassVar[str] = "Notification dependency unavailable"
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)

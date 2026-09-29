@@ -506,6 +506,8 @@
         "properties": {
           "attempt": {
             "default": 1,
+            "deprecated": true,
+            "description": "Ignored: the service retries a failed delivery itself",
             "maximum": 10.0,
             "minimum": 1.0,
             "title": "Attempt",
@@ -1158,6 +1160,7 @@
     },
     "/v1/notification/send": {
       "post": {
+        "description": "A failed delivery stays queued and the service retries it; sending the same request again is a duplicate. In quiet hours the notification is queued for their end.",
         "operationId": "send_v1_notification_send_post",
         "parameters": [
           {
@@ -1242,7 +1245,7 @@
             "description": "Service Unavailable"
           }
         },
-        "summary": "Send one notification: dedupe, consent, quiet hours, render, deliver",
+        "summary": "Send one notification now: dedupe, consent, quiet hours, queue, deliver",
         "tags": [
           "notification"
         ]

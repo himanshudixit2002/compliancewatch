@@ -6,9 +6,11 @@ from dataclasses import dataclass
 
 from domain_kernel.channels import Channel
 from domain_kernel.protocols import NotificationChannel
+from notification.application.dispatch import DispatchDue
+from notification.application.enqueue import EnqueueNotifications
 from notification.application.preferences import GetPreference, SetOptIn
 from notification.application.recipients import GetRecipient, RegisterRecipient, RemoveRecipient
-from notification.application.send import SendNotification
+from notification.application.send import SendNow
 from notification.domain.preferences import QuietHours
 from notification.domain.repository import UnitOfWorkFactory, WorkIndex
 from notification.settings import NotificationSettings
@@ -21,7 +23,9 @@ class Wiring:
     work_index: WorkIndex
     channels: Mapping[Channel, NotificationChannel]
     quiet_hours: QuietHours
-    send: SendNotification
+    send: SendNow
+    enqueue: EnqueueNotifications
+    dispatch: DispatchDue
     set_opt_in: SetOptIn
     get_preference: GetPreference
     register_recipient: RegisterRecipient

@@ -179,11 +179,20 @@ class Notification:
     def is_pending(self) -> bool:
         return self.state in PENDING_STATES
 
-    def sent(self, dispatch_id: DispatchId, provider_message_id: str, at: datetime) -> Transition:
-        """The channel accepted the message."""
+    def sent(
+        self,
+        dispatch_id: DispatchId,
+        provider_message_id: str,
+        at: datetime,
+        *,
+        params: Mapping[str, object] | None = None,
+    ) -> Transition:
+        """The channel accepted the message. ``params``, when given, replaces the values with the
+        ones the message was rendered with, kept for the record."""
         self._require_pending("sent")
         sent = replace(
             self,
+            params=self.params if params is None else params,
             state=DeliveryState.SENT,
             attempts=self.attempts + 1,
             dispatch_id=dispatch_id,

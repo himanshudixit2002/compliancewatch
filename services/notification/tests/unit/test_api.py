@@ -1,11 +1,18 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
 from domain_kernel.channels import Channel
+from domain_kernel.ids import NotificationId, TenantId
+from notification.domain.notification import DeliveryState
 from notification.domain.preferences import ConsentSource
 from notification.main import WHATSAPP_DISABLED, build_app, wire
-from notification.testing import NOON_IST, FakeChannel, notification_settings
+from notification.testing import (
+    NOON_IST,
+    FakeChannel,
+    FakeRuleVersionReader,
+    notification_settings,
+)
 
 PHONE = "919876543210"
 TENANT = {"x-tenant-id": str(uuid4())}
@@ -142,3 +149,25 @@ def test_ready_and_the_enabled_channel_wiring() -> None:
     assert isinstance(wiring.channels[Channel.WHATSAPP], WhatsAppCloudChannel)
     with TestClient(build_app(notification_settings())) as client:
         assert client.get("/ready").json()["status"] == "ready"
+
+
+def test_a_failed_send_stays_queued_and_the_old_attempt_field_is_ignored() -> None:
+    channel = FakeChannel(clock=lambda: NOON_IST)
+    channel.fail_next = 1
+    never_quiet = notification_settings(quiet_hours_start="00:00", quiet_hours_end="00:00")
+    app = build_app(
+        never_quiet, channels={Channel.WHATSAPP: channel}, rules=FakeRuleVersionReader()
+    )
+    wiring = app.state.wiring
+    wiring.set_opt_in.run(Channel.WHATSAPP, PHONE, opted_in=True, source=ConsentSource.API)
+    body = send_body(attempt=3)
+    with TestClient(app) as client:
+        failed = client.post("/v1/notification/send", json=body, headers=TENANT)
+        again = client.post("/v1/notification/send", json=body, headers=TENANT)
+    assert failed.status_code == 200, failed.text
+    assert (failed.json()["outcome"], failed.json()["error"]) == ("failed", "fake: down")
+    assert again.json()["outcome"] == "duplicate", "the service retries, not the caller"
+    with wiring.unit_of_work(TenantId(UUID(TENANT["x-tenant-id"]))) as unit:
+        stored = unit.notifications.get(NotificationId(UUID(str(body["notification_id"]))))
+    assert stored is not None
+    assert (stored.state, stored.attempts) == (DeliveryState.QUEUED, 1)

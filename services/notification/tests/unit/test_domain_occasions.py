@@ -9,7 +9,7 @@ from domain_kernel.dedupe import DedupeKey
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId
 from notification.domain.ids import RecipientId
-from notification.domain.occasions import Occasion, OccasionKind, dedupe_key
+from notification.domain.occasions import Occasion, OccasionKind, dedupe_key, fallback_key
 
 BUSINESS = BusinessId.new()
 RECIPIENT = RecipientId.new()
@@ -118,3 +118,11 @@ def test_fan_out_occasions_need_a_recipient(occasion: Occasion) -> None:
 def test_an_occasion_without_its_detail_is_refused(build: Callable[[], Occasion]) -> None:
     with pytest.raises(InvariantViolationError):
         build()
+
+
+def test_a_fallback_has_a_key_of_its_own_per_channel() -> None:
+    key = dedupe_key(Occasion.reminder(OBLIGATION, 1), BUSINESS, RECIPIENT, WA)
+    email = fallback_key(key, Channel.EMAIL)
+    assert email == fallback_key(key, Channel.EMAIL), "stable"
+    assert len({key, email, fallback_key(key, WA)}) == 3
+    assert email.value == hashlib.sha256(f"{key.value}|fallback|email".encode()).hexdigest()

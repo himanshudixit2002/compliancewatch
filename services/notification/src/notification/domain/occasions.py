@@ -13,6 +13,9 @@ key the store keeps unique, so a redelivered event or a repeated call makes no s
 - reschedule: one per obligation and new due date, recipient and channel;
 - manual: one per obligation, business, channel and template, as ``POST /send`` has always
   keyed it, and per recipient when the send names one.
+
+A fallback to another channel, after every attempt on the first one failed, is keyed from the
+notification it falls back from (``fallback_key``), so it too is made once.
 """
 
 import hashlib
@@ -142,3 +145,10 @@ def _tail(business_id: BusinessId, recipient_id: RecipientId, channel: Channel) 
 
 def _digest(material: str) -> DedupeKey:
     return DedupeKey(hashlib.sha256(material.encode("utf-8")).hexdigest())
+
+
+def fallback_key(key: DedupeKey, channel: Channel) -> DedupeKey:
+    """The key of the fallback on ``channel`` of the notification keyed ``key``."""
+    require_instance(key, DedupeKey, "key")
+    require_instance(channel, Channel, "channel")
+    return _digest(f"{key.value}|fallback|{channel.value}")

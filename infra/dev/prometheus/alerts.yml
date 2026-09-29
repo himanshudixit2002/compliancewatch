@@ -3,8 +3,8 @@
 # link is missing or points at a file that does not exist. promtool checks the rules and runs the
 # unit tests in alerts.test.yml (`make alerts-check`, the ops job in ci.yml), so a change to a
 # tested rule changes its cases there too. The remaining paging alerts of the guide (source
-# freshness, decision-flip rate, notification failure rate and duplicates, LLM spend past 80% of
-# budget) arrive with the metrics that feed them; docs/runbooks/README.md lists them as pending.
+# freshness, decision-flip rate, LLM spend past 80% of budget) arrive with the metrics that feed
+# them; docs/runbooks/README.md lists them as pending.
 groups:
   - name: api-slo
     rules:
@@ -100,3 +100,29 @@ groups:
         annotations:
           summary: "More than 500 entity review items have been open for 6 hours"
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/entity-review-queue.md
+  - name: notification
+    rules:
+      # notification_sends_total counts every delivery attempt by outcome. The share is the
+      # notifications whose last attempt failed against those sent plus those; a retry may still
+      # succeed and a suppressed notification was never to go, so neither counts.
+      - alert: NotificationDeliveryFailures
+        expr: |
+          sum by (channel) (rate(notification_sends_total{outcome="failed"}[15m]))
+            /
+          sum by (channel) (rate(notification_sends_total{outcome=~"sent|failed"}[15m])) > 0.01
+        for: 15m
+        labels:
+          severity: page
+          team: core-product
+        annotations:
+          summary: "More than 1% of {{ $labels.channel }} notifications failed for good over 15 minutes"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/notification-delivery.md#notificationdeliveryfailures
+      # A delivery of a notification that was already sent should never happen: any increase.
+      - alert: NotificationDuplicateSent
+        expr: sum by (channel) (increase(notification_duplicate_sent_total[15m])) > 0
+        labels:
+          severity: page
+          team: core-product
+        annotations:
+          summary: "A notification was delivered twice on {{ $labels.channel }}"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/notification-delivery.md#notificationduplicatesent

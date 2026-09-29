@@ -73,7 +73,13 @@ class SendIn(Strict):
     template_key: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     params: dict[str, Any] = Field(default_factory=dict)
     language: str | None = Field(default=None, pattern=r"^[a-z]{2}$")
-    attempt: int = Field(default=1, ge=1, le=10)
+    attempt: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        deprecated=True,
+        description="Ignored: the service retries a failed delivery itself",
+    )
 
 
 class SendOut(BaseModel):

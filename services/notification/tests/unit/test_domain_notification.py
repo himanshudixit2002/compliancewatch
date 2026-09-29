@@ -68,8 +68,11 @@ def test_sent_records_the_delivery_and_publishes_sent() -> None:
         KEY.value,
     )
     assert event.provider_message_id == "wamid.1"
+    assert sent.params == item.params
     with pytest.raises(InvariantViolationError):
         sent.sent(dispatch, "wamid.2", LATER)
+    rendered, _ = item.sent(dispatch, "wamid.1", LATER, params={"title": "File", "link": "x"})
+    assert dict(rendered.params) == {"title": "File", "link": "x"}
 
 
 def test_retries_run_at_60_and_300_seconds_and_the_third_failure_is_final() -> None:

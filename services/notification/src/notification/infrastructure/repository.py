@@ -493,7 +493,7 @@ class SqlAlchemyWorkQueue:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def add(self, entry: WorkEntry) -> None:
+    def add(self, entry: WorkEntry, *, lease_until: datetime | None = None) -> None:
         self._session.execute(
             insert(WorkIndexRow).values(
                 id=entry.id.value,
@@ -501,6 +501,7 @@ class SqlAlchemyWorkQueue:
                 kind=entry.kind.value,
                 status="pending",
                 available_at=entry.available_at,
+                lease_until=lease_until,
                 created_at=func.now(),
                 updated_at=func.now(),
             )

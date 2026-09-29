@@ -27,12 +27,13 @@ from domain_kernel.predicates import Applicability
 from domain_kernel.rules import RuleVersionSnapshot
 from identity.main import build_app as build_identity
 from identity.testing import identity_settings
+from notification.application.dispatch import DispatchDue
 from notification.application.preferences import SetOptIn
-from notification.application.send import SendNotification
+from notification.application.send import SendNow
 from notification.domain.model import NotificationRequest
 from notification.domain.preferences import ConsentSource as PreferenceSource
 from notification.infrastructure.memory import MemoryStore as NotificationStore
-from notification.testing import FakeChannel
+from notification.testing import FakeChannel, FakeRuleVersionReader
 from obligation.application.materialise import MaterialiseObligations, MaterialiseRequest
 from obligation.infrastructure.memory import MemoryStore as ObligationStore
 from ontology import load as load_ontology
@@ -192,7 +193,15 @@ def run_demo(*, now: datetime | None = None) -> DemoReport:
         language="hi",
     )
     channel = FakeChannel(clock=lambda: now)
-    sender = SendNotification(notifications, {Channel.WHATSAPP: channel}, clock=lambda: now)
+    dispatch = DispatchDue(
+        notifications,
+        notifications.work_index,
+        {Channel.WHATSAPP: channel},
+        rules=FakeRuleVersionReader(),
+        web_base_url="http://localhost:3000",
+        clock=lambda: now,
+    )
+    sender = SendNow(notifications, dispatch, clock=lambda: now)
     if obligations:
         first = obligations[0]
         outcome = sender.run(
