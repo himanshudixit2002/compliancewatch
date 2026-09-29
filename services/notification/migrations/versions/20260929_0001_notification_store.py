@@ -288,6 +288,7 @@ def upgrade() -> None:
         sa.Column("kind", sa.String(length=16), nullable=False),
         sa.Column("status", sa.String(length=8), server_default="pending", nullable=False),
         sa.Column("available_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("planned_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("lease_until", sa.DateTime(timezone=True), nullable=True),
         sa.Column("provider_message_id", sa.Text(), server_default="", nullable=False),
         *_created_updated(),

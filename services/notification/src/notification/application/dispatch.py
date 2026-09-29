@@ -17,7 +17,11 @@ dispatchers never take one entry) and handles them tenant by tenant:
 3. Outside any transaction the values are filled (``values.message_values``) with the rule
    version's facts, which the ``RuleVersionReader`` reads from the rulebook and caches, and with
    links into the web app (``CW_WEB_BASE_URL``). When the rulebook cannot answer, the
-   notifications are due again a minute later and no attempt is spent.
+   notifications are due again a minute later, no attempt is spent, and each is counted as
+   ``rescheduled``; they keep the moment they were planned for, so the pending-work age and
+   its alert show an outage that lasts. A rulebook that refuses the read (a 4xx other than
+   404, 408 and 429) would refuse it again, so the message fails without retries, as one that
+   cannot be rendered does.
 4. The channel adapter delivers the message (``ChannelAdapter.deliver``) under a new dispatch
    id. It carries the rendered text and its template with the values in order, and whether the
    address wrote to us within the last 24 hours (the WhatsApp customer service window, from
@@ -66,6 +70,7 @@ from notification.application.fallback import queue_fallback
 from notification.domain.channels import ChannelAdapter, OutboundMessage, outbound, session_open
 from notification.domain.digest import SummaryItem, compose
 from notification.domain.errors import (
+    DependencyRefusedError,
     DependencyUnavailableError,
     MissingPlaceholderError,
     UnknownTemplateError,
@@ -276,7 +281,7 @@ class DispatchDue:
             quiet = quiet_hours_for(unit.preferences.get(channel, address), self._quiet_hours)
             if quiet.is_quiet(now):
                 until = quiet.next_allowed(now)
-                _put_back(unit, batch.members, until, now)
+                _put_back(unit, batch.members, until, now, delay=False)
                 deliveries.append(Delivery(batch.ids, DeliveryOutcome.DEFERRED, available_at=until))
                 continue
             batch.session_open = session_open(
@@ -288,13 +293,27 @@ class DispatchDue:
     def _send(self, tenant_id: TenantId, batch: _Batch, now: datetime) -> Delivery:
         try:
             rendered = self._render(batch, DispatchId.new())
-        except DependencyUnavailableError:
+        except DependencyUnavailableError as exc:
             later = now + DEPENDENCY_BACKOFF
             with self._unit_of_work(tenant_id) as unit:
                 current = [unit.notifications.get(n.id) for n in batch.members]
-                _put_back(unit, [n for n in current if n is not None and n.is_pending], later, now)
+                waiting = [n for n in current if n is not None and n.is_pending]
+                _put_back(unit, waiting, later, now, delay=True)
+            for notification in waiting:
+                self._metrics.attempted(notification.channel, AttemptResult.RESCHEDULED)
+            log.warning(
+                "notification.rescheduled",
+                reason=str(exc),
+                notifications=len(waiting),
+                available_at=later.isoformat(),
+            )
             return Delivery(batch.ids, DeliveryOutcome.RESCHEDULED, available_at=later)
-        except (MissingPlaceholderError, UnknownTemplateError, InvariantViolationError) as exc:
+        except (
+            MissingPlaceholderError,
+            UnknownTemplateError,
+            InvariantViolationError,
+            DependencyRefusedError,
+        ) as exc:
             receipt = DeliveryReceipt(DeliveryStatus.FAILED, now, error=f"not rendered: {exc}")
             return self._record(tenant_id, batch, receipt, {}, now, NO_RETRIES, None)
         except Exception as exc:
@@ -462,7 +481,7 @@ class DispatchDue:
             for event in events:
                 unit.events.publish(event)
             self._metrics.attempted(sent.channel, AttemptResult.SENT)
-            lag = (receipt.at - entry.available_at).total_seconds()
+            lag = (receipt.at - entry.planned_at).total_seconds()
             self._metrics.delivery_lag(sent.channel, max(lag, 0.0))
         return Delivery(batch.ids, DeliveryOutcome.SENT, receipt)
 
@@ -489,7 +508,7 @@ class DispatchDue:
             if retry_at is None:
                 unit.work.complete(failed.id)
             else:
-                unit.work.reschedule(failed.id, retry_at)
+                unit.work.reschedule(failed.id, retry_at, delay=True)
             for event in events:
                 unit.events.publish(event)
             result = AttemptResult.FAILED if retry_at is None else AttemptResult.RETRY
@@ -499,13 +518,20 @@ class DispatchDue:
 
 
 def _put_back(
-    unit: UnitOfWork, notifications: Sequence[Notification], until: datetime, now: datetime
+    unit: UnitOfWork,
+    notifications: Sequence[Notification],
+    until: datetime,
+    now: datetime,
+    *,
+    delay: bool,
 ) -> None:
-    """Due again at ``until``, with no attempt spent."""
+    """Due again at ``until``, with no attempt spent. ``delay`` for a wait that is delay (a
+    rulebook outage): the entries keep the moment they were planned for. Otherwise (quiet
+    hours) ``until`` becomes that moment."""
     for notification in notifications:
         deferred, _ = notification.defer(until, now)
         unit.notifications.save(deferred)
-        unit.work.reschedule(notification.id, until)
+        unit.work.reschedule(notification.id, until, delay=delay)
 
 
 def _batch_key(notifications: Sequence[Notification]) -> DedupeKey:

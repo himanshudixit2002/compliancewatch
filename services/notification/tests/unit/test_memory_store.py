@@ -243,6 +243,35 @@ def test_a_renewal_holds_only_what_the_caller_still_holds() -> None:
     assert work.renew([], now=lapsed, lease=LEASE) == []
 
 
+def test_a_delay_keeps_the_planned_moment_and_the_oldest_due_reads_it() -> None:
+    store = MemoryStore()
+    first, second = item(1), item(2, minutes=1)
+    upcoming = item(3, available_at=NOON_IST + timedelta(hours=1))
+    add(store, first, second, upcoming)
+    work = store.work_index
+    assert work.oldest_due(NOON_IST - timedelta(seconds=1)) is None, "nothing due yet"
+    assert work.oldest_due(NOON_IST + timedelta(minutes=5)) == NOON_IST, "not the upcoming one"
+
+    retry_at = NOON_IST + timedelta(minutes=6)
+    quiet_until = NOON_IST + timedelta(hours=20)
+    with store(TENANT) as unit:
+        unit.work.reschedule(first.id, retry_at, delay=True)
+        unit.work.reschedule(second.id, quiet_until)
+    delayed, deferred = store.work_row(first.id), store.work_row(second.id)
+    assert delayed is not None
+    assert deferred is not None
+    assert (delayed.entry.available_at, delayed.entry.planned_at) == (retry_at, NOON_IST)
+    assert (deferred.entry.available_at, deferred.entry.planned_at) == (quiet_until, quiet_until)
+    later = NOON_IST + timedelta(minutes=90)
+    assert work.oldest_due(later) == NOON_IST, "a delay still counts from the planned moment"
+    (claimed,) = work.claim(limit=1, now=retry_at, lease=LEASE)
+    assert (claimed.id, claimed.planned_at) == (first.id, NOON_IST)
+
+    with store(TENANT) as unit:
+        unit.work.complete(first.id)
+    assert work.oldest_due(later) == upcoming.available_at, "done work is not pending"
+
+
 def test_consents_inbound_times_and_suppressions() -> None:
     store = MemoryStore()
     preference = ChannelPreference(Channel.WHATSAPP, PHONE, True, ConsentSource.API, NOON_IST)

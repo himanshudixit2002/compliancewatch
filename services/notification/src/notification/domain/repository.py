@@ -16,7 +16,9 @@ unit of work of that tenant sees only its own (row-level security in Postgres).
 - ``WorkIndex`` is the queue of work across tenants: the dispatcher claims due entries with a
   lease, renews the lease just before each message it sends, and handles each entry in a unit
   of work of the entry's tenant, where it completes or reschedules the entry together with the
-  notification.
+  notification. Each entry keeps the moment it was planned to go out (``planned_at``), which a
+  retry or a rulebook outage does not move, so how long pending work has waited past it can be
+  read across tenants (``WorkIndex.oldest_due``).
 """
 
 from collections.abc import Mapping, Sequence
@@ -209,6 +211,12 @@ class WorkEntry:
     tenant_id: TenantId
     kind: WorkKind
     available_at: datetime
+    """When a dispatcher may take it next."""
+    planned_at: datetime
+    """When it was planned to go out: when it was queued to go (after the batching window, at
+    the digest time) or when quiet hours ended. A retry's backoff and a rulebook outage put
+    ``available_at`` back but leave this, so the time the notification waits past it is delay:
+    the delivery lag and the age of the oldest pending work count from it."""
     lease_until: datetime | None = None
     """The end of the lease its holder took it under (a claim, or a send that queued it leased
     to itself); None for an entry nobody holds. A holder proves the entry is still its own by
@@ -219,19 +227,26 @@ class WorkEntry:
         require_instance(self.tenant_id, TenantId, "tenant_id")
         require_instance(self.kind, WorkKind, "kind")
         require_aware(self.available_at, "available_at")
+        require_aware(self.planned_at, "planned_at")
         if self.lease_until is not None:
             require_aware(self.lease_until, "lease_until")
 
     @classmethod
     def of(cls, notification: Notification, *, lease_until: datetime | None = None) -> "WorkEntry":
-        """The entry of a pending notification, leased to the caller until ``lease_until``."""
+        """The entry of a pending notification, planned for its ``available_at`` and leased to
+        the caller until ``lease_until``."""
         kind = (
             WorkKind.DIGEST_ITEM
             if notification.state is DeliveryState.DIGEST_PENDING
             else WorkKind.ITEM
         )
         return cls(
-            notification.id, notification.tenant_id, kind, notification.available_at, lease_until
+            notification.id,
+            notification.tenant_id,
+            kind,
+            notification.available_at,
+            notification.available_at,
+            lease_until,
         )
 
 
@@ -247,8 +262,12 @@ class WorkQueue(Protocol):
         """Nothing more to do; the provider's message id stays to route its receipts."""
         ...
 
-    def reschedule(self, notification_id: NotificationId, available_at: datetime) -> None:
-        """Due again at ``available_at``; the lease ends."""
+    def reschedule(
+        self, notification_id: NotificationId, available_at: datetime, *, delay: bool = False
+    ) -> None:
+        """Due again at ``available_at``; the lease ends. With ``delay`` the entry waits because
+        an attempt failed or the rulebook could not answer, and keeps its ``planned_at``;
+        otherwise (quiet hours, a resend) ``available_at`` becomes its planned moment too."""
         ...
 
 
@@ -273,6 +292,12 @@ class WorkIndex(Protocol):
         ...
 
     def tenant_for_provider_message(self, provider_message_id: str) -> TenantId | None: ...
+
+    def oldest_due(self, now: datetime) -> datetime | None:
+        """The earliest ``planned_at`` at or before ``now`` among pending entries: the moment
+        the pending work that has waited longest was planned to go out. None when no pending
+        entry's moment has come."""
+        ...
 
     def tenants(self) -> Sequence[TenantId]:
         """Every tenant with work entries or registered addresses."""

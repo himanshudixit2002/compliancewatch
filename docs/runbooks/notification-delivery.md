@@ -1,4 +1,4 @@
-# Notification delivery (NotificationDeliveryFailures, NotificationDuplicateSent, NotificationEmailBounces)
+# Notification delivery (NotificationDeliveryFailures, NotificationDuplicateSent, NotificationPendingOverdue, NotificationEmailBounces)
 
 The notification service queues one notification per recipient and occasion, and a dispatcher sends
 what is due. It claims due work with a 60-second lease (`WORK_LEASE`), renewed just before each
@@ -16,22 +16,26 @@ in group `notification.obligations`; an event it cannot read goes to
 `<topic>.notification.obligations.dlq`. Daily at 03:00 IST it runs the retention sweep, which
 deletes notifications older than two years and empties the values of those older than 30 days,
 one tenant at a time. Its log says `notification.event_queued` per event,
-`notification.dispatched` per run that sent anything and `notification.retention_swept` per
-sweep. Three alerts link here:
+`notification.dispatched` per run that sent anything, `notification.rescheduled` each time the
+rulebook could not fill a message and `notification.retention_swept` per sweep. Four alerts
+link here:
 [NotificationDeliveryFailures](#notificationdeliveryfailures),
-[NotificationDuplicateSent](#notificationduplicatesent) and
+[NotificationDuplicateSent](#notificationduplicatesent),
+[NotificationPendingOverdue](#notificationpendingoverdue) and
 [NotificationEmailBounces](#notificationemailbounces).
 
 ## Metrics
 
 Exported when `CW_OTEL_ENDPOINT` is set (`notification.infrastructure.metrics`):
 
-- `notification_sends_total{channel, outcome}`: one per attempt. `sent`; `retry` (failed,
-  another follows); `failed` (the last attempt failed); `suppressed` (the address opted out or
-  was suppressed after the notification was queued).
-- `notification_delivery_lag_seconds{channel}`: seconds from the moment a notification was due
-  to the moment the channel took it. The batching window and quiet hours move that moment, so
-  they do not count as delay; a rulebook outage and retries do.
+- `notification_sends_total{channel, outcome}`: one per notification each time the dispatcher
+  takes it up. `sent`; `retry` (failed, another follows); `failed` (the last attempt failed);
+  `suppressed` (the address opted out or was suppressed after the notification was queued);
+  `rescheduled` (the rulebook could not fill the message: due again a minute later, no attempt
+  spent).
+- `notification_delivery_lag_seconds{channel}`: seconds from the moment a notification was
+  planned to go out to the moment the channel took it. The batching window, the digest time and
+  quiet hours set that moment, so they do not count as delay; a rulebook outage and retries do.
 - `notification_duplicate_sent_total{channel}`: deliveries of a notification that was already
   sent.
 - `notification_enqueued_total{channel, outcome}`: `queued`, and `duplicate` for an occasion that
@@ -41,6 +45,9 @@ Exported when `CW_OTEL_ENDPOINT` is set (`notification.infrastructure.metrics`):
   `POST /v1/notification/receipts/whatsapp`. `applied` moved a notification on; `unchanged` was
   late or repeated; `unknown` names a message no notification carries, which the bot's own
   replies always do. A `failed` receipt fails a sent notification and queues its fallback.
+- `notification_pending_oldest_age_seconds`: seconds since the pending notification that has
+  waited longest was planned to go out; 0 when none waits past its moment. The API process
+  reports it (every replica the same queue), so it goes on reporting when no worker runs.
 
 ## NotificationDeliveryFailures
 
@@ -62,6 +69,10 @@ another channel reaches them.
      the notification does not carry. That is a code or template change; find the template key
      with `select template_key, count(*) from notification where error like 'not rendered%'
      group by 1`.
+   - `not rendered: rulebook refused rule version <id>: <status>: ...`: the rulebook answered
+     a 4xx other than 404, 408 and 429, so another try would be refused too and the message is
+     not retried. A 401 or 403 is the reader's service credentials; a 400 or 422 an id the
+     rulebook does not take. Fix the cause, then resend.
    - `no channel adapter for ...`: the composition root wired no adapter for the channel.
    - `<channel>: the channel adapter raised <error>`: a bug in the adapter, which raised instead
      of returning a receipt. The worker logs `notification.channel_error` with the traceback and
@@ -113,6 +124,32 @@ Fix: a channel that answers slowly needs a shorter client timeout than the lease
 too short for one delivery on a healthy channel is `WORK_LEASE` in
 `notification/domain/policy.py`. Tell support which business got the duplicate so they can
 apologise if it asks.
+
+## NotificationPendingOverdue
+
+A notification has waited more than 15 minutes, the delivery objective, past the moment it was
+planned to go out, for 5 minutes. The batching window, the digest time and quiet hours set that
+moment, so they never count; a dispatcher that does not run, retries and a rulebook that does
+not answer do. Severity page; core product owns it. The notifications still go once the cause
+is gone, only late.
+
+1. Is a dispatcher running: the worker logs `notification.dispatched` for each run that sent
+   anything, and `worker.job_failed` with `job=notification-dispatch` for a run that raised (the
+   database, a bug). With no worker, or one that fails every run, everything waits.
+2. Is the rulebook answering:
+   `sum by (channel) (rate(notification_sends_total{outcome="rescheduled"}[5m]))` above zero
+   means the dispatcher keeps putting notifications back because the rulebook cannot fill them.
+   The worker's `notification.rescheduled` lines give the reason: `rulebook unreachable`,
+   `rulebook answered <5xx, 408 or 429>`, or an answer the reader cannot read.
+3. What waits, in the database (as for NotificationDeliveryFailures):
+   `select w.kind, n.params->>'rule_version_id' as rule_version, count(*), min(w.planned_at)
+   from work_index w join notification n on n.id = w.id where w.status = 'pending' and
+   w.planned_at < now() - interval '15 minutes' group by 1, 2 order by 4`.
+
+Fix: start or repair the worker; bring the rulebook back, or correct `CW_RULEBOOK_URL`. The
+waiting notifications go on the next run after that, so nothing needs resending. Notifications
+of one rule version whose detail the reader cannot read wait until the rulebook's answer is
+fixed; step 3 names the version.
 
 ## NotificationEmailBounces
 

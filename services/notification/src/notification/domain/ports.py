@@ -57,7 +57,9 @@ class EmailFeedbackReader(Protocol):
 
 
 class AttemptResult(StrEnum):
-    """What one attempt made of a notification, as ``notification_sends_total`` counts it."""
+    """What the dispatcher made of a notification it took up, as ``notification_sends_total``
+    counts it: an attempt, or none because the address closed or the rulebook could not
+    answer."""
 
     SENT = "sent"
     RETRY = "retry"
@@ -66,6 +68,9 @@ class AttemptResult(StrEnum):
     """The last attempt failed."""
     SUPPRESSED = "suppressed"
     """Not sent: the address was closed after the notification was queued."""
+    RESCHEDULED = "rescheduled"
+    """Not attempted: the rulebook could not fill the message, so it is due again a minute
+    later without spending an attempt."""
 
 
 class QueueResult(StrEnum):
@@ -91,7 +96,8 @@ class DeliveryMetrics(Protocol):
     def attempted(self, channel: Channel, result: AttemptResult) -> None: ...
 
     def delivery_lag(self, channel: Channel, seconds: float) -> None:
-        """Seconds from the moment a notification was due to the moment the channel took it."""
+        """Seconds from the moment a notification was planned to go out to the moment the
+        channel took it."""
         ...
 
     def duplicate_sent(self, channel: Channel) -> None:

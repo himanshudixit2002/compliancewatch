@@ -288,12 +288,15 @@ class MemoryWorkQueue:
                 row, status="done", lease_until=None, provider_message_id=provider_message_id
             )
 
-    def reschedule(self, notification_id: NotificationId, available_at: datetime) -> None:
+    def reschedule(
+        self, notification_id: NotificationId, available_at: datetime, *, delay: bool = False
+    ) -> None:
         row = self._state.work.get(notification_id)
         if row is not None:
+            planned_at = row.entry.planned_at if delay else available_at
             self._state.work[notification_id] = replace(
                 row,
-                entry=replace(row.entry, available_at=available_at),
+                entry=replace(row.entry, available_at=available_at, planned_at=planned_at),
                 status="pending",
                 lease_until=None,
             )
@@ -382,6 +385,17 @@ class MemoryWorkIndex:
                     if row.provider_message_id == provider_message_id
                 ),
                 None,
+            )
+
+    def oldest_due(self, now: datetime) -> datetime | None:
+        with self._store.lock:
+            return min(
+                (
+                    row.entry.planned_at
+                    for row in self._store.state.work.values()
+                    if row.status == "pending" and row.entry.planned_at <= now
+                ),
+                default=None,
             )
 
     def tenants(self) -> Sequence[TenantId]:

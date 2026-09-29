@@ -68,6 +68,17 @@ class DependencyUnavailableError(DomainError):
         super().__init__(detail)
 
 
+class DependencyRefusedError(DomainError):
+    """A service the notification service reads from refused the read for a reason another try
+    would meet again, such as the rulebook answering 403 to the reader's credentials."""
+
+    type_slug: ClassVar[str] = "notification-dependency-refused"
+    title: ClassVar[str] = "Notification dependency refused the read"
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+
+
 class NotificationNotFoundError(DomainError):
     type_slug: ClassVar[str] = "notification-not-found"
     title: ClassVar[str] = "Notification not found"

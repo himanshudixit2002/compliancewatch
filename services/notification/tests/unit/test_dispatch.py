@@ -10,6 +10,7 @@ from notification.application.preferences import SetOptIn
 from notification.application.recipients import RecipientRegistration, RegisterRecipient
 from notification.application.send import SendNow
 from notification.domain.channels import OutboundMessage
+from notification.domain.errors import DependencyRefusedError
 from notification.domain.events import NotificationFailed, NotificationSent
 from notification.domain.ids import RecipientId
 from notification.domain.model import NotificationRequest, Outcome
@@ -90,6 +91,15 @@ class RaisingReader(FakeRuleVersionReader):
         if rule_version_id in self.broken:
             raise RuntimeError("the reader has a bug")
         return super().get(rule_version_id)
+
+
+class RefusingReader(FakeRuleVersionReader):
+    """Answers every read as a rulebook that refuses the reader's credentials would."""
+
+    def get(self, rule_version_id: RuleVersionId) -> RuleVersionFacts | None:
+        raise DependencyRefusedError(
+            f"rulebook refused rule version {rule_version_id}: 403: forbidden"
+        )
 
 
 class World:
@@ -336,6 +346,7 @@ def test_retries_run_at_60_and_300_seconds() -> None:
         AttemptResult.RETRY,
         AttemptResult.SENT,
     ]
+    assert world.metrics.lags == [(WA, 360.0)], "the backoffs are delay"
 
 
 def fail_three_times(world: World) -> None:
@@ -425,10 +436,39 @@ def test_a_rulebook_outage_reschedules_without_spending_an_attempt() -> None:
         later,
     )
     assert world.store.events == []
+    assert world.metrics.attempts == [(WA, AttemptResult.RESCHEDULED)], "counted, not attempted"
     world.rules.down = False
     world.clock.advance(60)
     assert outcomes(world.dispatch.run()) == [DeliveryOutcome.SENT]
     assert world.notifications()[0].attempts == 1
+    assert world.metrics.lags == [(WA, 60.0)], "the outage is delay"
+
+
+def test_an_outage_that_lasts_is_counted_each_time_and_ages_the_pending_work() -> None:
+    world = World(window=0)
+    world.owner((WA, PHONE))
+    world.enqueue.run(created())
+    world.rules.down = True
+    for _ in range(16):
+        assert outcomes(world.dispatch.run()) == [DeliveryOutcome.RESCHEDULED]
+        world.clock.advance(60)
+    assert world.metrics.attempts == [(WA, AttemptResult.RESCHEDULED)] * 16
+    assert world.store.work_index.oldest_due(world.clock.now) == NOON_IST, "planned at noon"
+    assert world.clock.now - NOON_IST == timedelta(minutes=16), "past the 15-minute objective"
+
+
+def test_a_rulebook_that_refuses_the_read_fails_the_message_without_retries() -> None:
+    world = World(window=0)
+    world.owner((WA, PHONE))
+    world.rules = RefusingReader()
+    world.enqueue.run(created())
+    (delivery,) = world.dispatcher({WA: world.whatsapp}).run()
+    assert delivery.outcome is DeliveryOutcome.FAILED
+    assert world.whatsapp.sent == []
+    (failed,) = world.notifications()
+    assert (failed.state, failed.attempts) == (DeliveryState.FAILED, 1)
+    assert failed.error == f"not rendered: rulebook refused rule version {RULE}: 403: forbidden"
+    assert world.metrics.attempts == [(WA, AttemptResult.FAILED)]
 
 
 def test_a_change_card_without_the_rule_facts_goes_as_obligation_created() -> None:

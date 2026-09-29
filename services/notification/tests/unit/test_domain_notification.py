@@ -48,7 +48,8 @@ def test_a_queued_notification_is_available_now_or_when_asked() -> None:
     digest = queued(available_at=LATER, digest=True)
     assert (digest.state, digest.available_at) == (DeliveryState.DIGEST_PENDING, LATER)
     assert WorkEntry.of(digest).kind is WorkKind.DIGEST_ITEM
-    assert WorkEntry.of(now) == WorkEntry(now.id, now.tenant_id, WorkKind.ITEM, NOON_IST)
+    assert WorkEntry.of(digest).planned_at == LATER, "planned for when it may go"
+    assert WorkEntry.of(now) == WorkEntry(now.id, now.tenant_id, WorkKind.ITEM, NOON_IST, NOON_IST)
 
 
 def test_sent_records_the_delivery_and_publishes_sent() -> None:

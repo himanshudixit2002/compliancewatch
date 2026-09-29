@@ -5,7 +5,7 @@ import httpx2
 import pytest
 
 from domain_kernel.ids import RuleVersionId
-from notification.domain.errors import DependencyUnavailableError
+from notification.domain.errors import DependencyRefusedError, DependencyUnavailableError
 from notification.domain.ports import RuleVersionFacts
 from notification.infrastructure.rulebook_client import HttpRuleVersionReader, facts_from
 from notification.testing import FakeClock
@@ -59,6 +59,8 @@ def test_an_unknown_version_is_none_and_an_outage_is_dependency_unavailable() ->
     assert reader(lambda _: httpx2.Response(404, json={})).get(RULE) is None
     failing = [
         lambda _: httpx2.Response(503, text="down"),
+        lambda _: httpx2.Response(429, text="slow down"),
+        lambda _: httpx2.Response(408, text="timed out"),
         lambda _: httpx2.Response(200, text="not json"),
         lambda _: httpx2.Response(200, json=["a list"]),
         lambda _: httpx2.Response(200, json={**DETAIL, "effective_from": "soon"}),
@@ -72,6 +74,22 @@ def test_an_unknown_version_is_none_and_an_outage_is_dependency_unavailable() ->
 
     with pytest.raises(DependencyUnavailableError, match="unreachable"):
         reader(unreachable).get(RULE)
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 409, 422])
+def test_a_refusal_other_than_404_408_and_429_is_permanent(status: int) -> None:
+    calls: list[int] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        calls.append(status)
+        return httpx2.Response(status, text="refused")
+
+    rules = reader(handler)
+    with pytest.raises(DependencyRefusedError, match=f"refused rule version {RULE}: {status}"):
+        rules.get(RULE)
+    with pytest.raises(DependencyRefusedError):
+        rules.get(RULE)
+    assert calls == [status, status], "a refusal is not kept"
 
 
 def test_facts_fall_back_to_the_rule_title_and_cite_what_there_is() -> None:

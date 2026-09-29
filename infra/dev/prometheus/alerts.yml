@@ -126,6 +126,20 @@ groups:
         annotations:
           summary: "A notification was delivered twice on {{ $labels.channel }}"
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/notification-delivery.md#notificationduplicatesent
+      # notification_pending_oldest_age_seconds is how long the pending notification that has
+      # waited longest is past the moment it was planned to go out. The batching window, the
+      # digest time and quiet hours set that moment; retries and rulebook outages do not move
+      # it. Past the 15-minute delivery objective for 5 minutes: no dispatcher is sending, or
+      # the rulebook has not answered for that long. Every API replica reports the same queue.
+      - alert: NotificationPendingOverdue
+        expr: max(notification_pending_oldest_age_seconds) > 900
+        for: 5m
+        labels:
+          severity: page
+          team: core-product
+        annotations:
+          summary: "A pending notification has waited more than 15 minutes past its planned time"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/notification-delivery.md#notificationpendingoverdue
       # SES puts a sending account under review when its bounces pass 5% or its complaints 0.1%
       # of its mail. Bounces and complaints reported against email notifications sent, over 6
       # hours, warn well before that: above 2% for 30 minutes.

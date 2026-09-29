@@ -271,6 +271,45 @@ tests:
         alertname: NotificationDuplicateSent
         exp_alerts: []
 
+  # Two API replicas report the pending age. On one the rulebook outage ages it by a minute each
+  # minute from 0; the other read before and still says 0. max() takes the older: above 900 s
+  # from 16m, so pending until it fires at 21m.
+  - interval: 1m
+    input_series:
+      - series: 'notification_pending_oldest_age_seconds{service_instance_id="a"}'
+        values: "0+60x40"
+      - series: 'notification_pending_oldest_age_seconds{service_instance_id="b"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NotificationPendingOverdue
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: NotificationPendingOverdue
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: NotificationPendingOverdue
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              team: core-product
+            exp_annotations:
+              summary: "A pending notification has waited more than 15 minutes past its planned time"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/notification-delivery.md#notificationpendingoverdue
+
+  # An old notification that went out within 3 minutes of passing the objective does not page.
+  - interval: 1m
+    input_series:
+      - series: 'notification_pending_oldest_age_seconds{service_instance_id="a"}'
+        values: "0x10 1000 1060 1120 0x30"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: NotificationPendingOverdue
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: NotificationPendingOverdue
+        exp_alerts: []
+
   # 100 emails sent a minute, 3 of them bounce (3%): above 2% from the start, firing after 30
   # minutes. The complaints stay at zero, and WhatsApp receipts do not count.
   - interval: 1m

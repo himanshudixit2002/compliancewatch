@@ -5,9 +5,12 @@ message states are taken from it: the obligation template's title (the rule's ow
 the template has none), the summary, ``effective_from``, the template's steps, and the source
 as '<instrument>, <reference>'.
 
-A 404 is None: the rulebook has no such version. A transport error, any other status that is
-not a success, or an answer that is not the expected JSON raises
-``DependencyUnavailableError``, and the dispatcher tries again later. Answers, None included,
+A 404 is None: the rulebook has no such version. Any other 4xx but 408 and 429 raises
+``DependencyRefusedError``: the rulebook refused the read (the reader's credentials, an id it
+does not take), another try would be refused the same way, and the dispatcher fails the
+message without retries. A transport error, a 408 or 429 (the rulebook asks to be tried
+later), a 5xx, or an answer that is not the expected JSON raises ``DependencyUnavailableError``,
+and the dispatcher tries again later without spending an attempt. Answers, None included,
 are kept for an hour (``CACHE_SECONDS``): a dispatch of many notifications of one rule asks once,
 and a version's published facts do not change while it is in force. Failures are not kept.
 """
@@ -21,12 +24,14 @@ import httpx2
 
 from domain_kernel.events import utc_now
 from domain_kernel.ids import RuleVersionId
-from notification.domain.errors import DependencyUnavailableError
+from notification.domain.errors import DependencyRefusedError, DependencyUnavailableError
 from notification.domain.ports import RuleVersionFacts
 
 PREFIX: Final = "/v1/rulebook"
 CACHE_SECONDS: Final = 3600.0
 DETAIL_CHARS: Final = 300
+TRY_LATER: Final = frozenset({408, 429})
+"""The 4xx statuses that ask the client to try again later rather than refuse the read."""
 
 
 class HttpRuleVersionReader:
@@ -66,6 +71,11 @@ class HttpRuleVersionReader:
             raise DependencyUnavailableError(f"rulebook unreachable: {exc}") from exc
         if response.status_code == 404:
             return None
+        if 400 <= response.status_code < 500 and response.status_code not in TRY_LATER:
+            raise DependencyRefusedError(
+                f"rulebook refused rule version {rule_version_id}: {response.status_code}: "
+                f"{response.text[:DETAIL_CHARS]}"
+            )
         if not 200 <= response.status_code < 300:
             raise DependencyUnavailableError(
                 f"rulebook answered {response.status_code}: {response.text[:DETAIL_CHARS]}"

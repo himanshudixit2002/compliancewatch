@@ -661,6 +661,53 @@ def test_a_renewal_holds_only_what_the_dispatcher_still_holds(
     purge(factory, tenant)
 
 
+def test_a_delay_keeps_the_planned_moment_the_pending_age_counts_from(
+    factory: PostgresUnitOfWorkFactory, app_engine: Engine
+) -> None:
+    tenant = TenantId.new()
+    base = datetime(1990, 1, 1, tzinfo=UTC)
+    first, second = (item(n, tenant, at=base + timedelta(seconds=n)) for n in range(2))
+    upcoming = item(2, tenant, at=base, available_at=base + timedelta(hours=1))
+    enqueue(factory, first, second, upcoming)
+    work = PostgresWorkIndex(app_engine)
+    assert work.oldest_due(base - timedelta(seconds=1)) is None, "nothing due yet"
+    assert work.oldest_due(base + timedelta(minutes=5)) == base
+
+    claimed = work.claim(limit=10, now=base + timedelta(minutes=1), lease=LEASE)
+    assert [(e.id, e.planned_at) for e in claimed] == [
+        (first.id, first.available_at),
+        (second.id, second.available_at),
+    ], "a claim names the planned moment"
+    retry_at = base + timedelta(minutes=6)
+    quiet_until = base + timedelta(hours=20)
+    with factory(tenant) as unit:
+        unit.work.reschedule(first.id, retry_at, delay=True)
+        unit.work.reschedule(second.id, quiet_until)
+    with app_engine.connect() as connection:
+        rows = {
+            row.id: (row.available_at, row.planned_at)
+            for row in connection.execute(
+                text(
+                    "SELECT id, available_at, planned_at FROM work_index "
+                    "WHERE id IN (:first, :second)"
+                ),
+                {"first": first.id.value, "second": second.id.value},
+            )
+        }
+    assert rows == {
+        first.id.value: (retry_at, base),
+        second.id.value: (quiet_until, quiet_until),
+    }, "a delay keeps the planned moment, quiet hours move it"
+    later = base + timedelta(minutes=90)
+    assert work.oldest_due(later) == base, "the retry still counts from its planned moment"
+    (again,) = work.claim(limit=10, now=retry_at, lease=LEASE)
+    assert (again.id, again.available_at, again.planned_at) == (first.id, retry_at, base)
+    with factory(tenant) as unit:
+        unit.work.complete(first.id)
+    assert work.oldest_due(later) == upcoming.available_at, "done work is not pending"
+    purge(factory, tenant)
+
+
 def _record(message: EventMessage, offset: int) -> InboundRecord:
     return InboundRecord(
         topic="obligation.created",

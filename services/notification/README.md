@@ -66,7 +66,9 @@ A recipient with a daily digest, and every person of a CA firm, gets them held u
 message is filled with the rule version's published facts from the rulebook
 (`CW_RULEBOOK_URL`, cached for an hour) and links to `CW_WEB_BASE_URL`. A rule version the
 rulebook does not know goes out as `obligation_created`, which states only the obligation's own
-facts; a rulebook outage puts the notification back for 60 seconds without spending an attempt.
+facts; a rulebook outage puts the notification back for 60 seconds without spending an attempt
+(counted as `rescheduled`, and aged by the pending-work gauge until it goes), and a rulebook
+that refuses the read (a 4xx other than 404, 408 and 429) fails the message without retries.
 
 A failed attempt is retried after 60 and 300 seconds. The third failure fails the notification,
 publishes `notification.failed` with `will_retry` saying whether a fallback follows, and queues
@@ -148,11 +150,12 @@ written here. `channel` is `whatsapp` or `email` on every series.
 
 | Series | Labels | Meaning |
 | --- | --- | --- |
-| `notification_sends_total` (counter) | `channel`, `outcome` | One per notification each time the dispatcher settles it. `sent`: the channel took it. `retry`: the attempt failed and another follows. `failed`: the last attempt failed (a fallback, if any, is a notification of its own). `suppressed`: the address opted out or was suppressed after the notification was queued, so it did not go |
-| `notification_delivery_lag_seconds` (histogram; `_bucket`, `_sum`, `_count`) | `channel` | Seconds from the moment a notification was due to the moment the channel took it, one per notification sent. The batching window, the digest time and quiet hours set that moment, so they are not delay. Buckets from 1 s to 6 h; 900 s is the 15-minute delivery objective |
+| `notification_sends_total` (counter) | `channel`, `outcome` | One per notification each time the dispatcher takes it up. `sent`: the channel took it. `retry`: the attempt failed and another follows. `failed`: the last attempt failed (a fallback, if any, is a notification of its own). `suppressed`: the address opted out or was suppressed after the notification was queued, so it did not go. `rescheduled`: the rulebook could not fill the message, so it is due again a minute later with no attempt spent |
+| `notification_delivery_lag_seconds` (histogram; `_bucket`, `_sum`, `_count`) | `channel` | Seconds from the moment a notification was planned to go out to the moment the channel took it, one per notification sent. The batching window, the digest time and quiet hours set that moment, so they are not delay; retries and rulebook outages do not move it, so they are. Buckets from 1 s to 6 h; 900 s is the 15-minute delivery objective |
 | `notification_duplicate_sent_total` (counter) | `channel` | A delivery of a notification that was already sent: one delivery outlasted its whole lease and another dispatcher sent the message meanwhile. Should stay at zero |
 | `notification_enqueued_total` (counter) | `channel`, `outcome` | Notifications that obligation events queued. `queued`, or `duplicate` for an occasion that already had its notification (a redelivered event), which is expected. `POST /send` and fallbacks are not counted here |
 | `notification_receipts_total` (counter) | `channel`, `kind`, `outcome` | Provider reports after a message was taken: WhatsApp statuses the bot forwards and SES feedback. `kind`: `sent`, `delivered`, `read`, `failed`, `bounced` or `complained`. `outcome`: `applied` (it moved a notification on), `unchanged` (late, repeated, or for a notification in no state to take it) or `unknown` (no notification carries the message id, as with the bot's own replies) |
+| `notification_pending_oldest_age_seconds` (gauge) | none | Seconds since the pending notification that has waited longest was planned to go out, 0 when none waits past its moment. The API process reports it, every replica the same queue across tenants, read at most every 30 s; a failed read reports nothing rather than 0 |
 
 The older names in the WP13 brief body are not emitted. Their counterparts: sent and failed
 attempts are `notification_sends_total{outcome="sent"}` and `{outcome=~"retry|failed"}`
@@ -162,7 +165,8 @@ attempts are `notification_sends_total{outcome="sent"}` and `{outcome=~"retry|fa
 `notification_delivery_lag_seconds`.
 
 The `notification` alert group (`NotificationDeliveryFailures`, `NotificationDuplicateSent`,
-`NotificationEmailBounces`) reads them and links `docs/runbooks/notification-delivery.md`.
+`NotificationPendingOverdue`, `NotificationEmailBounces`) reads them and links
+`docs/runbooks/notification-delivery.md`.
 
 ## Layout
 

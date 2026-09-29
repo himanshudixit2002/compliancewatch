@@ -502,6 +502,7 @@ class SqlAlchemyWorkQueue:
                 kind=entry.kind.value,
                 status="pending",
                 available_at=entry.available_at,
+                planned_at=entry.planned_at,
                 lease_until=entry.lease_until,
                 created_at=func.now(),
                 updated_at=func.now(),
@@ -521,12 +522,19 @@ class SqlAlchemyWorkQueue:
             .execution_options(synchronize_session=False)
         )
 
-    def reschedule(self, notification_id: NotificationId, available_at: datetime) -> None:
+    def reschedule(
+        self, notification_id: NotificationId, available_at: datetime, *, delay: bool = False
+    ) -> None:
+        planned: dict[str, object] = {} if delay else {"planned_at": available_at}
         self._session.execute(
             update(WorkIndexRow)
             .where(WorkIndexRow.id == notification_id.value)
             .values(
-                status="pending", available_at=available_at, lease_until=None, updated_at=func.now()
+                status="pending",
+                available_at=available_at,
+                lease_until=None,
+                updated_at=func.now(),
+                **planned,
             )
             .execution_options(synchronize_session=False)
         )

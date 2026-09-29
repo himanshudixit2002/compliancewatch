@@ -325,6 +325,9 @@ class WorkIndexRow(Base):
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(8), nullable=False, server_default="pending")
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    """When a dispatcher may take the entry next."""
+    planned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    """When the notification was planned to go out; retries and rulebook outages leave it."""
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     provider_message_id: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

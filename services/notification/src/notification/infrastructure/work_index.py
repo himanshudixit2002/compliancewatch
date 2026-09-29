@@ -13,6 +13,10 @@ update matches only rows still pending under the lease the dispatcher holds, and
 was claimed meanwhile nothing is renewed and the message does not go. A renewal and a concurrent
 claim of one row are ordered by the row lock: the claim skips a row the renewal holds, and a
 renewal that waited on a claim finds the row under the claim's lease.
+
+``oldest_due`` reads, across tenants, the moment the pending work that has waited longest was
+planned to go out (``planned_at``, which retries and rulebook outages leave); the
+``notification_pending_oldest_age_seconds`` gauge reports how long ago that was.
 """
 
 from collections.abc import Sequence
@@ -40,8 +44,12 @@ _CLAIM = text(
             LIMIT :limit
               FOR UPDATE SKIP LOCKED
      )
-    RETURNING id, tenant_id, kind, available_at, lease_until
+    RETURNING id, tenant_id, kind, available_at, planned_at, lease_until
     """
+)
+
+_OLDEST_DUE = text(
+    "SELECT min(planned_at) FROM work_index WHERE status = 'pending' AND planned_at <= :now"
 )
 
 _RENEW = text(
@@ -127,6 +135,11 @@ class PostgresWorkIndex:
             ).scalar()
         return None if found is None else TenantId(found)
 
+    def oldest_due(self, now: datetime) -> datetime | None:
+        with self._engine.connect() as connection:
+            found: datetime | None = connection.execute(_OLDEST_DUE, {"now": now}).scalar()
+        return None if found is None else found.astimezone(UTC)
+
     def tenants(self) -> Sequence[TenantId]:
         with self._engine.connect() as connection:
             values: list[UUID] = list(connection.execute(_TENANTS).scalars())
@@ -139,5 +152,6 @@ def _entry(row: Row[tuple[object, ...]]) -> WorkEntry:
         tenant_id=TenantId(row.tenant_id),
         kind=WorkKind(row.kind),
         available_at=row.available_at.astimezone(UTC),
+        planned_at=row.planned_at.astimezone(UTC),
         lease_until=row.lease_until.astimezone(UTC),
     )
