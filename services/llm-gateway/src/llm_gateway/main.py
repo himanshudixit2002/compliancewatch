@@ -45,7 +45,7 @@ from llm_gateway.infrastructure.tracing.langfuse import LangfuseTracer
 from llm_gateway.infrastructure.tracing.log import LogTracer
 from llm_gateway.settings import GatewaySettings
 from llm_gateway.wiring import GatewayWiring
-from py_common.app import create_app
+from py_common.app import create_app, module_app
 from py_common.logging import get_logger
 
 SERVICE_NAME = "llm-gateway"
@@ -237,7 +237,10 @@ def _threaded(check: Callable[[], bool]) -> Callable[[], Awaitable[bool]]:
     return run
 
 
-app = build_app()
+def __getattr__(name: str) -> FastAPI:
+    """``app`` is built on first access, so importing this module builds nothing."""
+    return module_app(name, build_app)
+
 
 if __name__ == "__main__":
     import uvicorn

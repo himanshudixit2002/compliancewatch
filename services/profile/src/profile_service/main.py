@@ -59,7 +59,7 @@ from profile_service.infrastructure.repository import (
 )
 from profile_service.settings import ProfileSettings
 from profile_service.wiring import Wiring
-from py_common.app import create_app
+from py_common.app import create_app, module_app
 from py_common.flags import configure_flags
 from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
 from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
@@ -177,7 +177,10 @@ def build_app(
     return app
 
 
-app = build_app()
+def __getattr__(name: str) -> FastAPI:
+    """``app`` is built on first access, so importing this module builds nothing."""
+    return module_app(name, build_app)
+
 
 if __name__ == "__main__":
     import uvicorn

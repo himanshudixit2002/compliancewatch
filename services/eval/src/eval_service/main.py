@@ -3,13 +3,26 @@
 Guide section 11: wiring of interfaces to implementations happens here, never inside the layers.
 """
 
+from fastapi import FastAPI
+
 from eval_service import __version__
 from eval_service.api.router import router
-from py_common.app import create_app
+from py_common.app import create_app, module_app
+from py_common.settings import Settings
 
 SERVICE_NAME = "eval"
 
-app = create_app(service_name=SERVICE_NAME, version=__version__, routers=[router])
+
+def build_app(settings: Settings | None = None) -> FastAPI:
+    return create_app(
+        service_name=SERVICE_NAME, version=__version__, routers=[router], settings=settings
+    )
+
+
+def __getattr__(name: str) -> FastAPI:
+    """``app`` is built on first access, so importing this module builds nothing."""
+    return module_app(name, build_app)
+
 
 if __name__ == "__main__":
     import uvicorn

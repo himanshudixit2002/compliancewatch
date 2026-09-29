@@ -13,7 +13,7 @@ from starlette.concurrency import run_in_threadpool
 
 from domain_kernel.errors import DomainError, InvalidRelationError, InvalidTransitionError
 from domain_kernel.events import utc_now
-from py_common.app import create_app
+from py_common.app import create_app, module_app
 from py_common.telemetry import Telemetry
 from rulebook import __version__
 from rulebook.api.router import router
@@ -215,7 +215,10 @@ def build_app(settings: RulebookSettings | None = None) -> FastAPI:
     return app
 
 
-app = build_app()
+def __getattr__(name: str) -> FastAPI:
+    """``app`` is built on first access, so importing this module builds nothing."""
+    return module_app(name, build_app)
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -29,7 +29,7 @@ from obligation.infrastructure.memory import MemoryStore
 from obligation.infrastructure.repository import PostgresUnitOfWorkFactory
 from obligation.settings import ObligationSettings
 from obligation.wiring import Wiring
-from py_common.app import create_app
+from py_common.app import create_app, module_app
 
 SERVICE_NAME = "obligation"
 PROBLEM_STATUS: dict[type[DomainError], int] = {
@@ -80,7 +80,10 @@ def build_app(settings: ObligationSettings | None = None) -> FastAPI:
     return app
 
 
-app = build_app()
+def __getattr__(name: str) -> FastAPI:
+    """``app`` is built on first access, so importing this module builds nothing."""
+    return module_app(name, build_app)
+
 
 if __name__ == "__main__":
     import uvicorn

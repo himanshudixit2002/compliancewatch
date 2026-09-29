@@ -41,7 +41,7 @@ from notification.domain.ports import EmailFeedbackReader, RuleVersionReader
 from notification.infrastructure.metrics import register_pending_age_gauge
 from notification.settings import NotificationSettings
 from notification.wiring import Wiring
-from py_common.app import create_app
+from py_common.app import create_app, module_app
 from py_common.telemetry import Telemetry
 
 SERVICE_NAME = "notification"
@@ -97,7 +97,10 @@ def build_app(
     return app
 
 
-app = build_app()
+def __getattr__(name: str) -> FastAPI:
+    """``app`` is built on first access, so importing this module builds nothing."""
+    return module_app(name, build_app)
+
 
 if __name__ == "__main__":
     import uvicorn
