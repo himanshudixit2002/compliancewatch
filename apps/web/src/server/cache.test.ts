@@ -41,6 +41,7 @@ describe("tags", () => {
     expect(tags.identity.plans()).toBe(tags.identity.plans());
     expect(tags.identity.consents(TENANT, "owner-1")).toBe(`identity:consents:${TENANT}:owner-1`);
     expect(tags.profile.node(TENANT, "node-1")).toBe(`profile:node:${TENANT}:node-1`);
+    expect(tags.profile.ontology()).toBe("profile:ontology");
     expect(tags.rulebook.rules()).toBe("rulebook:rules");
     expect(tags.rulebook.document("doc-1")).toBe("rulebook:document:doc-1");
     expect(tags.rulebook.reviewEntities()).toBe("rulebook:review-entities");
@@ -55,6 +56,7 @@ describe("tags", () => {
       tags.identity.plans(),
       tags.identity.consents(TENANT, "x".repeat(60)),
       tags.profile.node(TENANT, TENANT),
+      tags.profile.ontology(),
       tags.rulebook.rules(),
       tags.rulebook.document(TENANT),
       tags.rulebook.reviewEntities(),

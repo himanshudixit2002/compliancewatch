@@ -30,7 +30,9 @@ src/features/       one directory per screen family: model/, ui/, index.ts (port
                     the seed-state query), account
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
                     problem/ types the RFC 9457 body every service returns (from the generated contracts);
-                    session/ the session claims, the render-safe view and the time helpers
+                    session/ the session claims, the render-safe view and the time helpers;
+                    ontology/ the attributes with their questions, value labels and operators, from
+                    GET /v1/ontology, and the lookups over them (by key, by level, answerable, labels)
 src/server/         server-only modules; every file starts with `import "server-only"`
                     env.ts validates every CW_WEB_* variable (zod; parsed at the first request, never at build)
                     session.ts: the encrypted cw_session cookie (jose), its options, set and clear (actions only)
@@ -49,6 +51,8 @@ src/server/         server-only modules; every file starts with `import "server-
                     cache.ts: the cache tags, cachedRead() for global reads (five minutes under tags), uncachedRead()
                     for tenant reads, afterMutation() for actions (updateTag, revalidatePath)
                     legal.ts reads docs/legal at build time (marked)
+                    ontology.ts: GET /v1/ontology without a tenant, cached an hour under profile:ontology;
+                    getOntology() reads it once per request
 src/shared/config/  the screen registry (screens.ts), roles and permissions, flags, navigation, the legal doc list
 src/shared/lib/     IST dates, financial years, money and decimal strings, humanise, identifiers, pagination, urls,
                     action-state (what a server action returns to a form)

@@ -13,8 +13,10 @@ one. Domain terms follow the guide and the services; the last two groups are the
 - **Registration**: one GSTIN of a business; the node most obligations attach to.
 - **Node**: any level of the business hierarchy (entity, registration, location); attributes and
   snapshots are read per node and financial year.
-- **Attribute**: one fact about a node from the ontology (a YAML file of GST attributes);
-  answered during onboarding, inherited down the hierarchy.
+- **Attribute**: one fact about a node from the ontology (the profile service's attribute set,
+  served worded at `GET /v1/ontology`); answered during onboarding, inherited down the hierarchy.
+- **Ontology**: the attributes a profile holds, with their type, level, source, question, help
+  line and value labels, and the operators a rule may use per type; versioned (`0.2.0`).
 - **Financial year**: 1 April to 31 March, labelled `2026-27` (`shared/lib/financial-year.ts`).
 - **Obligation**: a dated thing a business must do, materialised per period from a published
   rule version (ADR-015).

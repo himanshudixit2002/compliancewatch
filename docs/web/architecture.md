@@ -59,11 +59,13 @@ apps/web/
     error.tsx, global-error.tsx, not-found.tsx
   src/features/                home, sitemap, legal, not-available, admin-home, system-pages, design-catalogue,
                                auth (sign-in form, action, seed state), account
-  src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims)
+  src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims),
+                               ontology/ (the attributes and their wording from GET /v1/ontology)
   src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError, webError),
                                api/ (typed clients, problem parsing, idempotency), cache.ts (tags and revalidation),
                                session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a
-                               POST handler), auth/ (the provider port and the fake adapter), legal.ts
+                               POST handler), auth/ (the provider port and the fake adapter), legal.ts,
+                               ontology.ts (the ontology read, cached an hour by tag)
   src/shared/config/           screens.ts, roles.ts, permissions.ts, flags.ts, nav.ts, services.ts, legal-docs.ts
   src/shared/lib/              dates, financial years, decimal money, humanise, identifiers, pagination, urls, assert
   src/shared/i18n/             messages/en.json and t()

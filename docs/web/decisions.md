@@ -302,3 +302,17 @@ fails when the name list and the registry's web entries differ; adding a web fla
 registry, py-common's generated copy (`make flags`) and `FLAG_NAMES`; the registry is a turbo
 global dependency so a changed entry reruns the web tests; the reader, when a screen needs one,
 reads through `@compliancewatch/flags/server` and honours the override only in local and test.
+
+## D-024: The ontology comes from GET /v1/ontology, not from a generated module
+
+2026-09-29. The screens need each attribute's question, help line, value labels, level, type and
+source, and the operators per type. The first design generated a TypeScript module from
+packages/ontology's YAML files with a drift check; since then the profile service serves exactly
+that, worded, at `GET /v1/ontology` (with an ETag), and it is the source the services and the
+rules use. `server/ontology.ts` reads it without a tenant header, caches it an hour under
+`profile:ontology` (the service's own `max-age`), and `entities/ontology` maps it and holds the
+lookups. Consequences: there is no generated file, no generator and no drift check; a wording
+change reaches the screens within the hour of its release (or at once after
+`updateTag(tags.profile.ontology())`); a page that needs the ontology fails with the service's
+problem when the profile service is down, like any other read; unit tests use a synthetic body
+(`src/test/ontology-fixture.ts`), never a copy of the real wording.

@@ -233,6 +233,7 @@ Tenant data is never cached; a handful of records every tenant sees the same way
 | a rulebook document                                           | `cachedRead([tags.rulebook.document(id)])`          | `rulebook:document:<id>`                                                              |
 | the entity and relation review queues                         | `cachedRead([tags.rulebook.reviewEntities()])`, ... | `rulebook:review-entities`, `rulebook:review-relations`                               |
 | notification templates                                        | `cachedRead([tags.notification.templates()])`       | `notification:templates`                                                              |
+| the ontology (`server/ontology.ts`)                           | `cachedRead([tags.profile.ontology()], 3600)`       | `profile:ontology`                                                                    |
 | gateway prompts and models                                    | `cachedRead([tags.llm.prompts()])`, ...             | `llm-gateway:prompts`, `llm-gateway:models`                                           |
 | anything keyed by the tenant (profile, consents, obligations) | `uncachedRead()` (`cache: "no-store"`)              | none; `tags.identity.consents` and `tags.profile.node` exist, the reads stay uncached |
 
@@ -258,6 +259,25 @@ reads with the same tags and headers share one entry: one for a rulebook read (n
 header), one per tenant for a global read from a tenant-scoped service such as the billing
 plans. A cached read's correlation id therefore names the tags rather than one request. No
 cached read sends `Authorization` or a cookie.
+
+## The ontology
+
+Every word a screen shows about a profile attribute comes from the profile service's
+`GET /v1/ontology`: the question onboarding asks, the help line, the label of each allowed value,
+the attribute's level, type and source, and the operators a rule may use on each type. There is
+no copy of the ontology in the web app. `server/ontology.ts` reads it without a tenant header
+(the ontology is the same for every tenant) and caches it under `profile:ontology` for an hour,
+the lifetime the service states in its `Cache-Control`; `getOntology()` is the per-request memo
+a page calls, and `entities/ontology` maps the body (`ontologyFromDto`) and holds the lookups:
+`attributeOf`, `attributesAt(level)`, `answerableAt(levels)` (derived attributes are never
+asked), `optionLabel` (the wording's label, or the value itself), `questionOf` (the question, or
+the definition when the wording asks nothing), `operatorsFor(type)` and
+`compareByOntologyOrder`. An attribute whose type, level or source is not one the domain kernel
+defines is left out and its key listed in `unsupported`, so a new kind on the service shows up as
+a gap instead of the wrong control. The service answers `If-None-Match` with a 304; the web
+server does not send it, because its copy lives in Next's data cache and is refreshed there. The
+wording carries `review_status` (`needs_review` until an analyst has read it), which the domain
+type exposes as `wordingReviewed`.
 
 ## Idempotency and natural keys
 
