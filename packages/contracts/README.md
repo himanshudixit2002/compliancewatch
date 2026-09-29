@@ -15,6 +15,8 @@ openapi/                 # OpenAPI 3.1 specs, public /v1 and internal service AP
   llm-gateway.v1.json      # services/llm-gateway
   profile.v1.json          # services/profile
   identity.v1.json         # services/identity
+  notification.v1.json     # services/notification
+  rulebook.v1.json         # services/rulebook
 events/
   schemas/               # JSON Schema 2020-12: envelope.v1.json and one <topic>.v1.json per event
   examples/<topic>/      # golden messages (envelope + payload) every check replays

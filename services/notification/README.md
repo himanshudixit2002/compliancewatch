@@ -23,6 +23,8 @@ can be set per recipient. The WhatsApp channel is wired only with `CW_WHATSAPP_E
 returns a failed receipt saying the channel is disabled. Templates are drafts until the
 maintainer submits them to Meta; `docs/runbooks/whatsapp.md` lists the steps. The inbound
 side (webhook, keywords) is `apps/whatsapp-bot`, which calls the preference routes.
+The spec is committed at `packages/contracts/openapi/notification.v1.json`
+(`make openapi SERVICE=notification`) and pinned by `tests/contract/test_openapi.py`.
 
 ## Layout
 
