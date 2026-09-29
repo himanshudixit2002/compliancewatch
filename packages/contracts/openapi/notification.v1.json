@@ -1,6 +1,47 @@
 {
   "components": {
     "schemas": {
+      "BusinessLinkIn": {
+        "additionalProperties": false,
+        "properties": {
+          "business_id": {
+            "format": "uuid",
+            "title": "Business Id",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "description": "What the recipient calls the business, such as a CA firm's client name",
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "business_id"
+        ],
+        "title": "BusinessLinkIn",
+        "type": "object"
+      },
+      "BusinessLinkOut": {
+        "properties": {
+          "business_id": {
+            "format": "uuid",
+            "title": "Business Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "business_id",
+          "label"
+        ],
+        "title": "BusinessLinkOut",
+        "type": "object"
+      },
       "Channel": {
         "description": "Where a notification is delivered.",
         "enum": [
@@ -19,6 +60,14 @@
           "support"
         ],
         "title": "ConsentSource",
+        "type": "string"
+      },
+      "DigestMode": {
+        "enum": [
+          "off",
+          "daily"
+        ],
+        "title": "DigestMode",
         "type": "string"
       },
       "HealthResponse": {
@@ -258,6 +307,199 @@
         ],
         "title": "ReadyResponse",
         "type": "object"
+      },
+      "RecipientAddressIn": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "description": "A phone number with its country code for WhatsApp, a mailbox for email",
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Address",
+            "type": "string"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          }
+        },
+        "required": [
+          "channel",
+          "address"
+        ],
+        "title": "RecipientAddressIn",
+        "type": "object"
+      },
+      "RecipientAddressOut": {
+        "properties": {
+          "address": {
+            "description": "Normalised: +<digits> for WhatsApp, lower case for email",
+            "title": "Address",
+            "type": "string"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "channel",
+          "address",
+          "position"
+        ],
+        "title": "RecipientAddressOut",
+        "type": "object"
+      },
+      "RecipientIn": {
+        "additionalProperties": false,
+        "properties": {
+          "addresses": {
+            "description": "In the order they are tried; each still needs its opt-in",
+            "items": {
+              "$ref": "#/components/schemas/RecipientAddressIn"
+            },
+            "maxItems": 10,
+            "title": "Addresses",
+            "type": "array"
+          },
+          "businesses": {
+            "items": {
+              "$ref": "#/components/schemas/BusinessLinkIn"
+            },
+            "maxItems": 500,
+            "title": "Businesses",
+            "type": "array"
+          },
+          "digest_mode": {
+            "$ref": "#/components/schemas/DigestMode",
+            "default": "off"
+          },
+          "language": {
+            "default": "en",
+            "pattern": "^[a-z]{2}$",
+            "title": "Language",
+            "type": "string"
+          },
+          "org_label": {
+            "default": "",
+            "description": "The organisation the recipient speaks for, such as the CA firm's name",
+            "maxLength": 200,
+            "title": "Org Label",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/RecipientRole"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The person's user id when they sign in to the web app",
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "RecipientIn",
+        "type": "object"
+      },
+      "RecipientOut": {
+        "properties": {
+          "addresses": {
+            "items": {
+              "$ref": "#/components/schemas/RecipientAddressOut"
+            },
+            "title": "Addresses",
+            "type": "array"
+          },
+          "businesses": {
+            "items": {
+              "$ref": "#/components/schemas/BusinessLinkOut"
+            },
+            "title": "Businesses",
+            "type": "array"
+          },
+          "by_digest": {
+            "description": "Notifications wait for the daily digest: chosen, or a CA firm's recipient",
+            "title": "By Digest",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "digest_mode": {
+            "$ref": "#/components/schemas/DigestMode"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "org_label": {
+            "title": "Org Label",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/RecipientRole"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "role",
+          "language",
+          "digest_mode",
+          "by_digest",
+          "org_label",
+          "addresses",
+          "businesses",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "RecipientOut",
+        "type": "object"
+      },
+      "RecipientRole": {
+        "enum": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff"
+        ],
+        "title": "RecipientRole",
+        "type": "string"
       },
       "SendIn": {
         "additionalProperties": false,
@@ -664,6 +906,251 @@
           }
         },
         "summary": "Record an opt-in or opt-out for a channel and recipient",
+        "tags": [
+          "notification"
+        ]
+      }
+    },
+    "/v1/notification/recipients/{recipient_id}": {
+      "delete": {
+        "operationId": "delete_recipient_v1_notification_recipients__recipient_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recipient_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Recipient Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID; required until identity issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; required until identity issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Remove a recipient with its addresses and business links",
+        "tags": [
+          "notification"
+        ]
+      },
+      "get": {
+        "operationId": "get_recipient_v1_notification_recipients__recipient_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recipient_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Recipient Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID; required until identity issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; required until identity issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipientOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "A recipient of the tenant, 404 when it has none by that id",
+        "tags": [
+          "notification"
+        ]
+      },
+      "put": {
+        "operationId": "put_recipient_v1_notification_recipients__recipient_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recipient_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Recipient Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID; required until identity issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; required until identity issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipientIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipientOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Register a recipient, or replace it: role, language, digest, addresses, businesses",
         "tags": [
           "notification"
         ]

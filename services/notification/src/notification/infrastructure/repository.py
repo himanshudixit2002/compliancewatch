@@ -1,22 +1,23 @@
 """The Postgres units of work of the notification service.
 
 A tenant unit is one transaction with ``app.tenant_id`` set for row-level security. Its
-repositories share the unit's session: the tenant's notifications, the work queue entries of
-those notifications, and the consents and suppressions of every address (tables without
-row-level security). Events go to the outbox on the same connection, so an event commits or
-rolls back with the change that made it.
+repositories share the unit's session: the tenant's recipients and notifications, the work queue
+entries of those notifications, and the consents, suppressions and directory entries of every
+address (tables without row-level security). Events go to the outbox on the same connection, so
+an event commits or rolls back with the change that made it.
 
-``PostgresUnitOfWorkFactory(tenant_id)`` opens a tenant unit on its own transaction;
-``shared()`` opens one without a tenant, for consents and suppressions. A consumer runs its
+``PostgresUnitOfWorkFactory(tenant_id)`` opens a tenant unit on its own transaction; ``shared()``
+opens one without a tenant, for consents, suppressions and the directory. A consumer runs its
 handler on the connection of its inbox transaction instead: ``SqlAlchemyUnitOfWork.on_connection``
-joins that transaction, so the handler's writes, its outbox rows and the ``processed_event``
-row commit together (``py_common.outbox.sync``).
+joins that transaction, so the handler's writes, its outbox rows and the ``processed_event`` row
+commit together (``py_common.outbox.sync``).
 """
 
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
 from typing import Any, Self
+from uuid import UUID
 
 from sqlalchemy import Connection, Engine, create_engine, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
@@ -26,7 +27,7 @@ from sqlalchemy.pool import NullPool
 from domain_kernel.channels import Channel
 from domain_kernel.dedupe import DedupeKey
 from domain_kernel.events import DomainEvent
-from domain_kernel.ids import BusinessId, NotificationId, ObligationId, TenantId
+from domain_kernel.ids import BusinessId, NotificationId, ObligationId, TenantId, UserId
 from notification.domain.ids import DispatchId, RecipientId
 from notification.domain.notification import PENDING_STATES, DeliveryState, Notification
 from notification.domain.occasions import OccasionKind
@@ -37,7 +38,15 @@ from notification.domain.preferences import (
     Suppression,
     SuppressionReason,
 )
+from notification.domain.recipients import (
+    BusinessLink,
+    DigestMode,
+    Recipient,
+    RecipientAddress,
+    RecipientRole,
+)
 from notification.domain.repository import (
+    DirectoryEntry,
     PageAfter,
     SharedUnitOfWork,
     UnitOfWork,
@@ -45,8 +54,12 @@ from notification.domain.repository import (
 )
 from notification.infrastructure.models import (
     TENANT_SETTING,
+    AddressDirectoryRow,
     ChannelPreferenceRow,
     NotificationRow,
+    RecipientAddressRow,
+    RecipientBusinessRow,
+    RecipientRow,
     SuppressionRow,
     WorkIndexRow,
 )
@@ -160,6 +173,185 @@ class SqlAlchemySuppressionRepository:
             .returning(SuppressionRow.address)
         )
         return result.first() is not None
+
+
+class SqlAlchemyRecipientRepository:
+    """Row-level security scopes every statement to the unit's tenant; the tenant is named in
+    the statements as well, because recipients are keyed by tenant and id."""
+
+    def __init__(self, session: Session, tenant_id: TenantId) -> None:
+        self._session = session
+        self._tenant = tenant_id.value
+
+    def get(self, recipient_id: RecipientId) -> Recipient | None:
+        found = self._load(
+            select(RecipientRow).where(
+                RecipientRow.tenant_id == self._tenant, RecipientRow.id == recipient_id.value
+            )
+        )
+        return found[0] if found else None
+
+    def save(self, recipient: Recipient) -> None:
+        values = {
+            "user_id": None if recipient.user_id is None else recipient.user_id.value,
+            "role": recipient.role.value,
+            "language": recipient.language,
+            "digest_mode": recipient.digest_mode.value,
+            "org_label": recipient.org_label,
+            "updated_at": recipient.updated_at,
+        }
+        statement = insert(RecipientRow).values(
+            tenant_id=recipient.tenant_id.value,
+            id=recipient.id.value,
+            created_at=recipient.created_at,
+            **values,
+        )
+        self._session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["tenant_id", "id"],
+                set_={name: statement.excluded[name] for name in values},
+            )
+        )
+        keys = {"tenant_id": recipient.tenant_id.value, "recipient_id": recipient.id.value}
+        for row in (RecipientAddressRow, RecipientBusinessRow):
+            self._session.execute(
+                delete(row).where(
+                    row.tenant_id == keys["tenant_id"], row.recipient_id == keys["recipient_id"]
+                )
+            )
+        if recipient.addresses:
+            self._session.execute(
+                insert(RecipientAddressRow),
+                [
+                    {
+                        **keys,
+                        "channel": address.channel.value,
+                        "address": address.address,
+                        "position": address.position,
+                    }
+                    for address in recipient.addresses
+                ],
+            )
+        if recipient.businesses:
+            self._session.execute(
+                insert(RecipientBusinessRow),
+                [
+                    {**keys, "business_id": link.business_id.value, "label": link.label}
+                    for link in recipient.businesses
+                ],
+            )
+        self._session.expire_all()
+
+    def delete(self, recipient_id: RecipientId) -> bool:
+        result = self._session.execute(
+            delete(RecipientRow)
+            .where(RecipientRow.tenant_id == self._tenant, RecipientRow.id == recipient_id.value)
+            .returning(RecipientRow.id)
+        )
+        self._session.expire_all()
+        return result.first() is not None
+
+    def for_business(self, business_id: BusinessId) -> Sequence[Recipient]:
+        followers = select(RecipientBusinessRow.recipient_id).where(
+            RecipientBusinessRow.tenant_id == self._tenant,
+            RecipientBusinessRow.business_id == business_id.value,
+        )
+        return self._load(
+            select(RecipientRow).where(
+                RecipientRow.tenant_id == self._tenant, RecipientRow.id.in_(followers)
+            )
+        )
+
+    def _load(self, statement: Any) -> list[Recipient]:
+        """The recipients ``statement`` selects, by id, with their addresses and links."""
+        rows = self._session.scalars(statement.order_by(RecipientRow.id)).all()
+        if not rows:
+            return []
+        ids = [row.id for row in rows]
+        addresses: dict[UUID, list[RecipientAddress]] = {}
+        for address in self._session.scalars(
+            select(RecipientAddressRow)
+            .where(
+                RecipientAddressRow.tenant_id == self._tenant,
+                RecipientAddressRow.recipient_id.in_(ids),
+            )
+            .order_by(RecipientAddressRow.position)
+        ):
+            addresses.setdefault(address.recipient_id, []).append(
+                RecipientAddress(Channel(address.channel), address.address, address.position)
+            )
+        links: dict[UUID, list[BusinessLink]] = {}
+        for link in self._session.scalars(
+            select(RecipientBusinessRow).where(
+                RecipientBusinessRow.tenant_id == self._tenant,
+                RecipientBusinessRow.recipient_id.in_(ids),
+            )
+        ):
+            links.setdefault(link.recipient_id, []).append(
+                BusinessLink(BusinessId(link.business_id), link.label)
+            )
+        return [
+            Recipient(
+                id=RecipientId(row.id),
+                tenant_id=TenantId(row.tenant_id),
+                user_id=None if row.user_id is None else UserId(row.user_id),
+                role=RecipientRole(row.role),
+                language=row.language,
+                digest_mode=DigestMode(row.digest_mode),
+                org_label=row.org_label,
+                addresses=tuple(addresses.get(row.id, ())),
+                businesses=tuple(links.get(row.id, ())),
+                created_at=row.created_at.astimezone(UTC),
+                updated_at=row.updated_at.astimezone(UTC),
+            )
+            for row in rows
+        ]
+
+
+class SqlAlchemyAddressDirectory:
+    """``address_directory`` has no row-level security; every statement names the tenant."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def replace(
+        self, tenant_id: TenantId, recipient_id: RecipientId, addresses: Sequence[RecipientAddress]
+    ) -> None:
+        self.remove(tenant_id, recipient_id)
+        if addresses:
+            self._session.execute(
+                insert(AddressDirectoryRow).on_conflict_do_nothing(),
+                [
+                    {
+                        "channel": address.channel.value,
+                        "address": address.address,
+                        "tenant_id": tenant_id.value,
+                        "recipient_id": recipient_id.value,
+                    }
+                    for address in addresses
+                ],
+            )
+
+    def remove(self, tenant_id: TenantId, recipient_id: RecipientId) -> None:
+        self._session.execute(
+            delete(AddressDirectoryRow).where(
+                AddressDirectoryRow.tenant_id == tenant_id.value,
+                AddressDirectoryRow.recipient_id == recipient_id.value,
+            )
+        )
+
+    def lookup(self, channel: Channel, address: str) -> Sequence[DirectoryEntry]:
+        rows = self._session.execute(
+            select(AddressDirectoryRow.tenant_id, AddressDirectoryRow.recipient_id)
+            .where(
+                AddressDirectoryRow.channel == channel.value,
+                AddressDirectoryRow.address == address,
+            )
+            .order_by(AddressDirectoryRow.tenant_id, AddressDirectoryRow.recipient_id)
+        ).all()
+        return [
+            DirectoryEntry(TenantId(row.tenant_id), RecipientId(row.recipient_id)) for row in rows
+        ]
 
 
 class SqlAlchemyNotificationRepository:
@@ -348,11 +540,12 @@ class OutboxSink:
 
 
 class SqlAlchemySharedUnitOfWork:
-    """Consents and suppressions, in a transaction without a tenant."""
+    """Consents, suppressions and the address directory, in a transaction without a tenant."""
 
     def __init__(self, session: Session) -> None:
         self.preferences = SqlAlchemyPreferenceRepository(session)
         self.suppressions = SqlAlchemySuppressionRepository(session)
+        self.directory = SqlAlchemyAddressDirectory(session)
 
 
 class SqlAlchemyUnitOfWork:
@@ -367,6 +560,8 @@ class SqlAlchemyUnitOfWork:
         self.tenant_id = tenant_id
         self.preferences = SqlAlchemyPreferenceRepository(session)
         self.suppressions = SqlAlchemySuppressionRepository(session)
+        self.directory = SqlAlchemyAddressDirectory(session)
+        self.recipients = SqlAlchemyRecipientRepository(session, tenant_id)
         self.notifications = SqlAlchemyNotificationRepository(session)
         self.work = SqlAlchemyWorkQueue(session)
         self.events = OutboxSink(connection, writer)

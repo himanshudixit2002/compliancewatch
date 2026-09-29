@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from domain_kernel.channels import Channel
 from domain_kernel.protocols import NotificationChannel
 from notification.application.preferences import GetPreference, SetOptIn
+from notification.application.recipients import GetRecipient, RegisterRecipient, RemoveRecipient
 from notification.application.send import SendNotification
 from notification.domain.preferences import QuietHours
 from notification.domain.repository import UnitOfWorkFactory, WorkIndex
@@ -23,4 +24,7 @@ class Wiring:
     send: SendNotification
     set_opt_in: SetOptIn
     get_preference: GetPreference
+    register_recipient: RegisterRecipient
+    get_recipient: GetRecipient
+    remove_recipient: RemoveRecipient
     store_ready: Callable[[], Awaitable[bool]]

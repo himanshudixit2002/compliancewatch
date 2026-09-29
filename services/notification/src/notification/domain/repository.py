@@ -5,11 +5,14 @@ to no tenant: an opt-out typed on WhatsApp arrives before anyone knows which ten
 belongs to, and must be honoured for all of them. Notifications belong to one tenant, and the
 unit of work of that tenant sees only its own (row-level security in Postgres).
 
-- ``UnitOfWorkFactory(tenant_id)`` opens one transaction for a tenant: its notifications, the
-  work queue entries of those notifications, the event sink (the outbox), and the consents and
-  suppressions of every address. Leaving the block cleanly commits; an exception rolls back.
-- ``UnitOfWorkFactory.shared()`` opens one transaction with no tenant, for consents and
-  suppressions only.
+- ``UnitOfWorkFactory(tenant_id)`` opens one transaction for a tenant: its recipients and
+  notifications, the work queue entries of those notifications, the event sink (the outbox),
+  and the consents, suppressions and directory entries of every address. Leaving the block
+  cleanly commits; an exception rolls back.
+- ``UnitOfWorkFactory.shared()`` opens one transaction with no tenant, for consents,
+  suppressions and the address directory only.
+- The address directory routes an address to the tenants and recipients that registered it.
+  Registering a recipient replaces its entries in the same transaction as the recipient.
 - ``WorkIndex`` is the queue of work across tenants: the dispatcher claims due entries with a
   lease, then handles each in a unit of work of the entry's tenant, where it completes or
   reschedules the entry together with the notification.
@@ -30,6 +33,7 @@ from domain_kernel.ids import BusinessId, NotificationId, ObligationId, TenantId
 from notification.domain.ids import DispatchId, RecipientId
 from notification.domain.notification import DeliveryState, Notification
 from notification.domain.preferences import ChannelPreference, Suppression
+from notification.domain.recipients import Recipient, RecipientAddress
 
 
 class EventSink(Protocol):
@@ -140,6 +144,53 @@ class NotificationRepository(Protocol):
         ...
 
 
+class RecipientRepository(Protocol):
+    """The recipients of the unit of work's tenant."""
+
+    def get(self, recipient_id: RecipientId) -> Recipient | None: ...
+
+    def save(self, recipient: Recipient) -> None:
+        """Insert the recipient or write it over the stored one, its addresses and business
+        links included."""
+        ...
+
+    def delete(self, recipient_id: RecipientId) -> bool:
+        """Remove the recipient with its addresses and links; False when there was none."""
+        ...
+
+    def for_business(self, business_id: BusinessId) -> Sequence[Recipient]:
+        """The recipients that follow the business, by id."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class DirectoryEntry:
+    """One tenant's recipient at an address."""
+
+    tenant_id: TenantId
+    recipient_id: RecipientId
+
+    def __post_init__(self) -> None:
+        require_instance(self.tenant_id, TenantId, "tenant_id")
+        require_instance(self.recipient_id, RecipientId, "recipient_id")
+
+
+class AddressDirectory(Protocol):
+    """Which tenants' recipients registered an address, across tenants."""
+
+    def replace(
+        self, tenant_id: TenantId, recipient_id: RecipientId, addresses: Sequence[RecipientAddress]
+    ) -> None:
+        """The recipient's entries become exactly ``addresses``."""
+        ...
+
+    def remove(self, tenant_id: TenantId, recipient_id: RecipientId) -> None: ...
+
+    def lookup(self, channel: Channel, address: str) -> Sequence[DirectoryEntry]:
+        """Every recipient at the normalised address, by tenant and recipient id."""
+        ...
+
+
 class WorkKind(StrEnum):
     ITEM = "item"
     """A notification that goes out on its own or in a batch."""
@@ -205,7 +256,7 @@ class WorkIndex(Protocol):
 
 
 class SharedUnitOfWork(Protocol):
-    """One transaction without a tenant: consents and suppressions."""
+    """One transaction without a tenant: consents, suppressions and the address directory."""
 
     @property
     def preferences(self) -> PreferenceRepository: ...
@@ -213,12 +264,18 @@ class SharedUnitOfWork(Protocol):
     @property
     def suppressions(self) -> SuppressionRepository: ...
 
+    @property
+    def directory(self) -> AddressDirectory: ...
+
 
 class UnitOfWork(SharedUnitOfWork, Protocol):
     """One transaction of one tenant."""
 
     @property
     def tenant_id(self) -> TenantId: ...
+
+    @property
+    def recipients(self) -> RecipientRepository: ...
 
     @property
     def notifications(self) -> NotificationRepository: ...

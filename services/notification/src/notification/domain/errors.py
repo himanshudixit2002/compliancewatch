@@ -47,3 +47,11 @@ class InvalidAddressError(DomainError):
 
     def __init__(self, channel: str, reason: str) -> None:
         super().__init__(f"not a valid {channel} address: {reason}")
+
+
+class RecipientNotFoundError(DomainError):
+    type_slug: ClassVar[str] = "notification-recipient-not-found"
+    title: ClassVar[str] = "Notification recipient not found"
+
+    def __init__(self, recipient_id: str) -> None:
+        super().__init__(f"no recipient {recipient_id} in this tenant")

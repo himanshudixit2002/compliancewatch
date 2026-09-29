@@ -1,6 +1,7 @@
 """Migration 0001 on Postgres: the tables, row-level security by tenant on the tenant tables, the
-store's repositories, one row per dedupe key under concurrent writes, the work index under two
-dispatchers, the consumer's transaction, and the outbox. Needs Docker.
+store's repositories, recipients with their address directory, one row per dedupe key under
+concurrent writes, the work index under two dispatchers, the consumer's transaction, and the
+outbox. Needs Docker.
 
 The store runs as a plain database role, not the container's superuser: a superuser bypasses
 row-level security whatever the table says, so the service's runtime role must never be one.
@@ -24,9 +25,16 @@ from testcontainers.community.postgres import PostgresContainer
 
 from domain_kernel.channels import Channel
 from domain_kernel.dedupe import DedupeKey
-from domain_kernel.ids import BusinessId, NotificationId, ObligationId, TenantId
+from domain_kernel.ids import BusinessId, NotificationId, ObligationId, TenantId, UserId
 from notification.application.preferences import SetOptIn
+from notification.application.recipients import (
+    GetRecipient,
+    RecipientRegistration,
+    RegisterRecipient,
+    RemoveRecipient,
+)
 from notification.application.send import SendNotification
+from notification.domain.errors import RecipientNotFoundError
 from notification.domain.ids import DispatchId, RecipientId
 from notification.domain.model import NotificationRequest, Outcome
 from notification.domain.notification import DeliveryState, Notification
@@ -38,7 +46,8 @@ from notification.domain.preferences import (
     Suppression,
     SuppressionReason,
 )
-from notification.domain.repository import PageAfter, WorkEntry
+from notification.domain.recipients import BusinessLink, DigestMode, RecipientRole
+from notification.domain.repository import DirectoryEntry, PageAfter, WorkEntry
 from notification.infrastructure.repository import PostgresUnitOfWorkFactory, SqlAlchemyUnitOfWork
 from notification.infrastructure.work_index import PostgresWorkIndex, claim_rows
 from notification.testing import NOON_IST, FakeChannel
@@ -398,6 +407,104 @@ def test_consents_inbound_times_and_suppressions(factory: PostgresUnitOfWorkFact
         assert unit.suppressions.remove(Channel.EMAIL, "gone@example.com")
         assert not unit.suppressions.remove(Channel.EMAIL, "gone@example.com")
         assert unit.suppressions.get(Channel.EMAIL, "gone@example.com") is None
+
+
+def test_recipients_and_their_directory_entries_under_row_level_security(
+    factory: PostgresUnitOfWorkFactory, engine: Engine
+) -> None:
+    tenant, other = TenantId.new(), TenantId.new()
+    business, client = BusinessId.new(), BusinessId.new()
+    register = RegisterRecipient(factory, clock=lambda: NOON_IST)
+    owner_id = RecipientId.new()
+    owner = register.run(
+        RecipientRegistration(
+            tenant_id=tenant,
+            recipient_id=owner_id,
+            role=RecipientRole.OWNER,
+            user_id=UserId.new(),
+            language="hi",
+            addresses=[(Channel.WHATSAPP, "+91 98765 11111"), (Channel.EMAIL, "Owner@Acme.in")],
+            businesses=[BusinessLink(business, "Acme Traders")],
+        )
+    )
+    staff = register.run(
+        RecipientRegistration(
+            tenant_id=tenant,
+            recipient_id=RecipientId.new(),
+            role=RecipientRole.STAFF,
+            addresses=[(Channel.WHATSAPP, "919876511111")],
+            businesses=[BusinessLink(business), BusinessLink(client, "Client")],
+        )
+    )
+    same_id = register.run(
+        RecipientRegistration(
+            tenant_id=other,
+            recipient_id=owner_id,
+            role=RecipientRole.CA_ADMIN,
+            org_label="Sharma & Co",
+            addresses=[(Channel.EMAIL, "desk@sharma.example")],
+            businesses=[BusinessLink(business)],
+        )
+    )
+    get = GetRecipient(factory)
+    assert get.run(tenant, owner_id) == owner
+    assert get.run(other, owner_id) == same_id, "one id in two tenants"
+    assert same_id.by_digest
+    with factory(tenant) as unit:
+        followers = unit.recipients.for_business(business)
+        assert sorted(r.id.value for r in followers) == sorted([owner_id.value, staff.id.value])
+        assert unit.recipients.for_business(client) == [staff]
+    with factory(other) as unit:
+        assert unit.recipients.for_business(business) == [same_id]
+        assert unit.recipients.for_business(client) == []
+    with factory.shared() as unit:
+        assert unit.directory.lookup(Channel.WHATSAPP, "+919876511111") == sorted(
+            [DirectoryEntry(tenant, owner_id), DirectoryEntry(tenant, staff.id)],
+            key=lambda entry: entry.recipient_id.value,
+        )
+    assert {tenant, other} <= set(PostgresWorkIndex(factory.engine).tenants())
+
+    later = NOON_IST + timedelta(days=1)
+    moved = RegisterRecipient(factory, clock=lambda: later).run(
+        RecipientRegistration(
+            tenant_id=tenant,
+            recipient_id=owner_id,
+            role=RecipientRole.OWNER,
+            digest_mode=DigestMode.DAILY,
+            addresses=[(Channel.EMAIL, "owner@acme.in")],
+            businesses=[BusinessLink(client, "Client")],
+        )
+    )
+    assert (moved.created_at, moved.updated_at) == (NOON_IST, later)
+    assert get.run(tenant, owner_id) == moved
+    with factory.shared() as unit:
+        assert unit.directory.lookup(Channel.WHATSAPP, "+919876511111") == [
+            DirectoryEntry(tenant, staff.id)
+        ]
+        assert unit.directory.lookup(Channel.EMAIL, "owner@acme.in") == [
+            DirectoryEntry(tenant, owner_id)
+        ]
+
+    RemoveRecipient(factory).run(tenant, owner_id)
+    with pytest.raises(RecipientNotFoundError):
+        get.run(tenant, owner_id)
+    assert get.run(other, owner_id) == same_id, "the other tenant's recipient stays"
+    with pytest.raises(RecipientNotFoundError):
+        RemoveRecipient(factory).run(tenant, owner_id)
+    with engine.connect() as connection:
+        left: dict[str, int] = {
+            table: connection.execute(
+                text(f"SELECT count(*) FROM {table} WHERE tenant_id = :t AND {column} = :id"),
+                {"t": tenant.value, "id": owner_id.value},
+            ).scalar_one()
+            for table, column in (
+                ("recipient", "id"),
+                ("recipient_address", "recipient_id"),
+                ("recipient_business", "recipient_id"),
+                ("address_directory", "recipient_id"),
+            )
+        }
+    assert left == dict.fromkeys(left, 0), "addresses, links and entries go with the recipient"
 
 
 def test_concurrent_writes_of_one_dedupe_key_keep_one_row(

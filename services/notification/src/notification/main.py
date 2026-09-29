@@ -16,12 +16,15 @@ from domain_kernel.channels import Channel
 from domain_kernel.errors import DomainError
 from domain_kernel.protocols import NotificationChannel
 from notification import __version__
+from notification.api.recipients import router as recipients_router
 from notification.api.router import router
 from notification.application.preferences import GetPreference, SetOptIn
+from notification.application.recipients import GetRecipient, RegisterRecipient, RemoveRecipient
 from notification.application.send import SendNotification
 from notification.domain.errors import (
     InvalidAddressError,
     MissingPlaceholderError,
+    RecipientNotFoundError,
     TenantRequiredError,
     UnknownChannelError,
     UnknownTemplateError,
@@ -41,6 +44,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     UnknownTemplateError: 422,
     MissingPlaceholderError: 422,
     InvalidAddressError: 422,
+    RecipientNotFoundError: 404,
     UnknownChannelError: 503,
 }
 WHATSAPP_DISABLED = "whatsapp channel disabled: set CW_WHATSAPP_ENABLED and the Meta credentials"
@@ -94,6 +98,9 @@ def wire(
         send=SendNotification(unit_of_work, wired_channels, quiet_hours=quiet_hours),
         set_opt_in=SetOptIn(unit_of_work),
         get_preference=GetPreference(unit_of_work),
+        register_recipient=RegisterRecipient(unit_of_work),
+        get_recipient=GetRecipient(unit_of_work),
+        remove_recipient=RemoveRecipient(unit_of_work),
         store_ready=store_ready,
     )
 
@@ -108,7 +115,7 @@ def build_app(
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router],
+        routers=[router, recipients_router],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         problem_status=PROBLEM_STATUS,

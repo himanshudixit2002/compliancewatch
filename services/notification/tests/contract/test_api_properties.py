@@ -35,6 +35,9 @@ OPERATIONS = frozenset(
         "PUT /v1/notification/preferences/{channel}/{recipient}",
         "POST /v1/notification/send",
         "GET /v1/notification/templates",
+        "PUT /v1/notification/recipients/{recipient_id}",
+        "GET /v1/notification/recipients/{recipient_id}",
+        "DELETE /v1/notification/recipients/{recipient_id}",
     }
 )
 EXCLUDED: dict[str, str] = {}

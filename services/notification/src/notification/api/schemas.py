@@ -9,6 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from domain_kernel.channels import Channel
 from notification.domain.model import Outcome, SendOutcome
 from notification.domain.preferences import ChannelPreference, ConsentSource
+from notification.domain.recipients import (
+    MAX_ADDRESSES,
+    MAX_BUSINESSES,
+    MAX_LABEL_LENGTH,
+    DigestMode,
+    Recipient,
+    RecipientRole,
+)
 from notification.domain.templates import MessageTemplate
 
 E164 = r"^\+?[1-9][0-9]{7,14}$"
@@ -110,4 +118,93 @@ class TemplateOut(BaseModel):
             meta_name=template.meta_name,
             placeholders=list(template.placeholders),
             body=template.body,
+        )
+
+
+class RecipientAddressIn(Strict):
+    channel: Channel
+    address: str = Field(
+        min_length=3,
+        max_length=254,
+        description="A phone number with its country code for WhatsApp, a mailbox for email",
+    )
+
+
+class BusinessLinkIn(Strict):
+    business_id: UUID
+    label: str = Field(
+        default="",
+        max_length=MAX_LABEL_LENGTH,
+        description="What the recipient calls the business, such as a CA firm's client name",
+    )
+
+
+class RecipientIn(Strict):
+    user_id: UUID | None = Field(
+        default=None, description="The person's user id when they sign in to the web app"
+    )
+    role: RecipientRole
+    language: str = Field(default="en", pattern=r"^[a-z]{2}$")
+    digest_mode: DigestMode = DigestMode.OFF
+    org_label: str = Field(
+        default="",
+        max_length=MAX_LABEL_LENGTH,
+        description="The organisation the recipient speaks for, such as the CA firm's name",
+    )
+    addresses: list[RecipientAddressIn] = Field(
+        default_factory=list,
+        max_length=MAX_ADDRESSES,
+        description="In the order they are tried; each still needs its opt-in",
+    )
+    businesses: list[BusinessLinkIn] = Field(default_factory=list, max_length=MAX_BUSINESSES)
+
+
+class RecipientAddressOut(BaseModel):
+    channel: Channel
+    address: str = Field(description="Normalised: +<digits> for WhatsApp, lower case for email")
+    position: int
+
+
+class BusinessLinkOut(BaseModel):
+    business_id: UUID
+    label: str
+
+
+class RecipientOut(BaseModel):
+    id: UUID
+    user_id: UUID | None
+    role: RecipientRole
+    language: str
+    digest_mode: DigestMode
+    by_digest: bool = Field(
+        description="Notifications wait for the daily digest: chosen, or a CA firm's recipient"
+    )
+    org_label: str
+    addresses: list[RecipientAddressOut]
+    businesses: list[BusinessLinkOut]
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_recipient(cls, recipient: Recipient) -> "RecipientOut":
+        return cls(
+            id=recipient.id.value,
+            user_id=None if recipient.user_id is None else recipient.user_id.value,
+            role=recipient.role,
+            language=recipient.language,
+            digest_mode=recipient.digest_mode,
+            by_digest=recipient.by_digest,
+            org_label=recipient.org_label,
+            addresses=[
+                RecipientAddressOut(
+                    channel=address.channel, address=address.address, position=address.position
+                )
+                for address in recipient.addresses
+            ],
+            businesses=[
+                BusinessLinkOut(business_id=link.business_id.value, label=link.label)
+                for link in recipient.businesses
+            ],
+            created_at=recipient.created_at,
+            updated_at=recipient.updated_at,
         )

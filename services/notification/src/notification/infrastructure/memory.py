@@ -2,10 +2,10 @@
 
 ``MemoryStore`` behaves like the Postgres units of work where the use cases can tell: a unit
 works on a copy of the store and replaces it only when the block exits cleanly, so a failed unit
-leaves nothing behind; a tenant unit sees only its tenant's notifications, as row-level security
-would show them; dedupe keys and ids are unique across tenants; and events are published only
-when their unit commits. Units run one at a time, which stands in for the database's locks.
-Committed events go to ``LogEventSink``, which keeps and logs them.
+leaves nothing behind; a tenant unit sees only its tenant's recipients and notifications, as
+row-level security would show them; dedupe keys and ids are unique across tenants; and events
+are published only when their unit commits. Units run one at a time, which stands in for the
+database's locks. Committed events go to ``LogEventSink``, which keeps and logs them.
 """
 
 import threading
@@ -23,7 +23,9 @@ from notification.domain.ids import DispatchId, RecipientId
 from notification.domain.notification import DeliveryState, Notification
 from notification.domain.policy import WORK_LEASE
 from notification.domain.preferences import ChannelPreference, Suppression
+from notification.domain.recipients import Recipient, RecipientAddress
 from notification.domain.repository import (
+    DirectoryEntry,
     PageAfter,
     SharedUnitOfWork,
     UnitOfWork,
@@ -34,6 +36,7 @@ from py_common.logging import get_logger
 log = get_logger(__name__)
 
 type AddressKey = tuple[Channel, str]
+type DirectoryKey = tuple[Channel, str, TenantId, RecipientId]
 
 
 class LogEventSink:
@@ -64,6 +67,8 @@ class MemoryState:
     suppressions: dict[AddressKey, Suppression] = field(default_factory=dict)
     notifications: dict[NotificationId, Notification] = field(default_factory=dict)
     work: dict[NotificationId, WorkRow] = field(default_factory=dict)
+    recipients: dict[tuple[TenantId, RecipientId], Recipient] = field(default_factory=dict)
+    directory: set[DirectoryKey] = field(default_factory=set)
 
     def copy(self) -> "MemoryState":
         return MemoryState(
@@ -72,6 +77,8 @@ class MemoryState:
             suppressions=dict(self.suppressions),
             notifications=dict(self.notifications),
             work=dict(self.work),
+            recipients=dict(self.recipients),
+            directory=set(self.directory),
         )
 
 
@@ -105,6 +112,56 @@ class MemorySuppressionRepository:
 
     def remove(self, channel: Channel, address: str) -> bool:
         return self._state.suppressions.pop((channel, address), None) is not None
+
+
+class MemoryRecipientRepository:
+    def __init__(self, state: MemoryState, tenant_id: TenantId) -> None:
+        self._state = state
+        self._tenant_id = tenant_id
+
+    def get(self, recipient_id: RecipientId) -> Recipient | None:
+        return self._state.recipients.get((self._tenant_id, recipient_id))
+
+    def save(self, recipient: Recipient) -> None:
+        if recipient.tenant_id != self._tenant_id:
+            raise ValueError(f"recipient {recipient.id} belongs to another tenant")
+        self._state.recipients[(self._tenant_id, recipient.id)] = recipient
+
+    def delete(self, recipient_id: RecipientId) -> bool:
+        return self._state.recipients.pop((self._tenant_id, recipient_id), None) is not None
+
+    def for_business(self, business_id: BusinessId) -> Sequence[Recipient]:
+        found = [
+            recipient
+            for (tenant_id, _), recipient in self._state.recipients.items()
+            if tenant_id == self._tenant_id and recipient.follows(business_id)
+        ]
+        return sorted(found, key=lambda recipient: recipient.id.value)
+
+
+class MemoryAddressDirectory:
+    def __init__(self, state: MemoryState) -> None:
+        self._state = state
+
+    def replace(
+        self, tenant_id: TenantId, recipient_id: RecipientId, addresses: Sequence[RecipientAddress]
+    ) -> None:
+        self.remove(tenant_id, recipient_id)
+        for address in addresses:
+            self._state.directory.add((address.channel, address.address, tenant_id, recipient_id))
+
+    def remove(self, tenant_id: TenantId, recipient_id: RecipientId) -> None:
+        self._state.directory -= {
+            key for key in self._state.directory if key[2:] == (tenant_id, recipient_id)
+        }
+
+    def lookup(self, channel: Channel, address: str) -> Sequence[DirectoryEntry]:
+        found = [
+            DirectoryEntry(tenant_id, recipient_id)
+            for (key_channel, key_address, tenant_id, recipient_id) in self._state.directory
+            if key_channel is channel and key_address == address
+        ]
+        return sorted(found, key=lambda entry: (entry.tenant_id.value, entry.recipient_id.value))
 
 
 class MemoryNotificationRepository:
@@ -252,12 +309,14 @@ class MemorySharedUnitOfWork:
     def __init__(self, state: MemoryState) -> None:
         self.preferences = MemoryPreferenceRepository(state)
         self.suppressions = MemorySuppressionRepository(state)
+        self.directory = MemoryAddressDirectory(state)
 
 
 class MemoryUnitOfWork(MemorySharedUnitOfWork):
     def __init__(self, state: MemoryState, tenant_id: TenantId) -> None:
         super().__init__(state)
         self.tenant_id = tenant_id
+        self.recipients = MemoryRecipientRepository(state, tenant_id)
         self.notifications = MemoryNotificationRepository(state, tenant_id)
         self.work = MemoryWorkQueue(state, tenant_id)
         self.events = MemoryEventSink()
@@ -303,7 +362,9 @@ class MemoryWorkIndex:
 
     def tenants(self) -> Sequence[TenantId]:
         with self._store.lock:
-            found = {row.entry.tenant_id for row in self._store.state.work.values()}
+            state = self._store.state
+            found = {row.entry.tenant_id for row in state.work.values()}
+            found |= {tenant_id for (_, _, tenant_id, _) in state.directory}
         return sorted(found, key=lambda tenant: tenant.value)
 
 

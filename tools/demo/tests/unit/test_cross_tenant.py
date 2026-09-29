@@ -97,7 +97,14 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
         }
     ),
     "obligation": frozenset({"GET /v1/obligation/obligations"}),
-    "notification": frozenset({"POST /v1/notification/send"}),
+    "notification": frozenset(
+        {
+            "POST /v1/notification/send",
+            "PUT /v1/notification/recipients/{recipient_id}",
+            "GET /v1/notification/recipients/{recipient_id}",
+            "DELETE /v1/notification/recipients/{recipient_id}",
+        }
+    ),
     "qa": frozenset({"POST /v1/qa/ask"}),
 }
 """Routes that must answer 401 without ``x-tenant-id``."""
@@ -321,6 +328,27 @@ def test_tenant_b_cannot_read_the_spend_of_tenant_a_at_the_gateway() -> None:
             "/v1/llm-gateway/usage", params={"tenant_id": str(TENANT_A)}, headers=AS_B
         )
     assert read.status_code in {401, 403, 404} or Decimal(read.json()["spent_inr"]) == 0
+
+
+def test_tenant_b_cannot_reach_a_recipient_of_tenant_a(clients: dict[str, TestClient]) -> None:
+    notification = clients["notification"]
+    path = f"/v1/notification/recipients/{DUMMY_ID}"
+    registered = notification.put(
+        path,
+        json={
+            "role": "owner",
+            "addresses": [{"channel": "whatsapp", "address": "+919876543210"}],
+            "businesses": [{"business_id": DUMMY_ID, "label": "Tenant A Traders"}],
+        },
+        headers=AS_A,
+    )
+    assert registered.status_code == 200, registered.text
+    assert notification.get(path, headers=AS_B).status_code == 404
+    assert notification.delete(path, headers=AS_B).status_code == 404
+    taken_over = notification.put(path, json={"role": "staff"}, headers=AS_B)
+    assert taken_over.status_code == 200, "tenant B registers its own recipient under the id"
+    as_a = notification.get(path, headers=AS_A).json()
+    assert (as_a["role"], as_a["businesses"][0]["label"]) == ("owner", "Tenant A Traders")
 
 
 def test_tenant_b_cannot_read_the_consents_of_tenant_a(clients: dict[str, TestClient]) -> None:

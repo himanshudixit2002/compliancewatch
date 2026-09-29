@@ -31,6 +31,7 @@ from domain_kernel.channels import Channel
 from notification.domain.notification import DeliveryState
 from notification.domain.occasions import OccasionKind
 from notification.domain.preferences import ConsentSource, SuppressionReason
+from notification.domain.recipients import DigestMode, RecipientRole
 from notification.domain.repository import WorkKind
 
 CHANNELS: Final[tuple[str, ...]] = tuple(channel.value for channel in Channel)
@@ -40,8 +41,8 @@ SOURCES: Final[tuple[str, ...]] = tuple(source.value for source in ConsentSource
 SUPPRESSION_REASONS: Final[tuple[str, ...]] = tuple(reason.value for reason in SuppressionReason)
 WORK_KINDS: Final[tuple[str, ...]] = tuple(kind.value for kind in WorkKind)
 WORK_STATUSES: Final[tuple[str, ...]] = ("pending", "done")
-RECIPIENT_ROLES: Final[tuple[str, ...]] = ("owner", "staff", "ca_admin", "ca_staff")
-DIGEST_MODES: Final[tuple[str, ...]] = ("off", "daily")
+RECIPIENT_ROLES: Final[tuple[str, ...]] = tuple(role.value for role in RecipientRole)
+DIGEST_MODES: Final[tuple[str, ...]] = tuple(mode.value for mode in DigestMode)
 TENANT_SETTING: Final[str] = "app.tenant_id"
 """The session setting the row-level security policies read; set per transaction."""
 
