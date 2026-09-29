@@ -88,6 +88,12 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "GET /v1/profile/nodes/{node_id}/review-tasks",
             "POST /v1/profile/registrations/{node_id}/prefill",
             "POST /v1/profile/financial-year-confirmations",
+            "POST /v1/businesses",
+            "GET /v1/businesses",
+            "GET /v1/businesses/{business_id}",
+            "PATCH /v1/businesses/{business_id}",
+            "GET /v1/businesses/{business_id}/onboarding",
+            "POST /v1/businesses/{business_id}/registrations",
         }
     ),
     "obligation": frozenset({"GET /v1/obligation/obligations"}),
@@ -378,6 +384,51 @@ def test_tenant_b_cannot_reach_a_profile_node_of_tenant_a(
     as_b = profile.request(method, url, json=body, headers=AS_B)
     assert as_b.status_code == 404, as_b.text
     assert profile.get(f"/v1/profile/nodes/{node_id}", headers=AS_A).status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("GET", "/v1/businesses/{id}", None),
+        ("PATCH", "/v1/businesses/{id}", {"name": "Taken over"}),
+        ("GET", "/v1/businesses/{id}/onboarding", None),
+        ("POST", "/v1/businesses/{id}/registrations", {"gstin": GSTIN}),
+    ],
+)
+def test_tenant_b_cannot_reach_a_business_of_tenant_a(
+    method: str,
+    path: str,
+    body: dict[str, Any] | None,
+    registration: dict[str, Any],
+    clients: dict[str, TestClient],
+) -> None:
+    profile = clients["profile"]
+    business = registration["parent_id"]
+    headers = {**AS_B, "Idempotency-Key": f"cross-tenant-{method}-{len(path)}"}
+    as_b = profile.request(method, path.replace("{id}", business), json=body, headers=headers)
+    assert as_b.status_code == 404, as_b.text
+    as_a = profile.get(f"/v1/businesses/{business}", headers=AS_A)
+    assert as_a.json()["name"] == "Tenant A Traders"
+
+
+def test_the_business_list_of_tenant_b_holds_nothing_of_tenant_a(
+    registration: dict[str, Any], clients: dict[str, TestClient]
+) -> None:
+    profile = clients["profile"]
+    second = profile.post(
+        "/v1/businesses",
+        json={"name": "Tenant A Holdings", "pan": "AAAAA1111A"},
+        headers={**AS_A, "Idempotency-Key": "cross-tenant-list-01"},
+    )
+    assert second.status_code == 201, second.text
+    mine = profile.get("/v1/businesses", params={"limit": 1}, headers=AS_A).json()
+    assert mine["next_cursor"] is not None
+    listed = profile.get("/v1/businesses", headers=AS_A).json()["items"]
+    assert registration["parent_id"] in [item["id"] for item in listed]
+    theirs = profile.get("/v1/businesses", params={"q": GSTIN}, headers=AS_B)
+    assert theirs.json() == {"items": [], "next_cursor": None}
+    refused = profile.get("/v1/businesses", params={"cursor": mine["next_cursor"]}, headers=AS_B)
+    assert refused.status_code == 422, "tenant A's cursor names no business of tenant B"
 
 
 def test_the_financial_year_confirmation_of_tenant_b_leaves_tenant_a_alone(

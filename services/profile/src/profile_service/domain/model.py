@@ -242,6 +242,15 @@ class ProfileNode:
             updated_at=at,
         )
 
+    def renamed(self, name: str, at: datetime) -> Self:
+        """This node under ``name``. The version bumps as for any change, but no event goes out:
+        the name is not an attribute any rule reads. The same name returns the node unchanged."""
+        require_instance(name, str, "name")
+        require_aware(at, "at")
+        if name == self.name:
+            return self
+        return replace(self, name=name, version=self.version + 1, updated_at=at)
+
     def apply(
         self,
         changes: Sequence[AttributeChange],

@@ -11,8 +11,9 @@ from starlette.concurrency import run_in_threadpool
 
 import ontology as ontology_package
 from domain_kernel.errors import DomainError, InvalidAttributeValueError, UnknownAttributeError
-from domain_kernel.ontology import Ontology
+from domain_kernel.ontology import Ontology, OntologyWording
 from profile_service import __version__
+from profile_service.api.businesses import router as businesses_router
 from profile_service.api.router import router
 from profile_service.application.attributes import (
     BuildSnapshot,
@@ -20,13 +21,24 @@ from profile_service.application.attributes import (
     NextQuestion,
     SetAttributes,
 )
+from profile_service.application.businesses import (
+    AddRegistration,
+    CreateBusiness,
+    ListBusinesses,
+    ReadBusiness,
+    UpdateBusiness,
+)
+from profile_service.application.onboarding import OnboardingChecklist
 from profile_service.application.prefill import PrefillFromGstin
 from profile_service.application.registration import RegisterNodes
 from profile_service.domain.errors import (
     AttributeLevelMismatchError,
+    BusinessIdentifierRequiredError,
     FinancialYearRequiredError,
     InvalidHierarchyError,
+    NotABusinessError,
     ProfileNodeNotFoundError,
+    RegistrationAmbiguousError,
     TenantRequiredError,
 )
 from profile_service.domain.flags import FeatureFlags
@@ -48,11 +60,16 @@ from profile_service.settings import ProfileSettings
 from profile_service.wiring import Wiring
 from py_common.app import create_app
 from py_common.flags import configure_flags
+from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
+from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
 
 SERVICE_NAME = "profile"
 PROBLEM_STATUS: dict[type[DomainError], int] = {
     TenantRequiredError: 401,
     ProfileNodeNotFoundError: 404,
+    NotABusinessError: 404,
+    BusinessIdentifierRequiredError: 422,
+    RegistrationAmbiguousError: 422,
     InvalidHierarchyError: 422,
     AttributeLevelMismatchError: 422,
     FinancialYearRequiredError: 422,
@@ -66,19 +83,24 @@ def wire(
     settings: ProfileSettings,
     ontology: Ontology | None = None,
     *,
+    wording: OntologyWording | None = None,
     flags: FeatureFlags | None = None,
 ) -> Wiring:
-    """Build the use cases on the store the settings name. Without ``flags`` the process-wide
-    OpenFeature provider is configured from the settings and answers them."""
+    """Build the use cases on the store the settings name, with the packaged ontology and its
+    English wording unless others are given. Without ``flags`` the process-wide OpenFeature
+    provider is configured from the settings and answers them. Idempotency keys live next to
+    the profile tables (``idempotency_key``, migration 0003), each key in its own short
+    transaction."""
     loaded = ontology or ontology_package.load()
     if flags is None:
         configure_flags(settings)
         flags = OpenFeatureFlags()
     unit_of_work: UnitOfWorkFactory
     ping: Callable[[], bool]
+    idempotency: IdempotencyStore
     if settings.profile_store == "memory":
         memory = MemoryStore()
-        unit_of_work, ping = memory, memory.ping
+        unit_of_work, ping, idempotency = memory, memory.ping, MemoryIdempotencyStore()
     else:
         recorder = (
             None
@@ -87,23 +109,31 @@ def wire(
         )
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url, eval_cases=recorder)
         unit_of_work, ping = postgres, postgres.ping
+        idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
 
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)
 
-    lookup = _lookup(settings)
-    set_attributes = SetAttributes(unit_of_work, loaded)
+    prefill = PrefillFromGstin(unit_of_work, _lookup(settings), loaded, flags)
     return Wiring(
         settings=settings,
         ontology=loaded,
+        wording=wording or ontology_package.load_wording(),
         unit_of_work=unit_of_work,
         store_ready=store_ready,
+        idempotency=idempotency,
         register=RegisterNodes(unit_of_work),
-        set_attributes=set_attributes,
+        set_attributes=SetAttributes(unit_of_work, loaded),
         next_question=NextQuestion(unit_of_work, loaded),
         build_snapshot=BuildSnapshot(unit_of_work),
         confirm_financial_year=ConfirmFinancialYear(unit_of_work, loaded),
-        prefill=PrefillFromGstin(unit_of_work, lookup, loaded, flags),
+        prefill=prefill,
+        create_business=CreateBusiness(unit_of_work, loaded, prefill),
+        update_business=UpdateBusiness(unit_of_work, loaded),
+        read_business=ReadBusiness(unit_of_work),
+        list_businesses=ListBusinesses(unit_of_work),
+        add_registration=AddRegistration(unit_of_work, prefill),
+        onboarding=OnboardingChecklist(unit_of_work, loaded),
     )
 
 
@@ -137,7 +167,7 @@ def build_app(
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router],
+        routers=[router, businesses_router],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready), ("ontology", _ontology_ready(wiring))],
         problem_status=PROBLEM_STATUS,

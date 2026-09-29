@@ -41,11 +41,35 @@ per year and the snapshot picks the year asked for.
   `memory.py` is the in-memory twin (`CW_PROFILE_STORE=memory`, the tests and demos).
 - `migrations/versions/20260928_0001_profile_hierarchy.py`: `profile_node`,
   `profile_attribute`, `profile_version` (history), `review_task`, each with tenant_id and a
-  forced policy, plus the outbox and inbox tables.
+  forced policy, plus the outbox and inbox tables. `20260929_0003_business_api.py` adds
+  `idempotency_key` (py-common's, with the forced tenant policy and the purge policy) and the
+  index `ix_profile_node_tenant_level_name` the business list pages on.
 
 Row-level security binds only non-superuser roles; see the obligation service README for the
 dev-stack caveat. Settings: `CW_PROFILE_STORE` (`postgres` default, `memory`),
 `CW_PROFILE_EVAL_CASES_PATH` (empty keeps the eval seed in the review task only).
+
+## Business API
+
+`/v1/businesses` is the public face of the profile (tags `public` and `businesses`; every route
+lists the roles that may call it as `x-roles`). A business is a legal entity with its GSTIN
+registrations, and its id is the entity's node id.
+
+- `POST /v1/businesses` (needs `Idempotency-Key`) creates a business from its GSTIN, pre-filling
+  it as the prefill route does, or from its PAN alone, stores the first answers and returns the
+  first onboarding question. A retry with the same key and body gets the same 201 back with
+  `Idempotent-Replayed: true` for 24 hours; the same key with another body is a 422.
+- `GET /v1/businesses?q=&limit=&cursor=` lists the tenant's businesses by name, a page at a
+  time; `q` matches the name, the PAN or a GSTIN.
+- `GET` and `PATCH /v1/businesses/{id}`: a PATCH stores answers across the entity and its
+  registrations (a registration answer names its node with `node_id` when there are several)
+  and may rename the business. It is all or nothing, and every node that changed publishes
+  `profile.updated`.
+- `GET /v1/businesses/{id}/onboarding`: the next question with its wording and labelled
+  options, and how many of the questions are answered (`application/onboarding.py`,
+  `domain/onboarding.py`).
+- `POST /v1/businesses/{id}/registrations` (needs `Idempotency-Key`) adds a GSTIN with the
+  business's PAN and pre-fills it.
 
 ## Financial year confirmation
 

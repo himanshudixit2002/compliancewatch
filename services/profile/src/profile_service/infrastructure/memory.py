@@ -3,10 +3,12 @@ before Postgres."""
 
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
+from uuid import UUID
 
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, TenantId
 from domain_kernel.ontology import AttributeLevel
+from profile_service.domain.errors import ProfileNodeNotFoundError
 from profile_service.domain.model import ProfileNode, ReviewTask
 from profile_service.domain.repository import UnitOfWork
 
@@ -59,6 +61,38 @@ class MemoryProfileRepository:
             if node.tenant_id == self._tenant and node.level is AttributeLevel.ENTITY
         ]
 
+    def page_entities(
+        self, after: BusinessId | None, limit: int, query: str = ""
+    ) -> Sequence[ProfileNode]:
+        entities = sorted(self.entities(), key=_position)
+        if after is not None:
+            start = self.get(after)
+            if start is None or start.level is not AttributeLevel.ENTITY:
+                raise ProfileNodeNotFoundError(str(after))
+            entities = [node for node in entities if _position(node) > _position(start)]
+        if query:
+            entities = [node for node in entities if self._matches(node, query.casefold())]
+        return entities[:limit]
+
+    def registrations_of(
+        self, entity_ids: Sequence[BusinessId]
+    ) -> Mapping[BusinessId, Sequence[ProfileNode]]:
+        return {
+            entity_id: sorted(
+                (
+                    node
+                    for node in self.children(entity_id)
+                    if node.level is AttributeLevel.REGISTRATION
+                ),
+                key=lambda node: (node.created_at, node.id.value),
+            )
+            for entity_id in entity_ids
+        }
+
+    def _matches(self, entity: ProfileNode, query: str) -> bool:
+        keys = [entity.name, entity.key, *(child.key for child in self.children(entity.id))]
+        return any(query in key.casefold() for key in keys)
+
     def add(self, node: ProfileNode) -> None:
         if node.id in self._nodes:
             raise ValueError(f"duplicate node {node.id}")
@@ -78,6 +112,11 @@ class MemoryProfileRepository:
             and task.open
             and (node_id is None or task.node_id == node_id)
         ]
+
+
+def _position(node: ProfileNode) -> tuple[str, UUID]:
+    """Where a node sorts in a list of businesses: by name, then id, as Postgres pages them."""
+    return (node.name, node.id.value)
 
 
 class MemorySink:

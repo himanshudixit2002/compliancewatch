@@ -3,7 +3,7 @@ clock."""
 
 from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any, Final
 from uuid import UUID
 
 import structlog
@@ -36,6 +36,13 @@ def wiring(request: Request) -> Wiring:
     wired: Wiring = request.app.state.wiring
     return wired
 
+
+TENANT_MEMBER_ROLES: Final = ("owner", "staff", "ca_admin", "ca_staff", "compliance_lead")
+"""The roles of a tenant's members; each public route lists who may call it as ``x-roles``. The
+identity service enforces them once it issues tokens; until then the tenant header scopes the
+routes."""
+PUBLIC_ROUTE: Final[dict[str, Any]] = {"x-roles": list(TENANT_MEMBER_ROLES)}
+"""``openapi_extra`` of a public route every member of the tenant may call."""
 
 Tenant = Annotated[TenantId, Depends(tenant_id_from_header)]
 Wired = Annotated[Wiring, Depends(wiring)]
