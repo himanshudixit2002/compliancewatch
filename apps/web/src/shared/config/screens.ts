@@ -1089,11 +1089,18 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [
+      uses("rulebook", "GET", "/v1/rulebook/review/entities"),
+      uses("rulebook", "GET", "/v1/rulebook/review/relations"),
+      uses("rulebook", "GET", "/v1/rulebook/rules"),
+      uses("llm-gateway", "GET", "/v1/llm-gateway/prompts"),
+    ],
     awaits: [],
     status: "live",
-    e2e: ["admin-home.spec.ts", "a11y.spec.ts"],
+    e2e: ["admin-home.spec.ts", "admin-gate.spec.ts", "a11y.spec.ts"],
     guideRef: "14, 15, 17",
+    notes:
+      "Also probes GET /health on every service (the py-common liveness route, outside the API specs).",
   },
   {
     id: "admin.not-available",
@@ -1795,6 +1802,18 @@ export function hrefFor(screen: Screen, params: Readonly<Record<string, string>>
     return encodeURIComponent(value);
   });
   return href as Route;
+}
+
+/**
+ * The href of the live page registered at a static route, or null while that page is not built:
+ * a link to a tool from elsewhere (a count tile, a "show all" link) appears once the tool does.
+ */
+export function livePageHref(route: string): Route | null {
+  const screen = SCREENS.find(
+    (entry) => entry.kind === "page" && entry.route === route && entry.status === "live",
+  );
+  if (screen === undefined || routeParams(screen.route).length > 0) return null;
+  return hrefFor(screen);
 }
 
 /** The screens a principal may open: public ones, or those sharing a role with it. */

@@ -159,6 +159,18 @@ describe("navFor", () => {
     expect(analyst.find((s) => s.key === "identity")).toBeUndefined();
   });
 
+  it("marks the links of tools that are not built with their status", () => {
+    const links = adminNavFor({ roles: ["admin"], tenantKind: "internal" }).flatMap(
+      (section) => section.items,
+    );
+    for (const link of links) {
+      const status = screenById(link.id as Parameters<typeof screenById>[0]).status;
+      expect(link.status, link.id).toBe(status === "live" ? undefined : status);
+    }
+    expect(links.find((link) => link.id === "admin.sources")?.status).toBe("waiting");
+    expect(links.find((link) => link.id === "admin.backfill")?.status).toBe("planned");
+  });
+
   it("only uses known group keys on registry entries", () => {
     for (const screen of SCREENS) {
       if (screen.nav) expect(isNavGroupKey(screen.nav.group), screen.id).toBe(true);

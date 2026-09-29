@@ -55,7 +55,9 @@ apps/web/
     (public)/                  home, /sitemap, /legal/[doc], /forbidden, /design, /sign-in; the visitor shell
     (app)/                     tenant screens under the session-aware shell: /account, /onboarding and the
                                catch-all [...slug]
-    admin/                     /admin (the tool list), the admin layout behind requireAdmin, the catch-all [...slug]
+    admin/                     (home)/ for /admin (the counts, the services summary and the tool list, with its
+                               loading skeleton), the admin layout behind requireAdmin, its error and not-found
+                               boundaries, the catch-all [...slug]
     sign-out/route.ts          POST: clears the session cookie
     api/health/route.ts        {status, version, commit}
     error.tsx, global-error.tsx, not-found.tsx
@@ -72,12 +74,13 @@ apps/web/
                                session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a
                                POST handler), auth/ (the provider port and the fake adapter), legal.ts,
                                ontology.ts (the ontology read, cached an hour by tag), flags.ts (the flag
-                               reader), analytics.ts (product events behind the flag and the consent)
+                               reader), analytics.ts (product events behind the flag and the consent),
+                               health.ts (the services' /health probes for the internal tools)
   src/shared/config/           screens.ts, roles.ts, permissions.ts, flags.ts, nav.ts, services.ts, legal-docs.ts
   src/shared/lib/              dates, financial years, decimal money, humanise, identifiers, pagination, urls, assert
   src/shared/i18n/             messages/en.json and t()
   src/shared/ui/               TenantShell, InternalShell, RouterLink, Breadcrumbs, ScreenStatusChip, SessionMenu,
-                               SignOutButton, ServiceError
+                               SignOutButton, ServiceError, RefreshButton
   src/test/                    vitest setup, the architecture rules and their test, the screens.md drift test,
                                fake-fetch.ts and fake-cookies.ts
   src/proxy.ts                 the optimistic redirect to /sign-in for gated screens without a cookie

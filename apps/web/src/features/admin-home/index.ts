@@ -1,4 +1,10 @@
+export { COUNT_TILES, countLabel, toCountTile } from "./model/counts";
+export type { CountTileKey, CountTileView } from "./model/counts";
+export { SYSTEM_ROUTE, servicesSummary } from "./model/services";
+export type { ServicesSummaryView } from "./model/services";
 export { adminToolGroups, groupOf, toAdminTool } from "./model/tools";
 export type { AdminTool, AdminToolGroup } from "./model/tools";
+export { getAdminHome } from "./queries";
+export type { AdminHomeData } from "./queries";
 export { AdminHomeView } from "./ui/admin-home-view";
 export type { AdminHomeViewProps } from "./ui/admin-home-view";

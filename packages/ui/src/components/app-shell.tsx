@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import type { ComponentProps, ElementType, ReactNode } from "react";
 import { MenuIcon } from "lucide-react";
 import { cn } from "../lib/cn";
@@ -10,6 +11,11 @@ export interface NavItem {
   href: string;
   label: string;
   active?: boolean;
+  /**
+   * A short note shown after the link, for example "Waiting" for a tool that is not built yet.
+   * It stays outside the link's name and is announced as the link's description.
+   */
+  hint?: string;
 }
 
 export interface NavLinkProps {
@@ -17,6 +23,7 @@ export interface NavLinkProps {
   className?: string;
   children: ReactNode;
   "aria-current"?: "page";
+  "aria-describedby"?: string;
 }
 
 export interface AppShellProps extends ComponentProps<"div"> {
@@ -58,22 +65,35 @@ export function NavLinks({
   Link?: ElementType<NavLinkProps>;
   className?: string;
 }) {
+  const baseId = useId();
   return (
     <ul className={cn("flex gap-1", className)}>
-      {items.map((item) => (
-        <li key={item.href}>
-          <Link
-            href={item.href}
-            aria-current={item.active ? "page" : undefined}
-            className={cn(
-              "block rounded-md px-3 py-2 text-sm font-medium text-fg-muted hover:bg-fg/5 hover:text-fg",
-              item.active && "bg-surface text-fg",
-            )}
+      {items.map((item, index) => {
+        const hintId = item.hint === undefined ? undefined : `${baseId}-hint-${index}`;
+        return (
+          <li
+            key={item.href}
+            className={item.hint === undefined ? undefined : "flex flex-wrap items-center gap-x-1"}
           >
-            {item.label}
-          </Link>
-        </li>
-      ))}
+            <Link
+              href={item.href}
+              aria-current={item.active ? "page" : undefined}
+              aria-describedby={hintId}
+              className={cn(
+                "block rounded-md px-3 py-2 text-sm font-medium text-fg-muted hover:bg-fg/5 hover:text-fg",
+                item.active && "bg-surface text-fg",
+              )}
+            >
+              {item.label}
+            </Link>
+            {item.hint === undefined ? null : (
+              <span id={hintId} data-slot="nav-hint" className="text-xs text-fg-muted">
+                {item.hint}
+              </span>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }

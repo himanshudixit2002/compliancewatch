@@ -73,7 +73,7 @@ listening on that port. On CI it retries once and writes the HTML report. `e2e/f
 extends `test` with `checkA11y(selector?)`, which runs `AxeBuilder` on the page (or one
 selector) and fails on any finding of impact `serious` or `critical` (moderate and minor
 findings are the unit level's business), and with `signIn(persona)`: the personas (`OWNER`,
-`COMPLIANCE_LEAD`, `CA_ADMIN`, `ANALYST`, `ADMIN`) are signed in once per worker through the
+`COMPLIANCE_LEAD`, `CA_ADMIN`, `ANALYST`, `REVIEWER`, `ADMIN`) are signed in once per worker through the
 fake form and their cookies are added to the test's context, so a spec that needs a session
 starts with `await signIn(ANALYST)`; `signInThroughForm(page, persona, next?)` drives the form
 itself for the specs that test it.
@@ -86,11 +86,11 @@ The specs on `main`:
 | `home.spec.ts`           | the landing links, the skip link moving focus to `main`, the sign-in link leading to the form                                                              |
 | `sign-in.spec.ts`        | the redirect with `next` from a gated page, the server's field errors, a refused submit keeping every value and focusing the errors, an owner signing in, returning to `/account`, the account menu and signing out, the role homes (`/businesses`, `/admin`), a signed-in visit to `/sign-in`, the last seeded tenant offered by the form and signed into (needs the seed), the roles following the tenant kind, `/sign-out` as POST only with the origin check, signing in and out through `127.0.0.1` (a host other than the one `next start` binds) |
 | `account.spec.ts`        | the session facts in IST, the copy controls, the note on `/me`, the header name linking to `/account`                                                     |
-| `admin-gate.spec.ts`     | anonymous `/admin` to sign-in with `next`, a 404 for a tenant role on every admin path, an analyst opening the tools without the admin-only entries and a 404 on one of them |
+| `admin-gate.spec.ts`     | anonymous `/admin` to sign-in with `next`; a 404 without any admin markup for an owner and a compliance lead on every admin path; an analyst opening the tools without the admin-only entries and a 404 on one of them; a reviewer and an admin opening the tools; an unknown admin path as a 404 inside the admin shell with the way back (axe) |
 | `sitemap.spec.ts`        | one table per section, a waiting tool's awaited route and owner, a ready tool's chip, the link to its notice                                              |
 | `legal.spec.ts`          | each listed document under the draft banner with its `-draft` version; an unlisted document is a 404; printed (print media, light and dark schemes): no shell, the banner kept, the paper line, black text on white |
 | `design.spec.ts`         | every catalogue section with axe, the theme control, dialogs (focus, Escape, the ten-character reason), the calendar keys                                   |
-| `admin-home.spec.ts`     | as an analyst: the tool list with status (waiting and ready) and service READMEs, the environment banner, sidebar navigation marking the current tool     |
+| `admin-home.spec.ts`     | as an analyst: the tool list with status (waiting and ready) and service READMEs, the environment banner, sidebar navigation marking the current tool, the "Waiting" hint of a tool not built yet as its link's description; against the stack (needs the seed): a number and no error in each count tile, the open mentions, every service answering its health check (axe); the counts are not compared with numbers, since other specs change the queues |
 | `not-available.spec.ts`  | an admin tool's awaited routes and breadcrumbs, a parameterised tenant route through the catch-all, `/forbidden` for the wrong tenant kind, a planned tool's sentence and note, a ready tool's sentence and what it will use, real 404s with and without a session |
 | `forbidden.spec.ts`      | the page and its two links                                                                                                                                |
 | `health.spec.ts`         | the health JSON, the static security headers, no `x-powered-by`                                                                                            |
