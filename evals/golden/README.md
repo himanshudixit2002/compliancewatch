@@ -24,4 +24,5 @@ applicability/  # (profile, rule version) -> expected decision; empty
 
 ## How to run
 
-`make label ARGS="check"` validates every case; `make eval` scores them (see evals/harness).
+`make label ARGS="check"` validates every extraction case and `make eval-check` the QA set and its
+world; `make eval` scores them (see evals/harness).

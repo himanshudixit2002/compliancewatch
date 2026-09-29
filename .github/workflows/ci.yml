@@ -91,6 +91,8 @@ jobs:
               - 'services/llm-gateway/src/**'
               - 'services/rulebook/**'
               - 'services/qa/**'
+              - 'services/profile/**'
+              - 'services/obligation/**'
               - 'services/applicability-engine/**'
               - 'packages/domain-kernel/**'
               - 'packages/ontology/**'
@@ -158,6 +160,8 @@ jobs:
       - run: uv sync --all-packages --locked
       - name: Golden cases are well formed
         run: make label ARGS="check"
+      - name: KAG golden set and world are well formed
+        run: make eval-check
       # Section 17 step 5: the harness runs the labelled cases with the scripted answers (proves
       # the scoring) and the in-process gateway with the fake provider (proves the plumbing, no
       # tokens). Section 8 thresholds against a real model run nightly (nightly.yml).

@@ -3,13 +3,13 @@ import tomllib
 from pathlib import Path
 
 import pytest
-import yaml
 
 from cw_evals.cases import load_extraction_set
 from cw_evals.metrics import aggregate, score
 from cw_evals.providers import fake_gateway, provider_for, scripted
+from cw_evals.qa.cases import load_qa_cases
 from cw_evals.relations import load_relation_cases, run_relations
-from cw_evals.report import markdown
+from cw_evals.report import RunResults, markdown
 from cw_evals.run import main, run_extraction
 from cw_evals.thresholds import GATES, evaluate
 from domain_kernel.documents import ExtractionContext
@@ -25,9 +25,9 @@ PROMPT_DIRS = {
     "qa": ROOT.parent / "services" / "qa" / "prompts",
 }
 """Where each prompt area's files are, by the part of the name before the dot."""
-QA_CASES = GOLDEN / "qa" / "kag" / "cases"
 PROMPT = PromptText("extraction.rule_candidate", "1", "regulatory-intelligence", "Extract.")
 CTX = ExtractionContext("cbic_notifications", PROMPT.ref, "test", "0.2.0")
+QA_SUITES = ("qa_kag", "qa_hybrid")
 
 
 def test_golden_set_loads_with_its_unlabelled_count() -> None:
@@ -74,17 +74,25 @@ def test_gates_and_report() -> None:
         name: run_relations(relation_cases, name, gateway_url="http://unused.test")[0]
         for name in ("scripted", "fake")
     }
-    gates = evaluate("ci", aggregates, relations)
-    assert all(g.passed for g in gates), [g for g in gates if not g.passed]
-    without_relations = evaluate("ci", aggregates)
-    assert {g.gate.suite for g in without_relations if not g.passed} == {"relations"}
-    missing = evaluate("nightly", aggregates)
+    suites: dict[str, dict[str, object]] = {
+        "extraction": dict(aggregates),
+        "relations": dict(relations),
+    }
+    gates = evaluate("ci", suites)
+    assert {g.gate.suite for g in gates if not g.passed} == set(QA_SUITES)
+    assert all(g.passed for g in gates if g.gate.suite in ("extraction", "relations"))
+    without_relations = evaluate("ci", {"extraction": aggregates})
+    assert {g.gate.suite for g in without_relations if not g.passed} == {"relations", *QA_SUITES}
+    missing = evaluate("nightly", suites)
     assert all(g.value is None and not g.passed for g in missing)
-    text = markdown("ci", extraction, aggregates, {}, gates, relations, {})
+    text = markdown(
+        RunResults("ci", gates, extraction=extraction, aggregates=aggregates, relations=relations)
+    )
     assert "| extraction_acceptance |" in text
     assert "| relation_recall |" in text
     assert "Relation golden set: 3 cases." in text
     assert "50 indexed" in text
+    assert "| Gate | Suite | Provider | Minimum | Baseline | Value | Result |" in text
     assert {g.provider for g in GATES["ci"]} == {"scripted", "fake"}
 
 
@@ -102,9 +110,22 @@ def test_main_ci_profile_passes_and_writes_reports(
     code = main(["--profile", "ci", "--golden", str(GOLDEN), "--reports", str(tmp_path)])
     out = capsys.readouterr().out
     assert code == 0, out
-    assert "ci gates passed" in out
+    assert "ci gates passed (22)" in out
+    assert "KAG against the hybrid baseline, scripted:" in out
     assert (tmp_path / "latest.md").exists()
     assert (tmp_path / "latest.json").exists()
+
+
+def test_main_runs_the_suites_it_is_given(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = ["--suite", "relations", "--golden", str(GOLDEN), "--reports", str(tmp_path)]
+    assert main(args) == 0
+    out = capsys.readouterr().out
+    assert "Relation golden set" in out
+    assert "Extraction golden set" not in out
+    assert "QA golden set" not in out
+    assert "ci gates passed (4)" in out
 
 
 def test_main_fails_when_a_gate_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -114,6 +135,8 @@ def test_main_fails_when_a_gate_fails(tmp_path: Path, capsys: pytest.CaptureFixt
             "nightly",
             "--provider",
             "fake",
+            "--suite",
+            "extraction",
             "--golden",
             str(GOLDEN),
             "--reports",
@@ -134,22 +157,11 @@ REGISTERED_PROMPTS = [
     for entry in tomllib.loads(REGISTRY.read_text())["prompts"]
     if entry.get("sha256") is not None
 ]
-
-
-def scripted_qa_cases(stage: str) -> int:
-    """The KAG golden cases that script a call of ``stage`` (plan or answer)."""
-    found = 0
-    for path in QA_CASES.glob("*.yaml"):
-        scripted = yaml.safe_load(path.read_text(encoding="utf-8")).get("scripted") or {}
-        found += scripted.get(stage) is not None
-    return found
-
-
 LABELLED_CASES = {
     "extraction.rule_candidate": lambda: len(load_extraction_set(GOLDEN).labelled),
     "extraction.rule_relations": lambda: len(load_relation_cases(GOLDEN)),
-    "qa.plan": lambda: scripted_qa_cases("plan"),
-    "qa.answer": lambda: scripted_qa_cases("answer"),
+    "qa.plan": lambda: sum(c.scripted.plan is not None for c in load_qa_cases(GOLDEN)),
+    "qa.answer": lambda: sum(c.scripted.answer is not None for c in load_qa_cases(GOLDEN)),
 }
 
 

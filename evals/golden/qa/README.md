@@ -2,7 +2,8 @@
 
 Questions for the qa service (`POST /v1/qa/ask`), each with what a grounded answer states and
 cites, or the fact that it must be refused (ADR-012, ADR-017). The eval harness asks every
-question of the service over a small world built in memory and scores the answers.
+question of the service over a small world built in memory and scores the answers;
+`make eval-check` checks the files without running anything.
 
 Every case and the world are `label_status: draft`, drafted from the recorded clause text and
 not yet reviewed by an analyst. Nothing here is a regulatory fact until an analyst has checked
@@ -78,3 +79,10 @@ notes: ...
 
 56 cases, not 60: the recorded text supports no more without inventing facts. More cases wait
 for more recorded notifications.
+
+## How to run
+
+```bash
+make eval-check                      # quotes, seed supports, scripted plans and answers; counts per category
+make eval ARGS="--suite qa"          # the qa suite alone, scripted and fake, both modes
+```

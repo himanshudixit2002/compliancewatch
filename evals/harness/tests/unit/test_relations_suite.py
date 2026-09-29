@@ -11,6 +11,7 @@ from cw_evals.relations import (
     RelationCase,
     RelationScore,
     aggregate_relations,
+    load_relation_case,
     load_relation_cases,
     relation_input,
     relation_provider,
@@ -86,6 +87,13 @@ def test_the_17_2025_candidates_carry_only_the_review_flag() -> None:
         ("en.p6", "2025-26 Q2"),
     ]
     assert {i.code for c in batch.candidates for i in c.issues} == {"target_not_in_evidence"}
+
+
+def test_a_case_file_loads_on_its_own() -> None:
+    path = GOLDEN / "relations" / "cbic_notifications" / "cases" / "10-2025-central-tax.yaml"
+    case = load_relation_case(GOLDEN, path)
+    (expected,) = case.expected
+    assert expected.key == ("amends", "notification", "02/2017-central tax")
 
 
 def test_scores_count_found_proposed_and_evidence() -> None:

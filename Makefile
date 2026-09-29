@@ -199,7 +199,7 @@ ts-dev: check-pnpm ## next dev (:3000) and whatsapp-bot (:8080) with reload
 	$(PNPM) turbo run dev
 
 # ---- Composition (guide sections 13, 17, 19) -------------------------------------------------
-.PHONY: install lint format typecheck test check eval label demo runbooks-check migrate run worker relay seed openapi contracts contracts-check hooks ci-lint
+.PHONY: install lint format typecheck test check eval eval-check label demo runbooks-check migrate run worker relay seed openapi contracts contracts-check hooks ci-lint
 install: py-sync ts-install ## Install both toolchains
 
 lint: py-lint ts-lint ## Lint both sides (CI step 1)
@@ -216,8 +216,11 @@ runbooks-check: check-uv ## Every Prometheus alert links an existing runbook (gu
 	$(UV) run python infra/scripts/check_alert_runbooks.py
 
 EVAL_PROFILE ?= ci
-eval: check-uv ## Eval harness against evals/golden: make eval [EVAL_PROFILE=ci|nightly] [ARGS="--provider fake"]
+eval: check-uv ## Eval harness against evals/golden: make eval [EVAL_PROFILE=ci|nightly] [ARGS="--provider fake --suite qa"]
 	$(UV) run --package compliancewatch-evals eval-harness --profile $(EVAL_PROFILE) $(ARGS)
+
+eval-check: check-uv ## KAG golden set and world well formed: quotes, seed supports, scripted plans and answers
+	CW_LOG_LEVEL=WARNING $(UV) run --package compliancewatch-evals eval-golden-check $(ARGS)
 
 demo: check-uv ## The demo tenant end to end in one process (consent, profile, rules, obligations, reminder): make demo [ARGS=--json]
 	CW_LOG_LEVEL=WARNING $(UV) run --package compliancewatch-demo cw-demo --daytime $(ARGS)
