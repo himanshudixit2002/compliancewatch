@@ -15,7 +15,7 @@ Flat; one markdown file per alert or operational procedure.
 - [api-slo-burn.md](api-slo-burn.md): the availability and latency SLO alerts on the product APIs.
 - [backup-restore.md](backup-restore.md): what holds state, dev backups, the quarterly restore drill.
 - [outbox-relay.md](outbox-relay.md): events not reaching Kafka, `dead` outbox rows (OutboxDeadLetters, OutboxBacklog), replay by hand, pruning.
-- [temporal-worker.md](temporal-worker.md): a worker that will not start, a task queue backing up, a failed workflow.
+- [temporal-worker.md](temporal-worker.md): a task queue with no worker (TemporalWorkerDown), no spans reaching the collector (TelemetrySilent), a worker that will not start, a task queue backing up, a failed workflow.
 - [whatsapp.md](whatsapp.md): the Meta manual steps, webhook signature failures, opt-outs that must be honoured, late or failed reminders, template rejections.
 
 ## Alerts
@@ -23,10 +23,12 @@ Flat; one markdown file per alert or operational procedure.
 `infra/dev/prometheus/alerts.yml` holds the paging rules; each carries a `runbook_url` into this
 directory and `make runbooks-check` (part of `make check`) fails when a link is missing or dead.
 `make alerts-check` (the ops job in CI) runs promtool over the rules and their unit tests in
-`infra/dev/prometheus/alerts.test.yml`, which pin when `ApiErrorBurnRate` and
-`ApiLatencyBurnRate` fire; a new alert group, or a change to a tested rule, comes with its cases
-there.
+`infra/dev/prometheus/alerts.test.yml`, which pin when `ApiErrorBurnRate`,
+`ApiLatencyBurnRate`, `TemporalWorkerDown` and `TelemetrySilent` fire; a new alert group, or a
+change to a tested rule, comes with its cases there. A `runbook_url` may name a section of its
+runbook (`temporal-worker.md#temporalworkerdown`), and the check then also requires a heading
+with that anchor.
 Wired now: `ApiErrorBurnRate`, `ApiLatencyBurnRate`, `OutboxDeadLetters`, `OutboxBacklog`,
-`PipelineWorkerSilent`. Pending their metrics: source freshness (two missed cadences),
+`TemporalWorkerDown`, `TelemetrySilent`. Pending their metrics: source freshness (two missed cadences),
 decision-flip rate after a deploy, notification failure rate and duplicates, LLM spend past
 80% of the monthly budget before the 20th.

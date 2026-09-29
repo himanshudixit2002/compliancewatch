@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from check_alert_runbooks import ALERTS, RUNBOOKS, problems
+from check_alert_runbooks import ALERTS, RUNBOOKS, anchors, problems
 
 URL = "https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/"
 
@@ -14,7 +14,10 @@ URL = "https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbo
 def runbooks(tmp_path: Path) -> Path:
     directory = tmp_path / "runbooks"
     directory.mkdir()
-    (directory / "api-slo-burn.md").write_text("# API SLO burn\n", encoding="utf-8")
+    (directory / "api-slo-burn.md").write_text(
+        "# API SLO burn\n\n## ApiErrorBurnRate\n\n```\n## Not a heading\n```\n",
+        encoding="utf-8",
+    )
     return directory
 
 
@@ -93,3 +96,47 @@ def test_a_file_without_groups_fails(tmp_path: Path, runbooks: Path, content: st
     path = tmp_path / "alerts.yml"
     path.write_text(content, encoding="utf-8")
     assert problems(path, runbooks) == [f"{path}: no alert groups"]
+
+
+def test_a_link_to_an_existing_section_passes(tmp_path: Path, runbooks: Path) -> None:
+    path = alerts(
+        tmp_path,
+        f"""
+        - alert: ApiErrorBurnRate
+          expr: vector(1)
+          annotations:
+            runbook_url: {URL}api-slo-burn.md#apierrorburnrate
+        """,
+    )
+    assert problems(path, runbooks) == []
+
+
+@pytest.mark.parametrize("anchor", ["apilatencyburnrate", "not-a-heading"])
+def test_a_link_to_a_missing_section_fails(tmp_path: Path, runbooks: Path, anchor: str) -> None:
+    path = alerts(
+        tmp_path,
+        f"""
+        - alert: ApiLatencyBurnRate
+          expr: vector(1)
+          annotations:
+            runbook_url: {URL}api-slo-burn.md#{anchor}
+        """,
+    )
+    assert problems(path, runbooks) == [
+        f"api-slo/ApiLatencyBurnRate: runbook {URL}api-slo-burn.md#{anchor} has no such section"
+    ]
+
+
+def test_anchors_follow_github_headings(tmp_path: Path) -> None:
+    path = tmp_path / "runbook.md"
+    path.write_text(
+        "# Temporal worker\n## TemporalWorkerDown\n### A queue: backing up (again)\n"
+        "#### snake_case and C-3PO ##\nnot # a heading\n",
+        encoding="utf-8",
+    )
+    assert anchors(path) == {
+        "temporal-worker",
+        "temporalworkerdown",
+        "a-queue-backing-up-again",
+        "snake_case-and-c-3po",
+    }
