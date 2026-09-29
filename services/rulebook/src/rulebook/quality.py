@@ -31,9 +31,9 @@ def main(argv: Sequence[str] | None = None, *, reader: QualityReader | None = No
     args = parser.parse_args(argv)
     settings = Settings(service_name="rulebook-quality")
     configure_logging(service_name="rulebook-quality", log_level=settings.log_level)
-    if reader is None:
-        reader = SqlQualityReader.from_url(settings.database_url, schema=settings.db_schema)
     try:
+        if reader is None:
+            reader = SqlQualityReader.from_url(settings.database_url, schema=settings.db_schema)
         report = RunDataQualityChecks(reader, ontology_package.load()).run()
     except SQLAlchemyError as exc:
         sys.stderr.write(f"data quality: cannot read the rulebook: {exc.__class__.__name__}\n")

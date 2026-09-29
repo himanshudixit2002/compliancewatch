@@ -390,6 +390,14 @@ def test_the_command_exits_2_when_the_database_cannot_be_read(
     assert capsys.readouterr().err == ("data quality: cannot read the rulebook: OperationalError\n")
 
 
+def test_the_command_exits_2_when_the_database_url_is_malformed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("CW_DATABASE_URL", "not a database url")
+    assert cli.main([]) == 2
+    assert capsys.readouterr().err == "data quality: cannot read the rulebook: ArgumentError\n"
+
+
 def test_a_version_label_and_period_read_well() -> None:
     facts = replace(version(1), effective_to=date(2027, 4, 1))
     assert facts.label == "gstr3b_monthly@1"
