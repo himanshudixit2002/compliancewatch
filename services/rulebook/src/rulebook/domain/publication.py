@@ -21,6 +21,10 @@ The version being published (X) changes the versions its relations target (Y), A
 - ``amends``, ``refers_to`` and ``exempts`` change nothing at publication.
 
 Last, X must not overlap another version of its rule that is in force once the cuts are made.
+
+X cannot be withdrawn directly while a version it replaces is still published
+(``check_withdrawal``): that version was cut at X's publication and moves only when X takes
+effect, so withdrawing X first would leave it cut for good.
 """
 
 from collections.abc import Mapping, Sequence
@@ -42,6 +46,7 @@ from rulebook.domain.errors import (
     OverlappingVersionError,
     RelationTargetStateError,
     ReplacementDatesError,
+    ReplacementsPendingError,
     TargetAlreadyReplacedError,
     UnknownRuleVersionError,
 )
@@ -393,6 +398,32 @@ def _check_overlap(
                 f"({after.effective_from} to {after.effective_to or 'open'}); replace it with a "
                 "supersedes relation or change the dates"
             )
+
+
+def check_withdrawal(
+    version: RuleVersionRecord,
+    relations: Sequence[RelationRecord],
+    targets: Mapping[RuleVersionId, RuleVersionRecord],
+) -> None:
+    """Refuse to withdraw ``version`` while a version it supersedes, corrects or withdraws is
+    still published. ``relations`` are the version's own, ``targets`` the versions they point
+    at."""
+    pending = sorted(
+        {
+            str(relation.to_rule_version_id)
+            for relation in relations
+            if relation.relation in REPLACING
+            and relation.to_rule_version_id is not None
+            and relation.to_rule_version_id in targets
+            and targets[relation.to_rule_version_id].status is RuleVersionStatus.PUBLISHED
+        }
+    )
+    if pending:
+        raise ReplacementsPendingError(
+            f"rule version {version.rule_version_id} replaces {', '.join(pending)} from "
+            f"{version.effective_from}, which has not moved yet; publish a version that corrects "
+            "or supersedes it instead of withdrawing it"
+        )
 
 
 @dataclass(frozen=True, slots=True)

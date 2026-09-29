@@ -4,7 +4,7 @@ problem types, and a version taken from draft to published."""
 from collections.abc import Iterator
 from datetime import date
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from domain_kernel.documents import clause_id_for, document_id_for
 from domain_kernel.ids import RuleVersionId
+from domain_kernel.knowledge import RelationKind, RuleRelation
 from domain_kernel.status import RuleVersionStatus
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 from rulebook.main import build_app
@@ -217,3 +218,25 @@ def test_problem_types_of_the_flow(publishing_app: FastAPI, publishing: TestClie
         f"{BASE}/rule-versions/{version}/citations", json={"citations": []}, headers=HEADERS
     )
     assert empty.status_code == 422
+
+
+def test_a_version_waiting_to_replace_another_is_not_withdrawn(
+    publishing_app: FastAPI, publishing: TestClient
+) -> None:
+    store = store_of(publishing_app, publishing)
+    _, old = store.add_rule("gstr3b_monthly", status=RuleVersionStatus.PUBLISHED)
+    new = store.add_version("gstr3b_monthly", title="Amended", effective_from=date(2999, 1, 1))
+    with store() as uow:
+        uow.relations.add(
+            RuleRelation(new, RelationKind.SUPERSEDES, old, CLAUSE),
+            relation_id=uuid4(),
+            candidate_id=None,
+        )
+    cite(publishing, new)
+    for action in ("submit", "approve", "publish"):
+        assert step(publishing, new, action).status_code == 200
+    refused = step(publishing, new, "withdraw")
+    assert (refused.status_code, refused.json()["type"]) == (
+        409,
+        PROBLEM + "rulebook-replacements-pending",
+    )

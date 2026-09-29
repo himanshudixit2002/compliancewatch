@@ -86,7 +86,7 @@ rules. `tests/unit/test_models_vocabulary.py` pins the trigger's literal pairs t
 | `POST /v1/rulebook/rule-versions/{id}/return` | In_review back to draft: `{actor_id, note?}`. The round's approvals no longer count. Needs the token |
 | `POST /v1/rulebook/rule-versions/{id}/approve` | One approval: `{actor_id, note?}`. The one that completes the round (one approver, two different ones when high impact) moves the version to approved and its seed status to reviewed; the same approver twice is 409 `rulebook-duplicate-approver`. Needs the token |
 | `POST /v1/rulebook/rule-versions/{id}/publish` | Approved to published, applying the version's relations and writing the rule events; see below. `{actor_id, note?}`. Needs the token and the flag |
-| `POST /v1/rulebook/rule-versions/{id}/withdraw` | Published to withdrawn with `rule.withdrawn` (no withdrawing version, effective today). Needs the token and the flag |
+| `POST /v1/rulebook/rule-versions/{id}/withdraw` | Published to withdrawn with `rule.withdrawn` (no withdrawing version, effective today); 409 `rulebook-replacements-pending` while a version it replaces has not moved yet. Needs the token and the flag |
 | `POST /v1/rulebook/maintenance/transitions` | The daily sweep, `{as_of?}` (today in India when empty, never later); returns the versions it moved and the events. Needs the token and the flag |
 
 Nothing is aligned by fuzzy matching and nothing is created without an analyst (ADR-017). With
@@ -158,10 +158,14 @@ Publishing checks, in order (`rulebook.domain.publication.plan_publication`):
 attributes the predicates reference. The events of one publication share a correlation id, the
 follow-on events name `rule.published` as their cause, every rule event has no tenant and the
 rule id as its Kafka key, and all of them are written to `outbox_event` in the publication's
-transaction; `python -m py_common.outbox` relays them. Withdrawing a version that another
-published version replaces later does not restore the replaced version's `effective_to`: publish
-a new version instead. Nothing consumes the events yet; the obligation service's consumer is
-still to be built.
+transaction; `python -m py_common.outbox` relays them. Nothing consumes the events yet; the
+obligation service's consumer is still to be built.
+
+A version cannot be withdrawn while a version it supersedes, corrects or withdraws is still
+published (409 `rulebook-replacements-pending`): that version was cut at publication and moves
+only when the replacement takes effect, so withdrawing the replacement first would leave it cut
+for good. A mistaken publication dated in the future is corrected by publishing a new version
+that corrects or supersedes it, not by withdrawing it before it takes effect.
 
 The sweep moves every published version whose replacement's `effective_from` has come, earliest
 replacement first, with its event and a decision naming the replacing version. It is idempotent:

@@ -183,6 +183,15 @@ class TargetAlreadyReplacedError(DomainError, ValueError):
     title = "Target version is replaced by another published version"
 
 
+class ReplacementsPendingError(DomainError, ValueError):
+    """The version replaces versions it has not moved yet: they were cut at its publication and
+    move when it takes effect. Withdrawing it now would leave them cut for good, so a mistaken
+    publication dated in the future is corrected by publishing a new version instead."""
+
+    type_slug = "rulebook-replacements-pending"
+    title = "Rule version has replacements not yet in effect"
+
+
 class DeadlineDetailMissingError(DomainError, ValueError):
     """An ``extends_deadline`` relation needs the new due date its candidate carried, and the
     period too when the target recurs."""

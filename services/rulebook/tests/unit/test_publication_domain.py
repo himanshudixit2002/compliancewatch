@@ -28,6 +28,7 @@ from rulebook.domain.errors import (
     OverlappingVersionError,
     RelationTargetStateError,
     ReplacementDatesError,
+    ReplacementsPendingError,
     TargetAlreadyReplacedError,
     UnknownRuleVersionError,
 )
@@ -45,6 +46,7 @@ from rulebook.domain.publication import (
     PublicationPlan,
     RuleVersionDecision,
     attribute_keys,
+    check_withdrawal,
     plan_due_transitions,
     plan_publication,
     required_approvals,
@@ -555,3 +557,20 @@ def test_a_quote_is_verified_by_score_and_facts() -> None:
     assert wrong_year.missing == ("2027",)
     assert not wrong_year.verified
     assert not check_quote("something else entirely, not in the clause", text).verified
+
+
+def test_withdrawal_waits_for_the_replacements_to_take_effect() -> None:
+    x = version(status=RuleVersionStatus.PUBLISHED, effective_from=NOVEMBER)
+    waiting = version(1, RuleVersionStatus.PUBLISHED, APRIL, NOVEMBER)
+    moved = version(1, RuleVersionStatus.SUPERSEDED, APRIL, NOVEMBER, rule_id=OTHER_RULE)
+    extended = version(1, RuleVersionStatus.PUBLISHED, APRIL, rule_id=OTHER_RULE)
+    relations = [
+        relation(x, RelationKind.CORRECTS, waiting),
+        relation(x, RelationKind.SUPERSEDES, moved),
+        relation(x, RelationKind.EXTENDS_DEADLINE, extended),
+    ]
+    targets = {r.rule_version_id: r for r in (waiting, moved, extended)}
+    with pytest.raises(ReplacementsPendingError, match=str(waiting.rule_version_id)):
+        check_withdrawal(x, relations, targets)
+    check_withdrawal(x, relations[1:], targets)
+    check_withdrawal(x, relations, {})

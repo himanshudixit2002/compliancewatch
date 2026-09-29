@@ -33,6 +33,7 @@ from rulebook.domain.errors import (
     DuplicateApproverError,
     OverlappingVersionError,
     PublishingDisabledError,
+    ReplacementsPendingError,
     RuleVersionNotEditableError,
     UnknownClauseError,
     UnknownRuleVersionError,
@@ -500,6 +501,33 @@ def test_a_published_version_is_withdrawn_today(
     with pytest.raises(InvalidTransitionError):
         flow.withdraw.run(version, actor_id=ANALYST)
     assert ListRulesInForce(store).run(date(2026, 10, 1)) == []
+
+
+def test_a_version_is_not_withdrawn_before_its_replacements_take_effect(
+    store: MemoryKnowledgeStore, flow: Flow, clock: Clock, clause: ClauseId
+) -> None:
+    _, old = store.add_rule(
+        "gstr3b_monthly", title="Monthly", status=RuleVersionStatus.PUBLISHED, effective_from=APRIL
+    )
+    new = store.add_version("gstr3b_monthly", title="Monthly, amended", effective_from=NOVEMBER)
+    relate(store, new, RelationKind.SUPERSEDES, old, clause)
+    flow.through_review(new, clause)
+    flow.publish.run(new, actor_id=ANALYST)
+    events = store.events()
+    with pytest.raises(ReplacementsPendingError, match=str(old)):
+        flow.withdraw.run(new, actor_id=ANALYST)
+    with store() as uow:
+        waiting, still = uow.rule_versions.get(old), uow.rule_versions.get(new)
+    assert waiting is not None
+    assert still is not None
+    assert (waiting.status, waiting.effective_to) == (RuleVersionStatus.PUBLISHED, NOVEMBER)
+    assert still.status is RuleVersionStatus.PUBLISHED
+    assert store.events() == events
+
+    clock.now = datetime(2026, 10, 31, 18, 30, tzinfo=UTC)
+    assert [moved.target_id for moved in flow.sweep.run().transitions] == [old]
+    withdrawn = flow.withdraw.run(new, actor_id=ANALYST, note="rescinded after it took effect")
+    assert withdrawn.record.status is RuleVersionStatus.WITHDRAWN
 
 
 def test_every_event_is_regulatory_and_keyed_by_its_rule(

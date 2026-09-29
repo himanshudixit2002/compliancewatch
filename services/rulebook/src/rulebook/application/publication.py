@@ -34,7 +34,7 @@ from rulebook.domain.errors import (
     UnknownRuleVersionError,
 )
 from rulebook.domain.events import RuleEvent
-from rulebook.domain.graph import RelationQuery
+from rulebook.domain.graph import RelationQuery, RelationRecord
 from rulebook.domain.ids import citation_id_for
 from rulebook.domain.publication import (
     REPLACING,
@@ -42,6 +42,7 @@ from rulebook.domain.publication import (
     PendingReplacement,
     PublicationPlan,
     RuleVersionDecision,
+    check_withdrawal,
     plan_due_transitions,
     plan_publication,
     required_approvals,
@@ -108,6 +109,17 @@ def _locked(uow: KnowledgeUnitOfWork, rule_version_id: RuleVersionId) -> RuleVer
     if record is None:
         raise UnknownRuleVersionError(str(rule_version_id))
     return record
+
+
+def _own_relations(
+    uow: KnowledgeUnitOfWork, rule_version_id: RuleVersionId
+) -> Sequence[RelationRecord]:
+    """The relations from the version, whether or not it has been published."""
+    return uow.relations.find(
+        RelationQuery(
+            from_rule_version_id=rule_version_id, published_only=False, limit=MAX_RELATIONS
+        )
+    )
 
 
 def _decision(
@@ -338,11 +350,7 @@ class PublishVersion:
         with self._unit_of_work() as uow:
             uow.rule_versions.lock_publication()
             version = _locked(uow, rule_version_id)
-            relations = uow.relations.find(
-                RelationQuery(
-                    from_rule_version_id=rule_version_id, published_only=False, limit=MAX_RELATIONS
-                )
-            )
+            relations = _own_relations(uow, rule_version_id)
             replaced = [
                 r.to_rule_version_id
                 for r in relations
@@ -401,7 +409,8 @@ class PublishVersion:
 class WithdrawVersion:
     """Withdraw a published version directly: ``rule.withdrawn`` with no withdrawing version,
     effective today. A version that another one replaces is withdrawn by publishing that one
-    with a ``withdraws`` relation instead."""
+    with a ``withdraws`` relation instead. A version whose own replacements have not taken
+    effect yet is refused (``check_withdrawal``)."""
 
     def __init__(
         self,
@@ -424,6 +433,18 @@ class WithdrawVersion:
             uow.rule_versions.lock_publication()
             version = _locked(uow, rule_version_id)
             RULE_VERSION_TRANSITIONS.assert_transition(version.status, RuleVersionStatus.WITHDRAWN)
+            relations = _own_relations(uow, rule_version_id)
+            check_withdrawal(
+                version,
+                relations,
+                uow.rule_versions.lock_many(
+                    [
+                        r.to_rule_version_id
+                        for r in relations
+                        if r.relation in REPLACING and r.to_rule_version_id is not None
+                    ]
+                ),
+            )
             withdrawn = replace(version, status=RuleVersionStatus.WITHDRAWN)
             uow.rule_versions.save_lifecycle(withdrawn)
             uow.rule_versions.record_decision(
