@@ -287,17 +287,18 @@ openapi: check-uv ## Export a service's OpenAPI spec: make openapi SERVICE=llm-g
 	$(UV) run --package compliancewatch-$(SERVICE) python -c "import json, pathlib; from $(PKG).main import app; pathlib.Path('packages/contracts/openapi/$(SERVICE).v1.json').write_text(json.dumps(app.openapi(), indent=2, sort_keys=True) + '\n', encoding='utf-8')"
 	@echo "wrote packages/contracts/openapi/$(SERVICE).v1.json"
 
-contracts: check-uv check-pnpm ## Generate the event clients (pydantic + TypeScript) from packages/contracts/events/schemas
+contracts: check-uv check-pnpm ## Generate the event clients (pydantic + TypeScript) and the Python REST models (openapi/clients.json)
 	$(UV) run python packages/contracts/scripts/generate_events.py
+	$(UV) run python packages/contracts/scripts/generate_rest.py
 
 contracts-check: check-uv check-pnpm ## Event schemas pass the 2020-12 metaschema, every topic in code has one, the generated clients match them, and public.v1.json is current
 	$(UV) run check-jsonschema --check-metaschema packages/contracts/events/schemas/*.json
 	$(UV) run python packages/contracts/scripts/check_topics.py
 	$(UV) run python packages/contracts/scripts/build_public_openapi.py --check
 	@$(MAKE) --no-print-directory contracts
-	@drift=$$(git status --porcelain -- packages/contracts/clients/python/src/cw_contracts/events packages/contracts/clients/typescript/events); \
-	if [ -n "$$drift" ]; then echo "$$drift"; echo "error: generated event clients are out of date; commit the output of make contracts"; exit 1; fi
-	@echo "event contracts OK"
+	@drift=$$(git status --porcelain -- packages/contracts/clients/python/src/cw_contracts/events packages/contracts/clients/typescript/events packages/contracts/clients/python/src/cw_contracts/rest); \
+	if [ -n "$$drift" ]; then echo "$$drift"; echo "error: generated clients are out of date; commit the output of make contracts"; exit 1; fi
+	@echo "contracts OK"
 
 hooks: ## Install the pre-commit and commit-msg hooks
 	pre-commit install --install-hooks
@@ -405,7 +406,9 @@ dev-flags: check-docker ## Start Unleash for CW_FLAGS_PROVIDER=unleash (compose 
 
 # ---- Public API spec (guide section 10) -------------------------------------------------------
 .PHONY: openapi-public
-# contracts-check fails while packages/contracts/openapi/public.v1.json differs from this build.
+# contracts-check fails while packages/contracts/openapi/public.v1.json differs from this build or
+# the committed REST models differ from what make contracts generates from it.
 
-openapi-public: check-uv ## Merge the operations the services tag public into packages/contracts/openapi/public.v1.json (after make openapi SERVICE=x)
+openapi-public: check-uv ## Merge the operations the services tag public into packages/contracts/openapi/public.v1.json (after make openapi SERVICE=x), then regenerate the Python REST models
 	$(UV) run python packages/contracts/scripts/build_public_openapi.py
+	$(UV) run python packages/contracts/scripts/generate_rest.py

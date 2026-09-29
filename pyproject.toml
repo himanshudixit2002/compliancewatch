@@ -54,6 +54,7 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "N", "RUF", "PT", "T20", "
 "**/migrations/versions/*.py" = ["F401"]
 # Generated pydantic models: docstrings are the schema text, enum members are the schema values
 "packages/contracts/clients/python/src/cw_contracts/events/*.py" = ["E501", "N815"]
+"packages/contracts/clients/python/src/cw_contracts/rest/*.py" = ["E501"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -202,7 +203,7 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "Generated event contracts depend on pydantic only, never on our packages"
+name = "Generated contracts (event and REST models) depend on pydantic only, never on our packages"
 type = "forbidden"
 source_modules = ["cw_contracts"]
 forbidden_modules = [
