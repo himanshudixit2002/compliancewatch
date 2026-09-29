@@ -1,6 +1,12 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
-import { CloudApiSender, HttpPreferencesClient, LoggingSender, NotConnectedQa } from "./clients.ts";
+import {
+  CloudApiSender,
+  HttpPreferencesClient,
+  LoggingSender,
+  NotConnectedQa,
+  consentLedger,
+} from "./clients.ts";
 
 const env = process.env;
 const port = Number(env.PORT ?? 8080);
@@ -13,6 +19,10 @@ const sender =
         env.WHATSAPP_API_VERSION ?? "v21.0",
       )
     : new LoggingSender();
+// Keyword opt-ins and opt-outs are recorded with identity only when
+// WHATSAPP_CONSENT_RECORDING_ENABLED=true; on, it needs IDENTITY_API_URL and IDENTITY_SERVICE_TOKEN.
+const consentRecording = env.WHATSAPP_CONSENT_RECORDING_ENABLED === "true";
+const consents = consentLedger(env);
 
 const app = createApp(
   {
@@ -22,6 +32,7 @@ const app = createApp(
   },
   {
     preferences: new HttpPreferencesClient(env.NOTIFICATION_API_URL ?? "http://localhost:8006"),
+    consents,
     sender,
     qa: new NotConnectedQa(),
   },
@@ -29,7 +40,7 @@ const app = createApp(
 
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(
-    `whatsapp-bot listening on http://localhost:${info.port} (send ${sendEnabled ? "enabled" : "disabled"})`,
+    `whatsapp-bot listening on http://localhost:${info.port} (send ${sendEnabled ? "enabled" : "disabled"}, consent recording ${consentRecording ? "enabled" : "disabled"})`,
   );
 });
 

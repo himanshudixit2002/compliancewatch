@@ -1,6 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { CloudApiSender, HttpPreferencesClient, LoggingSender, NotConnectedQa } from "./clients.ts";
+import {
+  CloudApiSender,
+  DEFAULT_NOTICE_VERSION,
+  HttpConsentLedger,
+  HttpPreferencesClient,
+  LoggingSender,
+  NoConsentLedger,
+  NotConnectedQa,
+  consentLedger,
+} from "./clients.ts";
 import { detectIntent, detectLanguage, normaliseKeyword } from "./consent.ts";
+import { handleInbound, maskNumber } from "./conversation.ts";
 import { REPLY_KEYS, reply } from "./replies.ts";
 import { signBody, verifySignature } from "./signature.ts";
 import { parseWebhook } from "./webhook.ts";
@@ -118,6 +128,76 @@ describe("clients", () => {
     await expect(client.isOptedIn("1")).rejects.toThrow("preferences: 500");
   });
 
+  it("consent ledger posts the keyword as a channel consent with the service token", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response("{}", { status: calls.length === 1 ? 201 : 200 });
+    }) as unknown as typeof fetch;
+    const at = new Date("2026-09-29T06:30:00Z");
+    const ledger = new HttpConsentLedger("http://i.test/", "svc", "notice 1", fetchImpl, () => at);
+    await ledger.record("919876543210", true, "START", "wamid.1", "en");
+    await ledger.record("919876543210", false, "बंद", "wamid.2", "hi");
+    expect(calls[0]?.url).toBe("http://i.test/v1/identity/channel-consents");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.headers).toEqual({
+      "content-type": "application/json",
+      "x-cw-service-token": "svc",
+    });
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      channel: "whatsapp",
+      subject: "919876543210",
+      purpose: "whatsapp_reminders",
+      granted: true,
+      source: "whatsapp_keyword",
+      notice_version: "notice 1",
+      evidence:
+        "keyword START in WhatsApp message wamid.1 at 2026-09-29T06:30:00.000Z, language en",
+      message_id: "wamid.1",
+    });
+    expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({
+      granted: false,
+      evidence: "keyword बंद in WhatsApp message wamid.2 at 2026-09-29T06:30:00.000Z, language hi",
+    });
+  });
+
+  it("consent ledger raises when identity refuses", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response("", { status: 401 }),
+    ) as unknown as typeof fetch;
+    const ledger = new HttpConsentLedger("http://i.test", "wrong", undefined, fetchImpl);
+    await expect(ledger.record("1", true, "START", "m", "en")).rejects.toThrow("consents: 401");
+  });
+
+  it("the environment picks the consent ledger", () => {
+    const lines: string[] = [];
+    const off = consentLedger({}, fetch, (line) => lines.push(line));
+    expect(off).toBeInstanceOf(NoConsentLedger);
+    expect(() => consentLedger({ WHATSAPP_CONSENT_RECORDING_ENABLED: "true" })).toThrow(
+      "needs IDENTITY_SERVICE_TOKEN",
+    );
+    const on = consentLedger({
+      WHATSAPP_CONSENT_RECORDING_ENABLED: "true",
+      IDENTITY_SERVICE_TOKEN: "svc",
+    });
+    expect(on).toBeInstanceOf(HttpConsentLedger);
+    expect(DEFAULT_NOTICE_VERSION).toBe("whatsapp-consent 0.1-draft");
+  });
+
+  it("the no-op ledger only logs, with the number masked", async () => {
+    const lines: string[] = [];
+    await new NoConsentLedger((line) => lines.push(line)).record(
+      "919876543210",
+      false,
+      "STOP",
+      "m",
+    );
+    expect(lines).toEqual([
+      "whatsapp-bot: consent recording disabled; would record the opt-out of ********3210 (keyword STOP, message m)",
+    ]);
+    expect(maskNumber("12")).toBe("12");
+  });
+
   it("cloud api sender posts a text message with the bearer token", async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       expect(String(url)).toBe("https://graph.facebook.com/v21.0/42/messages");
@@ -141,5 +221,42 @@ describe("clients", () => {
     expect(sender.sent).toEqual([{ to: "919876543210", body: "hello" }]);
     expect(lines[0]).toContain("********3210");
     expect(await new NotConnectedQa().ask()).toBeNull();
+  });
+});
+
+describe("conversation", () => {
+  it("logs a consent failure to stderr when no log is given", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const handled = await handleInbound(
+        {
+          id: "m",
+          from: "919876543210",
+          timestamp: "1",
+          text: "START",
+          type: "text",
+          phoneNumberId: "42",
+        },
+        {
+          preferences: {
+            async setOptIn() {},
+            async isOptedIn() {
+              return false;
+            },
+          },
+          consents: {
+            async record() {
+              throw new Error("down");
+            },
+          },
+          sender: { async sendText() {} },
+          qa: { ask: async () => null },
+        },
+      );
+      expect(handled.replied).toBe(reply("try_again_later", "en"));
+      expect(error).toHaveBeenCalledWith(expect.stringContaining("********3210"));
+    } finally {
+      error.mockRestore();
+    }
   });
 });

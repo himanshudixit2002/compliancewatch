@@ -22,6 +22,10 @@ const REPLIES: Record<string, Record<Language, string>> = {
     en: "Reply START to receive ComplianceWatch reminders on this number.",
     hi: "इस नंबर पर ComplianceWatch की सूचनाएँ पाने के लिए START लिखें।",
   },
+  try_again_later: {
+    en: "We could not record your opt-in just now, so reminders are not switched on yet. Please send START again in a few minutes.",
+    hi: "हम अभी आपकी सहमति दर्ज नहीं कर सके, इसलिए सूचनाएँ अभी शुरू नहीं हुई हैं। कृपया कुछ मिनट बाद फिर से START लिखें।",
+  },
   not_connected: {
     en: "Questions are not answered on WhatsApp yet. Reply HELP for what this number can do.",
     hi: "अभी WhatsApp पर प्रश्नों के उत्तर नहीं दिए जाते। यह नंबर क्या कर सकता है, जानने के लिए HELP लिखें।",
