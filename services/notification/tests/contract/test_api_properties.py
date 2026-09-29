@@ -37,10 +37,7 @@ OPERATIONS = frozenset(
         "GET /v1/notification/templates",
     }
 )
-QUIET_HOURS_500 = "quiet hours from 24:00 to 29:59 match the pattern and end in a 500"
-EXCLUDED: dict[str, str] = {
-    "PUT /v1/notification/preferences/{channel}/{recipient}": QUIET_HOURS_500,
-}
+EXCLUDED: dict[str, str] = {}
 CHECKS = cast(
     list[CheckFunction],
     [

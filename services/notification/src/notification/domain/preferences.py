@@ -13,6 +13,7 @@ from typing import Protocol, Self
 
 from domain_kernel._validation import require_aware, require_bool, require_instance, require_text
 from domain_kernel.channels import Channel
+from domain_kernel.errors import InvariantViolationError
 
 IST = timezone(timedelta(hours=5, minutes=30), "IST")
 
@@ -39,7 +40,13 @@ class QuietHours:
 
     @classmethod
     def parse(cls, start: str, end: str) -> Self:
-        return cls(time.fromisoformat(start), time.fromisoformat(end))
+        """A window from two ``HH:MM`` texts; anything else is an invariant violation."""
+        try:
+            return cls(time.fromisoformat(start), time.fromisoformat(end))
+        except ValueError as exc:
+            raise InvariantViolationError(
+                f"quiet hours must be HH:MM times, got {start!r} to {end!r}"
+            ) from exc
 
     def is_quiet(self, at: datetime) -> bool:
         local = require_aware(at, "at").astimezone(IST).time()
