@@ -453,7 +453,7 @@ web-stack: check-uv ## Start every service on SERVICE_PORT_BASE+1..10 with memor
 	    url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$${schema}%2Cpublic"; \
 	  fi; \
 	  CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$$schema" \
-	  CW_IDENTITY_STORE=$(STORE) CW_PROFILE_STORE=$(STORE) CW_RULEBOOK_STORE=$(STORE) CW_OBLIGATION_STORE=$(STORE) CW_LLM_LEDGER=$(STORE) \
+	  CW_IDENTITY_STORE=$(STORE) CW_PROFILE_STORE=$(STORE) CW_RULEBOOK_STORE=$(STORE) CW_OBLIGATION_STORE=$(STORE) CW_NOTIFICATION_STORE=$(STORE) CW_LLM_LEDGER=$(STORE) \
 	  CW_PROFILE_GSTIN_LOOKUP=static CW_BILLING_PROVIDER=none CW_RULEBOOK_PUBLISH_ENABLED=false CW_QA_KAG_ENABLED=false \
 	  CW_RULEBOOK_WRITE_TOKEN="$$token" \
 	  CW_PROFILE_URL="http://localhost:$$((base+2))" CW_RULEBOOK_URL="http://localhost:$$((base+3))" \
