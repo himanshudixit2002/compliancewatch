@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { adminNavFor } from "@/shared/config/nav";
 import { REGULATORY_ROLES } from "@/shared/config/roles";
-import { webEnvName } from "@/server/runtime";
+import { webEnvName } from "@/server/env";
 import { InternalShell } from "@/shared/ui/internal-shell";
 
 // The environment label is read per request, never baked in at build time.

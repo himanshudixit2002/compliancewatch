@@ -22,11 +22,15 @@ src/app/            route files only: page.tsx is gate, query, render; layouts, 
 src/features/       one directory per screen family: model/, ui/, index.ts (ports, gateway, queries and
                     actions join when a feature reads data); today: home, sitemap, legal, not-available,
                     admin-home, system-pages, design-catalogue
-src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports)
+src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
+                    problem/ types the RFC 9457 body every service returns (from the generated contracts)
 src/server/         server-only modules; every file starts with `import "server-only"`
-                    legal.ts reads docs/legal at build time (marked); runtime.ts reads CW_WEB_ENV (default local)
+                    env.ts validates every CW_WEB_* variable (zod; parsed at the first request, never at build)
+                    result.ts: Result, ApiError and the mapping to a form's ActionState
+                    legal.ts reads docs/legal at build time (marked)
 src/shared/config/  the screen registry (screens.ts), roles and permissions, flags, navigation, the legal doc list
-src/shared/lib/     IST dates, financial years, money and decimal strings, humanise, identifiers, pagination, urls
+src/shared/lib/     IST dates, financial years, money and decimal strings, humanise, identifiers, pagination, urls,
+                    action-state (what a server action returns to a form)
 src/shared/i18n/    messages/en.json and the typed t(); another locale falls back key by key
 src/shared/ui/      app-level compositions over the UI kit: the two shells over next/link, breadcrumbs, the status chip
 src/test/           vitest setup, the architecture rules and test, the docs/web/screens.md drift test
@@ -38,7 +42,7 @@ e2e/                fixtures.ts (the axe check failing on serious or critical) a
 next.config.ts      typed routes, security headers; eslint.config.mjs: Next flat config plus repo rules
 vitest.config.mts   jsdom, Testing Library, 80% coverage floor (route files are covered by e2e)
 playwright.config.ts  Playwright against `next start` on PORT with CW_WEB_ENV=test; chromium only
-.env.example        the variables the app reads (CW_WEB_ENV); copy to .env.local
+.env.example        every CW_WEB_* variable the app reads, with its default; copy to .env.local
 ```
 
 Import rules (checked by `src/test/architecture.test.ts` over the real tree): `app` imports
@@ -76,10 +80,11 @@ reference, or for a ready screen the sentence that its backend is on main (an un
 three listed names. `/admin` lists every internal tool from the registry with its status and the
 services it depends on. There is no `loading.tsx` above the catch-alls on purpose: a loading
 boundary above `notFound()` streams the page with status 200, so a later package adds
-`loading.tsx` beside each page that fetches. `CW_WEB_ENV` is read directly by
-`server/runtime.ts` (unset means local; an unknown value is treated as prod) until the validated
-environment module lands. No session, gate or service client exists yet: every page renders for
-every visitor.
+`loading.tsx` beside each page that fetches. `server/env.ts` validates every `CW_WEB_*` variable
+with zod: `getEnv()` parses the process environment at the first request (never at import or
+build time), keeps the frozen result, and refuses a bad value with the variable's name; unset
+means the documented default (`CW_WEB_ENV` local, the services on their canonical ports
+8001-8010). No session, gate or service client exists yet: every page renders for every visitor.
 
 ## End-to-end tests
 
@@ -98,7 +103,7 @@ the registry test checks they exist. Playwright reports land in `playwright-repo
 `make web-dev` (or `pnpm --filter web dev`; http://localhost:3000, `/admin` for the tool list,
 `/design` for the UI kit, `/sitemap` for every screen and its status), `pnpm --filter web
 build`, `test`, `lint`, `typecheck` (both tsconfigs), `e2e`. Copy `.env.example` to
-`.env.local` when `CW_WEB_ENV` must differ from `local`; the build needs no variable at all.
+`.env.local` for anything that must differ from the defaults; the build needs no variable at all.
 `pnpm --filter web screens:gen` regenerates `docs/web/screens.md` (`screens:check` compares,
 `make web-screens-check` in `make check`; `screens:audit` lists the awaited routes still absent
 from the committed specs). `next dev` maintains `AGENTS.md` (Next.js agent rules); keep it

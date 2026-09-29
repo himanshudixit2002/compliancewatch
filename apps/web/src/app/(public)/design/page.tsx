@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Catalogue } from "@/features/design-catalogue";
-import { isLocalOrTest } from "@/server/runtime";
+import { isLocalOrTest } from "@/server/env";
 import { screenById } from "@/shared/config/screens";
 
 const SCREEN = screenById("system.design");

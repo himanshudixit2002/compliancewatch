@@ -52,7 +52,7 @@ apps/web/
     error.tsx, global-error.tsx, not-found.tsx
   src/features/                home, sitemap, legal, not-available, admin-home, system-pages, design-catalogue
   src/entities/screen/         the view shapes of a registry entry and their mappers
-  src/server/                  legal.ts (docs/legal at build time), runtime.ts (CW_WEB_ENV)
+  src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError), legal.ts
   src/shared/config/           screens.ts, roles.ts, permissions.ts, flags.ts, nav.ts, services.ts, legal-docs.ts
   src/shared/lib/              dates, financial years, decimal money, humanise, identifiers, pagination, urls, assert
   src/shared/i18n/             messages/en.json and t()
@@ -153,8 +153,9 @@ shows and what `screens.md`'s matrix says.
 No gate function runs on `main` yet: there is no session, so every page renders for every
 visitor. `/admin` renders its tool list for anyone, and the internal shell's banner shows the
 environment name. `/design` is the one page with a gate today, and it is an environment gate:
-`server/runtime.ts` reads `CW_WEB_ENV` and the page answers 404 unless the value is `local` or
-`test` (unset means local; an unknown value counts as prod so a typo never opens it).
+`server/env.ts` reads `CW_WEB_ENV` and the page answers 404 unless the value is `local` or
+`test` (unset means local; an unknown value is refused at the first request, so a typo never
+opens it).
 
 ## Request flow
 
@@ -193,9 +194,15 @@ page refers to.
 
 ## Environments, ports and configuration
 
-- `CW_WEB_ENV`: `local`, `test`, `staging` or `prod`; read per request by `server/runtime.ts`.
-  The Playwright config starts `next start` with `test`. Every module works with no `CW_WEB_*`
-  variable set; `pnpm turbo run build` with an empty environment is part of the checklist.
+- `CW_WEB_*`: every variable the app reads, validated by `server/env.ts` (zod). `getEnv()`
+  parses the process environment at its first call from a request, action or route handler,
+  never at import, and keeps the frozen result; a bad value is refused with the variable's
+  name. `CW_WEB_ENV` is `local`, `test`, `staging` or `prod` (unset means local; the Playwright
+  config starts `next start` with `test`); the service URLs default to the canonical ports
+  8001-8010; the session secret is required only where a session is encrypted or decrypted.
+  `apps/web/.env.example` lists every variable with its default. Every module works with no
+  `CW_WEB_*` variable set; `pnpm turbo run build` with an empty environment is part of the
+  checklist.
 - `PORT`: what `next dev` and `next start` listen on. `make web-dev` and `make web-e2e` pass
   `WEB_PORT` from the root `.env` (3000 unless changed; a second working copy uses 3200, see
   `docs/onboarding/local-dev.md`). `apps/web/.env.example` lists the variables the app reads.
