@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -14,7 +14,8 @@ import {
 /**
  * The consent step against the real identity and notification services (make web-stack, then
  * make web-seed). Each test signs in through the fake provider as a new user of the seeded
- * tenant (a fresh display name gives a fresh user id), so no earlier run's consents are on file.
+ * tenant (a fresh display name gives a fresh user id), so no earlier run's consents are on file,
+ * and opts in a WhatsApp number of its own.
  */
 const tenantId = seededTenantId();
 
@@ -43,7 +44,13 @@ const REQUIRED = [
 ];
 const WHATSAPP_BOX =
   "Send me GST reminders for this business on WhatsApp. I can reply STOP at any time.";
-const NUMBER = "+919800000001";
+/**
+ * A number of this test's own, +9196 and eight random digits: preferences are kept per number
+ * across tenants, so a fixed number would find an earlier run's opt-in on a long-lived stack.
+ */
+function exampleNumber(): string {
+  return `+9196${String(randomInt(0, 100_000_000)).padStart(8, "0")}`;
+}
 
 test.describe("onboarding: consent step", () => {
   test.skip(
@@ -56,6 +63,7 @@ test.describe("onboarding: consent step", () => {
     checkA11y,
   }) => {
     expect(tenantId, "make web-seed writes var/seed/last.json").not.toBeNull();
+    const number = exampleNumber();
     await signInThroughForm(page, newUser("business", ["owner"]), "/onboarding");
     await expect(page).toHaveURL(/\/onboarding$/);
     await expect(page.getByRole("heading", { level: 1, name: "Get started" })).toBeVisible();
@@ -93,7 +101,7 @@ test.describe("onboarding: consent step", () => {
     await expect(page.getByRole("checkbox", { name: WHATSAPP_BOX })).toBeChecked();
     await checkA11y();
 
-    await page.getByLabel("WhatsApp number").fill(NUMBER);
+    await page.getByLabel("WhatsApp number").fill(number);
     await page.getByRole("button", { name: "Agree and continue" }).click();
     await expect(page).toHaveURL(/\/onboarding\/business$/);
     await expect(page.getByRole("heading", { level: 1, name: "Add a business" })).toBeVisible();
@@ -120,7 +128,7 @@ test.describe("onboarding: consent step", () => {
 
     // And the number is opted in on the notification service, keyed as WhatsApp reports it.
     const response = await fetch(
-      `${serviceUrl("notification")}/v1/notification/preferences/whatsapp/${NUMBER.slice(1)}`,
+      `${serviceUrl("notification")}/v1/notification/preferences/whatsapp/${number.slice(1)}`,
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ opted_in: true, source: "web_onboarding" });
