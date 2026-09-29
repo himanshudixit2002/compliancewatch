@@ -258,11 +258,20 @@ async def outbox_table_exists(engine: AsyncEngine) -> bool:
 
 async def run(settings: Settings, *, config: RelayConfig = DEFAULT_CONFIG) -> bool:
     """Run until a signal arrives. Returns False without starting when the table is missing."""
-    engine = create_async_engine(settings.database_url)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(signum, stop.set)
+    return await run_relay(settings, stop, config=config)
+
+
+async def run_relay(
+    settings: Settings, stop: asyncio.Event, *, config: RelayConfig = DEFAULT_CONFIG
+) -> bool:
+    """Relay the schema on ``CW_DATABASE_URL`` until ``stop`` is set, the way a worker process
+    runs it next to its other components (``py_common.runtime``). Returns False without starting
+    when the table is missing."""
+    engine = create_async_engine(settings.database_url)
     try:
         if not await outbox_table_exists(engine):
             log.error(

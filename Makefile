@@ -268,8 +268,8 @@ backfill: check-uv ## Backfill one regulator source into var/raw: make backfill 
 	@[ "$(SERVICE)" = "pipeline" ] || { echo "usage: make backfill SERVICE=pipeline ARGS=\"--source <key> [--since YYYY-MM-DD] [--limit N] [--list-only]\""; exit 1; }
 	@$(UV) run --package compliancewatch-pipeline pipeline-backfill $(ARGS)
 
-worker: check-uv ## Run a service's Temporal worker: make worker SERVICE=pipeline
-	@[ -n "$(SERVICE)" ] || { echo "usage: make worker SERVICE=<pipeline|...>"; exit 1; }
+worker: check-uv ## Run a service's worker process, python -m <pkg>.worker (consumers, relay, periodic jobs, Temporal): make worker SERVICE=pipeline
+	@[ -n "$(SERVICE)" ] || { echo "usage: make worker SERVICE=<pipeline|notification|...>"; exit 1; }
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$(SCHEMA)%2Cpublic"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \

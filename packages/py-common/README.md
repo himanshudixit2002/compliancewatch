@@ -29,6 +29,7 @@ src/py_common/
     liveness.py        # running(task_queue): the temporal_worker_up{task_queue} gauge while a worker runs
   events.py            # EventMessage (the envelope), to_message/encode/decode, payload_of(event)
   migrations.py        # alembic helpers: enable_tenant_rls, create_append_only_guard and their drop twins
+  runtime.py           # WorkerComponents (consumers, relays, periodic jobs, Temporal workers); run_worker_process
   outbox/
     schema.py          # outbox_event and processed_event tables; create_*/drop_* helpers for alembic
     writer.py          # OutboxWriter.write(connection, event): the row commits with the state change
@@ -36,6 +37,7 @@ src/py_common/
     producer.py        # MessageProducer protocol; AiokafkaProducer (idempotent, acks=all)
     relay.py           # OutboxRelay: publish, retry with backoff, dead-letter; python -m py_common.outbox
     consumer.py        # IdempotentConsumer: once per event id and consumer group, consumer dead-letter topic
+    sync.py            # SyncProcessedStore and sync_handler: sync handlers in the unit's transaction; run_consumer
     testing.py         # FakeProducer, MemoryOutboxStore, MemoryProcessedStore for service tests
   idempotency/         # Idempotency-Key with 24 hour replay; the package itself loads no FastAPI or SQLAlchemy
     store.py           # fingerprint, the begin outcomes, IdempotencyStore and IdempotencyRecorder protocols
@@ -201,6 +203,32 @@ work, whose `connection` is the transaction that also records the event id, so a
 skipped and a handler crash rolls everything back. After three failed attempts the message goes
 to `<topic>.<group>.dlq` and the offset is committed. `py_common.outbox.testing` has the fakes
 service tests use instead of a broker.
+
+A service whose repositories are synchronous consumes through `py_common.outbox.sync` instead:
+`SyncProcessedStore(engine, group_id=...)` on a sync engine gives each unit of work its own
+connection and its own thread, and `sync_handler(fn)` runs `fn(message, connection)` there, in the
+transaction that also records the event id. The handler's writes, the outbox rows it writes with
+`OutboxWriter` and the `processed_event` row commit together or roll back together, and a
+handler that calls another service over HTTP blocks its unit's thread, never the event loop.
+`run_consumer(settings, group_id=..., topics=..., handler=..., stop=...)` runs one group against
+`CW_DATABASE_URL` and `CW_KAFKA_BOOTSTRAP` until `stop` is set. Group ids are
+`<service>.<purpose>`, such as `notification.obligations`, so dead letters land in
+`<topic>.notification.obligations.dlq`. The store works on any SQLAlchemy engine, so handler
+tests can run it on a SQLite file.
+
+## Worker processes
+
+A service with background work exposes `<pkg>.worker.components(settings)`, which returns
+`py_common.runtime.WorkerComponents`: `consumers` (`ConsumerComponent(group_id, topics,
+handler)`, run with `run_consumer`), `relays` (`RelayComponent()`, the outbox relay of the
+service schema), `periodic` (`PeriodicComponent(name, fn, interval_seconds=...)`, or
+`next_run=daily_at(time(3, 0, tzinfo=IST))` for a daily job; a sync `fn` runs on a thread and a
+failing run is logged and tried again at the next time) and `temporal` (`TaskComponent(name,
+run)`, any coroutine that runs until the stop event, such as a Temporal worker). Its
+`python -m <pkg>.worker` calls `run_worker_process(settings, components, version=...)`, and
+`make worker SERVICE=<svc>` runs that locally. Every component runs until SIGTERM or SIGINT; when
+one fails, the others stop and the process exits with the error, for the supervisor to restart
+it. Components add up (`a + b`), so one process can host several services' work.
 
 ## How to run
 
