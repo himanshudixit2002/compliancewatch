@@ -345,6 +345,16 @@ def test_the_memory_store_mirrors_row_level_security() -> None:
     assert store.users[owner.id].session_version == 1
 
 
+def test_the_memory_store_locks_only_its_own_tenant() -> None:
+    store = MemoryStore()
+    acme = tenant()
+    with store(acme.id) as uow:
+        uow.tenants.add(acme)
+    with store(acme.id) as uow:
+        assert uow.tenants.lock(acme.id) == acme
+        assert uow.tenants.lock(tenant().id) is None
+
+
 def test_the_memory_store_keeps_nothing_from_a_failed_unit_of_work() -> None:
     store = MemoryStore()
     acme = tenant()

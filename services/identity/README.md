@@ -80,7 +80,8 @@ changed a moment ago is refused at once. In dual mode these routes need the toke
 `auth-token-required` without one), since the users and roles they store outlive the switch to
 token mode. In header mode the tenant header names the tenant as on every tenant route, and an
 anonymous caller grants no owner, CA admin, analyst, reviewer or admin role (403
-`auth-forbidden`). The last active admin of a tenant can be neither demoted nor disabled. The internal tenant is set up once by an operator with
+`auth-forbidden`). The last active admin of a tenant can be neither demoted nor disabled; role
+changes and disables lock the tenant's row, so two of them at once cannot both pass that check. The internal tenant is set up once by an operator with
 `identity-admin bootstrap-internal`, which creates its first admin at the identity provider; that
 admin enrols a second factor there before signing in, then invites the analysts and reviewers.
 

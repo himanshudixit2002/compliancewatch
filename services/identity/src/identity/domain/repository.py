@@ -25,6 +25,11 @@ class TenantRepository(Protocol):
         """The unit of work's own tenant when it has this id; None for any other."""
         ...
 
+    def lock(self, tenant_id: TenantId) -> Tenant | None:
+        """``get``, with the tenant locked until the unit of work ends: a second unit of work
+        locking it waits, then reads what the first committed."""
+        ...
+
 
 class UserRepository(Protocol):
     def add(self, user: User) -> None: ...

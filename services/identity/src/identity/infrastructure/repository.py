@@ -111,16 +111,20 @@ class SqlAlchemyTenantRepository:
         if tenant_id != self._tenant:
             return None
         row = self._session.get(TenantRow, tenant_id.value)
-        if row is None:
+        return None if row is None else _to_tenant(row)
+
+    def lock(self, tenant_id: TenantId) -> Tenant | None:
+        """The tenant, read with SELECT ... FOR UPDATE: its row stays locked until the
+        transaction ends."""
+        if tenant_id != self._tenant:
             return None
-        return Tenant(
-            id=TenantId(row.id),
-            kind=TenantKind(row.kind),
-            name=row.name,
-            created_at=row.created_at,
-            region=row.region,
-            status=TenantStatus(row.status),
-        )
+        row = self._session.scalars(
+            select(TenantRow)
+            .where(TenantRow.id == tenant_id.value)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).one_or_none()
+        return None if row is None else _to_tenant(row)
 
 
 class SqlAlchemyUserRepository:
@@ -266,6 +270,17 @@ class PostgresUnitOfWorkFactory:
         with self._engine.connect() as connection:
             connection.execute(text("SELECT 1"))
         return True
+
+
+def _to_tenant(row: TenantRow) -> Tenant:
+    return Tenant(
+        id=TenantId(row.id),
+        kind=TenantKind(row.kind),
+        name=row.name,
+        created_at=row.created_at,
+        region=row.region,
+        status=TenantStatus(row.status),
+    )
 
 
 def _user_row(user: User) -> UserRow:

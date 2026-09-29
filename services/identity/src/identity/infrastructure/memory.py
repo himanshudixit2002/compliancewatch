@@ -72,6 +72,10 @@ class MemoryTenantRepository:
     def get(self, tenant_id: TenantId) -> Tenant | None:
         return self._tenants.get(tenant_id) if tenant_id == self._tenant else None
 
+    def lock(self, tenant_id: TenantId) -> Tenant | None:
+        """``get``: memory units of work serve tests and demos, one at a time."""
+        return self.get(tenant_id)
+
 
 class MemoryUserRepository:
     def __init__(self, users: dict[UserId, User], tenant_id: TenantId | None) -> None:

@@ -5,6 +5,7 @@ The role owns nothing and is not a superuser, as the service's own role would be
 """
 
 import importlib
+import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -18,7 +19,7 @@ from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from testcontainers.community.postgres import PostgresContainer
 
-from domain_kernel.access import Role, Scope
+from domain_kernel.access import ANONYMOUS, Role, Scope
 from domain_kernel.ids import TenantId
 from identity.application.bootstrap import (
     BootstrapInternalTenant,
@@ -33,9 +34,11 @@ from identity.application.tenancy import (
     DisableUser,
     InviteUser,
     ListUsers,
+    admin_context,
 )
 from identity.domain.errors import (
     InternalTenantExistsError,
+    LastAdminError,
     SubjectRegisteredError,
     UserNotFoundError,
 )
@@ -391,6 +394,69 @@ def test_service_clients_through_a_plain_role(app_engine: Engine) -> None:
     with factory(None) as uow:
         stored = uow.service_clients.get("integration-client")
     assert stored == revoked
+
+
+def test_locking_a_tenant_makes_another_transaction_wait(app_engine: Engine) -> None:
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    acme = new_tenant()
+    sign_up(factory, acme, first_user(acme, "lock-acme"))
+    tenant_setting = text("SELECT set_config('app.tenant_id', :tenant, true)")
+    locked = text("SELECT id FROM tenant WHERE id = :tenant FOR UPDATE NOWAIT")
+    with factory(acme.id) as uow:
+        assert uow.tenants.lock(acme.id) == acme
+        assert uow.tenants.lock(new_tenant().id) is None
+        with app_engine.connect() as other:
+            other.execute(tenant_setting, {"tenant": str(acme.id)})
+            with pytest.raises(DBAPIError, match="could not obtain lock"):
+                other.execute(locked, {"tenant": acme.id.value})
+    with app_engine.connect() as other:
+        other.execute(tenant_setting, {"tenant": str(acme.id)})
+        assert other.execute(locked, {"tenant": acme.id.value}).scalar_one() == acme.id.value
+
+
+def test_two_owners_demoted_at_once_leave_one_owner(app_engine: Engine) -> None:
+    """The first demotion holds the tenant's lock while the second starts; the second waits,
+    then sees the first and refuses to take the last owner."""
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    provider = FakeIdentityProvider()
+    issuer = TestIssuer()
+    minter = IssuerMinter(
+        TokenIssuer(issuer.keys, issuer=issuer.issuer_name, audience=issuer.audience)
+    )
+    created = CreateTenant(factory, provider, minter, ttl=timedelta(minutes=10)).run(
+        provider.issue(phone="+919800000004"), TenantKind.BUSINESS, "Two Owners"
+    )
+    tenant, first = created.tenant, created.user
+    second = InviteUser(factory, provider).run(
+        tenant.id,
+        created.session.principal,
+        contact=Contact(phone="+919800000005"),
+        roles=[Role.OWNER],
+    )
+    outcome: list[BaseException | User] = []
+
+    def demote_the_first() -> None:
+        try:
+            outcome.append(ChangeRoles(factory).run(tenant.id, ANONYMOUS, first.id, [Role.STAFF]))
+        except LastAdminError as exc:
+            outcome.append(exc)
+
+    racer = threading.Thread(target=demote_the_first)
+    with factory(tenant.id) as uow:
+        held, _ = admin_context(uow, tenant.id, ANONYMOUS, lock=True)
+        stored = uow.users.get(second.id)
+        assert stored is not None
+        uow.users.save(stored.with_roles([Role.STAFF], held, colleagues=uow.users.list(), at=NOW))
+        racer.start()
+        racer.join(timeout=1.0)
+        assert racer.is_alive(), "the second change waits for the tenant's lock"
+    racer.join(timeout=30)
+    assert not racer.is_alive()
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], LastAdminError)
+    with factory(tenant.id) as uow:
+        owners = [user.id for user in uow.users.list() if Role.OWNER in user.roles]
+    assert owners == [first.id]
 
 
 def test_the_team_use_cases_through_a_plain_role(app_engine: Engine, engine: Engine) -> None:
