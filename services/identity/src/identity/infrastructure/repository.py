@@ -2,10 +2,10 @@
 (or none, for the subject index), with the outbox writer as the event sink, and one without a
 tenant for channel consents.
 
-Tenant and user reads also name the unit of work's tenant in the query. Row-level security
-applies only to a role that does not bypass it, and the dev stack connects as the database's
-owner, so the filter keeps tenants apart there too; with no tenant they find nothing, as row-level
-security would."""
+Tenant, user and consent reads also name the unit of work's tenant in the query. Row-level
+security applies only to a role that does not bypass it, and the dev stack connects as the
+database's owner, so the filter keeps tenants apart there too; with no tenant they find nothing,
+as row-level security would."""
 
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
@@ -52,8 +52,9 @@ from py_common.outbox import OutboxWriter
 
 
 class SqlAlchemyConsentRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, tenant_id: TenantId | None) -> None:
         self._session = session
+        self._tenant = tenant_id
 
     def add(self, record: ConsentRecord) -> None:
         self._session.add(
@@ -73,9 +74,11 @@ class SqlAlchemyConsentRepository:
         self._session.flush()
 
     def history(self, subject: str, purpose: ConsentPurpose | None = None) -> list[ConsentRecord]:
+        if self._tenant is None:
+            return []
         statement = (
             select(ConsentRow)
-            .where(ConsentRow.subject == subject)
+            .where(ConsentRow.tenant_id == self._tenant.value, ConsentRow.subject == subject)
             .order_by(ConsentRow.recorded_at, ConsentRow.id)
         )
         if purpose is not None:
@@ -232,7 +235,7 @@ class SqlAlchemyUnitOfWork:
                 text("SELECT set_config(:name, :value, true)"),
                 {"name": TENANT_SETTING, "value": str(tenant_id)},
             )
-        self.consents = SqlAlchemyConsentRepository(session)
+        self.consents = SqlAlchemyConsentRepository(session, tenant_id)
         self.tenants = SqlAlchemyTenantRepository(session, tenant_id)
         self.users = SqlAlchemyUserRepository(session, tenant_id)
         self.subjects = SqlAlchemySubjectIndex(session)

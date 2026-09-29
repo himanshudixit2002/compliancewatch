@@ -1,6 +1,6 @@
 """Migration 0001 on Postgres: the consent table, row-level security by tenant, the unit of
-work end to end as a plain database role; and migration 0004, which adds the web_settings
-source. Needs Docker."""
+work end to end as a plain database role, the history's own tenant filter where row-level
+security is bypassed; and migration 0004, which adds the web_settings source. Needs Docker."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -94,6 +94,31 @@ def test_table_policy_and_isolation(
     assert ConsentStatus(factory).run(other, "u").history == ()
     with app_engine.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM consent_record")).scalar_one() == 0
+
+
+def test_history_names_the_tenant_where_row_level_security_is_bypassed(
+    database_url: str, migrated: Config
+) -> None:
+    """The test database's user owns the table and is a superuser, so row-level security does
+    not apply to it, as for the dev stack's role: the query's own tenant filter keeps tenants
+    apart."""
+    engine = create_engine(database_url)
+    factory = PostgresUnitOfWorkFactory(engine)
+    tenant, other = TenantId.new(), TenantId.new()
+    record = RecordConsent(factory)
+    record.run(tenant, "shared", ConsentPurpose.TERMS, granted=False, source=ConsentSource.API)
+    record.run(other, "shared", ConsentPurpose.ANALYTICS, granted=False, source=ConsentSource.API)
+    with engine.connect() as connection:
+        visible: int = connection.execute(
+            text("SELECT count(*) FROM consent_record WHERE subject = 'shared'")
+        ).scalar_one()
+    assert visible == 2, "row-level security does not hide the other tenant's row here"
+    mine = ConsentStatus(factory).run(tenant, "shared")
+    assert [(r.tenant_id, r.purpose) for r in mine.history] == [(tenant, ConsentPurpose.TERMS)]
+    assert [state.purpose for state in mine.states] == [ConsentPurpose.TERMS]
+    with factory(None) as uow:
+        assert uow.consents.history("shared") == []
+    engine.dispose()
 
 
 def _source_check(engine: Engine) -> str:

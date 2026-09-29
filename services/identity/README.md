@@ -67,11 +67,11 @@ Tenants and users live in `identity.tenant` (row-level security on its own id) a
 `identity.app_user` (row-level security by `tenant_id`); `identity.user_subject` maps a provider
 subject to its user and tenant, and `identity.service_client` holds the service clients with the
 SHA-256 of their secrets (both without row-level security, exempted with the reasons in
-`infra/scripts/migration_lint.toml`). Tenant and user reads also name the tenant in the query,
-and the admin use cases check that the user they change belongs to the caller's tenant, so tenants
-stay apart where row-level security does not apply (the dev stack connects as the database's
-owner). `tenant.created` and `user.role.changed` leave through the outbox in the same transaction
-as the change.
+`infra/scripts/migration_lint.toml`). Tenant, user and consent reads also name the tenant in the
+query, and the admin use cases check that the user they change belongs to the caller's tenant, so
+tenants stay apart where row-level security does not apply (the dev stack connects as the
+database's owner). `tenant.created` and `user.role.changed` leave through the outbox in the same
+transaction as the change.
 
 Roles depend on the tenant's kind: a business has owners, staff and compliance leads; a CA firm has
 CA admins, CA staff and compliance leads; the internal tenant has analysts, reviewers and admins.
