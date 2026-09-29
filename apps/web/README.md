@@ -60,6 +60,12 @@ src/instrumentation.ts  onRequestError writes one JSON line (digest, route, x-re
 src/proxy.ts        the optimistic check before a render: no cw_session cookie on a gated screen or under
                     /admin means a redirect to /sign-in?next=; the gates in server/dal.ts decide
 scripts/screens-doc.mts generates docs/web/screens.md from the registry (screens:gen, screens:check, screens:audit)
+scripts/seed/       the demo-tenant seed (pnpm --filter web seed, make web-seed): main.mts runs the steps in
+                    order, steps/ fills identity consents, the profile registration, pre-fill and answers,
+                    the notification preference and the rulebook; http.mts is the openapi-fetch clients typed
+                    from the contracts; lib.mts the demo facts, arguments and fixture checks; report.mts the
+                    summary and var/seed/last.json; fixtures/rulebook/ the recorded notification (README,
+                    record.py)
 e2e/                fixtures.ts (the axe check failing on serious or critical) and one spec per live page,
                     plus a11y.spec.ts over every registered page; tsconfig.scripts.json type-checks them
 next.config.ts      typed routes, security headers; eslint.config.mjs: Next flat config plus repo rules
@@ -144,6 +150,14 @@ The services the app talks to come up with `make web-stack && make web-stack-wai
 service on `SERVICE_PORT_BASE`+1 to +10 from the root `.env`, memory stores, pids and logs in
 `var/web-stack`; `make web-stack-logs SERVICE=<name>` and `make web-stack-down`), and
 `.env.local`'s `CW_WEB_*_URL` values point the app at them when the base is not 8000.
+`make web-seed` then fills them with the demo tenant over their HTTP APIs: the owner's four
+consents, the demo GSTIN's registration with the static pre-fill and the answers on both nodes,
+the WhatsApp preference, and notification 01/2026-Central Tax with its six clauses, five
+mentions and one relation candidate, replayed from `scripts/seed/fixtures/rulebook` (recorded
+once with the pipeline's parser and grammar; the README there has the command). It prints the
+tenant id, the node ids and the document id, writes them to `var/seed/last.json` (the sign-in
+form offers that tenant), and exits non-zero when any step fails (`ARGS="--tenant <uuid>"` fills
+a given tenant, `--json` prints the report, `--skip-rulebook` leaves the rulebook alone).
 `pnpm --filter web screens:gen` regenerates `docs/web/screens.md` (`screens:check` compares,
 `make web-screens-check` in `make check`; `screens:audit` lists the awaited routes still absent
 from the committed specs). `next dev` maintains `AGENTS.md` (Next.js agent rules); keep it

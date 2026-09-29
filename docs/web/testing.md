@@ -131,6 +131,18 @@ No page on `main` calls a service yet, so the suite passes without the stack; a 
 that reads a service starts with the stack up and seeded, and the CI job brings it up before
 Playwright.
 
+`make web-seed` is the seed for that stack (`apps/web/scripts/seed`, run by Node's type
+stripping on the openapi-fetch clients typed from the contracts): real HTTP calls only, no mock
+and no invented data. Its pure parts run in the unit suite under the node environment:
+`seed.test.mts` (the demo facts, the service URLs, the arguments, the document id rule, and the
+recorded rulebook fixtures: they parse, the recorded PDF hashes to the fixture's digest, every
+mention is the exact slice of its clause, every candidate targets a recorded mention and quotes
+its clause), `http.test.mts` (a recording fetch shows the tenant header on identity, profile and
+notification only and the write token on the rulebook admin client only; problem bodies and
+connection failures become the printed failure) and `report.test.mts` (the state file and the
+summary). The steps themselves are proved by running `make web-stack && make web-stack-wait &&
+make web-seed` against the real services.
+
 `make check` runs every gate CI runs without Docker, including `web-screens-check`
 (`docs/web/screens.md` matches the registry) and `openapi-ts-check` (the TypeScript types under
 `packages/contracts/clients/typescript/openapi` match the committed OpenAPI specs; `make

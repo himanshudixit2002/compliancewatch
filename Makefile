@@ -414,7 +414,7 @@ openapi-public: check-uv ## Merge the operations the services tag public into pa
 	$(UV) run python packages/contracts/scripts/generate_rest.py
 
 # ---- Web app (apps/web, packages/ui) ---------------------------------------------------------
-.PHONY: web-dev web-stack web-stack-wait web-stack-down web-stack-logs web-e2e-install web-e2e web-screens web-screens-check openapi-ts openapi-ts-check
+.PHONY: web-dev web-stack web-stack-wait web-stack-down web-stack-logs web-seed web-e2e-install web-e2e web-screens web-screens-check openapi-ts openapi-ts-check
 CHECKS += web-screens-check openapi-ts-check
 # The port comes from WEB_PORT in .env (3000 unless the file says otherwise); a value already in
 # the environment wins, as for every variable the recipes source.
@@ -494,6 +494,18 @@ web-stack-down: ## Stop the web-stack services and remove their pid files (logs 
 web-stack-logs: ## Tail a web-stack service's log: make web-stack-logs SERVICE=identity (every log without SERVICE)
 	@if [ -n "$(SERVICE)" ]; then tail -n 100 -f $(WEB_STACK_DIR)/$(SERVICE).log; \
 	else for f in $(WEB_STACK_DIR)/*.log; do [ -f "$$f" ] || continue; echo "==> $$f"; tail -n 20 "$$f"; done; fi
+
+# The demo tenant in the running stack, over the services' HTTP APIs (apps/web/scripts/seed): the
+# owner's consents, the GSTIN registration with its pre-fill and answers, the WhatsApp preference,
+# and one recorded CBIC notification with its clauses, mentions and relation candidate replayed
+# from committed fixtures. It records the tenant in var/seed/last.json for the development
+# sign-in and exits non-zero when any step fails. The service URLs are the CW_WEB_*_URL values in
+# apps/web/.env.local, else SERVICE_PORT_BASE+1..10; the write token is the one make web-stack
+# gives the rulebook (CW_RULEBOOK_WRITE_TOKEN from .env, else local-write-token).
+web-seed: check-pnpm ## Seed the web-stack services with the demo tenant and a recorded notification: make web-seed [ARGS="--tenant <uuid> --json"]
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	CW_WEB_RULEBOOK_WRITE_TOKEN="$${CW_WEB_RULEBOOK_WRITE_TOKEN:-$${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}}" \
+	$(PNPM) --silent --filter web seed $(ARGS)
 
 web-e2e-install: check-pnpm ## Download Chromium for Playwright, once per machine (the package has no install script)
 	$(PNPM) --filter web e2e:install

@@ -201,6 +201,12 @@ pids and logs land in `var/web-stack`. `make web-stack-wait` waits for every `/h
 (memory stores forget their rows then; `STORE=postgres` runs the stores on the compose
 Postgres after `make dev` and `make migrate`). The web app reaches the stack through the
 `CW_WEB_*_URL` values in `apps/web/.env.local` (`http://localhost:9201` onward in a second copy).
+`make web-seed` fills the running stack with the demo tenant through the services' HTTP APIs
+(consents, the demo GSTIN's registration, pre-fill and answers, the WhatsApp preference, and one
+recorded CBIC notification with its clauses, mentions and relation candidate for the admin
+review queues), records it in `var/seed/last.json` for the development sign-in, and exits
+non-zero when a step fails; run it again after every `make web-stack`, since memory stores start
+empty.
 
 ## Not in the stack yet
 

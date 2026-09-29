@@ -22,14 +22,16 @@ const seedFileSchema = z.object({
   seeded_at: z.string().optional(),
 });
 
+// The file is written by the seed at run time, outside the app; the ignore comments keep the
+// output tracing from pulling the whole project into the server bundle for this one path.
 export function seedStatePath(env = getEnv()): string {
-  return resolve(process.cwd(), env.CW_WEB_SEED_STATE_PATH);
+  return resolve(/* turbopackIgnore: true */ process.cwd(), env.CW_WEB_SEED_STATE_PATH);
 }
 
 export async function seedState(): Promise<SeedState | null> {
   let text: string;
   try {
-    text = await readFile(seedStatePath(), "utf8");
+    text = await readFile(/* turbopackIgnore: true */ seedStatePath(), "utf8");
   } catch {
     return null;
   }

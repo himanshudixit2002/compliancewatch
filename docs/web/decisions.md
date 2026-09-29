@@ -241,3 +241,20 @@ Consequences: memory stores forget their rows when the stack stops, so `make web
 after every `make web-stack`; a second working copy only moves `SERVICE_PORT_BASE`; the web
 app's `CW_WEB_*_URL` defaults match the 8000 base; `make web-e2e` stays a build plus Playwright,
 because no page on `main` calls a service yet, and a spec that needs one runs with the stack up.
+
+## D-020: The seed replays the pipeline's recorded request bodies for one notification
+
+2026-09-29. The admin review queues are empty on a fresh stack, and the web app must never
+invent regulatory data. Running the pipeline needs a queue, a worker and a model; parsing the
+PDF again in TypeScript would be a second parser that could disagree with the real one. The
+seed therefore replays three committed JSON files, the exact bodies the pipeline's
+`HttpRulebook` sends for notification 01/2026-Central Tax (document with clauses, mentions,
+relation candidate), recorded once by `scripts/seed/fixtures/rulebook/record.py` with the
+pipeline's `PdfParser`, mention grammar and relation stage over the PDF its own tests keep
+(the candidate comes from the scripted answer the demo's knowledge-flow test uses; no model is
+called). Before every run the seed hashes that PDF and refuses to continue unless the digest
+and every span agree with the fixtures; the document id is the digest's first 32 hex digits
+read as a UUID, the kernel's rule. Consequences: a change to the parser, the grammar, the relation stage or the PDF
+means running the recorder again (the README has the `uv` command) and committing the new
+files; the seed blanks the candidate's rule key when the target rulebook does not list that
+rule, as the relation stage's answer schema would; the fixture test fails when the files drift.

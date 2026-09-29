@@ -1,0 +1,47 @@
+{
+  "source_id": "00000000-0000-4000-8000-00000000000b",
+  "sha256": "51f5dbee1615f0ec47256abddb11061a348e81b883051e89733a06b062bcebed",
+  "regulator": "CBIC",
+  "doc_type": "notification",
+  "external_ref": "01/2026-Central Tax",
+  "url": "https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/gst-ct-01-2026.pdf",
+  "title": "Seeks to extends the due date for furnishing the return in FORM GSTR-3B for the month of March, 2026 till the twenty-first day of April, 2026",
+  "language": "en",
+  "media_type": "application/pdf",
+  "parser_version": "pdf@1",
+  "published_at": "2026-04-21",
+  "fetched_at": "2026-09-28T00:00:00+00:00",
+  "raw_uri": null,
+  "clauses": [
+    {
+      "clause_ref": "en.p1",
+      "text": "[TO BE PUBLISHED IN THE GAZETTE OF INDIA, EXTRAORDINARY, PART II, SECTION 3, SUB- SECTION (i)]",
+      "page": 1
+    },
+    {
+      "clause_ref": "en.p2",
+      "text": "GOVERNMENT OF INDIA MINISTRY OF FINANCE DEPARTMENT OF REVENUE CENTRAL BOARD OF INDIRECT TAXES AND CUSTOMS NOTIFICATION No. 01/2026 – Central Tax New Delhi, dated the 21st April, 2026",
+      "page": 1
+    },
+    {
+      "clause_ref": "en.p3",
+      "text": "G.S.R … (E).— In exercise of the powers conferred by sub -section (6) of section 39 of the Central Goods and Services Tax Act, 2017 (12 of 2017), the Commissioner, on the recommendations of the GST Council, hereby extends the due  date for furnishing the return in FORM GSTR-3B for the month of March, 2026 till the twenty -first day of April, 2026, for the registered persons who are required to furnish return under sub-section (1) of section 39 read with clause (i) of sub -rule (1) of  rule 61 of the Central Goods and Services Tax Rules, 2017.",
+      "page": 1
+    },
+    {
+      "clause_ref": "en.p4",
+      "text": "2.  This notification shall come into effect from 20th day of April, 2026.",
+      "page": 1
+    },
+    {
+      "clause_ref": "en.p5",
+      "text": "[F. No. CBIC-20006/45/2025-GST]",
+      "page": 1
+    },
+    {
+      "clause_ref": "en.p6",
+      "text": "(Kangale Shrunkhala Motiram) Director",
+      "page": 1
+    }
+  ]
+}

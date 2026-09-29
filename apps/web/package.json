@@ -14,7 +14,8 @@
     "e2e:install": "playwright install --with-deps chromium",
     "screens:gen": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/screens-doc.mts",
     "screens:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/screens-doc.mts --check",
-    "screens:audit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/screens-doc.mts --audit"
+    "screens:audit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/screens-doc.mts --audit",
+    "seed": "node --env-file-if-exists=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed/main.mts"
   },
   "dependencies": {
     "@compliancewatch/contracts": "workspace:*",
