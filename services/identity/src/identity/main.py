@@ -2,7 +2,8 @@
 
 Guide section 11: wiring of interfaces to implementations happens here, never inside the layers.
 Consent records are the first thing this service owns (tenants and users arrive with Supabase
-Auth per ADR-014). Billing is behind ``CW_BILLING_PROVIDER``.
+Auth per ADR-014), with channel consents for numbers no tenant owns yet behind
+``CW_IDENTITY_CHANNEL_TOKEN``. Billing is behind ``CW_BILLING_PROVIDER``.
 """
 
 from collections.abc import Callable
@@ -14,18 +15,24 @@ from domain_kernel.errors import DomainError
 from identity import __version__
 from identity.api.router import router
 from identity.application.billing import BillingLedger, ReceiveBillingWebhook, StartSubscription
+from identity.application.channel_consents import ChannelConsentStatus, RecordChannelConsent
 from identity.application.consents import ConsentStatus, RecordConsent
 from identity.domain.billing import BillingProvider
+from identity.domain.channel_consent import ChannelUnitOfWorkFactory
 from identity.domain.consent import UnitOfWorkFactory
 from identity.domain.errors import (
     BillingDisabledError,
+    ChannelPurposeInvalidError,
+    ChannelSubjectInvalidError,
+    ChannelTokenInvalidError,
+    ChannelWritesDisabledError,
     InvalidWebhookSignatureError,
     NoticeVersionRequiredError,
     TenantRequiredError,
 )
 from identity.infrastructure.billing.memory import MemoryBillingProvider
 from identity.infrastructure.billing.razorpay import RazorpayBillingProvider
-from identity.infrastructure.memory import MemoryStore
+from identity.infrastructure.memory import MemoryChannelStore, MemoryStore
 from identity.infrastructure.repository import PostgresUnitOfWorkFactory
 from identity.settings import IdentitySettings
 from identity.wiring import Wiring
@@ -37,6 +44,10 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     NoticeVersionRequiredError: 422,
     BillingDisabledError: 503,
     InvalidWebhookSignatureError: 401,
+    ChannelWritesDisabledError: 503,
+    ChannelTokenInvalidError: 401,
+    ChannelSubjectInvalidError: 422,
+    ChannelPurposeInvalidError: 422,
 }
 
 
@@ -60,13 +71,16 @@ def billing_provider(settings: IdentitySettings) -> BillingProvider | None:
 
 def wire(settings: IdentitySettings) -> Wiring:
     unit_of_work: UnitOfWorkFactory
+    channel_unit_of_work: ChannelUnitOfWorkFactory
     ping: Callable[[], bool]
     if settings.identity_store == "memory":
         memory = MemoryStore()
         unit_of_work, ping = memory, memory.ping
+        channel_unit_of_work = MemoryChannelStore()
     else:
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url)
         unit_of_work, ping = postgres, postgres.ping
+        channel_unit_of_work = postgres.channel_unit_of_work
 
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)
@@ -79,6 +93,9 @@ def wire(settings: IdentitySettings) -> Wiring:
         store_ready=store_ready,
         record_consent=RecordConsent(unit_of_work),
         consent_status=ConsentStatus(unit_of_work),
+        channel_unit_of_work=channel_unit_of_work,
+        record_channel_consent=RecordChannelConsent(channel_unit_of_work),
+        channel_consent_status=ChannelConsentStatus(channel_unit_of_work),
         billing_enabled=provider is not None,
         billing_ledger=ledger,
         start_subscription=None if provider is None else StartSubscription(provider, ledger),

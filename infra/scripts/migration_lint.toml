@@ -45,3 +45,12 @@ reason = """
 Row-level security is deliberately not applied: the cost dashboard reads this table across
 tenants and tenant_id is NULL for regulatory calls (migration 0001 of llm-gateway).
 """
+
+[[exemptions]]
+table = "identity.channel_consent"
+reason = """
+Keyword opt-ins and opt-outs keyed by phone number, recorded when a person writes to the WhatsApp
+number before any tenant owns it, so there is no tenant_id to isolate by. Only identity's
+service-token routes read or write it, and a trigger keeps it append-only (migration 0002 of
+identity).
+"""

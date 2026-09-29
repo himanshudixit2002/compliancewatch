@@ -2,11 +2,15 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Header, Query, Request, status
+from fastapi import APIRouter, Header, Path, Query, Request, Response, status
 
 from domain_kernel.ids import UserId
-from identity.api.deps import Tenant, Wired
+from identity.api.deps import ChannelAccess, Tenant, Wired
 from identity.api.schemas import (
+    E164_PATTERN,
+    ChannelConsentIn,
+    ChannelConsentOut,
+    ChannelConsentSummaryOut,
     ConsentIn,
     ConsentOut,
     ConsentSummaryOut,
@@ -16,6 +20,7 @@ from identity.api.schemas import (
     WebhookOut,
 )
 from identity.domain.billing import PLANS
+from identity.domain.channel_consent import ConsentChannel
 from identity.domain.errors import BillingDisabledError
 from py_common.problems import problem_responses
 
@@ -56,6 +61,48 @@ def consent_status(
     subject: Annotated[str, Query(min_length=1, max_length=254)], tenant: Tenant, wired: Wired
 ) -> ConsentSummaryOut:
     return ConsentSummaryOut.from_summary(wired.consent_status.run(tenant, subject))
+
+
+@router.post(
+    "/channel-consents",
+    summary="Record a keyword opt-in or opt-out for a number no tenant owns yet (service token)",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        200: {"model": ChannelConsentOut, "description": "The message was recorded already"},
+        **problem_responses(401, 422, 503),
+    },
+    dependencies=[ChannelAccess],
+)
+def record_channel_consent(
+    body: ChannelConsentIn, wired: Wired, response: Response
+) -> ChannelConsentOut:
+    recorded = wired.record_channel_consent.run(
+        body.channel,
+        body.subject,
+        body.purpose,
+        granted=body.granted,
+        source=body.source,
+        notice_version=body.notice_version,
+        evidence=body.evidence,
+        message_id=body.message_id,
+    )
+    if not recorded.created:
+        response.status_code = status.HTTP_200_OK
+    return ChannelConsentOut.from_record(recorded.record)
+
+
+@router.get(
+    "/channel-consents/{channel}/{subject}",
+    summary="A number's current state per purpose on a channel, with the history (service token)",
+    responses=problem_responses(401, 422, 503),
+    dependencies=[ChannelAccess],
+)
+def channel_consent_status(
+    channel: ConsentChannel,
+    subject: Annotated[str, Path(pattern=E164_PATTERN, description="E.164 number")],
+    wired: Wired,
+) -> ChannelConsentSummaryOut:
+    return ChannelConsentSummaryOut.from_summary(wired.channel_consent_status.run(channel, subject))
 
 
 @router.get("/billing/plans", summary="The plans on offer (placeholders until pricing is decided)")

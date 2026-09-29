@@ -3,12 +3,111 @@ import hmac
 import json
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from identity.main import build_app
-from identity.testing import identity_settings
+from identity.testing import CHANNEL_TOKEN, identity_settings
 
 TENANT = {"x-tenant-id": str(uuid4())}
+SERVICE = {"x-cw-service-token": CHANNEL_TOKEN}
+CHANNEL_CONSENTS = "/v1/identity/channel-consents"
+NUMBER = "919876543210"
+NOTICE = "whatsapp-consent 0.1-draft"
+
+
+def channel_consent(**changes: object) -> dict[str, object]:
+    body: dict[str, object] = {
+        "channel": "whatsapp",
+        "subject": NUMBER,
+        "purpose": "whatsapp_reminders",
+        "granted": True,
+        "source": "whatsapp_keyword",
+        "notice_version": NOTICE,
+        "evidence": "keyword START in WhatsApp message wamid.1",
+        "message_id": "wamid.1",
+    }
+    body.update(changes)
+    return body
+
+
+def test_channel_consents_round_trip(client: TestClient) -> None:
+    created = client.post(CHANNEL_CONSENTS, json=channel_consent(), headers=SERVICE)
+    assert created.status_code == 201, created.text
+    assert created.json()["subject"] == NUMBER
+    again = client.post(CHANNEL_CONSENTS, json=channel_consent(), headers=SERVICE)
+    assert again.status_code == 200
+    assert again.json() == created.json()
+    withdrawn = client.post(
+        CHANNEL_CONSENTS,
+        json=channel_consent(
+            subject="+" + NUMBER, granted=False, notice_version="", message_id="wamid.2"
+        ),
+        headers=SERVICE,
+    )
+    assert withdrawn.status_code == 201
+    summary = client.get(f"{CHANNEL_CONSENTS}/whatsapp/%2B{NUMBER}", headers=SERVICE)
+    assert summary.status_code == 200
+    body = summary.json()
+    assert (body["channel"], body["subject"]) == ("whatsapp", NUMBER)
+    assert body["states"] == [
+        {
+            "purpose": "whatsapp_reminders",
+            "granted": False,
+            "notice_version": "",
+            "since": withdrawn.json()["recorded_at"],
+            "source": "whatsapp_keyword",
+        }
+    ]
+    assert [item["message_id"] for item in body["history"]] == ["wamid.1", "wamid.2"]
+    unknown = client.get(f"{CHANNEL_CONSENTS}/whatsapp/919999999999", headers=SERVICE)
+    assert unknown.json() == {
+        "channel": "whatsapp",
+        "subject": "919999999999",
+        "states": [],
+        "history": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("changes", "problem"),
+    [
+        ({"notice_version": ""}, "consent-notice-version-required"),
+        ({"purpose": "terms"}, "identity-channel-purpose-invalid"),
+        ({"subject": "12345"}, "request-invalid"),
+        ({"subject": "+0919876543210"}, "request-invalid"),
+        ({"source": "api"}, "invariant-violation"),
+        ({"channel": "email"}, "request-invalid"),
+    ],
+)
+def test_a_channel_consent_the_service_refuses_is_422(
+    client: TestClient, changes: dict[str, object], problem: str
+) -> None:
+    response = client.post(CHANNEL_CONSENTS, json=channel_consent(**changes), headers=SERVICE)
+    assert response.status_code == 422, response.text
+    assert response.json()["type"].endswith(":" + problem)
+    bad_path = client.get(f"{CHANNEL_CONSENTS}/whatsapp/12345", headers=SERVICE)
+    assert bad_path.status_code == 422
+
+
+def test_channel_consents_need_the_service_token(client: TestClient) -> None:
+    for headers in ({}, {"x-cw-service-token": "wrong"}, TENANT):
+        post = client.post(CHANNEL_CONSENTS, json=channel_consent(), headers=headers)
+        assert post.status_code == 401
+        assert post.json()["type"].endswith(":identity-channel-token-invalid")
+        assert client.get(f"{CHANNEL_CONSENTS}/whatsapp/{NUMBER}", headers=headers).status_code == (
+            401
+        )
+
+
+@pytest.mark.parametrize("token", [None, ""])
+def test_channel_consents_are_503_without_a_configured_token(token: str | None) -> None:
+    with TestClient(build_app(identity_settings(identity_channel_token=token))) as client:
+        post = client.post(CHANNEL_CONSENTS, json=channel_consent(), headers=SERVICE)
+        assert post.status_code == 503
+        assert post.json()["type"].endswith(":identity-channel-writes-disabled")
+        read = client.get(f"{CHANNEL_CONSENTS}/whatsapp/{NUMBER}", headers=SERVICE)
+        assert read.status_code == 503
 
 
 def test_consents_round_trip(client: TestClient) -> None:
