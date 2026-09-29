@@ -1,93 +1,99 @@
-"""Composition root for the notification service.
+"""The notification service's HTTP app.
 
-Guide section 11: wiring of interfaces to implementations happens here, never inside the layers.
-Stores are in memory until the service's own migration lands; the WhatsApp channel is real only
-behind ``CW_WHATSAPP_ENABLED`` with a phone number id and an access token.
+``build_app(settings, channels=..., rules=..., email_feedback=...)`` wires the service
+(``notification.composition``) and serves its routes; the channels, the rulebook reader and the
+SES feedback reader it takes replace the configured ones, which is how the demo and the tests
+send and receive through fakes. With telemetry on, the app also reports the age of the oldest
+pending work (``install_pending_metrics``): the API process runs whether or not a worker does, so
+the gauge keeps reporting when the dispatcher stops.
 """
+
+from collections.abc import Mapping
 
 from fastapi import FastAPI
 
 from domain_kernel.channels import Channel
 from domain_kernel.errors import DomainError
-from domain_kernel.protocols import NotificationChannel
+from domain_kernel.events import utc_now
 from notification import __version__
+from notification.api.notifications import router as notifications_router
+from notification.api.receipts import router as receipts_router
+from notification.api.recipients import router as recipients_router
 from notification.api.router import router
-from notification.application.preferences import SetOptIn
-from notification.application.send import SendNotification
+from notification.composition import wire
+from notification.domain.channels import ChannelAdapter
 from notification.domain.errors import (
+    DependencyUnavailableError,
+    EmailFeedbackInvalidError,
+    EmailFeedbackUnauthorizedError,
+    InvalidAddressError,
     MissingPlaceholderError,
+    NotificationNotFoundError,
+    ReceiptsDisabledError,
+    ReceiptTokenInvalidError,
+    RecipientNotFoundError,
+    ResendNotAllowedError,
     TenantRequiredError,
     UnknownChannelError,
     UnknownTemplateError,
 )
-from notification.domain.preferences import QuietHours
-from notification.infrastructure.memory import LogEventSink, MemoryPreferences, MemorySentLog
-from notification.infrastructure.whatsapp import DisabledChannel, WhatsAppCloudChannel
+from notification.domain.ports import EmailFeedbackReader, RuleVersionReader
+from notification.infrastructure.metrics import register_pending_age_gauge
 from notification.settings import NotificationSettings
 from notification.wiring import Wiring
 from py_common.app import create_app
+from py_common.telemetry import Telemetry
 
 SERVICE_NAME = "notification"
 PROBLEM_STATUS: dict[type[DomainError], int] = {
     TenantRequiredError: 401,
     UnknownTemplateError: 422,
     MissingPlaceholderError: 422,
+    InvalidAddressError: 422,
+    RecipientNotFoundError: 404,
     UnknownChannelError: 503,
+    DependencyUnavailableError: 503,
+    NotificationNotFoundError: 404,
+    ResendNotAllowedError: 409,
+    ReceiptsDisabledError: 503,
+    ReceiptTokenInvalidError: 401,
+    EmailFeedbackInvalidError: 422,
+    EmailFeedbackUnauthorizedError: 401,
 }
-WHATSAPP_DISABLED = "whatsapp channel disabled: set CW_WHATSAPP_ENABLED and the Meta credentials"
 
 
-def wire(settings: NotificationSettings) -> Wiring:
-    preferences = MemoryPreferences()
-    sent_log = MemorySentLog()
-    events = LogEventSink()
-    quiet_hours = QuietHours.parse(settings.quiet_hours_start, settings.quiet_hours_end)
-    whatsapp: NotificationChannel
-    if (
-        settings.whatsapp_enabled
-        and settings.whatsapp_phone_number_id
-        and settings.whatsapp_access_token is not None
-    ):
-        whatsapp = WhatsAppCloudChannel(
-            settings.whatsapp_phone_number_id,
-            settings.whatsapp_access_token.get_secret_value(),
-            api_version=settings.whatsapp_api_version,
-        )
-    else:
-        whatsapp = DisabledChannel(WHATSAPP_DISABLED)
-    channels = {
-        Channel.WHATSAPP: whatsapp,
-        Channel.EMAIL: DisabledChannel("email channel not wired yet (SES arrives with deploy)"),
-    }
-
-    async def store_ready() -> bool:
-        return preferences.ping()
-
-    return Wiring(
-        settings=settings,
-        preferences=preferences,
-        sent_log=sent_log,
-        events=events,
-        channels=channels,
-        quiet_hours=quiet_hours,
-        send=SendNotification(preferences, sent_log, events, channels, quiet_hours=quiet_hours),
-        set_opt_in=SetOptIn(preferences),
-        store_ready=store_ready,
+def install_pending_metrics(app: FastAPI, wiring: Wiring) -> bool:
+    """Register the pending-work age gauge when telemetry is on; whether it did."""
+    telemetry: Telemetry = app.state.telemetry
+    if not telemetry.enabled or telemetry.meter_provider is None:
+        return False
+    register_pending_age_gauge(
+        wiring.work_index.oldest_due,
+        utc_now,
+        telemetry.meter_provider.get_meter(SERVICE_NAME, __version__),
     )
+    return True
 
 
-def build_app(settings: NotificationSettings | None = None) -> FastAPI:
+def build_app(
+    settings: NotificationSettings | None = None,
+    *,
+    channels: Mapping[Channel, ChannelAdapter] | None = None,
+    rules: RuleVersionReader | None = None,
+    email_feedback: EmailFeedbackReader | None = None,
+) -> FastAPI:
     settings = settings or NotificationSettings(service_name=SERVICE_NAME)
-    wiring = wire(settings)
+    wiring = wire(settings, channels=channels, rules=rules, email_feedback=email_feedback)
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router],
+        routers=[router, recipients_router, notifications_router, receipts_router],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         problem_status=PROBLEM_STATUS,
     )
     app.state.wiring = wiring
+    install_pending_metrics(app, wiring)
     return app
 
 

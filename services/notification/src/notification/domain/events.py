@@ -20,7 +20,7 @@ from domain_kernel.ids import BusinessId, NotificationId, ObligationId
 @dataclass(frozen=True, slots=True, kw_only=True)
 class NotificationSent(DomainEvent):
     topic: ClassVar[str] = "notification.sent"
-    schema_version: ClassVar[str] = "1.0.0"
+    schema_version: ClassVar[str] = "1.0.1"
 
     notification_id: NotificationId
     obligation_id: ObligationId
@@ -45,7 +45,7 @@ class NotificationSent(DomainEvent):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class NotificationFailed(DomainEvent):
     topic: ClassVar[str] = "notification.failed"
-    schema_version: ClassVar[str] = "1.0.0"
+    schema_version: ClassVar[str] = "1.0.1"
 
     notification_id: NotificationId
     obligation_id: ObligationId

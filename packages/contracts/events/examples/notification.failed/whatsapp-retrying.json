@@ -1,7 +1,7 @@
 {
   "event_id": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d",
   "topic": "notification.failed",
-  "schema_version": "1.0.0",
+  "schema_version": "1.0.1",
   "occurred_at": "2026-10-01T02:31:05Z",
   "tenant_id": "5b1f3d2e-7c4a-4e0b-9a6d-1f2e3d4c5b6a",
   "correlation_id": "c2d3e4f5-a6b7-4c8d-8e9f-0a1b2c3d4e5f",

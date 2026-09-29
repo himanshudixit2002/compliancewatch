@@ -2,10 +2,12 @@ import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
 import {
   CloudApiSender,
+  DEFAULT_NOTIFICATION_API_URL,
   HttpPreferencesClient,
   LoggingSender,
   NotConnectedQa,
   consentLedger,
+  receiptsClient,
 } from "./clients.ts";
 
 const env = process.env;
@@ -23,6 +25,9 @@ const sender =
 // WHATSAPP_CONSENT_RECORDING_ENABLED=true; on, it needs IDENTITY_API_URL and IDENTITY_SERVICE_TOKEN.
 const consentRecording = env.WHATSAPP_CONSENT_RECORDING_ENABLED === "true";
 const consents = consentLedger(env);
+// Delivery statuses and inbound times go to notification with NOTIFICATION_BOT_TOKEN; without it
+// they are not forwarded, and the bot says so once at start.
+const receipts = receiptsClient(env);
 
 const app = createApp(
   {
@@ -31,11 +36,14 @@ const app = createApp(
     requireSignature: env.WHATSAPP_REQUIRE_SIGNATURE !== "false",
   },
   {
-    preferences: new HttpPreferencesClient(env.NOTIFICATION_API_URL ?? "http://localhost:8006"),
+    preferences: new HttpPreferencesClient(
+      env.NOTIFICATION_API_URL || DEFAULT_NOTIFICATION_API_URL,
+    ),
     consents,
     sender,
     qa: new NotConnectedQa(),
   },
+  receipts,
 );
 
 const server = serve({ fetch: app.fetch, port }, (info) => {

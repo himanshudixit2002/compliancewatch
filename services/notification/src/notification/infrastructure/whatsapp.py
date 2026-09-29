@@ -1,10 +1,13 @@
-"""The WhatsApp Business Cloud API as a ``NotificationChannel``.
+"""The WhatsApp Business Cloud API as a ``ChannelAdapter``.
 
 ``POST https://graph.facebook.com/<version>/<phone_number_id>/messages`` with a bearer token.
-A rendered message is sent as free text; a template send (needed outside the 24-hour customer
-service window) is the same call with a ``template`` object and is prepared here but only
-used when the template's ``meta_name`` is set and approved. The adapter is behind
-``CW_WHATSAPP_ENABLED``; with the flag off the composition root wires ``DisabledChannel``.
+Inside the 24-hour customer service window (the person wrote to us within the last day) the
+rendered message goes as free text (``text_payload``). Outside it WhatsApp accepts only a
+template Meta has approved: the same call with a ``template`` object naming its ``meta_name``
+and language and listing its values in order (``template_payload``). A message outside the
+window whose template is not approved gets a failed receipt without an HTTP call, since Meta
+would refuse it. The adapter is behind ``CW_WHATSAPP_ENABLED``; with the flag off the
+composition root wires ``DisabledChannel``.
 """
 
 from collections.abc import Callable
@@ -13,7 +16,11 @@ from datetime import datetime
 import httpx2
 
 from domain_kernel.events import utc_now
-from domain_kernel.notifications import DeliveryReceipt, DeliveryStatus, RenderedMessage
+from domain_kernel.notifications import DeliveryReceipt, DeliveryStatus
+from notification.domain.channels import OutboundMessage
+from py_common.logging import get_logger
+
+log = get_logger(__name__)
 
 GRAPH_URL = "https://graph.facebook.com"
 
@@ -33,26 +40,54 @@ class WhatsAppCloudChannel:
         self._headers = {"authorization": f"Bearer {access_token}"}
         self._clock = clock
 
-    def send(self, message: RenderedMessage) -> DeliveryReceipt:
-        body = text_payload(message.recipient, message.body)
+    def deliver(self, message: OutboundMessage) -> DeliveryReceipt:
+        if not message.deliverable:
+            return DeliveryReceipt(
+                DeliveryStatus.FAILED, self._clock(), error=message.undeliverable_reason()
+            )
+        rendered = message.rendered
+        if message.session_open:
+            body = text_payload(rendered.recipient, rendered.body)
+        else:
+            body = template_payload(
+                rendered.recipient,
+                message.template.meta_name,
+                message.template.language,
+                list(message.ordered_params),
+            )
         try:
             response = self._client.post(self._url, json=body, headers=self._headers)
         except httpx2.TransportError as exc:
             return DeliveryReceipt(DeliveryStatus.FAILED, self._clock(), error=f"transport: {exc}")
-        if response.status_code >= 400:
+        if not response.is_success:
             return DeliveryReceipt(
                 DeliveryStatus.FAILED,
                 self._clock(),
                 error=f"{response.status_code}: {response.text[:300]}",
             )
-        data = response.json()
-        messages = data.get("messages") or [{}]
         return DeliveryReceipt(
-            DeliveryStatus.SENT, self._clock(), provider_message_id=str(messages[0].get("id", ""))
+            DeliveryStatus.SENT, self._clock(), provider_message_id=_message_id(response)
         )
 
     def close(self) -> None:
         self._client.close()
+
+
+def _message_id(response: httpx2.Response) -> str:
+    """The id Meta gave the message it took, or '' when the answer does not carry one where the
+    Graph API puts it. A success is a send either way: retrying it would send the message twice,
+    and only the statuses Meta reports for it later go unmatched."""
+    try:
+        data = response.json()
+    except ValueError:
+        data = None
+    messages = data.get("messages") if isinstance(data, dict) else None
+    first = messages[0] if isinstance(messages, list) and messages else None
+    message_id = first.get("id") if isinstance(first, dict) else None
+    if not isinstance(message_id, str) or not message_id:
+        log.warning("notification.whatsapp_message_id_missing", status=response.status_code)
+        return ""
+    return message_id
 
 
 def text_payload(to: str, body: str) -> dict[str, object]:
@@ -93,5 +128,5 @@ class DisabledChannel:
         self._reason = reason
         self._clock = clock
 
-    def send(self, message: RenderedMessage) -> DeliveryReceipt:
+    def deliver(self, message: OutboundMessage) -> DeliveryReceipt:
         return DeliveryReceipt(DeliveryStatus.FAILED, self._clock(), error=self._reason)

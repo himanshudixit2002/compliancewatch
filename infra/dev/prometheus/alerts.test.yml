@@ -1,6 +1,6 @@
 # promtool unit tests for alerts.yml (`make alerts-check`, the ops job in ci.yml). The api-slo,
-# workers, outbox and rulebook-review groups have cases; each package appends the cases for the
-# alert group it owns.
+# workers, outbox, rulebook-review and notification groups have cases; each package appends the
+# cases for the alert group it owns.
 rule_files:
   - alerts.yml
 
@@ -214,4 +214,136 @@ tests:
     alert_rule_test:
       - eval_time: 7h
         alertname: EntityReviewQueueBacklog
+        exp_alerts: []
+
+  # WhatsApp: 3 of 100 finished notifications failed for good each minute (3%), with retries on
+  # top that do not count. Email: 1 in 200 (0.5%). The rule needs 15 minutes above 1%.
+  - interval: 1m
+    input_series:
+      - series: 'notification_sends_total{channel="whatsapp", outcome="sent"}'
+        values: "0+97x60"
+      - series: 'notification_sends_total{channel="whatsapp", outcome="failed"}'
+        values: "0+3x60"
+      - series: 'notification_sends_total{channel="whatsapp", outcome="retry"}'
+        values: "0+50x60"
+      - series: 'notification_sends_total{channel="email", outcome="sent"}'
+        values: "0+199x60"
+      - series: 'notification_sends_total{channel="email", outcome="failed"}'
+        values: "0+1x60"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NotificationDeliveryFailures
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: NotificationDeliveryFailures
+        exp_alerts:
+          - exp_labels:
+              channel: whatsapp
+              severity: page
+              team: core-product
+            exp_annotations:
+              summary: "More than 1% of whatsapp notifications failed for good over 15 minutes"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/notification-delivery.md#notificationdeliveryfailures
+
+  # One duplicate delivery on WhatsApp at minute 10 fires at once and clears once it is 15
+  # minutes old.
+  - interval: 1m
+    input_series:
+      - series: 'notification_duplicate_sent_total{channel="whatsapp"}'
+        values: "0x10 1x30"
+      - series: 'notification_duplicate_sent_total{channel="email"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: NotificationDuplicateSent
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: NotificationDuplicateSent
+        exp_alerts:
+          - exp_labels:
+              channel: whatsapp
+              severity: page
+              team: core-product
+            exp_annotations:
+              summary: "A notification was delivered twice on whatsapp"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/notification-delivery.md#notificationduplicatesent
+      - eval_time: 35m
+        alertname: NotificationDuplicateSent
+        exp_alerts: []
+
+  # Two API replicas report the pending age. On one the rulebook outage ages it by a minute each
+  # minute from 0; the other read before and still says 0. max() takes the older: above 900 s
+  # from 16m, so pending until it fires at 21m.
+  - interval: 1m
+    input_series:
+      - series: 'notification_pending_oldest_age_seconds{service_instance_id="a"}'
+        values: "0+60x40"
+      - series: 'notification_pending_oldest_age_seconds{service_instance_id="b"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NotificationPendingOverdue
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: NotificationPendingOverdue
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: NotificationPendingOverdue
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              team: core-product
+            exp_annotations:
+              summary: "A pending notification has waited more than 15 minutes past its planned time"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/notification-delivery.md#notificationpendingoverdue
+
+  # An old notification that went out within 3 minutes of passing the objective does not page.
+  - interval: 1m
+    input_series:
+      - series: 'notification_pending_oldest_age_seconds{service_instance_id="a"}'
+        values: "0x10 1000 1060 1120 0x30"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: NotificationPendingOverdue
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: NotificationPendingOverdue
+        exp_alerts: []
+
+  # 100 emails sent a minute, 3 of them bounce (3%): above 2% from the start, firing after 30
+  # minutes. The complaints stay at zero, and WhatsApp receipts do not count.
+  - interval: 1m
+    input_series:
+      - series: 'notification_sends_total{channel="email", outcome="sent"}'
+        values: "0+100x60"
+      - series: 'notification_receipts_total{channel="email", kind="bounced", outcome="applied"}'
+        values: "0+3x60"
+      - series: 'notification_receipts_total{channel="email", kind="complained", outcome="applied"}'
+        values: "0x60"
+      - series: 'notification_receipts_total{channel="whatsapp", kind="failed", outcome="applied"}'
+        values: "0+50x60"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NotificationEmailBounces
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: NotificationEmailBounces
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              team: core-product
+            exp_annotations:
+              summary: "Email bounces and complaints passed 2% of the email notifications sent over 6 hours"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/notification-delivery.md#notificationemailbounces
+
+  # 1 bounce in 100 (1%) stays below the threshold.
+  - interval: 1m
+    input_series:
+      - series: 'notification_sends_total{channel="email", outcome="sent"}'
+        values: "0+100x60"
+      - series: 'notification_receipts_total{channel="email", kind="bounced", outcome="unknown"}'
+        values: "0+1x60"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: NotificationEmailBounces
         exp_alerts: []

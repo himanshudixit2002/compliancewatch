@@ -8,7 +8,7 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { HttpConsentLedger, HttpPreferencesClient } from "./clients.ts";
+import { HttpConsentLedger, HttpPreferencesClient, HttpReceiptsClient } from "./clients.ts";
 
 interface Interaction {
   readonly description: string;
@@ -31,6 +31,7 @@ const BASE_URL = "http://provider.test";
 const NUMBER = "919876543210";
 const STRANGER = "919999999999";
 const SERVICE_TOKEN = "test-channel-token";
+const BOT_TOKEN = "bot-token-for-tests";
 const AT = new Date("2026-09-29T06:30:00Z");
 
 function load(provider: string): Contract {
@@ -72,7 +73,7 @@ function replaying(contract: Contract) {
 }
 
 describe("consumer contract with notification", () => {
-  it("the preferences client sends the recorded requests and reads the recorded answers", async () => {
+  it("the preferences and receipts clients send the recorded requests", async () => {
     const { fetchImpl, pending } = replaying(load("notification"));
     const client = new HttpPreferencesClient(BASE_URL, fetchImpl);
     await client.setOptIn(NUMBER, true, "en");
@@ -80,6 +81,26 @@ describe("consumer contract with notification", () => {
     await client.setOptIn(NUMBER, false, "hi");
     expect(await client.isOptedIn(NUMBER)).toBe(false);
     expect(await client.isOptedIn(STRANGER)).toBe(false);
+    const at = AT.toISOString();
+    const inbound = [{ address: NUMBER, at }];
+    await new HttpReceiptsClient(BASE_URL, BOT_TOKEN, fetchImpl).forward({
+      statuses: [
+        {
+          provider_message_id: "wamid.contract.1",
+          status: "failed",
+          at,
+          error_code: 131026,
+          error_title: "Message undeliverable",
+        },
+      ],
+      inbound,
+    });
+    await expect(
+      new HttpReceiptsClient(BASE_URL, "not-the-bot-token", fetchImpl).forward({
+        statuses: [],
+        inbound,
+      }),
+    ).rejects.toThrow("receipts: 401");
     expect(pending).toEqual([]);
   });
 });

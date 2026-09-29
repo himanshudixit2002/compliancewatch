@@ -39,16 +39,22 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 
 | Variable | identity | profile | rulebook | obligation | notification | llm-gateway | pipeline | applicability-engine, qa, eval | whatsapp-bot |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `CW_DATABASE_URL` | secret | secret | secret | secret | secret (once it has tables) | secret (`CW_LLM_LEDGER=postgres`) | secret | secret | - |
+| `CW_DATABASE_URL` | secret | secret | secret | secret | secret (API, worker and relay) | secret (`CW_LLM_LEDGER=postgres`) | secret | secret | - |
 | `CW_DB_SCHEMA` | env | env | env | env | env | env | env | env | - |
-| `CW_KAFKA_BOOTSTRAP` + SASL | - | secret (relay) | secret (relay) | secret (relay) | secret | - | secret | secret | - |
+| `CW_KAFKA_BOOTSTRAP` + SASL | - | secret (relay) | secret (relay) | secret (relay) | secret (worker, `python -m notification.worker`, and relay) | - | secret | secret | - |
 | `CW_TEMPORAL_*` | - | - | - | - | - | - | secret | - | - |
-| `CW_REDIS_URL` | - | - | - | - | secret (digests, later) | secret (cache, later) | - | - | - |
+| `CW_REDIS_URL` | - | - | - | - | - (digests are held in Postgres) | secret (cache, later) | - | - | - |
 | `CW_OTEL_ENDPOINT` (+ header) | secret | secret | secret | secret | secret | secret | secret | secret | - |
 | `CW_AI_GATEWAY_API_KEY`, `CW_LLM_PROVIDER` | - | - | - | - | - | secret / env | - | - | - |
 | `CW_LANGFUSE_*` | - | - | - | - | - | secret | - | - | - |
 | `CW_LLM_ROUTES__<FEATURE>` (for example `CW_LLM_ROUTES__RETRIEVAL`), `CW_LLM_EMBEDDING_DIMENSIONS_PARAM` | - | - | - | - | - | env (only to override the routing table; the second defaults to `true`) | - | - | - |
 | `CW_WHATSAPP_ENABLED`, `CW_WHATSAPP_PHONE_NUMBER_ID`, `CW_WHATSAPP_ACCESS_TOKEN` | - | - | - | - | env / secret / secret | - | - | - | - |
+| `CW_NOTIFICATION_STORE` | - | - | - | - | env (default `postgres`; `memory` only for tests and demos, and the worker refuses it) | - | - | - | - |
+| `CW_QUIET_HOURS_START`, `CW_QUIET_HOURS_END`, `CW_NOTIFICATION_BATCH_WINDOW_SECONDS`, `CW_NOTIFICATION_DISPATCH_INTERVAL_SECONDS`, `CW_NOTIFICATION_DIGEST_AT` | - | - | - | - | env (defaults `21:00` and `08:00` IST, 300 s, 5 s, `09:00` IST) | - | - | - | - |
+| `CW_WEB_BASE_URL` | - | - | - | - | env (the web app's public URL, which messages link to) | - | - | - | - |
+| `CW_NOTIFICATION_BOT_TOKEN` (notification), `NOTIFICATION_BOT_TOKEN` (bot) | - | - | - | - | secret (unset, the WhatsApp receipt route answers 503) | - | - | - | secret (the same value; unset, the bot forwards no delivery statuses) |
+| `CW_EMAIL_ENABLED`, `CW_SMTP_HOST`, `CW_SMTP_PORT`, `CW_SMTP_USERNAME`, `CW_SMTP_PASSWORD`, `CW_EMAIL_FROM` | - | - | - | - | env / env / env / secret / secret / env (flag default `false`; owner core-product; on once the in-region SES or SMTP sending domain is verified with SPF, DKIM and DMARC; removed after email has run in production for 30 days, when the channel is wired whenever `CW_SMTP_HOST` is set) | - | - | - | - |
+| `CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN`, `CW_NOTIFICATION_SES_TOPIC_ARN` | - | - | - | - | secret / env (the password of the SNS subscription's basic credentials, and the SES feedback topic it must come from; unset token, the email receipt route answers 503) | - | - | - | - |
 | `CW_BILLING_PROVIDER`, `CW_RAZORPAY_*` | env / secret | - | - | - | - | - | - | - | - |
 | `CW_IDENTITY_STORE`, `CW_PROFILE_STORE`, `CW_PROFILE_GSTIN_LOOKUP` | env | env | - | - | - | - | - | - | - |
 | `CW_RULEBOOK_STORE` | - | - | env | - | - | - | - | - | - |
@@ -59,7 +65,7 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_RULEBOOK_REVIEW_TOKEN` | - | - | secret (analyst actions; the workbench holds the same value) | - | - | - | - | - | - |
 | `CW_RULEBOOK_PUBLISH_ENABLED` | - | - | env (default `false`; owner regulatory-intelligence; removed once the workbench publishes in production and the obligation consumer of the rule events is live) | - | - | - | - | - | - |
 | `CW_PIPELINE_KNOWLEDGE_ENABLED` | - | - | - | - | - | - | env | - | - |
-| `CW_RULEBOOK_URL`, `CW_LLM_GATEWAY_URL` | - | - | - | - | - | - | env | env (qa) | - |
+| `CW_RULEBOOK_URL`, `CW_LLM_GATEWAY_URL` | - | - | - | - | env (`CW_RULEBOOK_URL` only: the published facts of change cards) | - | env | env (qa) | - |
 | `CW_PROFILE_URL`, `CW_OBLIGATION_URL`, `CW_QA_HTTP_TIMEOUT_SECONDS`, `CW_QA_LLM_TIMEOUT_SECONDS`, `CW_QA_EMBEDDING_TIMEOUT_SECONDS` | - | - | - | - | - | - | - | env (qa; reads time out after 5 s by default, the model calls after 20 s, longer than the gateway's budget for the call) | - |
 | `CW_QA_KAG_ENABLED`, `CW_QA_KAG_TENANTS` | - | - | - | - | - | - | - | env (qa; default `false` and every tenant; owner ai-platform; removed when ADR-017 is Accepted) | - |
 | `CW_QA_PROMPTS_DIR` | - | - | - | - | - | - | - | set by the qa image (`/app/prompts`) | - |
