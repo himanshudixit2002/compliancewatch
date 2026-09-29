@@ -66,6 +66,8 @@ jobs:
               - 'conftest.py'
               - 'Makefile'
               - '.github/workflows/ci.yml'
+              - 'infra/scripts/**' # the repository checks: ruff, mypy and their unit tests
+              - '.trivyignore.yaml' # its unit test holds every entry to a statement and an expiry
             typescript:
               - 'apps/**'
               - 'packages/ui/**'
