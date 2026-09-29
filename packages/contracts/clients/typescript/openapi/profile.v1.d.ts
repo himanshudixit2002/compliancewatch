@@ -35,6 +35,103 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/businesses": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The tenant's businesses by name, a page at a time */
+    get: operations["list_businesses_v1_businesses_get"];
+    put?: never;
+    /**
+     * Create a business from its GSTIN, or from its PAN alone
+     * @description A GSTIN makes the business from the PAN inside it and pre-fills the registration from the
+     *     GSTIN lookup; a PAN alone makes the business with no registration. The answers are stored
+     *     with it, and the first onboarding question comes back. A business the tenant already has
+     *     (the same PAN) is answered with ``created`` false.
+     */
+    post: operations["create_business_v1_businesses_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/businesses/{business_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** One business with its registrations and stored values */
+    get: operations["read_business_v1_businesses__business_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Store answers across the business and its registrations, or rename it
+     * @description All or nothing: one value the ontology refuses stores none of the changes. Every node
+     *     that changed publishes ``profile.updated``, which recomputes the business's obligations.
+     */
+    patch: operations["update_business_v1_businesses__business_id__patch"];
+    trace?: never;
+  };
+  "/v1/businesses/{business_id}/onboarding": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The next onboarding question with its wording and options, and the progress */
+    get: operations["onboarding_v1_businesses__business_id__onboarding_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/businesses/{business_id}/registrations": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Add a GSTIN registration to a business and pre-fill it */
+    post: operations["add_registration_v1_businesses__business_id__registrations_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/ontology": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The profile attributes with their questions, labelled values and rule operators */
+    get: operations["read_ontology_v1_ontology_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/profile/entities": {
     parameters: {
       query?: never;
@@ -218,7 +315,7 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Pre-fill a registration from the GSTIN lookup, or open a verify_registration task */
+    /** Pre-fill a registration from its GSTIN and the GSTIN lookup, or open a verify_registration task */
     post: operations["prefill_v1_profile_registrations__node_id__prefill_post"];
     delete?: never;
     options?: never;
@@ -230,6 +327,26 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
   schemas: {
+    /** AnswerIn */
+    AnswerIn: {
+      /**
+       * As Of Fy
+       * @description 2025-26; required for an attribute stated per financial year
+       */
+      as_of_fy?: string | null;
+      /**
+       * Key
+       * @description Ontology key
+       */
+      key: string;
+      /** @default known */
+      state?: components["schemas"]["ValueState"];
+      /**
+       * Value
+       * @description The value; absent for unsure or not_applicable
+       */
+      value?: unknown;
+    };
     /** AttributeChangeIn */
     AttributeChangeIn: {
       /**
@@ -278,6 +395,139 @@ export type components = {
      * @enum {string}
      */
     AttributeSource: "gstin_lookup" | "user_input" | "derived";
+    /** BusinessChangeIn */
+    BusinessChangeIn: {
+      /**
+       * As Of Fy
+       * @description 2025-26; required for an attribute stated per financial year
+       */
+      as_of_fy?: string | null;
+      /**
+       * Key
+       * @description Ontology key
+       */
+      key: string;
+      /**
+       * Node Id
+       * @description The registration or location the answer is for, needed when the business has several; without it the attribute's level picks the node
+       */
+      node_id?: string | null;
+      /** @default known */
+      state?: components["schemas"]["ValueState"];
+      /**
+       * Value
+       * @description The value; absent for unsure or not_applicable
+       */
+      value?: unknown;
+    };
+    /** BusinessCreatedOut */
+    BusinessCreatedOut: {
+      business: components["schemas"]["BusinessOut"];
+      /**
+       * Created
+       * @description False when the tenant already had this business
+       */
+      created: boolean;
+      onboarding: components["schemas"]["OnboardingOut"];
+      /** @description What the GSTIN filled in; null without one */
+      prefill: components["schemas"]["PrefillOut"] | null;
+    };
+    /** BusinessIn */
+    BusinessIn: {
+      /**
+       * Answers
+       * @description First answers, stored with the business
+       */
+      answers?: components["schemas"]["AnswerIn"][];
+      /**
+       * Gstin
+       * @description GSTIN, any case or spacing. Its PAN makes the business, and the registration is pre-filled from the GSTIN and the GSTIN lookup
+       */
+      gstin?: string | null;
+      /**
+       * Name
+       * @description The name the business goes by
+       */
+      name: string;
+      /**
+       * Pan
+       * @description PAN, any case or spacing; enough on its own when there is no GSTIN yet
+       */
+      pan?: string | null;
+      /**
+       * Registration Name
+       * @description Name of the registration; the business name when empty
+       * @default
+       */
+      registration_name?: string;
+    };
+    /** BusinessOut */
+    BusinessOut: {
+      /**
+       * Attributes
+       * @description Values stored on the legal entity
+       */
+      attributes: components["schemas"]["AttributeOut"][];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       * @description The business id: the node id of its legal entity
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Pan */
+      pan: string;
+      /**
+       * Registrations
+       * @description Its GSTIN registrations, oldest first
+       */
+      registrations: components["schemas"]["NodeOut"][];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Version */
+      version: number;
+    };
+    /** BusinessPatchIn */
+    BusinessPatchIn: {
+      /**
+       * Changes
+       * @description Answers to store; all of them or none are stored
+       */
+      changes?: components["schemas"]["BusinessChangeIn"][];
+      /**
+       * Name
+       * @description Rename
+       */
+      name?: string | null;
+    };
+    /** BusinessSummaryOut */
+    BusinessSummaryOut: {
+      /** Gstins */
+      gstins: string[];
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Pan */
+      pan: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
     /** EntityIn */
     EntityIn: {
       /** Name */
@@ -315,6 +565,12 @@ export type components = {
       /** Version */
       version: string;
     };
+    /**
+     * ItemState
+     * @description Where one question stands: no value yet, an unsure answer, or an answer.
+     * @enum {string}
+     */
+    ItemState: "missing" | "unsure" | "known" | "not_applicable";
     /** LocationIn */
     LocationIn: {
       /**
@@ -332,6 +588,12 @@ export type components = {
     };
     /** LookupResultOut */
     LookupResultOut: {
+      /**
+       * Business Category
+       * @description The category the activities map to, empty when none or several do; stored only while profile.gstin_category_prefill is on
+       * @default
+       */
+      business_category?: string;
       /** Constitution */
       constitution: string;
       /** Gstin */
@@ -340,6 +602,11 @@ export type components = {
       gstin_status: string;
       /** Legal Name */
       legal_name: string;
+      /**
+       * Nature Of Business
+       * @description The registry's activities, as it words them
+       */
+      nature_of_business?: string[];
       /** Registered Since */
       registered_since: string | null;
       /** Registration Type */
@@ -391,6 +658,112 @@ export type components = {
       parent_id: string | null;
       /** Version */
       version: number;
+    };
+    /** OnboardingOut */
+    OnboardingOut: {
+      /** Answered */
+      answered: number;
+      /**
+       * As Of Fy
+       * @description The financial year per-year questions are asked for
+       */
+      as_of_fy: string;
+      /**
+       * Business Id
+       * Format: uuid
+       */
+      business_id: string;
+      /** Complete */
+      complete: boolean;
+      /** @description The one question to ask now; null when complete */
+      next: components["schemas"]["QuestionOut"] | null;
+      /** Total */
+      total: number;
+    };
+    /** OntologyAttributeOut */
+    OntologyAttributeOut: {
+      /**
+       * Definition
+       * @description What the attribute means; the ontology's own words
+       */
+      definition: string;
+      /** Example */
+      example?: unknown;
+      /** Help */
+      help: string;
+      /** Key */
+      key: string;
+      /**
+       * Level
+       * @description entity, registration or location: the node holding the value
+       */
+      level: string;
+      /** Max */
+      max?: number | null;
+      /** Min */
+      min?: number | null;
+      /** Per Financial Year */
+      per_financial_year: boolean;
+      /**
+       * Question
+       * @description How onboarding asks for it; empty for a derived one
+       */
+      question: string;
+      /**
+       * Source
+       * @description gstin_lookup, user_input or derived
+       */
+      source: string;
+      /** Type */
+      type: string;
+      /**
+       * Values
+       * @description Allowed values with their labels, in order
+       */
+      values: components["schemas"]["OptionOut"][];
+    };
+    /** OntologyOut */
+    OntologyOut: {
+      /** Attributes */
+      attributes: components["schemas"]["OntologyAttributeOut"][];
+      /** Language */
+      language: string;
+      /**
+       * Operators By Type
+       * @description The operators a rule predicate may use on each attribute type
+       */
+      operators_by_type: {
+        [key: string]: string[];
+      };
+      /**
+       * Review Status
+       * @description needs_review until an analyst has read the wording
+       */
+      review_status: string;
+      /**
+       * Version
+       * @description The attribute set's version, which rules are written against
+       */
+      version: string;
+      /** Wording Version */
+      wording_version: string;
+    };
+    /** OptionOut */
+    OptionOut: {
+      /** Label */
+      label: string;
+      /** Value */
+      value: string;
+    };
+    /** Page[BusinessSummaryOut] */
+    Page_BusinessSummaryOut_: {
+      /** Items */
+      items: components["schemas"]["BusinessSummaryOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
     };
     /** PrefillIn */
     PrefillIn: {
@@ -444,6 +817,43 @@ export type components = {
       /** Type */
       type: string;
     };
+    /** QuestionOut */
+    QuestionOut: {
+      /**
+       * As Of Fy
+       * @description The financial year a per-year answer is for
+       */
+      as_of_fy: string | null;
+      /** Help */
+      help: string;
+      /** Key */
+      key: string;
+      /** Level */
+      level: string;
+      /** Max */
+      max?: number | null;
+      /** Min */
+      min?: number | null;
+      /**
+       * Node Id
+       * Format: uuid
+       * @description The entity or registration the answer is stored on
+       */
+      node_id: string;
+      /**
+       * Options
+       * @description Allowed values with their labels, in order
+       */
+      options: components["schemas"]["OptionOut"][];
+      /** Per Financial Year */
+      per_financial_year: boolean;
+      /** Question */
+      question: string;
+      /** @description missing or unsure */
+      state: components["schemas"]["ItemState"];
+      /** Type */
+      type: string;
+    };
     /** ReadyResponse */
     ReadyResponse: {
       /** Checks */
@@ -452,6 +862,31 @@ export type components = {
       };
       /** Status */
       status: string;
+    };
+    /** RegistrationAddIn */
+    RegistrationAddIn: {
+      /**
+       * Gstin
+       * @description GSTIN, any case or spacing; it must carry the business's PAN
+       */
+      gstin: string;
+      /**
+       * Name
+       * @description Name of the registration; the business name when empty
+       * @default
+       */
+      name?: string;
+    };
+    /** RegistrationCreatedOut */
+    RegistrationCreatedOut: {
+      business: components["schemas"]["BusinessOut"];
+      /**
+       * Created
+       * @description False when the business already held this GSTIN
+       */
+      created: boolean;
+      prefill: components["schemas"]["PrefillOut"];
+      registration: components["schemas"]["NodeOut"];
     };
     /** RegistrationIn */
     RegistrationIn: {
@@ -599,6 +1034,430 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ReadyResponse"];
+        };
+      };
+    };
+  };
+  list_businesses_v1_businesses_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Keeps the businesses whose name, PAN or GSTIN contains this, any case */
+        q?: string | null;
+      };
+      header?: {
+        /** @description Tenant UUID; required until the identity service issues tokens */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_BusinessSummaryOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  create_business_v1_businesses_post: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours */
+        "Idempotency-Key": string;
+        /** @description Tenant UUID; required until the identity service issues tokens */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BusinessIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BusinessCreatedOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  read_business_v1_businesses__business_id__get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID; required until the identity service issues tokens */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        business_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BusinessOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  update_business_v1_businesses__business_id__patch: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID; required until the identity service issues tokens */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        business_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BusinessPatchIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BusinessOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  onboarding_v1_businesses__business_id__onboarding_get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID; required until the identity service issues tokens */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        business_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OnboardingOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  add_registration_v1_businesses__business_id__registrations_post: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours */
+        "Idempotency-Key": string;
+        /** @description Tenant UUID; required until the identity service issues tokens */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        business_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RegistrationAddIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RegistrationCreatedOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  read_ontology_v1_ontology_get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The ETag of a copy the client holds */
+        "if-none-match"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OntologyOut"];
+        };
+      };
+      /** @description Not Modified: the ETag in If-None-Match is still current; no body */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
     };

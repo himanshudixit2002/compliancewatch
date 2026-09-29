@@ -85,23 +85,24 @@ rewords a phrase may require regenerating the specs.
 
 ### TypeScript types from the specs
 
-`make openapi-ts` runs `scripts/openapi_ts.mjs`, which reads every `openapi/<service>.v1.json`
-and writes `clients/typescript/openapi/<service>.v1.d.ts` with `openapi-typescript`'s
-programmatic API (`paths`, `components`, `operations`; alphabetised; a property with a default
-is optional, because pydantic leaves it out of `required` and the services drop null fields
-from a `Problem`), plus an `index.ts` that re-exports each file as a namespace (`identity`,
-`llmGateway`, `notification`, `obligation`, `profile`, `qa`, `rulebook`) and lists the services in
-`OPENAPI_SERVICES`. The output is formatted with prettier and committed; stale files for a spec
-that went away are removed. `make openapi-ts-check` (part of `make check`) regenerates in memory
-and fails on a missing, stale or differing file, so a spec change lands together with its types.
-The web app imports them type-only, `import type { profile } from
-"@compliancewatch/contracts/openapi"`, and binds them to its `openapi-fetch` clients on the
-server (`apps/web/src/server/api`); its seed script (`apps/web/scripts/seed`) binds the same
-types to its own clients. Nothing from this package runs in a browser (ADR-019). There is no
-generated HTTP client: the request layer is the app's own (`docs/web/data-layer.md`), so the
-package stays types and schemas. A spec that is new or changed needs `make openapi-ts` in the
-same pull request; `make openapi-ts-check` runs in `make check` locally and in the `web-e2e` CI
-job.
+`make openapi-ts` runs `scripts/openapi_ts.mjs`, which reads every service spec,
+`openapi/<service>.v1.json`, and writes `clients/typescript/openapi/<service>.v1.d.ts` with
+`openapi-typescript`'s programmatic API (`paths`, `components`, `operations`; alphabetised; a
+property with a default is optional, because pydantic leaves it out of `required` and the services
+drop null fields from a `Problem`), plus an `index.ts` that re-exports each file as a namespace
+(`identity`, `llmGateway`, `notification`, `obligation`, `profile`, `qa`, `rulebook`) and lists
+the services in `OPENAPI_SERVICES`. `public.v1.json` is not a service and gets no file: it is the
+facade built from the service specs (below), each of its operations is already typed from its
+service's own spec, and the web app calls each service by that spec. The output is formatted with
+prettier and committed; stale files for a spec that went away are removed. `make openapi-ts-check`
+(part of `make check`) regenerates in memory and fails on a missing, stale or differing file, so a
+spec change lands together with its types. The web app imports them type-only, `import type {
+profile } from "@compliancewatch/contracts/openapi"`, and binds them to its `openapi-fetch`
+clients on the server (`apps/web/src/server/api`); its seed script (`apps/web/scripts/seed`) binds
+the same types to its own clients. Nothing from this package runs in a browser (ADR-019). There is
+no generated HTTP client: the request layer is the app's own (`docs/web/data-layer.md`), so the
+package stays types and schemas. A spec that is new or changed needs `make openapi-ts` in the same
+pull request; `make openapi-ts-check` runs in `make check` locally and in the `web-e2e` CI job.
 
 ## The public API spec
 
