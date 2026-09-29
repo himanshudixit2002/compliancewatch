@@ -71,8 +71,11 @@ fetches documents for analysts to label (see `evals/golden/extraction/README.md`
 Flags for the pieces that need an external account, all off by default in `.env.example`:
 `CW_WHATSAPP_ENABLED` (notification channel), `WHATSAPP_SEND_ENABLED` (the bot's replies),
 `CW_BILLING_PROVIDER` (identity billing; `memory` for a demo), `CW_PROFILE_GSTIN_LOOKUP`
-(`static` for the demo table). `pnpm --filter whatsapp-bot dev` runs the bot on 8080 against
-the notification service on 8006.
+(`static` for the demo table, `http` for a provider). `pnpm --filter whatsapp-bot dev` runs the
+bot on 8080 against the notification service on 8006. Every flag, with its owner and removal
+condition, is in `packages/flags/registry.json`; a flag without a variable of its own is set with
+`CW_FLAG_<NAME>` (`packages/flags/README.md`). `make dev-flags` starts Unleash for
+`CW_FLAGS_PROVIDER=unleash`.
 
 `make demo` needs neither Docker nor accounts: it runs the demo tenant through every service in
 one process and prints the transcript ([demo.md](demo.md)). `make dev-backup` and
@@ -91,6 +94,22 @@ curl -s -X POST http://localhost:8002/v1/profile/registrations \
 
 Then `PUT /v1/profile/nodes/{id}/attributes`, `GET .../next-question?fy=2025-26` and
 `GET .../snapshot?fy=2025-26`. `CW_PROFILE_STORE=memory` runs the service without Postgres.
+
+The public business API does the same in fewer calls. A creating POST needs an
+`Idempotency-Key`; sending the same request with the same key again answers the first 201 with
+`Idempotent-Replayed: true`, and another body with that key is a 422:
+
+```bash
+curl -s -X POST http://localhost:8002/v1/businesses \
+  -H 'content-type: application/json' -H 'x-tenant-id: 5b1f3d2e-7c4a-4e0b-9a6d-1f2e3d4c5b6a' \
+  -H "Idempotency-Key: $(uuidgen)" -d '{"name":"Acme","gstin":"29ABCDE1234F1Z5"}'
+curl -s 'http://localhost:8002/v1/businesses?limit=20' -H 'x-tenant-id: 5b1f3d2e-7c4a-4e0b-9a6d-1f2e3d4c5b6a'
+curl -s http://localhost:8002/v1/ontology | jq '.attributes[0].question, .operators_by_type.enum'
+```
+
+`GET /v1/businesses/{id}/onboarding` asks the next question with its labelled options, and
+`PATCH /v1/businesses/{id}` stores answers. These routes are in the public API spec,
+`packages/contracts/openapi/public.v1.json` (`make openapi-public`).
 
 ## Seed calendar
 

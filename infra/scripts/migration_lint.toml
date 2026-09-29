@@ -3,7 +3,8 @@
 # Rules, checked after every service has migrated:
 #   R1  a NOT NULL tenant_id means row-level security enabled and forced, and a policy for ALL
 #       commands whose USING and WITH CHECK compare tenant_id with
-#       NULLIF(current_setting('app.tenant_id', true), '');
+#       NULLIF(current_setting('app.tenant_id', true), ''); the only other permissive policy
+#       allowed is a purge policy, FOR DELETE USING (expires_at < now()) (idempotency keys);
 #   R2  every table in a tenant schema has tenant_id;
 #   R3  a nullable tenant_id only on an exempt table;
 #   R4  every exemption below matches at least one table.

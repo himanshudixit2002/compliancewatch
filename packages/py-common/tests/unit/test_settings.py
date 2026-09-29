@@ -36,6 +36,15 @@ def test_env_prefix_and_level_normalisation(monkeypatch: pytest.MonkeyPatch) -> 
     assert settings.db_schema == "obligation"
 
 
+def test_the_settings_remember_which_env_files_they_read(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("CW_LOG_LEVEL=error\n", encoding="utf-8")
+    assert Settings().env_files == (Path(".env"),)
+    assert Settings().log_level == "ERROR"
+    hermetic = Settings(_env_file=None)
+    assert (hermetic.env_files, hermetic.log_level) == ((), "INFO")
+    assert Settings(_env_file="other.env").env_files == (Path("other.env"),)
+
+
 def test_service_name_is_passed_by_the_composition_root() -> None:
     assert Settings(service_name="obligation").service_name == "obligation"
 

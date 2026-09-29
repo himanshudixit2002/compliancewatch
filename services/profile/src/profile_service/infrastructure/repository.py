@@ -3,6 +3,7 @@ the profile repository on it, the outbox writer as the event sink, and an option
 recorder for eval cases."""
 
 import json
+import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, date
@@ -10,15 +11,17 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Self
 
-from sqlalchemy import Connection, Engine, create_engine, select, text
-from sqlalchemy.orm import Session
+from sqlalchemy import Connection, Engine, create_engine, exists, or_, select, text, tuple_
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy.pool import NullPool
 
 from domain_kernel.events import DomainEvent
 from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ids import BusinessId, TenantId
 from domain_kernel.ontology import AttributeLevel, AttributeSource
+from profile_service.domain.errors import ProfileNodeNotFoundError
 from profile_service.domain.model import (
+    AttributeKey,
     AttributeRecord,
     ProfileNode,
     ReviewReason,
@@ -43,7 +46,7 @@ class SqlAlchemyProfileRepository:
 
     def get(self, node_id: BusinessId) -> ProfileNode | None:
         row = self._session.get(ProfileNodeRow, node_id.value)
-        return None if row is None else self._to_node(row)
+        return None if row is None else self._to_nodes([row])[0]
 
     def find_by_key(self, level: AttributeLevel, key: str) -> ProfileNode | None:
         row = self._session.scalars(
@@ -51,7 +54,7 @@ class SqlAlchemyProfileRepository:
                 ProfileNodeRow.level == level.value, ProfileNodeRow.key == key
             )
         ).first()
-        return None if row is None else self._to_node(row)
+        return None if row is None else self._to_nodes([row])[0]
 
     def lineage(self, node: ProfileNode) -> Sequence[ProfileNode]:
         chain: list[ProfileNode] = []
@@ -70,7 +73,7 @@ class SqlAlchemyProfileRepository:
             .where(ProfileNodeRow.parent_id == node_id.value)
             .order_by(ProfileNodeRow.created_at, ProfileNodeRow.id)
         ).all()
-        return [self._to_node(row) for row in rows]
+        return self._to_nodes(rows)
 
     def entities(self) -> Sequence[ProfileNode]:
         rows = self._session.scalars(
@@ -78,7 +81,58 @@ class SqlAlchemyProfileRepository:
             .where(ProfileNodeRow.level == AttributeLevel.ENTITY.value)
             .order_by(ProfileNodeRow.created_at, ProfileNodeRow.id)
         ).all()
-        return [self._to_node(row) for row in rows]
+        return self._to_nodes(rows)
+
+    def page_entities(
+        self, after: BusinessId | None, limit: int, query: str = ""
+    ) -> Sequence[ProfileNode]:
+        """Keyset paging on ix_profile_node_tenant_level_name (tenant_id, level, name, id)."""
+        node = ProfileNodeRow
+        statement = select(node).where(node.level == AttributeLevel.ENTITY.value)
+        if after is not None:
+            start = self._session.execute(
+                select(node.name, node.id).where(
+                    node.id == after.value, node.level == AttributeLevel.ENTITY.value
+                )
+            ).first()
+            if start is None:
+                raise ProfileNodeNotFoundError(str(after))
+            statement = statement.where(tuple_(node.name, node.id) > tuple_(start.name, start.id))
+        if query:
+            pattern = f"%{_escape_like(query)}%"
+            registration = aliased(ProfileNodeRow)
+            statement = statement.where(
+                or_(
+                    node.name.ilike(pattern, escape=LIKE_ESCAPE),
+                    node.key.ilike(pattern, escape=LIKE_ESCAPE),
+                    exists().where(
+                        registration.parent_id == node.id,
+                        registration.level == AttributeLevel.REGISTRATION.value,
+                        registration.key.ilike(pattern, escape=LIKE_ESCAPE),
+                    ),
+                )
+            )
+        rows = self._session.scalars(statement.order_by(node.name, node.id).limit(limit)).all()
+        return self._to_nodes(rows)
+
+    def registrations_of(
+        self, entity_ids: Sequence[BusinessId]
+    ) -> Mapping[BusinessId, Sequence[ProfileNode]]:
+        found: dict[BusinessId, list[ProfileNode]] = {entity_id: [] for entity_id in entity_ids}
+        if not found:
+            return found
+        rows = self._session.scalars(
+            select(ProfileNodeRow)
+            .where(
+                ProfileNodeRow.parent_id.in_([entity_id.value for entity_id in entity_ids]),
+                ProfileNodeRow.level == AttributeLevel.REGISTRATION.value,
+            )
+            .order_by(ProfileNodeRow.created_at, ProfileNodeRow.id)
+        ).all()
+        for registration in self._to_nodes(rows):
+            if registration.parent_id is not None:
+                found[registration.parent_id].append(registration)
+        return found
 
     def add(self, node: ProfileNode) -> None:
         self._session.add(_node_row(node))
@@ -140,11 +194,16 @@ class SqlAlchemyProfileRepository:
             for row in rows
         ]
 
-    def _to_node(self, row: ProfileNodeRow) -> ProfileNode:
+    def _to_nodes(self, rows: Sequence[ProfileNodeRow]) -> list[ProfileNode]:
+        """The nodes of ``rows`` with their attribute values, read in one query."""
+        if not rows:
+            return []
         attribute_rows = self._session.scalars(
-            select(ProfileAttributeRow).where(ProfileAttributeRow.node_id == row.id)
+            select(ProfileAttributeRow).where(
+                ProfileAttributeRow.node_id.in_([row.id for row in rows])
+            )
         ).all()
-        records = {}
+        records: dict[uuid.UUID, dict[AttributeKey, AttributeRecord]] = {row.id: {} for row in rows}
         for item in attribute_rows:
             record = AttributeRecord(
                 key=item.key,
@@ -154,19 +213,34 @@ class SqlAlchemyProfileRepository:
                 source=AttributeSource(item.source),
                 updated_at=item.updated_at.astimezone(UTC),
             )
-            records[record.storage_key] = record
-        return ProfileNode(
-            id=BusinessId(row.id),
-            tenant_id=TenantId(row.tenant_id),
-            level=AttributeLevel(row.level),
-            key=row.key,
-            name=row.name,
-            parent_id=None if row.parent_id is None else BusinessId(row.parent_id),
-            version=row.version,
-            created_at=row.created_at.astimezone(UTC),
-            updated_at=row.updated_at.astimezone(UTC),
-            attributes=records,
-        )
+            records[item.node_id][record.storage_key] = record
+        return [
+            ProfileNode(
+                id=BusinessId(row.id),
+                tenant_id=TenantId(row.tenant_id),
+                level=AttributeLevel(row.level),
+                key=row.key,
+                name=row.name,
+                parent_id=None if row.parent_id is None else BusinessId(row.parent_id),
+                version=row.version,
+                created_at=row.created_at.astimezone(UTC),
+                updated_at=row.updated_at.astimezone(UTC),
+                attributes=records[row.id],
+            )
+            for row in rows
+        ]
+
+
+LIKE_ESCAPE = "\\"
+
+
+def _escape_like(text: str) -> str:
+    """``text`` matched literally inside a LIKE pattern: its wildcards and the escape escaped."""
+    return (
+        text.replace(LIKE_ESCAPE, LIKE_ESCAPE * 2)
+        .replace("%", LIKE_ESCAPE + "%")
+        .replace("_", LIKE_ESCAPE + "_")
+    )
 
 
 def _node_row(node: ProfileNode) -> ProfileNodeRow:
@@ -284,6 +358,11 @@ class PostgresUnitOfWorkFactory:
     def _open(self, tenant_id: TenantId) -> Iterator[UnitOfWork]:
         with Session(self._engine, expire_on_commit=False) as session, session.begin():
             yield SqlAlchemyUnitOfWork(session, tenant_id, self._writer, self._eval_cases)
+
+    @property
+    def engine(self) -> Engine:
+        """The engine the units of work run on; the idempotency store shares it."""
+        return self._engine
 
     def ping(self) -> bool:
         with self._engine.connect() as connection:

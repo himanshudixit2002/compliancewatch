@@ -23,10 +23,10 @@
 > every quote checked against its clause or the answer is "not covered"), the profile service's
 > business hierarchy (entity, registration, location;
 > attribute values per node and financial year; snapshots for the engine; one-question onboarding;
-> review tasks) behind the second committed OpenAPI spec,
+> review tasks) behind the second committed OpenAPI spec, and its public business API (create from a GSTIN or a PAN with an Idempotency-Key, the tenant's list by cursor, an onboarding checklist with worded questions) with `GET /v1/ontology` over the draft English wording of every attribute, all merged into the public API spec (`public.v1.json`, with a changelog, the API rules checked on every public route, and generated Python models),
 > the LLM gateway skeleton (routing, prompt registry, cost ledger,
 > budgets, PII masking, Langfuse tracing, fake provider container, embeddings for retrieval) with the first committed OpenAPI
-> spec, problem-details errors in py-common, the event contracts (sixteen topics and the envelope as
+> spec, problem-details errors, cursor pagination and idempotency keys in py-common, feature flags (a registry with owners, defaults and expiry dates checked by `make flags-check`, OpenFeature in Python and TypeScript with env and Unleash providers), the event contracts (sixteen topics and the envelope as
 > JSON Schema with generated pydantic and TypeScript types and compatibility checks in CI), the
 > transactional outbox in py-common (writer, Kafka relay with dead letters, idempotent consumer),
 > the Temporal worker scaffold with the pipeline's sample ingest workflow, the first source
@@ -40,7 +40,7 @@
 > signature checks, keyword opt-in and opt-out and Hindi replies, the notification service's
 > preferences, quiet hours, template drafts and Cloud API channel behind a flag, consent records
 > and WhatsApp keyword consents in the identity service with the legal drafts in `docs/legal`, the GSTIN lookup protocol with
-> the manual fallback, the billing protocol with a Razorpay skeleton behind a flag, OpenTelemetry tracing
+> the manual fallback and an HTTP provider behind a flag (state codes derived from the GSTIN, the business category behind a second flag), the billing protocol with a Razorpay skeleton behind a flag, OpenTelemetry tracing
 > and metrics with a dev observability stack (collector, Prometheus, Tempo, Grafana dashboard),
 > pnpm + Turborepo workspace with the Next.js web app and
 > the WhatsApp bot, paging alert rules with runbooks and a CI link check, dev backup and restore, the MVP deploy profile (Fly.io templates, Vercel config, env matrix) and the one-process demo tenant (`make demo`), Docker Compose dev stack, GitHub Actions CI behind one required check (integration tests for the packages a change touches, a migration lint for tenant tables, OpenAPI coverage, compatibility and property tests, Semgrep and Trivy scans, a cross-tenant route suite, a nightly rescan, fuzz run and rulebook data-quality check) with Dependabot, pre-commit hooks and ADRs 001 to 008
@@ -299,7 +299,8 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 
 - The repository settings in [docs/onboarding/repository-settings.md](docs/onboarding/repository-settings.md) (the required `CI gate` check, title-only squash merges, Dependabot security updates, secret scanning, private vulnerability reporting) until the owner applies them; an API scan (DAST) of the running services, which arrives with the deployable stack
 - Terraform staging cluster and Keycloak (the gateway trusts an `x-tenant-id` header until then)
-- Accounts the maintainer opens: the Meta WhatsApp business account (bot and channel stay in logging mode), Razorpay (billing answers 503), a GSTIN lookup provider (every registration gets a verify task), Supabase Auth; the legal drafts need a lawyer before onboarding shows them
+- Accounts the maintainer opens: the Meta WhatsApp business account (bot and channel stay in logging mode), Razorpay (billing answers 503), a GSTIN lookup provider (every registration gets a verify task until the HTTP provider's field mapping is checked against its sandbox), Supabase Auth, a hosted Unleash (flags come from the environment until then); the legal drafts need a lawyer before onboarding shows them
+- Analyst review of the draft ontology wording and of the GSTIN nature-of-business to category mapping; enforcement of the public routes' `x-roles` (the identity service); the daily purge of expired idempotency keys (`python -m py_common.idempotency purge`, for the deploy to schedule); TypeScript types for the REST APIs (the web UI track will generate them from the committed specs)
 - Postgres tables for notification preferences and the sent log (in memory now); the email channel (SES)
 - Alert rules for source freshness, decision-flip rate, notification failures and LLM budget (their metrics do not exist yet; the API SLO, outbox, worker and entity review queue alerts do, with runbooks)
 - The EKS path of the guide (Terraform, Helm, Argo CD canaries); the MVP profile in `infra/deploy` targets Fly.io and Vercel and has not been applied

@@ -37,6 +37,7 @@ TABLES = {
     "review_task",
     "outbox_event",
     "processed_event",
+    "idempotency_key",
     "alembic_version",
 }
 APP_ROLE = "profile_app"
@@ -110,6 +111,8 @@ def test_migration_creates_the_tables_with_row_level_security(engine: Engine) ->
             ).scalars()
         )
     assert policies == [
+        "idempotency_key_purge_expired",
+        "idempotency_key_tenant_isolation",
         "profile_attribute_tenant_isolation",
         "profile_node_tenant_isolation",
         "profile_version_tenant_isolation",

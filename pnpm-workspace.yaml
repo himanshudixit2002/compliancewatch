@@ -4,6 +4,7 @@ packages:
   - apps/*
   - packages/ui
   - packages/contracts
+  - packages/flags
 
 # Supply chain: no dependency may run install scripts. Each package below ships prebuilt
 # binaries as optional dependencies, so denying its script is safe. strictDepBuilds (pnpm 11

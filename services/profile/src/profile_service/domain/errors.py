@@ -43,3 +43,37 @@ class TenantRequiredError(DomainError, PermissionError):
 
     def __init__(self) -> None:
         super().__init__("the request names no tenant (x-tenant-id header)")
+
+
+class BusinessIdentifierRequiredError(DomainError, ValueError):
+    type_slug = "profile-business-identifier-required"
+    title = "Business needs a PAN or GSTIN"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "a business is created from its GSTIN or, without one, its PAN; give either"
+        )
+
+
+class RegistrationAmbiguousError(DomainError, ValueError):
+    type_slug = "profile-registration-ambiguous"
+    title = "Registration must be named"
+
+    def __init__(self, key: str, level: str, count: int) -> None:
+        where = f"has no {level}" if count == 0 else f"has {count}"
+        super().__init__(
+            f"attribute {key!r} belongs to one {level} and the business {where}; name the node "
+            "with node_id"
+        )
+        self.key = key
+
+
+class NotABusinessError(DomainError, LookupError):
+    type_slug = "profile-node-not-a-business"
+    title = "Profile node is not a business"
+
+    def __init__(self, node_id: str) -> None:
+        super().__init__(
+            f"profile node {node_id} is a registration or location; a business is a legal entity"
+        )
+        self.node_id = node_id

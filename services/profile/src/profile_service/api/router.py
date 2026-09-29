@@ -16,7 +16,6 @@ from profile_service.api.schemas import (
     FinancialYearConfirmationIn,
     FinancialYearConfirmationOut,
     LocationIn,
-    LookupResultOut,
     NextQuestionOut,
     NodeOut,
     PrefillIn,
@@ -167,34 +166,17 @@ def review_tasks(node_id: UUID, tenant: Tenant, wired: Wired) -> list[ReviewTask
 
 @router.post(
     "/registrations/{node_id}/prefill",
-    summary="Pre-fill a registration from the GSTIN lookup, or open a verify_registration task",
+    summary=(
+        "Pre-fill a registration from its GSTIN and the GSTIN lookup, or open a "
+        "verify_registration task"
+    ),
     responses=problem_responses(401, 404, 422),
 )
 def prefill(node_id: UUID, body: PrefillIn, tenant: Tenant, wired: Wired) -> PrefillOut:
     result = wired.prefill.run(
         tenant, BusinessId(node_id), by=None if body.changed_by is None else UserId(body.changed_by)
     )
-    looked = result.result
-    return PrefillOut(
-        node_id=result.node_id.value,
-        looked_up=result.looked_up,
-        result=None
-        if looked is None
-        else LookupResultOut(
-            gstin=looked.gstin.value,
-            legal_name=looked.legal_name,
-            trade_name=looked.trade_name,
-            registration_type=looked.registration_type,
-            gstin_status=looked.gstin_status,
-            state_code=looked.state_code,
-            constitution=looked.constitution,
-            registered_since=None
-            if looked.registered_since is None
-            else looked.registered_since.isoformat(),
-        ),
-        applied=list(result.applied),
-        review_task=None if result.review_task is None else result.review_task.value,
-    )
+    return PrefillOut.from_result(result)
 
 
 @router.post(

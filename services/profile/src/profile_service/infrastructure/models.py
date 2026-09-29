@@ -58,6 +58,8 @@ class ProfileNodeRow(Base):
         CheckConstraint(sql_in_list("level", LEVELS), name="ck_profile_node_level"),
         CheckConstraint("(level = 'entity') = (parent_id IS NULL)", name="ck_profile_node_parent"),
         Index("ix_profile_node_parent", "parent_id"),
+        # The business list pages entities by (name, id) within a tenant (migration 0003).
+        Index("ix_profile_node_tenant_level_name", "tenant_id", "level", "name", "id"),
         {
             "comment": (
                 "Hierarchy nodes: entity (PAN), registration (GSTIN), location. RLS by tenant_id."

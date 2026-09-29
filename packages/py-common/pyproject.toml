@@ -7,6 +7,7 @@ dependencies = [
   "fastapi>=0.120",
   "pydantic>=2.11",
   "pydantic-settings>=2.10",
+  "python-dotenv>=1.0",  # py_common.flags reads .env the way the settings do
   "structlog>=25.4",
   "sqlalchemy[asyncio]>=2.0",
   "alembic>=1.16",
@@ -18,8 +19,13 @@ dependencies = [
   "opentelemetry-exporter-otlp-proto-grpc==1.45.0",
   "opentelemetry-instrumentation-fastapi==0.66b0",
   "opentelemetry-instrumentation-sqlalchemy==0.66b0",
+  "openfeature-sdk==0.10.0",
   "domain-kernel",
 ]
+
+[project.optional-dependencies]
+# The Unleash flag provider (CW_FLAGS_PROVIDER=unleash); py_common.flags imports it only then.
+unleash = ["UnleashClient==6.8.0"]
 
 [tool.uv.sources]
 domain-kernel = { workspace = true }

@@ -15,7 +15,11 @@ import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from psycopg.rows import TupleRow
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import NullPool
 from testcontainers.community.postgres import PostgresContainer
 
 from check_migrations import (
@@ -29,6 +33,7 @@ from check_migrations import (
     read_catalog,
     read_tables,
 )
+from py_common.idempotency.schema import create_idempotency_table
 
 ROOT = Path(__file__).resolve().parents[4]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
@@ -167,3 +172,27 @@ def test_a_routing_directory_reads_across_tenants_but_writes_within_one(
         "applicability.directory: R1: write policy directory_backfill (FOR INSERT) needs a WITH "
         "CHECK that compares tenant_id with the app.tenant_id setting"
     ]
+
+
+def test_an_idempotency_table_passes_with_its_purge_policy(database_url: str) -> None:
+    """The table ``create_idempotency_table`` makes, read back from the catalog: the tenant
+    policy and the extra DELETE policy for expired rows raise no problem."""
+    repo = load_config()
+    config = LintConfig(repo.tenant_schemas | {"idempotency_lint"}, repo.global_schemas, ())
+    engine = create_engine(database_url, poolclass=NullPool)
+    try:
+        with engine.connect() as connection:
+            transaction = connection.begin()
+            connection.execute(text("CREATE SCHEMA idempotency_lint"))
+            connection.execute(text("SET LOCAL search_path TO idempotency_lint, public"))
+            create_idempotency_table(Operations(MigrationContext.configure(connection)))
+            driver = connection.connection.driver_connection
+            assert isinstance(driver, psycopg.Connection)
+            tables = read_tables(driver)
+            transaction.rollback()
+    finally:
+        engine.dispose()
+    created = [table for table in tables if table.schema == "idempotency_lint"]
+    assert [table.name for table in created] == ["idempotency_key"]
+    assert {policy.command for policy in created[0].policies} == {"ALL", "DELETE"}
+    assert catalog_problems(created, config) == []

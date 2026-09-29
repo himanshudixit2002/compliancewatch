@@ -14,7 +14,9 @@ migrated, with the rules and exemptions of ``migration_lint.toml``:
 - R1: a table with a NOT NULL tenant_id has row-level security enabled and forced, and a policy
   for ALL commands whose USING and WITH CHECK both compare tenant_id with
   ``NULLIF(current_setting('app.tenant_id', true), '')``. No other permissive policy may let
-  rows through without that comparison.
+  rows through without that comparison, except a purge policy: FOR DELETE, with the USING
+  ``expires_at < now()`` and no WITH CHECK. It lets a job with no tenant delete expired rows
+  of every tenant and lets no one read or write a row (``py_common.idempotency`` creates one).
 - R2: every table in a tenant schema has a tenant_id column.
 - R3: a nullable tenant_id is allowed only on an exempt table.
 - R4: every exemption matches at least one table.
@@ -54,6 +56,8 @@ CONTRACT_SQL = re.compile(r"\b(DROP\s+COLUMN|DROP\s+TABLE|RENAME|SET\s+NOT\s+NUL
 SQL_CALLS = frozenset({"execute", "exec_driver_sql"})
 
 TENANT_SETTING = "nullif(current_setting('app.tenant_id',true),'')"
+EXPIRED_ROWS = "(expires_at<now())"
+"""The USING of a purge policy, normalised as ``_normalised`` leaves Postgres's deparsed text."""
 EXEMPT = "exempt"
 ROUTING_DIRECTORY = "routing_directory"
 KINDS = (EXEMPT, ROUTING_DIRECTORY)
@@ -423,6 +427,17 @@ def tenant_checked(expression: str | None) -> bool:
     return re.search(r"\btenant_id\b", normalised.replace(TENANT_SETTING, "")) is not None
 
 
+def purges_expired_rows(policy: Policy) -> bool:
+    """True for a purge policy: FOR DELETE of rows whose expires_at has passed, and nothing
+    else."""
+    return (
+        policy.command == "DELETE"
+        and policy.with_check is None
+        and policy.qual is not None
+        and _normalised(policy.qual) == EXPIRED_ROWS
+    )
+
+
 def _covers(policy: Policy, command: str) -> bool:
     return policy.command in {"ALL", command}
 
@@ -467,6 +482,8 @@ def tenant_table_problems(table: Table) -> list[str]:
     # Permissive policies combine with OR, so any other one without the check opens the table.
     for policy in table.policies:
         if not policy.permissive or policy in compliant or policy in reported:
+            continue
+        if purges_expired_rows(policy):
             continue
         expressions = [e for e in (policy.qual, policy.with_check) if e is not None]
         if not all(tenant_checked(e) for e in expressions):

@@ -31,6 +31,7 @@ OPERATIONS = frozenset(
         "GET /health",
         "GET /ready",
         "POST /v1/llm-gateway/completions",
+        "POST /v1/llm-gateway/embeddings",
         "GET /v1/llm-gateway/models",
         "GET /v1/llm-gateway/ping",
         "GET /v1/llm-gateway/prompts",

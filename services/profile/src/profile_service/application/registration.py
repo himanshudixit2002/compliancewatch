@@ -1,5 +1,9 @@
 """Create the nodes of the hierarchy: an entity from its PAN, a registration from its GSTIN
-(finding or creating the entity the PAN names), a location under a registration."""
+(finding or creating the entity the PAN names), a location under a registration.
+
+``register_entity`` and ``register_registration`` do the work inside a unit of work the caller
+holds, so a use case can create a business and fill it in one transaction; ``RegisterNodes``
+opens one unit of work per call."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -11,13 +15,50 @@ from domain_kernel.ids import BusinessId, TenantId
 from domain_kernel.ontology import AttributeLevel
 from profile_service.domain.errors import InvalidHierarchyError, ProfileNodeNotFoundError
 from profile_service.domain.model import ProfileNode
-from profile_service.domain.repository import UnitOfWorkFactory
+from profile_service.domain.repository import UnitOfWork, UnitOfWorkFactory
 
 
 @dataclass(frozen=True, slots=True)
 class Registered:
     node: ProfileNode
     created: bool
+
+
+def register_entity(
+    uow: UnitOfWork, tenant_id: TenantId, pan: Pan, name: str, now: datetime
+) -> Registered:
+    """The entity of ``pan``, created with ``name`` when the tenant has none."""
+    existing = uow.profiles.find_by_key(AttributeLevel.ENTITY, pan.value)
+    if existing is not None:
+        return Registered(existing, False)
+    node = ProfileNode.entity(tenant_id=tenant_id, pan=pan, name=name, at=now)
+    uow.profiles.add(node)
+    return Registered(node, True)
+
+
+def register_registration(
+    uow: UnitOfWork,
+    tenant_id: TenantId,
+    gstin: Gstin,
+    name: str,
+    *,
+    entity_name: str,
+    now: datetime,
+) -> tuple[Registered, Registered]:
+    """The entity the GSTIN's PAN names and the registration of ``gstin`` under it, each
+    created when the tenant has none."""
+    existing = uow.profiles.find_by_key(AttributeLevel.REGISTRATION, gstin.value)
+    if existing is not None:
+        entity = None if existing.parent_id is None else uow.profiles.get(existing.parent_id)
+        if entity is None:  # pragma: no cover - a registration always has its entity
+            raise InvalidHierarchyError(f"registration {existing.id} has no entity")
+        return Registered(entity, False), Registered(existing, False)
+    entity_registered = register_entity(uow, tenant_id, gstin.pan, entity_name or name, now)
+    node = ProfileNode.registration(
+        tenant_id=tenant_id, entity=entity_registered.node, gstin=gstin, name=name, at=now
+    )
+    uow.profiles.add(node)
+    return entity_registered, Registered(node, True)
 
 
 class RegisterNodes:
@@ -29,33 +70,17 @@ class RegisterNodes:
 
     def entity(self, tenant_id: TenantId, pan: Pan, name: str) -> Registered:
         with self._unit_of_work(tenant_id) as uow:
-            existing = uow.profiles.find_by_key(AttributeLevel.ENTITY, pan.value)
-            if existing is not None:
-                return Registered(existing, False)
-            node = ProfileNode.entity(tenant_id=tenant_id, pan=pan, name=name, at=self._clock())
-            uow.profiles.add(node)
-            return Registered(node, True)
+            return register_entity(uow, tenant_id, pan, name, self._clock())
 
     def registration(
         self, tenant_id: TenantId, gstin: Gstin, name: str, *, entity_name: str = ""
     ) -> Registered:
         """The entity is found by the GSTIN's PAN or created with ``entity_name``."""
         with self._unit_of_work(tenant_id) as uow:
-            existing = uow.profiles.find_by_key(AttributeLevel.REGISTRATION, gstin.value)
-            if existing is not None:
-                return Registered(existing, False)
-            now = self._clock()
-            entity = uow.profiles.find_by_key(AttributeLevel.ENTITY, gstin.pan.value)
-            if entity is None:
-                entity = ProfileNode.entity(
-                    tenant_id=tenant_id, pan=gstin.pan, name=entity_name or name, at=now
-                )
-                uow.profiles.add(entity)
-            node = ProfileNode.registration(
-                tenant_id=tenant_id, entity=entity, gstin=gstin, name=name, at=now
+            _, registration = register_registration(
+                uow, tenant_id, gstin, name, entity_name=entity_name, now=self._clock()
             )
-            uow.profiles.add(node)
-            return Registered(node, True)
+            return registration
 
     def location(
         self, tenant_id: TenantId, registration_id: BusinessId, label: str, name: str

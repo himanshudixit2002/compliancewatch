@@ -3,6 +3,13 @@
 Versions follow semver. A new attribute or allowed value is a minor bump, a removed or renamed
 one is a major bump, wording is a patch.
 
+## Unreleased
+
+Draft English wording, version 0.1.0 of `data/wording.en.yaml` (review status needs_review): a
+question for each of the seventeen attributes and a label for every allowed value, loaded and
+checked against the attribute set by `ontology.load_wording()` (`WORDING_VERSION`). The
+attribute set stays at 0.2.0.
+
 ## 0.2.0 - 2026-09-28
 
 Every attribute declares its `level` in the business hierarchy (ADR-016): `state_codes`,
