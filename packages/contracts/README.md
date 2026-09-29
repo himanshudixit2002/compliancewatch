@@ -182,5 +182,5 @@ not know, so a client keeps working when a minor version adds one; request model
 unknown fields, as the services do. `make contracts` and `make openapi-public` regenerate them,
 and `make contracts-check` fails when the committed module differs. The profile service's
 `tests/contract/test_public_client.py` sends requests built from these models and reads every
-answer with them. TypeScript types for the REST APIs are not generated here: the web app's
-track generates them from the committed specs.
+answer with them. No TypeScript types are generated for the REST APIs yet, here or in the web
+app; the web UI track owns them and will generate them from the committed specs.

@@ -3,8 +3,9 @@
 Run through ``make contracts`` (and ``make openapi-public``). The manifest is opt-in: its
 ``python`` list names the specs, as ``<name>`` for ``openapi/<name>.v1.json``, that get a module
 of pydantic v2 models in ``clients/python/src/cw_contracts/rest/<name>_v1.py``, one model per
-component schema of the spec. Today that is the public API spec alone. The TypeScript types are
-not generated here: the web app generates them from every committed spec.
+component schema of the spec. Today that is the public API spec alone. No TypeScript types are
+generated for the REST APIs yet, here or in the web app; the web UI track owns them and will
+generate them from the committed specs.
 
 One ``datamodel-codegen --input-file-type openapi`` call per spec writes the module, whose
 docstring names the spec and its ``info.version``. The script then removes generated modules
