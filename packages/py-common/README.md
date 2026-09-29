@@ -120,8 +120,11 @@ allow-list (`CW_FLAG_<NAME>__TENANTS`, or the variable the code already reads, s
 `CW_QA_KAG_TENANTS`). With `CW_FLAGS_PROVIDER=unleash` the flags come from an Unleash server
 at `CW_UNLEASH_URL` with the client token `CW_UNLEASH_API_TOKEN`, under their registry names;
 the tenant id is Unleash's `userId` and the `tenantId` property. That provider needs the
-optional extra `py-common[unleash]`. A malformed value or a flag Unleash does not hold answers
-the registry default, which is off, and logs `flag_evaluation_failed`.
+optional extra `py-common[unleash]`, so a service that calls `configure_flags` depends on
+`"py-common[unleash]"` in its own `pyproject.toml`, as the profile service does. Its image is
+built with `--no-dev`, and without the extra it would not start with `CW_FLAGS_PROVIDER=unleash`.
+A malformed value or a flag Unleash does not hold answers the registry default, which is off,
+and logs `flag_evaluation_failed`.
 
 ## Telemetry
 

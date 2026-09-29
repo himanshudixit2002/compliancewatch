@@ -12,7 +12,8 @@ dependencies = [
   "alembic>=1.16",
   "psycopg[binary]>=3.2",
   "httpx2>=2.13",
-  "py-common",
+  # The extra carries the Unleash client, so CW_FLAGS_PROVIDER=unleash works in the image too.
+  "py-common[unleash]",
   "domain-kernel",
   "ontology",
 ]
