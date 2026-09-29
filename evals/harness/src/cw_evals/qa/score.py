@@ -5,9 +5,10 @@ on or before the question's date, and the quote holds in the clause (``quote_mat
 number, form code or month the clause lacks). A case is grounded when it is answered, every
 citation is valid, at least one expected citation is among them, every expected fact is in the
 answer and nothing in ``must_not_mention`` is. Facts are read from the answer text: dates in
-ISO, "21 April 2026", "21st April, 2026" or "April 21, 2026" form (every expected date must be
-among them); text casefolded, dashes folded and whitespace collapsed; entities by the canonical
-names the mention grammar finds in the answer.
+ISO, "21 April 2026", "21st April, 2026", "April 21, 2026" or ordinal-word form ("the
+twenty-first day of April, 2026"), every expected date among them; text casefolded, dashes
+folded and whitespace collapsed; entities by the canonical names the mention grammar finds in
+the answer.
 
 With the KAG layer on, a case the labels send through it (answerable, with a scripted plan that
 has steps) is grounded only when the KAG layer decided it: a hybrid answer after the KAG layer
@@ -68,6 +69,48 @@ _DAY_MONTH_YEAR = re.compile(
 _MONTH_DAY_YEAR = re.compile(
     r"\b" + _MONTH + r"\s+([0-9]{1,2})(?:st|nd|rd|th)?,?\s+([0-9]{4})\b", re.IGNORECASE
 )
+_ORDINALS: Final = (
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "sixth",
+    "seventh",
+    "eighth",
+    "ninth",
+    "tenth",
+    "eleventh",
+    "twelfth",
+    "thirteenth",
+    "fourteenth",
+    "fifteenth",
+    "sixteenth",
+    "seventeenth",
+    "eighteenth",
+    "nineteenth",
+    "twentieth",
+)
+ORDINAL_DAYS: Final = {
+    **{word: day for day, word in enumerate(_ORDINALS, start=1)},
+    **{f"twenty-{word}": 20 + day for day, word in enumerate(_ORDINALS[:9], start=1)},
+    "thirtieth": 30,
+    "thirty-first": 31,
+}
+"""A day of the month written as an ordinal word, hyphenated."""
+_ORDINAL = (
+    "("
+    + "|".join(
+        word.replace("-", r"\s*-?\s*") for word in sorted(ORDINAL_DAYS, key=len, reverse=True)
+    )
+    + ")"
+)
+_WORD_DAY_MONTH_YEAR = re.compile(
+    r"\b" + _ORDINAL + r"\s+(?:day\s+of\s+)?" + _MONTH + r",?\s+([0-9]{4})\b", re.IGNORECASE
+)
+_MONTH_WORD_DAY_YEAR = re.compile(
+    r"\b" + _MONTH + r"\s+" + _ORDINAL + r",?\s+([0-9]{4})\b", re.IGNORECASE
+)
 _AMOUNT = re.compile(r"(?:\u20b9|\brs\.?|\binr)\s*[0-9]|\b(?:crore|lakh|rupees?)\b", re.IGNORECASE)
 _FOLD = str.maketrans(dict.fromkeys(DASHES, "-"))
 
@@ -81,7 +124,16 @@ def dates_in(text: str) -> set[date]:
         _add(found, int(year), MONTHS.index(month.casefold()) + 1, int(day))
     for month, day, year in _MONTH_DAY_YEAR.findall(text):
         _add(found, int(year), MONTHS.index(month.casefold()) + 1, int(day))
+    for word, month, year in _WORD_DAY_MONTH_YEAR.findall(text):
+        _add(found, int(year), MONTHS.index(month.casefold()) + 1, _ordinal_day(word))
+    for month, word, year in _MONTH_WORD_DAY_YEAR.findall(text):
+        _add(found, int(year), MONTHS.index(month.casefold()) + 1, _ordinal_day(word))
     return found
+
+
+def _ordinal_day(word: str) -> int:
+    parts = re.split(r"[\s-]+", word.casefold())
+    return ORDINAL_DAYS["-".join(part for part in parts if part)]
 
 
 def _add(found: set[date], year: int, month: int, day: int) -> None:
@@ -133,7 +185,8 @@ class WorldClause:
 
 @dataclass(frozen=True, slots=True)
 class Asked:
-    """One question as the harness saw it: the answer (or the error) and the model calls."""
+    """One question as the harness saw it: the answer (or the error), the model calls and what
+    the scripted provider noted while answering it."""
 
     case: QaCase
     status: int | None
@@ -141,6 +194,7 @@ class Asked:
     error: str = ""
     calls: tuple[ModelCall, ...] = ()
     latency_ms: float = 0.0
+    notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,7 +309,7 @@ def score_case(
             or (kag.reason.value == NO_EVIDENCE and case.answerable and _has_steps(body.plan))
         )
     )
-    problems: list[str] = []
+    problems: list[str] = list(asked.notes)
     expected = {(ref.document, ref.clause_ref) for ref in case.expected.citations}
     valid = correct = 0
     cited_expected = False

@@ -64,9 +64,13 @@ notes: ...
   evidence, a quote its clause does not have, or a clause not yet published on the question's
   date. It never states a date or an amount. The qa citation check must turn it into
   `not_covered`.
-- In the hybrid baseline run the same scripted answer is served. It counts as grounded when the
-  hybrid search found the clauses it cites; its text may still state what only the KAG layer's
-  facts gave (a due date from the obligations), so the hybrid number is an upper bound.
+- The scripted answer is served only when every date the case expects is written in the
+  evidence the answering layer gathered (a clause, or a fact such as an obligation's due date);
+  otherwise the harness declines for the model, which could not have stated that date, and
+  notes the missing date against the case. In the hybrid baseline run the same answer counts as
+  grounded when the hybrid search found the clauses it cites and the dates it states. Text and
+  entity facts are not checked against the evidence, so for them the hybrid number is still an
+  upper bound.
 
 ## Counts
 

@@ -50,6 +50,11 @@ QUOTE = (
         ("the 17th day of September 2025", date(2025, 9, 17)),
         ("on April 21, 2026", date(2026, 4, 21)),
         ("on september 3 2025", date(2025, 9, 3)),
+        ("till the twenty -first day of April, 2026", date(2026, 4, 21)),
+        ("till twenty-fifth day of October, 2025", date(2025, 10, 25)),
+        ("on the thirty-first day of December, 2027", date(2027, 12, 31)),
+        ("from the first day of July 2025", date(2025, 7, 1)),
+        ("on April twenty first, 2026", date(2026, 4, 21)),
     ],
 )
 def test_dates_are_read_in_every_written_form(text: str, day: date) -> None:
@@ -58,6 +63,9 @@ def test_dates_are_read_in_every_written_form(text: str, day: date) -> None:
 
 def test_impossible_dates_and_bare_months_are_not_dates() -> None:
     assert dates_in("31 February 2026, March 2026, 2026-13-01 and 12/2025") == set()
+    assert (
+        dates_in("the thirtieth day of February, 2026 and the twenty-first of the month") == set()
+    )
 
 
 def test_amounts_and_folding() -> None:

@@ -3,9 +3,12 @@
 ``scripted`` answers each case with its own labels, keyed on the case in flight: the harness
 sets ``current_case`` before each question. ``qa.plan`` gets ``scripted.plan``; the planner's
 retry (``attempt`` 2 in the call's metadata) gets ``scripted.plan_retry`` when the case has one,
-otherwise the same plan. ``qa.answer`` gets ``scripted.answer``. A call the case does not script
-is ``UnscriptedCallError``, and the run stops on it rather than score a question the labels do
-not cover. The scripted provider is served through the gateway app
+otherwise the same plan. ``qa.answer`` gets ``scripted.answer`` only when every date the case
+expects is written in the evidence of the prompt (its clauses and facts, read with the scorer's
+``dates_in``); otherwise it declines, as a model could not state a date it was not given, and the
+missing dates are noted against the case. A call the case does not script is
+``UnscriptedCallError``, and the run stops on it rather than score a question the labels do not
+cover. The scripted provider is served through the gateway app
 (``build_app(completion_provider=...)``), so the registry check, the masking and the ledger run
 as in production. ``fake`` is the same gateway app with its own deterministic provider;
 ``gateway`` is a running gateway over HTTP, for the nightly run with a real model.
@@ -23,22 +26,35 @@ provider answered.
 """
 
 import json
+import re
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date
 from typing import Final
 
 import httpx2
 
 from cw_evals.providers import gateway_client
 from cw_evals.qa.cases import QaCase, plan_text, scripted_answer
-from cw_evals.qa.score import ANSWER, PLAN, ModelCall
+from cw_evals.qa.score import ANSWER, PLAN, ModelCall, dates_in
 from domain_kernel.llm import CompletionRequest, CompletionResponse
 from domain_kernel.protocols import LLMProvider
 
 QA_PROVIDERS: Final = ("scripted", "fake", "gateway")
 COMPLETIONS: Final = "/v1/llm-gateway/completions"
 GATEWAY_TIMEOUT_SECONDS: Final = 60.0
+DECLINED: Final = json.dumps({"covered": False, "answer": "", "citations": []})
+_EVIDENCE: Final = re.compile(r"^Clauses:$", re.MULTILINE)
+"""Where the evidence starts in an answer prompt (``render_bundle``)."""
+_RETRY: Final = "\n\nYour previous answer failed the check:"
+"""Where the answerer's retry note starts; it may quote the previous answer."""
+
+
+def evidence_of(prompt: str) -> str:
+    """The evidence an answer prompt gives: its clauses and facts, not the question."""
+    start = _EVIDENCE.search(prompt)
+    return "" if start is None else prompt[start.start() :].split(_RETRY, 1)[0]
 
 
 class UnscriptedCallError(RuntimeError):
@@ -60,6 +76,8 @@ class ScriptedQaProvider:
         self._sources = dict(sources)
         self.current_case: str | None = None
         self.aborted: UnscriptedCallError | None = None
+        self.notes: list[str] = []
+        """What the provider withheld for the case in flight, and why."""
 
     def complete(self, req: CompletionRequest) -> CompletionResponse:
         text = self._reply(req)
@@ -78,6 +96,17 @@ class ScriptedQaProvider:
             retry = scripted.plan_retry if req.metadata.get("attempt") == "2" else None
             return plan_text(retry or scripted.plan)
         if name == ANSWER and scripted.answer is not None:
+            written = dates_in(evidence_of(req.user))
+            missing = [
+                fact.value
+                for fact in case.expected.facts
+                if fact.kind == "date" and date.fromisoformat(fact.value) not in written
+            ]
+            if missing:
+                layer = req.metadata.get("layer")
+                where = f"the {layer} evidence" if layer else "the evidence"
+                self.notes.append(f"scripted answer withheld: {', '.join(missing)} not in {where}")
+                return DECLINED
             return json.dumps(scripted_answer(scripted.answer, req.user, self._sources))
         return None
 
@@ -126,6 +155,11 @@ class QaModel:
     def start(self, case_id: str) -> None:
         if self.scripted is not None:
             self.scripted.current_case = case_id
+            self.scripted.notes = []
+
+    @property
+    def notes(self) -> tuple[str, ...]:
+        return () if self.scripted is None else tuple(self.scripted.notes)
 
     @property
     def aborted(self) -> UnscriptedCallError | None:

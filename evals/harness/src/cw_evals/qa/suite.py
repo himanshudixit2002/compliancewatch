@@ -100,4 +100,5 @@ def ask(client: TestClient, world: Services, model: QaModel, case: QaCase) -> As
         error=error or ("" if status == 200 else f"HTTP {status}: {str(answer)[:300]}"),
         calls=tuple(model.log.calls[before:]),
         latency_ms=(time.perf_counter() - started) * 1000,
+        notes=model.notes,
     )

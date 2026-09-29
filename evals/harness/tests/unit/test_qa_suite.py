@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from cw_evals.qa.cases import QaCase, Scripted
-from cw_evals.qa.providers import ScriptedQaProvider, UnscriptedCallError, qa_model
+from cw_evals.qa.providers import DECLINED, ScriptedQaProvider, UnscriptedCallError, qa_model
 from cw_evals.qa.suite import QaRun, load_qa_suite, run_qa
 from cw_evals.qa.world import WorldSpec
 from cw_evals.run import main
@@ -167,6 +167,74 @@ def test_the_planner_retry_gets_the_retry_plan(suite: tuple[WorldSpec, list[QaCa
     )
     assert '"rules_in_force"' in first
     assert second == '{"as_of": null, "steps": []}'
+
+
+def answer_prompt(clause: str) -> str:
+    return "\n".join(
+        [
+            "Question: Was it extended till 21 April 2026?",
+            "Date of the question: 2026-04-22",
+            "",
+            "Clauses:",
+            "[C1] en.p3 (01/2026-Central Tax)",
+            clause,
+            "",
+            "Facts:",
+            "F1: gstr3b_monthly (File GSTR-3B) is in force on 2026-04-22",
+        ]
+    )
+
+
+def test_a_scripted_answer_needs_its_dates_in_the_evidence(
+    suite: tuple[WorldSpec, list[QaCase]],
+) -> None:
+    """The date the case expects must be written in the evidence, not only in the question."""
+    _, cases = suite
+    case = next(c for c in cases if c.case_id == "mh-acme-gstr3b-2026-03")
+    provider = ScriptedQaProvider([case], {"n01_2026": "01/2026-Central Tax"})
+    provider.current_case = case.case_id
+    clause = "extends the due date for March, 2026 till the {} day of April, 2026"
+
+    def reply(prompt: str) -> str:
+        request = CompletionRequest(
+            feature="qa",
+            prompt_version="qa.answer@1",
+            system="",
+            user=prompt,
+            metadata={"layer": "kag"},
+        )
+        return provider.complete(request).text
+
+    assert '"clause": "C1"' in reply(answer_prompt(clause.format("twenty -first")))
+    assert provider.notes == []
+    for shifted in ("twentieth", "twenty-second"):
+        assert reply(answer_prompt(clause.format(shifted))) == DECLINED
+    assert provider.notes == ["scripted answer withheld: 2026-04-21 not in the kag evidence"] * 2
+
+
+def test_an_operator_that_finds_no_obligation_fails_the_kag_gates(
+    suite: tuple[WorldSpec, list[QaCase]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """get_obligations finding nothing still leaves the clauses the plan follows, but the due
+    dates only the obligations give are missing, so the scripted answers are withheld."""
+    spec, cases = suite
+    chosen = [c for c in cases if c.case_id.startswith(("dt-acme-", "dt-delhi-", "mh-acme-annual"))]
+    monkeypatch.setattr(
+        "qa.application.solver._Run.get_obligations",
+        lambda *_: StepValue(ValueKind.OBLIGATIONS),
+    )
+    runs = run_qa(spec, chosen, "scripted", gateway_url=UNUSED)
+    withheld = {
+        s.case_id
+        for s in runs["qa_kag"].scores
+        if s.reason == "answerer_declined" and "scripted answer withheld" in s.problems[0]
+    }
+    assert withheld == {
+        "dt-acme-april-2026-and-march",
+        "dt-delhi-q1-2026-and-last-extension",
+        "mh-acme-annual-return-due",
+    }
+    assert ("qa_kag", "grounded_answer_rate") in failed_gates(runs)
 
 
 def test_an_unknown_provider_is_refused(suite: tuple[WorldSpec, list[QaCase]]) -> None:

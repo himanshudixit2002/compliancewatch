@@ -30,8 +30,9 @@ provider: the rulebook, profile, obligation and gateway apps in process, seeded 
 own APIs, and the qa service on HTTP clients bound to them. It asks every case twice, with the
 KAG layer on (`qa_kag`) and off (`qa_hybrid`, the baseline), and the report compares the two.
 The scripted provider is served through the gateway (`build_app(completion_provider=...)`), so
-the registry check, masking and ledger run; it answers by the case in flight, and a model call
-the case does not script stops the run with exit 2. An exception while asking one case counts
+the registry check, masking and ledger run; it answers by the case in flight, declines when the
+evidence in the prompt does not give a date the case expects, and a model call the case does not
+script stops the run with exit 2. An exception while asking one case counts
 against the response rate and the run goes on.
 
 | Profile | Gates | When |
