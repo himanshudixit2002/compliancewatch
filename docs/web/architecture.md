@@ -62,8 +62,8 @@ apps/web/
   src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims)
   src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError, webError),
                                api/ (typed clients, problem parsing, idempotency), cache.ts (tags and revalidation),
-                               session.ts (the cookie), dal.ts (the gates), auth/ (the provider port and the fake
-                               adapter), legal.ts
+                               session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a
+                               POST handler), auth/ (the provider port and the fake adapter), legal.ts
   src/shared/config/           screens.ts, roles.ts, permissions.ts, flags.ts, nav.ts, services.ts, legal-docs.ts
   src/shared/lib/              dates, financial years, decimal money, humanise, identifiers, pagination, urls, assert
   src/shared/i18n/             messages/en.json and t()

@@ -80,6 +80,8 @@ const schema = z
     CW_WEB_REQUEST_TIMEOUT_MS: positiveInt.max(120_000).default(10_000),
     CW_WEB_RULEBOOK_WRITE_TOKEN: z.string().min(1).optional(),
     CW_WEB_ADMIN_IP_ALLOWLIST: cidrList,
+    // Trust the reverse proxy's forwarded headers: the client IP (x-real-ip, x-forwarded-for)
+    // and, for the sign-out origin check, the host (x-forwarded-host).
     CW_WEB_TRUST_FORWARDED_IP: envBoolean.default(false),
     CW_WEB_SEED_STATE_PATH: z.string().min(1).default("../../var/seed/last.json"),
     CW_WEB_BUILD_SHA: z.string().min(1).optional(),

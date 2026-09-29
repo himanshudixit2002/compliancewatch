@@ -35,6 +35,7 @@ src/server/         server-only modules; every file starts with `import "server-
                     env.ts validates every CW_WEB_* variable (zod; parsed at the first request, never at build)
                     session.ts: the encrypted cw_session cookie (jose), its options, set and clear (actions only)
                     dal.ts: verifySession, requireRole, requireAdmin, requireScreen, sessionForRender (the gates)
+                    origin.ts: the same-origin check a POST route handler runs (Sec-Fetch-Site, Origin against Host)
                     auth/provider.ts: the AuthProvider port and providerFor(env); auth/fake.ts: the development
                     adapter (CW_WEB_AUTH_PROVIDER=fake, local and test only) minting a session for a chosen
                     tenant, kind, roles and name

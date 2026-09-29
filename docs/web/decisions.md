@@ -183,9 +183,10 @@ web-local problems, mapped to a form's `ActionState` like a service failure.
 
 2026-09-29. Two small choices the later screens copy. Sign-out is `POST /sign-out`
 (`app/sign-out/route.ts`): the shells and the account page submit a plain form to it, so it
-works without JavaScript, the handler expires the cookie on the redirect response, refuses a
-request whose `Origin` is another site, and any other method is a 405; there is no sign-out
-server action to keep in step. The sign-in form (`features/auth/ui/dev-sign-in-form.tsx`) is a
+works without JavaScript, the handler expires the cookie on a relative redirect to
+`/sign-in`, refuses a request from another site by `Sec-Fetch-Site` or by `Origin` against the
+`Host` header (never against `request.nextUrl`, which `next start` builds from its bind
+address), and any other method is a 405; there is no sign-out server action to keep in step. The sign-in form (`features/auth/ui/dev-sign-in-form.tsx`) is a
 client component and the layer rule keeps client components to `shared`, `entities` and their
 own directory, so the page passes it the `signIn` server action and the options the model built
 (`signInFormOptions()`: the input names, the tenant kinds, the roles per kind) as props instead

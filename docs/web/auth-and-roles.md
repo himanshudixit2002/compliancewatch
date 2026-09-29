@@ -151,11 +151,11 @@ constructor refuses again (D-016).
    (`parseFakeSignInForm`), asks the provider for the claims, writes the cookie and redirects to
    `safeNext(next, homeFor(session))`. Every expected failure comes back as an `ActionState`
    with field errors or the problem.
-3. `POST /sign-out` (`app/sign-out/route.ts`) expires the cookie on a 303 to `/sign-in`. It
-   refuses a request whose `Origin` is another site with a 403 problem
-   (`web-cross-origin-request`), and any other method is a 405. The shells' account menu and
-   the account page submit a plain form to it, so it works without JavaScript. Nothing is
-   revoked at a provider today.
+3. `POST /sign-out` (`app/sign-out/route.ts`) expires the cookie on a 303 to the relative
+   `/sign-in`, so the browser stays on whatever host it used. It refuses a request from another
+   site with a 403 problem (`web-cross-origin-request`; the check is below), and any other
+   method is a 405. The shells' account menu and the account page submit a plain form to it,
+   so it works without JavaScript. Nothing is revoked at a provider today.
 4. `/account` (`app/(app)/account/page.tsx`) shows the session's facts: display name, user id,
    tenant id and kind, roles, the second factor (asserted, verified or not), when the session
    started and expires (IST), and the provider, with the sign-out form.
@@ -163,8 +163,17 @@ constructor refuses again (D-016).
 ## Cross-site requests
 
 The cookie is `SameSite=Lax`, so a cross-site POST does not carry it. Next compares a server
-action's `Origin` with the host before running it, and the sign-out handler checks `Origin`
-itself. `next` is a same-origin path or nothing. The session and the tokens never reach client
+action's `Origin` with the host before running it, and the sign-out handler runs the same kind
+of check itself (`server/origin.ts`): `Sec-Fetch-Site` decides when the browser sends it (only
+`same-origin` passes); otherwise `Origin`'s host must equal the request's `Host` header, or the
+first `X-Forwarded-Host` value when `CW_WEB_TRUST_FORWARDED_IP` says the deployment trusts its
+proxy's forwarded headers; a request with neither header is not a browser's cross-site
+submission and passes. The check never uses `request.nextUrl`: under `next start` Next builds
+that URL from the server's bind address (`http://localhost:PORT`), so comparing with it would
+refuse every visitor who opened the app as `127.0.0.1`, a LAN address or a domain behind a
+proxy, and a redirect built from it would send them to `localhost`. The proxy's redirects are
+safe from this, because Next rewrites a proxy redirect to the request's own host into a
+relative `Location`. `next` is a same-origin path or nothing. The session and the tokens never reach client
 JavaScript: the cookie is httpOnly and the server passes only the `SessionDto`.
 
 ## Not enforced yet on `main`
@@ -176,7 +185,8 @@ JavaScript: the cookie is httpOnly and the server passes only the `SessionDto`.
   second factor.
 - `CW_WEB_ADMIN_IP_ALLOWLIST` and `CW_WEB_TRUST_FORWARDED_IP` are parsed and validated by
   `server/env.ts`, but the proxy does not check an allow-list yet; `/admin` is guarded by the
-  session gates alone.
+  session gates alone. `CW_WEB_TRUST_FORWARDED_IP` is read today only by the sign-out origin
+  check, for `X-Forwarded-Host`.
 - The services trust `x-tenant-id` from their caller (ADR-014 names that a dev-stage
   limitation); the web server sends the session's tenant, and no screen lets a user choose
   another.

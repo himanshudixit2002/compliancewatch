@@ -107,7 +107,38 @@ test.describe("sign-in", () => {
     expect(foreign.headers()["content-type"]).toContain("application/problem+json");
     const own = await page.request.post("/sign-out", { maxRedirects: 0 });
     expect(own.status()).toBe(303);
-    expect(own.headers()["location"]).toMatch(/\/sign-in$/);
+    expect(own.headers()["location"]).toBe("/sign-in");
     expect(own.headers()["set-cookie"]).toMatch(/cw_session=;/);
+  });
+
+  // next start builds the request URL from the address it binds (localhost), not from the
+  // host the browser used; sign-out must still work, and stay, on any other host name.
+  test("an owner signed in through 127.0.0.1 signs out and stays on that host", async ({
+    browser,
+    baseURL,
+  }) => {
+    const loopback = (baseURL ?? "").replace("//localhost", "//127.0.0.1");
+    expect(loopback).toContain("127.0.0.1");
+    const direct = await browser.newContext({ baseURL: loopback });
+    try {
+      const page = await direct.newPage();
+      await page.goto("/account");
+      await expect(page).toHaveURL(`${loopback}/sign-in?next=%2Faccount`);
+      await signInThroughForm(page, OWNER, "/account");
+      await expect(page).toHaveURL(`${loopback}/account`);
+      const menu = page.getByRole("navigation", { name: "Account" });
+      await menu.getByRole("button", { name: "Sign out" }).click();
+      await expect(page).toHaveURL(`${loopback}/sign-in`);
+      const cookies = await direct.cookies(loopback);
+      expect(cookies.find((cookie) => cookie.name === "cw_session")).toBeUndefined();
+      const scripted = await page.request.post("/sign-out", {
+        headers: { origin: loopback },
+        maxRedirects: 0,
+      });
+      expect(scripted.status()).toBe(303);
+      expect(scripted.headers()["location"]).toBe("/sign-in");
+    } finally {
+      await direct.close();
+    }
   });
 });
