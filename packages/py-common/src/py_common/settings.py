@@ -8,6 +8,18 @@ the environment, ``unleash`` from an Unleash server at ``unleash_url`` with the 
 ``unleash_api_token`` (``CW_FLAGS_PROVIDER``; owner platform; it becomes plain configuration once
 a hosted Unleash runs in staging and production).
 
+``auth_mode`` says how a request proves who it comes from (``CW_AUTH_MODE``; owner platform):
+
+- ``header`` (the default): no token is read; the tenant comes from ``x-tenant-id`` as before;
+- ``dual``: a bearer token from the identity service is verified and enforced when a request
+  carries one, and a request without one is served as in ``header`` mode;
+- ``token``: every request needs a bearer token.
+
+Production (``CW_ENV=prod``) refuses anything but ``token``. Tokens are ES256 JWTs issued by
+``auth_issuer`` for ``auth_audience``; their keys come from ``auth_jwks_json`` when it is set (an
+inline key set, for tests and static configuration) and otherwise from ``auth_jwks_url``, cached
+for an hour. ``auth_leeway_seconds`` allows for clock skew on the time claims.
+
 ``env_files`` are the ``.env`` files the settings were read from: ``.env`` by default, none when
 they were built with ``_env_file=None`` (tests, the demo, the evals). ``py_common.flags`` reads
 flags from the same files, so settings kept away from a developer's ``.env`` keep their flags
@@ -18,12 +30,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
-from pydantic import PrivateAttr, SecretStr, field_validator, model_validator
+from pydantic import Field, PrivateAttr, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["local", "test", "staging", "prod"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 FlagsProvider = Literal["env", "unleash"]
+AuthMode = Literal["header", "dual", "token"]
 
 
 class Settings(BaseSettings):
@@ -50,6 +63,12 @@ class Settings(BaseSettings):
     flags_provider: FlagsProvider = "env"
     unleash_url: str | None = None
     unleash_api_token: SecretStr | None = None
+    auth_mode: AuthMode = "header"
+    auth_issuer: str = "urn:compliancewatch:identity"
+    auth_audience: str = "compliancewatch"
+    auth_jwks_url: str = "http://localhost:8001/v1/identity/.well-known/jwks.json"
+    auth_jwks_json: SecretStr | None = None
+    auth_leeway_seconds: int = Field(default=30, ge=0, le=300)
     _env_files: tuple[Path, ...] = PrivateAttr(default=())
 
     if not TYPE_CHECKING:
@@ -78,6 +97,15 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "CW_FLAGS_PROVIDER=unleash needs CW_UNLEASH_URL and CW_UNLEASH_API_TOKEN"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_tokens_in_production(self) -> Self:
+        if self.env == "prod" and self.auth_mode != "token":
+            raise ValueError(
+                f"CW_ENV=prod needs CW_AUTH_MODE=token, got {self.auth_mode}: production serves "
+                "no request without a verified access token"
             )
         return self
 

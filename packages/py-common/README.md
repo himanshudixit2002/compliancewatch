@@ -15,12 +15,19 @@ src/py_common/
   settings.py          # pydantic-settings, env_prefix CW_, env_file .env
   flags.py             # configure_flags, flag_enabled, flag_value: OpenFeature over the flag registry (env or Unleash)
   flags_registry.json  # generated from packages/flags/registry.json by make flags; never edited by hand
-  logging.py           # structlog JSON logging bridging stdlib records; correlation_id/tenant_id contextvars
+  logging.py           # structlog JSON logging bridging stdlib records; correlation_id/tenant_id/actor contextvars
   health.py            # GET /health and GET /ready router with pluggable readiness checks
   request_context.py   # x-request-id middleware; correlation_id_of(request) for handlers and dependencies
   problems.py          # RFC 9457 problem+json handlers, Problem schema, problem_responses() for routers
   pagination.py        # keyset pagination: Pagination (limit, cursor), encode/decode_cursor, Page[T], page_of
-  app.py               # create_app(service_name, version, routers, problem_status, ...)
+  app.py               # create_app(service_name, version, routers, problem_status, authenticator, ...)
+  auth/                # verified identities; the package itself loads no FastAPI
+    keys.py            # ES256 SigningKey, KeySet (first signs, all published), load_signing_keys
+    tokens.py          # TokenIssuer, TokenVerifier (ES256 only), JwksUrlSource (1 h cache), StaticKeySource
+    errors.py          # 401 token required, 401 token invalid, 403 forbidden, 403 tenant mismatch, 503 keys unavailable
+    context.py         # current_principal, bind_principal: actor and tenant_id in the log context
+    fastapi.py         # Authenticator by CW_AUTH_MODE, authenticate, tenant_scope, require_roles, shared_token_or_roles
+    testing.py         # TestIssuer: tokens signed with a key generated at run time; bearer(token)
   telemetry.py         # configure_telemetry (OTLP to CW_OTEL_ENDPOINT), instrument_app, instrument_engine
   temporal/
     client.py          # connect(settings): pydantic converter + tracing interceptor
@@ -58,7 +65,8 @@ Every error a service returns is `application/problem+json` (RFC 9457) with `typ
 every app. A `DomainError` maps to the status the service passes in `problem_status`, for
 example `{BudgetExceededError: 429}`; the most specific class in the error's MRO wins, the
 defaults (`InvariantViolationError` 422, `UnknownAttributeError` 404, and py-common's own
-`InvalidCursorError` 422, idempotency errors 428, 422 and 409, and `UnknownFlagError` 500)
+`InvalidCursorError` 422, idempotency errors 428, 422 and 409, `UnknownFlagError` 500, and
+the authentication errors 401, 403 and 503)
 apply underneath, and an unmapped domain error is a 400. An error class may define `problem_headers` (a mapping) and
 those headers are copied onto the response; the gateway's budget error sets `Retry-After` that
 way. Request validation errors are 422 with an `errors` list that does not echo the submitted
@@ -69,6 +77,55 @@ a generic 500 that is logged with the correlation id. Routers declare the shape 
 a declaration: the 422 of request validation is a `Problem` (FastAPI's default
 `HTTPValidationError` entry is replaced), and every operation that takes a body lists a 400
 for a body that is not UTF-8, which fails before validation runs.
+
+## Authentication
+
+The identity service issues ES256 access tokens and every service verifies them with
+`py_common.auth`. A token names a `Principal` from `domain_kernel.access`: a user (`sub` the
+user id, `tid` the tenant, `roles`, `mfa`, `sv` the session version) or a service client (`sub`
+the client id, `scp` its scopes); `iss`, `aud`, `iat`, `exp` and `jti` complete the claims and
+the header's `kid` names the signing key. `CW_AUTH_MODE` decides what a service does with them
+(it is registered as the `auth.mode` flag):
+
+- `header` (the default): no token is read and the tenant comes from `x-tenant-id`, as before;
+- `dual`: a bearer token is verified and enforced when a request carries one, and a request
+  without one is served as in `header` mode;
+- `token`: every request needs a bearer token. `CW_ENV=prod` refuses any other mode.
+
+`create_app` puts an `Authenticator` on `app.state`, built from the settings: keys come from
+`CW_AUTH_JWKS_JSON` when it is set and otherwise from `CW_AUTH_JWKS_URL` (identity's
+`/v1/identity/.well-known/jwks.json`), cached for an hour; a token naming a key the cache lacks
+fetches once more, at most every 30 seconds, and cached keys stay in use while identity is
+unreachable. With nothing cached and identity unreachable, a token cannot be checked:
+`auth-keys-unavailable` (503). `CW_AUTH_ISSUER`, `CW_AUTH_AUDIENCE` and
+`CW_AUTH_LEEWAY_SECONDS` (30) complete the checks. Only ES256 is accepted, so `none` and HS256
+tokens are refused whatever key they name.
+
+A route reads its caller through dependencies in `py_common.auth.fastapi`:
+
+- `CurrentPrincipal` (`authenticate`): the principal, anonymous in `header` mode. A missing
+  token in `token` mode is `auth-token-required` (401 with `WWW-Authenticate: Bearer`), a bad
+  one `auth-token-invalid` (401). The principal is bound for the request, so every log line
+  carries `actor` (`user:<uuid>`, `service:<client>` or `anonymous`) and, for a user,
+  `tenant_id`.
+- `tenant_scope(True, TenantRequiredError)`: the tenant. A user's token names it and an
+  `x-tenant-id` naming another is `auth-tenant-mismatch` (403); a service names it in the
+  header and needs the `tenant:act` scope; the anonymous principal names it in the header. No
+  tenant is the service's own error, so its problem type does not change.
+- `require_roles(TENANT_MEMBER_ROLES, scopes={Scope.TENANT_ACT})`: a user with one of the roles
+  or a service with one of the scopes, else `auth-forbidden` (403). The anonymous principal
+  passes, so `header` mode behaves as before.
+- `shared_token_or_roles(setting, header, roles, scopes, disabled_error=..., invalid_error=...)`:
+  for routes a shared secret guarded. A bearer with one of the roles or scopes is accepted in
+  `dual` and `token` mode; the secret is accepted only in `header` and `dual` mode and fails
+  closed when unset. The two errors are the service's own.
+- `Authenticated`: any verified principal; the anonymous one is a 401.
+
+Tests use `py_common.auth.testing.TestIssuer`, which generates its key at run time:
+`Settings(**issuer.settings_overrides("token"))` makes a service verify its tokens, and
+`bearer(issuer.user(tenant, [Role.OWNER]))` or `bearer(issuer.service("pipeline", scopes))` is
+the header. `py_common.auth` itself imports no FastAPI (an import-linter contract keeps it so),
+so application layers may use the principal, the issuer and the key helpers.
 
 ## Pagination
 
