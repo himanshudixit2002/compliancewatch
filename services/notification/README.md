@@ -120,7 +120,10 @@ opt-out confirmations there are `change_card`, `obligation_created`, `obligation
 (`obligation_deadline_extended`, `obligation_corrected`, `obligation_withdrawn`).
 `ordered_params` gives the values in the order of the template's placeholders for a Meta
 template send, and summary and digest lines are joined with `; ` on WhatsApp, which refuses
-newlines in template values. The texts carry placeholders only, never a regulatory fact; the
+newlines in template values. Meta also refuses a template message whose filled body passes
+1,024 characters, so on WhatsApp a summary's list gets only the room the rest of its template
+leaves (its copy, the link, the label), and what does not fit is counted as 'and N more'; the
+business or firm label a summary names is cut to 60 characters. The texts carry placeholders only, never a regulatory fact; the
 facts come from the rulebook. The Hindi copy awaits analyst review, and each template waits for
 Meta's approval (`docs/runbooks/whatsapp.md`).
 

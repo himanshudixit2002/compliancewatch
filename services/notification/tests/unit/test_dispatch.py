@@ -21,6 +21,7 @@ from notification.domain.ports import AttemptResult, RuleVersionFacts
 from notification.domain.preferences import ConsentSource
 from notification.domain.recipients import BusinessLink, DigestMode, RecipientRole
 from notification.domain.routing import ObligationNotice
+from notification.domain.templates import WHATSAPP_BODY_MAX_CHARS
 from notification.infrastructure.memory import MemoryStore
 from notification.testing import (
     NIGHT_IST,
@@ -698,6 +699,25 @@ def test_a_ca_firm_gets_one_client_digest_even_for_one_notification() -> None:
         f"Open {WEB}/obligations?business_id={BUSINESS} for details. "
         "Reply HELP for help or STOP to opt out."
     )
+
+
+def test_a_long_digest_on_whatsapp_stays_within_metas_body_limit_link_included() -> None:
+    world = World()
+    world.digest_reader(
+        RecipientRole.CA_ADMIN, (WA, PHONE), org_label=("Rao & Co " * 23)[:200].strip()
+    )
+    for n in range(30):
+        title = f"File the quarterly statement of tax deducted at source, FORM 24Q, part {n}"
+        business = BETA if n % 2 else BUSINESS
+        world.enqueue.run(created(rule=RuleVersionId.new(), title=title, business=business))
+    world.clock.now = NINE_IST
+    assert outcomes(world.dispatch.run()) == [DeliveryOutcome.SENT]
+    (message,) = world.whatsapp.sent
+    assert "Updates: 30. Clients: 2." in message.body
+    assert len(message.body) <= WHATSAPP_BODY_MAX_CHARS
+    assert message.body.startswith(f"Client digest for {('Rao & Co ' * 7)[:57].rstrip()}...")
+    assert f"Open {WEB}/obligations for details." in message.body
+    assert "more. Open" in message.body, "what does not fit is counted"
 
 
 def test_a_notification_after_the_digest_went_waits_for_the_next_one() -> None:

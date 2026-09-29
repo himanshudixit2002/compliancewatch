@@ -398,13 +398,13 @@ class DispatchDue:
             digest=batch.digest,
             language=first.language,
             policy=self._batch,
+            link=summary_link(self._web_base_url, [n.business_id for n in batch.members]),
         )
-        link = summary_link(self._web_base_url, [n.business_id for n in batch.members])
         message = outbound(
             composition.template_key,
             first.channel,
             first.language,
-            {**composition.params, "link": link},
+            composition.params,
             recipient=first.address,
             dedupe_key=_batch_key(batch.members),
             session_open=batch.session_open,

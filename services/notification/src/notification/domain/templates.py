@@ -28,7 +28,9 @@ Summary and digest lines, and the short phrases a message fills in when a value 
 
 WhatsApp template sends carry the values as an ordered list (``ordered_params``). Meta refuses
 a parameter with a newline, a tab or more than four spaces in a row, so the values of a
-WhatsApp template are flattened to one line (``one_line``).
+WhatsApp template are flattened to one line (``one_line``). It also refuses a template message
+whose body, its values filled in, is longer than ``WHATSAPP_BODY_MAX_CHARS`` (1,024); a summary
+or digest sizes its list of lines to fit (``digest.compose``).
 
 ``CHANGE_TEMPLATES`` names the template for each deadline change a customer is told about:
 extended, corrected or withdrawn (ADR-015). ``template_for_change`` looks it up.
@@ -70,6 +72,9 @@ class MessageTemplate:
 
 _WA = Channel.WHATSAPP
 _EMAIL = Channel.EMAIL
+
+WHATSAPP_BODY_MAX_CHARS = 1024
+"""The most characters Meta takes in a WhatsApp template message's body, values filled in."""
 
 DUE_SOON = "obligation_due_soon"
 CREATED = "obligation_created"
@@ -390,10 +395,7 @@ def render(
     dedupe_key: DedupeKey,
 ) -> RenderedMessage:
     template = find_template(key, channel, language)
-    for name in template.placeholders:
-        if name not in params:
-            raise MissingPlaceholderError(key, name)
-    values = {name: str(params[name]) for name in template.placeholders}
+    values = _values(template, params)
     return RenderedMessage(
         channel=channel,
         recipient=recipient,
@@ -404,6 +406,19 @@ def render(
         subject=one_line(template.subject.format(**values)) if template.subject else "",
         language=template.language,
     )
+
+
+def fill(template: MessageTemplate, params: Mapping[str, object]) -> str:
+    """The template's body with ``params`` filled in, as ``render`` makes it; a missing value
+    raises ``MissingPlaceholderError``."""
+    return template.body.format(**_values(template, params))
+
+
+def _values(template: MessageTemplate, params: Mapping[str, object]) -> dict[str, str]:
+    for name in template.placeholders:
+        if name not in params:
+            raise MissingPlaceholderError(template.key, name)
+    return {name: str(params[name]) for name in template.placeholders}
 
 
 CHANGE_TEMPLATES: Mapping[tuple[str, str], str] = MappingProxyType(

@@ -44,6 +44,8 @@ DEFAULT_RETRY_POLICY = RetryPolicy()
 
 MIN_PARAM_CHARS = 40
 """Room for one short line and its 'and N more' tail."""
+MIN_LABEL_CHARS = 10
+"""Room for the start of a label and its ellipsis."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,19 +54,24 @@ class BatchPolicy:
 
     A notification waits ``window_seconds`` before it goes out, and the ones queued for the same
     person, channel and business meanwhile go with it as one summary. A summary lists at most
-    ``max_lines`` lines, and its list stays within ``max_param_chars`` characters, below the
-    size Meta accepts for one template parameter; what does not fit is counted as
-    'and N more'.
+    ``max_lines`` lines, and its list stays within ``max_param_chars`` characters; on WhatsApp
+    also within what Meta's 1,024 characters for the whole body leave once the rest of the
+    template (its copy, the link, the label) is filled in (``digest.compose``). What does not
+    fit is counted as 'and N more'. The business or firm label a summary names, in its heading
+    and before its lines, is cut to ``max_label_chars`` characters: a recipient may give one of
+    up to 200.
     """
 
     window_seconds: int = 300
     max_lines: int = 10
     max_param_chars: int = 900
+    max_label_chars: int = 60
 
     def __post_init__(self) -> None:
         require_int(self.window_seconds, "window_seconds", minimum=0)
         require_int(self.max_lines, "max_lines", minimum=1)
         require_int(self.max_param_chars, "max_param_chars", minimum=MIN_PARAM_CHARS)
+        require_int(self.max_label_chars, "max_label_chars", minimum=MIN_LABEL_CHARS)
 
     @property
     def window(self) -> timedelta:
