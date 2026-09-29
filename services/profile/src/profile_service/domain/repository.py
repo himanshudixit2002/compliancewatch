@@ -25,6 +25,22 @@ class ProfileRepository(Protocol):
 
     def entities(self) -> Sequence[ProfileNode]: ...
 
+    def page_entities(
+        self, after: BusinessId | None, limit: int, query: str = ""
+    ) -> Sequence[ProfileNode]:
+        """At most ``limit`` entities in the order of (name, id), starting after the entity
+        ``after``. ``query`` keeps the entities whose name, PAN or GSTIN of a registration
+        contains it, ignoring case. ProfileNodeNotFoundError when ``after`` names no entity of
+        this tenant."""
+        ...
+
+    def registrations_of(
+        self, entity_ids: Sequence[BusinessId]
+    ) -> Mapping[BusinessId, Sequence[ProfileNode]]:
+        """The registrations under each entity in the order they were created; an entity
+        without any maps to an empty sequence."""
+        ...
+
     def add(self, node: ProfileNode) -> None: ...
 
     def save(self, node: ProfileNode) -> None: ...

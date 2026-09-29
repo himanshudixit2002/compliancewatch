@@ -1,0 +1,202 @@
+# ComplianceWatch ontology wording, English: the question onboarding asks for each attribute in
+# attributes.yaml and a label for each allowed value.
+#
+# Draft wording; an analyst reviews it before launch (guide section 14).
+#
+# House rules:
+#   - one entry per attribute, in the order of attributes.yaml
+#   - every attribute a person answers or confirms (source gstin_lookup or user_input) has a
+#     question that ends in "?"; derived attributes need none
+#   - every allowed value of an enum, ordered_enum or enum_set attribute has a label, labels are
+#     unique within an attribute, and no label names a value the attribute does not allow
+#   - wording asserts nothing the definitions do not: help lines restate the definition,
+#     turnover-band labels restate the band keys, and state labels come from the comments in
+#     attributes.yaml
+#   - review_status stays needs_review until an analyst has read every line; any change bumps
+#     `version` here and WORDING_VERSION in src/ontology/__init__.py
+#
+# `ontology.load_wording()` checks this file against attributes.yaml.
+version: "0.1.0"
+language: en
+review_status: needs_review
+
+attributes:
+  # ---- Facts the GSTIN lookup pre-fills ---------------------------------------------------
+
+  - key: registration_type
+    question: What kind of GST registration does this business hold?
+    help: As shown on the GST portal. Choose unregistered if the business has no GSTIN.
+    labels:
+      regular: Regular
+      composition: Composition
+      casual: Casual taxable person
+      non_resident: Non-resident taxable person
+      isd: Input service distributor (ISD)
+      tds: Tax deductor (TDS)
+      tcs: Tax collector (TCS)
+      sez_unit: SEZ unit
+      sez_developer: SEZ developer
+      unregistered: Unregistered
+
+  - key: gstin_status
+    question: What is the status of this GSTIN on the GST portal?
+    labels:
+      active: Active
+      suspended: Suspended
+      cancelled: Cancelled
+      inactive: Inactive
+
+  - key: registered_since
+    question: On what date did this GST registration take effect?
+    help: The date on the registration certificate.
+
+  - key: state_codes
+    question: In which states and union territories does this business hold a GST registration?
+    help: The first two digits of a GSTIN are its state code.
+    labels:
+      "01": Jammu and Kashmir
+      "02": Himachal Pradesh
+      "03": Punjab
+      "04": Chandigarh
+      "05": Uttarakhand
+      "06": Haryana
+      "07": Delhi
+      "08": Rajasthan
+      "09": Uttar Pradesh
+      "10": Bihar
+      "11": Sikkim
+      "12": Arunachal Pradesh
+      "13": Nagaland
+      "14": Manipur
+      "15": Mizoram
+      "16": Tripura
+      "17": Meghalaya
+      "18": Assam
+      "19": West Bengal
+      "20": Jharkhand
+      "21": Odisha
+      "22": Chhattisgarh
+      "23": Madhya Pradesh
+      "24": Gujarat
+      "25": Daman and Diu (legacy code)
+      "26": Dadra and Nagar Haveli and Daman and Diu
+      "27": Maharashtra
+      "28": Andhra Pradesh (legacy code)
+      "29": Karnataka
+      "30": Goa
+      "31": Lakshadweep
+      "32": Kerala
+      "33": Tamil Nadu
+      "34": Puducherry
+      "35": Andaman and Nicobar Islands
+      "36": Telangana
+      "37": Andhra Pradesh
+      "38": Ladakh
+
+  - key: constitution
+    question: What is the legal form of this business?
+    help: The constitution of business on the GST registration certificate.
+    labels:
+      proprietorship: Proprietorship
+      partnership: Partnership
+      llp: Limited liability partnership (LLP)
+      private_limited: Private limited company
+      public_limited: Public limited company
+      huf: Hindu undivided family (HUF)
+      trust: Trust
+      society: Society
+      government: Government
+      other: Other
+
+  - key: business_category
+    question: What is the main activity of this business?
+    help: Pick the activity that earns most of the turnover.
+    labels:
+      manufacturing: Manufacturing
+      wholesale_trade: Wholesale trade
+      retail_trade: Retail trade
+      services: Services
+      restaurant: Restaurant
+      works_contract: Works contract
+      other: Other
+
+  # ---- Turnover and filing ----------------------------------------------------------------
+
+  - key: supply_type
+    question: Does this business supply goods, services, or both?
+    labels:
+      goods: Goods
+      services: Services
+      both: Both goods and services
+
+  - key: turnover_band
+    question: What was the aggregate turnover of this business in the previous financial year?
+    help: >-
+      Turnover on an all-India PAN basis, as defined in section 2(6) of the CGST Act. Each band
+      runs from above its lower bound up to and including its upper bound.
+    labels: &turnover_band_labels
+      upto_10_lakh: Up to 10 lakh
+      10_lakh_to_20_lakh: 10 lakh to 20 lakh
+      20_lakh_to_40_lakh: 20 lakh to 40 lakh
+      40_lakh_to_75_lakh: 40 lakh to 75 lakh
+      75_lakh_to_1_5_crore: 75 lakh to 1.5 crore
+      1_5_crore_to_2_crore: 1.5 crore to 2 crore
+      2_crore_to_5_crore: 2 crore to 5 crore
+      5_crore_to_10_crore: 5 crore to 10 crore
+      10_crore_to_20_crore: 10 crore to 20 crore
+      20_crore_to_50_crore: 20 crore to 50 crore
+      50_crore_to_100_crore: 50 crore to 100 crore
+      100_crore_to_500_crore: 100 crore to 500 crore
+      above_500_crore: Above 500 crore
+
+  - key: peak_turnover_band
+    question: >-
+      What is the highest aggregate turnover this business has had in any financial year from
+      2017-18 onwards?
+    help: The same bands as the previous year's turnover.
+    labels: *turnover_band_labels
+
+  - key: return_filing_frequency
+    question: How often does this business file GSTR-1 and GSTR-3B?
+    help: Quarterly means the business has opted into the QRMP scheme.
+    labels:
+      monthly: Monthly
+      quarterly: Quarterly (QRMP scheme)
+
+  - key: filing_scheme
+    question: Which return-filing scheme is this registration under?
+    labels:
+      regular_monthly: Regular, filing monthly
+      regular_qrmp: Regular, filing quarterly under QRMP
+      composition: Composition
+
+  # ---- Activity flags that notifications condition on -------------------------------------
+
+  - key: makes_inter_state_supplies
+    question: Does this business supply goods or services to customers in another state or union territory?
+
+  - key: makes_zero_rated_supplies
+    question: Does this business export goods or services, or supply SEZ units or developers?
+
+  - key: ecommerce_role
+    question: Does this business sell through an e-commerce operator, run one, or both?
+    labels:
+      none: Neither
+      seller: Sells through an e-commerce operator
+      operator: Runs an e-commerce operator
+      both: Both
+
+  - key: pays_reverse_charge
+    question: Does this business receive supplies on which it must pay GST under reverse charge?
+    help: For example goods transport agency, legal, security or imported services.
+
+  - key: generates_eway_bills
+    question: Does this business move goods that need an e-way bill?
+    help: >-
+      Usually consignments worth more than 50,000 rupees; some states set a higher limit for
+      movement within the state.
+
+  # ---- Size ---------------------------------------------------------------------------------
+
+  - key: employee_count
+    question: How many people are on the payroll, including part-time and contract staff?

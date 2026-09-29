@@ -1,0 +1,141 @@
+{
+  "$schema": "./registry.schema.json",
+  "flags": [
+    {
+      "name": "flags.provider",
+      "type": "string",
+      "default": "env",
+      "values": ["env", "unleash"],
+      "owner": "platform",
+      "description": "Where py_common.flags and @compliancewatch/flags read flags: env from the environment, unleash from an Unleash server at CW_UNLEASH_URL with CW_UNLEASH_API_TOKEN.",
+      "removal": "Becomes plain configuration once a hosted Unleash runs in staging and production.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_FLAGS_PROVIDER",
+      "services": ["py-common", "flags"]
+    },
+    {
+      "name": "identity.billing_provider",
+      "type": "string",
+      "default": "none",
+      "values": ["none", "memory", "razorpay"],
+      "owner": "identity-partner",
+      "description": "The billing provider identity starts subscriptions with: none refuses them (503), memory keeps them in the process for tests and demos, razorpay calls Razorpay.",
+      "removal": "Becomes plain configuration once the Razorpay account, plans and keys work in production; none stays for local runs.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_BILLING_PROVIDER",
+      "services": ["identity"]
+    },
+    {
+      "name": "llm_gateway.provider",
+      "type": "string",
+      "default": "fake",
+      "values": ["fake", "vercel"],
+      "owner": "ai-platform",
+      "description": "The model provider the gateway calls: fake serves every route deterministically, vercel uses the Vercel AI Gateway and needs its key.",
+      "removal": "Becomes plain configuration once the AI Gateway account and key are live in staging and production; fake stays for tests and local runs.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_LLM_PROVIDER",
+      "services": ["llm-gateway"]
+    },
+    {
+      "name": "notification.whatsapp",
+      "type": "bool",
+      "default": false,
+      "owner": "core-product",
+      "description": "Wires the WhatsApp channel in the notification service. Off, every WhatsApp send fails with that reason.",
+      "removal": "Once the Meta business account, phone number and message templates are approved and WhatsApp sends in production.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_WHATSAPP_ENABLED",
+      "services": ["notification"]
+    },
+    {
+      "name": "pipeline.knowledge",
+      "type": "bool",
+      "default": false,
+      "owner": "regulatory-intelligence",
+      "description": "Hands parsed documents to the rulebook and embeds their clauses. Off, the worker makes no call to the rulebook or the gateway.",
+      "removal": "Once ADR-017 is accepted.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_PIPELINE_KNOWLEDGE_ENABLED",
+      "services": ["pipeline"]
+    },
+    {
+      "name": "profile.gstin_category_prefill",
+      "type": "bool",
+      "default": false,
+      "owner": "core-product",
+      "description": "Writes business_category from the GSTIN lookup's nature of business when exactly one category maps.",
+      "removal": "When the nature-of-business mapping is reviewed against recorded provider responses and has been on for every tenant for 30 days.",
+      "expires": "2027-03-31",
+      "targeting": "tenant",
+      "services": ["profile"]
+    },
+    {
+      "name": "profile.gstin_lookup",
+      "type": "string",
+      "default": "manual",
+      "values": ["manual", "static", "http"],
+      "owner": "core-product",
+      "description": "The GSTIN lookup provider profile uses: manual has none, so every registration gets a verify_registration task; static serves the demo table; http asks the provider at CW_PROFILE_GSTIN_LOOKUP_URL, whose field mapping is reviewed against the provider's sandbox first.",
+      "removal": "Becomes plain provider configuration once the provider contract is signed; the manual fallback stays.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_PROFILE_GSTIN_LOOKUP",
+      "services": ["profile"]
+    },
+    {
+      "name": "qa.kag",
+      "type": "bool",
+      "default": false,
+      "owner": "ai-platform",
+      "description": "Runs the planner and solver layer (ADR-017) between the structured layer and hybrid search, for the listed tenants or, with no list, for every tenant.",
+      "removal": "When ADR-017 is Accepted.",
+      "expires": "2027-03-31",
+      "targeting": "tenant",
+      "env": "CW_QA_KAG_ENABLED",
+      "tenants_env": "CW_QA_KAG_TENANTS",
+      "services": ["qa"]
+    },
+    {
+      "name": "rulebook.publish",
+      "type": "bool",
+      "default": false,
+      "owner": "regulatory-intelligence",
+      "description": "Publishing and withdrawing rule versions and the daily transition sweep. Off, those routes answer 503; citing and review still work.",
+      "removal": "Once the workbench publishes in production and the obligation consumer of the rule events is live.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_RULEBOOK_PUBLISH_ENABLED",
+      "services": ["rulebook"]
+    },
+    {
+      "name": "whatsapp_bot.consent_recording",
+      "type": "bool",
+      "default": false,
+      "owner": "core-product",
+      "description": "Records keyword opt-ins and opt-outs as channel consents in identity. Off, the bot logs what it would record.",
+      "removal": "Once the lawyer confirms keyword opt-in is valid consent.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "WHATSAPP_CONSENT_RECORDING_ENABLED",
+      "services": ["whatsapp-bot"]
+    },
+    {
+      "name": "whatsapp_bot.send",
+      "type": "bool",
+      "default": false,
+      "owner": "core-product",
+      "description": "Lets the bot's replies leave the process through the WhatsApp Cloud API, with the phone number id and access token set.",
+      "removal": "Once the Meta business account is approved and the bot replies in production.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "WHATSAPP_SEND_ENABLED",
+      "services": ["whatsapp-bot"]
+    }
+  ]
+}

@@ -9,7 +9,7 @@ Analysts.
 
 Design reference: Project Foundation guide, sections 6 and 14.
 
-- **Owns:** `src/ontology/data/attributes.yaml` and the loader, checks and validator under `src/ontology`
+- **Owns:** `src/ontology/data/attributes.yaml`, the wording in `src/ontology/data/wording.en.yaml`, and the loader, checks and validator under `src/ontology`
 - **Owning team:** Core Product, co-approved by Regulatory Intelligence
 - **Consumes:** `packages/domain-kernel` (the `Ontology` model and its structural validation)
 - **Emits / publishes:** ontology versions; the profile service and the applicability engine upgrade together
@@ -30,12 +30,33 @@ Design reference: Project Foundation guide, sections 6 and 14.
   `ontology.parse(text)` turns YAML text into the mapping `Ontology.from_mapping` takes.
 - `uv run ontology-validate` checks the packaged file and lists its attributes. `--file path`
   checks a draft instead; a draft is not required to match `VERSION`.
+- `src/ontology/data/wording.en.yaml`, wording version 0.1.0: the question onboarding asks for
+  each attribute, an optional help line, and a label for every allowed value.
+  `ontology.load_wording()` returns the kernel's `OntologyWording` checked against `load()`;
+  `ontology.WORDING_VERSION` is the version it must carry and `ontology.wording_path()` locates
+  it.
 
 The kernel owns the model and the structural validation: keys, types, sources, allowed values,
 bounds, semver strings and examples. This package adds seven house rules on top: keys are
 snake_case; definitions end with a period; `since` is present and not newer than `version`;
 enum kinds have at least two values; values are snake_case, and state codes are exactly two
 digits; a per-financial-year attribute lives at the entity level.
+
+## Wording
+
+The questions and value labels live apart from the attributes and carry their own version, so
+rewording a question never changes what a predicate means. The English file is a draft: its
+`review_status` is `needs_review` until an analyst from Regulatory Intelligence has read every
+line and sets it to `reviewed` before launch (guide section 14). Nothing in it goes beyond the
+definitions: help lines restate a definition, turnover-band labels restate the band keys and
+state labels come from the comments in `attributes.yaml`.
+
+`load_wording()` fails when an attribute a person answers has no question ending in `?`, when an
+allowed value has no label, when a label names a value the attribute does not allow, or when a
+key is not an attribute; derived attributes need no question. A new attribute or allowed value
+therefore lands together with its wording. A wording change bumps `version` in the file and
+`WORDING_VERSION` together; the attribute set's version stays. Hindi wording
+(`wording.hi.yaml`) arrives with the Hindi interface.
 
 ## How services use it
 
@@ -54,7 +75,8 @@ check.
    `src/ontology/__init__.py` and `version` in `pyproject.toml`. Minor for a new attribute or
    allowed value, major for a removal or rename, patch for wording. A new attribute gets `since`
    set to the new version.
-3. Update `EXPECTED_COUNT` in `tests/unit/test_load.py` when the count changes and add an entry
+3. Add the attribute's question and value labels to `wording.en.yaml` and bump its version.
+   Update `EXPECTED_COUNT` in `tests/unit/test_load.py` when the count changes and add an entry
    to `CHANGELOG.md`.
 4. Run `uv run ontology-validate` and `uv run pytest packages/ontology`.
 5. Open a pull request; it needs a review from both owning teams.

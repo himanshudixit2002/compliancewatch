@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:flags:registry:v1",
+  "title": "Feature flag registry",
+  "description": "Every rollout switch in ComplianceWatch: its owner, its default, when it expires and what removes it. make flags-check validates packages/flags/registry.json against this schema.",
+  "type": "object",
+  "required": ["flags"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "flags": {
+      "type": "array",
+      "description": "One entry per flag, sorted by name.",
+      "items": { "$ref": "#/$defs/flag" }
+    }
+  },
+  "$defs": {
+    "flag": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "default",
+        "owner",
+        "description",
+        "removal",
+        "expires",
+        "targeting",
+        "services"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Dotted, lower case: <area>.<switch>. CW_FLAG_<NAME> (dots become underscores) overrides it in the env provider.",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+        },
+        "type": { "enum": ["bool", "string"] },
+        "default": {
+          "type": ["boolean", "string"],
+          "description": "A bool flag defaults to false; a string flag defaults to its off value, one of values."
+        },
+        "values": {
+          "type": "array",
+          "description": "Every value a string flag takes; the default is one of them.",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 2,
+          "uniqueItems": true
+        },
+        "owner": {
+          "enum": [
+            "core-product",
+            "platform",
+            "regulatory-intelligence",
+            "ai-platform",
+            "identity-partner"
+          ]
+        },
+        "description": { "type": "string", "minLength": 1 },
+        "removal": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The condition under which the flag is deleted from the code and from this registry."
+        },
+        "expires": {
+          "type": "string",
+          "format": "date",
+          "description": "The date by which the flag is removed or its owner extends it with a reason."
+        },
+        "targeting": {
+          "enum": ["none", "tenant"],
+          "description": "tenant: the flag can be on for some tenants only (the tenant id is the targeting key)."
+        },
+        "env": {
+          "type": "string",
+          "description": "The environment variable the code already reads for this switch, when it has one.",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "tenants_env": {
+          "type": "string",
+          "description": "The environment variable holding the tenant allow-list (comma-separated tenant ids), when the code already reads one.",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "services": {
+          "type": "array",
+          "description": "The services, apps and packages that read the flag (directory names).",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "bool" } } },
+          "then": {
+            "properties": { "default": { "const": false } },
+            "not": { "required": ["values"] }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "string" } } },
+          "then": {
+            "properties": { "default": { "type": "string" } },
+            "required": ["values"]
+          }
+        },
+        {
+          "if": { "required": ["tenants_env"] },
+          "then": { "properties": { "targeting": { "const": "tenant" } } }
+        }
+      ]
+    }
+  }
+}

@@ -4,11 +4,13 @@ A ``DomainError`` becomes ``application/problem+json`` whose ``type`` is the err
 The service passes the status each of its errors maps to; the kernel's defaults apply underneath.
 Request validation errors, HTTP errors and unhandled exceptions get the same shape, so a client
 parses one error format. An error may carry extra response headers in ``problem_headers``
-(the gateway's budget error sets ``Retry-After`` that way).
+(the gateway's budget error sets ``Retry-After`` that way). A required header listed in
+``MISSING_HEADER_ERRORS`` that a request leaves out is answered with its own problem rather than
+request-invalid: a creating request without ``Idempotency-Key`` is a 428.
 """
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from http import HTTPStatus
 from typing import Any
 
@@ -24,7 +26,15 @@ from domain_kernel.errors import (
     InvariantViolationError,
     UnknownAttributeError,
 )
+from py_common.flags import UnknownFlagError
+from py_common.idempotency.errors import (
+    IDEMPOTENCY_KEY_HEADER,
+    IdempotencyKeyRequiredError,
+    IdempotencyKeyReusedError,
+    IdempotencyRequestInFlightError,
+)
 from py_common.logging import get_logger
+from py_common.pagination import InvalidCursorError
 from py_common.request_context import REQUEST_ID_HEADER, correlation_id_of
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
@@ -34,7 +44,16 @@ INTERNAL_TYPE = PROBLEM_TYPE_PREFIX + "internal-error"
 DEFAULT_STATUS_BY_ERROR: Mapping[type[DomainError], int] = {
     InvariantViolationError: 422,
     UnknownAttributeError: 404,
+    InvalidCursorError: 422,
+    IdempotencyKeyRequiredError: 428,
+    IdempotencyKeyReusedError: 422,
+    IdempotencyRequestInFlightError: 409,
+    UnknownFlagError: 500,
 }
+MISSING_HEADER_ERRORS: Mapping[str, type[DomainError]] = {
+    IDEMPOTENCY_KEY_HEADER.lower(): IdempotencyKeyRequiredError,
+}
+"""Required headers, by lower-case name, whose absence is the given error."""
 
 log = get_logger(__name__)
 
@@ -95,6 +114,9 @@ def install_problem_handlers(
     def validation_error(request: Request, exc: Exception) -> JSONResponse:
         if not isinstance(exc, RequestValidationError):  # pragma: no cover
             raise exc
+        missing = _missing_header_error(exc.errors())
+        if missing is not None:
+            return domain_error(request, missing())
         issues = [
             ValidationIssue(loc=[*error["loc"]], msg=error["msg"], type=error["type"])
             for error in exc.errors()
@@ -144,6 +166,17 @@ def install_problem_handlers(
     app.add_exception_handler(HTTPException, http_error)
     app.add_exception_handler(Exception, unhandled)
     _publish_problem_schema(app)
+
+
+def _missing_header_error(errors: Sequence[Any]) -> type[DomainError] | None:
+    """The error for the first missing header that has one of its own."""
+    for error in errors:
+        loc = tuple(error.get("loc", ()))
+        if error.get("type") == "missing" and len(loc) == 2 and loc[0] == "header":
+            found = MISSING_HEADER_ERRORS.get(str(loc[1]).lower())
+            if found is not None:
+                return found
+    return None
 
 
 def _status_for(exc: DomainError, statuses: Mapping[type[DomainError], int], default: int) -> int:

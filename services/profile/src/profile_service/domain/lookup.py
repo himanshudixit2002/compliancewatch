@@ -6,6 +6,7 @@ configured, or the provider is down, ``lookup`` returns None and the user procee
 the profile opens a review task to re-verify later (guide section 7, profile-service).
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
@@ -27,13 +28,26 @@ class GstinLookupResult:
     state_code: str = ""
     constitution: str = ""
     registered_since: date | None = None
+    nature_of_business: tuple[str, ...] = ()
+    """The nature of business activities as the registry words them, not mapped."""
+    business_category: str = ""
+    """An ontology ``business_category`` value when the activities map to exactly one category
+    (``single_category``); empty when none or several do."""
 
     def __post_init__(self) -> None:
         require_instance(self.gstin, Gstin, "gstin")
         require_text(self.legal_name, "legal_name")
+        for activity in require_instance(self.nature_of_business, tuple, "nature_of_business"):
+            require_text(activity, "nature_of_business[]")
+        require_instance(self.business_category, str, "business_category")
 
     def attribute_values(self) -> dict[str, object]:
-        """The profile attributes the answer fills, keyed by ontology attribute."""
+        """The profile attributes the answer fills, keyed by ontology attribute.
+
+        ``business_category`` is left out: the prefill writes it only while the flag
+        ``profile.gstin_category_prefill`` is on for the tenant, since the mapping from the
+        registry's activities is not reviewed yet.
+        """
         values: dict[str, object] = {}
         if self.registration_type:
             values["registration_type"] = self.registration_type
@@ -44,6 +58,17 @@ class GstinLookupResult:
         if self.registered_since is not None:
             values["registered_since"] = self.registered_since.isoformat()
         return values
+
+
+def single_category(categories: Iterable[str]) -> str:
+    """The category every mapped activity names, or empty when none is mapped or they differ.
+
+    The ontology's ``business_category`` is the activity that earns most of the turnover, and
+    the registry does not say which activity that is: a business listed as both a wholesaler
+    and a retailer gets no category, and the owner is asked instead.
+    """
+    distinct = {category for category in categories if category}
+    return distinct.pop() if len(distinct) == 1 else ""
 
 
 class GstinLookupProvider(Protocol):

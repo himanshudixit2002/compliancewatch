@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ontology import AttributeSource
 from domain_kernel.profiles import ProfileSnapshot
+from profile_service.application.prefill import PrefillResult
+from profile_service.domain.lookup import GstinLookupResult
 from profile_service.domain.model import (
     AttributeChange,
     AttributeRecord,
@@ -202,6 +204,33 @@ class LookupResultOut(BaseModel):
     state_code: str
     constitution: str
     registered_since: str | None
+    nature_of_business: list[str] = Field(
+        default_factory=list, description="The registry's activities, as it words them"
+    )
+    business_category: str = Field(
+        default="",
+        description=(
+            "The category the activities map to, empty when none or several do; stored only "
+            "while profile.gstin_category_prefill is on"
+        ),
+    )
+
+    @classmethod
+    def from_result(cls, result: GstinLookupResult) -> "LookupResultOut":
+        return cls(
+            gstin=result.gstin.value,
+            legal_name=result.legal_name,
+            trade_name=result.trade_name,
+            registration_type=result.registration_type,
+            gstin_status=result.gstin_status,
+            state_code=result.state_code,
+            constitution=result.constitution,
+            registered_since=None
+            if result.registered_since is None
+            else result.registered_since.isoformat(),
+            nature_of_business=list(result.nature_of_business),
+            business_category=result.business_category,
+        )
 
 
 class PrefillOut(BaseModel):
@@ -210,3 +239,13 @@ class PrefillOut(BaseModel):
     result: LookupResultOut | None
     applied: list[str]
     review_task: UUID | None
+
+    @classmethod
+    def from_result(cls, result: PrefillResult) -> "PrefillOut":
+        return cls(
+            node_id=result.node_id.value,
+            looked_up=result.looked_up,
+            result=None if result.result is None else LookupResultOut.from_result(result.result),
+            applied=list(result.applied),
+            review_task=None if result.review_task is None else result.review_task.value,
+        )
