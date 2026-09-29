@@ -20,6 +20,7 @@ from profile_service.domain.model import (
 )
 
 FY_PATTERN = r"^[0-9]{4}-[0-9]{2}$"
+CHANGED_BY = "The user who changed the values; ignored when an access token names the caller"
 
 
 class Strict(BaseModel):
@@ -65,7 +66,7 @@ class AttributeChangeIn(Strict):
 class AttributesIn(Strict):
     changes: list[AttributeChangeIn] = Field(min_length=1, max_length=100)
     source: Literal["user_input", "gstin_lookup", "partner_api", "import"] = "user_input"
-    changed_by: UUID | None = None
+    changed_by: UUID | None = Field(default=None, description=CHANGED_BY)
 
 
 class AttributeOut(BaseModel):
@@ -192,7 +193,7 @@ class ReviewTaskOut(BaseModel):
 
 
 class PrefillIn(Strict):
-    changed_by: UUID | None = None
+    changed_by: UUID | None = Field(default=None, description=CHANGED_BY)
 
 
 class LookupResultOut(BaseModel):

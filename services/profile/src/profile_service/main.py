@@ -1,7 +1,7 @@
 """Composition root for the profile service.
 
 Guide section 11: wiring of interfaces to implementations happens here, never inside the layers.
-The tenant comes from the ``x-tenant-id`` header until the identity service issues tokens.
+The caller and its tenant come from ``py_common.auth`` by ``CW_AUTH_MODE`` (``api.deps``).
 """
 
 from collections.abc import Awaitable, Callable
