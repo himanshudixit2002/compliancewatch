@@ -45,6 +45,7 @@
 > pnpm + Turborepo workspace with the Next.js web app and
 > the WhatsApp bot, paging alert rules with runbooks and a CI link check, dev backup and restore, the MVP deploy profile (Fly.io templates, Vercel config, env matrix) and the one-process demo tenant (`make demo`), Docker Compose dev stack, GitHub Actions CI behind one required check (integration tests for the packages a change touches, a migration lint for tenant tables, OpenAPI coverage, compatibility and property tests, Semgrep and Trivy scans, a cross-tenant route suite, a nightly rescan, fuzz run and rulebook data-quality check) with Dependabot, pre-commit hooks and ADRs 001 to 008
 > and 012 to 018 (009 to 011 as stubs). No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
+> The web app has its foundation: design tokens with light and dark schemes and a tested component kit in `packages/ui`, a screen registry that drives the navigation, `/sitemap` and an honest "not available yet" page for every screen whose backend is absent, the legal drafts rendered under a draft banner, a Playwright and axe suite with its CI job, and the docs in [docs/web](docs/web/README.md).
 >
 > Source of truth: *ComplianceWatch - Project Foundation (HLD, LLD & Build Guide)*. Section numbers below refer to that guide.
 >
@@ -181,6 +182,7 @@ compliancewatch/
     adr/                     # Architecture decision records (001 to 008 and 012 to 018 written; 009 to 011 stubs)
     runbooks/
     onboarding/              # local-dev.md
+    web/                     # the web app: architecture, design system, testing, adding a screen, decisions, generated screen list
   .github/workflows/         # ci.yml (every gate, behind the required "CI gate" job), nightly.yml, pr-checks.yml; dependabot.yml
   docker-compose.yml         # Postgres 16 + pgvector, Redis 7, Redpanda, Temporal, Langfuse and fake-llm (profiles)
   .env.example               # every variable the stack and the services read
