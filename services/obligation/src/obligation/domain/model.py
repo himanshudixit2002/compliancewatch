@@ -189,13 +189,18 @@ class DueWindow:
     """Days on which obligations fall due, both ends included and either end open.
 
     Days are days in India: ``bounds`` turns them into instants, the start of ``due_from`` and
-    the start of the day after ``due_to``, the upper bound exclusive.
+    the start of the day after ``due_to``, the upper bound exclusive. So ``due_to`` cannot be
+    the last date there is.
     """
 
     due_from: date | None = None
     due_to: date | None = None
 
     def __post_init__(self) -> None:
+        if self.due_to == date.max:
+            raise ObligationWindowInvalidError(
+                f"due_to {self.due_to} is the last date there is; the window needs the day after"
+            )
         if self.due_from is None or self.due_to is None:
             return
         if self.due_from > self.due_to:

@@ -97,6 +97,17 @@ def test_an_invalid_window_is_a_422_problem(client: TestClient) -> None:
         assert response.json()["type"].endswith(":obligation-window-invalid")
 
 
+def test_a_window_ending_on_the_last_date_is_a_422_problem(client: TestClient) -> None:
+    """The window's upper bound is the start of the day after ``due_to``, which does not exist
+    for the last date there is."""
+    for window in ({"due_to": "9999-12-31"}, {"due_from": "9999-12-01", "due_to": "9999-12-31"}):
+        response = client.get(
+            ROUTE, params={"business_id": str(BUSINESS), **window}, headers=headers()
+        )
+        assert response.status_code == 422
+        assert response.json()["type"].endswith(":obligation-window-invalid")
+
+
 def test_the_business_is_required(client: TestClient) -> None:
     response = client.get(ROUTE, headers=headers())
     assert response.status_code == 422

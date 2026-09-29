@@ -40,7 +40,7 @@ obligations is not built yet, because it needs a cross-tenant design under row-l
 
 | Route | What it does |
 | --- | --- |
-| `GET /v1/obligation/obligations?business_id=&due_from=&due_to=&rule_version_id=` | The business's obligations with `obligation_id, business_id, rule_version_id, decision_id, title, steps, evidence_type, period_label, period_start, period_end, due_at, status, closed_at, closed_reason`. `due_from` and `due_to` are days in India, both included; an obligation without a due date is left out when either is given. `due_at` is the end of the due day in India, in UTC; the period is half-open. Needs `x-tenant-id` (401 `obligation-tenant-required` without it); a window that ends before it starts or spans more than 366 days is 422 `obligation-window-invalid` |
+| `GET /v1/obligation/obligations?business_id=&due_from=&due_to=&rule_version_id=` | The business's obligations with `obligation_id, business_id, rule_version_id, decision_id, title, steps, evidence_type, period_label, period_start, period_end, due_at, status, closed_at, closed_reason`. `due_from` and `due_to` are days in India, both included; an obligation without a due date is left out when either is given. `due_at` is the end of the due day in India, in UTC; the period is half-open. Needs `x-tenant-id` (401 `obligation-tenant-required` without it); a window that ends before it starts, spans more than 366 days or ends on 9999-12-31 (there is no day after it) is 422 `obligation-window-invalid` |
 
 The tenant header stands in for a token until the identity service issues them (ADR-014), and
 the unit of work sets it for row-level security, so a read never sees another tenant's rows.

@@ -160,4 +160,6 @@ def test_a_due_window_spans_at_most_a_leap_year() -> None:
         DueWindow(date(2027, 4, 1), date(2028, 4, 1))
     with pytest.raises(ObligationWindowInvalidError, match="after due_to"):
         DueWindow(date(2026, 10, 2), date(2026, 10, 1))
+    with pytest.raises(ObligationWindowInvalidError, match="last date there is"):
+        DueWindow(due_to=date.max)
     assert ObligationWindowInvalidError.type_slug == "obligation-window-invalid"
