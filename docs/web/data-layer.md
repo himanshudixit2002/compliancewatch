@@ -419,7 +419,7 @@ required purposes are not changed there: withdrawing them ends the service, so t
 to the data rights request. The optional ones are given or withdrawn by `changeConsent`, one new
 record each time and never an edit: a grant carries the current `<document>@<Version line>`, a
 withdrawal (`granted: false`) carries the notice version of the grant it withdraws, the source
-is `web_onboarding` (the identity service's `ConsentSource` has no settings value), and the
+is `web_settings`, and the
 evidence is `Confirmed on the settings page: ` followed by the sentence the dialog showed (the
 consent step's checkbox sentence to give, `Withdraw consent: <purpose>.` to withdraw). A change
 that is already the state records nothing and says so. Withdrawing WhatsApp reminders opts the
@@ -455,8 +455,7 @@ languages offered are those the channel has templates in, English first, named b
 `Intl.DisplayNames`; the quiet hours are HH:MM in IST, a window may cross midnight, and equal ends
 mean no quiet hours (the service's own rule); a recipient with nothing recorded starts from the
 service's defaults (English, 21:00 to 08:00). `savePreference` writes for the remembered
-recipient only (the form carries no recipient field), with `source: web_onboarding` (the
-service's sources have no settings value), always sends both ends of the window (the service
+recipient only (the form carries no recipient field), with `source: web_settings`, always sends both ends of the window (the service
 keeps a window only when both arrive), and refuses an opt-in while the channel's consent
 (`whatsapp_reminders` or `email_reminders`) is not granted, because the notification service
 does not check it; opting out and changing the language or the window need no consent. The

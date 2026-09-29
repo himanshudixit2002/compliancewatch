@@ -59,7 +59,7 @@ describe("consentSettingsView", () => {
       status: "granted",
       change: null,
       outdated: false,
-      source: "Web app",
+      source: "Web onboarding",
       since: "1 Jan 2000, 5:30 am IST",
     });
     expect(byPurpose.profile_processing).toMatchObject({

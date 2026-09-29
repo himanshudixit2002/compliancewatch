@@ -37,8 +37,8 @@ import { describeQuietHours } from "./model/quiet-hours";
  * The notifications page's server actions. Each runs the screen's gate again (the proxy never
  * sees an action). Choosing a recipient checks the number or address and remembers it on this
  * device (server/remembered-recipients.ts); the page then reads that recipient's preference.
- * Saving a preference replaces it on the notification service with `source: web_onboarding`
- * (its sources have no settings value), the language and both ends of the quiet hours, for the
+ * Saving a preference replaces it on the notification service with `source: web_settings`, the
+ * language and both ends of the quiet hours, for the
  * recipient the page showed. Opting in needs the user's consent to the channel's reminders to be
  * on file, as the consent step records it before it opts a number in; opting out never waits
  * on anything.
@@ -121,7 +121,7 @@ export async function savePreference(
 
   const saved = await gateway.save(channel, recipient, {
     optedIn: choice.optedIn,
-    source: "web_onboarding",
+    source: "web_settings",
     language: choice.language,
     quietHoursStart: choice.quietHoursStart,
     quietHoursEnd: choice.quietHoursEnd,

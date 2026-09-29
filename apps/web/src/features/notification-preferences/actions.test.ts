@@ -167,7 +167,7 @@ describe("savePreference", () => {
     expect(put?.pathname).toBe(`/v1/notification/preferences/whatsapp/${WHATSAPP_KEY}`);
     expect(put?.body).toEqual({
       opted_in: true,
-      source: "web_onboarding",
+      source: "web_settings",
       language: "hi",
       quiet_hours_start: "22:00",
       quiet_hours_end: "07:00",

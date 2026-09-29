@@ -414,8 +414,8 @@ reset, which had sent an occasional spec into a new, empty tenant.
 reminders, email reminders, analytics). Giving is there because the notification page (next)
 opts a number in only while the channel's consent is given, and a user who withdrew would
 otherwise have no way back on the web; the required purposes stay with the consent step and
-the data rights request. Every change is a new record, with `web_onboarding` as the source
-because the identity service has no settings source; the evidence says it was confirmed on the
+the data rights request. Every change is a new record, with `web_settings` as the source (the
+identity and notification services added it; the first version sent `web_onboarding`); the evidence says it was confirmed on the
 settings page and quotes the sentence shown. Withdrawing WhatsApp reminders opts the number out
 before the record is written, so a failure leaves reminders stopped rather than a withdrawal on
 file with reminders still going. The service does not return the user's own number or address

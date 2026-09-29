@@ -37,8 +37,7 @@ What the signed-in user agreed to, from `GET /v1/identity/consents?subject=<user
 - The optional purposes (WhatsApp reminders, email reminders, product analytics) can be given or
   withdrawn. A confirm dialog says exactly what is recorded (a new record with `granted` true or
   false, the source, the time); no reason is asked, because the route takes none.
-- A change is one new record: `source` is `web_onboarding` (the identity service has no settings
-  source yet), a grant carries the current notice version, a withdrawal the version of the grant
+- A change is one new record: `source` is `web_settings`, a grant carries the current notice version, a withdrawal the version of the grant
   it withdraws, and the evidence is `Confirmed on the settings page: ` with the sentence the
   dialog showed. A change that is already the state records nothing and says so.
 - WhatsApp reminders also move the number (D-031). A withdrawal opts the number out on the
@@ -76,7 +75,7 @@ user's consent to that channel's reminders is on file.
   from the service's default, 21:00 to 08:00. Both ends are always sent, because the service keeps
   a window only when both arrive.
 - `savePreference` replaces the preference for the remembered recipient only (the form carries
-  no recipient field, so it cannot be aimed at another number), with `source: web_onboarding`.
+  no recipient field, so it cannot be aimed at another number), with `source: web_settings`.
   It refuses to switch reminders on while the channel's consent (`whatsapp_reminders` or
   `email_reminders`) is not granted, because the notification service does not check it (D-032);
   opting out, the language and the quiet hours are never held back.
@@ -121,8 +120,6 @@ the next event. See [feature-flags.md](feature-flags.md).
 
 - The user's own phone number and email address, instead of the per-device memory: `GET
   /v1/identity/me`.
-- A settings source for consent and preference records: `web_onboarding` is sent until the
-  identity and notification services add one.
 - Withdrawing the required consents: the data rights routes.
 - Entitlements and usage on the billing page: the identity entitlements route.
 - Team, activity, and a CA firm's webhooks, API keys and digests: listed on the index with the

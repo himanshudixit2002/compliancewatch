@@ -157,8 +157,8 @@ function changeMessage(
 /**
  * The consents settings page's server action: gives or withdraws one optional purpose. It runs
  * the screen's gate again, checks the form's shape, reads the user's records, and adds one
- * record (subject and recorded_by the user id, source web_onboarding, since the service has no
- * settings source, and the confirmed sentence inside the evidence), or none when the change is
+ * record (subject and recorded_by the user id, source web_settings, and the confirmed sentence
+ * inside the evidence), or none when the change is
  * already the current state.
  *
  * WhatsApp reminders also move the number. A withdrawal opts the number out first, so reminders
@@ -198,7 +198,7 @@ export async function changeConsent(
   if (recipient !== null && choice.change === "withdraw") {
     const optOut = await gateway.setPreference("whatsapp", recipient, {
       optedIn: false,
-      source: "web_onboarding",
+      source: "web_settings",
     });
     if (!optOut.ok) return changeFailed(optOut, t("consentSettings.error.optOutFailed"));
     await rememberRecipient(session.userId, "whatsapp", recipient);
@@ -226,7 +226,7 @@ export async function changeConsent(
   if (recipient !== null && choice.change === "give") {
     const optIn = await gateway.setPreference("whatsapp", recipient, {
       optedIn: true,
-      source: "web_onboarding",
+      source: "web_settings",
     });
     if (!optIn.ok) return changeFailed(optIn, t("consentSettings.error.optInFailed"));
     await rememberRecipient(session.userId, "whatsapp", recipient);

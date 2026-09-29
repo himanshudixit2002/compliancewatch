@@ -107,7 +107,7 @@ test.describe("settings: consents", () => {
     await expect(history.last()).toContainText(`whatsapp-consent@${versionOf("whatsapp-consent")}`);
     expect(await preferenceOf(number)).toMatchObject({
       opted_in: false,
-      source: "web_onboarding",
+      source: "web_settings",
     });
 
     await page.getByRole("button", { name: "Give consent: Product analytics" }).click();

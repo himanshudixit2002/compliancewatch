@@ -86,7 +86,7 @@ test.describe("settings: notifications", () => {
       language: "hi",
       quiet_hours_start: "22:00",
       quiet_hours_end: "07:00",
-      source: "web_onboarding",
+      source: "web_settings",
     });
 
     await page.reload();
@@ -132,7 +132,7 @@ test.describe("settings: notifications", () => {
     );
     expect(await preferenceOn("email", address)).toMatchObject({
       opted_in: false,
-      source: "web_onboarding",
+      source: "web_settings",
     });
 
     await email.getByRole("button", { name: "Use another address" }).click();

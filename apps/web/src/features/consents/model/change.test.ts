@@ -104,7 +104,7 @@ describe("consentChangeRecord", () => {
       subject: OWNER_ID,
       purpose: "whatsapp_reminders",
       granted: false,
-      source: "web_onboarding",
+      source: "web_settings",
       noticeVersion: "whatsapp-consent@9.0",
       evidence: "Confirmed on the settings page: Withdraw consent: WhatsApp reminders.",
       recordedBy: OWNER_ID,

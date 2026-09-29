@@ -92,7 +92,7 @@ export function consentChangeRecord(
   const base = {
     subject: userId,
     purpose: choice.purpose,
-    source: "web_onboarding" as const,
+    source: "web_settings" as const,
     evidence: changeEvidence(choice.purpose, choice.change),
     recordedBy: userId,
   };

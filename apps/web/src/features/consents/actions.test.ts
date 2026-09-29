@@ -450,12 +450,12 @@ describe("changeConsent", () => {
       "PUT /v1/notification/preferences/whatsapp/919800000000",
       "POST /v1/identity/consents",
     ]);
-    expect(fake.requests[1]?.body).toEqual({ opted_in: false, source: "web_onboarding" });
+    expect(fake.requests[1]?.body).toEqual({ opted_in: false, source: "web_settings" });
     expect(fake.requests[2]?.body).toEqual({
       subject: OWNER_ID,
       purpose: "whatsapp_reminders",
       granted: false,
-      source: "web_onboarding",
+      source: "web_settings",
       notice_version: WHATSAPP_GRANT,
       evidence: "Confirmed on the settings page: Withdraw consent: WhatsApp reminders.",
       recorded_by: OWNER_ID,
@@ -516,7 +516,7 @@ describe("changeConsent", () => {
     );
     expect(fake.requests.map((request) => request.method)).toEqual(["GET", "POST", "PUT"]);
     expect(fake.requests[1]?.body).toMatchObject({ granted: true, notice_version: WHATSAPP });
-    expect(fake.requests[2]?.body).toEqual({ opted_in: true, source: "web_onboarding" });
+    expect(fake.requests[2]?.body).toEqual({ opted_in: true, source: "web_settings" });
     expect(state.status === "ok" && state.message).toBe(
       `Given: WhatsApp reminders, recorded 1 Jan 2000, 5:30 am IST. ${NUMBER} is opted in.`,
     );
