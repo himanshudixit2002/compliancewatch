@@ -14,7 +14,7 @@ import os
 from typing import Any, cast
 
 import schemathesis
-from hypothesis import settings
+from hypothesis import HealthCheck, settings
 from schemathesis.checks import CheckFunction, not_a_server_error
 from schemathesis.specs.openapi.checks import (
     content_type_conformance,
@@ -63,6 +63,11 @@ def test_every_listed_operation_is_served() -> None:
 
 
 @schema.parametrize()
-@settings(max_examples=EXAMPLES)
+# Bodies with patterns and nested models make schemathesis discard many drafts; that is
+# expected, not a slow or broken generator, so those two health checks do not apply.
+@settings(
+    max_examples=EXAMPLES,
+    suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow],
+)
 def test_responses_conform_to_the_spec(case: schemathesis.Case[Any]) -> None:
     case.call_and_validate(headers={"x-tenant-id": TENANT_ID}, checks=CHECKS)
