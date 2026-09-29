@@ -3,7 +3,7 @@ category: multi_hop
 label_status: draft
 labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
 reviewed_by: ''
-fact_source: recorded_clause
+fact_source: mixed
 question: "Is QRMP Delhi exempt from filing the annual return under notification 15/2025-Central Tax?"
 as_of: 2026-09-28
 business: qrmp_delhi
@@ -17,6 +17,19 @@ expected:
       document: n15_2025
       clause_ref: en.p4
       quote: up to two crore rupees
+  - kind: text
+    value: the annual return rule does not apply to it
+    support:
+      seed_rule: gstr9_annual
+      field: specification
+      value:
+        all_of:
+        - attribute: registration_type
+          operator: eq
+          value: regular
+        - attribute: turnover_band
+          operator: gt
+          value: 1_5_crore_to_2_crore
   must_not_mention:
   - not exempt
   citations:
@@ -51,4 +64,4 @@ scripted:
       clause_ref: en.p4
       quote: in respect of filing of annual return for the financial year 2024-25 onwards
 refusal_reason: null
-notes: "The applicability fact compares the fictional profile's turnover band with the seed's predicate; the band is not a regulatory fact."
+notes: "The limit is en.p4's; the yes or no is the seed predicate (regular, turnover band above 1.5 to 2 crore) evaluated on the fictional profile's band, which is not a regulatory fact."

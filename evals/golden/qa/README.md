@@ -77,7 +77,7 @@ notes: ...
 | Category | Cases | Source |
 | --- | --- | --- |
 | Single-hop | 20 | Recorded clauses (01/2026: 4, 17/2025: 4, 15/2025: 4, 10/2025: 5, 13/2024: 3) |
-| Multi-hop | 16 | 12 recorded; 4 with a due date from the seed calendar |
+| Multi-hop | 16 | 10 recorded; 4 with a due date from the seed calendar; 2 mixed (a recorded limit and the seed predicate's verdict for the business) |
 | Date or threshold | 10 | 8 recorded; 2 mixed (a seed due date and a recorded one) |
 | Must-refuse | 10 | Listing-only notifications (4), unpublished seed rules (2), out of domain (2), asked before its source (1), an injection with the test GSTIN (1) |
 
