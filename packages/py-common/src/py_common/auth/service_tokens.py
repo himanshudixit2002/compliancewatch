@@ -25,6 +25,7 @@ the service's clients. Any object with ``client_id``, ``token()`` and ``invalida
 """
 
 import asyncio
+import hmac
 import re
 import threading
 import time
@@ -148,7 +149,7 @@ class ServiceTokenSource:
     def invalidate(self, token: str) -> None:
         """Drop ``token`` if it is the cached one, so the next call fetches a new token."""
         with self._lock:
-            if self._cached is not None and self._cached.token == token:
+            if self._cached is not None and hmac.compare_digest(self._cached.token, token):
                 self._cached = None
 
     def _fetch(self) -> _Cached:
