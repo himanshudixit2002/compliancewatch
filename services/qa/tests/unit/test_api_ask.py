@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from domain_kernel.errors import PROBLEM_TYPE_PREFIX
 from qa.domain.answer import NOT_COVERED_TEXT
-from qa.domain.errors import GatewayError
+from qa.domain.errors import GatewayError, ModelBudgetExceededError
 from qa.infrastructure.prompts import PROMPTS_DIR
 from qa.main import build_app, wire
 from qa.testing import answer_text, plan_step, plan_text, qa_settings
@@ -202,6 +202,18 @@ def test_a_gateway_outage_while_answering_is_503(world: World) -> None:
         )
     assert response.status_code == 503
     assert "llm-gateway: 502" in response.json()["detail"]
+
+
+def test_a_used_up_model_budget_is_429_with_the_gateways_retry_after(world: World) -> None:
+    refused = ModelBudgetExceededError("llm-gateway answered 429", retry_after="3600")
+    world.provider.add("r3", world.ANSWER, refused)
+    with api(world) as client:
+        response = client.post(
+            ASK, json={"question": "GSTR-3B March"}, headers=headers(world, "r3")
+        )
+    assert response.status_code == 429
+    assert problem_type(response) == "qa-model-budget-exceeded"
+    assert response.headers["retry-after"] == "3600"
 
 
 def test_readiness_reads_the_prompts_again(world: World, tmp_path: Path) -> None:

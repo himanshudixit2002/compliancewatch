@@ -2,9 +2,11 @@
 
 from typing import Any
 
+import pytest
+
 from qa.application.planner import Planner
 from qa.domain.answer import Reason
-from qa.domain.errors import GatewayError
+from qa.domain.errors import GatewayError, ModelBudgetExceededError
 from qa.domain.plan import Op
 from qa.domain.prompt import PromptText
 from qa.testing import plan_step, plan_text
@@ -79,6 +81,12 @@ def test_a_gateway_failure_falls_back(world: World) -> None:
         Reason.PLANNER_UNAVAILABLE,
         1,
     )
+
+
+def test_a_used_up_budget_is_not_a_fallback(world: World) -> None:
+    world.provider.add("q1", world.PLAN, ModelBudgetExceededError("llm-gateway answered 429"))
+    with pytest.raises(ModelBudgetExceededError):
+        Planner(world.provider, PROMPT).plan(world.context())
 
 
 def test_an_empty_plan_defers(world: World) -> None:

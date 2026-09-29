@@ -4,6 +4,7 @@ from domain_kernel.errors import PROBLEM_TYPE_PREFIX, DomainError
 from qa.domain.errors import (
     BusinessNotFoundError,
     DependencyUnavailableError,
+    ModelBudgetExceededError,
     QaTenantRequiredError,
     QuestionInvalidError,
 )
@@ -17,6 +18,10 @@ def test_slugs_and_titles_are_pinned() -> None:
         DependencyUnavailableError: (
             "qa-dependency-unavailable",
             "A service the answer depends on is unavailable",
+        ),
+        ModelBudgetExceededError: (
+            "qa-model-budget-exceeded",
+            "Model budget for questions is used up",
         ),
     }
     for error, (slug, title) in pinned.items():
@@ -32,3 +37,9 @@ def test_details_name_what_is_missing() -> None:
     )
     assert QuestionInvalidError().type_uri == PROBLEM_TYPE_PREFIX + "qa-question-invalid"
     assert DependencyUnavailableError("rulebook: 502").detail == "rulebook: 502"
+
+
+def test_a_used_up_budget_passes_on_the_gateways_retry_after() -> None:
+    assert ModelBudgetExceededError(retry_after="3600").problem_headers == {"Retry-After": "3600"}
+    assert ModelBudgetExceededError(retry_after="soon").problem_headers == {}
+    assert ModelBudgetExceededError().problem_headers == {}

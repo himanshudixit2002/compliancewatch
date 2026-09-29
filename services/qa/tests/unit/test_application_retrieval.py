@@ -1,12 +1,17 @@
 """Hybrid search: the embedded question, the lexical fallback, no evidence."""
 
+from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
+import pytest
+
+from domain_kernel.ids import TenantId
 from domain_kernel.vectors import Vector
 from qa.application.retrieval import HybridLayer
 from qa.domain.answer import Outcome, Reason
-from qa.domain.records import SearchHit
+from qa.domain.errors import ModelBudgetExceededError
+from qa.domain.records import QueryEmbedding, SearchHit
 from qa.testing import FakeEmbedder, answer_text
 
 World = Any
@@ -66,6 +71,31 @@ def test_without_embeddings_the_search_is_lexical(world: World) -> None:
     assert (answer.outcome, answer.reason) == (Outcome.NOT_COVERED, Reason.ANSWERER_DECLINED)
     assert (search.asked[0]["vector"], search.asked[0]["model"]) == (None, None)
     assert world.tracer.named("qa.retrieve")[0].attributes["qa.retrieve.lexical_only"] is True
+
+
+class Refused:
+    """The gateway refusing the embedding because a budget is used up."""
+
+    def embed(
+        self, text: str, *, tenant: TenantId | None, metadata: Mapping[str, str]
+    ) -> QueryEmbedding:
+        raise ModelBudgetExceededError("llm-gateway answered 429")
+
+
+def test_an_embedding_refused_for_its_budget_leaves_the_search_lexical(world: World) -> None:
+    search = Search(world)
+    world.provider.add("q1", world.ANSWER, answer_text("", covered=False))
+    hybrid = HybridLayer(search, Refused(), world.answerer(), world.tracer)
+    answer = hybrid.run(world.context("GSTR-3B March"))
+    assert answer.reason is Reason.ANSWERER_DECLINED
+    assert search.asked[0]["vector"] is None
+    assert world.tracer.named("qa.retrieve")[0].attributes["qa.retrieve.lexical_only"] is True
+
+
+def test_an_answer_refused_for_its_budget_ends_the_question(world: World) -> None:
+    world.provider.add("q1", world.ANSWER, ModelBudgetExceededError("llm-gateway answered 429"))
+    with pytest.raises(ModelBudgetExceededError):
+        layer(world).run(world.context("GSTR-3B March"))
 
 
 def test_no_hit_is_not_covered_without_a_model_call(world: World) -> None:

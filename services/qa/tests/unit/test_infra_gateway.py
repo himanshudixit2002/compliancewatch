@@ -10,7 +10,7 @@ import pytest
 from domain_kernel.ids import TenantId
 from domain_kernel.llm import CompletionRequest
 from domain_kernel.vectors import EMBEDDING_DIMS
-from qa.domain.errors import DependencyUnavailableError, GatewayError
+from qa.domain.errors import DependencyUnavailableError, GatewayError, ModelBudgetExceededError
 from qa.infrastructure.gateway import GatewayProvider, HttpEmbedder
 
 TENANT = TenantId(UUID(int=1))
@@ -118,7 +118,7 @@ def test_a_model_override_is_sent_and_no_tenant_means_no_header() -> None:
 @pytest.mark.parametrize(
     ("status", "body", "detail"),
     [
-        (429, {"title": "LLM budget exceeded"}, "429: .*budget"),
+        (503, {"title": "LLM provider unavailable"}, "503: .*unavailable"),
         (200, {"text": "x"}, "unexpected completion"),
     ],
 )
@@ -126,6 +126,20 @@ def test_a_failed_completion_is_a_gateway_error(status: int, body: object, detai
     client, _ = recording(status, body)
     with pytest.raises(GatewayError, match=detail):
         GatewayProvider(client=client).complete(request())
+
+
+def test_a_used_up_budget_is_not_an_outage() -> None:
+    def refuse(req: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            429, headers={"retry-after": "86400"}, json={"title": "LLM budget exceeded"}
+        )
+
+    client = httpx2.Client(base_url="http://gw.test", transport=httpx2.MockTransport(refuse))
+    with pytest.raises(ModelBudgetExceededError, match="llm-gateway answered 429") as caught:
+        GatewayProvider(client=client).complete(request())
+    assert caught.value.problem_headers == {"Retry-After": "86400"}
+    with pytest.raises(ModelBudgetExceededError):
+        HttpEmbedder(client=client).embed("when?", tenant=TENANT, metadata={})
 
 
 def test_an_unreachable_gateway_is_a_gateway_error() -> None:

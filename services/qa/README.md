@@ -105,8 +105,11 @@ when ADR-017 is Accepted. Off, or for a tenant not listed, there is no planner c
 
 `plan` is the validated plan whenever there was one, even when hybrid answered. Problems: 401
 `qa-tenant-required`, 404 `qa-business-not-found` (a `business_node_id` the tenant does not
-have), 422 `qa-question-invalid` or `request-invalid`, 503 `qa-dependency-unavailable` (a
-service the answer depends on failed, including the gateway while answering). The spec is
+have), 422 `qa-question-invalid` or `request-invalid`, 429 `qa-model-budget-exceeded` (the
+gateway refused a model call because a monthly budget is used up; `Retry-After` is the
+gateway's), 503 `qa-dependency-unavailable` (a service the answer depends on failed, including
+the gateway while answering). An embedding refused for its budget leaves the search to full
+text. The spec is
 `packages/contracts/openapi/qa.v1.json`.
 
 ## Ports, prompts, traces and evals

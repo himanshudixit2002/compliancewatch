@@ -30,6 +30,7 @@ from qa.application.structured import StructuredLayer
 from qa.domain.errors import (
     BusinessNotFoundError,
     DependencyUnavailableError,
+    ModelBudgetExceededError,
     QaTenantRequiredError,
     QuestionInvalidError,
 )
@@ -51,6 +52,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     QaTenantRequiredError: 401,
     BusinessNotFoundError: 404,
     QuestionInvalidError: 422,
+    ModelBudgetExceededError: 429,
     DependencyUnavailableError: 503,
 }
 

@@ -22,7 +22,7 @@ async def ping() -> dict[str, str]:
 @router.post(
     "/ask",
     summary="Answer a question with verified citations, or say it is not covered",
-    responses=problem_responses(401, 404, 422, 503),
+    responses=problem_responses(401, 404, 422, 429, 503),
 )
 def ask(body: AskIn, tenant: Tenant, wired: Wired, question_id: QuestionId) -> AskOut:
     try:

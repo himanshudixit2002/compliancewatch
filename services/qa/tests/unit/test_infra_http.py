@@ -1,9 +1,10 @@
-"""The HTTP helper: 404 is nothing, everything else that fails is a dependency failure."""
+"""The HTTP helper: 404 is nothing, 429 a used-up budget, everything else that fails is a
+dependency failure."""
 
 import httpx2
 import pytest
 
-from qa.domain.errors import DependencyUnavailableError
+from qa.domain.errors import DependencyUnavailableError, ModelBudgetExceededError
 from qa.infrastructure.http import JsonHttp, http_client, reading
 
 
@@ -45,6 +46,19 @@ def test_other_answers_are_a_dependency_failure(response: httpx2.Response, detai
     client = http(httpx2.MockTransport(lambda _: response))
     with pytest.raises(DependencyUnavailableError, match=detail):
         client.get("/x")
+
+
+def test_too_many_requests_is_a_used_up_budget() -> None:
+    refused = httpx2.Response(
+        429, headers={"retry-after": "120"}, json={"title": "LLM budget exceeded"}
+    )
+    client = JsonHttp(
+        httpx2.Client(base_url="http://gw.test", transport=httpx2.MockTransport(lambda _: refused)),
+        "llm-gateway",
+    )
+    with pytest.raises(ModelBudgetExceededError, match="llm-gateway answered 429") as caught:
+        client.post("/v1/llm-gateway/embeddings", {"inputs": ["q"]})
+    assert caught.value.problem_headers == {"Retry-After": "120"}
 
 
 def test_a_transport_error_is_a_dependency_failure() -> None:

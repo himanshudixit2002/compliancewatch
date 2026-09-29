@@ -2,8 +2,9 @@
 fused by reciprocal rank, then the answerer.
 
 The question is embedded through the gateway and searched with the model that served the
-vector, ``k=8``, in the fused order: there is no reranker. When embedding fails, the search runs
-on full text alone and the span says so. No hit means ``not_covered`` (``no_evidence``).
+vector, ``k=8``, in the fused order: there is no reranker. When embedding fails or its budget is
+used up, the search runs on full text alone and the span says so. No hit means ``not_covered``
+(``no_evidence``).
 """
 
 from datetime import date
@@ -13,7 +14,7 @@ from domain_kernel.vectors import Vector
 from qa.application.answerer import Answerer
 from qa.application.context import AskContext
 from qa.domain.answer import Answer, Layer, Reason
-from qa.domain.errors import DependencyUnavailableError
+from qa.domain.errors import DependencyUnavailableError, ModelBudgetExceededError
 from qa.domain.evidence import BundleBuilder
 from qa.domain.ports import ClauseSearch, Embedder, Span, Tracer
 from qa.domain.records import SearchHit
@@ -46,7 +47,7 @@ def search_clauses(
             metadata={"question_id": request.question_id, "layer": layer.value},
         )
         vector, model = embedding.vector, embedding.model
-    except DependencyUnavailableError:
+    except (DependencyUnavailableError, ModelBudgetExceededError):
         span.set_attribute(LEXICAL_ONLY, True)
     return search.search(text, vector=vector, model=model, as_of=as_of, k=k)
 

@@ -5,7 +5,8 @@ every quote checked against its clause (``check_citations``); an answer that fai
 retry that lists the problems, and a second failure is ``not_covered``
 (``citation_check_failed``). A model that says the evidence does not cover the question gives
 ``not_covered`` (``answerer_declined``). A gateway failure is ``DependencyUnavailableError``:
-the question cannot be answered or refused honestly without the model.
+the question cannot be answered or refused honestly without the model. A used-up budget stays
+``ModelBudgetExceededError``.
 """
 
 from typing import Final

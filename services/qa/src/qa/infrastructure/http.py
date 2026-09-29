@@ -1,8 +1,10 @@
 """JSON over HTTP to the services answers are built from.
 
-A 404 is ``None``: the thing does not exist, and the caller decides what that means. Anything
-else that is not a success is ``DependencyUnavailableError`` with the service, the status and
-the start of the body: a transport error, a 5xx, a refusal, or an answer that is not JSON or
+A 404 is ``None``: the thing does not exist, and the caller decides what that means. A 429 is
+the llm-gateway refusing a model call because a budget is used up (no other upstream answers
+429): ``ModelBudgetExceededError``, with its ``Retry-After``. Anything else that is not a
+success is ``DependencyUnavailableError`` with the service, the status and the start of the
+body: a transport error, a 5xx, a refusal, or an answer that is not JSON or
 not the shape the reader expects. Retrying is the caller's choice; a question fails fast.
 Tests pass their own ``httpx2.Client`` (a ``MockTransport`` or a FastAPI ``TestClient``).
 """
@@ -13,7 +15,7 @@ from typing import Any, Final
 
 import httpx2
 
-from qa.domain.errors import DependencyUnavailableError
+from qa.domain.errors import DependencyUnavailableError, ModelBudgetExceededError
 
 DETAIL_CHARS: Final = 300
 
@@ -60,6 +62,8 @@ class JsonHttp:
             raise DependencyUnavailableError(f"{self.service} unreachable: {exc}") from exc
         if response.status_code == 404:
             return None
+        if response.status_code == 429:
+            raise budget_exceeded(self.service, response)
         if not 200 <= response.status_code < 300:
             raise DependencyUnavailableError(
                 f"{self.service} answered {response.status_code}: {response.text[:DETAIL_CHARS]}"
@@ -80,6 +84,13 @@ def reading(service: str) -> Iterator[None]:
         yield
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise DependencyUnavailableError(f"{service} answered an unexpected shape: {exc}") from exc
+
+
+def budget_exceeded(service: str, response: httpx2.Response) -> ModelBudgetExceededError:
+    return ModelBudgetExceededError(
+        f"{service} answered 429: {response.text[:DETAIL_CHARS]}",
+        retry_after=response.headers.get("retry-after"),
+    )
 
 
 def http_client(

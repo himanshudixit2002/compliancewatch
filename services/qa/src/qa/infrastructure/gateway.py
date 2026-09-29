@@ -5,7 +5,9 @@ The tenant travels per request (``x-tenant-id`` from ``CompletionRequest.tenant_
 gateway's ledger and budget see who asked. A completion that fails is ``GatewayError``; the
 planner falls back on it and the answerer turns it into ``DependencyUnavailableError``. An
 embedding that fails, or that does not have the rulebook's ``EMBEDDING_DIMS`` components, is
-``DependencyUnavailableError``, and hybrid search then runs on full text alone.
+``DependencyUnavailableError``, and hybrid search then runs on full text alone. A call the
+gateway refuses because a budget is used up (429) is ``ModelBudgetExceededError``: a completion
+refused so ends the question, an embedding refused so leaves search to full text.
 """
 
 from collections.abc import Mapping
@@ -18,7 +20,7 @@ from domain_kernel.llm import CompletionRequest, CompletionResponse
 from domain_kernel.vectors import EMBEDDING_DIMS
 from qa.domain.errors import DependencyUnavailableError, GatewayError
 from qa.domain.records import QueryEmbedding
-from qa.infrastructure.http import JsonHttp, http_client, reading
+from qa.infrastructure.http import JsonHttp, budget_exceeded, http_client, reading
 
 COMPLETIONS_PATH: Final = "/v1/llm-gateway/completions"
 EMBEDDINGS_PATH: Final = "/v1/llm-gateway/embeddings"
@@ -55,6 +57,8 @@ class GatewayProvider:
             response = self._client.post(COMPLETIONS_PATH, json=body, headers=headers)
         except httpx2.TransportError as exc:
             raise GatewayError(f"unreachable: {exc}") from exc
+        if response.status_code == 429:
+            raise budget_exceeded(SERVICE, response)
         if response.status_code != 200:
             raise GatewayError(f"{response.status_code}: {response.text[:500]}")
         try:
