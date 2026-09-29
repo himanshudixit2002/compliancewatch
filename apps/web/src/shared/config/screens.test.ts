@@ -114,6 +114,17 @@ describe("screen registry", () => {
     }
   });
 
+  it("names exactly the services whose spec is committed", () => {
+    const stems = readdirSync(SPEC_DIR)
+      .filter((name) => name.endsWith(".v1.json"))
+      .map((name) => name.slice(0, -".v1.json".length))
+      .sort();
+    expect(
+      [...SERVICES_WITH_SPECS].sort(),
+      "SERVICES_WITH_SPECS in services.ts must list the packages/contracts/openapi/*.v1.json stems",
+    ).toEqual(stems);
+  });
+
   it("only calls routes that exist in a committed spec", () => {
     for (const screen of SCREENS) {
       for (const route of screen.uses) {

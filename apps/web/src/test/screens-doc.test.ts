@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   OUTPUT_PATH,
+  SPEC_DIR,
   auditAwaits,
   committedRoutes,
   formatScreensDoc,
@@ -47,6 +48,11 @@ describe("generated screen docs", () => {
   });
 });
 
+/** The services with a committed spec, read from the directory the audit reads. */
+const servicesWithSpec = readdirSync(SPEC_DIR)
+  .filter((name) => name.endsWith(".v1.json"))
+  .map((name) => name.slice(0, -".v1.json".length));
+
 describe("awaits audit", () => {
   it("lists awaited routes absent from the committed specs, sorted by service and path", () => {
     const stats = screenById("admin.review.stats");
@@ -65,17 +71,10 @@ describe("awaits audit", () => {
     expect(rows.map((row) => `${row.service} ${row.path}`)).toEqual(
       sorted.map((row) => `${row.service} ${row.path}`),
     );
+    expect(servicesWithSpec.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(row.specExists, `${row.service} ${row.path}`).toBe(
-        [
-          "identity",
-          "profile",
-          "rulebook",
-          "obligation",
-          "notification",
-          "qa",
-          "llm-gateway",
-        ].includes(row.service),
+        servicesWithSpec.includes(row.service),
       );
     }
   });
