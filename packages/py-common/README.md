@@ -123,8 +123,9 @@ A route reads its caller through dependencies in `py_common.auth.fastapi`:
 - `Authenticated`: any verified principal; the anonymous one is a 401.
 
 A service calls others with its own token. `CW_SERVICE_CLIENT_ID` and `CW_SERVICE_CLIENT_SECRET`
-name its client at the identity service (`CW_IDENTITY_URL`); `make run` and `make worker` set the
-id to the service's name unless it is set already. Every outgoing `httpx2` client is built with
+name its client at the identity service (`CW_IDENTITY_URL`). An empty id stands for the process's
+service name, and `make run` and `make worker` set it to the service's directory name unless it is
+set already, so a worker is its service's client. Every outgoing `httpx2` client is built with
 `auth=service_auth_from(settings)`, which is None, so no token is sent, until the secret is set.
 The token comes from `POST /v1/identity/service-tokens`, is kept until a minute before it expires
 and is shared by the clients built from the same settings; a 401 from the called service drops it

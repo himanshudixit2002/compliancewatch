@@ -23,6 +23,8 @@ for an hour. ``auth_leeway_seconds`` allows for clock skew on the time claims.
 ``service_client_id`` and ``service_client_secret`` are this process's service client at the
 identity service (``identity_url``). With a secret set, ``py_common.auth.service_tokens`` gets
 access tokens with them and every outgoing HTTP client sends one; without it no token is sent.
+An empty id stands for ``service_name``, so a process that only migrates, relays or seeds starts
+whatever secret a shared ``.env`` holds.
 
 ``env_files`` are the ``.env`` files the settings were read from: ``.env`` by default, none when
 they were built with ``_env_file=None`` (tests, the demo, the evals). ``py_common.flags`` reads
@@ -105,12 +107,6 @@ class Settings(BaseSettings):
             raise ValueError(
                 "CW_FLAGS_PROVIDER=unleash needs CW_UNLEASH_URL and CW_UNLEASH_API_TOKEN"
             )
-        return self
-
-    @model_validator(mode="after")
-    def _require_service_client_id(self) -> Self:
-        if self.service_client_secret is not None and not self.service_client_id.strip():
-            raise ValueError("CW_SERVICE_CLIENT_SECRET needs CW_SERVICE_CLIENT_ID")
         return self
 
     @model_validator(mode="after")

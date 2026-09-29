@@ -175,10 +175,11 @@ curl -s -X POST $ID/service-tokens -H 'content-type: application/json' \
   `make run` does on each code change. The key set exported above lives in that shell only; never
   reuse a dev key in another environment.
 - A caller sends its own service token once `CW_SERVICE_CLIENT_SECRET` is set to the dev secret
-  (`make run` and `make worker` set `CW_SERVICE_CLIENT_ID` to the service's name). The dev
-  clients and their scopes are in `services/identity/src/identity/identity_dev_clients.toml`;
-  the WhatsApp bot reads `BOT_SERVICE_CLIENT_ID` and `BOT_SERVICE_CLIENT_SECRET` from
-  `apps/whatsapp-bot/.env`.
+  (`make run` and `make worker` set `CW_SERVICE_CLIENT_ID` to the service's name; an empty id
+  stands for the process's service name, so the other targets start with the secret in `.env`).
+  The dev clients and their scopes are in
+  `services/identity/src/identity/identity_dev_clients.toml`; the WhatsApp bot reads
+  `BOT_SERVICE_CLIENT_ID` and `BOT_SERVICE_CLIENT_SECRET` from `apps/whatsapp-bot/.env`.
 - The web app sends no tokens yet, and `make web-stack` reads `.env`: keep `CW_AUTH_MODE` out of
   `.env`, or at `header`, while you run the web app.
 - `tools/demo/tests/unit/test_token_flow.py` runs the same steps in one process.

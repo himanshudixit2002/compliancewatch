@@ -10,7 +10,7 @@ dropped and the request is sent once more with a fresh one.
 
 Every outgoing client is built with ``auth=service_auth_from(settings)``, which is None, and so
 sends no token, while no client secret is configured. Clients built from the same settings share
-one token.
+one token. The client id is ``CW_SERVICE_CLIENT_ID``, or the service's name when that is empty.
 """
 
 import asyncio
@@ -181,6 +181,12 @@ _shared: dict[tuple[str, str, str], ServiceTokenSource] = {}
 _shared_lock = threading.Lock()
 
 
+def service_client_id(settings: Settings) -> str:
+    """The client this process's service tokens are for: ``CW_SERVICE_CLIENT_ID``, or the
+    service's name when it is empty."""
+    return settings.service_client_id.strip() or settings.service_name
+
+
 def service_auth_from(
     settings: Settings, *, client: httpx2.Client | None = None
 ) -> BearerAuth | None:
@@ -190,16 +196,15 @@ def service_auth_from(
     secret = settings.service_client_secret
     if secret is None or not secret.get_secret_value():
         return None
+    client_id = service_client_id(settings)
     if client is not None:
         return BearerAuth(
-            ServiceTokenSource(
-                settings.identity_url, settings.service_client_id, secret, client=client
-            )
+            ServiceTokenSource(settings.identity_url, client_id, secret, client=client)
         )
-    key = (settings.identity_url, settings.service_client_id, secret.get_secret_value())
+    key = (settings.identity_url, client_id, secret.get_secret_value())
     with _shared_lock:
         source = _shared.get(key)
         if source is None:
-            source = ServiceTokenSource(settings.identity_url, settings.service_client_id, secret)
+            source = ServiceTokenSource(settings.identity_url, client_id, secret)
             _shared[key] = source
     return BearerAuth(source)

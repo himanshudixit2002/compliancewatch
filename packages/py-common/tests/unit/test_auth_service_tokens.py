@@ -1,11 +1,12 @@
 import json
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import httpx2
 import pytest
-from pydantic import SecretStr, ValidationError
+from pydantic import SecretStr
 
 from py_common.auth import (
     BearerAuth,
@@ -13,7 +14,7 @@ from py_common.auth import (
     ServiceTokenUnavailableError,
     service_auth_from,
 )
-from py_common.auth.service_tokens import SERVICE_TOKENS_PATH
+from py_common.auth.service_tokens import SERVICE_TOKENS_PATH, service_client_id
 from py_common.settings import Settings
 
 _IDENTITY = "http://identity.test"
@@ -280,11 +281,33 @@ def test_no_secret_means_no_token_is_sent() -> None:
     assert service_auth_from(_settings(service_client_id="qa", service_client_secret="")) is None
 
 
-def test_a_secret_needs_a_client_id() -> None:
-    with pytest.raises(
-        ValidationError, match="CW_SERVICE_CLIENT_SECRET needs CW_SERVICE_CLIENT_ID"
-    ):
-        _settings(service_client_secret=_CLIENT_SECRET)
+def test_without_a_client_id_the_service_name_is_the_client() -> None:
+    settings = _settings(service_name="qa", service_client_secret=_CLIENT_SECRET)
+    assert settings.service_client_id == ""
+    auth = service_auth_from(settings)
+    assert auth is not None
+    assert auth.source.client_id == "qa"
+    named = _settings(
+        service_name="pipeline-worker",
+        service_client_id=" pipeline ",
+        service_client_secret=_CLIENT_SECRET,
+    )
+    assert service_client_id(named) == "pipeline"
+
+
+def test_a_secret_without_a_client_id_starts_every_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A shared .env with the dev secret and no id, as .env.example suggests, is read by make
+    targets that set no id (migrate, relay, seed)."""
+    secret = _CLIENT_SECRET.get_secret_value()
+    (tmp_path / ".env").write_text(
+        f"CW_SERVICE_CLIENT_ID=\nCW_SERVICE_CLIENT_SECRET={secret}\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    settings = Settings(service_name="rulebook")
+    assert settings.service_client_secret is not None
+    assert service_client_id(settings) == "rulebook"
 
 
 def test_clients_built_from_the_same_settings_share_one_token_source() -> None:

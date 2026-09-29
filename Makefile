@@ -249,7 +249,8 @@ migrate: check-uv ## alembic upgrade head for every service, or one: make migrat
 	done
 
 # run and worker name the process's service client after the service (CW_SERVICE_CLIENT_ID) unless
-# .env or the environment sets it; no token is sent until CW_SERVICE_CLIENT_SECRET is set too.
+# .env or the environment sets it, so a worker is its service's client; elsewhere an empty id stands
+# for the process's service name. No token is sent until CW_SERVICE_CLIENT_SECRET is set too.
 run: check-uv ## Run one service with reload: make run SERVICE=identity [PORT=8001]
 	@[ -n "$(SERVICE)" ] || { echo "usage: make run SERVICE=<identity|profile|...> [PORT=8000]"; exit 1; }
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
