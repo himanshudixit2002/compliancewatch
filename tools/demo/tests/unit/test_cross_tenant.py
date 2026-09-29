@@ -100,6 +100,7 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
     "notification": frozenset(
         {
             "POST /v1/notification/send",
+            "GET /v1/notification/recipients",
             "PUT /v1/notification/recipients/{recipient_id}",
             "GET /v1/notification/recipients/{recipient_id}",
             "DELETE /v1/notification/recipients/{recipient_id}",
@@ -362,6 +363,11 @@ def test_tenant_b_cannot_reach_a_recipient_of_tenant_a(clients: dict[str, TestCl
     assert registered.status_code == 200, registered.text
     assert notification.get(path, headers=AS_B).status_code == 404
     assert notification.delete(path, headers=AS_B).status_code == 404
+    listed = notification.get(
+        "/v1/notification/recipients", params={"business_id": DUMMY_ID}, headers=AS_B
+    )
+    assert listed.status_code == 200
+    assert listed.json()["items"] == []
     taken_over = notification.put(path, json={"role": "staff"}, headers=AS_B)
     assert taken_over.status_code == 200, "tenant B registers its own recipient under the id"
     as_a = notification.get(path, headers=AS_A).json()

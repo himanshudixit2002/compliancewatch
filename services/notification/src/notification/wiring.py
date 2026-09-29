@@ -11,7 +11,12 @@ from notification.application.enqueue import EnqueueNotifications
 from notification.application.history import GetNotification, ListNotifications
 from notification.application.preferences import GetPreference, SetOptIn
 from notification.application.receipts import ReconcileReceipts
-from notification.application.recipients import GetRecipient, RegisterRecipient, RemoveRecipient
+from notification.application.recipients import (
+    GetRecipient,
+    ListRecipients,
+    RegisterRecipient,
+    RemoveRecipient,
+)
 from notification.application.resend import ResendNotification
 from notification.application.retention import PurgeExpired
 from notification.application.send import SendNow
@@ -35,6 +40,7 @@ class Wiring:
     get_preference: GetPreference
     register_recipient: RegisterRecipient
     get_recipient: GetRecipient
+    list_recipients: ListRecipients
     remove_recipient: RemoveRecipient
     purge: PurgeExpired
     get_notification: GetNotification

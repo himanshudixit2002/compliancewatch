@@ -16,6 +16,7 @@ Design reference: Project Foundation guide, sections 7, 9 and 14.
 | `GET /v1/notification/preferences/{channel}/{recipient}` | The recorded preference |
 | `PUT /v1/notification/recipients/{recipient_id}` | Register a recipient of the tenant, or replace it whole: role (`owner`, `staff`, `ca_admin`, `ca_staff`), language, digest mode, the CA firm's label, addresses in order, and the businesses it hears about. Registering an address gives no consent |
 | `GET`, `DELETE /v1/notification/recipients/{recipient_id}` | Read or remove a recipient with its addresses and business links |
+| `GET /v1/notification/recipients?business_id=&limit=&cursor=` | The recipients that follow a business, by id, a page at a time |
 | `POST /v1/notification/send` | Send one notification now through the queue: `sent`, `failed` (the service retries it), `deferred` (quiet hours, with `scheduled_for`), `not_opted_in` or `duplicate`. The `attempt` field is deprecated and ignored |
 | `GET /v1/notification/notifications?business_id=&state=&limit=&cursor=` | A business's notifications, newest first, a page at a time |
 | `GET /v1/notification/notifications/{notification_id}` | One notification of the tenant with its state, attempts, error and delivery times |

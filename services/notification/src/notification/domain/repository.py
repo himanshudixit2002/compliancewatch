@@ -166,6 +166,13 @@ class RecipientRepository(Protocol):
         """The recipients that follow the business, by id."""
         ...
 
+    def page(
+        self, business_id: BusinessId, *, limit: int, after: RecipientId | None = None
+    ) -> Sequence[Recipient]:
+        """The recipients that follow the business, by id, at most ``limit``, starting after
+        the id ``after`` (a recipient removed since still marks the place)."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class DirectoryEntry:

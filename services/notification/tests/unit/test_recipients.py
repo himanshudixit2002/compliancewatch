@@ -6,8 +6,10 @@ from fastapi.testclient import TestClient
 
 from domain_kernel.channels import Channel
 from domain_kernel.ids import BusinessId, TenantId, UserId
+from notification.api.schemas import RecipientKeyset
 from notification.application.recipients import (
     GetRecipient,
+    ListRecipients,
     RecipientRegistration,
     RegisterRecipient,
     RemoveRecipient,
@@ -18,6 +20,7 @@ from notification.domain.recipients import BusinessLink, DigestMode, RecipientRo
 from notification.domain.repository import DirectoryEntry
 from notification.infrastructure.memory import MemoryStore
 from notification.testing import NOON_IST
+from py_common.pagination import encode_cursor
 
 TENANT = TenantId.new()
 OTHER = TenantId.new()
@@ -106,6 +109,25 @@ def test_recipients_of_a_business_and_tenants_apart() -> None:
         unit.recipients.save(owner)
 
 
+def test_a_business_lists_its_recipients_by_id_a_page_at_a_time() -> None:
+    store = MemoryStore()
+    register = RegisterRecipient(store, clock=lambda: NOON_IST)
+    followers = sorted((register.run(registration()) for _ in range(3)), key=lambda r: r.id.value)
+    register.run(registration(businesses=[BusinessLink(BusinessId.new())]))
+    register.run(registration(tenant_id=OTHER))
+    listing = ListRecipients(store)
+    assert listing.run(TENANT, BUSINESS, limit=10) == followers, "by id, followers only"
+    assert listing.run(TENANT, BUSINESS, limit=2) == followers[:2]
+    assert listing.run(TENANT, BUSINESS, limit=2, after=followers[1].id) == followers[2:]
+    assert listing.run(TENANT, BUSINESS, limit=2, after=followers[2].id) == []
+    RemoveRecipient(store).run(TENANT, followers[0].id)
+    assert listing.run(TENANT, BUSINESS, limit=10, after=followers[0].id) == followers[1:], (
+        "a removed recipient still marks the place"
+    )
+    assert [r.tenant_id for r in listing.run(OTHER, BUSINESS, limit=10)] == [OTHER]
+    assert listing.run(TENANT, BusinessId.new(), limit=10) == []
+
+
 def test_removing_a_recipient_clears_its_directory_entries() -> None:
     store = MemoryStore()
     registered = RegisterRecipient(store, clock=lambda: NOON_IST).run(registration())
@@ -166,6 +188,53 @@ def test_the_recipient_routes_round_trip(client: TestClient) -> None:
     missing = client.get(path, headers=tenant)
     assert missing.status_code == 404
     assert missing.json()["type"].endswith(":notification-recipient-not-found")
+
+
+def test_the_recipients_of_a_business_list_a_page_at_a_time(client: TestClient) -> None:
+    tenant = {"x-tenant-id": str(TENANT)}
+    business = str(uuid4())
+    ids = sorted(str(uuid4()) for _ in range(3))
+    for recipient_id in ids:
+        link = {"business_id": business, "label": "Acme Traders"}
+        put = client.put(
+            f"/v1/notification/recipients/{recipient_id}",
+            json=body(businesses=[link]),
+            headers=tenant,
+        )
+        assert put.status_code == 200, put.text
+    elsewhere = client.put(f"/v1/notification/recipients/{uuid4()}", json=body(), headers=tenant)
+    assert elsewhere.status_code == 200, "a recipient of another business"
+    path = "/v1/notification/recipients"
+    first = client.get(path, params={"business_id": business, "limit": 2}, headers=tenant)
+    assert first.status_code == 200, first.text
+    second = client.get(
+        path,
+        params={"business_id": business, "limit": 2, "cursor": first.json()["next_cursor"]},
+        headers=tenant,
+    ).json()
+    assert [item["id"] for item in first.json()["items"]] == ids[:2]
+    assert [item["id"] for item in second["items"]] == ids[2:]
+    assert second["next_cursor"] is None
+    assert second["items"][0] == client.get(f"{path}/{ids[2]}", headers=tenant).json()
+    whole = client.get(path, params={"business_id": business}, headers=tenant).json()
+    assert ([item["id"] for item in whole["items"]], whole["next_cursor"]) == (ids, None)
+    other = client.get(path, params={"business_id": business}, headers={"x-tenant-id": str(OTHER)})
+    assert other.json() == {"items": [], "next_cursor": None}, "another tenant sees nothing"
+
+
+def test_the_recipient_list_refuses_what_it_cannot_read(client: TestClient) -> None:
+    tenant = {"x-tenant-id": str(TENANT)}
+    path = "/v1/notification/recipients"
+    business = {"business_id": str(BUSINESS)}
+    assert client.get(path, params=business).status_code == 401
+    assert client.get(path, headers=tenant).status_code == 422, "business_id is required"
+    assert client.get(path, params={"business_id": "acme"}, headers=tenant).status_code == 422
+    assert client.get(path, params={**business, "limit": 0}, headers=tenant).status_code == 422
+    of_the_history = encode_cursor("notification.notifications", RecipientKeyset(id=uuid4()))
+    for cursor in ("not-a-cursor", of_the_history):
+        refused = client.get(path, params={**business, "cursor": cursor}, headers=tenant)
+        assert refused.status_code == 422, cursor
+        assert refused.json()["type"].endswith(":pagination-cursor-invalid")
 
 
 def test_the_recipient_routes_refuse_what_they_cannot_store(client: TestClient) -> None:

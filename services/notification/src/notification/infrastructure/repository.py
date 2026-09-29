@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from typing import Any, Self
 from uuid import UUID
 
-from sqlalchemy import Connection, Engine, create_engine, delete, func, select, text, update
+from sqlalchemy import Connection, Engine, Select, create_engine, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
@@ -252,14 +252,24 @@ class SqlAlchemyRecipientRepository:
         return result.first() is not None
 
     def for_business(self, business_id: BusinessId) -> Sequence[Recipient]:
+        return self._load(self._following(business_id))
+
+    def page(
+        self, business_id: BusinessId, *, limit: int, after: RecipientId | None = None
+    ) -> Sequence[Recipient]:
+        statement = self._following(business_id).limit(limit)
+        if after is not None:
+            statement = statement.where(RecipientRow.id > after.value)
+        return self._load(statement)
+
+    def _following(self, business_id: BusinessId) -> Select[RecipientRow]:
+        """The recipients that follow the business; ``_load`` orders them by id."""
         followers = select(RecipientBusinessRow.recipient_id).where(
             RecipientBusinessRow.tenant_id == self._tenant,
             RecipientBusinessRow.business_id == business_id.value,
         )
-        return self._load(
-            select(RecipientRow).where(
-                RecipientRow.tenant_id == self._tenant, RecipientRow.id.in_(followers)
-            )
+        return select(RecipientRow).where(
+            RecipientRow.tenant_id == self._tenant, RecipientRow.id.in_(followers)
         )
 
     def _load(self, statement: Any) -> list[Recipient]:

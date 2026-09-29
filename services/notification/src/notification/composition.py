@@ -26,7 +26,12 @@ from notification.application.enqueue import EnqueueNotifications
 from notification.application.history import GetNotification, ListNotifications
 from notification.application.preferences import GetPreference, SetOptIn
 from notification.application.receipts import ReconcileReceipts
-from notification.application.recipients import GetRecipient, RegisterRecipient, RemoveRecipient
+from notification.application.recipients import (
+    GetRecipient,
+    ListRecipients,
+    RegisterRecipient,
+    RemoveRecipient,
+)
 from notification.application.resend import ResendNotification
 from notification.application.retention import PurgeExpired
 from notification.application.send import SendNow
@@ -134,6 +139,7 @@ def wire(
         get_preference=GetPreference(unit_of_work),
         register_recipient=RegisterRecipient(unit_of_work),
         get_recipient=GetRecipient(unit_of_work),
+        list_recipients=ListRecipients(unit_of_work),
         remove_recipient=RemoveRecipient(unit_of_work),
         purge=PurgeExpired(unit_of_work, work_index),
         get_notification=GetNotification(unit_of_work),

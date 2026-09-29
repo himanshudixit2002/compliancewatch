@@ -138,6 +138,14 @@ class MemoryRecipientRepository:
         ]
         return sorted(found, key=lambda recipient: recipient.id.value)
 
+    def page(
+        self, business_id: BusinessId, *, limit: int, after: RecipientId | None = None
+    ) -> Sequence[Recipient]:
+        found = self.for_business(business_id)
+        if after is not None:
+            found = [recipient for recipient in found if recipient.id.value > after.value]
+        return found[:limit]
+
 
 class MemoryAddressDirectory:
     def __init__(self, state: MemoryState) -> None:

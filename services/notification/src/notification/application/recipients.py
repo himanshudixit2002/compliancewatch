@@ -1,11 +1,11 @@
-"""Register, read and remove the recipients of a tenant's businesses.
+"""Register, read, list and remove the recipients of a tenant's businesses.
 
 Registering is an upsert by recipient id (the web app uses the person's user id): the recipient,
 its addresses in the order given and its business links replace what was stored, and the
 address directory is rewritten in the same transaction, so an address never routes to a
 recipient that no longer has it. Addresses are normalised first; one listed twice keeps its
 first place. Consent is not given here: an address still needs its opt-in before anything is
-sent to it.
+sent to it. A business's recipients are listed by id, a page at a time.
 """
 
 from collections.abc import Callable, Sequence
@@ -14,7 +14,7 @@ from datetime import datetime
 
 from domain_kernel.channels import Channel
 from domain_kernel.events import utc_now
-from domain_kernel.ids import TenantId, UserId
+from domain_kernel.ids import BusinessId, TenantId, UserId
 from notification.domain.addresses import normalise_address
 from notification.domain.errors import RecipientNotFoundError
 from notification.domain.ids import RecipientId
@@ -82,6 +82,24 @@ class GetRecipient:
         if recipient is None:
             raise RecipientNotFoundError(str(recipient_id))
         return recipient
+
+
+class ListRecipients:
+    def __init__(self, unit_of_work: UnitOfWorkFactory) -> None:
+        self._unit_of_work = unit_of_work
+
+    def run(
+        self,
+        tenant_id: TenantId,
+        business_id: BusinessId,
+        *,
+        limit: int,
+        after: RecipientId | None = None,
+    ) -> Sequence[Recipient]:
+        """At most ``limit`` of the recipients that follow the business, by id, after
+        ``after``."""
+        with self._unit_of_work(tenant_id) as unit:
+            return unit.recipients.page(business_id, limit=limit, after=after)
 
 
 class RemoveRecipient:

@@ -35,6 +35,57 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/notification/notifications": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** A business's notifications, newest first, a page at a time */
+    get: operations["list_notifications_v1_notification_notifications_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/notification/notifications/{notification_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** One notification of the tenant, 404 when it has none by that id */
+    get: operations["get_notification_v1_notification_notifications__notification_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/notification/notifications/{notification_id}/resend": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Queue a notification that failed for good again; 409 in any other state */
+    post: operations["resend_notification_v1_notification_notifications__notification_id__resend_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/notification/ping": {
     parameters: {
       query?: never;
@@ -70,6 +121,76 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/notification/receipts/email": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Record the SES bounces, complaints and deliveries that SNS posts */
+    post: operations["email_receipts_v1_notification_receipts_email_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/notification/receipts/whatsapp": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Record the WhatsApp statuses and inbound times the bot forwards */
+    post: operations["whatsapp_receipts_v1_notification_receipts_whatsapp_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/notification/recipients": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The recipients that follow a business, by id, a page at a time */
+    get: operations["list_recipients_v1_notification_recipients_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/notification/recipients/{recipient_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** A recipient of the tenant, 404 when it has none by that id */
+    get: operations["get_recipient_v1_notification_recipients__recipient_id__get"];
+    /** Register a recipient, or replace it: role, language, digest, addresses, businesses */
+    put: operations["put_recipient_v1_notification_recipients__recipient_id__put"];
+    post?: never;
+    /** Remove a recipient with its addresses and business links */
+    delete: operations["delete_recipient_v1_notification_recipients__recipient_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/notification/send": {
     parameters: {
       query?: never;
@@ -79,7 +200,10 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Send one notification: dedupe, consent, quiet hours, render, deliver */
+    /**
+     * Send one notification now: dedupe, consent, quiet hours, queue, deliver
+     * @description A failed delivery stays queued and the service retries it; sending the same request again is a duplicate. In quiet hours the notification is queued for their end.
+     */
     post: operations["send_v1_notification_send_post"];
     delete?: never;
     options?: never;
@@ -108,6 +232,30 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
   schemas: {
+    /** BusinessLinkIn */
+    BusinessLinkIn: {
+      /**
+       * Business Id
+       * Format: uuid
+       */
+      business_id: string;
+      /**
+       * Label
+       * @description What the recipient calls the business, such as a CA firm's client name
+       * @default
+       */
+      label?: string;
+    };
+    /** BusinessLinkOut */
+    BusinessLinkOut: {
+      /**
+       * Business Id
+       * Format: uuid
+       */
+      business_id: string;
+      /** Label */
+      label: string;
+    };
     /**
      * Channel
      * @description Where a notification is delivered.
@@ -120,6 +268,45 @@ export type components = {
      * @enum {string}
      */
     ConsentSource: "whatsapp_keyword" | "web_onboarding" | "api" | "support";
+    /**
+     * DeliveryState
+     * @enum {string}
+     */
+    DeliveryState:
+      "queued" | "digest_pending" | "sent" | "delivered" | "read" | "failed" | "suppressed";
+    /**
+     * DigestMode
+     * @enum {string}
+     */
+    DigestMode: "off" | "daily";
+    /** EmailFeedbackOut */
+    EmailFeedbackOut: {
+      /**
+       * Applied
+       * @description Notifications the report moved on
+       */
+      applied: number;
+      /**
+       * Kind
+       * @description report (a bounce, complaint or delivery), subscription_confirmation or ignored
+       */
+      kind: string;
+      /**
+       * Suppressed
+       * @description Mailboxes closed by a permanent bounce or a complaint
+       */
+      suppressed: number;
+      /**
+       * Unchanged
+       * @description Reports that changed nothing
+       */
+      unchanged: number;
+      /**
+       * Unknown
+       * @description Reports for messages no notification carries
+       */
+      unknown: number;
+    };
     /** HealthResponse */
     HealthResponse: {
       /** Service */
@@ -129,11 +316,132 @@ export type components = {
       /** Version */
       version: string;
     };
+    /** InboundIn */
+    InboundIn: {
+      /**
+       * Address
+       * @description The number that wrote to the business
+       */
+      address: string;
+      /**
+       * At
+       * Format: date-time
+       * @description When its message was sent, with its offset
+       */
+      at: string;
+    };
+    /**
+     * NotificationOut
+     * @description One notification: to whom, about what, and how far it got.
+     */
+    NotificationOut: {
+      /**
+       * Address
+       * @description Normalised: +<digits> for WhatsApp, lower case for email
+       */
+      address: string;
+      /** Attempts */
+      attempts: number;
+      /**
+       * Available At
+       * Format: date-time
+       * @description When it may go out, or when it is tried again
+       */
+      available_at: string;
+      /**
+       * Business Id
+       * Format: uuid
+       */
+      business_id: string;
+      channel: components["schemas"]["Channel"];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Delivered At */
+      delivered_at: string | null;
+      /** Dispatch Id */
+      dispatch_id: string | null;
+      /** Error */
+      error: string;
+      /** Failed At */
+      failed_at: string | null;
+      /**
+       * Fallback Of
+       * @description The notification this one falls back from
+       */
+      fallback_of: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Language */
+      language: string;
+      /**
+       * Obligation Id
+       * Format: uuid
+       */
+      obligation_id: string;
+      occasion: components["schemas"]["OccasionKind"];
+      /**
+       * Params
+       * @description The values the message was filled with; emptied 30 days after it ended
+       */
+      params: {
+        [key: string]: unknown;
+      };
+      /** Provider Message Id */
+      provider_message_id: string;
+      /** Read At */
+      read_at: string | null;
+      /**
+       * Recipient Id
+       * @description None for a send addressed straight to a number
+       */
+      recipient_id: string | null;
+      /** Sent At */
+      sent_at: string | null;
+      state: components["schemas"]["DeliveryState"];
+      /** Template Key */
+      template_key: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * OccasionKind
+     * @enum {string}
+     */
+    OccasionKind: "change_card" | "reminder" | "closure" | "reschedule" | "manual";
     /**
      * Outcome
      * @enum {string}
      */
     Outcome: "sent" | "failed" | "deferred" | "not_opted_in" | "duplicate";
+    /** Page[NotificationOut] */
+    Page_NotificationOut_: {
+      /** Items */
+      items: components["schemas"]["NotificationOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
+    /** Page[RecipientOut] */
+    Page_RecipientOut_: {
+      /** Items */
+      items: components["schemas"]["RecipientOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
     /** PreferenceIn */
     PreferenceIn: {
       /** Language */
@@ -148,6 +456,11 @@ export type components = {
     };
     /** PreferenceOut */
     PreferenceOut: {
+      /**
+       * Address
+       * @description The address as it is stored: +<digits> for WhatsApp, lower case for email
+       */
+      address: string;
       channel: components["schemas"]["Channel"];
       /** Language */
       language: string;
@@ -157,7 +470,10 @@ export type components = {
       quiet_hours_end: string;
       /** Quiet Hours Start */
       quiet_hours_start: string;
-      /** Recipient */
+      /**
+       * Recipient
+       * @description The address as the request gave it
+       */
       recipient: string;
       source: components["schemas"]["ConsentSource"];
       /**
@@ -207,10 +523,129 @@ export type components = {
       /** Status */
       status: string;
     };
+    /** ReceiptsOut */
+    ReceiptsOut: {
+      /**
+       * Applied
+       * @description Receipts that moved a notification on
+       */
+      applied: number;
+      /**
+       * Ignored
+       * @description Statuses the service does not act on
+       */
+      ignored: number;
+      /**
+       * Inbound
+       * @description Inbound times recorded
+       */
+      inbound: number;
+      /**
+       * Unchanged
+       * @description Late or repeated receipts that changed nothing
+       */
+      unchanged: number;
+      /**
+       * Unknown
+       * @description Receipts for messages no notification carries
+       */
+      unknown: number;
+    };
+    /** RecipientAddressIn */
+    RecipientAddressIn: {
+      /**
+       * Address
+       * @description A phone number with its country code for WhatsApp, a mailbox for email
+       */
+      address: string;
+      channel: components["schemas"]["Channel"];
+    };
+    /** RecipientAddressOut */
+    RecipientAddressOut: {
+      /**
+       * Address
+       * @description Normalised: +<digits> for WhatsApp, lower case for email
+       */
+      address: string;
+      channel: components["schemas"]["Channel"];
+      /** Position */
+      position: number;
+    };
+    /** RecipientIn */
+    RecipientIn: {
+      /**
+       * Addresses
+       * @description In the order they are tried; each still needs its opt-in
+       */
+      addresses?: components["schemas"]["RecipientAddressIn"][];
+      /** Businesses */
+      businesses?: components["schemas"]["BusinessLinkIn"][];
+      /** @default off */
+      digest_mode?: components["schemas"]["DigestMode"];
+      /**
+       * Language
+       * @default en
+       */
+      language?: string;
+      /**
+       * Org Label
+       * @description The organisation the recipient speaks for, such as the CA firm's name
+       * @default
+       */
+      org_label?: string;
+      role: components["schemas"]["RecipientRole"];
+      /**
+       * User Id
+       * @description The person's user id when they sign in to the web app
+       */
+      user_id?: string | null;
+    };
+    /** RecipientOut */
+    RecipientOut: {
+      /** Addresses */
+      addresses: components["schemas"]["RecipientAddressOut"][];
+      /** Businesses */
+      businesses: components["schemas"]["BusinessLinkOut"][];
+      /**
+       * By Digest
+       * @description Notifications wait for the daily digest: chosen, or a CA firm's recipient
+       */
+      by_digest: boolean;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      digest_mode: components["schemas"]["DigestMode"];
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Language */
+      language: string;
+      /** Org Label */
+      org_label: string;
+      role: components["schemas"]["RecipientRole"];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** User Id */
+      user_id: string | null;
+    };
+    /**
+     * RecipientRole
+     * @enum {string}
+     */
+    RecipientRole: "owner" | "staff" | "ca_admin" | "ca_staff";
     /** SendIn */
     SendIn: {
       /**
        * Attempt
+       * @deprecated
+       * @description Ignored: the service retries a failed delivery itself
        * @default 1
        */
       attempt?: number;
@@ -294,6 +729,42 @@ export type components = {
       /** Type */
       type: string;
     };
+    /** WhatsAppReceiptsIn */
+    WhatsAppReceiptsIn: {
+      /** Inbound */
+      inbound?: components["schemas"]["InboundIn"][];
+      /** Statuses */
+      statuses?: components["schemas"]["WhatsAppStatusIn"][];
+    };
+    /** WhatsAppStatusIn */
+    WhatsAppStatusIn: {
+      /**
+       * At
+       * Format: date-time
+       * @description When Meta says it happened, with its offset
+       */
+      at: string;
+      /**
+       * Error Code
+       * @description Meta's error code of a failure
+       */
+      error_code?: number | null;
+      /**
+       * Error Title
+       * @default
+       */
+      error_title?: string;
+      /**
+       * Provider Message Id
+       * @description Meta's wamid
+       */
+      provider_message_id: string;
+      /**
+       * Status
+       * @description sent, delivered, read or failed; any other status is ignored
+       */
+      status: string;
+    };
   };
   responses: never;
   parameters: never;
@@ -348,6 +819,169 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ReadyResponse"];
+        };
+      };
+    };
+  };
+  list_notifications_v1_notification_notifications_get: {
+    parameters: {
+      query: {
+        /** @description The business the notifications are about */
+        business_id: string;
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Keep only this state */
+        state?: components["schemas"]["DeliveryState"] | null;
+      };
+      header?: {
+        /** @description Tenant UUID; required until identity issues tokens */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_NotificationOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  get_notification_v1_notification_notifications__notification_id__get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID; required until identity issues tokens */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        notification_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NotificationOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  resend_notification_v1_notification_notifications__notification_id__resend_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID; required until identity issues tokens */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        notification_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NotificationOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
     };
@@ -442,6 +1076,335 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  email_receipts_v1_notification_receipts_email_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "text/plain": string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EmailFeedbackOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  whatsapp_receipts_v1_notification_receipts_whatsapp_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Shared secret of the WhatsApp bot (CW_NOTIFICATION_BOT_TOKEN) */
+        "x-cw-bot-token"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WhatsAppReceiptsIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReceiptsOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  list_recipients_v1_notification_recipients_get: {
+    parameters: {
+      query: {
+        /** @description The business the recipients hear about */
+        business_id: string;
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+      };
+      header?: {
+        /** @description Tenant UUID; required until identity issues tokens */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_RecipientOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  get_recipient_v1_notification_recipients__recipient_id__get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID; required until identity issues tokens */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        recipient_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RecipientOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  put_recipient_v1_notification_recipients__recipient_id__put: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID; required until identity issues tokens */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        recipient_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RecipientIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RecipientOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  delete_recipient_v1_notification_recipients__recipient_id__delete: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID; required until identity issues tokens */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        recipient_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

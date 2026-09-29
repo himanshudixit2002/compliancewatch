@@ -290,6 +290,12 @@ class NotificationKeyset(Strict):
     id: UUID
 
 
+class RecipientKeyset(Strict):
+    """Where a page of a business's recipients starts: after this one, by id."""
+
+    id: UUID
+
+
 MAX_RECEIPTS = 1000
 """Items one forward may carry; a webhook delivery holds far fewer."""
 

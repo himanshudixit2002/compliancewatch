@@ -41,6 +41,7 @@ from notification.application.preferences import SetOptIn
 from notification.application.receipts import InboundTime, ReconcileReceipts
 from notification.application.recipients import (
     GetRecipient,
+    ListRecipients,
     RecipientRegistration,
     RegisterRecipient,
     RemoveRecipient,
@@ -529,6 +530,50 @@ def test_recipients_and_their_directory_entries_under_row_level_security(
             )
         }
     assert left == dict.fromkeys(left, 0), "addresses, links and entries go with the recipient"
+
+
+def test_a_business_lists_its_recipients_by_id_under_row_level_security(
+    factory: PostgresUnitOfWorkFactory,
+) -> None:
+    tenant, other = TenantId.new(), TenantId.new()
+    business = BusinessId.new()
+    register = RegisterRecipient(factory, clock=lambda: NOON_IST)
+
+    def recipient(tenant_id: TenantId, *businesses: BusinessId) -> RecipientId:
+        registered = register.run(
+            RecipientRegistration(
+                tenant_id=tenant_id,
+                recipient_id=RecipientId.new(),
+                role=RecipientRole.STAFF,
+                addresses=[(Channel.EMAIL, f"{uuid4().hex}@acme.in")],
+                businesses=[BusinessLink(link, "Acme Traders") for link in businesses],
+            )
+        )
+        return registered.id
+
+    followers = sorted(
+        (recipient(tenant, business, BusinessId.new()) for _ in range(3)), key=lambda r: r.value
+    )
+    recipient(tenant, BusinessId.new())
+    theirs = recipient(other, business)
+    listing = ListRecipients(factory)
+
+    def ids(
+        tenant_id: TenantId, limit: int = 10, after: RecipientId | None = None
+    ) -> list[RecipientId]:
+        return [r.id for r in listing.run(tenant_id, business, limit=limit, after=after)]
+
+    assert ids(tenant) == followers, "by id, the business's followers only"
+    assert ids(tenant, limit=2) == followers[:2]
+    assert ids(tenant, limit=2, after=followers[1]) == followers[2:]
+    assert ids(tenant, limit=2, after=followers[2]) == []
+    whole = listing.run(tenant, business, limit=10)
+    assert whole == [GetRecipient(factory).run(tenant, r) for r in followers]
+    assert [len(r.businesses) for r in whole] == [2, 2, 2], "every link, not only this one"
+    RemoveRecipient(factory).run(tenant, followers[0])
+    assert ids(tenant, after=followers[0]) == followers[1:], "a removed id marks the place"
+    assert ids(other) == [theirs]
+    assert listing.run(tenant, BusinessId.new(), limit=10) == []
 
 
 def test_concurrent_writes_of_one_dedupe_key_keep_one_row(
