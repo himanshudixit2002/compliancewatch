@@ -1,4 +1,4 @@
-"""Property tests of the llm-gateway API against its spec (schemathesis).
+"""Property tests of the obligation API against its spec (schemathesis).
 
 Schemathesis generates valid and invalid requests from the served schema, which
 ``test_openapi.py`` pins to the committed spec, and sends them in process with a tenant header.
@@ -22,20 +22,16 @@ from schemathesis.specs.openapi.checks import (
     status_code_conformance,
 )
 
-from llm_gateway.main import build_app
-from llm_gateway.settings import GatewaySettings
+from obligation.main import build_app
+from obligation.settings import ObligationSettings
 
 TENANT_ID = "7d0f4d56-2a8e-4c1b-9f3e-5b6a1c2d3e4f"
 OPERATIONS = frozenset(
     {
         "GET /health",
         "GET /ready",
-        "POST /v1/llm-gateway/completions",
-        "POST /v1/llm-gateway/embeddings",
-        "GET /v1/llm-gateway/models",
-        "GET /v1/llm-gateway/ping",
-        "GET /v1/llm-gateway/prompts",
-        "GET /v1/llm-gateway/usage",
+        "GET /v1/obligation/obligations",
+        "GET /v1/obligation/ping",
     }
 )
 EXCLUDED: dict[str, str] = {}
@@ -50,18 +46,8 @@ CHECKS = cast(
 )
 EXAMPLES = 200 if os.environ.get("HYPOTHESIS_PROFILE") == "nightly" else 25
 
-# The fake provider and the memory ledger, as in tests/conftest.py; no .env, no Langfuse.
 app = build_app(
-    GatewaySettings(
-        _env_file=None,
-        service_name="llm-gateway",
-        llm_provider="fake",
-        llm_ledger="memory",
-        llm_routes={},
-        langfuse_host=None,
-        langfuse_public_key=None,
-        langfuse_secret_key=None,
-    )
+    ObligationSettings(_env_file=None, service_name="obligation", obligation_store="memory")
 )
 schema = schemathesis.openapi.from_asgi("/openapi.json", app).include(
     func=lambda ctx: ctx.operation.label in OPERATIONS and ctx.operation.label not in EXCLUDED
