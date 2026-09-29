@@ -27,6 +27,11 @@ in the workspace: `runAxe(container)` runs axe with the `region` rule off (a com
 on its own has no landmarks) and `color-contrast` off (jsdom has no layout to measure it; the
 Playwright suite and `contrast.test.ts` cover colour), and `toHaveNoViolations()` formats the
 violations with their targets. Every component test and every feature view test ends with it.
+The check stays component sized: a view that renders the whole registry or the whole catalogue
+(the sitemap, the admin tool list, `/design`) runs it on one section's table or group, because
+axe over a page-sized jsdom tree takes tens of seconds on a CI runner; the Playwright suite runs
+`AxeBuilder` over those pages in full. No unit test sets its own timeout; the configured 30 s
+ceiling applies.
 
 **Coverage.** Both packages hold 80% for lines, functions, branches and statements. In `apps/web`
 the route files (`page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`,
