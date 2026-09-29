@@ -71,3 +71,63 @@ class InvalidWebhookSignatureError(DomainError):
 
     def __init__(self) -> None:
         super().__init__("billing webhook signature did not verify")
+
+
+class RoleNotAllowedError(DomainError):
+    """A user was given no role, or a role the tenant's kind does not have (422)."""
+
+    type_slug: ClassVar[str] = "identity-role-not-allowed"
+    title: ClassVar[str] = "Role not allowed in this tenant"
+
+    def __init__(self, kind: str, refused: tuple[str, ...]) -> None:
+        if refused:
+            detail = f"a {kind} tenant has no role {', '.join(refused)}"
+        else:
+            detail = "a user holds at least one role"
+        super().__init__(detail)
+        self.kind = kind
+        self.refused = refused
+
+
+class LastAdminError(DomainError):
+    """The change would leave the tenant without an active admin (409)."""
+
+    type_slug: ClassVar[str] = "identity-last-admin"
+    title: ClassVar[str] = "Tenant would lose its last admin"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "the tenant needs an active admin: make another user an admin before this change"
+        )
+
+
+class UserNotFoundError(DomainError):
+    """No user with this id in the caller's tenant (404)."""
+
+    type_slug: ClassVar[str] = "identity-user-not-found"
+    title: ClassVar[str] = "User not found in this tenant"
+
+    def __init__(self, user_id: str) -> None:
+        super().__init__(f"no user {user_id} in this tenant")
+
+
+class UserDisabledError(DomainError):
+    """The user is disabled: it cannot sign in and its roles cannot change (403)."""
+
+    type_slug: ClassVar[str] = "identity-user-disabled"
+    title: ClassVar[str] = "User is disabled"
+
+    def __init__(self) -> None:
+        super().__init__("this user is disabled: it cannot sign in and its roles cannot change")
+
+
+class SubjectRegisteredError(DomainError):
+    """The provider's subject already signs in as a user, in this tenant or another (409)."""
+
+    type_slug: ClassVar[str] = "identity-subject-registered"
+    title: ClassVar[str] = "Sign-in already belongs to a user"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "this sign-in already belongs to a user; exchange it for a session instead"
+        )

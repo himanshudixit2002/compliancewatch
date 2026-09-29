@@ -1,0 +1,294 @@
+"""Migration 0003 on Postgres: tenants, users, the subject index, service clients and the outbox,
+with row-level security on tenant and app_user checked through a plain role. Needs Docker.
+
+The role owns nothing and is not a superuser, as the service's own role would be.
+"""
+
+import importlib
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+from alembic import command
+from alembic.autogenerate import compare_metadata
+from alembic.config import Config
+from alembic.migration import MigrationContext
+from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from testcontainers.community.postgres import PostgresContainer
+
+from domain_kernel.access import Role
+from domain_kernel.ids import TenantId
+from identity.domain.errors import SubjectRegisteredError
+from identity.domain.events import RoleChangeReason, TenantCreated, UserRoleChanged, sorted_roles
+from identity.domain.tenancy import Contact, SubjectEntry, Tenant, TenantKind, User
+from identity.infrastructure.models import Base
+from identity.infrastructure.repository import PostgresUnitOfWorkFactory
+
+SERVICE_DIR = Path(__file__).resolve().parents[2]
+IMAGE = "pgvector/pgvector:0.8.6-pg16"
+SCHEMA = "identity"
+APP_ROLE = "identity_tenancy_app"
+APP_PASSWORD = "app-role-for-tests"
+NEW_TABLES = ("tenant", "app_user", "user_subject", "service_client")
+NOW = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+PHONE = "+919876543210"
+
+
+@pytest.fixture(scope="module")
+def database_url() -> Iterator[str]:
+    with PostgresContainer(IMAGE, driver="psycopg") as postgres:
+        base_url = postgres.get_connection_url()
+        admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
+        with admin.connect() as connection:
+            connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+            connection.execute(text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'"))
+            connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
+            # Tables the migrations create later, again after a downgrade, reach the role too.
+            connection.execute(
+                text(
+                    f"ALTER DEFAULT PRIVILEGES IN SCHEMA {SCHEMA} "
+                    f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE}"
+                )
+            )
+        admin.dispose()
+        yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
+
+
+@pytest.fixture(scope="module")
+def alembic_config(database_url: str) -> Iterator[Config]:
+    with pytest.MonkeyPatch.context() as env:
+        env.setenv("CW_DATABASE_URL", database_url)
+        env.setenv("CW_DB_SCHEMA", SCHEMA)
+        yield Config(str(SERVICE_DIR / "alembic.ini"))
+
+
+@pytest.fixture(scope="module")
+def engine(database_url: str, alembic_config: Config) -> Iterator[Engine]:
+    command.upgrade(alembic_config, "head")
+    engine = create_engine(database_url)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture(scope="module")
+def app_engine(database_url: str, engine: Engine) -> Iterator[Engine]:
+    engine = create_engine(database_url.replace("test:test@", f"{APP_ROLE}:{APP_PASSWORD}@"))
+    yield engine
+    engine.dispose()
+
+
+def tables(engine: Engine) -> set[str]:
+    return set(inspect(engine).get_table_names(schema=SCHEMA))
+
+
+def new_tenant(kind: TenantKind = TenantKind.BUSINESS, name: str = "Acme Traders") -> Tenant:
+    return Tenant(TenantId.new(), kind, name, NOW)
+
+
+def first_user(tenant: Tenant, subject: str) -> User:
+    return User.new(
+        tenant,
+        provider="fake",
+        provider_subject=subject,
+        contact=Contact(phone=PHONE),
+        roles=[Role.OWNER if tenant.kind is TenantKind.BUSINESS else Role.ADMIN],
+        at=NOW,
+    )
+
+
+def sign_up(factory: PostgresUnitOfWorkFactory, tenant: Tenant, user: User) -> None:
+    with factory(tenant.id) as uow:
+        uow.tenants.add(tenant)
+        uow.users.add(user)
+        uow.subjects.add(SubjectEntry.of(user))
+        uow.events.publish(
+            TenantCreated(
+                tenant_id=tenant.id,
+                kind=tenant.kind,
+                region=tenant.region,
+                created_by=user.id,
+                created_at=NOW,
+            )
+        )
+        uow.events.publish(
+            UserRoleChanged(
+                tenant_id=tenant.id,
+                user_id=user.id,
+                roles=sorted_roles(user.roles),
+                previous_roles=(),
+                reason=RoleChangeReason.CREATED,
+                session_version=user.session_version,
+                changed_by=user.id,
+            )
+        )
+
+
+def outbox_topics(engine: Engine, tenant: Tenant) -> list[str]:
+    with engine.connect() as connection:
+        return list(
+            connection.execute(
+                text("SELECT topic FROM outbox_event WHERE tenant_id = :tenant ORDER BY topic"),
+                {"tenant": tenant.id.value},
+            ).scalars()
+        )
+
+
+def test_upgrade_downgrade_upgrade(alembic_config: Config, engine: Engine) -> None:
+    assert set(NEW_TABLES) | {"outbox_event"} <= tables(engine)
+    command.downgrade(alembic_config, "0002")
+    assert tables(engine) == {"consent_record", "channel_consent", "alembic_version"}
+    command.upgrade(alembic_config, "head")
+    assert set(NEW_TABLES) | {"outbox_event"} <= tables(engine)
+
+
+def test_models_and_migration_agree(engine: Engine) -> None:
+    def only_new_tables(
+        obj: object, name: str | None, type_: str, reflected: bool, compare_to: object
+    ) -> bool:
+        table = name if type_ == "table" else getattr(getattr(obj, "table", None), "name", None)
+        return table in NEW_TABLES
+
+    with engine.connect() as connection:
+        context = MigrationContext.configure(
+            connection,
+            opts={
+                "compare_type": True,
+                "compare_server_default": True,
+                "include_object": only_new_tables,
+            },
+        )
+        assert compare_metadata(context, Base.metadata) == []
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                "SELECT relname, relforcerowsecurity FROM pg_class c JOIN pg_namespace n "
+                "ON n.oid = c.relnamespace WHERE n.nspname = :schema AND c.relkind = 'r'"
+            ),
+            {"schema": SCHEMA},
+        )
+        forced: dict[str, bool] = {row.relname: row.relforcerowsecurity for row in rows}
+    assert forced["tenant"]
+    assert forced["app_user"]
+    assert not forced["user_subject"]
+    assert not forced["service_client"]
+
+
+def test_the_catalog_lint_passes_with_the_exemptions(engine: Engine) -> None:
+    lint = importlib.import_module("check_migrations")  # infra/scripts, on the pytest path
+    with engine.connect() as connection:
+        raw = connection.connection.driver_connection
+        catalog = [t for t in lint.read_tables(raw) if t.schema == SCHEMA]
+    config = lint.load_config()
+    for table in ("tenant", "user_subject", "service_client"):
+        assert config.exemption_for(f"{SCHEMA}.{table}") is not None
+    assert config.exemption_for(f"{SCHEMA}.app_user") is None
+    assert [p for p in lint.catalog_problems(catalog, config) if p.startswith(f"{SCHEMA}.")] == []
+
+
+def test_row_level_security_isolates_tenants_and_users(app_engine: Engine) -> None:
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    acme, other = new_tenant(), new_tenant(name="Other Traders")
+    owner, other_owner = first_user(acme, "rls-acme"), first_user(other, "rls-other")
+    sign_up(factory, acme, owner)
+    sign_up(factory, other, other_owner)
+    with factory(acme.id) as uow:
+        assert uow.tenants.get(acme.id) == acme
+        assert uow.tenants.get(other.id) is None
+        assert uow.users.list() == [owner]
+        assert uow.users.get(other_owner.id) is None
+    with factory(None) as uow:
+        assert uow.tenants.get(acme.id) is None
+        assert uow.users.list() == []
+    with app_engine.connect() as connection:
+        for table in ("tenant", "app_user"):
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar_one() == 0
+    with pytest.raises(DBAPIError, match="row-level security"), factory(acme.id) as uow:
+        uow.tenants.add(new_tenant(name="Smuggled"))
+
+
+def test_role_changes_are_saved_under_the_tenant(app_engine: Engine) -> None:
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    acme = new_tenant()
+    owner = first_user(acme, "save-acme")
+    sign_up(factory, acme, owner)
+    changed = owner.with_roles([Role.OWNER, Role.COMPLIANCE_LEAD], acme, colleagues=[], at=NOW)
+    with factory(acme.id) as uow:
+        uow.users.save(changed)
+    with factory(acme.id) as uow:
+        stored = uow.users.get(owner.id)
+    assert stored == changed
+    assert stored is not None
+    assert stored.session_version == 1
+
+
+def test_the_subject_index_answers_without_a_tenant(app_engine: Engine) -> None:
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    acme = new_tenant()
+    owner = first_user(acme, "subject-lookup")
+    sign_up(factory, acme, owner)
+    with factory(None) as uow:
+        assert uow.subjects.find("fake", "subject-lookup") == SubjectEntry.of(owner)
+        assert uow.subjects.find("fake", "nobody") is None
+
+
+def test_the_outbox_rows_commit_and_roll_back_with_the_sign_up(
+    app_engine: Engine, engine: Engine
+) -> None:
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    acme = new_tenant()
+    owner = first_user(acme, "outbox-acme")
+    sign_up(factory, acme, owner)
+    assert outbox_topics(engine, acme) == ["tenant.created", "user.role.changed"]
+    late = new_tenant(name="Late Traders")
+    with pytest.raises(SubjectRegisteredError):
+        sign_up(factory, late, first_user(late, "outbox-acme"))
+    assert outbox_topics(engine, late) == []
+    with factory(late.id) as uow:
+        assert uow.tenants.get(late.id) is None
+        assert uow.users.list() == []
+
+
+def insert_user(app_engine: Engine, tenant: Tenant, **values: str) -> None:
+    with app_engine.begin() as connection:
+        connection.execute(
+            text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": str(tenant.id)}
+        )
+        connection.execute(
+            text(
+                "INSERT INTO app_user (id, tenant_id, provider, provider_subject, phone, roles, "
+                "status, created_at, updated_at) VALUES (gen_random_uuid(), :tenant, 'fake', "
+                ":subject, :phone, CAST(:roles AS varchar[]), :status, now(), now())"
+            ),
+            {"tenant": tenant.id.value, **values},
+        )
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "constraint"),
+    [
+        ("roles", "{partner}", "ck_app_user_roles"),
+        ("roles", "{}", "ck_app_user_roles_present"),
+        ("phone", "9876543210", "ck_app_user_phone"),
+        ("status", "gone", "ck_app_user_status"),
+    ],
+)
+def test_the_checks_refuse_what_the_domain_refuses(
+    app_engine: Engine, column: str, value: str, constraint: str
+) -> None:
+    acme = new_tenant()
+    sign_up(PostgresUnitOfWorkFactory(app_engine), acme, first_user(acme, f"checks-{constraint}"))
+    values = {"roles": "{owner}", "phone": PHONE, "status": "active", column: value}
+    subject = f"check-{constraint}"
+    with pytest.raises(IntegrityError, match=constraint):
+        insert_user(app_engine, acme, subject=subject, **values)
+
+
+def test_there_is_one_internal_tenant(app_engine: Engine) -> None:
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    first = new_tenant(TenantKind.INTERNAL, "Regulatory team")
+    sign_up(factory, first, first_user(first, "internal-1"))
+    second = new_tenant(TenantKind.INTERNAL, "Second team")
+    with pytest.raises(IntegrityError, match="ux_tenant_internal"):
+        sign_up(factory, second, first_user(second, "internal-2"))

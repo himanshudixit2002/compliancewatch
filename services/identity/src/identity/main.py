@@ -19,7 +19,6 @@ from identity.application.channel_consents import ChannelConsentStatus, RecordCh
 from identity.application.consents import ConsentStatus, RecordConsent
 from identity.domain.billing import BillingProvider
 from identity.domain.channel_consent import ChannelUnitOfWorkFactory
-from identity.domain.consent import UnitOfWorkFactory
 from identity.domain.errors import (
     BillingDisabledError,
     ChannelPurposeInvalidError,
@@ -30,6 +29,7 @@ from identity.domain.errors import (
     NoticeVersionRequiredError,
     TenantRequiredError,
 )
+from identity.domain.repository import UnitOfWorkFactory
 from identity.infrastructure.billing.memory import MemoryBillingProvider
 from identity.infrastructure.billing.razorpay import RazorpayBillingProvider
 from identity.infrastructure.memory import MemoryChannelStore, MemoryStore

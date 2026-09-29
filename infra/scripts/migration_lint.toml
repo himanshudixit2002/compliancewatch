@@ -57,6 +57,29 @@ identity).
 """
 
 [[exemptions]]
+table = "identity.tenant"
+reason = """
+The tenant table is the tenant itself, so it has no tenant_id: row-level security is enabled and
+forced with a policy on id, which admits the tenant the app.tenant_id setting names and no other
+(migration 0003 of identity).
+"""
+
+[[exemptions]]
+table = "identity.user_subject"
+reason = """
+Which user, in which tenant, an identity provider's subject signs in as. The session exchange reads
+it before it knows the tenant, so no tenant setting can apply; it holds ids only (migration 0003 of
+identity).
+"""
+
+[[exemptions]]
+table = "identity.service_client"
+reason = """
+Service clients belong to no tenant, so there is no tenant_id. It holds client ids, the SHA-256 of
+each secret and the scopes, never a secret (migration 0003 of identity).
+"""
+
+[[exemptions]]
 table = "notification.channel_preference"
 reason = """
 Consent per channel and normalised address, recorded before any tenant links the address: an

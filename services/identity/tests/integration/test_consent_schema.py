@@ -62,11 +62,9 @@ def test_table_policy_and_isolation(
     database_url: str, migrated: Config, app_engine: Engine
 ) -> None:
     engine = create_engine(database_url)
-    assert set(inspect(engine).get_table_names(schema=SCHEMA)) == {
-        "consent_record",
-        "channel_consent",
-        "alembic_version",
-    }
+    assert {"consent_record", "channel_consent", "alembic_version"} <= set(
+        inspect(engine).get_table_names(schema=SCHEMA)
+    )
     with engine.connect() as connection:
         policies: list[str] = list(
             connection.execute(

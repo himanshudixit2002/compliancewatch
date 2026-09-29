@@ -7,7 +7,7 @@ from identity.application.billing import BillingLedger, ReceiveBillingWebhook, S
 from identity.application.channel_consents import ChannelConsentStatus, RecordChannelConsent
 from identity.application.consents import ConsentStatus, RecordConsent
 from identity.domain.channel_consent import ChannelUnitOfWorkFactory
-from identity.domain.consent import UnitOfWorkFactory
+from identity.domain.repository import UnitOfWorkFactory
 from identity.settings import IdentitySettings
 
 

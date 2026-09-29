@@ -1,29 +1,50 @@
-"""The Postgres units of work: one transaction with the tenant setting for row-level security,
-and one without a tenant for channel consents."""
+"""The Postgres units of work: one transaction with the tenant setting for row-level security
+(or none, for the subject index), with the outbox writer as the event sink, and one without a
+tenant for channel consents."""
 
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from typing import Self
 
-from sqlalchemy import Engine, create_engine, select, text
+from sqlalchemy import Connection, Engine, create_engine, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
+from domain_kernel.access import Role
+from domain_kernel.events import DomainEvent
 from domain_kernel.ids import ConsentId, TenantId, UserId
 from identity.domain.channel_consent import (
     ChannelConsentRecord,
     ChannelUnitOfWork,
     ConsentChannel,
 )
-from identity.domain.consent import ConsentPurpose, ConsentRecord, ConsentSource, UnitOfWork
-from identity.infrastructure.models import TENANT_SETTING, ChannelConsentRow, ConsentRow
+from identity.domain.consent import ConsentPurpose, ConsentRecord, ConsentSource
+from identity.domain.errors import SubjectRegisteredError
+from identity.domain.repository import UnitOfWork
+from identity.domain.tenancy import (
+    Contact,
+    SubjectEntry,
+    Tenant,
+    TenantKind,
+    TenantStatus,
+    User,
+    UserStatus,
+)
+from identity.infrastructure.models import (
+    TENANT_SETTING,
+    ChannelConsentRow,
+    ConsentRow,
+    TenantRow,
+    UserRow,
+    UserSubjectRow,
+)
+from py_common.outbox import OutboxWriter
 
 
 class SqlAlchemyConsentRepository:
-    def __init__(self, session: Session, tenant_id: TenantId) -> None:
+    def __init__(self, session: Session) -> None:
         self._session = session
-        self._tenant_id = tenant_id
 
     def add(self, record: ConsentRecord) -> None:
         self._session.add(
@@ -53,25 +74,130 @@ class SqlAlchemyConsentRepository:
         return [_to_record(row) for row in self._session.scalars(statement).all()]
 
 
-class SqlAlchemyUnitOfWork:
-    def __init__(self, session: Session, tenant_id: TenantId) -> None:
-        session.connection().execute(
-            text("SELECT set_config(:name, :value, true)"),
-            {"name": TENANT_SETTING, "value": str(tenant_id)},
+class SqlAlchemyTenantRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, tenant: Tenant) -> None:
+        self._session.add(
+            TenantRow(
+                id=tenant.id.value,
+                kind=tenant.kind.value,
+                name=tenant.name,
+                region=tenant.region,
+                status=tenant.status.value,
+                created_at=tenant.created_at,
+            )
         )
-        self.consents = SqlAlchemyConsentRepository(session, tenant_id)
+        self._session.flush()
+
+    def get(self, tenant_id: TenantId) -> Tenant | None:
+        row = self._session.get(TenantRow, tenant_id.value)
+        if row is None:
+            return None
+        return Tenant(
+            id=TenantId(row.id),
+            kind=TenantKind(row.kind),
+            name=row.name,
+            created_at=row.created_at,
+            region=row.region,
+            status=TenantStatus(row.status),
+        )
+
+
+class SqlAlchemyUserRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, user: User) -> None:
+        self._session.add(_user_row(user))
+        self._session.flush()
+
+    def save(self, user: User) -> None:
+        self._session.merge(_user_row(user))
+        self._session.flush()
+
+    def get(self, user_id: UserId) -> User | None:
+        row = self._session.get(UserRow, user_id.value)
+        return None if row is None else _to_user(row)
+
+    def list(self) -> list[User]:
+        rows = self._session.scalars(select(UserRow).order_by(UserRow.created_at, UserRow.id))
+        return [_to_user(row) for row in rows]
+
+
+class SqlAlchemySubjectIndex:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, entry: SubjectEntry) -> None:
+        """Insert unless the provider's subject is taken; two sign-ups racing for one subject
+        still make one row, and the second gets ``SubjectRegisteredError``."""
+        statement = (
+            insert(UserSubjectRow)
+            .values(
+                provider=entry.provider,
+                provider_subject=entry.provider_subject,
+                user_id=entry.user_id.value,
+                tenant_id=entry.tenant_id.value,
+            )
+            .on_conflict_do_nothing(index_elements=["provider", "provider_subject"])
+            .returning(UserSubjectRow.provider)
+        )
+        if self._session.execute(statement).scalar_one_or_none() is None:
+            raise SubjectRegisteredError()
+
+    def find(self, provider: str, provider_subject: str) -> SubjectEntry | None:
+        row = self._session.get(UserSubjectRow, (provider, provider_subject))
+        if row is None:
+            return None
+        return SubjectEntry(
+            row.provider, row.provider_subject, UserId(row.user_id), TenantId(row.tenant_id)
+        )
+
+
+class OutboxSink:
+    def __init__(self, connection: Connection, writer: OutboxWriter) -> None:
+        self._connection = connection
+        self._writer = writer
+
+    def publish(self, event: DomainEvent) -> None:
+        self._writer.write(self._connection, event)
+
+
+class SqlAlchemyUnitOfWork:
+    """One transaction. The tenant setting is set only when a tenant is given; without one,
+    row-level security hides every tenant row and the subject index is what is left."""
+
+    def __init__(self, session: Session, tenant_id: TenantId | None, writer: OutboxWriter) -> None:
+        connection = session.connection()
+        if tenant_id is not None:
+            connection.execute(
+                text("SELECT set_config(:name, :value, true)"),
+                {"name": TENANT_SETTING, "value": str(tenant_id)},
+            )
+        self.consents = SqlAlchemyConsentRepository(session)
+        self.tenants = SqlAlchemyTenantRepository(session)
+        self.users = SqlAlchemyUserRepository(session)
+        self.subjects = SqlAlchemySubjectIndex(session)
+        self.events = OutboxSink(connection, writer)
 
 
 class PostgresUnitOfWorkFactory:
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, engine: Engine, *, writer: OutboxWriter | None = None) -> None:
         self._engine = engine
+        self._writer = writer or OutboxWriter()
 
     @classmethod
     def from_url(cls, database_url: str) -> Self:
         return cls(create_engine(database_url, poolclass=NullPool))
 
-    def __call__(self, tenant_id: TenantId) -> AbstractContextManager[UnitOfWork]:
+    def __call__(self, tenant_id: TenantId | None) -> AbstractContextManager[UnitOfWork]:
         return self._open(tenant_id)
+
+    @property
+    def engine(self) -> Engine:
+        return self._engine
 
     @property
     def channel_unit_of_work(self) -> "PostgresChannelUnitOfWorkFactory":
@@ -79,14 +205,47 @@ class PostgresUnitOfWorkFactory:
         return PostgresChannelUnitOfWorkFactory(self._engine)
 
     @contextmanager
-    def _open(self, tenant_id: TenantId) -> Iterator[UnitOfWork]:
+    def _open(self, tenant_id: TenantId | None) -> Iterator[UnitOfWork]:
         with Session(self._engine, expire_on_commit=False) as session, session.begin():
-            yield SqlAlchemyUnitOfWork(session, tenant_id)
+            yield SqlAlchemyUnitOfWork(session, tenant_id, self._writer)
 
     def ping(self) -> bool:
         with self._engine.connect() as connection:
             connection.execute(text("SELECT 1"))
         return True
+
+
+def _user_row(user: User) -> UserRow:
+    return UserRow(
+        id=user.id.value,
+        tenant_id=user.tenant_id.value,
+        provider=user.provider,
+        provider_subject=user.provider_subject,
+        email=user.contact.email,
+        phone=user.contact.phone,
+        display_name=user.display_name,
+        roles=sorted(role.value for role in user.roles),
+        status=user.status.value,
+        session_version=user.session_version,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+    )
+
+
+def _to_user(row: UserRow) -> User:
+    return User(
+        id=UserId(row.id),
+        tenant_id=TenantId(row.tenant_id),
+        provider=row.provider,
+        provider_subject=row.provider_subject,
+        contact=Contact(email=row.email, phone=row.phone),
+        roles=frozenset(Role(role) for role in row.roles),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        display_name=row.display_name,
+        status=UserStatus(row.status),
+        session_version=row.session_version,
+    )
 
 
 def _to_record(row: ConsentRow) -> ConsentRecord:
