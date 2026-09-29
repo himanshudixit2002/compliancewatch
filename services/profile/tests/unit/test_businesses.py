@@ -231,6 +231,31 @@ def test_a_registration_answer_needs_a_node_when_there_are_several(service: Serv
     }
 
 
+def test_a_second_gstin_of_a_pan_takes_its_own_registration_answers(service: Service) -> None:
+    karnataka = service.create.run(
+        TENANT,
+        name="Acme",
+        gstin=GSTIN_KARNATAKA,
+        answers=[Answer(AttributeChange("supply_type", "goods"))],
+    ).business
+    delhi = service.create.run(
+        TENANT,
+        name="Acme",
+        gstin=GSTIN_DELHI,
+        answers=[
+            Answer(AttributeChange("supply_type", "services")),
+            Answer(AttributeChange("employee_count", 7)),
+        ],
+    )
+    assert not delhi.created
+    assert delhi.business.id == karnataka.id
+    assert {node.key: value_of(node, "supply_type") for node in delhi.business.registrations} == {
+        GSTIN_KARNATAKA.value: "goods",
+        GSTIN_DELHI.value: "services",
+    }
+    assert value_of(delhi.business.entity, "employee_count") == 7
+
+
 def test_a_node_outside_the_business_or_at_another_level_is_refused(service: Service) -> None:
     business = service.create.run(TENANT, name="Acme", gstin=GSTIN_KARNATAKA).business
     [registration] = business.registrations

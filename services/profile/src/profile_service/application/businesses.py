@@ -11,8 +11,10 @@ business's obligations.
 
 An answer goes to the node of its attribute's level. An entity-level attribute goes to the
 entity. A registration-level one goes to the registration ``node_id`` names or, without one, to
-the business's only registration; with none or several, RegistrationAmbiguousError. A
-location-level one goes to the location ``node_id`` names, or to the only location.
+the business's only registration; with none or several, RegistrationAmbiguousError. When
+``CreateBusiness`` gets a GSTIN, a registration-level answer without ``node_id`` goes to that
+GSTIN's registration, even when the PAN's business already has others. A location-level one goes
+to the location ``node_id`` names, or to the only location.
 """
 
 from collections.abc import Callable, Sequence
@@ -214,6 +216,7 @@ class CreateBusiness:
                     uow, tenant_id, gstin, registration_name or name, entity_name=name, now=now
                 )
                 prefilled = self._prefill.apply(uow, tenant_id, registration.node, looked_up, by=by)
+                answers = self._to_registration(answers, registration.node.id)
             business = store_answers(
                 uow,
                 tenant_id,
@@ -227,6 +230,19 @@ class CreateBusiness:
             business.entity, business.registrations, self._ontology, financial_year_in_india(now)
         )
         return BusinessCreated(business, entity.created, prefilled, checklist)
+
+    def _to_registration(
+        self, answers: Sequence[Answer], registration_id: BusinessId
+    ) -> list[Answer]:
+        """The answers with every registration-level one that names no node sent to the
+        registration of the GSTIN in the request, which the request cannot name by id."""
+        return [
+            replace(answer, node_id=registration_id)
+            if answer.node_id is None
+            and self._ontology.require(answer.change.key).level is AttributeLevel.REGISTRATION
+            else answer
+            for answer in answers
+        ]
 
 
 class UpdateBusiness:

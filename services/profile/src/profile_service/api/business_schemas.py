@@ -50,7 +50,8 @@ class AnswerIn(Strict):
         return Answer(change, self.target())
 
     def target(self) -> BusinessId | None:
-        """The node the answer names; a new business has no node ids to name yet."""
+        """The node the answer names. A new business has no node ids to name yet: its
+        registration-level answers go to the GSTIN's registration."""
         return None
 
 
