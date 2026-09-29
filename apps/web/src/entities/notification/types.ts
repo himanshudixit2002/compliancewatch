@@ -10,6 +10,7 @@ type Schemas = notification.components["schemas"];
 
 export type PreferenceDto = Schemas["PreferenceOut"];
 export type PreferenceInDto = Schemas["PreferenceIn"];
+export type TemplateDto = Schemas["TemplateOut"];
 
 export type Channel = Schemas["Channel"];
 export type PreferenceSource = Schemas["ConsentSource"];
@@ -33,4 +34,15 @@ export interface PreferenceChange {
   language?: string;
   quietHoursStart?: string;
   quietHoursEnd?: string;
+}
+
+/**
+ * A message template as the settings page needs it: which languages a channel has templates in.
+ * The body and placeholders stay on the service; `status` is Meta's approval state as recorded.
+ */
+export interface Template {
+  key: string;
+  channel: Channel;
+  language: string;
+  status: string;
 }

@@ -60,6 +60,28 @@ describe("ConsentChange", () => {
     expect(screen.getByRole("status").textContent).toBe("Example recorded message.");
   });
 
+  it("moves focus to the status line once the page shows the flipped change", async () => {
+    const user = userEvent.setup();
+    const action = vi.fn<Action>(async () => ({ status: "ok", message: "Example recorded." }));
+    const props = {
+      action,
+      purpose: "analytics",
+      purposeLabel: "Example analytics",
+      statement: "Example statement.",
+      records: "Example record description.",
+      fields: FIELDS,
+    };
+    const { rerender } = render(<ConsentChange {...props} change="give" />);
+    await user.click(screen.getByRole("button", { name: "Give consent: Example analytics" }));
+    await user.click(await screen.findByRole("button", { name: "Agree" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    rerender(<ConsentChange {...props} change="withdraw" />);
+    expect(screen.getByRole("button", { name: "Withdraw: Example analytics" })).toBeDefined();
+    expect(document.activeElement).toBe(screen.getByRole("status"));
+    rerender(<ConsentChange {...props} change="withdraw" />);
+    expect(document.activeElement).toBe(screen.getByRole("status"));
+  });
+
   it("keeps the dialog open with the problem and the field to fix after a refusal", async () => {
     const user = userEvent.setup();
     const action = vi.fn<Action>(async () => ({

@@ -1,7 +1,7 @@
 import type { ConsentPurpose } from "@/entities/consent/types";
 import { t } from "@/shared/i18n";
 import type { FieldErrors } from "@/shared/lib/action-state";
-import { isE164 } from "@/shared/lib/identifiers";
+import { isE164, normalisePhone } from "@/shared/lib/identifiers";
 import { ONBOARDING_PURPOSES, REQUIRED_PURPOSES } from "./purposes";
 
 /**
@@ -25,9 +25,7 @@ export interface ConsentChoice {
 export type ParsedConsentForm =
   { ok: true; value: ConsentChoice } | { ok: false; fieldErrors: FieldErrors };
 
-export function normalisePhone(value: string): string {
-  return value.replace(/[\s\-().]/g, "");
-}
+export { normalisePhone };
 
 /** "+919800000000" -> "919800000000": the key WhatsApp and the notification service use. */
 export function whatsappRecipient(e164: string): string {

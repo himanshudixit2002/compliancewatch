@@ -5,6 +5,8 @@ import type {
   PreferenceChange,
   PreferenceDto,
   PreferenceInDto,
+  Template,
+  TemplateDto,
 } from "./types";
 
 /** The channels a preference is kept for, in the order the settings page shows them. */
@@ -67,4 +69,8 @@ export function preferenceChangeToDto(change: PreferenceChange): PreferenceInDto
   if (change.quietHoursStart !== undefined) dto.quiet_hours_start = change.quietHoursStart;
   if (change.quietHoursEnd !== undefined) dto.quiet_hours_end = change.quietHoursEnd;
   return dto;
+}
+
+export function templateFromDto(dto: TemplateDto): Template {
+  return { key: dto.key, channel: dto.channel, language: dto.language, status: dto.status };
 }

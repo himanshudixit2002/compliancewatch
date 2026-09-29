@@ -9,6 +9,7 @@ import {
   isUuid,
   maskIdentifier,
   normaliseIdentifier,
+  normalisePhone,
   panOfGstin,
 } from "./identifiers.ts";
 
@@ -39,6 +40,10 @@ describe("identifiers", () => {
     expect(panOfGstin(GSTIN)).toBe("ABCDE1234F");
     expect(() => gstinStateCode("nope")).toThrow(/not a GSTIN/);
     expect(() => panOfGstin("nope")).toThrow(/not a GSTIN/);
+  });
+
+  it("drops what people type between the digits of a phone number", () => {
+    expect(normalisePhone(" +91 (98000) 000-01.")).toBe("+919800000001");
   });
 
   it("masks all but the tail", () => {

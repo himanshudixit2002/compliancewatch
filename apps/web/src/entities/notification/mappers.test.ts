@@ -7,6 +7,7 @@ import {
   preferenceChangeToDto,
   preferenceFromDto,
   recipientLabel,
+  templateFromDto,
   whatsappKeyOf,
   whatsappNumberOf,
 } from "./mappers";
@@ -85,5 +86,21 @@ describe("recipient keys", () => {
   it("shows a number with its plus and an address as it is", () => {
     expect(recipientLabel("whatsapp", "919800000001")).toBe("+919800000001");
     expect(recipientLabel("email", "owner@example.com")).toBe("owner@example.com");
+  });
+});
+
+describe("templateFromDto", () => {
+  it("keeps what the settings page needs and leaves the body on the service", () => {
+    expect(
+      templateFromDto({
+        key: "example_template",
+        channel: "email",
+        language: "en",
+        status: "draft",
+        meta_name: "",
+        placeholders: ["name"],
+        body: "Example body {name}",
+      }),
+    ).toEqual({ key: "example_template", channel: "email", language: "en", status: "draft" });
   });
 });

@@ -424,3 +424,17 @@ often leave the number opted in) and a hidden form field (it would put the numbe
 for anyone to change). The settings index is registry-driven and sits in the account group so
 the header links to it; the settings pages share a header with breadcrumbs and tabs from the
 settings group, planned entries left to the index.
+
+## D-032: The notifications page opts in only with the channel's consent on file
+
+2026-09-29. The notification service records any opt-in it is sent; it does not look at the
+identity service's consents. The WhatsApp consent notice says the consent is recorded first and
+the preference set after it, so `savePreference` reads the user's consents and refuses to switch
+reminders on while the channel's purpose is not granted, naming the purpose and pointing to the
+consents page; opting out, the language and the quiet hours are never held back. The page
+writes to the recipient this device remembers, not to one named in the form, so a form cannot be
+aimed at another number; choosing another recipient is its own step. The number and address
+forms check their values on the server only (the browser's own email check is off), so the
+messages are the same in every browser. Consequence: a number opted in by writing START on
+WhatsApp shows as opted in here even without the web consent, and the page says the consent is
+not on file.

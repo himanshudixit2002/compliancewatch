@@ -35,6 +35,11 @@ export function isEmailAddress(value: string): boolean {
   return value.length <= EMAIL_MAX_LENGTH && EMAIL.test(value);
 }
 
+/** Drops the spaces, dashes, dots and brackets people type in a phone number. */
+export function normalisePhone(value: string): string {
+  return value.replace(/[\s\-().]/g, "");
+}
+
 /** Rulebook document ids are 32 hex characters. */
 export function isHexId(value: string): boolean {
   return HEX_ID.test(value);

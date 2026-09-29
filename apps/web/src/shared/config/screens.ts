@@ -838,12 +838,14 @@ const SCREEN_LIST = [
       uses("notification", "GET", "/v1/notification/templates"),
       uses("identity", "GET", "/v1/identity/consents"),
     ],
-    awaits: [],
-    status: "ready",
-    e2e: [],
+    awaits: [servicesTrack("WP14", "identity", "GET", "/v1/identity/me")],
+    status: "live",
+    e2e: ["owner-settings-notifications.spec.ts", "a11y.spec.ts"],
     guideRef: "9, F9; docs/legal/whatsapp-consent.md",
     nav: { group: "settings", order: 2 },
     parent: "owner.settings",
+    notes:
+      "Per channel, a recipient's preference on the notification service: reminders on or off, the language and the quiet hours; opting in needs the channel's consent. The user's own number and address arrive with the identity route it awaits; until then the page asks and remembers them on the device.",
   },
   {
     id: "owner.settings.billing",

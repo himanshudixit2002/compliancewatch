@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useActionState, useId, useRef, useState } from "react";
+import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
 import { Banner, Button, ConfirmDialog, ErrorState, Field, Input } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
 import { fieldErrorOf, idleAction } from "@/shared/lib/action-state";
@@ -64,6 +64,17 @@ export function ConsentChange<R>({
     startTransition(() => dispatch(data));
   };
 
+  // Once the page shows the new record the button flips (withdraw to give, or back): it is a
+  // new element then, so it does not fade between the two looks, and focus moves to the status
+  // line that says what was recorded instead of being lost with the old button.
+  const statusRef = useRef<HTMLParagraphElement>(null);
+  const shownChange = useRef(change);
+  useEffect(() => {
+    if (shownChange.current === change) return;
+    shownChange.current = change;
+    if (state.status === "ok") statusRef.current?.focus();
+  }, [change, state.status]);
+
   const withdraw = change === "withdraw";
   // The visible word, with the purpose in the accessible name: a row of "Withdraw" buttons.
   const buttonLabel = withdraw ? t("consentSettings.withdraw") : t("consentSettings.give");
@@ -77,6 +88,7 @@ export function ConsentChange<R>({
         onOpenChange={setOpen}
         trigger={
           <Button
+            key={change}
             variant={withdraw ? "secondary" : "primary"}
             size="sm"
             aria-label={`${buttonLabel}: ${purposeLabel}`}
@@ -147,7 +159,13 @@ export function ConsentChange<R>({
           ) : null}
         </form>
       </ConfirmDialog>
-      <p role="status" data-slot="consent-change-status" className="text-sm text-fg-muted">
+      <p
+        ref={statusRef}
+        role="status"
+        tabIndex={-1}
+        data-slot="consent-change-status"
+        className="text-sm text-fg-muted outline-none"
+      >
         {state.status === "ok" ? state.message : ""}
       </p>
     </div>

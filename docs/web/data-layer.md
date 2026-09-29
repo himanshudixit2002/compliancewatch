@@ -418,6 +418,29 @@ httpOnly, SameSite=Lax, Secure outside local, path `/settings`, 30 days, bound t
 it after opting a number in, the settings actions write it when they use a number, pages only
 read it, and `/sign-out` expires it with the session.
 
+## Notification preferences
+
+`features/notification-preferences/gateway.ts` reads a recipient's preference (`GET
+/v1/notification/preferences/{channel}/{recipient}`, uncached; the route's 404, "never opted in
+or out", becomes `null`), replaces it (`PUT` with `opted_in`, `source`, `language` and both ends
+of the quiet hours), reads the templates (`GET /v1/notification/templates`, cached for five
+minutes under `notification:templates`) and the user's consents (`GET
+/v1/identity/consents?subject=`, uncached). A preference belongs to no tenant. The page at
+`/settings/notifications` shows one section per channel (WhatsApp, then email) for the
+recipient this device remembers (`cw_prefs_recipient`, see Consents above), asks for one when
+there is none, and says whether the user's consent to that channel's reminders is on file. The
+languages offered are those the channel has templates in, English first, named by
+`Intl.DisplayNames`; the quiet hours are HH:MM in IST, a window may cross midnight, and equal ends
+mean no quiet hours (the service's own rule); a recipient with nothing recorded starts from the
+service's defaults (English, 21:00 to 08:00). `savePreference` writes for the remembered
+recipient only (the form carries no recipient field), with `source: web_onboarding` (the
+service's sources have no settings value), always sends both ends of the window (the service
+keeps a window only when both arrive), and refuses an opt-in while the channel's consent
+(`whatsapp_reminders` or `email_reminders`) is not granted, because the notification service
+does not check it; opting out and changing the language or the window need no consent. The
+email section says that the service's email channel is not connected on `main`: a preference is
+recorded all the same.
+
 ## Idempotency and natural keys
 
 Two routes on `main` require an `Idempotency-Key`: the business API's `POST /v1/businesses`

@@ -115,10 +115,10 @@ export function ConsentSettings<R>({
             <TableRow>
               <TableHead>{t("consentSettings.column.purpose")}</TableHead>
               <TableHead>{t("consentSettings.column.state")}</TableHead>
+              <TableHead>{t("consentSettings.column.change")}</TableHead>
               <TableHead>{t("consentSettings.column.notice")}</TableHead>
               <TableHead>{t("consentSettings.column.since")}</TableHead>
               <TableHead>{t("consentSettings.column.source")}</TableHead>
-              <TableHead>{t("consentSettings.column.change")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -139,26 +139,6 @@ export function ConsentSettings<R>({
                 <TableCell>
                   <StateCell row={row} />
                 </TableCell>
-                <TableCell>
-                  <code className="text-xs">
-                    {row.noticeVersion ?? t("consentSettings.noNotice")}
-                  </code>
-                  {row.outdated ? (
-                    <p className="text-xs text-fg-muted" data-slot="consent-outdated">
-                      {t("consentSettings.outdated", { current: row.currentNoticeVersion })}
-                      {row.required && onboardingHref !== null ? (
-                        <>
-                          {" "}
-                          <Link href={onboardingHref as Route} className="text-primary underline">
-                            {t("consentSettings.agreeAgain")}
-                          </Link>
-                        </>
-                      ) : null}
-                    </p>
-                  ) : null}
-                </TableCell>
-                <TableCell>{row.since ?? t("consentSettings.never")}</TableCell>
-                <TableCell>{row.source ?? t("consentSettings.never")}</TableCell>
                 <TableCell>
                   {row.change === null ? (
                     <span className="text-xs text-fg-muted">
@@ -190,6 +170,26 @@ export function ConsentSettings<R>({
                     />
                   )}
                 </TableCell>
+                <TableCell>
+                  <code className="text-xs">
+                    {row.noticeVersion ?? t("consentSettings.noNotice")}
+                  </code>
+                  {row.outdated ? (
+                    <p className="text-xs text-fg-muted" data-slot="consent-outdated">
+                      {t("consentSettings.outdated", { current: row.currentNoticeVersion })}
+                      {row.required && onboardingHref !== null ? (
+                        <>
+                          {" "}
+                          <Link href={onboardingHref as Route} className="text-primary underline">
+                            {t("consentSettings.agreeAgain")}
+                          </Link>
+                        </>
+                      ) : null}
+                    </p>
+                  ) : null}
+                </TableCell>
+                <TableCell>{row.since ?? t("consentSettings.never")}</TableCell>
+                <TableCell>{row.source ?? t("consentSettings.never")}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -253,7 +253,9 @@ export function ConsentSettings<R>({
                     </code>
                   </TableCell>
                   <TableCell>{item.source}</TableCell>
-                  <TableCell className="min-w-64 text-xs">{item.evidence}</TableCell>
+                  <TableCell className="min-w-64 text-xs whitespace-normal">
+                    {item.evidence}
+                  </TableCell>
                   <TableCell className="text-xs">{recordedByText(item)}</TableCell>
                 </TableRow>
               ))}
