@@ -5,7 +5,8 @@ stage over the whole rulebook: it catches up the clauses registered before the w
 them, and with ``--model`` fills a new model's vectors ahead of a switch of the gateway's
 retrieval route (``CW_LLM_ROUTES__RETRIEVAL``), so search keeps working across the change.
 It prints the model the run pinned and the counts. It reads ``CW_RULEBOOK_URL``,
-``CW_RULEBOOK_WRITE_TOKEN`` and ``CW_LLM_GATEWAY_URL`` like the worker; running it is the
+``CW_RULEBOOK_WRITE_TOKEN``, ``CW_LLM_GATEWAY_URL`` and the service client
+(``CW_SERVICE_CLIENT_ID`` and ``CW_SERVICE_CLIENT_SECRET``) like the worker; running it is the
 decision, so ``CW_PIPELINE_KNOWLEDGE_ENABLED`` does not apply.
 """
 
@@ -17,6 +18,7 @@ from pipeline.application.embedding import EmbeddingStage
 from pipeline.infrastructure.gateway import GatewayEmbedder
 from pipeline.infrastructure.rulebook_client import HttpRulebook
 from pipeline.settings import PipelineSettings
+from py_common.auth import service_auth_from
 
 SERVICE_NAME = "pipeline-embed"
 
@@ -29,11 +31,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be positive")
     settings = PipelineSettings(service_name=SERVICE_NAME)
+    auth = service_auth_from(settings)
     token = settings.rulebook_write_token
     rulebook = HttpRulebook(
-        settings.rulebook_url, token=None if token is None else token.get_secret_value()
+        settings.rulebook_url,
+        token=None if token is None else token.get_secret_value(),
+        auth=auth,
     )
-    embedder = GatewayEmbedder(settings.llm_gateway_url)
+    embedder = GatewayEmbedder(settings.llm_gateway_url, auth=auth)
     try:
         run = EmbeddingStage(embedder, rulebook).embed_missing(
             None, limit=args.limit, model=args.model, metadata={"run": SERVICE_NAME}
