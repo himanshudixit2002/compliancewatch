@@ -8,7 +8,8 @@ and ``make run``) puts them in the ``rulebook`` schema. The migrations under
 the integration test compares the two. Triggers are not modelled: migration 0004 makes
 ``document`` and ``clause`` append-only and fixes a citation's identity, migration 0006 makes
 ``clause_embedding`` refuse updates, and migration 0007 makes ``rule_version_decision``
-append-only and guards ``rule_version`` (status moves, frozen content, publish preconditions).
+append-only and guards ``rule_version`` (inserted as drafts, status moves, frozen content,
+publish preconditions).
 The ``outbox_event`` table of the same migration belongs to py-common's metadata, not this one.
 
 The vocabulary in the CHECK constraints is the kernel's (``domain_kernel.knowledge``), and so are
@@ -508,9 +509,9 @@ class RuleVersionRow(Base):
         {
             "comment": (
                 "Rule versions. specification, obligation_template and recurrence hold the "
-                "kernel's mapping forms; source and todo come from the seed calendar. status "
-                "moves only as the kernel's transitions allow, and a published version's content "
-                "is frozen (trigger)."
+                "kernel's mapping forms; source and todo come from the seed calendar. A version "
+                "is inserted as a draft, status moves only as the kernel's transitions allow, and "
+                "a published version's content is frozen (triggers)."
             )
         },
     )

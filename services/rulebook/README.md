@@ -46,15 +46,17 @@ version. Table names are unqualified: the connection's `search_path` puts them i
 Migration 0004 adds foreign keys to `clause_entity` and `rule_relation` and stops with a clear
 message if either table has rows (nothing writes them before it).
 
-Migration 0007 puts `rulebook_rule_version_guard` on `rule_version` (BEFORE UPDATE): the status
-moves only along the kernel's `RULE_VERSION_TRANSITIONS` (draft to in_review, in_review to
-approved, in_review or approved back to draft, approved to published, published to superseded or
-withdrawn); once a
-version is published, superseded or withdrawn its content is frozen and `effective_to` may only
-be set or moved earlier; and approved to published needs `published_at`, at least one verified
-citation and no unverified one, and one distinct approver in `rule_version_decision` since
-`submitted_at`, two when `high_impact`. A writer that bypasses the use cases is held to the same
-rules. `tests/unit/test_models_vocabulary.py` pins the trigger's literal pairs to the kernel.
+Migration 0007 puts two triggers on `rule_version`. `rulebook_rule_version_insert_guard` (BEFORE
+INSERT) admits only a draft with no `published_at`, so every published version went through the
+review flow. `rulebook_rule_version_guard` (BEFORE UPDATE) does the rest: the status moves only
+along the kernel's `RULE_VERSION_TRANSITIONS` (draft to in_review, in_review to approved,
+in_review or approved back to draft, approved to published, published to superseded or
+withdrawn); once a version is published, superseded or withdrawn its content is frozen and
+`effective_to` may only be set or moved earlier; and approved to published needs `published_at`,
+at least one verified citation and no unverified one, and one distinct approver in
+`rule_version_decision` since `submitted_at`, two when `high_impact`. A writer that bypasses the
+use cases is held to the same rules. `tests/unit/test_models_vocabulary.py` pins the trigger's
+literal pairs to the kernel.
 
 ## API
 

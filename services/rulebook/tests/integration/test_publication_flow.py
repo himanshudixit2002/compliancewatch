@@ -156,6 +156,22 @@ def version(
     return version_id
 
 
+def through_review(
+    factory: PostgresKnowledgeUnitOfWorkFactory,
+    clock: Clock,
+    rule_id: RuleId,
+    clause: ClauseId,
+    number: int = 1,
+) -> RuleVersionId:
+    """A version published through the review flow: the insert guard admits only drafts."""
+    version_id = version(factory.engine, rule_id, number)
+    AddCitations(factory, clock).run(version_id, [CitationInput(clause, QUOTE)])
+    SubmitForReview(factory, clock).run(version_id, actor_id=ANALYST)
+    ApproveVersion(factory, clock).run(version_id, actor_id=REVIEWER)
+    PublishVersion(factory, enabled=True, clock=clock).run(version_id, actor_id=ANALYST)
+    return version_id
+
+
 def update(engine: Engine, version_id: RuleVersionId, assignment: str) -> None:
     execute(engine, f"UPDATE rule_version SET {assignment} WHERE id = :id", id=version_id.value)
 
@@ -195,10 +211,11 @@ def test_migration_0007_goes_down_and_up(
     assert {"high_impact", "submitted_at"}.isdisjoint(columns)
     tables = set(inspect(engine).get_table_names(schema=SCHEMA))
     assert {"rule_version_decision", "outbox_event"}.isdisjoint(tables)
-    assert (
-        scalar(engine, "SELECT count(*) FROM pg_proc WHERE proname = 'rulebook_rule_version_guard'")
-        == 0
+    guards = (
+        "SELECT count(*) FROM pg_proc WHERE proname IN"
+        " ('rulebook_rule_version_guard', 'rulebook_rule_version_insert_guard')"
     )
+    assert scalar(engine, guards) == 0
     before = RuleVersionId(uuid4())
     execute(
         engine,
@@ -218,11 +235,36 @@ def test_migration_0007_goes_down_and_up(
     )
     tables = set(inspect(engine).get_table_names(schema=SCHEMA))
     assert {"rule_version_decision", "outbox_event"} <= tables
+    assert scalar(engine, guards) == 2
     with pytest.raises(IntegrityError, match="cannot move from published to draft"):
         update(engine, before, "status = 'draft'")
 
 
 # ---------------------------------------------------------------- the guard
+
+
+def test_a_version_is_inserted_only_as_an_unpublished_draft(
+    factory: PostgresKnowledgeUnitOfWorkFactory,
+) -> None:
+    engine = factory.engine
+    rule_id = rule(engine)
+    for number, status in enumerate(("in_review", "approved", "published", "superseded"), 1):
+        with pytest.raises(IntegrityError, match=f"inserted as an unpublished draft, not {status}"):
+            version(engine, rule_id, number, status)
+    with pytest.raises(IntegrityError, match="unpublished draft"):
+        execute(
+            engine,
+            "INSERT INTO rule_version (id, rule_id, version, status, title, specification,"
+            " obligation_template, effective_from, published_at) VALUES (:id, :rule, 1, 'draft',"
+            " 'published early', '{}', '{}', DATE '2026-04-01', now())",
+            id=uuid4(),
+            rule=rule_id.value,
+        )
+    assert (
+        scalar(engine, "SELECT count(*) FROM rule_version WHERE rule_id = :id", id=rule_id.value)
+        == 0
+    )
+    version(engine, rule_id, 1)
 
 
 def test_the_guard_refuses_what_the_kernel_does_not_allow(
@@ -363,10 +405,10 @@ def test_a_publication_writes_its_events_with_the_change(
     factory: PostgresKnowledgeUnitOfWorkFactory, clause: ClauseId
 ) -> None:
     engine = factory.engine
-    execute(engine, "DELETE FROM outbox_event")
     clock = Clock()
     rule_id = rule(engine)
-    old = version(engine, rule_id, 1, "published")
+    old = through_review(factory, clock, rule_id, clause)
+    execute(engine, "DELETE FROM outbox_event")
     new = version(engine, rule_id, 2, effective_from=date(2026, 7, 1))
     with factory() as uow:
         uow.relations.add(
@@ -415,7 +457,15 @@ def test_a_publication_writes_its_events_with_the_change(
             .all()
         )
     assert states == {old.value: "superseded 2026-07-01", new.value: "published open"}
-    assert actions == ["submitted", "approved", "published", "superseded"]
+    assert actions == [
+        "submitted",
+        "approved",
+        "published",
+        "submitted",
+        "approved",
+        "published",
+        "superseded",
+    ]
 
 
 def test_the_sweep_moves_a_version_when_its_replacement_takes_effect(
@@ -426,10 +476,10 @@ def test_the_sweep_moves_a_version_when_its_replacement_takes_effect(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     engine = factory.engine
-    execute(engine, "DELETE FROM outbox_event")
     clock = Clock()
     rule_id = rule(engine)
-    old = version(engine, rule_id, 1, "published")
+    old = through_review(factory, clock, rule_id, clause)
+    execute(engine, "DELETE FROM outbox_event")
     new = version(engine, rule_id, 2, effective_from=date(2026, 11, 1))
     with factory() as uow:
         uow.relations.add(

@@ -37,6 +37,10 @@ from rulebook.infrastructure.knowledge_repository import PostgresKnowledgeUnitOf
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "rulebook"
+INSERT_GUARD = "tr_rule_version_insert_guard"
+"""Admits only unpublished drafts. The fixture below inserts versions in any status, so it turns
+the guard off for its own transaction; ``ALTER TABLE`` is transactional, so the guard is back on
+for everyone else when that transaction commits."""
 NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 TEXT = "hereby extends the due date for furnishing the return in FORM GSTR-3B for March, 2026"
 OTHER = "Every registered person shall furnish a return in FORM GSTR-3B."
@@ -108,6 +112,7 @@ def version(
 ) -> RuleVersionId:
     version_id = uuid4()
     with factory.engine.begin() as connection:
+        connection.execute(text(f"ALTER TABLE rule_version DISABLE TRIGGER {INSERT_GUARD}"))
         connection.execute(
             text(
                 "INSERT INTO rule_version (id, rule_id, version, status, title, summary,"
@@ -127,6 +132,7 @@ def version(
                 "end": effective_to,
             },
         )
+        connection.execute(text(f"ALTER TABLE rule_version ENABLE TRIGGER {INSERT_GUARD}"))
     return RuleVersionId(version_id)
 
 

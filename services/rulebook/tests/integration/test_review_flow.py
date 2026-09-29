@@ -51,6 +51,10 @@ from rulebook.infrastructure.knowledge_repository import PostgresKnowledgeUnitOf
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "rulebook"
+INSERT_GUARD = "tr_rule_version_insert_guard"
+"""Admits only unpublished drafts. The fixture below inserts versions in any status, so it turns
+the guard off for its own transaction; ``ALTER TABLE`` is transactional, so the guard is back on
+for everyone else when that transaction commits."""
 NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 TEXT = (
     "sub -section (6) of section 39 of the Central Goods and Services Tax Act, 2017 hereby "
@@ -107,6 +111,7 @@ def rule(factory: PostgresKnowledgeUnitOfWorkFactory, key: str, status: str) -> 
             ),
             {"id": rule_id, "key": key},
         )
+        connection.execute(text(f"ALTER TABLE rule_version DISABLE TRIGGER {INSERT_GUARD}"))
         connection.execute(
             text(
                 "INSERT INTO rule_version (id, rule_id, version, status, title, specification,"
@@ -115,6 +120,7 @@ def rule(factory: PostgresKnowledgeUnitOfWorkFactory, key: str, status: str) -> 
             ),
             {"id": version_id, "rule": rule_id, "status": status, "title": f"{key} title"},
         )
+        connection.execute(text(f"ALTER TABLE rule_version ENABLE TRIGGER {INSERT_GUARD}"))
     return RuleVersionId(version_id)
 
 

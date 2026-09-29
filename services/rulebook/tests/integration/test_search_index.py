@@ -28,6 +28,10 @@ from rulebook.infrastructure.models import ClauseEmbeddingRow, ClauseRow
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "rulebook"
+INSERT_GUARD = "tr_rule_version_insert_guard"
+"""Admits only unpublished drafts. The fixture below inserts versions in any status, so it turns
+the guard off for its own transaction; ``ALTER TABLE`` is transactional, so the guard is back on
+for everyone else when that transaction commits."""
 NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 MODEL = "fake/hash-ngram-512"
 EXTENSION = "The due dates for furnishing the returns in FORM GSTR-3B are extended"
@@ -316,6 +320,7 @@ def test_hits_carry_the_citing_versions_in_force(
             ),
             {"id": rule_id},
         )
+        connection.execute(text(f"ALTER TABLE rule_version DISABLE TRIGGER {INSERT_GUARD}"))
         for version_id, number, status, start, end in (
             (old, 1, "superseded", date(2026, 4, 1), date(2026, 7, 1)),
             (new, 2, "published", date(2026, 7, 1), None),
@@ -344,6 +349,7 @@ def test_hits_carry_the_citing_versions_in_force(
                 ),
                 {"id": uuid4(), "version": version_id, "clause": clause_id.value, "now": NOW},
             )
+        connection.execute(text(f"ALTER TABLE rule_version ENABLE TRIGGER {INSERT_GUARD}"))
     with factory() as uow:
         anytime = uow.index.hits([clause_id], None)[clause_id]
         june = uow.index.hits([clause_id], date(2026, 6, 1))[clause_id]

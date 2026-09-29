@@ -8,6 +8,9 @@ Hand-written; mirrors rulebook.infrastructure.models. Expand-only:
 - ``rule_version.high_impact`` (two different approvers, ADR-006) and ``submitted_at`` (the start
   of the current review round).
 - ``rule_version_decision``, the append-only audit of every review and publication step.
+- ``rulebook_rule_version_insert_guard``, a BEFORE INSERT trigger on ``rule_version``: a version
+  is inserted as a draft with no ``published_at``, so every published version went through the
+  review flow and its checks.
 - ``rulebook_rule_version_guard``, a BEFORE UPDATE trigger on ``rule_version``. The status moves
   only along the kernel's ``RULE_VERSION_TRANSITIONS``, written here as literals (the vocabulary
   test pins them). Once published, superseded or withdrawn, a version's content is frozen and
@@ -36,14 +39,27 @@ RULE_VERSION_STATUSES = ("draft", "in_review", "approved", "published", "superse
 DECISION_ACTIONS = ("submitted", "returned", "approved", "published", "withdrawn", "superseded")
 RULE_VERSION_COMMENT = (
     "Rule versions. specification, obligation_template and recurrence hold the kernel's mapping "
-    "forms; source and todo come from the seed calendar. status moves only as the kernel's "
-    "transitions allow, and a published version's content is frozen (trigger)."
+    "forms; source and todo come from the seed calendar. A version is inserted as a draft, status "
+    "moves only as the kernel's transitions allow, and a published version's content is frozen "
+    "(triggers)."
 )
 OLD_RULE_VERSION_COMMENT = (
     "Rule versions. specification, obligation_template and recurrence hold the kernel's mapping "
     "forms; source and todo come from the seed calendar. Citations to clauses arrive with the "
     "pipeline."
 )
+
+INSERT_GUARD = """
+CREATE FUNCTION rulebook_rule_version_insert_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.status IS DISTINCT FROM 'draft' OR NEW.published_at IS NOT NULL THEN
+    RAISE EXCEPTION 'rule_version %: a version is inserted as an unpublished draft, not %',
+      NEW.id, NEW.status USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END
+$$
+"""
 
 GUARD = """
 CREATE FUNCTION rulebook_rule_version_guard() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -190,6 +206,11 @@ def upgrade() -> None:
         " ON rule_version_decision FOR EACH ROW EXECUTE FUNCTION rulebook_append_only()"
     )
 
+    op.execute(INSERT_GUARD)
+    op.execute(
+        "CREATE TRIGGER tr_rule_version_insert_guard BEFORE INSERT ON rule_version"
+        " FOR EACH ROW EXECUTE FUNCTION rulebook_rule_version_insert_guard()"
+    )
     op.execute(GUARD)
     op.execute(
         "CREATE TRIGGER tr_rule_version_guard BEFORE UPDATE ON rule_version"
@@ -203,6 +224,8 @@ def downgrade() -> None:
     drop_outbox_table(op)
     op.execute("DROP TRIGGER tr_rule_version_guard ON rule_version")
     op.execute("DROP FUNCTION rulebook_rule_version_guard()")
+    op.execute("DROP TRIGGER tr_rule_version_insert_guard ON rule_version")
+    op.execute("DROP FUNCTION rulebook_rule_version_insert_guard()")
     op.drop_index("ix_rule_version_decision_version", table_name="rule_version_decision")
     op.drop_table("rule_version_decision")
     op.create_table_comment("rule_version", OLD_RULE_VERSION_COMMENT)

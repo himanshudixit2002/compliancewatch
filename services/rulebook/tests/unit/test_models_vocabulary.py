@@ -150,6 +150,12 @@ def test_the_rule_version_guard_allows_exactly_the_kernel_transitions() -> None:
     assert "OLD.status IN ('published', 'superseded', 'withdrawn')" in guard
 
 
+def test_the_insert_guard_admits_only_unpublished_drafts() -> None:
+    guard: str = _publish_flow_migration().INSERT_GUARD
+    assert "NEW.status IS DISTINCT FROM 'draft' OR NEW.published_at IS NOT NULL" in guard
+    assert not PAIR.findall(guard)
+
+
 def test_decision_actions_and_statuses_follow_the_domain() -> None:
     migration = _publish_flow_migration()
     assert tuple(action.value for action in DecisionAction) == DECISION_ACTIONS
