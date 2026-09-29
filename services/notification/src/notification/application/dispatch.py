@@ -22,7 +22,10 @@ dispatchers never take one entry) and handles them tenant by tenant:
    id. It carries the rendered text and its template with the values in order, and whether the
    address wrote to us within the last 24 hours (the WhatsApp customer service window, from
    ``PreferenceRepository.last_inbound_at``): WhatsApp takes free text inside the window and
-   only an approved template outside it.
+   only an approved template outside it. Just before, the lease of the message's entries is
+   renewed from that moment (``WorkIndex.renew``): a claim's messages go one after another, and
+   one lease cannot cover them all. When another dispatcher claimed one of the entries after
+   the lease ran out, nothing is renewed and the message does not go; that dispatcher sends it.
 5. In a second unit, a sent message marks each notification sent, completes its entry under
    the provider's message id (receipts find the tenant through it) and publishes
    ``notification.sent``. A failed one spends an attempt: the notification is due again after
@@ -36,8 +39,9 @@ dispatchers never take one entry) and handles them tenant by tenant:
    fail the same way, so the fallback goes at once. An adapter that raises instead of returning
    a receipt has failed the attempt like any other failure, and the run goes on with the rest.
 
-A notification that another dispatcher sent meanwhile, because this one's lease ran out while
-it was sending, is left as it is and counted (``notification_duplicate_sent_total``).
+A notification that another dispatcher sent meanwhile, because one delivery outlasted its whole
+lease (a channel call hung past its timeout, the process stalled), is left as it is and counted
+(``notification_duplicate_sent_total``).
 
 ``SendNow`` serves ``POST /send``: it queues the one notification, due at once (or when quiet
 hours end), leased to itself, and hands it to ``DispatchDue.dispatch``.
@@ -109,7 +113,8 @@ class DeliveryOutcome(StrEnum):
     RESCHEDULED = "rescheduled"
     """The rulebook could not answer: due again at ``available_at``, no attempt spent."""
     SKIPPED = "skipped"
-    """No longer pending when claimed."""
+    """Not this dispatcher's to send: no longer pending when claimed, or claimed by another
+    dispatcher after this one's lease ran out."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,12 +301,26 @@ class DispatchDue:
         if adapter is None:
             error = f"no channel adapter for {message.channel.value}"
             receipt = DeliveryReceipt(DeliveryStatus.FAILED, now, error=error)
+        elif not self._hold(batch):
+            return Delivery(batch.ids, DeliveryOutcome.SKIPPED)
         else:
             receipt = self._deliver(adapter, message)
         policy = self._retry if message.deliverable else NO_RETRIES
         return self._record(
             tenant_id, batch, receipt, rendered.values, now, policy, message.dispatch_id
         )
+
+    def _hold(self, batch: _Batch) -> bool:
+        """Renew the lease of the batch's entries from now, so that its delivery has a whole
+        lease to itself however long the claim's earlier messages took. False, and the message
+        must not go, when another dispatcher claimed one of them after this one's lease ran out:
+        that dispatcher sends them."""
+        renewed = self._work_index.renew(batch.entries, now=self._clock(), lease=self._lease)
+        if renewed is None:
+            log.info("notification.lease_lost", notifications=len(batch.entries))
+            return False
+        batch.entries = list(renewed)
+        return True
 
     def _deliver(self, adapter: ChannelAdapter, message: OutboundMessage) -> DeliveryReceipt:
         """The adapter's receipt. An adapter that raises instead of answering failed this

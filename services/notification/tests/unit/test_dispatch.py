@@ -487,19 +487,65 @@ def test_an_adapter_that_raises_fails_its_attempt_and_the_run_goes_on() -> None:
     assert failed.available_at == NOON_IST + timedelta(seconds=60), "the retry policy's backoff"
 
 
-def test_a_notification_another_dispatcher_sent_meanwhile_is_a_duplicate_send() -> None:
+def test_a_delivery_that_outlasts_its_whole_lease_is_counted_as_a_duplicate_send() -> None:
     world = World(window=0)
-    world.owner()
+    world.owner((WA, PHONE))
     world.enqueue.run(created())
-    entries = world.store.work_index.claim(limit=10, now=world.clock.now)
-    world.whatsapp.race = lambda: world.dispatch.dispatch(entries, world.clock.now)
-    (delivery,) = world.dispatch.dispatch(entries, world.clock.now)
+    other = FakeChannel(clock=world.clock)
+    second = world.dispatcher({WA: other})
+
+    def stall() -> None:
+        world.clock.advance(61)  # the channel call hangs past the lease
+        assert outcomes(second.run()) == [DeliveryOutcome.SENT]
+
+    world.whatsapp.race = stall
+    (delivery,) = world.dispatch.run()
     assert delivery.outcome is DeliveryOutcome.SENT
-    assert len(world.whatsapp.sent) == 2
+    assert (len(world.whatsapp.sent), len(other.sent)) == (1, 1)
     assert len(world.events(NotificationSent)) == 1, "the notification is recorded once"
     assert world.metrics.duplicates_sent == [WA]
-    (again,) = world.dispatch.dispatch(entries, world.clock.now)
-    assert again.outcome is DeliveryOutcome.SKIPPED
+
+
+class SlowChannel(FakeChannel):
+    """Takes ``seconds`` of the clock for every delivery, and runs ``during[n]`` in the middle
+    of the n-th, counted from 1."""
+
+    def __init__(self, clock: FakeClock, seconds: float) -> None:
+        super().__init__(clock=clock)
+        self.clock = clock
+        self.seconds = seconds
+        self.during: dict[int, Callable[[], object]] = {}
+        self.calls = 0
+
+    def deliver(self, message: OutboundMessage) -> DeliveryReceipt:
+        self.calls += 1
+        self.clock.advance(self.seconds)
+        hook = self.during.pop(self.calls, None)
+        if hook is not None:
+            hook()
+        return super().deliver(message)
+
+
+def test_a_claim_that_outlasts_its_lease_sends_each_message_once() -> None:
+    """Five messages of 25 seconds each outlast their claim's 60-second lease. A second
+    dispatcher claims, 75 seconds in, the two the first has not reached; the first renews the
+    lease of each message just before sending it, so it leaves those two alone."""
+    world = World(window=0)
+    phones = [f"+9198765000{n:02d}" for n in range(5)]
+    for phone in phones:
+        world.owner((WA, phone))
+    world.enqueue.run(created())
+    slow = SlowChannel(world.clock, seconds=25)
+    fast = FakeChannel(clock=world.clock)
+    second = world.dispatcher({WA: fast})
+    slow.during[3] = lambda: outcomes(second.run())
+    first = world.dispatcher({WA: slow}).run()
+    assert outcomes(first) == [DeliveryOutcome.SENT] * 3 + [DeliveryOutcome.SKIPPED] * 2
+    assert (len(slow.sent), len(fast.sent)) == (3, 2)
+    assert sorted(message.recipient for message in [*slow.sent, *fast.sent]) == phones
+    assert world.metrics.duplicates_sent == []
+    assert len(world.events(NotificationSent)) == 5
+    assert all(n.state is DeliveryState.SENT for n in world.notifications())
 
 
 def test_sends_addressed_straight_to_a_number_are_never_gathered() -> None:

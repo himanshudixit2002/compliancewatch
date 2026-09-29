@@ -207,10 +207,40 @@ def test_an_entry_added_with_a_lease_is_not_claimed_before_it_ends() -> None:
     leased = item(1)
     with store(TENANT) as unit:
         assert unit.notifications.add_if_absent(leased)
-        unit.work.add(WorkEntry.of(leased), lease_until=NOON_IST + LEASE)
+        unit.work.add(WorkEntry.of(leased, lease_until=NOON_IST + LEASE))
     assert store.work_index.claim(limit=10, now=NOON_IST, lease=LEASE) == []
     claimed = store.work_index.claim(limit=10, now=NOON_IST + LEASE, lease=LEASE)
     assert [entry.id for entry in claimed] == [leased.id]
+
+
+def test_a_renewal_holds_only_what_the_caller_still_holds() -> None:
+    store = MemoryStore()
+    first, second = item(1), item(2)
+    add(store, first, second)
+    work = store.work_index
+    claimed = work.claim(limit=10, now=NOON_IST, lease=LEASE)
+    assert [e.lease_until for e in claimed] == [NOON_IST + LEASE] * 2, "a claim names its lease"
+    later = NOON_IST + timedelta(seconds=45)
+    renewed = work.renew(claimed, now=later, lease=LEASE)
+    assert renewed is not None
+    assert [(e.id, e.lease_until) for e in renewed] == [(e.id, later + LEASE) for e in claimed]
+    assert work.renew(claimed, now=later, lease=LEASE) is None, "that lease is not held any more"
+    assert work.claim(limit=10, now=NOON_IST + LEASE, lease=LEASE) == [], "renewed past it"
+
+    lapsed = later + LEASE
+    (taken,) = work.claim(limit=1, now=lapsed, lease=LEASE)
+    assert work.renew(renewed, now=lapsed, lease=LEASE) is None, "another dispatcher took one"
+    (rest,) = [e for e in renewed if e.id != taken.id]
+    row = store.work_row(rest.id)
+    assert row is not None
+    assert row.lease_until == later + LEASE, "a refused renewal changes nothing"
+    assert work.renew([rest], now=lapsed, lease=LEASE) is not None, "run out, but nobody took it"
+
+    with store(TENANT) as unit:
+        unit.work.complete(taken.id)
+    assert work.renew([taken], now=lapsed, lease=LEASE) is None, "completed"
+    assert work.renew([WorkEntry.of(first)], now=lapsed, lease=LEASE) is None, "never leased"
+    assert work.renew([], now=lapsed, lease=LEASE) == []
 
 
 def test_consents_inbound_times_and_suppressions() -> None:

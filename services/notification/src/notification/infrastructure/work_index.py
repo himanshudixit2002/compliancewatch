@@ -6,9 +6,17 @@ dispatchers never lease one entry, and handles each in a unit of work of the ent
 where it completes or reschedules the entry with the notification. An entry whose lease ran out
 without either, because its dispatcher died, is due again. A lease lasts
 ``WORK_LEASE`` (60 seconds) by default.
+
+A claim can hold more than one lease can cover when its messages go out one after another, so
+the dispatcher renews the lease of a message's entries just before it sends it (``renew``): the
+update matches only rows still pending under the lease the dispatcher holds, and when one of them
+was claimed meanwhile nothing is renewed and the message does not go. A renewal and a concurrent
+claim of one row are ordered by the row lock: the claim skips a row the renewal holds, and a
+renewal that waited on a claim finds the row under the claim's lease.
 """
 
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -32,7 +40,19 @@ _CLAIM = text(
             LIMIT :limit
               FOR UPDATE SKIP LOCKED
      )
-    RETURNING id, tenant_id, kind, available_at
+    RETURNING id, tenant_id, kind, available_at, lease_until
+    """
+)
+
+_RENEW = text(
+    """
+    UPDATE work_index AS w
+       SET lease_until = :lease_until, updated_at = :now
+      FROM unnest(CAST(:ids AS uuid[]), CAST(:held AS timestamptz[])) AS h(id, held)
+     WHERE w.id = h.id
+       AND w.status = 'pending'
+       AND w.lease_until = h.held
+    RETURNING w.id
     """
 )
 
@@ -70,6 +90,34 @@ class PostgresWorkIndex:
         with self._engine.begin() as connection:
             return claim_rows(connection, limit=limit, now=now, lease=lease)
 
+    def renew(
+        self, entries: Sequence[WorkEntry], *, now: datetime, lease: timedelta
+    ) -> Sequence[WorkEntry] | None:
+        if any(entry.lease_until is None for entry in entries):
+            return None
+        if not entries:
+            return []
+        lease_until = now + lease
+        with self._engine.connect() as connection:
+            transaction = connection.begin()
+            renewed: set[UUID] = set(
+                connection.execute(
+                    _RENEW,
+                    {
+                        "ids": [entry.id.value for entry in entries],
+                        "held": [entry.lease_until for entry in entries],
+                        "lease_until": lease_until,
+                        "now": now,
+                    },
+                ).scalars()
+            )
+            if renewed != {entry.id.value for entry in entries}:
+                # One entry is no longer this dispatcher's: renew none of them.
+                transaction.rollback()
+                return None
+            transaction.commit()
+        return [replace(entry, lease_until=lease_until) for entry in entries]
+
     def tenant_for_provider_message(self, provider_message_id: str) -> TenantId | None:
         if not provider_message_id:
             return None
@@ -91,4 +139,5 @@ def _entry(row: Row[tuple[object, ...]]) -> WorkEntry:
         tenant_id=TenantId(row.tenant_id),
         kind=WorkKind(row.kind),
         available_at=row.available_at.astimezone(UTC),
+        lease_until=row.lease_until.astimezone(UTC),
     )

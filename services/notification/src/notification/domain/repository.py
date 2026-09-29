@@ -14,8 +14,9 @@ unit of work of that tenant sees only its own (row-level security in Postgres).
 - The address directory routes an address to the tenants and recipients that registered it.
   Registering a recipient replaces its entries in the same transaction as the recipient.
 - ``WorkIndex`` is the queue of work across tenants: the dispatcher claims due entries with a
-  lease, then handles each in a unit of work of the entry's tenant, where it completes or
-  reschedules the entry together with the notification.
+  lease, renews the lease just before each message it sends, and handles each entry in a unit
+  of work of the entry's tenant, where it completes or reschedules the entry together with the
+  notification.
 """
 
 from collections.abc import Mapping, Sequence
@@ -208,29 +209,37 @@ class WorkEntry:
     tenant_id: TenantId
     kind: WorkKind
     available_at: datetime
+    lease_until: datetime | None = None
+    """The end of the lease its holder took it under (a claim, or a send that queued it leased
+    to itself); None for an entry nobody holds. A holder proves the entry is still its own by
+    this value (``WorkIndex.renew``)."""
 
     def __post_init__(self) -> None:
         require_instance(self.id, NotificationId, "id")
         require_instance(self.tenant_id, TenantId, "tenant_id")
         require_instance(self.kind, WorkKind, "kind")
         require_aware(self.available_at, "available_at")
+        if self.lease_until is not None:
+            require_aware(self.lease_until, "lease_until")
 
     @classmethod
-    def of(cls, notification: Notification) -> "WorkEntry":
-        """The entry of a pending notification."""
+    def of(cls, notification: Notification, *, lease_until: datetime | None = None) -> "WorkEntry":
+        """The entry of a pending notification, leased to the caller until ``lease_until``."""
         kind = (
             WorkKind.DIGEST_ITEM
             if notification.state is DeliveryState.DIGEST_PENDING
             else WorkKind.ITEM
         )
-        return cls(notification.id, notification.tenant_id, kind, notification.available_at)
+        return cls(
+            notification.id, notification.tenant_id, kind, notification.available_at, lease_until
+        )
 
 
 class WorkQueue(Protocol):
     """The work queue entries of the unit of work's notifications, written in its transaction."""
 
-    def add(self, entry: WorkEntry, *, lease_until: datetime | None = None) -> None:
-        """Queue the entry; with ``lease_until`` it is leased to the caller until then, as a
+    def add(self, entry: WorkEntry) -> None:
+        """Queue the entry; one with a ``lease_until`` is leased to the caller until then, as a
         claim would lease it, so that no dispatcher takes it meanwhile."""
         ...
 
@@ -247,9 +256,20 @@ class WorkIndex(Protocol):
     """The work queue across tenants; each call is a transaction of its own."""
 
     def claim(self, *, limit: int, now: datetime, lease: timedelta) -> Sequence[WorkEntry]:
-        """Lease at most ``limit`` pending entries due at ``now``, oldest first, for ``lease``.
-        Concurrent claims never return one entry twice; an entry whose lease ran out without
-        being completed or rescheduled can be claimed again."""
+        """Lease at most ``limit`` pending entries due at ``now``, oldest first, for ``lease``;
+        each comes back with the end of its lease. Concurrent claims never return one entry
+        twice; an entry whose lease ran out without being completed or rescheduled can be
+        claimed again."""
+        ...
+
+    def renew(
+        self, entries: Sequence[WorkEntry], *, now: datetime, lease: timedelta
+    ) -> Sequence[WorkEntry] | None:
+        """Extend the lease of ``entries`` to ``now + lease`` when the caller still holds every
+        one of them: each is pending under the lease it came with (``lease_until``). Returns
+        them, in order, under the new lease. None, changing nothing, when one was claimed by
+        another dispatcher since, completed, rescheduled or deleted. A lease the caller let run
+        out is renewed as long as no other dispatcher claimed the entry meanwhile."""
         ...
 
     def tenant_for_provider_message(self, provider_message_id: str) -> TenantId | None: ...

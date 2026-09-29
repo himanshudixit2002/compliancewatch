@@ -54,8 +54,10 @@ commit together. A message the handler cannot read goes to
 `<topic>.notification.obligations.dlq` after the consumer's retries.
 
 `DispatchDue` runs every `CW_NOTIFICATION_DISPATCH_INTERVAL_SECONDS` (5). It claims due work
-with a 60-second lease (`FOR UPDATE SKIP LOCKED`, so several workers can run side by side),
-checks consent and suppression again, and holds a notification in quiet hours (21:00 to 08:00
+with a 60-second lease (`FOR UPDATE SKIP LOCKED`, so several workers can run side by side) and
+renews the lease of each message's notifications just before it sends that message, so a long
+claim is never sent twice by a second worker; a message whose notifications another worker
+claimed meanwhile is left to that worker. It checks consent and suppression again, and holds a notification in quiet hours (21:00 to 08:00
 IST by default, `CW_QUIET_HOURS_START` and `CW_QUIET_HOURS_END`, or the address's own) until
 they end. Notifications to one person, business and channel that fall in one batching window
 (`CW_NOTIFICATION_BATCH_WINDOW_SECONDS`, 300; 0 sends each alone) go as one `batch_summary`.

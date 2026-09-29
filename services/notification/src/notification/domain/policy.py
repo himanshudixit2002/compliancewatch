@@ -148,5 +148,6 @@ class RetentionPolicy:
 DEFAULT_RETENTION_POLICY = RetentionPolicy()
 
 WORK_LEASE = timedelta(seconds=60)
-"""How long a dispatcher holds the work it claimed before another may claim it: long enough for
-one delivery, retries of its HTTP call included."""
+"""How long a dispatcher holds the work it claimed before another may claim it. The dispatcher
+renews it just before each message it sends, so it has to cover one delivery: the channels'
+client timeouts (20 seconds for SMTP, 30 for the Graph API) stay below it."""

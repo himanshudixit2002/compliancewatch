@@ -1,13 +1,13 @@
 # Notification delivery (NotificationDeliveryFailures, NotificationDuplicateSent, NotificationEmailBounces)
 
-The notification service queues one notification per recipient and occasion, and a dispatcher
-sends what is due. It claims due work with a 60-second lease (`WORK_LEASE`), checks consent and
-quiet hours again, gathers what goes to one person and business into one summary, fills the
-message with the rule version's facts from the rulebook, and hands it to the channel. A failed
-attempt is retried after 60 s and again after 300 s; the third failure fails the notification
-and queues a fallback on the recipient's next open address on another channel. `POST /send`
-goes through the same queue and dispatcher. A recipient who chose a daily digest, and every
-person of a CA firm, gets their notifications held (`digest_pending`) until
+The notification service queues one notification per recipient and occasion, and a dispatcher sends
+what is due. It claims due work with a 60-second lease (`WORK_LEASE`), renewed just before each
+message goes, checks consent and quiet hours again, gathers what goes to one person and business
+into one summary, fills the message with the rule version's facts from the rulebook, and hands it to
+the channel. A failed attempt is retried after 60 s and again after 300 s; the third failure fails
+the notification and queues a fallback on the recipient's next open address on another channel.
+`POST /send` goes through the same queue and dispatcher. A recipient who chose a daily digest, and
+every person of a CA firm, gets their notifications held (`digest_pending`) until
 `CW_NOTIFICATION_DIGEST_AT` (09:00 IST) and then as one `daily_digest` or `ca_digest`.
 
 The worker (`python -m notification.worker`, locally `make worker SERVICE=notification`) runs the
@@ -93,10 +93,12 @@ a business, support tells its owner.
 
 ## NotificationDuplicateSent
 
-A notification was delivered twice. That happens only when a dispatcher held a claimed
-notification past its 60-second lease, because a channel call hung or the process stalled, and
-another dispatcher sent it meanwhile; the first one's delivery is then counted here and not
-recorded. Severity page; core product owns it. The person got the same message twice.
+A notification was delivered twice. The dispatcher renews its 60-second lease on a message's
+notifications just before it sends that message, and sends nothing whose lease another worker
+took. So this happens only when one delivery outlasted the whole lease, because a channel call
+hung past its client timeout or the process stalled, and another dispatcher sent the message
+meanwhile; the first one's delivery is then counted here and not recorded. Severity page; core
+product owns it. The person got the same message twice.
 
 1. Which channel, and when: `sum by (channel) (increase(notification_duplicate_sent_total[1h]))`.
 2. Look for slow deliveries at that time: the dispatcher's log lines and the channel's HTTP spans
@@ -104,8 +106,9 @@ recorded. Severity page; core product owns it. The person got the same message t
 3. A process that stalled (CPU starvation, a long pause) shows as a gap in its logs.
 
 Fix: a channel that answers slowly needs a shorter client timeout than the lease; a lease that is
-too short for a healthy channel is `WORK_LEASE` in `notification/domain/policy.py`. Tell support
-which business got the duplicate so they can apologise if it asks.
+too short for one delivery on a healthy channel is `WORK_LEASE` in
+`notification/domain/policy.py`. Tell support which business got the duplicate so they can
+apologise if it asks.
 
 ## NotificationEmailBounces
 

@@ -108,9 +108,8 @@ class SendNow:
             if not unit.notifications.add_if_absent(notification):
                 return SendOutcome(Outcome.DUPLICATE, request.notification_id, key)
             due_now = available_at <= now
-            unit.work.add(
-                WorkEntry.of(notification), lease_until=now + self._lease if due_now else None
-            )
+            entry = WorkEntry.of(notification, lease_until=now + self._lease if due_now else None)
+            unit.work.add(entry)
         if not due_now:
             return SendOutcome(
                 Outcome.DEFERRED,
@@ -119,7 +118,7 @@ class SendNow:
                 scheduled_for=available_at,
                 language=language,
             )
-        (delivery,) = self._dispatcher.dispatch([WorkEntry.of(notification)], now)
+        (delivery,) = self._dispatcher.dispatch([entry], now)
         return _outcome(delivery, notification)
 
 

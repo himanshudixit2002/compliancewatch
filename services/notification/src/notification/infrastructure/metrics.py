@@ -8,7 +8,7 @@
   due to the moment the channel took it, so the batching window and quiet hours, which move
   that moment, are not counted as delay;
 - ``notification_duplicate_sent_total{channel}``: a delivery of a notification that had already
-  been sent, which only a dispatcher whose lease ran out mid-send can cause, and which should
+  been sent, which only a delivery that outlasted its whole lease can cause, and which should
   never happen;
 - ``notification_enqueued_total{channel, outcome}``: notifications queued, and ``duplicate`` for
   an occasion that already had its notification (a redelivered event), which is expected;

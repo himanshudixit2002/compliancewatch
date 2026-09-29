@@ -611,6 +611,56 @@ def test_two_dispatchers_never_claim_one_entry(
     purge(factory, tenant)
 
 
+def test_a_renewal_holds_only_what_the_dispatcher_still_holds(
+    factory: PostgresUnitOfWorkFactory, app_engine: Engine
+) -> None:
+    tenant = TenantId.new()
+    base = datetime(1999, 1, 1, tzinfo=UTC)
+    first, second = (item(n, tenant, at=base + timedelta(seconds=n)) for n in range(2))
+    enqueue(factory, first, second)
+    work = PostgresWorkIndex(app_engine)
+    now = base + timedelta(minutes=1)
+    claimed = work.claim(limit=10, now=now, lease=LEASE)
+    assert [e.lease_until for e in claimed] == [now + LEASE] * 2, "a claim names its lease"
+    later = now + timedelta(seconds=45)
+    renewed = work.renew(claimed, now=later, lease=LEASE)
+    assert renewed is not None
+    assert [(e.id, e.lease_until) for e in renewed] == [(e.id, later + LEASE) for e in claimed]
+    assert work.renew(claimed, now=later, lease=LEASE) is None, "that lease is not held any more"
+    assert work.claim(limit=10, now=now + LEASE, lease=LEASE) == [], "renewed past it"
+
+    lapsed = later + LEASE
+    (taken,) = work.claim(limit=1, now=lapsed, lease=LEASE)
+    assert work.renew(renewed, now=lapsed, lease=LEASE) is None, "another dispatcher took one"
+    (rest,) = [e for e in renewed if e.id != taken.id]
+    held = work.renew([rest], now=lapsed, lease=LEASE)
+    assert held is not None, "a lease that ran out is renewed while nobody took the entry"
+    with factory(tenant) as unit:
+        unit.work.complete(taken.id)
+    assert work.renew([taken], now=lapsed, lease=LEASE) is None, "completed"
+    assert work.renew([], now=lapsed, lease=LEASE) == []
+
+    # A renewal that waits on a claim's row lock finds the row under the claim's lease.
+    expired = lapsed + LEASE
+    outcome: list[Sequence[WorkEntry] | None] = []
+    holder = app_engine.connect()
+    try:
+        holder.begin()
+        assert [e.id for e in claim_rows(holder, limit=10, now=expired, lease=LEASE)] == [rest.id]
+        renewal = threading.Thread(
+            target=lambda: outcome.append(work.renew(held, now=expired, lease=LEASE))
+        )
+        renewal.start()
+        renewal.join(timeout=1)
+        assert renewal.is_alive(), "the renewal waits for the claim's transaction"
+        holder.commit()
+        renewal.join(timeout=30)
+    finally:
+        holder.close()
+    assert outcome == [None]
+    purge(factory, tenant)
+
+
 def _record(message: EventMessage, offset: int) -> InboundRecord:
     return InboundRecord(
         topic="obligation.created",
@@ -848,7 +898,7 @@ def test_queued_notifications_go_out_as_one_batch(
     leased = item(1, tenant, at=base + timedelta(days=1))
     with factory(tenant) as unit:
         assert unit.notifications.add_if_absent(leased)
-        unit.work.add(WorkEntry.of(leased), lease_until=leased.available_at + LEASE)
+        unit.work.add(WorkEntry.of(leased, lease_until=leased.available_at + LEASE))
     work = PostgresWorkIndex(app_engine)
     assert work.claim(limit=10, now=leased.available_at, lease=LEASE) == [], "leased when added"
     assert [e.id for e in work.claim(limit=10, now=leased.available_at + LEASE, lease=LEASE)] == [

@@ -270,14 +270,16 @@ class MemoryWorkQueue:
         self._state = state
         self._tenant_id = tenant_id
 
-    def add(self, entry: WorkEntry, *, lease_until: datetime | None = None) -> None:
+    def add(self, entry: WorkEntry) -> None:
         if entry.tenant_id != self._tenant_id:
             raise ValueError(f"work entry {entry.id} belongs to another tenant")
         if entry.id not in self._state.notifications:
             raise ValueError(f"work entry {entry.id} has no notification")
         if entry.id in self._state.work:
             raise ValueError(f"duplicate work entry {entry.id}")
-        self._state.work[entry.id] = WorkRow(entry, lease_until=lease_until)
+        self._state.work[entry.id] = WorkRow(
+            replace(entry, lease_until=None), lease_until=entry.lease_until
+        )
 
     def complete(self, notification_id: NotificationId, *, provider_message_id: str = "") -> None:
         row = self._state.work.get(notification_id)
@@ -345,9 +347,29 @@ class MemoryWorkIndex:
                 ),
                 key=lambda row: (row.entry.available_at, row.entry.id.value),
             )[:limit]
+            lease_until = now + lease
             for row in due:
-                work[row.entry.id] = replace(row, lease_until=now + lease)
-            return [row.entry for row in due]
+                work[row.entry.id] = replace(row, lease_until=lease_until)
+            return [replace(row.entry, lease_until=lease_until) for row in due]
+
+    def renew(
+        self, entries: Sequence[WorkEntry], *, now: datetime, lease: timedelta
+    ) -> Sequence[WorkEntry] | None:
+        with self._store.lock:
+            work = self._store.state.work
+            for entry in entries:
+                row = work.get(entry.id)
+                if (
+                    row is None
+                    or row.status != "pending"
+                    or entry.lease_until is None
+                    or row.lease_until != entry.lease_until
+                ):
+                    return None
+            renewed = [replace(entry, lease_until=now + lease) for entry in entries]
+            for entry in renewed:
+                work[entry.id] = replace(work[entry.id], lease_until=entry.lease_until)
+            return renewed
 
     def tenant_for_provider_message(self, provider_message_id: str) -> TenantId | None:
         if not provider_message_id:
