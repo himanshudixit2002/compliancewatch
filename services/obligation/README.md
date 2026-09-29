@@ -56,10 +56,21 @@ obligations is not built yet, because it needs a cross-tenant design under row-l
 
 | Route | What it does |
 | --- | --- |
-| `GET /v1/obligation/obligations?business_id=&due_from=&due_to=&rule_version_id=` | The business's obligations with `obligation_id, business_id, rule_version_id, decision_id, title, steps, evidence_type, period_label, period_start, period_end, due_at, status, closed_at, closed_reason`. `due_from` and `due_to` are days in India, both included; an obligation without a due date is left out when either is given. `due_at` is the end of the due day in India, in UTC; the period is half-open. Needs `x-tenant-id` (401 `obligation-tenant-required` without it); a window that ends before it starts, spans more than 366 days or ends on 9999-12-31 (there is no day after it) is 422 `obligation-window-invalid` |
+| `GET /v1/obligation/obligations?business_id=&due_from=&due_to=&rule_version_id=` | The business's obligations with `obligation_id, business_id, rule_version_id, decision_id, title, steps, evidence_type, period_label, period_start, period_end, due_at, status, closed_at, closed_reason`. `due_from` and `due_to` are days in India, both included; an obligation without a due date is left out when either is given. `due_at` is the end of the due day in India, in UTC; the period is half-open. Needs a tenant (401 `obligation-tenant-required` without one; see below); a window that ends before it starts, spans more than 366 days or ends on 9999-12-31 (there is no day after it) is 422 `obligation-window-invalid` |
 
-The tenant header stands in for a token until the identity service issues them (ADR-014), and
-the unit of work sets it for row-level security, so a read never sees another tenant's rows.
+Who calls and for which tenant comes from `py_common.auth` by `CW_AUTH_MODE` (`api/deps.py`):
+
+- `header` (the default): the `x-tenant-id` header names the tenant, and no token is read.
+- `dual`: a bearer token is verified when the request carries one, and then counts as in
+  `token` mode; without one the header counts, as in `header` mode.
+- `token`: a bearer token is required (401 `auth-token-required`). A user's token names the
+  tenant, and the user needs one of the tenant member roles (owner, staff, ca_admin, ca_staff,
+  compliance_lead); an `x-tenant-id` naming another tenant is a 403 `auth-tenant-mismatch`. A
+  service (the qa service reading the obligations a question is about) names the tenant in
+  `x-tenant-id` and needs the tenant:act scope. Anyone else is a 403 `auth-forbidden`.
+
+The unit of work sets the tenant for row-level security, so a read never sees another tenant's
+rows.
 The spec is committed at `packages/contracts/openapi/obligation.v1.json`
 (`make openapi SERVICE=obligation`) and pinned by `tests/contract/test_openapi.py`.
 
@@ -75,7 +86,7 @@ been used in a session.
 
 ```
 src/obligation/
-  api/             # router.py (the read route), schemas.py (ObligationOut), deps.py (tenant header, wiring)
+  api/             # router.py (the read route), schemas.py (ObligationOut), deps.py (caller and tenant, wiring)
   application/     # materialise.py, changes.py, queries.py
   domain/          # model.py (Obligation, DueWindow), events.py, errors.py, repository.py (protocols)
   infrastructure/  # models.py, repository.py (Postgres unit of work with the outbox), memory.py
