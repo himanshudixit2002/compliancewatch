@@ -1,17 +1,21 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2017",
+    "target": "ES2022",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "noEmit": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    // shared/config and shared/lib use explicit ".ts" relative imports so plain Node (the docs
+    // generators) can load them; Next, tsc and vitest resolve them too.
+    "allowImportingTsExtensions": true,
     "jsx": "preserve",
     "incremental": true,
     "plugins": [{ "name": "next" }],
     "paths": { "@/*": ["./src/*"] }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", "**/*.mts", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", ".next", "coverage"]
+  // scripts/ and e2e/ are NodeNext programs checked by tsconfig.scripts.json.
+  "exclude": ["node_modules", ".next", "coverage", "scripts", "e2e"]
 }

@@ -175,6 +175,22 @@ Settings, routes, budgets and errors: [services/llm-gateway/README.md](../../ser
 - **Apple Silicon.** Every pinned image publishes an arm64 manifest; no `platform:` overrides are needed.
 - **`next dev` rewrites `apps/web/AGENTS.md` (and `CLAUDE.md`, which just points at it).** Both are maintained by Next.js and committed on purpose.
 
+## Running a second clone
+
+A second working copy of the repository on the same machine needs its own containers and
+ports. In its root `.env`, give `COMPOSE_PROJECT_NAME` another value (compose names the
+containers, network and volumes after it, so the two stacks never share a database; the
+variable wins over the `name:` in `docker-compose.yml`, which is never edited for this) and
+move every host port from the table above, plus `WEB_PORT`. The values a second copy uses:
+Postgres 25432, Redis 26379, Kafka 39092 (schema registry 28081, admin 29644), Temporal 27233
+(UI 28233), the collector on 24317 and 24318 (health 23133), Prometheus 29090, Grafana 23030,
+Langfuse 23010, the fake LLM gateway 28090, the services on 9201 to 9210
+(`make run SERVICE=identity PORT=9201`, in the `SERVICES` order of the Makefile), the web app
+on 3200 (`WEB_PORT=3200`, which `make web-dev` and `make web-e2e` read) and the bot on 9180.
+Rewrite `CW_DATABASE_URL`, `CW_REDIS_URL`, `CW_KAFKA_BOOTSTRAP`, `CW_TEMPORAL_ADDRESS` and the
+`CW_*_URL` service URLs to those ports as well. `make web-e2e` needs no container at all: it
+builds the app and runs Playwright against `next start` on `WEB_PORT`.
+
 ## Not in the stack yet
 
 Seeded fixtures and the 50-document sample rulebook, Keycloak, Terraform, alert rules.

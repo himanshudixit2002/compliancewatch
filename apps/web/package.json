@@ -7,24 +7,35 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --max-warnings 0",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
     "test": "vitest run --coverage",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install --with-deps chromium",
+    "screens:gen": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/screens-doc.mts",
+    "screens:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/screens-doc.mts --check",
+    "screens:audit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/screens-doc.mts --audit"
   },
   "dependencies": {
     "@compliancewatch/ui": "workspace:*",
+    "marked": "18.0.14",
     "next": "16.3.6",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "server-only": "0.0.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4.1.0",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "14.6.7",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "eslint": "^9.39.5",
     "eslint-config-next": "16.3.6",
+    "prettier": "3.9.9",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.9.3"
   }

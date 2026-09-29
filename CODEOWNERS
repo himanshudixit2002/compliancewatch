@@ -13,9 +13,11 @@
 /.github/                        @himanshudixit2002 # team: Platform and Infrastructure (CI/CD)
 /docs/                           @himanshudixit2002 # team: Platform and Infrastructure (custodian; ADRs approved at the monthly architecture review)
 /docs/runbooks/                  @himanshudixit2002 # team: Platform and Infrastructure (service owners write their runbooks; Platform reviews)
+/docs/web/                       @himanshudixit2002 # team: Core Product (the web app's docs; the generated screens.md follows the registry)
 
 # ---- Apps -------------------------------------------------------------------
-/apps/web/                       @himanshudixit2002 # team: Core Product (review workbench UI: Regulatory Intelligence; tenant admin: Identity and Partner; split by route once routes exist)
+/apps/web/                       @himanshudixit2002 # team: Core Product (shells, public pages, screen registry, shared code; narrower routes below)
+/apps/web/src/app/admin/         @himanshudixit2002 # team: Regulatory Intelligence (the /admin internal tools; tenant admin routes go to Identity and Partner once they exist)
 /apps/whatsapp-bot/              @himanshudixit2002 # team: Core Product
 
 # ---- Services ---------------------------------------------------------------

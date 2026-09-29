@@ -412,3 +412,27 @@ dev-flags: check-docker ## Start Unleash for CW_FLAGS_PROVIDER=unleash (compose 
 openapi-public: check-uv ## Merge the operations the services tag public into packages/contracts/openapi/public.v1.json (after make openapi SERVICE=x), then regenerate the Python REST models
 	$(UV) run python packages/contracts/scripts/build_public_openapi.py
 	$(UV) run python packages/contracts/scripts/generate_rest.py
+
+# ---- Web app (apps/web, packages/ui) ---------------------------------------------------------
+.PHONY: web-dev web-e2e-install web-e2e web-screens web-screens-check
+CHECKS += web-screens-check
+# The port comes from WEB_PORT in .env (3000 unless the file says otherwise); a value already in
+# the environment wins, as for every variable the recipes source.
+
+web-dev: check-pnpm ## next dev on WEB_PORT from .env; /admin lists the internal tools, /design the UI kit
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	PORT=$${WEB_PORT:-3000} $(PNPM) --filter web dev
+
+web-e2e-install: check-pnpm ## Download Chromium for Playwright, once per machine (the package has no install script)
+	$(PNPM) --filter web e2e:install
+
+web-e2e: check-pnpm ## Build the web app and run Playwright with axe against next start on WEB_PORT (no service needed)
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	$(PNPM) --filter web build && \
+	PORT=$${WEB_PORT:-3000} CW_WEB_ENV=test $(PNPM) --filter web e2e
+
+web-screens: check-pnpm ## Regenerate docs/web/screens.md from the screen registry
+	$(PNPM) --filter web screens:gen
+
+web-screens-check: check-pnpm ## docs/web/screens.md matches the screen registry (part of make check)
+	$(PNPM) --filter web screens:check

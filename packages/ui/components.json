@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": true,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/styles/tokens.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "iconLibrary": "lucide",
+  "aliases": {
+    "components": "@compliancewatch/ui/components",
+    "utils": "@compliancewatch/ui/lib/cn",
+    "ui": "@compliancewatch/ui/components",
+    "lib": "@compliancewatch/ui/lib",
+    "hooks": "@compliancewatch/ui/hooks"
+  }
+}
