@@ -14,7 +14,7 @@ Design reference: Project Foundation guide, sections 7 and 14.
 | --- | --- |
 | `PUT /v1/notification/preferences/{channel}/{recipient}` | Record an opt-in or opt-out (no tenant: an opt-out must be honoured before the number is linked to a tenant) |
 | `GET /v1/notification/preferences/{channel}/{recipient}` | The recorded preference |
-| `POST /v1/notification/send` | One notification (tenant header required): `sent`, `failed`, `deferred` (quiet hours, with `scheduled_for`), `not_opted_in` or `duplicate` |
+| `POST /v1/notification/send` | One notification (tenant header required, checked before the body: a request without it is a 401 `notification-tenant-required` problem): `sent`, `failed`, `deferred` (quiet hours, with `scheduled_for`), `not_opted_in` or `duplicate` |
 | `GET /v1/notification/templates` | Every template with its Meta approval status |
 
 Quiet hours default to 21:00 to 08:00 IST (`CW_QUIET_HOURS_START`, `CW_QUIET_HOURS_END`) and
@@ -22,7 +22,18 @@ can be set per recipient. The WhatsApp channel is wired only with `CW_WHATSAPP_E
 `CW_WHATSAPP_PHONE_NUMBER_ID` and `CW_WHATSAPP_ACCESS_TOKEN`; otherwise every WhatsApp send
 returns a failed receipt saying the channel is disabled. Templates are drafts until the
 maintainer submits them to Meta; `docs/runbooks/whatsapp.md` lists the steps. The inbound
-side (webhook, keywords) is `apps/whatsapp-bot`, which calls the preference routes.
+side (webhook, keywords) is `apps/whatsapp-bot`, which calls the preference routes; its
+recorded calls are in `packages/contracts/consumers/whatsapp-bot/notification.json`, and
+`tests/contract/test_consumers.py` replays them against this service.
+
+Deadline changes (ADR-015) have three templates, each WhatsApp in English and Hindi and email
+in English, all drafts: `obligation_deadline_extended`, `obligation_corrected` and
+`obligation_withdrawn` (the last without dates). `CHANGE_TEMPLATES` maps an obligation event's
+topic and reason to one: `obligation.rescheduled` with `deadline_extended` or `corrected`, and
+`obligation.closed` with `rule_withdrawn`. `template_for_change(topic, reason)` returns the
+key, returns nothing for a manual reschedule (the customer made it), and raises
+`UnknownTemplateError` for any other pair until the notification routing table decides it.
+The Hindi copy awaits analyst review before it goes to Meta.
 The spec is committed at `packages/contracts/openapi/notification.v1.json`
 (`make openapi SERVICE=notification`) and pinned by `tests/contract/test_openapi.py`.
 

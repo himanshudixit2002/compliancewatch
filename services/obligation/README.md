@@ -3,7 +3,7 @@
 Part of the ComplianceWatch monorepo. **Domain, use cases and the Postgres unit of work exist; no API beyond the health routes and no event consumer yet.**
 Design reference: Project Foundation guide, sections 7 and 14.
 
-- **Owns:** Obligations, evidence metadata, append-only audit log; builds obligations from the RuleVersion template, computes due dates, schedules reminders
+- **Owns:** Obligations, evidence metadata, the append-only change log of every obligation (`obligation_change`); builds obligations from the RuleVersion template, computes due dates, schedules reminders
 - **Owning team:** Core Product (guide section 14)
 - **Consumes:** applicability.decided; user actions
 - **Emits / publishes:** obligation.created, obligation.rescheduled, obligation.closed (through the outbox); obligation.due_soon arrives with the reminder scheduler
@@ -19,12 +19,27 @@ Design reference: Project Foundation guide, sections 7 and 14.
 - `application/changes.py`: `ApplyDeadlineChange` moves open obligations of a period and
   publishes `obligation.rescheduled`; `WithdrawRule` closes them with `rule_withdrawn`;
   `CloseObligation` closes one for a user's reason.
+- `domain/history.py` and `application/audit.py`: the change log (ADR-015, every change writes
+  an audit row). Every use case above publishes through `audit.record(uow, event, after)`,
+  which also appends an `ObligationChange` to `uow.history`: kind `created`, `rescheduled` or
+  `closed`, the previous and new due dates, the status after the change, the reason
+  (`deadline_extended`, `corrected`, `manual`, or a closure reason), the rule version that
+  caused it, the actor and the correlation id. The change's id is the event's id, and it is
+  written on the same connection as the event's outbox row, so the two commit or roll back
+  together. A use case that leaves an obligation unchanged, or skips a closed one, writes
+  neither. This table is the single history of an obligation; later kinds (started, completed,
+  assigned) widen `ChangeKind` and its CHECK constraint. There is no read route yet.
 - `infrastructure/repository.py`: `PostgresUnitOfWorkFactory` opens one transaction per call
   with the `app.tenant_id` setting that the row-level security policy reads, and writes events
   to the outbox on the same connection. `infrastructure/memory.py` is the in-memory twin for
   tests; `obligation.testing` has sample builders.
 - `migrations/versions/20260928_0001_obligations.py`: the `obligation` table with row-level
   security enabled and forced, the outbox and the consumer inbox tables (py-common helpers).
+- `migrations/versions/20260929_0002_obligation_change.py`: the `obligation_change` table,
+  with the same forced row-level security (`py_common.migrations.enable_tenant_rls`) and an
+  append-only trigger (`create_append_only_guard(..., allow_erasure_delete=True)`): UPDATE is
+  always refused, and DELETE only in a transaction that has set `app.erasure` to `on`, which a
+  tenant's erasure does before it deletes the change rows and then the obligations.
 
 The caller of the use cases is the applicability engine's decision consumer, which lands with
 the profile and engine work; until then the use cases are exercised by the tests and by hand.

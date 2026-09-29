@@ -15,8 +15,9 @@ Flat; one markdown file per alert or operational procedure.
 - [api-slo-burn.md](api-slo-burn.md): the availability and latency SLO alerts on the product APIs.
 - [backup-restore.md](backup-restore.md): what holds state, dev backups, the quarterly restore drill.
 - [outbox-relay.md](outbox-relay.md): events not reaching Kafka, `dead` outbox rows (OutboxDeadLetters, OutboxBacklog), replay by hand, pruning.
+- [rulebook-data-quality.md](rulebook-data-quality.md): the nightly data-quality checks over rule versions, citations and relations, what each violation means, and the read-only role for a deployed database.
 - [temporal-worker.md](temporal-worker.md): a task queue with no worker (TemporalWorkerDown), no spans reaching the collector (TelemetrySilent), a worker that will not start, a task queue backing up, a failed workflow.
-- [whatsapp.md](whatsapp.md): the Meta manual steps, webhook signature failures, opt-outs that must be honoured, late or failed reminders, template rejections.
+- [whatsapp.md](whatsapp.md): the Meta manual steps, consent recording and its flag, webhook signature failures, opt-outs that must be honoured, late or failed reminders, template rejections.
 
 ## Alerts
 

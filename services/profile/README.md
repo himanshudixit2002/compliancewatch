@@ -30,7 +30,8 @@ per year and the snapshot picks the year asked for.
   per-year attribute missing for the new year: the April task).
 - `api/`: `POST /v1/profile/{entities,registrations,locations}`, `GET /v1/profile/nodes/{id}`,
   `PUT /v1/profile/nodes/{id}/attributes`, `GET .../snapshot?fy=2025-26`,
-  `GET .../next-question?fy=`, `GET .../review-tasks`. The tenant is the `x-tenant-id`
+  `GET .../next-question?fy=`, `GET .../review-tasks`,
+  `POST /v1/profile/financial-year-confirmations`. The tenant is the `x-tenant-id`
   header (required, 401 without it) until the identity service issues tokens (ADR-014). Errors
   are problem details; the spec is `packages/contracts/openapi/profile.v1.json`
   (`make openapi SERVICE=profile`, checked by a contract test).
@@ -45,6 +46,21 @@ per year and the snapshot picks the year asked for.
 Row-level security binds only non-superuser roles; see the obligation service README for the
 dev-stack caveat. Settings: `CW_PROFILE_STORE` (`postgres` default, `memory`),
 `CW_PROFILE_EVAL_CASES_PATH` (empty keeps the eval seed in the review task only).
+
+## Financial year confirmation
+
+On 1 April a new financial year starts, and per-year attributes (the turnover band) have no
+value for it yet. `POST /v1/profile/financial-year-confirmations` (tenant header, optional body
+`{"fy": "2026-27"}`) runs `ConfirmFinancialYear` for the tenant: one `confirm_financial_year`
+review task per entity and per-year attribute missing for that year, answered 200 with
+`{"fy", "opened": [task ids]}`. Without `fy` it takes the financial year of today's date in
+India Standard Time. It is idempotent: a task still open for the same entity, attribute and
+year is not opened again, so a second call opens nothing. The command
+`profile-fy-confirm --tenant <uuid> [--tenant <uuid> ...] [--fy 2026-27]` does the same for
+named tenants from a shell (`uv run --package compliancewatch-profile profile-fy-confirm ...`;
+`CW_PROFILE_STORE` and `CW_DATABASE_URL` pick the store). Nothing calls either on a schedule
+yet: the daily job that confirms every active tenant from 1 to 7 April arrives with identity's
+worker, since under forced row-level security nothing here can list tenants.
 
 ## GSTIN lookup
 
@@ -65,6 +81,7 @@ src/profile_service/
   domain/          # entities, value objects, domain events, repository protocols
   infrastructure/  # SQLAlchemy models, repositories, Kafka, adapters
   main.py          # composition root: create_app(...) from py-common
+  jobs.py          # profile-fy-confirm: the financial year confirmation for named tenants
 migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA)
 tests/
   unit/            # domain and application with fakes; no I/O

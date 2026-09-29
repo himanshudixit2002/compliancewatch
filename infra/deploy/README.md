@@ -54,10 +54,18 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_RULEBOOK_WRITE_TOKEN` | - | - | secret | - | - | - | secret | - | - |
 | `CW_PIPELINE_KNOWLEDGE_ENABLED`, `CW_RULEBOOK_URL`, `CW_LLM_GATEWAY_URL` | - | - | - | - | - | - | env | - | - |
 | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_SEND_ENABLED`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `NOTIFICATION_API_URL` | - | - | - | - | - | - | - | - | secret / secret / env / secret / secret / env |
+| `CW_IDENTITY_CHANNEL_TOKEN` | secret | - | - | - | - | - | - | - | - |
+| `WHATSAPP_CONSENT_RECORDING_ENABLED`, `IDENTITY_API_URL`, `IDENTITY_SERVICE_TOKEN`, `WHATSAPP_NOTICE_VERSION` | - | - | - | - | - | - | - | - | env / env / secret / env |
 
 The pipeline writes regulator documents to the rulebook (ADR-018), so deploy the rulebook before
 the pipeline and give both the same `CW_RULEBOOK_WRITE_TOKEN`; a rulebook without one refuses
 every write.
+
+The WhatsApp bot records keyword opt-ins and opt-outs in identity: give identity
+`CW_IDENTITY_CHANNEL_TOKEN` and the bot the same value as `IDENTITY_SERVICE_TOKEN`, with
+`IDENTITY_API_URL` pointing at identity. `WHATSAPP_CONSENT_RECORDING_ENABLED` stays `false` until
+the lawyer confirms that the keyword opt-in is valid consent (`docs/legal/README.md`) and
+identity runs in the deployed profile; with it `true` and no token the bot refuses to start.
 
 Every service also reads `CW_ENV`, `CW_LOG_LEVEL` and `CW_LOG_JSON` (env). The tenant comes from
 the `x-tenant-id` header until Supabase Auth issues tokens (ADR-014): the MVP must sit behind
