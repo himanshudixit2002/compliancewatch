@@ -8,10 +8,12 @@ the clients and their headers, how an answer becomes a `Result`, what a page and
 a failure, caching, idempotency, the shared secrets, and the local services with their seed.
 Who is asking (the session and the gates) is in [auth-and-roles.md](auth-and-roles.md).
 
-On `main` no screen reads a service yet: the layer is in place and tested, the sign-in feature
-uses its `Result` and `ActionState` types, and the seed script fills the services through
-clients typed the same way. The first data screens copy the shape described under "A feature
-that reads data".
+The owner and CA-firm screens read and write the identity, profile and notification services
+through this layer, and the seed script fills the services through clients typed the same way.
+Each screen family's flow, what it records and what it waits for is in its own page:
+[onboarding-flow.md](onboarding-flow.md), [business-pages.md](business-pages.md),
+[settings.md](settings.md) and [legal-pages.md](legal-pages.md). A new data screen copies the
+shape described under "A feature that reads data".
 
 ## Request flow
 

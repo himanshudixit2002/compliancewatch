@@ -36,13 +36,25 @@ Flat; markdown files. Reading order for someone new to the app:
    jobs and the make targets.
 7. [i18n.md](i18n.md): the message table, `t()`, and the date, financial-year and money
    helpers.
-8. [feature-flags.md](feature-flags.md): how a flag is declared.
-9. [decisions.md](decisions.md): the log of decisions local to the web app, `D-001` onward.
-   The platform-level one, that the browser never calls a service and the session is an
-   encrypted cookie, is [ADR-019](../adr/ADR-019-web-server-layer-and-stateless-session.md).
-10. [screens.md](screens.md): generated; every registry entry with its route, roles, status and
+8. [feature-flags.md](feature-flags.md): how a flag is declared, the reader, and the product
+   events behind `web.analytics_enabled` and the analytics consent.
+9. [onboarding-flow.md](onboarding-flow.md): the four onboarding steps, every call in order,
+   what each records, the unsure loop and its cookie, the GSTIN lookup, a CA firm's differences.
+10. [business-pages.md](business-pages.md): the businesses list and a business's pages: the
+    hierarchy and locations, attributes per financial year, the snapshot's origins, the review
+    task reasons, and what waits.
+11. [settings.md](settings.md): the settings index, consents and their withdrawal, the
+    recipients remembered per device, notification preferences and quiet hours, billing and
+    its "not connected" state, the account page.
+12. [legal-pages.md](legal-pages.md): the legal documents, their loader and draft banner, the
+    versions a consent records, production onboarding closed while they are drafts, printing,
+    and adding a document.
+13. [decisions.md](decisions.md): the log of decisions local to the web app, `D-001` onward.
+    The platform-level one, that the browser never calls a service and the session is an
+    encrypted cookie, is [ADR-019](../adr/ADR-019-web-server-layer-and-stateless-session.md).
+14. [screens.md](screens.md): generated; every registry entry with its route, roles, status and
     what it waits for, plus the role-by-screen matrix.
-11. [glossary.md](glossary.md): the words the code and these docs use.
+15. [glossary.md](glossary.md): the words the code and these docs use.
 
 The package READMEs ([apps/web/README.md](../../apps/web/README.md),
 [packages/ui/README.md](../../packages/ui/README.md)) carry the layout trees and the run
@@ -60,7 +72,8 @@ commands; the docs here carry the reasoning and the procedures.
 | The steps for adding or flipping a screen                                | `adding-a-screen.md`                                                                                           |
 | A test convention, a coverage exclusion, a make target, a CI step        | `testing.md`                                                                                                   |
 | A message key convention or a shared helper                              | `i18n.md`                                                                                                      |
-| A flag declaration                                                       | `feature-flags.md`                                                                                             |
+| A flag declaration, the reader, a product event                          | `feature-flags.md`                                                                                             |
+| What an owner or CA screen shows, calls, records or waits for            | `onboarding-flow.md`, `business-pages.md`, `settings.md` or `legal-pages.md`                                   |
 | A choice local to the web app                                            | A `D-0NN` entry in `decisions.md`; a choice that binds other parts of the platform is an ADR under `docs/adr/` |
 
 ## How to run

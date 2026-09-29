@@ -142,8 +142,12 @@ page that fetches. `server/env.ts` validates every `CW_WEB_*` variable with zod:
 the process environment at the first request (never at import or build time), keeps the frozen
 result, and refuses a bad value with the variable's name; unset means the documented default
 (`CW_WEB_ENV` local, the services on their canonical ports 8001-8010). The service clients
-(`server/api`) are typed from the generated contracts and used only on the server; no page calls one
-yet.
+(`server/api`) are typed from the generated contracts and used only on the server; the owner and
+CA-firm screens (onboarding, the businesses and their pages, settings) call identity, profile and
+notification through them, as `docs/web/onboarding-flow.md`, `business-pages.md`, `settings.md`
+and `legal-pages.md` describe. In production, onboarding is closed while the terms or the privacy
+notice in `docs/legal` is a draft; product events are written only with `web.analytics_enabled`
+on and the person's analytics consent current.
 
 Sessions and gates: `/sign-in` renders the fake provider's form (`CW_WEB_AUTH_PROVIDER=fake`,
 local and test only; unset shows "Sign-in is not configured" with the variable's name), the
@@ -161,8 +165,10 @@ The Playwright suite visits the built app: the public pages, the sign-in, accoun
 pages after signing in through the fake form, the design catalogue (group by group) and every
 planned, waiting or ready page through the catch-alls as the first persona its roles admit, with
 `AxeBuilder` failing a page on any serious or critical finding. The specs that need the
-services and the seeded tenant (the seeded-tenant sign-in, the consent step) run after `make
-web-stack`, `make web-stack-wait` and `make web-seed` and are skipped without the seed state;
+services and the seeded tenant (the seeded-tenant sign-in, the onboarding steps, the business
+and settings pages, and the `journey-*` specs that take an owner, a CA firm and a visitor across
+them) run after `make web-stack`, `make web-stack-wait` and `make web-seed` and are skipped
+without the seed state;
 `make web-e2e` points the app at the stack's ports. Once per
 machine: `make web-e2e-install` (downloads Chromium; the package has no install script). Then
 `make web-e2e` builds the app and runs the suite on `WEB_PORT` from the root `.env` (3000 unless

@@ -224,8 +224,9 @@ documents and render each under the fixed "Draft - to be reviewed by a lawyer" b
 `Version:` line while that line ends in `-draft` (a plain version line afterwards); the print
 stylesheet in `globals.css` leaves the shell out and keeps the banner. In production the consent
 and business steps are closed while the terms or the privacy notice is a draft
-(`onboardingGate()` in `server/legal.ts`, D-035). `/design` and the admin layout are `force-dynamic` so the environment answer is
-never baked into the build.
+(`onboardingGate()` in `server/legal.ts`; [legal-pages.md](legal-pages.md), D-035). `/design`
+and the admin layout are `force-dynamic` so the environment answer is never baked into the
+build.
 
 Errors: `error.tsx` renders `ErrorState` inside the segment's shell with the error digest as the
 reference to quote, `global-error.tsx` does the same with its own `<html>`, and

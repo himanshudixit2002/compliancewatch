@@ -392,7 +392,7 @@ A table that can be wider than its column names its scroll container (`scrollLab
 ## D-030: The businesses search is posted, and a business's pages share one header
 
 2026-09-29. The CA client list searches by name, PAN or GSTIN, and a PAN or a GSTIN in a query
-string would land in the browser history and in access logs, which the plan rules out for
+string would land in the browser history and in access logs, which the web app rules out for
 identifiers. The search box and the pager post to a server action and the client component redraws
 the table from its answer; the cursor travels in the same body. The cost is that a searched page
 is not bookmarkable and the back button leaves the list; the unfiltered first page is rendered on
@@ -454,8 +454,8 @@ notifications page.
 
 ## D-034: Product events are log lines behind the flag and a consent read on every event
 
-2026-09-29. The onboarding funnel and the settings changes need product events, the plan rules
-out third-party analytics, and `docs/legal` makes analytics an optional purpose the person can
+2026-09-29. The onboarding funnel and the settings changes need product events, third-party
+analytics are ruled out, and `docs/legal` makes analytics an optional purpose the person can
 withdraw. `server/analytics.ts` writes each event as one JSON line on stdout and adds it to the
 active OpenTelemetry span (`@opentelemetry/api`, pinned at 1.9.1, is the API Next's own tracing
 resolves first; with no tracer registered the span event is a no-op). An event goes out only
