@@ -6,6 +6,7 @@ rule version, and a place to count deliveries.
   cites); None when the rulebook has no such version. A rulebook that cannot answer raises
   ``DependencyUnavailableError``, and the dispatcher tries again later without spending an
   attempt.
+- ``EmailFeedbackReader.read(body)``: the verified report in an SNS message from SES.
 - ``DeliveryMetrics``: the counters and the lag the alerts read, and the provider reports.
   ``NO_METRICS`` counts nothing.
 """
@@ -19,7 +20,7 @@ from typing import Protocol
 from domain_kernel._validation import require_date, require_instance, require_text
 from domain_kernel.channels import Channel
 from domain_kernel.ids import RuleVersionId
-from notification.domain.receipts import ReceiptKind
+from notification.domain.receipts import MailFeedback, ReceiptKind, SubscriptionRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +45,15 @@ class RuleVersionFacts:
 
 class RuleVersionReader(Protocol):
     def get(self, rule_version_id: RuleVersionId) -> RuleVersionFacts | None: ...
+
+
+class EmailFeedbackReader(Protocol):
+    def read(self, body: str) -> MailFeedback | SubscriptionRequest | None:
+        """The report an SNS message carries, once its signature is verified; None for one the
+        service does not act on. ``EmailFeedbackInvalidError`` for a body that is not a
+        verified SNS message of the expected topic, ``DependencyUnavailableError`` when the
+        signing certificate cannot be fetched."""
+        ...
 
 
 class AttemptResult(StrEnum):

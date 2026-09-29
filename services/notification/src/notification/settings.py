@@ -14,6 +14,13 @@ hear by digest get: a daily digest chosen, and a CA firm's people.
 
 ``notification_bot_token`` is the shared secret the WhatsApp bot sends (``x-cw-bot-token``) with
 the delivery statuses and inbound times it forwards; unset, the receipt route refuses them all.
+
+Email goes out over SMTP only behind ``email_enabled`` (the ``notification.email`` flag, off by
+default) with ``smtp_host`` and ``email_from``; STARTTLS is required, and the channel logs in
+with ``smtp_username`` and ``smtp_password`` when a username is set. The SES bounce and
+complaint feedback arrives through SNS with HTTP basic credentials whose password is
+``notification_email_feedback_token`` (unset, the route refuses everything), and, when
+``notification_ses_topic_arn`` is set, only from that topic.
 """
 
 from typing import Literal
@@ -39,5 +46,13 @@ class NotificationSettings(Settings):
     notification_dispatch_interval_seconds: float = Field(default=5.0, gt=0, le=300)
     notification_digest_at: str = Field(default="09:00", pattern=CLOCK_TIME)
     notification_bot_token: SecretStr | None = None
+    email_enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = ""
+    smtp_password: SecretStr | None = None
+    email_from: str = ""
+    notification_email_feedback_token: SecretStr | None = None
+    notification_ses_topic_arn: str = ""
     rulebook_url: str = "http://localhost:8003"
     web_base_url: str = "http://localhost:3000"

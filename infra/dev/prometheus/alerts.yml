@@ -126,3 +126,18 @@ groups:
         annotations:
           summary: "A notification was delivered twice on {{ $labels.channel }}"
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/notification-delivery.md#notificationduplicatesent
+      # SES puts a sending account under review when its bounces pass 5% or its complaints 0.1%
+      # of its mail. Bounces and complaints reported against email notifications sent, over 6
+      # hours, warn well before that: above 2% for 30 minutes.
+      - alert: NotificationEmailBounces
+        expr: |
+          sum(increase(notification_receipts_total{channel="email", kind=~"bounced|complained"}[6h]))
+            /
+          sum(increase(notification_sends_total{channel="email", outcome="sent"}[6h])) > 0.02
+        for: 30m
+        labels:
+          severity: ticket
+          team: core-product
+        annotations:
+          summary: "Email bounces and complaints passed 2% of the email notifications sent over 6 hours"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/notification-delivery.md#notificationemailbounces

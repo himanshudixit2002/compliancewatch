@@ -270,3 +270,41 @@ tests:
       - eval_time: 35m
         alertname: NotificationDuplicateSent
         exp_alerts: []
+
+  # 100 emails sent a minute, 3 of them bounce (3%): above 2% from the start, firing after 30
+  # minutes. The complaints stay at zero, and WhatsApp receipts do not count.
+  - interval: 1m
+    input_series:
+      - series: 'notification_sends_total{channel="email", outcome="sent"}'
+        values: "0+100x60"
+      - series: 'notification_receipts_total{channel="email", kind="bounced", outcome="applied"}'
+        values: "0+3x60"
+      - series: 'notification_receipts_total{channel="email", kind="complained", outcome="applied"}'
+        values: "0x60"
+      - series: 'notification_receipts_total{channel="whatsapp", kind="failed", outcome="applied"}'
+        values: "0+50x60"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NotificationEmailBounces
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: NotificationEmailBounces
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              team: core-product
+            exp_annotations:
+              summary: "Email bounces and complaints passed 2% of the email notifications sent over 6 hours"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/notification-delivery.md#notificationemailbounces
+
+  # 1 bounce in 100 (1%) stays below the threshold.
+  - interval: 1m
+    input_series:
+      - series: 'notification_sends_total{channel="email", outcome="sent"}'
+        values: "0+100x60"
+      - series: 'notification_receipts_total{channel="email", kind="bounced", outcome="unknown"}'
+        values: "0+1x60"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: NotificationEmailBounces
+        exp_alerts: []

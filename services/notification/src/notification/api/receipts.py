@@ -1,5 +1,13 @@
 """Delivery receipts: what the providers report after they took a message.
 
+``POST /receipts/email`` takes what Amazon SES reports through SNS: bounces, complaints and
+deliveries. SNS posts the message as JSON in a text/plain body with the HTTP basic credentials
+of the subscription URL (``https://sns:<secret>@<host>/v1/notification/receipts/email``); the
+password is ``CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN``, so the secret never appears in the path
+that logs and spans record. The message's signature is verified before it is read. A permanent
+bounce or a complaint suppresses the mailbox for every tenant, and a subscription confirmation
+is logged for the maintainer to open once.
+
 ``POST /receipts/whatsapp`` takes what the WhatsApp bot forwards from Meta's webhook: the
 statuses of the messages the service sent (sent, delivered, read, failed) and the times numbers
 wrote to the business, which open the 24-hour customer service window. It names no tenant, so
@@ -8,11 +16,12 @@ no configured token is a 503, a missing or wrong one a 401. A status for a messa
 did not send, such as the bot's own replies, is counted as unknown and otherwise ignored.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from starlette.concurrency import run_in_threadpool
 
 from domain_kernel.channels import Channel
-from notification.api.deps import BotAccess, Wired
-from notification.api.schemas import ReceiptsOut, WhatsAppReceiptsIn
+from notification.api.deps import BotAccess, FeedbackAccess, Wired
+from notification.api.schemas import EmailFeedbackOut, ReceiptsOut, WhatsAppReceiptsIn
 from notification.application.receipts import InboundTime
 from notification.domain.receipts import Receipt, ReceiptKind, from_whatsapp, whatsapp_error
 from py_common.problems import problem_responses
@@ -54,4 +63,36 @@ def whatsapp_receipts(body: WhatsAppReceiptsIn, wired: Wired) -> ReceiptsOut:
         unknown=reconciled.unknown,
         ignored=ignored,
         inbound=reconciled.inbound,
+    )
+
+
+SNS_BODY = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "text/plain": {
+                "schema": {"type": "string", "description": "The SNS message, JSON as text"}
+            }
+        },
+    }
+}
+
+
+@router.post(
+    "/receipts/email",
+    summary="Record the SES bounces, complaints and deliveries that SNS posts",
+    dependencies=[FeedbackAccess],
+    responses=problem_responses(401, 422, 503),
+    openapi_extra=SNS_BODY,
+)
+async def email_receipts(request: Request, wired: Wired) -> EmailFeedbackOut:
+    body = (await request.body()).decode("utf-8", "replace")
+    outcome = await run_in_threadpool(wired.email_feedback.run, body)
+    reconciled = outcome.reconciled
+    return EmailFeedbackOut(
+        kind=outcome.kind.value,
+        applied=reconciled.applied,
+        unchanged=reconciled.unchanged,
+        unknown=reconciled.unknown,
+        suppressed=reconciled.suppressed,
     )

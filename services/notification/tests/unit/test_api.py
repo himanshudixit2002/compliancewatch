@@ -9,13 +9,17 @@ from domain_kernel.ids import NotificationId, TenantId
 from notification.composition import WHATSAPP_DISABLED, wire
 from notification.domain.notification import DeliveryState
 from notification.domain.preferences import ConsentSource
+from notification.infrastructure.ses_feedback import SnsFeedbackReader
 from notification.main import build_app
 from notification.testing import (
     BOT_TOKEN,
+    EMAIL_FEEDBACK_TOKEN,
     NOON_IST,
     FakeChannel,
     FakeRuleVersionReader,
+    FakeSns,
     notification_settings,
+    ses_report,
 )
 
 PHONE = "919876543210"
@@ -340,3 +344,59 @@ def test_the_history_pages_newest_first_and_filters_by_state() -> None:
 
 def iso(moment: datetime) -> str:
     return moment.isoformat()
+
+
+def test_the_email_feedback_route_takes_sns_basic_credentials(client: TestClient) -> None:
+    sns = FakeSns()
+    body = sns.notification(ses_report("Complaint", "Owner@Example.com"))
+    unset = client.post("/v1/notification/receipts/email", content=body)
+    assert unset.status_code == 503
+    assert "CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN" in unset.json()["detail"]
+    app = build_app(
+        notification_settings(notification_email_feedback_token=EMAIL_FEEDBACK_TOKEN),
+        email_feedback=SnsFeedbackReader(sns.certificates, topic_arn=FakeSns.TOPIC),
+    )
+    headers = {"content-type": "text/plain; charset=UTF-8"}
+    with TestClient(app) as guarded:
+        missing = guarded.post("/v1/notification/receipts/email", content=body, headers=headers)
+        wrong = guarded.post(
+            "/v1/notification/receipts/email",
+            content=body,
+            headers=headers,
+            auth=("sns", "not-the-secret"),
+        )
+        garbage = guarded.post(
+            "/v1/notification/receipts/email",
+            content="not json",
+            headers=headers,
+            auth=("sns", EMAIL_FEEDBACK_TOKEN),
+        )
+        accepted = guarded.post(
+            "/v1/notification/receipts/email",
+            content=body,
+            headers=headers,
+            auth=("sns", EMAIL_FEEDBACK_TOKEN),
+        )
+        confirmation = guarded.post(
+            "/v1/notification/receipts/email",
+            content=sns.confirmation(),
+            headers=headers,
+            auth=("anyone", EMAIL_FEEDBACK_TOKEN),
+        )
+        with app.state.wiring.unit_of_work.shared() as unit:
+            suppression = unit.suppressions.get(Channel.EMAIL, "owner@example.com")
+    assert missing.status_code == wrong.status_code == 401
+    assert missing.headers["www-authenticate"].startswith("Basic ")
+    assert wrong.json()["type"].endswith(":notification-email-feedback-unauthorized")
+    assert garbage.status_code == 422
+    assert garbage.json()["type"].endswith(":notification-email-feedback-invalid")
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json() == {
+        "kind": "report",
+        "applied": 0,
+        "unchanged": 0,
+        "unknown": 0,
+        "suppressed": 1,
+    }
+    assert confirmation.json()["kind"] == "subscription_confirmation"
+    assert suppression is not None

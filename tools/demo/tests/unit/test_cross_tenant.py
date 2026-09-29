@@ -148,6 +148,12 @@ EXEMPT_ROUTES: dict[str, dict[str, str]] = {
             "the bot's shared token (x-cw-bot-token) guards the route: 503 until it is set, 401 "
             "without it"
         ),
+        "POST /v1/notification/receipts/email": (
+            "SES bounces, complaints and deliveries posted by SNS, which names no tenant; the "
+            "service finds each tenant by the message's dispatch id. SNS's basic credentials "
+            "guard the route (503 until CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN is set, 401 "
+            "without them) and the message's SNS signature is verified"
+        ),
     },
     "qa": {},
 }
@@ -159,6 +165,7 @@ GUARDED_EXEMPT_ROUTES = {
     "GET /v1/identity/channel-consents/{channel}/{subject}": 401,
     "POST /v1/identity/billing/webhook": 401,
     "POST /v1/notification/receipts/whatsapp": 503,
+    "POST /v1/notification/receipts/email": 503,
 }
 """Exempt routes whose own guard refuses an anonymous request."""
 

@@ -13,6 +13,13 @@ provider's message id, and ``Notification.apply_receipt`` moves the notification
 ``from_whatsapp`` maps the statuses of the WhatsApp Cloud API webhook; a status it does not know
 maps to None and is ignored. ``whatsapp_error`` keeps the code and title Meta gave a failure,
 never the message.
+
+Email feedback comes from Amazon SES through SNS (``infrastructure.ses_feedback``) as
+``MailFeedback``: what happened (``from_ses``), when, the dispatch id the message carried in its
+``X-CW-Dispatch-Id`` header (the email channel's provider message id) and the mailboxes the
+report names. A permanent bounce or a complaint closes those mailboxes for every tenant
+(``Suppression``). A ``SubscriptionRequest`` is SNS asking to confirm the subscription, which
+the maintainer does by hand.
 """
 
 from dataclasses import dataclass
@@ -76,3 +83,49 @@ class Receipt:
     @property
     def is_failure(self) -> bool:
         return self.kind in FAILURE_KINDS
+
+
+def from_ses(notification_type: str, bounce_type: str = "") -> ReceiptKind | None:
+    """The kind of an SES notification: ``Delivery`` is delivered; ``Bounce`` is bounced when
+    permanent (the mailbox refuses mail for good) and failed otherwise (this message did not
+    arrive, a later one may); ``Complaint`` is complained. Anything else is None."""
+    match notification_type:
+        case "Delivery":
+            return ReceiptKind.DELIVERED
+        case "Bounce":
+            return ReceiptKind.BOUNCED if bounce_type == "Permanent" else ReceiptKind.FAILED
+        case "Complaint":
+            return ReceiptKind.COMPLAINED
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class MailFeedback:
+    """One SES report about one message."""
+
+    kind: ReceiptKind
+    at: datetime
+    dispatch_id: str
+    """The message's ``X-CW-Dispatch-Id`` header; '' when SES did not include the original
+    headers, and then only the mailboxes can be acted on."""
+    addresses: tuple[str, ...]
+    """The mailboxes the report names, as SES gives them."""
+    detail: str = ""
+    """The bounce or complaint type, such as 'Permanent/General'; never message content."""
+
+    def __post_init__(self) -> None:
+        require_instance(self.kind, ReceiptKind, "kind")
+        require_aware(self.at, "at")
+        require_instance(self.dispatch_id, str, "dispatch_id")
+        object.__setattr__(self, "addresses", tuple(self.addresses))
+        for address in self.addresses:
+            require_instance(address, str, "addresses")
+        require_instance(self.detail, str, "detail")
+
+
+@dataclass(frozen=True, slots=True)
+class SubscriptionRequest:
+    """SNS asks to confirm that the topic may post here: open ``confirm_url`` once."""
+
+    topic_arn: str
+    confirm_url: str

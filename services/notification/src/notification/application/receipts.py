@@ -17,6 +17,9 @@ forwards from Meta's webhook (and, for email, the provider's feedback):
 3. A message id no notification carries (the bot's own replies, or a notification the retention
    sweep removed) is counted as unknown and otherwise ignored; so is a report that changes
    nothing, such as a late ``delivered`` after ``read``.
+4. Every closed address (a permanent bounce or a complaint the email provider reported) is
+   suppressed for every tenant (``SuppressionRepository.add``), whether or not its message was
+   matched, so nothing more is sent to it until support lifts the suppression.
 
 Each report is counted (``notification_receipts_total``). The tenant's receipts commit in one
 unit, so a redelivered webhook applies nothing twice.
@@ -33,6 +36,7 @@ from notification.application.fallback import queue_fallback
 from notification.domain.addresses import normalise_address
 from notification.domain.errors import InvalidAddressError
 from notification.domain.ports import NO_METRICS, DeliveryMetrics, ReceiptResult
+from notification.domain.preferences import Suppression, SuppressionReason
 from notification.domain.receipts import Receipt
 from notification.domain.repository import UnitOfWork, UnitOfWorkFactory, WorkIndex
 
@@ -46,14 +50,25 @@ class InboundTime:
 
 
 @dataclass(frozen=True, slots=True)
+class ClosedAddress:
+    """The provider reported that the address must not get mail any more."""
+
+    address: str
+    reason: SuppressionReason
+    at: datetime
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Reconciled:
     """What one batch of reports did: receipts applied, receipts that changed nothing, receipts
-    for messages no notification carries, and inbound times recorded."""
+    for messages no notification carries, inbound times recorded and addresses suppressed."""
 
     applied: int = 0
     unchanged: int = 0
     unknown: int = 0
     inbound: int = 0
+    suppressed: int = 0
 
 
 class ReconcileReceipts:
@@ -75,8 +90,9 @@ class ReconcileReceipts:
         channel: Channel,
         receipts: Sequence[Receipt] = (),
         inbound: Sequence[InboundTime] = (),
+        closed: Sequence[ClosedAddress] = (),
     ) -> Reconciled:
-        recorded = self._record_inbound(channel, inbound)
+        recorded, suppressed = self._record_addresses(channel, inbound, closed)
         by_tenant: dict[TenantId, list[Receipt]] = {}
         unknown = 0
         for receipt in receipts:
@@ -95,21 +111,31 @@ class ReconcileReceipts:
                     applied += result is ReceiptResult.APPLIED
                     unchanged += result is ReceiptResult.UNCHANGED
                     unknown += result is ReceiptResult.UNKNOWN
-        return Reconciled(applied, unchanged, unknown, recorded)
+        return Reconciled(applied, unchanged, unknown, recorded, suppressed)
 
-    def _record_inbound(self, channel: Channel, inbound: Sequence[InboundTime]) -> int:
-        addresses: list[tuple[str, datetime]] = []
-        for item in inbound:
-            try:
-                addresses.append((normalise_address(channel, item.address), item.at))
-            except InvalidAddressError:
-                continue
-        if not addresses:
-            return 0
+    def _record_addresses(
+        self, channel: Channel, inbound: Sequence[InboundTime], closed: Sequence[ClosedAddress]
+    ) -> tuple[int, int]:
+        """Record the inbound times and the suppressions in one shared unit; an address that
+        cannot be normalised is skipped."""
+        wrote = [
+            (address, item.at)
+            for item in inbound
+            if (address := _normalised(channel, item.address)) is not None
+        ]
+        suppressions = [
+            Suppression(channel, address, item.reason, item.at, detail=item.detail)
+            for item in closed
+            if (address := _normalised(channel, item.address)) is not None
+        ]
+        if not wrote and not suppressions:
+            return 0, 0
         with self._unit_of_work.shared() as unit:
-            for address, at in addresses:
+            for address, at in wrote:
                 unit.preferences.record_inbound(channel, address, at)
-        return len(addresses)
+            for suppression in suppressions:
+                unit.suppressions.add(suppression)
+        return len(wrote), len(suppressions)
 
     def _apply(self, unit: UnitOfWork, channel: Channel, receipt: Receipt) -> ReceiptResult:
         carried = unit.notifications.by_provider_message(receipt.provider_message_id)
@@ -137,3 +163,10 @@ class ReconcileReceipts:
                 unit.events.publish(event)
             result = ReceiptResult.APPLIED
         return result
+
+
+def _normalised(channel: Channel, address: str) -> str | None:
+    try:
+        return normalise_address(channel, address)
+    except InvalidAddressError:
+        return None

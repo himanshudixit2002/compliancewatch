@@ -1,8 +1,9 @@
 """The notification service's HTTP app.
 
-``build_app(settings, channels=..., rules=...)`` wires the service (``notification.composition``)
-and serves its routes; the channels and the rulebook reader it takes replace the configured
-ones, which is how the demo and the tests send through fakes.
+``build_app(settings, channels=..., rules=..., email_feedback=...)`` wires the service
+(``notification.composition``) and serves its routes; the channels, the rulebook reader and the
+SES feedback reader it takes replace the configured ones, which is how the demo and the tests
+send and receive through fakes.
 """
 
 from collections.abc import Mapping
@@ -20,6 +21,8 @@ from notification.composition import wire
 from notification.domain.channels import ChannelAdapter
 from notification.domain.errors import (
     DependencyUnavailableError,
+    EmailFeedbackInvalidError,
+    EmailFeedbackUnauthorizedError,
     InvalidAddressError,
     MissingPlaceholderError,
     NotificationNotFoundError,
@@ -31,7 +34,7 @@ from notification.domain.errors import (
     UnknownChannelError,
     UnknownTemplateError,
 )
-from notification.domain.ports import RuleVersionReader
+from notification.domain.ports import EmailFeedbackReader, RuleVersionReader
 from notification.settings import NotificationSettings
 from py_common.app import create_app
 
@@ -48,6 +51,8 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     ResendNotAllowedError: 409,
     ReceiptsDisabledError: 503,
     ReceiptTokenInvalidError: 401,
+    EmailFeedbackInvalidError: 422,
+    EmailFeedbackUnauthorizedError: 401,
 }
 
 
@@ -56,9 +61,10 @@ def build_app(
     *,
     channels: Mapping[Channel, ChannelAdapter] | None = None,
     rules: RuleVersionReader | None = None,
+    email_feedback: EmailFeedbackReader | None = None,
 ) -> FastAPI:
     settings = settings or NotificationSettings(service_name=SERVICE_NAME)
-    wiring = wire(settings, channels=channels, rules=rules)
+    wiring = wire(settings, channels=channels, rules=rules, email_feedback=email_feedback)
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,

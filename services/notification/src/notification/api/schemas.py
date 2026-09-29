@@ -326,6 +326,16 @@ class ReceiptsOut(BaseModel):
     inbound: int = Field(description="Inbound times recorded")
 
 
+class EmailFeedbackOut(BaseModel):
+    kind: str = Field(
+        description="report (a bounce, complaint or delivery), subscription_confirmation or ignored"
+    )
+    applied: int = Field(description="Notifications the report moved on")
+    unchanged: int = Field(description="Reports that changed nothing")
+    unknown: int = Field(description="Reports for messages no notification carries")
+    suppressed: int = Field(description="Mailboxes closed by a permanent bounce or a complaint")
+
+
 def _plain(value: object) -> Any:
     """Template values as JSON: read-only mappings and tuples become dicts and lists."""
     if isinstance(value, Mapping):

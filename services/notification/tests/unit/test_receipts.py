@@ -1,22 +1,26 @@
 """Delivery receipts on the memory store: statuses find their notifications through the work
 index, only move them forward, and an asynchronous failure falls back to the next address."""
 
+from dataclasses import replace
 from datetime import timedelta
 
 from domain_kernel.channels import Channel
 from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId, TenantId
+from domain_kernel.notifications import DeliveryReceipt
 from notification.application.dispatch import DispatchDue
+from notification.application.email_feedback import FeedbackKind, ReceiveEmailFeedback
 from notification.application.enqueue import EnqueueNotifications
 from notification.application.preferences import SetOptIn
 from notification.application.receipts import InboundTime, Reconciled, ReconcileReceipts
 from notification.application.recipients import RecipientRegistration, RegisterRecipient
+from notification.domain.channels import OutboundMessage
 from notification.domain.events import NotificationFailed
 from notification.domain.ids import RecipientId
 from notification.domain.notification import DeliveryState, Notification
 from notification.domain.occasions import Occasion
 from notification.domain.policy import BatchPolicy
 from notification.domain.ports import ReceiptResult
-from notification.domain.preferences import ConsentSource
+from notification.domain.preferences import ConsentSource, Suppression, SuppressionReason
 from notification.domain.receipts import (
     Receipt,
     ReceiptKind,
@@ -26,12 +30,15 @@ from notification.domain.receipts import (
 from notification.domain.recipients import BusinessLink, RecipientRole
 from notification.domain.routing import ObligationNotice
 from notification.infrastructure.memory import MemoryStore
+from notification.infrastructure.ses_feedback import SnsFeedbackReader
 from notification.testing import (
     NOON_IST,
     FakeChannel,
     FakeClock,
     FakeRuleVersionReader,
+    FakeSns,
     RecordingMetrics,
+    ses_report,
 )
 
 TENANT = TenantId.new()
@@ -193,3 +200,105 @@ def test_whatsapp_statuses_and_errors() -> None:
     )
     assert Receipt("wamid.1", ReceiptKind.BOUNCED, LATER).is_failure
     assert not Receipt("wamid.1", ReceiptKind.READ, LATER).is_failure
+
+
+class SmtpLikeChannel(FakeChannel):
+    """Names the dispatch id as the provider's message id, as the SMTP channel does."""
+
+    def deliver(self, message: OutboundMessage) -> DeliveryReceipt:
+        receipt = super().deliver(message)
+        return replace(receipt, provider_message_id=str(message.dispatch_id))
+
+
+class MailWorld(World):
+    def __init__(self) -> None:
+        super().__init__((EMAIL, MAIL))
+        self.email = SmtpLikeChannel(clock=self.clock)
+        self.dispatch = DispatchDue(
+            self.store,
+            self.store.work_index,
+            {WA: self.whatsapp, EMAIL: self.email},
+            rules=FakeRuleVersionReader(),
+            web_base_url="https://app.example",
+            clock=self.clock,
+        )
+        self.sns = SNS
+        self.feedback = ReceiveEmailFeedback(
+            SnsFeedbackReader(SNS.certificates, clock=self.clock), self.receipts
+        )
+
+    def report(self, notification_type: str, *, matched: bool = True, **options: str) -> str:
+        (sent,) = [n for n in self.notifications() if n.dispatch_id is not None]
+        dispatch = str(sent.dispatch_id) if matched else ""
+        return SNS.notification(
+            ses_report(notification_type, MAIL.upper(), dispatch_id=dispatch, **options)
+        )
+
+    def suppression(self) -> Suppression | None:
+        with self.store.shared() as unit:
+            return unit.suppressions.get(EMAIL, MAIL)
+
+
+SNS = FakeSns()
+
+
+def test_an_ses_permanent_bounce_suppresses_the_mailbox_and_fails_the_email() -> None:
+    world = MailWorld()
+    world.send("File GSTR-3B")
+    outcome = world.feedback.run(world.report("Bounce"))
+    assert outcome.kind is FeedbackKind.REPORT
+    assert outcome.reconciled == Reconciled(applied=1, suppressed=1)
+    (failed,) = world.notifications()
+    assert (failed.state, failed.error) == (
+        DeliveryState.FAILED,
+        "email bounced: Permanent/General",
+    )
+    event = world.store.events[-1]
+    assert isinstance(event, NotificationFailed)
+    assert not event.will_retry, "no address after the email one"
+    suppression = world.suppression()
+    assert suppression is not None
+    assert (suppression.reason, suppression.detail) == (
+        SuppressionReason.BOUNCE,
+        "Permanent/General",
+    )
+    assert world.send("File GSTR-1") == [failed], "nothing is queued to a suppressed mailbox"
+
+
+def test_a_complaint_after_delivery_suppresses_and_keeps_the_record() -> None:
+    world = MailWorld()
+    world.send("File GSTR-3B")
+    delivered = world.feedback.run(world.report("Delivery"))
+    assert delivered.reconciled == Reconciled(applied=1)
+    complained = world.feedback.run(world.report("Complaint"))
+    assert complained.reconciled == Reconciled(unchanged=1, suppressed=1)
+    assert world.notifications()[0].state is DeliveryState.DELIVERED
+    suppression = world.suppression()
+    assert suppression is not None
+    assert suppression.reason is SuppressionReason.COMPLAINT
+
+
+def test_a_report_without_the_original_headers_still_closes_the_mailbox() -> None:
+    world = MailWorld()
+    world.send("File GSTR-3B")
+    outcome = world.feedback.run(world.report("Bounce", matched=False))
+    assert outcome.reconciled == Reconciled(suppressed=1)
+    assert world.notifications()[0].state is DeliveryState.SENT
+    assert world.suppression() is not None
+
+
+def test_a_transient_bounce_fails_the_email_but_leaves_the_mailbox_open() -> None:
+    world = MailWorld()
+    world.send("File GSTR-3B")
+    outcome = world.feedback.run(world.report("Bounce", bounce_type="Transient"))
+    assert outcome.reconciled == Reconciled(applied=1)
+    assert world.notifications()[0].error == "email failed: Transient/General"
+    assert world.suppression() is None
+
+
+def test_a_subscription_confirmation_and_an_ignored_report_change_nothing() -> None:
+    world = MailWorld()
+    confirmation = world.feedback.run(SNS.confirmation())
+    assert confirmation.kind is FeedbackKind.SUBSCRIPTION_CONFIRMATION
+    ignored = world.feedback.run(SNS.notification({"eventType": "Open"}))
+    assert (ignored.kind, ignored.reconciled) == (FeedbackKind.IGNORED, Reconciled())

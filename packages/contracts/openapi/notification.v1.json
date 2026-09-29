@@ -83,6 +83,44 @@
         "title": "DigestMode",
         "type": "string"
       },
+      "EmailFeedbackOut": {
+        "properties": {
+          "applied": {
+            "description": "Notifications the report moved on",
+            "title": "Applied",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "report (a bounce, complaint or delivery), subscription_confirmation or ignored",
+            "title": "Kind",
+            "type": "string"
+          },
+          "suppressed": {
+            "description": "Mailboxes closed by a permanent bounce or a complaint",
+            "title": "Suppressed",
+            "type": "integer"
+          },
+          "unchanged": {
+            "description": "Reports that changed nothing",
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "unknown": {
+            "description": "Reports for messages no notification carries",
+            "title": "Unknown",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "applied",
+          "unchanged",
+          "unknown",
+          "suppressed"
+        ],
+        "title": "EmailFeedbackOut",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "service": {
@@ -1077,6 +1115,13 @@
         "title": "WhatsAppStatusIn",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "HTTPBasic": {
+        "description": "The credentials in the SNS subscription URL; the password is CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN, the user name is not checked",
+        "scheme": "basic",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -1585,6 +1630,83 @@
           }
         },
         "summary": "Record an opt-in or opt-out for a channel and recipient",
+        "tags": [
+          "notification"
+        ]
+      }
+    },
+    "/v1/notification/receipts/email": {
+      "post": {
+        "operationId": "email_receipts_v1_notification_receipts_email_post",
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": {
+                "description": "The SNS message, JSON as text",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailFeedbackOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Record the SES bounces, complaints and deliveries that SNS posts",
         "tags": [
           "notification"
         ]

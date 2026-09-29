@@ -16,6 +16,7 @@ dependencies = [
   "compliancewatch-contracts",
   "httpx2>=2.13",
   "opentelemetry-api==1.45.0",
+  "cryptography>=46",
 ]
 
 [tool.uv.sources]

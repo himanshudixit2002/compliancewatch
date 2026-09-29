@@ -1,5 +1,6 @@
 """Errors of the notification service; the composition root maps them to problem statuses."""
 
+from collections.abc import Mapping
 from typing import ClassVar
 
 from domain_kernel.errors import DomainError
@@ -101,3 +102,29 @@ class ReceiptTokenInvalidError(DomainError):
 
     def __init__(self) -> None:
         super().__init__("missing or wrong receipt token")
+
+
+class EmailFeedbackInvalidError(DomainError):
+    """A body on the email feedback route that is not a verified SNS message of the expected
+    topic: not JSON, a field missing, a signing certificate outside SNS, a signature version
+    other than 2, a signature that does not verify, or another topic."""
+
+    type_slug: ClassVar[str] = "notification-email-feedback-invalid"
+    title: ClassVar[str] = "Email feedback not a verified SNS message"
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"email feedback refused: {reason}")
+
+
+class EmailFeedbackUnauthorizedError(DomainError):
+    """The email feedback route takes SNS's HTTP basic credentials; the challenge header makes
+    SNS send them."""
+
+    type_slug: ClassVar[str] = "notification-email-feedback-unauthorized"
+    title: ClassVar[str] = "Email feedback credentials missing or wrong"
+    problem_headers: ClassVar[Mapping[str, str]] = {
+        "WWW-Authenticate": 'Basic realm="notification-email-feedback"'
+    }
+
+    def __init__(self) -> None:
+        super().__init__("missing or wrong basic credentials")

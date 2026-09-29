@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from domain_kernel.channels import Channel
 from notification.application.dispatch import DispatchDue
+from notification.application.email_feedback import ReceiveEmailFeedback
 from notification.application.enqueue import EnqueueNotifications
 from notification.application.history import GetNotification, ListNotifications
 from notification.application.preferences import GetPreference, SetOptIn
@@ -40,4 +41,5 @@ class Wiring:
     list_notifications: ListNotifications
     resend: ResendNotification
     reconcile: ReconcileReceipts
+    email_feedback: ReceiveEmailFeedback
     store_ready: Callable[[], Awaitable[bool]]
