@@ -5,10 +5,13 @@ import { PROBLEM_TYPE_PREFIX } from "@/entities/problem/mappers";
 import { fakeFetch, hangingFetch, jsonResponse, refusingFetch } from "@/test/fake-fetch";
 import { defaultMessageFor } from "../result";
 import {
+  CACHED_REQUEST_ID_PREFIX,
   NetworkFailure,
   REQUEST_ID_HEADER,
+  cacheTagsOf,
   call,
   createServiceClient,
+  requestIdFor,
   requestIdOf,
 } from "./client";
 
@@ -66,6 +69,43 @@ describe("createServiceClient", () => {
     const hanging = hangingFetch();
     const client = identityClient(hanging.fetchImpl, 20);
     await expect(client.GET("/v1/identity/billing/plans")).rejects.toBeInstanceOf(NetworkFailure);
+  });
+
+  it("gives a cached read a request id made of its tags and hands next on to fetch", async () => {
+    const fake = fakeFetch([{ method: "GET", path: "/v1/identity/billing/plans", body: [] }]);
+    const client = identityClient(fake.fetchImpl);
+    const options = { next: { revalidate: 300, tags: ["identity:plans", "identity:all"] } };
+    await client.GET("/v1/identity/billing/plans", options);
+    await client.GET("/v1/identity/billing/plans", options);
+    const [first, second] = fake.requests;
+    expect(first?.headers[REQUEST_ID_HEADER]).toBe(
+      `${CACHED_REQUEST_ID_PREFIX}identity:plans,identity:all`,
+    );
+    expect(second?.headers[REQUEST_ID_HEADER]).toBe(first?.headers[REQUEST_ID_HEADER]);
+    expect(first?.next).toEqual(options.next);
+    expect(first?.cache).toBe("default");
+  });
+
+  it("keeps a no-store read uncached with a fresh id", async () => {
+    const fake = fakeFetch([{ method: "GET", path: "/v1/identity/billing/plans", body: [] }]);
+    const client = identityClient(fake.fetchImpl);
+    await client.GET("/v1/identity/billing/plans", { cache: "no-store" });
+    expect(fake.requests[0]?.cache).toBe("no-store");
+    expect(fake.requests[0]?.next).toBeUndefined();
+    expect(fake.requests[0]?.headers[REQUEST_ID_HEADER]).toMatch(UUID);
+  });
+});
+
+describe("requestIdFor", () => {
+  it("reads the tags openapi-fetch copied onto the request, or none", () => {
+    const plain = new Request("http://localhost:8001/v1/identity/billing/plans");
+    expect(cacheTagsOf(plain)).toEqual([]);
+    expect(requestIdFor(plain)).toMatch(UUID);
+    const tagged = Object.assign(new Request("http://localhost:8001/v1/identity/billing/plans"), {
+      next: { revalidate: 300, tags: ["identity:plans", 7] },
+    });
+    expect(cacheTagsOf(tagged)).toEqual(["identity:plans"]);
+    expect(requestIdFor(tagged)).toBe(`${CACHED_REQUEST_ID_PREFIX}identity:plans`);
   });
 });
 

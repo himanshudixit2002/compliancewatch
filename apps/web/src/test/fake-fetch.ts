@@ -17,6 +17,10 @@ export interface RecordedRequest {
   headers: Record<string, string>;
   /** The JSON body, the raw text when it is not JSON, or undefined without a body. */
   body: unknown;
+  /** The Request's cache mode ("default" unless the call set one). */
+  cache: RequestCache;
+  /** The Next fetch options the call carried (from the init, else from the Request). */
+  next?: NextFetchRequestConfig;
 }
 
 export interface FakeRoute {
@@ -75,7 +79,7 @@ export function textResponse(
   return new Response(text, { status, headers: { "content-type": "text/plain", ...headers } });
 }
 
-async function record(raw: Request): Promise<RecordedRequest> {
+async function record(raw: Request, init?: RequestInit): Promise<RecordedRequest> {
   const headers: Record<string, string> = {};
   raw.headers.forEach((value, key) => {
     headers[key] = value;
@@ -90,7 +94,16 @@ async function record(raw: Request): Promise<RecordedRequest> {
     }
   }
   const url = new URL(raw.url);
-  return { method: raw.method, url: raw.url, pathname: url.pathname, headers, body };
+  const next = init?.next ?? (raw as Request & { next?: NextFetchRequestConfig }).next;
+  return {
+    method: raw.method,
+    url: raw.url,
+    pathname: url.pathname,
+    headers,
+    body,
+    cache: raw.cache,
+    ...(next === undefined ? {} : { next }),
+  };
 }
 
 function matches(route: FakeRoute, request: RecordedRequest): boolean {
@@ -123,8 +136,8 @@ export function fakeFetch(routes: readonly FakeRoute[] | FakeHandler): FakeFetch
         };
   return {
     requests,
-    fetchImpl: async (input) => {
-      const recorded = await record(input);
+    fetchImpl: async (input, init) => {
+      const recorded = await record(input, init);
       requests.push(recorded);
       return handler(recorded, input);
     },
@@ -137,7 +150,7 @@ export function hangingFetch(): FakeFetch {
   return {
     requests,
     fetchImpl: async (input, init) => {
-      requests.push(await record(input));
+      requests.push(await record(input, init));
       return new Promise((_, reject) => {
         const signal = init?.signal;
         if (signal === undefined || signal === null) return;
@@ -156,8 +169,8 @@ export function refusingFetch(): FakeFetch {
   const requests: RecordedRequest[] = [];
   return {
     requests,
-    fetchImpl: async (input) => {
-      requests.push(await record(input));
+    fetchImpl: async (input, init) => {
+      requests.push(await record(input, init));
       throw new TypeError("fetch failed", { cause: new Error("connect ECONNREFUSED") });
     },
   };

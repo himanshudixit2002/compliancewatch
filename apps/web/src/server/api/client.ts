@@ -8,20 +8,45 @@ import { networkError, problemFromBody, toApiError } from "./problem";
 
 /**
  * One openapi-fetch client per service, bound to the paths generated from its committed spec.
- * Every request carries a fresh x-request-id (a UUID the services echo as the problem's
- * correlation_id and in their logs), `accept: application/json`, the time limit from
+ * Every request carries an x-request-id (the services echo it as the problem's correlation_id
+ * and in their logs), `accept: application/json`, the time limit from
  * CW_WEB_REQUEST_TIMEOUT_MS, and the headers the service factory adds (the tenant header, the
  * rulebook write token). `call()` turns the client's `{ data, error, response }` into a
  * `Result`: a value with its request id, or an `ApiError` from the problem body; a refused
  * connection or a timeout becomes `kind: "network"`, still with the request id. Nothing here
  * throws for an expected failure, and nothing here runs in a browser.
+ *
+ * The request id is a fresh UUID, except for a cached read (`cachedRead()` in server/cache.ts
+ * puts `next.tags` on the call): Next's fetch cache keys an entry on the request headers too,
+ * so a cached read sends `cached:<tags>` instead and every visitor's read of the same tags is
+ * the same cache entry. openapi-fetch copies the call's `cache` and `next` options onto the
+ * Request it builds; the fetch wrapper passes `next` on again in the init, which is where
+ * Next's fetch looks first.
  */
 export const REQUEST_ID_HEADER = "x-request-id";
 export const TENANT_HEADER = "x-tenant-id";
 export const WRITE_TOKEN_HEADER = "x-cw-write-token";
 
+/** The request id of a cached read: `cached:` and its tags, joined with commas. */
+export const CACHED_REQUEST_ID_PREFIX = "cached:";
+
 /** What a test injects in place of fetch: the Request openapi-fetch built plus the signal. */
 export type FetchImpl = (input: Request, init?: RequestInit) => Promise<Response>;
+
+/** A Request that may carry the `next` fetch options openapi-fetch copied from the call. */
+export type CacheableRequest = Request & { next?: NextFetchRequestConfig };
+
+/** The cache tags of the call behind a request; empty for an uncached one. */
+export function cacheTagsOf(request: Request): readonly string[] {
+  const tags = (request as CacheableRequest).next?.tags;
+  return Array.isArray(tags) ? tags.filter((tag) => typeof tag === "string") : [];
+}
+
+/** A UUID, or the stable id of a cached read so its cache key is stable too. */
+export function requestIdFor(request: Request): string {
+  const tags = cacheTagsOf(request);
+  return tags.length === 0 ? randomUUID() : `${CACHED_REQUEST_ID_PREFIX}${tags.join(",")}`;
+}
 
 export interface ServiceClientOptions {
   service: ServiceName;
@@ -58,6 +83,14 @@ function withTimeout(request: Request, timeoutMs: number): AbortSignal {
   return AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]);
 }
 
+/** The init the wrapper hands to fetch: the time limit, plus the call's `next` options. */
+function fetchInit(request: Request, timeoutMs: number): RequestInit {
+  const init: RequestInit = { signal: withTimeout(request, timeoutMs) };
+  const next = (request as CacheableRequest).next;
+  if (next !== undefined) init.next = next;
+  return init;
+}
+
 export function createServiceClient<Paths extends object>(
   options: ServiceClientOptions,
 ): Client<Paths> {
@@ -65,11 +98,11 @@ export function createServiceClient<Paths extends object>(
   const client = createClient<Paths>({
     baseUrl: options.baseUrl,
     headers: { accept: "application/json", ...options.headers },
-    fetch: (request) => fetchImpl(request, { signal: withTimeout(request, options.timeoutMs) }),
+    fetch: (request) => fetchImpl(request, fetchInit(request, options.timeoutMs)),
   });
   client.use({
     onRequest({ request }) {
-      request.headers.set(REQUEST_ID_HEADER, randomUUID());
+      request.headers.set(REQUEST_ID_HEADER, requestIdFor(request));
     },
     onResponse({ request, response }) {
       REQUEST_IDS.set(response, request.headers.get(REQUEST_ID_HEADER) ?? "");

@@ -191,3 +191,36 @@ of importing them. Consequences: a form's vocabulary lives in the feature's `mod
 unit-tested there; the client bundle carries no config module; the tenant shell's header shows
 the business and account groups of the navigation for a session (settings pages stay reachable
 from the sitemap until a settings menu exists).
+
+## D-017: Global reads are cached by tag for five minutes; tenant reads are never cached
+
+2026-09-29. Some records are the same for every tenant (billing plans, notification templates,
+the rulebook's rules, documents and review queues, the gateway's prompts and models) and change
+rarely; everything else is keyed by the session's tenant and must be current. `server/cache.ts`
+builds the tags (`tags.identity.plans()`, `tags.rulebook.document(id)`, ...), `cachedRead(tags)`
+gives a global read `next: { revalidate: 300, tags }`, `uncachedRead()` gives a tenant read
+`cache: "no-store"`, and `afterMutation({ tags, paths })` in a server action expires the tags
+with `updateTag` (read-your-writes) and refreshes the routes with `revalidatePath`. Authenticated
+pages stay `force-dynamic`: Next honours an explicit `revalidate` on a fetch inside such a page
+(only a fetch with no cache option is forced to no-store). Next keys a fetch cache entry on the
+request headers too, so `server/api/client.ts` gives a cached read the request id `cached:<tags>`
+instead of a fresh UUID; a cached read's correlation id therefore names the tags, not one
+request. Consequences: no `cacheComponents`, no `"use cache"` and no `revalidateTag(tag, "max")`
+on `main`; a screen that caches a read must name a tag the writing action expires; a read whose
+call sends `Authorization` or `Cookie` is never cached by Next unless it carries an explicit
+`revalidate`, which is the case for every `cachedRead`.
+
+## D-018: No Idempotency-Key until a route reads it; natural keys make the creating writes safe
+
+2026-09-29. No service route reads an `Idempotency-Key` on `main`, yet every creating write the
+screens make is safe to repeat: a profile registration is found by its GSTIN, an entity by its
+PAN and a location by its label (a second POST returns the existing node with `created:
+false`); identity consents are append-only and the state is the latest row; a rulebook document
+is keyed by its sha256 (201 created, 200 unchanged, 409 when the metadata differs) and its
+mentions and relation candidates by the document and the extractor; a notification preference
+is a PUT by channel and recipient. `server/api/idempotency.ts` keeps the wiring ready: a page
+renders `<IdempotencyKeyInput />` (one UUID per render of the form) and an action calls
+`idempotencyHeaders(formData, operation)`, which answers the header only for an operation in
+`IDEMPOTENT_OPERATIONS`, empty today. Consequences: when a route starts reading the header, the
+operation's name is added to the set and no form or action changes; a form value that is not a
+UUID is ignored, so the hidden field cannot inject a header.
