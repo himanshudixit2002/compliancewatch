@@ -96,6 +96,7 @@ jobs:
               - 'services/applicability-engine/**'
               - 'packages/domain-kernel/**'
               - 'packages/ontology/**'
+              - 'packages/py-common/**'
               - 'pyproject.toml'
               - 'uv.lock'
               - 'Makefile'
@@ -340,8 +341,8 @@ jobs:
 # TODO (guide section 17, steps 4-7) - not implemented yet:
 #   4. integration: testcontainers (Postgres, Redpanda, Temporal test server) for affected services,
 #                   e.g. `uv run pytest -m integration` (Docker is available on ubuntu-latest)
-#   5. evals:       done for extraction (job "evals" above, nightly.yml for real providers); the qa
-#                   and applicability suites arrive with their golden sets
+#   5. evals:       done for extraction, relations and qa (job "evals" above, nightly.yml for real
+#                   providers); the applicability suite arrives with its golden set
 #   6. images:      per-service image build, SBOM (syft), Trivy scan, cosign sign, push to ECR
 #   7. deploy:      Argo CD sync to staging, Playwright e2e and k6 smoke against staging
 # -----------------------------------------------------------------------------------------------
