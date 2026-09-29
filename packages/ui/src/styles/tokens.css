@@ -4,10 +4,11 @@
   This file is imported by apps/web/src/app/globals.css AFTER `@import "tailwindcss"`; it never
   imports Tailwind itself. It has three parts:
 
-  1. Colour roles as plain CSS custom properties in hex, once for the light scheme (:root) and
-     once for the dark scheme (.dark, and prefers-color-scheme unless .light is set). The two dark
-     blocks must stay identical; src/tokens.test.ts checks that, and src/contrast.test.ts checks
-     WCAG AA contrast (4.5:1 for text pairs, 3:1 for UI pairs) in both schemes.
+  1. Colour roles as plain CSS custom properties in hex (plus `overlay`, the scrim behind
+     dialogs), once for the light scheme (:root) and once for the dark scheme (.dark, and
+     prefers-color-scheme unless .light is set). The two dark blocks must stay identical;
+     src/tokens.test.ts checks that, and src/contrast.test.ts checks WCAG AA contrast (4.5:1 for
+     text pairs, 3:1 for UI pairs) in both schemes.
   2. An `@theme inline` block that maps the roles onto Tailwind namespaces, so the utilities are
      bg-bg, bg-surface, text-fg, text-fg-muted, border-line, ring-focus, bg-danger and so on. The
      default Tailwind palette is removed: colours are only reachable through these roles.
@@ -41,6 +42,7 @@
   --info: #0369a1;
   --info-fg: #ffffff;
   --focus: #2563eb;
+  --overlay: #101828;
 }
 
 .dark {
@@ -65,6 +67,7 @@
   --info: #38bdf8;
   --info-fg: #041b2b;
   --focus: #93c5fd;
+  --overlay: #000000;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -90,6 +93,7 @@
     --info: #38bdf8;
     --info-fg: #041b2b;
     --focus: #93c5fd;
+    --overlay: #000000;
   }
 }
 
@@ -115,6 +119,7 @@
   --color-info: var(--info);
   --color-info-fg: var(--info-fg);
   --color-focus: var(--focus);
+  --color-overlay: var(--overlay);
 }
 
 @theme {
@@ -149,6 +154,13 @@
   body {
     background-color: var(--bg);
     color: var(--fg);
+  }
+
+  /* A bare `border` utility draws the line colour, so components never restate it. */
+  *,
+  ::before,
+  ::after {
+    border-color: var(--line);
   }
 
   *:focus-visible {

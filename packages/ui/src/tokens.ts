@@ -25,6 +25,7 @@ export const COLOR_TOKENS = [
   "info",
   "info-fg",
   "focus",
+  "overlay",
 ] as const;
 
 export type ColorToken = (typeof COLOR_TOKENS)[number];
