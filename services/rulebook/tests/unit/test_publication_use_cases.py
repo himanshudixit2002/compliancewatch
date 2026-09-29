@@ -193,12 +193,18 @@ def test_citations_are_all_or_nothing(
         assert uow.citations.for_version(version) == ()
 
 
-def test_a_published_version_takes_no_new_citation(
-    store: MemoryKnowledgeStore, flow: Flow, clause: ClauseId
+@pytest.mark.parametrize(
+    "status",
+    [RuleVersionStatus.IN_REVIEW, RuleVersionStatus.APPROVED, RuleVersionStatus.PUBLISHED],
+)
+def test_only_a_draft_takes_new_citations(
+    store: MemoryKnowledgeStore, flow: Flow, clause: ClauseId, status: RuleVersionStatus
 ) -> None:
-    _, published = store.add_rule("gstr1_monthly", status=RuleVersionStatus.PUBLISHED)
-    with pytest.raises(RuleVersionNotEditableError):
-        flow.cite.run(published, [CitationInput(clause, QUOTE)])
+    _, version = store.add_rule("gstr1_monthly", status=status)
+    with pytest.raises(RuleVersionNotEditableError, match=status.value):
+        flow.cite.run(version, [CitationInput(clause, QUOTE)])
+    with store() as uow:
+        assert uow.citations.for_version(version) == ()
 
 
 # ---------------------------------------------------------------- review
@@ -288,6 +294,39 @@ def test_returning_a_version_starts_a_new_round(
         DecisionAction.SUBMITTED,
         DecisionAction.APPROVED,
         DecisionAction.APPROVED,
+    ]
+
+
+def test_an_approved_version_is_returned_to_draft_to_change_it(
+    store: MemoryKnowledgeStore, flow: Flow, clause: ClauseId
+) -> None:
+    version = draft(store)
+    flow.through_review(version, clause)
+    other = "The due date for furnishing the return in FORM GSTR-3B for the month of September"
+    with pytest.raises(RuleVersionNotEditableError, match="approved"):
+        flow.cite.run(version, [CitationInput(clause, other)])
+    returned = flow.return_to_draft.run(version, actor_id=ANALYST, note="one more citation")
+    assert (returned.record.status, returned.record.submitted_at) == (RuleVersionStatus.DRAFT, None)
+    assert returned.record.seed_status is SeedStatus.NEEDS_REVIEW
+    assert flow.cite.run(version, [CitationInput(clause, other)]).added == 1
+    flow.submit.run(version, actor_id=ANALYST)
+    with pytest.raises(InvalidTransitionError):
+        flow.publish.run(version, actor_id=ANALYST)
+    again = flow.approve.run(version, actor_id=REVIEWER)
+    assert (again.record.status, again.record.seed_status) == (
+        RuleVersionStatus.APPROVED,
+        SeedStatus.REVIEWED,
+    )
+    assert flow.publish.run(version, actor_id=ANALYST).plan.published.status is (
+        RuleVersionStatus.PUBLISHED
+    )
+    assert [d.action for d in store.decisions(version)] == [
+        DecisionAction.SUBMITTED,
+        DecisionAction.APPROVED,
+        DecisionAction.RETURNED,
+        DecisionAction.SUBMITTED,
+        DecisionAction.APPROVED,
+        DecisionAction.PUBLISHED,
     ]
 
 

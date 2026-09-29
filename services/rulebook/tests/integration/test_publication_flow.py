@@ -235,6 +235,9 @@ def test_the_guard_refuses_what_the_kernel_does_not_allow(
     update(engine, version_id, "title = 'drafts may change'")
     update(engine, version_id, "status = 'in_review', submitted_at = clock_timestamp()")
     update(engine, version_id, "status = 'approved'")
+    update(engine, version_id, "status = 'draft', submitted_at = NULL")
+    update(engine, version_id, "status = 'in_review', submitted_at = clock_timestamp()")
+    update(engine, version_id, "status = 'approved'")
     with pytest.raises(IntegrityError, match="needs published_at"):
         update(engine, version_id, "status = 'published'")
     with pytest.raises(IntegrityError, match="verified citations"):

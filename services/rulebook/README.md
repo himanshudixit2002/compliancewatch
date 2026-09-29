@@ -48,7 +48,8 @@ message if either table has rows (nothing writes them before it).
 
 Migration 0007 puts `rulebook_rule_version_guard` on `rule_version` (BEFORE UPDATE): the status
 moves only along the kernel's `RULE_VERSION_TRANSITIONS` (draft to in_review, in_review to
-approved or back to draft, approved to published, published to superseded or withdrawn); once a
+approved, in_review or approved back to draft, approved to published, published to superseded or
+withdrawn); once a
 version is published, superseded or withdrawn its content is frozen and `effective_to` may only
 be set or moved earlier; and approved to published needs `published_at`, at least one verified
 citation and no unverified one, and one distinct approver in `rule_version_decision` since
@@ -67,7 +68,7 @@ rules. `tests/unit/test_models_vocabulary.py` pins the trigger's literal pairs t
 | `GET /v1/rulebook/review/entities/items` | Every open mention of one group with its review id |
 | `POST /v1/rulebook/review/entities/decisions` | Create the entity, add the name to an existing one, or reject the group; resolves every open mention of the group and points open candidates at the entity. A name that does not name one entity across documents (empty, or a section or rule without its statute) is decided mention by mention: the decision lists the `review_ids` it covers and adds no alias. Needs the token |
 | `GET /v1/rulebook/review/relations` | Relation candidates, open ones by default |
-| `POST /v1/rulebook/review/relations/{id}/approve` | Approve into a `rule_relation` from a rule version not yet published (and to the target version for supersedes, extends_deadline, corrects, withdraws); refuses supersession cycles. Needs the token |
+| `POST /v1/rulebook/review/relations/{id}/approve` | Approve into a `rule_relation` from a draft rule version (and to the target version for supersedes, extends_deadline, corrects, withdraws); 409 `rulebook-rule-version-not-editable` when the version is not a draft; refuses supersession cycles. Needs the token |
 | `POST /v1/rulebook/review/relations/{id}/reject` | Reject with a reason. Needs the token |
 | `GET /v1/rulebook/rules` | Rule keys with their latest title, the list the relation prompt may choose a rule from |
 | `GET /v1/rulebook/rule-versions?as_of=&rule_key=&regulator=&limit=&after=` | Versions in force on `as_of`: published or superseded, with `effective_from <= as_of < effective_to`; ordered by rule key, paged with `after` (a rule key) |
@@ -81,9 +82,9 @@ rules. `tests/unit/test_models_vocabulary.py` pins the trigger's literal pairs t
 | `GET /v1/rulebook/clauses/unembedded?model=&document_id=&limit=&after=` | Clauses with no embedding from `model`, in clause id order, with their document's metadata (for the embedding text) |
 | `POST /v1/rulebook/search` | Hybrid search, see below |
 | `GET /v1/rulebook/clauses/{id}` | A clause with its document's regulator, type, reference, title, URL, language and date; 404 `rulebook-clause-unknown` when no clause has the id |
-| `PUT /v1/rulebook/rule-versions/{id}/citations` | Cite clauses for a version not yet published: `{citations: [{clause_id, quote}]}` (1 to 50). Every quote must match its clause (`quote_match_ratio >= 0.85`) and carry no number, form code or month name the clause lacks, else 422 `rulebook-citation-not-verified` and nothing is stored. Returns `{added, unchanged, citations}`; a citation's id derives from version, clause and quote. Needs the token |
+| `PUT /v1/rulebook/rule-versions/{id}/citations` | Cite clauses for a draft version (409 `rulebook-rule-version-not-editable` otherwise): `{citations: [{clause_id, quote}]}` (1 to 50). Every quote must match its clause (`quote_match_ratio >= 0.85`) and carry no number, form code or month name the clause lacks, else 422 `rulebook-citation-not-verified` and nothing is stored. Returns `{added, unchanged, citations}`; a citation's id derives from version, clause and quote. Needs the token |
 | `POST /v1/rulebook/rule-versions/{id}/submit` | Draft to in_review: `{actor_id, high_impact?, note?}`. Starts a new approval round; a high-impact tag, once set, stays. Needs the token |
-| `POST /v1/rulebook/rule-versions/{id}/return` | In_review back to draft: `{actor_id, note?}`. The round's approvals no longer count. Needs the token |
+| `POST /v1/rulebook/rule-versions/{id}/return` | In_review or approved back to draft: `{actor_id, note?}`. The round's approvals no longer count and the seed status is needs_review again; the next submission starts a new round. Needs the token |
 | `POST /v1/rulebook/rule-versions/{id}/approve` | One approval: `{actor_id, note?}`. The one that completes the round (one approver, two different ones when high impact) moves the version to approved and its seed status to reviewed; the same approver twice is 409 `rulebook-duplicate-approver`. Needs the token |
 | `POST /v1/rulebook/rule-versions/{id}/publish` | Approved to published, applying the version's relations and writing the rule events; see below. `{actor_id, note?}`. Needs the token and the flag |
 | `POST /v1/rulebook/rule-versions/{id}/withdraw` | Published to withdrawn with `rule.withdrawn` (no withdrawing version, effective today); 409 `rulebook-replacements-pending` while a version it replaces has not moved yet. Needs the token and the flag |
@@ -130,7 +131,10 @@ sending a query vector both embed through the LLM gateway.
 ## Publish lifecycle
 
 A version goes draft, in_review, approved, published (ADR-006): cite its clauses, submit it,
-approve it (one approver; two different ones when `high_impact`), publish it. Every step is one
+approve it (one approver; two different ones when `high_impact`), publish it. Citations and
+relations are added only while the version is a draft, so the round approves exactly what is
+published; to change them, return the version (under review or approved) to draft, which starts
+a new round. Every step is one
 transaction that locks the version, checks the move against the kernel's transition table and
 appends a row to `rule_version_decision`; the kernel's `InvalidTransitionError` is a 409. Days
 are days in India: "today" is the date in Asia/Kolkata when the step runs.

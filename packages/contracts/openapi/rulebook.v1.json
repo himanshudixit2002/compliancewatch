@@ -4601,7 +4601,7 @@
             "description": "Service Unavailable"
           }
         },
-        "summary": "Approve a candidate into a rule relation from a rule version not yet published",
+        "summary": "Approve a candidate into a rule relation from a draft rule version",
         "tags": [
           "rulebook",
           "review"
@@ -5160,7 +5160,7 @@
             "description": "Service Unavailable"
           }
         },
-        "summary": "Cite clauses for a version not yet published; every quote must be in its clause",
+        "summary": "Cite clauses for a draft version; every quote must be in its clause",
         "tags": [
           "rulebook",
           "publication"
@@ -5384,7 +5384,7 @@
             "description": "Service Unavailable"
           }
         },
-        "summary": "Send a version under review back to draft",
+        "summary": "Send a version under review or approved back to draft; starts a new round",
         "tags": [
           "rulebook",
           "publication"

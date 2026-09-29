@@ -2,7 +2,9 @@
 replacement takes effect.
 
 A version is drafted (the seed calendar writes drafts), cited, submitted for review, approved by
-one analyst or two different ones when it is high impact, and published (ADR-006). Each step is
+one analyst or two different ones when it is high impact, and published (ADR-006). Citations and
+relations change only while it is a draft, so the round approves what is published; a version
+under review or approved is returned to draft to change them. Each step is
 one transaction: it locks the version, checks the move against the kernel's transition table,
 writes the new state and appends a row to the decision audit. Publishing writes its events to
 the outbox in the same transaction; ``rulebook.domain.publication`` decides what it changes.
@@ -146,7 +148,7 @@ def _decision(
 
 
 class AddCitations:
-    """Cite clauses for a version before publication. All or nothing: every quote must be in its
+    """Cite clauses for a draft version. All or nothing: every quote must be in its
     clause (a fuzzy score of at least 0.85 and every number, form code and month name present),
     otherwise nothing is stored. A citation's id derives from the version, clause and quote, so
     sending the same one again changes nothing."""
@@ -252,8 +254,9 @@ class SubmitForReview:
 
 
 class ReturnToDraft:
-    """Send a version under review back to draft. Its approvals stay in the audit but no longer
-    count: the next submission starts a new round."""
+    """Send a version under review or approved back to draft. Its approvals stay in the audit
+    but no longer count: the next submission starts a new round, and its seed status is back to
+    needs_review until that round is complete."""
 
     def __init__(self, unit_of_work: KnowledgeUnitOfWorkFactory, clock: Clock = default_clock):
         self._unit_of_work = unit_of_work
@@ -266,7 +269,12 @@ class ReturnToDraft:
         with self._unit_of_work() as uow:
             version = _locked(uow, rule_version_id)
             RULE_VERSION_TRANSITIONS.assert_transition(version.status, RuleVersionStatus.DRAFT)
-            returned = replace(version, status=RuleVersionStatus.DRAFT, submitted_at=None)
+            returned = replace(
+                version,
+                status=RuleVersionStatus.DRAFT,
+                submitted_at=None,
+                seed_status=SeedStatus.NEEDS_REVIEW,
+            )
             uow.rule_versions.save_lifecycle(returned)
             uow.rule_versions.record_decision(
                 _decision(

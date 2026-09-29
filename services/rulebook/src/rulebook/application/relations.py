@@ -5,8 +5,8 @@ stays a name and the candidate carries the issue ``target_unaligned`` until the 
 for that name is decided. Nothing the pipeline sent is dropped: proposals it could not turn into
 candidates are kept verbatim in the run's issues.
 
-Approval needs the rule version the relation starts from, still before publication, and for a
-relation that must target a rule version the version it targets. It writes one ``rule_relation``
+Approval needs the rule version the relation starts from, still a draft, and for a relation
+that must target a rule version the version it targets. It writes one ``rule_relation``
 row pointing back at the candidate; a supersession that would close a cycle is refused.
 """
 

@@ -512,19 +512,22 @@ def test_an_entity_target_must_be_aligned_first(store: MemoryKnowledgeStore) -> 
 
 
 @pytest.mark.parametrize(
-    ("status", "error"),
+    "status",
     [
-        (RuleVersionStatus.PUBLISHED, RuleVersionNotEditableError),
-        (RuleVersionStatus.WITHDRAWN, RuleVersionNotEditableError),
+        RuleVersionStatus.IN_REVIEW,
+        RuleVersionStatus.APPROVED,
+        RuleVersionStatus.PUBLISHED,
+        RuleVersionStatus.WITHDRAWN,
     ],
 )
-def test_the_from_version_must_be_before_publication(
-    store: MemoryKnowledgeStore, status: RuleVersionStatus, error: type[Exception]
+def test_the_from_version_must_be_a_draft(
+    store: MemoryKnowledgeStore, status: RuleVersionStatus
 ) -> None:
     _, version = store.add_rule("r", status=status)
     (candidate_id,) = stage(store, REFERS)
-    with pytest.raises(error):
+    with pytest.raises(RuleVersionNotEditableError, match=status.value):
         ApproveRelationCandidate(store, clock).run(candidate_id, version, None, decided_by="a")
+    assert store.rule_relations() == []
 
 
 def test_unknown_versions_and_candidates(store: MemoryKnowledgeStore) -> None:

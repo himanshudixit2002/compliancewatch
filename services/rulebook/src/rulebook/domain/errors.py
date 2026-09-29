@@ -110,11 +110,12 @@ class UnknownRuleVersionError(DomainError, LookupError):
 
 
 class RuleVersionNotEditableError(DomainError, ValueError):
-    """Relations are approved together with the version they start from, before it is
-    published; a published, superseded or withdrawn version does not change."""
+    """Relations and citations are added while the version they belong to is a draft: return a
+    version under review or approved to draft first. A published, superseded or withdrawn
+    version does not change."""
 
     type_slug = "rulebook-rule-version-not-editable"
-    title = "Rule version is past approval"
+    title = "Rule version is not a draft"
 
 
 class SupersessionCycleError(DomainError, ValueError):

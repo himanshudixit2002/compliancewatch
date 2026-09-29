@@ -128,7 +128,7 @@ def list_relation_candidates(
 
 @router.post(
     "/review/relations/{candidate_id}/approve",
-    summary="Approve a candidate into a rule relation from a rule version not yet published",
+    summary="Approve a candidate into a rule relation from a draft rule version",
     tags=["review"],
     dependencies=[WriteAccess],
     responses=problem_responses(401, 404, 409, 422, 503),

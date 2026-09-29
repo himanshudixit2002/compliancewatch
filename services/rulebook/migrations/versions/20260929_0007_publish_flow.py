@@ -57,6 +57,7 @@ BEGIN
        ('in_review', 'approved'),
        ('in_review', 'draft'),
        ('approved', 'published'),
+       ('approved', 'draft'),
        ('published', 'superseded'),
        ('published', 'withdrawn')
      ) THEN

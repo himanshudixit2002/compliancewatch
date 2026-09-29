@@ -25,7 +25,7 @@ router = APIRouter(tags=["publication"], dependencies=[WriteAccess])
 
 @router.put(
     "/rule-versions/{rule_version_id}/citations",
-    summary="Cite clauses for a version not yet published; every quote must be in its clause",
+    summary="Cite clauses for a draft version; every quote must be in its clause",
     responses=problem_responses(401, 404, 409, 422, 503),
 )
 def add_citations(rule_version_id: UUID, body: CitationsIn, wired: Wired) -> CitationsOut:
@@ -52,7 +52,7 @@ def submit(rule_version_id: UUID, body: SubmitIn, wired: Wired) -> LifecycleOut:
 
 @router.post(
     "/rule-versions/{rule_version_id}/return",
-    summary="Send a version under review back to draft",
+    summary="Send a version under review or approved back to draft; starts a new round",
     responses=problem_responses(401, 404, 409, 503),
 )
 def return_to_draft(rule_version_id: UUID, body: ActorIn, wired: Wired) -> LifecycleOut:
