@@ -20,6 +20,11 @@ export const FIXTURES = {
   paragraph:
     "Example clause text that runs long enough to wrap onto a second line, so spacing and line height can be judged.",
   quote: "Example clause text, quoted as stored and never paraphrased.",
+  highlight: {
+    before: "Example clause text with ",
+    mark: "a marked span",
+    after: " that a link pointed at.",
+  },
   clauseRef: "Example clause 3(1)",
   documentTitle: "Example document title",
   documentHref: "#example-document",

@@ -57,18 +57,21 @@ apps/web/
                                catch-all [...slug]
     admin/                     (home)/ for /admin (the counts, the services summary and the tool list, with its
                                loading skeleton), the admin layout behind requireAdmin, its error and not-found
-                               boundaries, the catch-all [...slug]
+                               boundaries, rulebook/documents (open by id) and its [documentId] viewer, the
+                               catch-all [...slug]
     sign-out/route.ts          POST: clears the session cookie
     api/health/route.ts        {status, version, commit}
     error.tsx, global-error.tsx, not-found.tsx
   src/features/                home, sitemap, legal, not-available, admin-home, system-pages, design-catalogue,
                                auth (sign-in form, action, seed state), account, business (the business API and
                                profile node gateway, the attribute view models and controls), consents (the
-                               consent step)
+                               consent step), rulebook-documents (open a document, the viewer with clause
+                               anchors and marked spans)
   src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims),
                                ontology/ (the attributes and their wording from GET /v1/ontology),
                                business/ (a business, its nodes and values, onboarding, review tasks, snapshots),
-                               consent/ (consent records), notification/ (a channel preference)
+                               consent/ (consent records), notification/ (a channel preference),
+                               rulebook/ (a rulebook document and its clauses)
   src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError, webError),
                                api/ (typed clients, problem parsing, idempotency), cache.ts (tags and revalidation),
                                session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a
