@@ -94,6 +94,9 @@ step, and when identity cannot be read it passes on that problem.
   the demo `29ABCDE1234F1Z5`; every other GSTIN gets the plain note, and the page says so under
   the field. Nothing is ever invented to fill the panel.
 - "Add another business" loads the page afresh, so the next form has a new key.
+- An owner with one business is sent from `/businesses` straight to it, so the business's home
+  links back here ("Add another business"), and another GSTIN of the same business is added on
+  its profile page ([business-pages.md](business-pages.md)).
 
 ## 3. Questions: `/onboarding/[businessId]/questions`
 

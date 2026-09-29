@@ -36,6 +36,7 @@ export default async function BusinessHomePage({ params }: Props) {
     session.roles,
     session.tenantKind,
   );
+  const addsBusiness = screenById("owner.onboarding.business");
   return (
     <BusinessHome
       view={home.value}
@@ -47,8 +48,12 @@ export default async function BusinessHomePage({ params }: Props) {
         reviewTasks: at("owner.business.review-tasks"),
         questions: onboards ? at("owner.onboarding.questions") : null,
         done: onboards ? at("owner.onboarding.done") : null,
+        addBusiness: isVisibleTo(addsBusiness, session.roles, session.tenantKind)
+          ? hrefFor(addsBusiness)
+          : null,
       }}
       later={laterScreens(session, businessId)}
+      clients={session.tenantKind === "ca_firm"}
     />
   );
 }

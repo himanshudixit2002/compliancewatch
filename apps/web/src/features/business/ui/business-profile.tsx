@@ -1,10 +1,12 @@
 import type { Route } from "next";
 import Link from "next/link";
-import { KeyValue } from "@compliancewatch/ui";
+import type { ReactNode } from "react";
+import { Banner, Button, KeyValue } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
 import type { BusinessHeader } from "../model/business-pages";
 import { BusinessPageHeader, type BusinessPageHeaderProps } from "./business-page-header";
 import { LocationForm, type LocationAction } from "./location-form";
+import { RegistrationForm, type RegistrationAction } from "./registration-form";
 
 export interface NodeLinks {
   attributes: string;
@@ -20,7 +22,28 @@ export interface BusinessProfileProps {
   /** Null for a role that may not change the profile (a compliance lead). */
   locationAction: LocationAction | null;
   locationFields: { businessId: string; registrationId: string; label: string; name: string };
+  /**
+   * Adding a GSTIN: the form, or the way to the consent step while the required consents are
+   * not on file; null for a role that may not change the profile.
+   */
+  registration: RegistrationSection | null;
+  /** The business step, for a GSTIN of another PAN; null for a role that does not add one. */
+  addBusinessHref: string | null;
+  /** True for a CA firm, whose businesses are its clients. */
+  clients?: boolean;
 }
+
+export type RegistrationSection =
+  | {
+      status: "form";
+      action: RegistrationAction;
+      /** The hidden Idempotency-Key input the page rendered for this form. */
+      idempotencyInput: ReactNode;
+      fields: { businessId: string; gstin: string; name: string };
+      /** This page again, loaded afresh for another GSTIN. */
+      againHref: string;
+    }
+  | { status: "consent-first"; consentHref: string };
 
 function NodeLinksLine({ links }: { links: NodeLinks | undefined }) {
   if (links === undefined) return null;
@@ -37,10 +60,63 @@ function NodeLinksLine({ links }: { links: NodeLinks | undefined }) {
   );
 }
 
+function AddRegistration({
+  business,
+  section,
+  addBusinessHref,
+  clients,
+}: {
+  business: BusinessHeader;
+  section: RegistrationSection;
+  addBusinessHref: string | null;
+  clients: boolean;
+}) {
+  return (
+    <section aria-labelledby="profile-add-registration" className="flex flex-col gap-3">
+      <h2 id="profile-add-registration" className="text-lg font-semibold text-fg">
+        {t("registration.title")}
+      </h2>
+      <p className="text-sm text-fg-muted">
+        {t("registration.intro")}{" "}
+        {addBusinessHref === null ? null : (
+          <Link href={addBusinessHref as Route} className="text-primary underline">
+            {clients ? t("business.addClient") : t("business.addBusiness")}
+          </Link>
+        )}
+      </p>
+      {section.status === "form" ? (
+        <RegistrationForm
+          action={section.action}
+          businessId={business.id}
+          businessName={business.name}
+          pan={business.pan}
+          idempotencyInput={section.idempotencyInput}
+          fields={section.fields}
+          againHref={section.againHref}
+        />
+      ) : (
+        <Banner
+          tone="warning"
+          title={t("businessStep.consentFirstTitle")}
+          data-slot="registration-consent-first"
+          action={
+            <Button asChild variant="secondary" size="sm">
+              <Link href={section.consentHref as Route}>{t("businessStep.consentFirstLink")}</Link>
+            </Button>
+          }
+        >
+          {t("businessStep.consentFirst")}
+        </Banner>
+      )}
+    </section>
+  );
+}
+
 /**
  * The business's hierarchy: the legal entity by its PAN, then each GSTIN registration, each with
  * links to its attributes and snapshot and, for a role that may change the profile, a form to add
- * a location under it. Locations are not listed: no route lists a registration's children yet.
+ * a location under it, and a form to add another GSTIN of the business (once the required
+ * consents are on file). Locations are not listed: no route lists a registration's children yet.
  */
 export function BusinessProfile({
   title,
@@ -49,6 +125,9 @@ export function BusinessProfile({
   nodeLinks,
   locationAction,
   locationFields,
+  registration,
+  addBusinessHref,
+  clients = false,
 }: BusinessProfileProps) {
   return (
     <div data-slot="business-profile" className="flex max-w-4xl flex-col gap-6">
@@ -114,6 +193,14 @@ export function BusinessProfile({
         ))}
         <p className="text-sm text-fg-muted">{t("location.notListed")}</p>
       </section>
+      {registration === null ? null : (
+        <AddRegistration
+          business={business}
+          section={registration}
+          addBusinessHref={addBusinessHref}
+          clients={clients}
+        />
+      )}
     </div>
   );
 }

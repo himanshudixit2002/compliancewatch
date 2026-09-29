@@ -357,16 +357,18 @@ cookies only means the unsure questions are asked again.
 ## The businesses list and the business pages
 
 `/businesses` lists the tenant's businesses by name, 20 at a time (`GET /v1/businesses` with
-`limit` and the opaque `cursor`). A business tenant with exactly one business is redirected to it;
-a CA firm always sees its client list. The search term matches a name, a PAN or a GSTIN, so the
+`limit` and the opaque `cursor`). A business tenant with exactly one business is redirected to it,
+so its home links to the business step for another one; a CA firm always sees its client list. The search term matches a name, a PAN or a GSTIN, so the
 search box and the pager post to the `searchBusinesses` server action and the list is redrawn from
 its answer: the term never reaches a URL, the browser history or a server log line of the page's
 path. The first page is rendered on the server.
 
 A business's pages are `/b/[businessId]` (home: identifiers, registrations, onboarding progress,
 a tile per page, the screens not built yet with their status), `/profile` (the entity by its PAN,
-each registration by its GSTIN, and adding a location with `POST /v1/profile/locations` after the
-registration is checked against the business), `/attributes` and `/snapshot` (one node and one
+each registration by its GSTIN, adding a location with `POST /v1/profile/locations` after the
+registration is checked against the business, and adding another GSTIN with `addRegistration`:
+`POST /v1/businesses/{id}/registrations` with the Idempotency-Key the page rendered
+(`profile.add-registration`), after the required consents and the business's PAN are checked), `/attributes` and `/snapshot` (one node and one
 financial year, chosen with `?node=<id>&fy=<label>`: node ids and year labels are not personal
 data) and `/review-tasks`. The business id is the entity node's id; a node is the entity, one of
 its registrations (`GET /v1/businesses/{id}` lists them), or a location whose parent is one of

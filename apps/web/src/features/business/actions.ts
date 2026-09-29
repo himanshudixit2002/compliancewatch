@@ -27,6 +27,12 @@ import { parseBusinessForm } from "./model/business-form";
 import { readDirectoryQuery, type DirectoryPage } from "./model/directory";
 import { parseLocationForm } from "./model/location-form";
 import { businessStepResult, type BusinessStepResult } from "./model/prefill";
+import {
+  panMismatch,
+  parseRegistrationForm,
+  registrationAddedResult,
+  type RegistrationAddedResult,
+} from "./model/registration-form";
 import { skipKey } from "./model/questions";
 import { parseAnswer } from "./model/values";
 import { getDirectoryPage } from "./queries";
@@ -275,4 +281,59 @@ export async function addLocation(
     attributesHref: `${hrefFor(screenById("owner.business.attributes"), { businessId })}${query}`,
     snapshotHref: `${hrefFor(screenById("owner.business.snapshot"), { businessId })}${query}`,
   });
+}
+
+/**
+ * Adds another GSTIN registration to a business from its profile page, with
+ * `POST /v1/businesses/{business_id}/registrations` and the Idempotency-Key the page rendered
+ * into the form (`profile.add-registration`), so a double submit adds it once. Only a role that
+ * may change the profile gets here, and only with the required consents on file, as for creating
+ * a business: the GSTIN lookup runs on it, and the profile service checks neither. The business
+ * is read first, so a GSTIN of another PAN gets a plain field error (that is another business,
+ * added from the business step) rather than the service's refusal. The answer names the
+ * registration, whether it is new, and whether the lookup filled it in or a review task was
+ * opened to verify it.
+ */
+export async function addRegistration(
+  _state: ActionState<RegistrationAddedResult>,
+  formData: FormData,
+): Promise<ActionState<RegistrationAddedResult>> {
+  const parsed = parseRegistrationForm(formData);
+  if (!parsed.ok) {
+    return parsed.fieldErrors === undefined
+      ? actionFailure(parsed.formError ?? t("question.error.form"))
+      : fieldFailure(parsed.fieldErrors);
+  }
+  const { businessId, gstin, name } = parsed.value;
+  const screen = screenById("owner.business.profile");
+  const session = await requireScreenSession(screen, { businessId });
+  if (!can(session, "profile.edit")) return actionFailure(t("attributes.error.role"));
+  const consents = await hasRequiredConsents(session);
+  if (!consents.ok) return toActionState(consents);
+  if (!consents.value) return actionFailure(t("businessStep.consentFirst"));
+
+  const gateway = businessGateway({ session });
+  const business = await gateway.get(businessId);
+  if (!business.ok) return toActionState(business);
+  const mismatch = panMismatch(gstin, business.value.pan);
+  if (mismatch !== null) return fieldFailure(mismatch);
+  const added = await gateway.addRegistration(
+    businessId,
+    name === undefined ? { gstin } : { gstin, name },
+    idempotencyHeaders(formData, "profile.add-registration"),
+  );
+  if (!added.ok) return toActionState(added);
+  afterMutation({
+    paths: [
+      hrefFor(screen, { businessId }),
+      hrefFor(screenById("owner.business"), { businessId }),
+      hrefFor(screenById("owner.businesses")),
+    ],
+  });
+  return actionSuccess(
+    registrationAddedResult(added.value, {
+      attributes: hrefFor(screenById("owner.business.attributes"), { businessId }),
+      reviewTasks: hrefFor(screenById("owner.business.review-tasks"), { businessId }),
+    }),
+  );
 }

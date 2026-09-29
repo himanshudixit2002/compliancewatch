@@ -22,6 +22,12 @@ export interface BusinessHomeLinks {
   /** The questions step, or null for a role that does not onboard (a compliance lead). */
   questions: string | null;
   done: string | null;
+  /**
+   * The business step, for another business (another PAN), or null for a role that does not add
+   * one. The businesses list sends an owner with one business straight here, so this is the way
+   * to a second one; another GSTIN of this business is added on the profile page.
+   */
+  addBusiness: string | null;
 }
 
 /** A registry screen of this business that is not built yet, with its notice page. */
@@ -37,6 +43,8 @@ export interface BusinessHomeProps {
   header: Omit<BusinessPageHeaderProps, "title" | "description">;
   links: BusinessHomeLinks;
   later: readonly LaterScreen[];
+  /** True for a CA firm, whose businesses are its clients. */
+  clients?: boolean;
 }
 
 function Tile({ title, body, href }: { title: string; body: string; href: string }) {
@@ -58,7 +66,7 @@ function Tile({ title, body, href }: { title: string; body: string; href: string
  * A business's home: its identifiers and registrations, how far onboarding has got, a tile per
  * profile page, and the screens for this business that are not built yet, each with its status.
  */
-export function BusinessHome({ view, header, links, later }: BusinessHomeProps) {
+export function BusinessHome({ view, header, links, later, clients = false }: BusinessHomeProps) {
   const { header: business, progress, counts } = view;
   return (
     <div data-slot="business-home" className="flex max-w-4xl flex-col gap-6">
@@ -66,6 +74,15 @@ export function BusinessHome({ view, header, links, later }: BusinessHomeProps) 
         {...header}
         title={business.name}
         description={t("business.homeIntro", { pan: business.pan })}
+        actions={
+          links.addBusiness === null ? undefined : (
+            <Button asChild variant="secondary">
+              <Link href={links.addBusiness as Route}>
+                {clients ? t("business.addClient") : t("business.addBusiness")}
+              </Link>
+            </Button>
+          )
+        }
       />
       <KeyValue
         items={[

@@ -17,6 +17,8 @@ import {
   ENTITY_ID,
   LOCATION_DTO,
   LOCATION_ID,
+  PREFILL_DTO,
+  REGISTRATION_DTO,
   REGISTRATION_ID,
   TENANT_ID,
   USER_ID,
@@ -27,6 +29,7 @@ import { fakeFetch, jsonResponse, problemResponse, type RecordedRequest } from "
 import { ONTOLOGY_DTO } from "@/test/ontology-fixture";
 import {
   addLocation,
+  addRegistration,
   answerQuestion,
   createBusiness,
   revisitUnsure,
@@ -78,6 +81,9 @@ const VALID = {
 };
 
 const LEGAL = readLegalVersions();
+/** A second GSTIN of the fixture business (the same PAN, another state). */
+const SECOND_GSTIN = "27ABCDE1234F1Z5";
+const SECOND_ID = "00000000-0000-4000-8000-0000000000a2";
 /** The required consents granted at the Version lines this build ships. */
 const REQUIRED_GRANTED = [
   grantedState("terms", `terms-of-service@${LEGAL["terms-of-service"].version}`),
@@ -94,6 +100,7 @@ function profile(
     location?: Response;
     business?: Response;
     consents?: Response;
+    registration?: Response;
   } = {},
 ) {
   return fakeFetch((request: RecordedRequest) => {
@@ -105,6 +112,20 @@ function profile(
     }
     if (request.method === "GET" && request.pathname === `/v1/businesses/${ENTITY_ID}`) {
       return options.business ?? jsonResponse(200, BUSINESS_DTO);
+    }
+    if (
+      request.method === "POST" &&
+      request.pathname === `/v1/businesses/${ENTITY_ID}/registrations`
+    ) {
+      return (
+        options.registration ??
+        jsonResponse(201, {
+          business: BUSINESS_DTO,
+          registration: { ...REGISTRATION_DTO, id: SECOND_ID, key: SECOND_GSTIN, created: true },
+          created: true,
+          prefill: { ...PREFILL_DTO, node_id: SECOND_ID },
+        })
+      );
     }
     if (request.method === "POST" && request.pathname === "/v1/profile/locations") {
       return options.location ?? jsonResponse(201, LOCATION_DTO);
@@ -593,6 +614,122 @@ describe("addLocation", () => {
       profile({ location: problemResponse(422, { title: "Hierarchy invalid" }) }).fetchImpl,
     );
     const refused = await addLocation({ status: "idle" }, form(LOCATION_FORM));
+    expect(refused.status === "error" && refused.problem?.title).toBe("Hierarchy invalid");
+  });
+});
+
+describe("addRegistration", () => {
+  const REGISTRATION_FORM = {
+    business_id: ENTITY_ID,
+    gstin: "27abcde1234f1z5",
+    name: "",
+    idempotency_key: IDEMPOTENCY_KEY,
+  };
+
+  it("adds the GSTIN with the form's key after reading the consents and the business", async () => {
+    await signedInAs();
+    const fake = profile();
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await addRegistration({ status: "idle" }, form(REGISTRATION_FORM));
+    expect(fake.requests.map((request) => `${request.method} ${request.pathname}`)).toEqual([
+      "GET /v1/identity/consents",
+      `GET /v1/businesses/${ENTITY_ID}`,
+      `POST /v1/businesses/${ENTITY_ID}/registrations`,
+    ]);
+    const post = fake.requests[2];
+    expect(post?.headers["idempotency-key"]).toBe(IDEMPOTENCY_KEY);
+    expect(post?.headers["x-tenant-id"]).toBe(TENANT_ID);
+    expect(post?.body).toEqual({ gstin: SECOND_GSTIN });
+    expect(state).toEqual({
+      status: "ok",
+      value: {
+        registrationId: SECOND_ID,
+        gstin: SECOND_GSTIN,
+        name: "Example registration",
+        created: true,
+        lookedUp: false,
+        applied: [],
+        attributesHref: `/b/${ENTITY_ID}/attributes?node=${SECOND_ID}`,
+        reviewTasksHref: `/b/${ENTITY_ID}/review-tasks`,
+      },
+    });
+    expect(revalidatePath).toHaveBeenCalledWith(`/b/${ENTITY_ID}/profile`);
+    expect(revalidatePath).toHaveBeenCalledWith(`/b/${ENTITY_ID}`);
+    expect(revalidatePath).toHaveBeenCalledWith("/businesses");
+  });
+
+  it("sends a registration name when one is typed", async () => {
+    await signedInAs();
+    const fake = profile();
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    await addRegistration(
+      { status: "idle" },
+      form({ ...REGISTRATION_FORM, name: "Example branch" }),
+    );
+    expect(fake.requests.find((request) => request.method === "POST")?.body).toEqual({
+      gstin: SECOND_GSTIN,
+      name: "Example branch",
+    });
+  });
+
+  it("refuses a malformed form, a reader, missing consents and a GSTIN of another PAN", async () => {
+    await signedInAs();
+    const fake = profile();
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const fields = await addRegistration(
+      { status: "idle" },
+      form({ ...REGISTRATION_FORM, gstin: "27ABC" }),
+    );
+    expect(fields.status === "error" && Object.keys(fields.fieldErrors ?? {})).toEqual(["gstin"]);
+    const tampered = await addRegistration(
+      { status: "idle" },
+      form({ ...REGISTRATION_FORM, business_id: "x" }),
+    );
+    expect(tampered.status === "error" && tampered.formErrors?.[0]).toMatch(/Reload the page/);
+    const otherPan = await addRegistration(
+      { status: "idle" },
+      form({ ...REGISTRATION_FORM, gstin: "27ZZZZZ9999Z1Z5" }),
+    );
+    expect(otherPan.status === "error" && otherPan.fieldErrors?.gstin?.[0]).toMatch(
+      /carries the PAN ZZZZZ9999Z, not this business's PAN ABCDE1234F/,
+    );
+
+    await signedInAs({ roles: ["compliance_lead"] });
+    const reader = await addRegistration({ status: "idle" }, form(REGISTRATION_FORM));
+    expect(reader.status === "error" && reader.formErrors?.[0]).toMatch(/not change it/);
+
+    await signedInAs({ tenantKind: "ca_firm", roles: ["ca_staff"] });
+    const noConsents = profile({ consents: jsonResponse(200, summaryDto([])) });
+    vi.stubGlobal("fetch", noConsents.fetchImpl);
+    const refused = await addRegistration({ status: "idle" }, form(REGISTRATION_FORM));
+    expect(refused.status === "error" && refused.formErrors?.[0]).toMatch(
+      /^A business profile is processed on the strength of your consents/,
+    );
+    expect(noConsents.requests.map((request) => request.pathname)).toEqual([
+      "/v1/identity/consents",
+    ]);
+    expect(fake.requests.some((request) => request.method === "POST")).toBe(false);
+  });
+
+  it("passes on unreadable consents, a failed read of the business and a refused GSTIN", async () => {
+    await signedInAs();
+    vi.stubGlobal(
+      "fetch",
+      profile({ consents: problemResponse(503, { title: "Identity is unavailable" }) }).fetchImpl,
+    );
+    const consents = await addRegistration({ status: "idle" }, form(REGISTRATION_FORM));
+    expect(consents.status === "error" && consents.problem?.title).toBe("Identity is unavailable");
+    vi.stubGlobal(
+      "fetch",
+      profile({ business: problemResponse(404, { title: "No business" }) }).fetchImpl,
+    );
+    const missing = await addRegistration({ status: "idle" }, form(REGISTRATION_FORM));
+    expect(missing.status === "error" && missing.problem?.title).toBe("No business");
+    vi.stubGlobal(
+      "fetch",
+      profile({ registration: problemResponse(422, { title: "Hierarchy invalid" }) }).fetchImpl,
+    );
+    const refused = await addRegistration({ status: "idle" }, form(REGISTRATION_FORM));
     expect(refused.status === "error" && refused.problem?.title).toBe("Hierarchy invalid");
   });
 });

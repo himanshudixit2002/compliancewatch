@@ -459,7 +459,7 @@ const SCREEN_LIST = [
     guideRef: "6, 10; F12",
     nav: { group: "business", order: 1 },
     notes:
-      "Where every tenant role lands after signing in: an owner with one business goes straight to it; a CA firm's client list with search and paging.",
+      "Where every tenant role lands after signing in: an owner with one business goes straight to it (whose home links to adding another); a CA firm's client list with search and paging.",
   },
   {
     id: "owner.onboarding",
@@ -588,7 +588,12 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [BUSINESS, uses("profile", "POST", "/v1/profile/locations")],
+    uses: [
+      BUSINESS,
+      uses("profile", "POST", "/v1/profile/locations"),
+      uses("profile", "POST", "/v1/businesses/{business_id}/registrations"),
+      uses("identity", "GET", "/v1/identity/consents"),
+    ],
     awaits: [],
     status: "live",
     e2e: ["business-pages.spec.ts", "journey-owner.spec.ts"],
@@ -596,7 +601,7 @@ const SCREEN_LIST = [
     nav: { group: "business", order: 3 },
     parent: "owner.business",
     notes:
-      "The hierarchy (the entity by its PAN, each registration by its GSTIN) and adding a location under a registration; no route lists a registration's locations yet.",
+      "The hierarchy (the entity by its PAN, each registration by its GSTIN), adding a location under a registration, and adding another GSTIN of the business with an Idempotency-Key once the required consents are on file; no route lists a registration's locations yet.",
   },
   {
     id: "owner.business.attributes",

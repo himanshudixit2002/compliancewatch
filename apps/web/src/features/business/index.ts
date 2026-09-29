@@ -1,5 +1,6 @@
 export {
   addLocation,
+  addRegistration,
   answerQuestion,
   createBusiness,
   revisitUnsure,
@@ -69,6 +70,19 @@ export {
   parseLocationForm,
 } from "./model/location-form";
 export type { LocationFields, LocationFormInput, ParsedLocationForm } from "./model/location-form";
+export {
+  REGISTRATION_FIELDS,
+  panMismatch,
+  parseRegistrationForm,
+  registrationAddedResult,
+} from "./model/registration-form";
+export type {
+  ParsedRegistrationForm,
+  RegistrationAddedResult,
+  RegistrationFields,
+  RegistrationFormInput,
+  RegistrationHrefs,
+} from "./model/registration-form";
 export { businessHeaderLinks, laterScreens } from "./navigation";
 export type { BusinessHeaderLinks, BusinessViewer, LaterScreenLink } from "./navigation";
 export type { BusinessFormFields, ParsedBusinessForm } from "./model/business-form";
@@ -139,13 +153,19 @@ export type { BusinessHomeLinks, BusinessHomeProps, LaterScreen } from "./ui/bus
 export { BusinessPageHeader } from "./ui/business-page-header";
 export type { BusinessPageHeaderProps } from "./ui/business-page-header";
 export { BusinessProfile } from "./ui/business-profile";
-export type { BusinessProfileProps, NodeLinks } from "./ui/business-profile";
+export type { BusinessProfileProps, NodeLinks, RegistrationSection } from "./ui/business-profile";
 export { BusinessForm } from "./ui/business-form";
 export type { BusinessAction, BusinessFormProps, BusinessFormResult } from "./ui/business-form";
 export { BusinessStep } from "./ui/business-step";
 export type { BusinessStepProps } from "./ui/business-step";
 export { DoneSummary } from "./ui/done-summary";
 export { LocationForm } from "./ui/location-form";
+export { RegistrationForm } from "./ui/registration-form";
+export type {
+  RegistrationAction,
+  RegistrationFormProps,
+  RegistrationFormResult,
+} from "./ui/registration-form";
 export type { LocationAction, LocationFormProps, LocationFormResult } from "./ui/location-form";
 export { NodeYearPicker } from "./ui/node-year-picker";
 export type { NodeYearPickerProps } from "./ui/node-year-picker";

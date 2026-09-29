@@ -26,6 +26,7 @@ const LINKS: BusinessHomeLinks = {
   reviewTasks: "/b/x/review-tasks",
   questions: "/onboarding/x/questions",
   done: "/onboarding/x/done",
+  addBusiness: "/onboarding/business",
 };
 
 describe("BusinessHome", () => {
@@ -50,7 +51,27 @@ describe("BusinessHome", () => {
     expect(screen.getByText("1 open.")).toBeDefined();
     expect(screen.getByRole("link", { name: "Changes" }).getAttribute("href")).toBe("/b/x/changes");
     expect(screen.getByText("Waiting for a backend")).toBeDefined();
+    // The businesses list opens an owner's only business, so the way to another is here.
+    expect(screen.getByRole("link", { name: "Add another business" }).getAttribute("href")).toBe(
+      "/onboarding/business",
+    );
     expect(await runAxe(container)).toHaveNoViolations();
+  });
+
+  it("names the link for a CA firm's clients and leaves it out for a role that does not add one", () => {
+    const { rerender } = render(
+      <BusinessHome view={VIEW} header={HEADER} links={LINKS} later={[]} clients />,
+    );
+    expect(screen.getByRole("link", { name: "Add another client" })).toBeDefined();
+    rerender(
+      <BusinessHome
+        view={VIEW}
+        header={HEADER}
+        links={{ ...LINKS, addBusiness: null }}
+        later={[]}
+      />,
+    );
+    expect(screen.queryByRole("link", { name: /Add another/ })).toBeNull();
   });
 
   it("points at the summary once complete and leaves onboarding links out for a reader", () => {

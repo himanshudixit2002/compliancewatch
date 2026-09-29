@@ -16,11 +16,14 @@ import {
  * real services with axe on every screen: sign in to a new tenant and find the empty list, read
  * the privacy notice from the consent step, agree (with a WhatsApp number and analytics), add the
  * demo business, answer questions with each of the three answers, stop at the summary, walk the
- * business's pages, then the settings: withdraw analytics, set the quiet hours of the number
+ * business's pages, find the way to another business from the one the list opens and add a second
+ * GSTIN of this one on its profile, then the settings: withdraw analytics, set the quiet hours of the number
  * opted in at onboarding, try to subscribe, and sign out. The screens' own specs cover each
  * screen's states in depth; this one checks that they lead into each other.
  */
 const DEMO_GSTIN = "29ABCDE1234F1Z5";
+/** The demo GSTIN's PAN in another state: the static lookup does not know it. */
+const SECOND_GSTIN = "27ABCDE1234F1Z5";
 const NAME = "Example Journey Traders";
 const BILLING = process.env.WEB_STACK_BILLING?.trim() || "none";
 const WHATSAPP_BOX =
@@ -173,12 +176,28 @@ test.describe("journey: an owner from sign-in to settings", () => {
       .map((task) => task.reason);
     expect(reasons).toContain("not_applicable");
 
-    // With one business, the list now opens it.
+    // With one business, the list now opens it; its home leads to another business, and its
+    // profile adds another GSTIN of this one.
     await page
       .getByRole("navigation", { name: "Primary" })
       .getByRole("link", { name: "Businesses" })
       .click();
     await expect(page).toHaveURL(new RegExp(`/b/${businessId}$`));
+    await expect(page.getByRole("link", { name: "Add another business" })).toHaveAttribute(
+      "href",
+      "/onboarding/business",
+    );
+    await tabs.getByRole("link", { name: "Profile", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/b/${businessId}/profile$`));
+    await waitForHydration(page, "[data-slot='registration-form']");
+    const gstinForm = page.getByRole("form", { name: `Add a GSTIN to ${NAME}` });
+    await gstinForm.getByRole("textbox", { name: /GSTIN/ }).fill(SECOND_GSTIN);
+    await gstinForm.getByRole("button", { name: "Add the GSTIN" }).click();
+    const added = page.locator("[data-slot='registration-result']");
+    await expect(added).toContainText(`${SECOND_GSTIN} is added`);
+    await expect(added).toContainText("No GSTIN lookup answered for this GSTIN");
+    await expect(page.getByRole("heading", { level: 3, name: SECOND_GSTIN })).toBeVisible();
+    await checkA11y();
 
     // Settings: the consents given at onboarding, and analytics withdrawn.
     await page
