@@ -76,6 +76,22 @@ class RaisingChannel(FakeChannel):
         return super().deliver(message)
 
 
+class RaisingReader(FakeRuleVersionReader):
+    """Raises what no reader is meant to raise for the rule versions in ``broken``, as a reader
+    with a bug would."""
+
+    def __init__(
+        self, facts: dict[RuleVersionId, RuleVersionFacts], broken: set[RuleVersionId]
+    ) -> None:
+        super().__init__(facts)
+        self.broken = broken
+
+    def get(self, rule_version_id: RuleVersionId) -> RuleVersionFacts | None:
+        if rule_version_id in self.broken:
+            raise RuntimeError("the reader has a bug")
+        return super().get(rule_version_id)
+
+
 class World:
     def __init__(self, now: datetime = NOON_IST, *, window: int = 300) -> None:
         self.clock = FakeClock(now)
@@ -485,6 +501,25 @@ def test_an_adapter_that_raises_fails_its_attempt_and_the_run_goes_on() -> None:
     assert (failed.is_pending, failed.attempts) == (True, 1)
     assert failed.error == "email: the channel adapter raised ValueError"
     assert failed.available_at == NOON_IST + timedelta(seconds=60), "the retry policy's backoff"
+
+
+def test_an_error_while_a_message_is_filled_fails_its_attempt_and_the_run_goes_on() -> None:
+    world = World(window=0)
+    world.owner((WA, PHONE))
+    other = TenantId.new()
+    world.owner((WA, "+919800000000"), tenant=other)
+    broken = RuleVersionId.new()
+    world.rules = RaisingReader({RULE: FACTS}, broken={broken})
+    world.enqueue.run(created(rule=broken))
+    world.enqueue.run(created(tenant=other))
+    deliveries = world.dispatcher({WA: world.whatsapp}).run()
+    assert sorted(outcomes(deliveries)) == [DeliveryOutcome.RETRY, DeliveryOutcome.SENT]
+    assert [message.recipient for message in world.whatsapp.sent] == ["+919800000000"]
+    (failed,) = world.notifications()
+    assert (failed.is_pending, failed.attempts) == (True, 1)
+    assert failed.error == "message not prepared: RuntimeError"
+    assert failed.available_at == NOON_IST + timedelta(seconds=60), "the retry policy's backoff"
+    assert [n.state for n in world.notifications(other)] == [DeliveryState.SENT]
 
 
 def test_a_delivery_that_outlasts_its_whole_lease_is_counted_as_a_duplicate_send() -> None:

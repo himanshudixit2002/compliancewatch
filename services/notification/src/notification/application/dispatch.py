@@ -37,7 +37,8 @@ dispatchers never take one entry) and handles them tenant by tenant:
    have, a value that is not what its template expects), and a WhatsApp message outside the
    window whose template Meta has not approved, fail without retries: another attempt would
    fail the same way, so the fallback goes at once. An adapter that raises instead of returning
-   a receipt has failed the attempt like any other failure, and the run goes on with the rest.
+   a receipt, and any other error nobody expected while the message was filled, have failed
+   the attempt like any other failure, and the run goes on with the rest.
 
 A notification that another dispatcher sent meanwhile, because one delivery outlasted its whole
 lease (a channel call hung past its timeout, the process stalled), is left as it is and counted
@@ -296,6 +297,18 @@ class DispatchDue:
         except (MissingPlaceholderError, UnknownTemplateError, InvariantViolationError) as exc:
             receipt = DeliveryReceipt(DeliveryStatus.FAILED, now, error=f"not rendered: {exc}")
             return self._record(tenant_id, batch, receipt, {}, now, NO_RETRIES, None)
+        except Exception as exc:
+            # Filling the message raised what nobody expected, such as an answer of the
+            # rulebook's its reader does not handle: this message's attempt failed, as a channel
+            # error fails it, and the rest of the claim still goes.
+            log.exception(
+                "notification.prepare_error",
+                channel=batch.first.channel.value,
+                notifications=len(batch.members),
+            )
+            error = f"message not prepared: {type(exc).__name__}"
+            receipt = DeliveryReceipt(DeliveryStatus.FAILED, now, error=error)
+            return self._record(tenant_id, batch, receipt, {}, now, self._retry, None)
         message = rendered.message
         adapter = self._channels.get(message.channel)
         if adapter is None:

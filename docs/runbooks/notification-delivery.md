@@ -66,6 +66,10 @@ another channel reaches them.
    - `<channel>: the channel adapter raised <error>`: a bug in the adapter, which raised instead
      of returning a receipt. The worker logs `notification.channel_error` with the traceback and
      the dispatch id. The attempt counts as failed and the rest of the run goes on.
+   - `message not prepared: <error>`: filling the message raised an error nobody expected, such
+     as an answer of the rulebook's that its reader does not handle. The worker logs
+     `notification.prepare_error` with the traceback. The attempt counts as failed, is retried
+     like any other, and the rest of the run goes on.
    - `email not built: <error>`: the email library refused a header of the message, so no
      connection was opened. Every attempt fails the same way until the code is fixed; the
      fallback then goes to the recipient's next address.
