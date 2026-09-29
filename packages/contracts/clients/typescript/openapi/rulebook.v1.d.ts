@@ -522,7 +522,7 @@ export type components = {
       /**
        * Actor Id
        * Format: uuid
-       * @description The analyst taking the step
+       * @description The analyst taking the step; a signed-in user's token overrides it
        */
       actor_id: string;
       /**
@@ -555,7 +555,10 @@ export type components = {
     };
     /** ApproveIn */
     ApproveIn: {
-      /** Decided By */
+      /**
+       * Decided By
+       * @description Who decided; a signed-in user's token overrides it with that user's id
+       */
       decided_by: string;
       /**
        * From Rule Version Id
@@ -776,7 +779,10 @@ export type components = {
      * @description Decide every open mention of one (entity type, proposed name).
      */
     DecisionIn: {
-      /** Decided By */
+      /**
+       * Decided By
+       * @description Who decided; a signed-in user's token overrides it with that user's id
+       */
       decided_by: string;
       decision: components["schemas"]["MentionDecision"];
       /**
@@ -1295,7 +1301,10 @@ export type components = {
     };
     /** RejectIn */
     RejectIn: {
-      /** Decided By */
+      /**
+       * Decided By
+       * @description Who decided; a signed-in user's token overrides it with that user's id
+       */
       decided_by: string;
       /**
        * Note
@@ -1747,7 +1756,7 @@ export type components = {
       /**
        * Actor Id
        * Format: uuid
-       * @description The analyst taking the step
+       * @description The analyst taking the step; a signed-in user's token overrides it
        */
       actor_id: string;
       /**
@@ -1920,7 +1929,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN) */
+        /** @description Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs rulebook:write */
         "x-cw-write-token"?: string | null;
       };
       path?: never;
@@ -1952,6 +1961,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -2058,7 +2076,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN) */
+        /** @description Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs rulebook:write */
         "x-cw-write-token"?: string | null;
       };
       path: {
@@ -2108,6 +2126,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Conflict */
       409: {
         headers: {
@@ -2141,7 +2168,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN) */
+        /** @description Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs rulebook:write */
         "x-cw-write-token"?: string | null;
       };
       path: {
@@ -2182,6 +2209,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -2215,7 +2251,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN) */
+        /** @description Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs rulebook:write */
         "x-cw-write-token"?: string | null;
       };
       path: {
@@ -2249,6 +2285,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -2405,7 +2450,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN) */
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
         "x-cw-review-token"?: string | null;
       };
       path?: never;
@@ -2437,6 +2482,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -2561,7 +2615,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN) */
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
         "x-cw-review-token"?: string | null;
       };
       path?: never;
@@ -2593,6 +2647,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -2708,7 +2771,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN) */
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
         "x-cw-review-token"?: string | null;
       };
       path: {
@@ -2742,6 +2805,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -2791,7 +2863,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN) */
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
         "x-cw-review-token"?: string | null;
       };
       path: {
@@ -2825,6 +2897,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -2950,7 +3031,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN) */
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
         "x-cw-review-token"?: string | null;
       };
       path: {
@@ -2984,6 +3065,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -3073,7 +3163,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN) */
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
         "x-cw-review-token"?: string | null;
       };
       path: {
@@ -3107,6 +3197,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -3156,7 +3255,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN) */
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
         "x-cw-review-token"?: string | null;
       };
       path: {
@@ -3190,6 +3289,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -3239,7 +3347,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN) */
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
         "x-cw-review-token"?: string | null;
       };
       path: {
@@ -3273,6 +3381,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -3322,7 +3439,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN) */
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
         "x-cw-review-token"?: string | null;
       };
       path: {
@@ -3356,6 +3473,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -3405,7 +3531,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN) */
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
         "x-cw-review-token"?: string | null;
       };
       path: {
@@ -3439,6 +3565,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

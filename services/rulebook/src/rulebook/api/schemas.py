@@ -28,6 +28,7 @@ from rulebook.domain.review import (
 from rulebook.domain.runs import RuleSummary
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
+DECIDED_BY = "Who decided; a signed-in user's token overrides it with that user's id"
 
 
 class ClauseIn(BaseModel):
@@ -328,7 +329,7 @@ class DecisionIn(BaseModel):
             "entity across documents (empty, or a section or rule without its statute)"
         ),
     )
-    decided_by: str = Field(min_length=1, max_length=120)
+    decided_by: str = Field(min_length=1, max_length=120, description=DECIDED_BY)
     note: str = Field(default="", max_length=2_000)
 
     @model_validator(mode="after")
@@ -417,7 +418,7 @@ class ApproveIn(BaseModel):
     target_rule_version_id: UUID | None = Field(
         default=None, description="The affected version, for relations that target one"
     )
-    decided_by: str = Field(min_length=1, max_length=120)
+    decided_by: str = Field(min_length=1, max_length=120, description=DECIDED_BY)
     note: str = Field(default="", max_length=2_000)
 
 
@@ -430,7 +431,7 @@ class RejectIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: CandidateRejectReason
-    decided_by: str = Field(min_length=1, max_length=120)
+    decided_by: str = Field(min_length=1, max_length=120, description=DECIDED_BY)
     note: str = Field(default="", max_length=2_000)
 
 

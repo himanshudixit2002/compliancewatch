@@ -1,6 +1,6 @@
-"""Knowledge written by the pipeline (mentions, relation candidates; the write token) and the
-analyst's review of it (entity groups, candidate approvals; the review token), plus the rule list
-the pipeline offers the model."""
+"""Knowledge written by the pipeline (mentions, relation candidates; ``PipelineWrite``) and the
+analyst's review of it (entity groups, candidate approvals; ``AnalystWrite``, which records a
+signed-in user as the one who decided), plus the rule list the pipeline offers the model."""
 
 from typing import Annotated
 from uuid import UUID
@@ -10,7 +10,7 @@ from fastapi import APIRouter, Query
 from domain_kernel.ids import CanonicalEntityId, DocumentId, RuleVersionId
 from domain_kernel.knowledge import EntityType
 from py_common.problems import problem_responses
-from rulebook.api.deps import ReviewAccess, Wired, WriteAccess
+from rulebook.api.deps import AnalystWrite, PipelineAccess, Wired, decided_by
 from rulebook.api.schemas import (
     AlignmentOut,
     ApprovalOut,
@@ -35,8 +35,8 @@ router = APIRouter()
     "/documents/{document_id}/mentions",
     summary="Align the entity mentions found in a document; the unresolved go to review",
     tags=["knowledge"],
-    dependencies=[WriteAccess],
-    responses=problem_responses(401, 404, 422, 503),
+    dependencies=[PipelineAccess],
+    responses=problem_responses(401, 403, 404, 422, 503),
 )
 def submit_mentions(document_id: UUID, body: MentionsIn, wired: Wired) -> AlignmentOut:
     report = wired.align_mentions.run(
@@ -49,8 +49,8 @@ def submit_mentions(document_id: UUID, body: MentionsIn, wired: Wired) -> Alignm
     "/documents/{document_id}/relation-candidates",
     summary="Stage the relations proposed for a document; idempotent per proposal",
     tags=["knowledge"],
-    dependencies=[WriteAccess],
-    responses=problem_responses(401, 404, 422, 503),
+    dependencies=[PipelineAccess],
+    responses=problem_responses(401, 403, 404, 422, 503),
 )
 def submit_relations(document_id: UUID, body: RelationsIn, wired: Wired) -> StagingOut:
     report = wired.stage_relations.run(DocumentId(document_id), body.to_submission())
@@ -92,15 +92,14 @@ def list_group_items(
     "/review/entities/decisions",
     summary="Create the entity, add the name to one, or reject every open mention of a group",
     tags=["review"],
-    dependencies=[ReviewAccess],
-    responses=problem_responses(401, 404, 409, 422, 503),
+    responses=problem_responses(401, 403, 404, 409, 422, 503),
 )
-def decide_entity_group(body: DecisionIn, wired: Wired) -> GroupDecisionOut:
+def decide_entity_group(body: DecisionIn, analyst: AnalystWrite, wired: Wired) -> GroupDecisionOut:
     decision = wired.decide_entity_group.run(
         body.entity_type,
         body.proposed_name,
         body.decision,
-        decided_by=body.decided_by,
+        decided_by=decided_by(analyst, body.decided_by),
         entity_id=None if body.entity_id is None else CanonicalEntityId(body.entity_id),
         reject_reason=body.reject_reason,
         note=body.note,
@@ -131,15 +130,16 @@ def list_relation_candidates(
     "/review/relations/{candidate_id}/approve",
     summary="Approve a candidate into a rule relation from a draft rule version",
     tags=["review"],
-    dependencies=[ReviewAccess],
-    responses=problem_responses(401, 404, 409, 422, 503),
+    responses=problem_responses(401, 403, 404, 409, 422, 503),
 )
-def approve_relation(candidate_id: UUID, body: ApproveIn, wired: Wired) -> ApprovalOut:
+def approve_relation(
+    candidate_id: UUID, body: ApproveIn, analyst: AnalystWrite, wired: Wired
+) -> ApprovalOut:
     approval = wired.approve_relation.run(
         candidate_id,
         RuleVersionId(body.from_rule_version_id),
         None if body.target_rule_version_id is None else RuleVersionId(body.target_rule_version_id),
-        decided_by=body.decided_by,
+        decided_by=decided_by(analyst, body.decided_by),
         note=body.note,
     )
     return ApprovalOut(
@@ -151,12 +151,13 @@ def approve_relation(candidate_id: UUID, body: ApproveIn, wired: Wired) -> Appro
     "/review/relations/{candidate_id}/reject",
     summary="Reject a candidate with a reason",
     tags=["review"],
-    dependencies=[ReviewAccess],
-    responses=problem_responses(401, 404, 409, 422, 503),
+    responses=problem_responses(401, 403, 404, 409, 422, 503),
 )
-def reject_relation(candidate_id: UUID, body: RejectIn, wired: Wired) -> RelationCandidateOut:
+def reject_relation(
+    candidate_id: UUID, body: RejectIn, analyst: AnalystWrite, wired: Wired
+) -> RelationCandidateOut:
     rejected = wired.reject_relation.run(
-        candidate_id, body.reason, decided_by=body.decided_by, note=body.note
+        candidate_id, body.reason, decided_by=decided_by(analyst, body.decided_by), note=body.note
     )
     return RelationCandidateOut.from_candidate(rejected)
 

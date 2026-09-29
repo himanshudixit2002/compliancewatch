@@ -6,8 +6,9 @@ tenant-owned, and then answers 401 to a request without ``x-tenant-id`` whatever
 body, or exempt with the reason written next to it. A route in neither list fails the suite
 with its name, so whoever adds a route classifies it. The rulebook holds regulatory data every
 tenant reads, so its writes need the write token (the pipeline) or the review token (analyst
-actions) instead of a tenant. The llm-gateway is shared
-infrastructure and is recorded with its reasons and one open finding, which token mode closes.
+actions) instead of a tenant, and with an access token rulebook:write or a regulatory role.
+The llm-gateway is shared infrastructure and is recorded with its reasons and one open finding,
+which token mode closes.
 
 The probes at the end seed data as tenant A through the API and read it as tenant B. The
 Postgres proofs (forced row-level security under a plain role) stay in each service's

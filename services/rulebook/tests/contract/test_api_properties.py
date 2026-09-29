@@ -7,6 +7,10 @@ actions get past their token checks. Publishing is switched on, so the publish, 
 sweep routes run their use cases instead of answering 503. Each response must not be a server
 error, and its status code, content type and body must be the ones the spec documents.
 
+That app runs in header mode. The writes run again in token mode, where the shared tokens are
+refused: the pipeline's writes with a service token holding rulebook:write, and the analyst's
+actions with the token of a user holding the analyst, reviewer and admin roles.
+
 Only the operations in ``OPERATIONS`` run: those served when these tests arrived. A change that
 adds an operation opts it in here. An operation that cannot pass yet, for a defect or because it
 needs a redesign, goes in ``EXCLUDED`` with the reason.
@@ -24,6 +28,9 @@ from schemathesis.specs.openapi.checks import (
     status_code_conformance,
 )
 
+from domain_kernel.access import REGULATORY_ROLES, Scope
+from domain_kernel.ids import TenantId
+from py_common.auth.testing import TestIssuer, bearer
 from rulebook.main import build_app
 from rulebook.testing import REVIEW_TOKEN, WRITE_TOKEN, rulebook_settings
 
@@ -64,6 +71,28 @@ OPERATIONS = frozenset(
         "POST /v1/rulebook/search",
     }
 )
+PIPELINE_OPERATIONS = frozenset(
+    {
+        "PUT /v1/rulebook/clauses/embeddings",
+        "PUT /v1/rulebook/documents/{document_id}",
+        "PUT /v1/rulebook/documents/{document_id}/mentions",
+        "PUT /v1/rulebook/documents/{document_id}/relation-candidates",
+    }
+)
+ANALYST_OPERATIONS = frozenset(
+    {
+        "POST /v1/rulebook/maintenance/transitions",
+        "POST /v1/rulebook/review/entities/decisions",
+        "POST /v1/rulebook/review/relations/{candidate_id}/approve",
+        "POST /v1/rulebook/review/relations/{candidate_id}/reject",
+        "POST /v1/rulebook/rule-versions/{rule_version_id}/approve",
+        "PUT /v1/rulebook/rule-versions/{rule_version_id}/citations",
+        "POST /v1/rulebook/rule-versions/{rule_version_id}/publish",
+        "POST /v1/rulebook/rule-versions/{rule_version_id}/return",
+        "POST /v1/rulebook/rule-versions/{rule_version_id}/submit",
+        "POST /v1/rulebook/rule-versions/{rule_version_id}/withdraw",
+    }
+)
 EXCLUDED: dict[str, str] = {}
 CHECKS = cast(
     list[CheckFunction],
@@ -86,11 +115,24 @@ schema = schemathesis.openapi.from_asgi("/openapi.json", app).include(
     func=lambda ctx: ctx.operation.label in OPERATIONS and ctx.operation.label not in EXCLUDED
 )
 
+ISSUER = TestIssuer()
+PIPELINE_TOKEN = ISSUER.service("pipeline", [Scope.RULEBOOK_WRITE])
+ANALYST_TOKEN = ISSUER.user(TenantId.new(), REGULATORY_ROLES, mfa=True)
+token_app = build_app(
+    rulebook_settings(rulebook_publish_enabled=True, **ISSUER.settings_overrides("token"))
+)
+pipeline_schema = schemathesis.openapi.from_asgi("/openapi.json", token_app).include(
+    func=lambda ctx: ctx.operation.label in PIPELINE_OPERATIONS
+)
+analyst_schema = schemathesis.openapi.from_asgi("/openapi.json", token_app).include(
+    func=lambda ctx: ctx.operation.label in ANALYST_OPERATIONS
+)
+
 
 def test_every_listed_operation_is_served() -> None:
     paths = app.openapi()["paths"]
     labels = {f"{method.upper()} {path}" for path, item in paths.items() for method in item}
-    assert labels >= OPERATIONS | EXCLUDED.keys()
+    assert labels >= OPERATIONS | EXCLUDED.keys() | PIPELINE_OPERATIONS | ANALYST_OPERATIONS
 
 
 @schema.parametrize()
@@ -102,3 +144,21 @@ def test_every_listed_operation_is_served() -> None:
 )
 def test_responses_conform_to_the_spec(case: schemathesis.Case[Any]) -> None:
     case.call_and_validate(headers=HEADERS, checks=CHECKS)
+
+
+@pipeline_schema.parametrize()
+@settings(
+    max_examples=EXAMPLES,
+    suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow],
+)
+def test_responses_to_the_pipeline_token_conform_to_the_spec(case: schemathesis.Case[Any]) -> None:
+    case.call_and_validate(headers=bearer(PIPELINE_TOKEN), checks=CHECKS)
+
+
+@analyst_schema.parametrize()
+@settings(
+    max_examples=EXAMPLES,
+    suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow],
+)
+def test_responses_to_an_analyst_token_conform_to_the_spec(case: schemathesis.Case[Any]) -> None:
+    case.call_and_validate(headers=bearer(ANALYST_TOKEN), checks=CHECKS)
