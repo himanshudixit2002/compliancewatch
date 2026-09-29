@@ -17,7 +17,7 @@ deletion pipeline that runs after `tenant.deletion.requested` (deadline 30 days)
 | PAN, GSTIN, legal and trade names | profile `profile_node` | Identify the entity and its registrations | Life of account + 30 days | PAN of a proprietor is personal data |
 | Profile attributes (state, category, turnover band, filing scheme, ...) | profile `profile_attribute`, `profile_version` | Applicability of rules | Life of account + 30 days | Versioned; history deleted with the account |
 | Obligations and their status | obligation `obligation` | The calendar | Life of account + 30 days | |
-| Obligation change history (due dates before and after, status, reason, the user who acted) | obligation `obligation_change` | Audit of every change to an obligation (ADR-015) | Life of account + 30 days | Append-only; only a tenant's erasure may delete it, with the obligations |
+| Obligation change history (due dates before and after, status, reason, the user who acted) | obligation `obligation_change` | Audit of every change to an obligation (ADR-015) | Life of account + 30 days | Append-only; a tenant erasure (not built yet) must set `app.erasure=on` and delete the change rows before the obligations |
 | Evidence uploads | object store [not built] | Proof an obligation was met | Life of account + 90 days after deletion request | Audit trail assumption from the guide |
 | Questions and answers | qa (not built) | Answer, improve, analyst review | Life of account + 30 days; anonymised eval cases indefinitely | Identifiers masked before any model call |
 | Notification sent log (dedupe key, time, provider message id) | notification (in memory until its migration) | Never send one change twice; delivery receipts | 90 days | Contains no message text |

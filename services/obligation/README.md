@@ -38,8 +38,9 @@ Design reference: Project Foundation guide, sections 7 and 14.
 - `migrations/versions/20260929_0002_obligation_change.py`: the `obligation_change` table,
   with the same forced row-level security (`py_common.migrations.enable_tenant_rls`) and an
   append-only trigger (`create_append_only_guard(..., allow_erasure_delete=True)`): UPDATE is
-  always refused, and DELETE only in a transaction that has set `app.erasure` to `on`, which a
-  tenant's erasure does before it deletes the change rows and then the obligations.
+  always refused, and DELETE only in a transaction that has set `app.erasure` to `on`. A tenant
+  erasure (not built yet; a later work package adds it) must set `app.erasure=on` and delete the
+  change rows before the obligations.
 
 The caller of the use cases is the applicability engine's decision consumer, which lands with
 the profile and engine work; until then the use cases are exercised by the tests and by hand.
