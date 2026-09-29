@@ -38,6 +38,14 @@ channel, preferences, templates, Python).
    `NOTIFICATION_API_URL` pointing at notification. Without it the bot forwards nothing and
    warns once at start: notification then never sees a message delivered or read, and treats
    every number as outside the 24-hour window.
+8. Service token, needed once notification and identity run `CW_AUTH_MODE=token` (they then
+   refuse the two shared tokens of steps 6 and 7): create the bot's client at identity with
+   `identity-admin service-client create --id whatsapp-bot --scope notification:preferences
+   --scope notification:receipts --scope identity:channel-consents --scope tenant:act`, and set
+   `BOT_SERVICE_CLIENT_ID` and `BOT_SERVICE_CLIENT_SECRET` on the bot with `IDENTITY_API_URL`
+   pointing at identity. The bot then sends its access token on every call, and the shared tokens
+   too while they are set, so it works in every mode (`apps/whatsapp-bot/README.md`). Rotating any
+   of these values: `docs/runbooks/secret-rotation.md`.
 
 ## Consent recording (`WHATSAPP_CONSENT_RECORDING_ENABLED`)
 
@@ -48,14 +56,16 @@ and behaves as before. It is removed, and recording made unconditional, once the
 confirms the keyword opt-in wording and identity runs in the deployed profile.
 
 - **The bot will not start**, with `WHATSAPP_CONSENT_RECORDING_ENABLED=true needs
-  IDENTITY_SERVICE_TOKEN`: the flag is on and the token is empty. Set the token (the value of
-  identity's `CW_IDENTITY_CHANNEL_TOKEN`) or turn the flag off. The bot refuses to start rather
-  than switch reminders on without a record.
+  IDENTITY_SERVICE_TOKEN or BOT_SERVICE_CLIENT_SECRET`: the flag is on and the bot has neither
+  the shared token nor a service client. Set the token (the value of identity's
+  `CW_IDENTITY_CHANNEL_TOKEN`) or the client secret (manual step 8), or turn the flag off. The
+  bot refuses to start rather than switch reminders on without a record.
 - **Opt-ins fail closed while identity is down.** An opt-in is recorded first and switched on
   only once the record exists. When the call fails, the person gets the "try again later" reply,
   the log says `opt-in of ****1234 not recorded, so not applied` with the status (`consents: 503`
   when identity has no `CW_IDENTITY_CHANNEL_TOKEN`, `consents: 401` for a token that differs from
-  the bot's), and no preference is set. Nothing to replay: the person sends START again once
+  the bot's, or when identity runs in token mode and the bot has no service token; `consents: 403`
+  when the bot's client lacks `identity:channel-consents`), and no preference is set. Nothing to replay: the person sends START again once
   identity answers.
 - **Opt-outs never wait for identity.** The preference is set first; the withdrawal is recorded
   afterwards on a best-effort basis, and a failure is logged as `opt-out of ****1234 honoured but
@@ -63,7 +73,8 @@ confirms the keyword opt-in wording and identity runs in the deployed profile.
   `updated_at` are the record of it); only the channel consent history misses that withdrawal,
   and the log masks the number, so note the incident rather than guess the number.
 - A number's recorded history: `GET /v1/identity/channel-consents/whatsapp/<number>` with the
-  service token in `x-cw-service-token`.
+  shared token in `x-cw-service-token`, or in token mode with an access token of a client holding
+  `identity:channel-consents`.
 - A redelivered webhook is harmless: the message id finds the first record and identity answers
   200 with it.
 

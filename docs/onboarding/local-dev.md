@@ -84,8 +84,9 @@ one process and prints the transcript ([demo.md](demo.md)). `make dev-backup` an
 
 ## Profiles
 
-`make migrate SERVICE=profile` then `make run SERVICE=profile`; every call needs an
-`x-tenant-id` header with a UUID until the identity service exists:
+`make migrate SERVICE=profile` then `make run SERVICE=profile`. In the default `header` auth mode
+every call names its tenant in an `x-tenant-id` header with a UUID ("Signing in with tokens"
+below uses an access token instead):
 
 ```bash
 curl -s -X POST http://localhost:8002/v1/profile/registrations \
@@ -111,6 +112,76 @@ curl -s http://localhost:8002/v1/ontology | jq '.attributes[0].question, .operat
 `GET /v1/businesses/{id}/onboarding` asks the next question with its labelled options, and
 `PATCH /v1/businesses/{id}` stores answers. These routes are in the public API spec,
 `packages/contracts/openapi/public.v1.json` (`make openapi-public`).
+
+## Signing in with tokens
+
+`CW_AUTH_MODE` decides how every Python service reads its caller (the py-common README,
+"Authentication", has the details):
+
+| Mode | What a service does |
+| --- | --- |
+| `header` (the default) | Reads no token. The tenant comes from `x-tenant-id` and shared secrets guard the service-to-service routes, as in the examples above. |
+| `dual` | Verifies a bearer token when a request carries one and enforces its tenant, roles and scopes; a request without one is served as in `header` mode. |
+| `token` | Needs a bearer token wherever a caller is read: every tenant route and every service-to-service route. Shared secrets open nothing. `CW_ENV=prod` accepts only this mode. |
+
+Locally, identity signs people in with a fake identity provider (`CW_AUTH_PROVIDER=fake`, the
+default), so no account is needed. With both services on memory stores, no container is needed
+either:
+
+```bash
+export DEV_CLIENT_SECRET=$(openssl rand -hex 24)   # the dev service clients' secret
+# optional: tokens that survive identity's reload (see below)
+export CW_IDENTITY_SIGNING_KEYS="$(uv run --package compliancewatch-identity \
+  identity-admin signing-key new --kid dev | jq -c .)"
+CW_IDENTITY_STORE=memory CW_AUTH_MODE=token CW_IDENTITY_DEV_CLIENT_SECRET=$DEV_CLIENT_SECRET \
+  make run SERVICE=identity
+CW_PROFILE_STORE=memory CW_AUTH_MODE=token make run SERVICE=profile   # in a second shell
+```
+
+Then, with identity on 8001 and profile on 8002:
+
+```bash
+ID=http://localhost:8001/v1/identity
+provider_token() {   # a fake provider token for a phone number; add "aal":"aal2" for a second factor
+  curl -s -X POST $ID/dev/provider-tokens -H 'content-type: application/json' \
+    -d "{\"phone\":\"$1\"}" | jq -r .provider_token
+}
+# A person nobody has signed up yet: 404 identity-user-not-provisioned, the cue to sign up
+curl -s -X POST $ID/sessions -H 'content-type: application/json' \
+  -d "{\"provider_token\":\"$(provider_token +919876543210)\"}" | jq .type
+# Sign-up creates the business tenant with the person as its owner, and answers a session
+curl -s -X POST $ID/tenants -H 'content-type: application/json' \
+  -d "{\"kind\":\"business\",\"name\":\"Acme Traders\",\"provider_token\":\"$(provider_token +919876543210)\"}" \
+  | jq '{tenant: .tenant.id, roles: .user.roles}'
+# Sign-in exchanges a provider token for an ES256 access token (ten minutes)
+TOKEN=$(curl -s -X POST $ID/sessions -H 'content-type: application/json' \
+  -d "{\"provider_token\":\"$(provider_token +919876543210)\"}" | jq -r .access_token)
+curl -s $ID/me -H "authorization: Bearer $TOKEN" | jq '{tenant: .tenant.id, roles, session_version, mfa}'
+# Profile: 201 with the token, 401 auth-token-required without it,
+# and 403 auth-tenant-mismatch when x-tenant-id names another tenant
+curl -s -X POST http://localhost:8002/v1/profile/registrations \
+  -H 'content-type: application/json' -H "authorization: Bearer $TOKEN" \
+  -d '{"gstin":"29ABCDE1234F1Z5","name":"Acme Bengaluru","entity_name":"Acme"}'
+# A service token for the pipeline's dev client
+curl -s -X POST $ID/service-tokens -H 'content-type: application/json' \
+  -d "{\"client_id\":\"pipeline\",\"client_secret\":\"$DEV_CLIENT_SECRET\"}" | jq '{scopes, expires_in}'
+```
+
+- Every other service fetches identity's public keys from `CW_AUTH_JWKS_URL`, by default
+  `http://localhost:8001/v1/identity/.well-known/jwks.json`; a second clone points it at its own
+  identity port.
+- Without `CW_IDENTITY_SIGNING_KEYS`, identity makes a key when it starts and logs
+  `identity_ephemeral_signing_key`. Every token it signed stops verifying when it restarts, which
+  `make run` does on each code change. The key set exported above lives in that shell only; never
+  reuse a dev key in another environment.
+- A caller sends its own service token once `CW_SERVICE_CLIENT_SECRET` is set to the dev secret
+  (`make run` and `make worker` set `CW_SERVICE_CLIENT_ID` to the service's name). The dev
+  clients and their scopes are in `services/identity/src/identity/identity_dev_clients.toml`;
+  the WhatsApp bot reads `BOT_SERVICE_CLIENT_ID` and `BOT_SERVICE_CLIENT_SECRET` from
+  `apps/whatsapp-bot/.env`.
+- The web app sends no tokens yet, and `make web-stack` reads `.env`: keep `CW_AUTH_MODE` out of
+  `.env`, or at `header`, while you run the web app.
+- `tools/demo/tests/unit/test_token_flow.py` runs the same steps in one process.
 
 ## Seed calendar
 

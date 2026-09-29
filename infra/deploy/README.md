@@ -32,6 +32,11 @@ Nothing in this directory has been applied: every account is the maintainer's to
    `https://hooks.<domain>/webhook`.
 5. Wire the flags once the accounts exist: `CW_WHATSAPP_ENABLED`, `WHATSAPP_SEND_ENABLED`,
    `CW_BILLING_PROVIDER=razorpay`, `CW_PROFILE_GSTIN_LOOKUP`, `CW_LLM_PROVIDER=vercel`.
+6. Identity and access tokens, per environment: the Supabase project and its keys, identity's
+   signing key, a service client for each caller and the internal tenant, as listed in
+   `services/identity/README.md` ("Supabase: manual steps"). Deploy identity before the services
+   that verify its tokens. Run staging with `CW_AUTH_MODE=dual`, then `token`; production refuses
+   any other mode and the fake provider.
 
 ## Environment matrix
 
@@ -45,6 +50,14 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_TEMPORAL_*` | - | - | - | - | - | - | secret | - | - |
 | `CW_REDIS_URL` | - | - | - | - | - (digests are held in Postgres) | secret (cache, later) | - | - | - |
 | `CW_OTEL_ENDPOINT` (+ header) | secret | secret | secret | secret | secret | secret | secret | secret | - |
+| `CW_AUTH_MODE` | env | env | env | env | env | env | env | env | - |
+| `CW_AUTH_JWKS_URL`, `CW_AUTH_ISSUER`, `CW_AUTH_AUDIENCE`, `CW_AUTH_LEEWAY_SECONDS` | env (issuer and audience only: identity verifies with its own keys) | env | env | env | env | env | env | env | - |
+| `CW_IDENTITY_URL`, `CW_SERVICE_CLIENT_ID`, `CW_SERVICE_CLIENT_SECRET` | - | - | - | - | env / env / secret (rulebook reads) | - | env / env / secret (worker and `pipeline-embed`) | env / env / secret (qa) | - |
+| `BOT_SERVICE_CLIENT_ID`, `BOT_SERVICE_CLIENT_SECRET` | - | - | - | - | - | - | - | - | env / secret (identity at `IDENTITY_API_URL`) |
+| `CW_AUTH_PROVIDER`, `CW_SUPABASE_URL`, `CW_SUPABASE_SERVICE_ROLE_KEY`, `CW_SUPABASE_JWT_SECRET` | env / env / secret / secret (`supabase`; `fake` is refused with `CW_ENV=prod`; the JWT secret only for a project on the legacy HS256 secret; owner identity-partner) | - | - | - | - | - | - | - | - |
+| `CW_IDENTITY_SIGNING_KEYS` | secret (one key set per environment, from `identity-admin signing-key new`; required outside local and test) | - | - | - | - | - | - | - | - |
+| `CW_ACCESS_TOKEN_TTL_SECONDS`, `CW_SERVICE_TOKEN_TTL_SECONDS` | env (default 600: the longest a revoked session keeps working in the other services) | - | - | - | - | - | - | - | - |
+| `CW_IDENTITY_FAKE_PROVIDER_SECRET`, `CW_IDENTITY_DEV_CLIENT_SECRET`, `CW_IDENTITY_DEV_CLIENTS` | never set (local and test only; the dev client secret is refused elsewhere) | - | - | - | - | - | - | - | - |
 | `CW_AI_GATEWAY_API_KEY`, `CW_LLM_PROVIDER` | - | - | - | - | - | secret / env | - | - | - |
 | `CW_LANGFUSE_*` | - | - | - | - | - | secret | - | - | - |
 | `CW_LLM_ROUTES__<FEATURE>` (for example `CW_LLM_ROUTES__RETRIEVAL`), `CW_LLM_EMBEDDING_DIMENSIONS_PARAM` | - | - | - | - | - | env (only to override the routing table; the second defaults to `true`) | - | - | - |
@@ -52,7 +65,7 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_NOTIFICATION_STORE` | - | - | - | - | env (default `postgres`; `memory` only for tests and demos, and the worker refuses it) | - | - | - | - |
 | `CW_QUIET_HOURS_START`, `CW_QUIET_HOURS_END`, `CW_NOTIFICATION_BATCH_WINDOW_SECONDS`, `CW_NOTIFICATION_DISPATCH_INTERVAL_SECONDS`, `CW_NOTIFICATION_DIGEST_AT` | - | - | - | - | env (defaults `21:00` and `08:00` IST, 300 s, 5 s, `09:00` IST) | - | - | - | - |
 | `CW_WEB_BASE_URL` | - | - | - | - | env (the web app's public URL, which messages link to) | - | - | - | - |
-| `CW_NOTIFICATION_BOT_TOKEN` (notification), `NOTIFICATION_BOT_TOKEN` (bot) | - | - | - | - | secret (unset, the WhatsApp receipt route answers 503) | - | - | - | secret (the same value; unset, the bot forwards no delivery statuses) |
+| `CW_NOTIFICATION_BOT_TOKEN` (notification), `NOTIFICATION_BOT_TOKEN` (bot) | - | - | - | - | secret (unset, the WhatsApp receipt route answers 503; accepted in `header` and `dual` mode only) | - | - | - | secret (the same value; unset, the bot forwards no delivery statuses unless it has its service token) |
 | `CW_EMAIL_ENABLED`, `CW_SMTP_HOST`, `CW_SMTP_PORT`, `CW_SMTP_USERNAME`, `CW_SMTP_PASSWORD`, `CW_EMAIL_FROM` | - | - | - | - | env / env / env / secret / secret / env (flag default `false`; owner core-product; on once the in-region SES or SMTP sending domain is verified with SPF, DKIM and DMARC; removed after email has run in production for 30 days, when the channel is wired whenever `CW_SMTP_HOST` is set) | - | - | - | - |
 | `CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN`, `CW_NOTIFICATION_SES_TOPIC_ARN` | - | - | - | - | secret / env (the password of the SNS subscription's basic credentials, and the SES feedback topic it must come from; unset token, the email receipt route answers 503) | - | - | - | - |
 | `CW_BILLING_PROVIDER`, `CW_RAZORPAY_*` | env / secret | - | - | - | - | - | - | - | - |
@@ -61,8 +74,8 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_PROFILE_GSTIN_LOOKUP_URL`, `CW_PROFILE_GSTIN_LOOKUP_API_KEY`, `CW_PROFILE_GSTIN_LOOKUP_TIMEOUT_SECONDS` | - | env / secret / env (read with `CW_PROFILE_GSTIN_LOOKUP=http`, which waits for the provider account and a check of the field mapping against the provider's sandbox; until then `manual`) | - | - | - | - | - | - | - |
 | `CW_FLAG_PROFILE_GSTIN_CATEGORY_PREFILL`, `CW_FLAG_PROFILE_GSTIN_CATEGORY_PREFILL__TENANTS` | - | env (default `false`, every tenant when the list is empty; owner core-product; on only after an analyst reviews the nature-of-business mapping, a few tenants first; removed once it has been on for every tenant for 30 days) | - | - | - | - | - | - | - |
 | `CW_FLAGS_PROVIDER`, `CW_UNLEASH_URL`, `CW_UNLEASH_API_TOKEN` | - | env / env / secret (default `env`, flags from the variables in this table; `unleash` once a hosted Unleash runs, self-hosted on the MVP platform or an Unleash account, with a client token; owner platform). Only flags read through `py_common.flags` follow it, today `profile.gstin_category_prefill` alone; `CW_RULEBOOK_PUBLISH_ENABLED`, `CW_QA_KAG_ENABLED` and the other switches in this table stay environment variables whichever provider is chosen | - | - | - | - | - | - | - |
-| `CW_RULEBOOK_WRITE_TOKEN` | - | - | secret | - | - | - | secret | - | - |
-| `CW_RULEBOOK_REVIEW_TOKEN` | - | - | secret (analyst actions; the workbench holds the same value) | - | - | - | - | - | - |
+| `CW_RULEBOOK_WRITE_TOKEN` | - | - | secret (`header` and `dual` mode; in `token` mode the pipeline's service token with `rulebook:write` replaces it) | - | - | - | secret | - | - |
+| `CW_RULEBOOK_REVIEW_TOKEN` | - | - | secret (analyst actions in `header` and `dual` mode; the workbench holds the same value; in `token` mode the analyst's own access token replaces it) | - | - | - | - | - | - |
 | `CW_RULEBOOK_PUBLISH_ENABLED` | - | - | env (default `false`; owner regulatory-intelligence; removed once the workbench publishes in production and the obligation consumer of the rule events is live) | - | - | - | - | - | - |
 | `CW_PIPELINE_KNOWLEDGE_ENABLED` | - | - | - | - | - | - | env | - | - |
 | `CW_RULEBOOK_URL`, `CW_LLM_GATEWAY_URL` | - | - | - | - | env (`CW_RULEBOOK_URL` only: the published facts of change cards) | - | env | env (qa) | - |
@@ -70,15 +83,18 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_QA_KAG_ENABLED`, `CW_QA_KAG_TENANTS` | - | - | - | - | - | - | - | env (qa; default `false` and every tenant; owner ai-platform; removed when ADR-017 is Accepted) | - |
 | `CW_QA_PROMPTS_DIR` | - | - | - | - | - | - | - | set by the qa image (`/app/prompts`) | - |
 | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_SEND_ENABLED`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `NOTIFICATION_API_URL` | - | - | - | - | - | - | - | - | secret / secret / env / secret / secret / env |
-| `CW_IDENTITY_CHANNEL_TOKEN` | secret | - | - | - | - | - | - | - | - |
+| `CW_IDENTITY_CHANNEL_TOKEN` | secret (`header` and `dual` mode only; in `token` mode the bot's service token with `identity:channel-consents` replaces it) | - | - | - | - | - | - | - | - |
 | `WHATSAPP_CONSENT_RECORDING_ENABLED`, `IDENTITY_API_URL`, `IDENTITY_SERVICE_TOKEN`, `WHATSAPP_NOTICE_VERSION` | - | - | - | - | - | - | - | - | env / env / secret / env |
 
 The pipeline writes regulator documents to the rulebook (ADR-018), so deploy the rulebook before
 the pipeline and give both the same `CW_RULEBOOK_WRITE_TOKEN`; a rulebook without one refuses
 every write. The analyst's actions (review decisions, relation approvals, citations, the version
 lifecycle and the sweep route) need a second secret, `CW_RULEBOOK_REVIEW_TOKEN`, with a different
-value: the pipeline never gets it, and a rulebook without it refuses those actions. It is a shared
-secret until the identity service exists, so the approver ids are asserted by the caller.
+value: the pipeline never gets it, and a rulebook without it refuses those actions. A request that
+opens them with the shared secret (in `header` mode, or `dual` mode without an access token) names
+its own approver ids. In `token` mode neither shared token opens anything: the pipeline sends its
+service token, the analyst signs in, and the rulebook takes the approver from the analyst's access
+token.
 
 The rulebook writes its rule events (`rule.published`, `rule.superseded`, `rule.withdrawn`,
 `rule.deadline_changed`) to its own `outbox_event` table, so it needs the outbox relay like the
@@ -106,9 +122,16 @@ The WhatsApp bot records keyword opt-ins and opt-outs in identity: give identity
 the lawyer confirms that the keyword opt-in is valid consent (`docs/legal/README.md`) and
 identity runs in the deployed profile; with it `true` and no token the bot refuses to start.
 
-Every service also reads `CW_ENV`, `CW_LOG_LEVEL` and `CW_LOG_JSON` (env). The tenant comes from
-the `x-tenant-id` header until Supabase Auth issues tokens (ADR-014): the MVP must sit behind
-an authenticating proxy or an allow-list before it faces customers.
+Every service also reads `CW_ENV`, `CW_LOG_LEVEL` and `CW_LOG_JSON` (env). With
+`CW_AUTH_MODE=header`, the default, the tenant comes from the `x-tenant-id` header and nothing
+checks who sent it, so a deployment in that mode must sit behind an authenticating proxy or an
+allow-list. `CW_ENV=prod` refuses any mode but `token` (ADR-014's addendum). Identity signs access
+tokens with `CW_IDENTITY_SIGNING_KEYS` and publishes the public keys at
+`/v1/identity/.well-known/jwks.json`; every other service fetches them from `CW_AUTH_JWKS_URL`
+(identity's internal URL plus that path) and keeps them for an hour. The callers that send service
+tokens (notification, the pipeline, qa and the WhatsApp bot) each need a service client created in
+that environment with `identity-admin service-client create`. Who holds each secret, and how it
+rotates, is in `docs/runbooks/secret-rotation.md`.
 
 ## Promotion and rollback
 

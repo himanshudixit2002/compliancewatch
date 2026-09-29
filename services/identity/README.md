@@ -108,6 +108,51 @@ sends the same value as `IDENTITY_SERVICE_TOKEN`); `CW_BILLING_PROVIDER=none|mem
 webhook to `/v1/identity/billing/webhook` with a secret, API keys. Nothing is created by code.
 The OpenAPI spec is `packages/contracts/openapi/identity.v1.json` (`make openapi SERVICE=identity`).
 
+`tools/demo/tests/unit/test_token_flow.py` runs the whole path in one process: a fake provider
+token, sign-up, the session exchange, the profile service in token mode accepting the ES256 token
+and refusing a request without it or for another tenant, a service client acting for a tenant,
+and a disabled user refused by identity at once while profile accepts the token until it
+expires. [docs/onboarding/local-dev.md](../../docs/onboarding/local-dev.md) has the same steps
+with curl against running services, and ADR-014's addendum records the design choices.
+
+## Supabase: manual steps
+
+Nothing in this repository creates a Supabase project or changes its settings. Until the project
+exists, identity runs with `CW_AUTH_PROVIDER=fake`, which production refuses. The maintainer's
+steps, in order:
+
+1. Create the Supabase project in the Mumbai region and confirm the region in the project's
+   settings (ADR-014: personal data stays in India).
+2. Enable phone sign-in with an SMS provider Supabase supports, and confirm with that provider
+   that phone numbers and messages stay in India. Record the answer with the DPDP data map.
+3. Enable email sign-in, asymmetric JWT signing keys (so the project publishes its keys at
+   `<project url>/auth/v1/.well-known/jwks.json`), TOTP multi-factor authentication, and an
+   access token expiry of one hour or less.
+4. Store the project URL as `CW_SUPABASE_URL` and the service-role key as the secret
+   `CW_SUPABASE_SERVICE_ROLE_KEY` on identity, then set `CW_AUTH_PROVIDER=supabase`. Set
+   `CW_SUPABASE_JWT_SECRET` only while the project still signs with its legacy HS256 secret.
+5. For each environment, make identity's signing key with
+   `identity-admin signing-key new --kid <yyyy-mm>` and store the printed key set as the secret
+   `CW_IDENTITY_SIGNING_KEYS`. Every environment gets its own key.
+6. For each environment, create the service clients with `identity-admin service-client create`,
+   with the scopes `src/identity/identity_dev_clients.toml` gives each caller (today notification,
+   pipeline, qa and the WhatsApp bot). Store each printed secret on its caller as
+   `CW_SERVICE_CLIENT_SECRET` and the client id as `CW_SERVICE_CLIENT_ID` (the bot's are
+   `BOT_SERVICE_CLIENT_SECRET` and `BOT_SERVICE_CLIENT_ID`). A secret is printed once.
+7. Create the internal tenant and its first admin with
+   `identity-admin bootstrap-internal --name ... --email ...`. Admins need a second factor, so the
+   admin enrols a TOTP factor at Supabase before the first sign-in, then invites the analysts and
+   reviewers.
+8. Sign a person in on staging end to end. The adapter has been checked against synthetic tokens
+   and recorded answers only, so this first sign-in is the check of the key set's path, the issuer
+   (`<project url>/auth/v1`), the `authenticated` audience, the `aal` claim and the admin API that
+   invitations use.
+9. Move staging to `CW_AUTH_MODE=dual`, then to `token` once the web signs in with tokens and
+   every caller sends its service token; production accepts only `token`. Then move ADR-014 to
+   Accepted.
+
+The secrets these steps create rotate as `docs/runbooks/secret-rotation.md` describes.
+
 ## Layout
 
 ```
@@ -140,4 +185,4 @@ make test                         # unit + contract tests with the coverage gate
 docker build -f services/identity/Dockerfile -t compliancewatch-identity .
 ```
 
-Package `identity`, dev port 8001, Postgres schema `identity`. Details: [docs/onboarding/local-dev.md](../../docs/onboarding/local-dev.md).
+Package `identity`, dev port 8001, Postgres schema `identity`. Details: [docs/onboarding/local-dev.md](../../docs/onboarding/local-dev.md), whose "Signing in with tokens" section runs identity in token mode and signs in with curl.

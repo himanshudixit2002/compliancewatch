@@ -48,3 +48,12 @@ updates as advisories appear. A finding that is accepted rather than fixed is li
 No real secret belongs in this repository. `.env.example` holds placeholders only, gitleaks
 runs in pre-commit and CI, and a leaked key is rotated as soon as it is noticed. If you find
 one, treat it as a vulnerability and report it the same way.
+
+Tests make their signing keys and provider secrets when they run
+(`py_common.auth.testing.TestIssuer` and `identity.testing`), so no private key is committed. Every deployed environment holds its own values: the
+inventory, with each secret's holders, owner, rotation cadence and procedure, is
+[docs/runbooks/secret-rotation.md](docs/runbooks/secret-rotation.md), and `infra/deploy/README.md`
+lists which app holds which secret. Once `CW_AUTH_MODE=token`, which production requires, a
+service trusts only access tokens the identity service signed (ES256, published as a key set) and
+no secret shared between our services. Webhooks from providers (Meta, Razorpay, SES through SNS)
+keep their own signatures or passwords.

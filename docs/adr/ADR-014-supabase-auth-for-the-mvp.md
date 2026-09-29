@@ -63,3 +63,50 @@ identity service runs with the fake provider behind `CW_AUTH_PROVIDER=fake`.
   until the Kubernetes profile.
 - Revisit when an SSO customer signs, when monthly active users make the per-user cost
   larger than running Keycloak, or when the Kubernetes profile goes live.
+
+## Addendum 2026-09-29: token exchange, revocation, second factor and key rotation
+
+The identity service now signs people in through an `IdentityProvider` (the fake one locally, a
+Supabase adapter behind `CW_AUTH_PROVIDER=supabase`) and issues the tokens every service
+verifies. How it does so:
+
+- **Services see identity's token, never the provider's.** The web exchanges the provider's token
+  at `POST /v1/identity/sessions` for identity's access token: an ES256 JWT with the claims `iss`,
+  `aud`, `sub`, `kind` (user or service), `tid` (the tenant), `roles`, `scp` (scopes), `sv` (the
+  session version), `mfa`, `iat`, `exp` and `jti`, and `kid` in its header. Services verify it
+  against identity's key set at `/v1/identity/.well-known/jwks.json` and read the tenant and roles
+  from it. They trust one issuer and one claim shape, so replacing Supabase with Keycloak
+  (ADR-009) changes identity's provider adapter and nothing else. Service clients get the same
+  kind of token for their id and secret at `POST /v1/identity/service-tokens`, with scopes and no
+  roles.
+- **Revocation is immediate in identity and bounded elsewhere.** Changing a user's roles or
+  disabling the user bumps their session version. Identity checks the token's `sv` against its
+  store on `/me` and the tenant admin routes, so it refuses an older token there at once. The
+  other services, and identity's consent routes, check the signature, issuer, audience and expiry
+  only: a revoked token keeps working there until it expires, ten minutes after issue by default
+  (`CW_ACCESS_TOKEN_TTL_SECONDS`). A revocation list shared by every service would close that
+  window; it is left out on purpose. A revoked service client gets no new token, and the tokens
+  it holds run out the same way.
+- **The second factor comes from the provider's `aal` claim.** Analysts, reviewers, admins and CA
+  admins need a sign-in at `aal2`. The exchange refuses a one-factor sign-in for those roles with
+  `identity-mfa-required` (403), and the web then sends the person to the provider to pass the
+  second factor (TOTP in Supabase) and exchanges again. The token's `mfa` claim records it;
+  services do not check it a second time.
+- **Sign-in fails closed.** When identity cannot fetch the provider's keys and holds none, a new
+  sign-in is refused with `identity-provider-unavailable` (503) rather than accepted unverified.
+  Sessions already issued go on working: every service caches identity's key set for an hour and
+  keeps the cached keys while identity is unreachable.
+- **Keys rotate by `kid`.** `CW_IDENTITY_SIGNING_KEYS` is a list: the first key signs and every
+  key is published. A new key goes in second, so it is published before it signs; it moves to the
+  front once verifiers have fetched it, and the old key leaves once no token it signed is alive. A
+  verifier that meets a `kid` it does not hold fetches the key set again, at most every 30
+  seconds. The steps are in `docs/runbooks/secret-rotation.md`.
+- **The switch is gradual.** `CW_AUTH_MODE` is `header` by default (the tenant from `x-tenant-id`,
+  as before), `dual` (a bearer token is verified and enforced when a request carries one) or
+  `token` (every request needs one, and shared secrets such as the rulebook's write and review
+  tokens stop opening routes). `CW_ENV=prod` refuses any mode but `token` and refuses
+  `CW_AUTH_PROVIDER=fake`, so staging runs `dual` and then `token` before production does.
+
+The Supabase project is still a manual step (the list is in `services/identity/README.md`). The
+adapter has been checked against synthetic tokens and recorded answers only, so this record stays
+Proposed until staging signs a person in end to end through the project.

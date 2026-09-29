@@ -137,6 +137,13 @@ Tests use `py_common.auth.testing.TestIssuer`, which generates its key at run ti
 the header. `py_common.auth` itself imports no FastAPI (an import-linter contract keeps it so),
 so application layers may use the principal, the issuer and the key helpers.
 
+`tools/demo/tests/unit/test_token_flow.py` puts the pieces together: identity signs a person's
+token, the profile service verifies it with the key set identity publishes (inline, and fetched by
+URL), and a `ServiceTokenSource` pointed at identity gets a service client's token. A deployment
+moves from `header` to `dual` to `token` as ADR-014's addendum describes, and identity's signing
+keys rotate as `docs/runbooks/secret-rotation.md` describes; a verifier holds the old and the new
+key through a rotation because it fetches the key set again when a token names a key it lacks.
+
 ## Pagination
 
 A list route declares `page: Pagination`, which reads `limit` (1 to 200, default 50) and
