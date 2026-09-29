@@ -205,6 +205,7 @@ test.describe("journey: an owner from sign-in to settings", () => {
       .getByRole("link", { name: "Settings", exact: true })
       .click();
     await expect(page).toHaveURL(/\/settings$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
     await checkA11y();
     await page.getByRole("link", { name: "Consents", exact: true }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Consents" })).toBeVisible();
