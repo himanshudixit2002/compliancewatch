@@ -279,6 +279,39 @@ server does not send it, because its copy lives in Next's data cache and is refr
 wording carries `review_status` (`needs_review` until an analyst has read it), which the domain
 type exposes as `wordingReviewed`.
 
+## Businesses: the business API and the profile node routes
+
+The owner and CA-firm screens read and write businesses through the profile service's business
+API (tagged public in its spec) and use the older profile node routes only where the business
+API has no equivalent. `features/business/gateway.ts` implements both ports over the typed
+profile client; every call is tenant-scoped (x-tenant-id from the session), uncached and mapped
+through `entities/business/mappers.ts`, and `mapBody` reports a success without a body as a
+server error instead of mapping nothing.
+
+| Port method             | Route                                                                      |
+| ----------------------- | -------------------------------------------------------------------------- |
+| `list({ q, limit, cursor })` | `GET /v1/businesses` (the tenant's businesses by name, a page at a time) |
+| `create(input, headers)`     | `POST /v1/businesses` with Idempotency-Key (`profile.create-business`)   |
+| `get(id)`                    | `GET /v1/businesses/{business_id}` (the entity, its values, registrations) |
+| `update(id, changes)`        | `PATCH /v1/businesses/{business_id}` (answers across the business, all or none) |
+| `onboarding(id)`             | `GET /v1/businesses/{business_id}/onboarding` (the next question, progress) |
+| `addRegistration(id, input, headers)` | `POST /v1/businesses/{business_id}/registrations` with Idempotency-Key (`profile.add-registration`) |
+| `node(id)`                   | `GET /v1/profile/nodes/{node_id}` (a location, or a parent in a lineage) |
+| `addLocation(input)`         | `POST /v1/profile/locations` (natural key: the label under its registration) |
+| `snapshot(id, fy?)`          | `GET /v1/profile/nodes/{node_id}/snapshot?fy=` (no per-year values without `fy`) |
+| `reviewTasks(id)`            | `GET /v1/profile/nodes/{node_id}/review-tasks`                            |
+
+A business id is the id of its legal entity node. An answer is `{ key, state, value?, asOfFy?,
+nodeId? }`: `state` is `known`, `unsure` or `not_applicable`, the value travels only with
+`known`, the financial year only for a per-year attribute, and the node only when the business
+has several registrations. The view models in `features/business/model` word everything with the
+ontology: `formatValue` and `describeValue` (labels, Yes and No, en-IN grouping, IST dates),
+`parseAnswer` (the form's state and strings to an answer, with a message per shape error before
+the service is asked), `attributeRows`, `unansweredAttributes`, `snapshotRows` with the origin of
+each value (this node, inherited from a named ancestor, or worked out by the service),
+`reviewTaskRows` and `onboardingProgress`. `AttributeControl` is the one place a control is
+chosen for an attribute type, and `AnswerButtons` submits the state.
+
 ## Idempotency and natural keys
 
 Two routes on `main` require an `Idempotency-Key`: the business API's `POST /v1/businesses`
@@ -306,9 +339,9 @@ key, because each has a natural key on the service:
 For a listed route, a page renders `<IdempotencyKeyInput />` inside the form (one UUID per
 render, so a double submit or a retry after a lost response sends the same key), and the action
 spreads `idempotencyHeaders(formData, "profile.create-business")` into the call's headers. A
-form value that is not a UUID is ignored, so the hidden field cannot inject a header. No screen
-on `main` calls the two business routes yet; the owner and CA screens that do will use this
-wiring.
+form value that is not a UUID is ignored, so the hidden field cannot inject a header. The
+business gateway's `create` and `addRegistration` take those headers as an argument and pass
+them on; without a key the service's 428 comes back as `precondition_required`.
 
 ## Shared secrets
 

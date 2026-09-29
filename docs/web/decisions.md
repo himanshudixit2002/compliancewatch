@@ -316,3 +316,20 @@ change reaches the screens within the hour of its release (or at once after
 `updateTag(tags.profile.ontology())`); a page that needs the ontology fails with the service's
 problem when the profile service is down, like any other read; unit tests use a synthetic body
 (`src/test/ontology-fixture.ts`), never a copy of the real wording.
+
+## D-025: The owner and CA screens use the business API; the node routes fill its gaps
+
+2026-09-29. The first design built the owner screens on the profile node routes (register a
+GSTIN, pre-fill, ask each node for its next question, write attributes per node). The business
+API on `main` now does that as one resource: create a business from a GSTIN or a PAN (with the
+pre-fill and the first question in the answer), read it with its registrations, store answers
+across it in one all-or-nothing patch, and read the onboarding checklist with the question's
+wording, options and progress. `features/business` builds on it, and calls the node routes only
+for what it lacks: one node (locations, lineage parents), adding a location, the snapshot per
+financial year and the review tasks. Consequences: the two creating calls need an
+Idempotency-Key, so their forms render `IdempotencyKeyInput`; the checklist counts known and
+not-applicable answers and returns an unsure one as the next question again, so a questions step
+that lets a person move past "Not sure" keeps its own list of what was skipped; the business id is
+the entity node's id, and a registration is addressed by `nodeId` inside an answer. Because a feature may not import
+another, the onboarding steps that create and question a business are views of the business
+feature, next to the business pages, and the attribute controls live there too.

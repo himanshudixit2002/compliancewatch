@@ -6,7 +6,7 @@ import type { Ontology } from "@/entities/ontology/types";
 import { call } from "./api/client";
 import { profileClient, type ClientContext } from "./api/services";
 import { cachedRead, tags } from "./cache";
-import { err, ok, webError, type Result } from "./result";
+import { mapBody, type Result } from "./result";
 
 /**
  * The ontology the screens word attributes with, read from the profile service's
@@ -32,12 +32,7 @@ export async function readOntology(ctx: OntologyContext = {}): Promise<Result<On
       ...cachedRead([tags.profile.ontology()], ONTOLOGY_REVALIDATE_SECONDS),
     }),
   );
-  if (!result.ok) return result;
-  // A body is always there: only a request with If-None-Match can get the bodiless 304.
-  if (result.value === undefined) {
-    return err(webError("server", "web-ontology-empty", "The ontology came back without a body"));
-  }
-  return ok(ontologyFromDto(result.value), result.requestId);
+  return mapBody(result, ontologyFromDto);
 }
 
 /** The ontology for the current request, read once however many views need it. */

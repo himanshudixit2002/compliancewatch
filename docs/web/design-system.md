@@ -78,6 +78,14 @@ Skeleton, Toaster (`sonner` with a polite live region; `toast` is re-exported).
 
 - `Field`: label, control, description and error; the control receives `id`,
   `aria-describedby`, `aria-invalid` and `aria-required`, and the error id is `<id>-error`.
+- `CheckboxGroup`: a `<fieldset>` with the question as its `<legend>`, one labelled checkbox per
+  option (Tab moves between boxes, Space toggles), an option's hint describing its box, the
+  description and error describing the fieldset; every checked box submits `name=value`, so a
+  server action reads `formData.getAll(name)`, and the value keeps the options' order.
+- `NumberField`: a text input with `inputmode="numeric"` (or `decimal`) and the allowed range as
+  a sentence in its description; a native number input changes its value on a scroll and reads
+  out poorly. `DateField`: the browser's own date input with `min` and `max`; the value is
+  always YYYY-MM-DD.
 - `StatusChip`, `Badge`, `Banner`, `Timeline`: the `Tone` vocabulary (`neutral`, `success`,
   `warning`, `danger`, `info`); the text carries the meaning. A danger Banner is `role="alert"`,
   the other tones `role="status"`.

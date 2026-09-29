@@ -58,9 +58,11 @@ apps/web/
     api/health/route.ts        {status, version, commit}
     error.tsx, global-error.tsx, not-found.tsx
   src/features/                home, sitemap, legal, not-available, admin-home, system-pages, design-catalogue,
-                               auth (sign-in form, action, seed state), account
+                               auth (sign-in form, action, seed state), account, business (the business API and
+                               profile node gateway, the attribute view models and controls)
   src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims),
-                               ontology/ (the attributes and their wording from GET /v1/ontology)
+                               ontology/ (the attributes and their wording from GET /v1/ontology),
+                               business/ (a business, its nodes and values, onboarding, review tasks, snapshots)
   src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError, webError),
                                api/ (typed clients, problem parsing, idempotency), cache.ts (tags and revalidation),
                                session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a

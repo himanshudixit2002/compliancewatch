@@ -83,6 +83,8 @@ export { AppShell, NavLinks, SkipLink } from "./components/app-shell";
 export type { AppShellProps, NavItem, NavLinkProps } from "./components/app-shell";
 export { Banner } from "./components/banner";
 export type { BannerProps } from "./components/banner";
+export { CheckboxGroup } from "./components/checkbox-group";
+export type { CheckboxGroupOption, CheckboxGroupProps } from "./components/checkbox-group";
 export { CitationCard } from "./components/citation-card";
 export type { CitationCardProps } from "./components/citation-card";
 export { ConfirmDialog } from "./components/confirm-dialog";
@@ -96,6 +98,8 @@ export type {
   DataTableProps,
   DataTableSort,
 } from "./components/data-table";
+export { DateField } from "./components/date-field";
+export type { DateFieldProps } from "./components/date-field";
 export { DRAFT_BANNER_TEXT, DraftBanner } from "./components/draft-banner";
 export type { DraftBannerProps } from "./components/draft-banner";
 export { EmptyState } from "./components/empty-state";
@@ -120,6 +124,8 @@ export {
 export type { CalendarDay, MonthCalendarProps, YearMonth } from "./components/month-calendar";
 export { NotAvailableYet } from "./components/not-available-yet";
 export type { AwaitedRoute, NotAvailableYetProps } from "./components/not-available-yet";
+export { NumberField, rangeText } from "./components/number-field";
+export type { NumberFieldProps } from "./components/number-field";
 export { PageHeader } from "./components/page-header";
 export type { PageHeaderProps } from "./components/page-header";
 export { REASON_MIN_LENGTH, ReasonDialog } from "./components/reason-dialog";

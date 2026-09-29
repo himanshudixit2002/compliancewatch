@@ -63,7 +63,7 @@ describe("readOntology", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.kind).toBe("server");
-      expect(result.error.problem?.type).toBe("urn:compliancewatch:problem:web-ontology-empty");
+      expect(result.error.problem?.type).toBe("urn:compliancewatch:problem:web-empty-body");
     }
   });
 

@@ -30,6 +30,7 @@ src/components/            # one file per component, <name>.test.tsx beside it
   field, status-chip, banner, draft-banner, empty-state, error-state, copy-button, visually-hidden
   page-header, app-shell, admin-shell, key-value, timeline, json-view, stepper
   confirm-dialog, reason-dialog, citation-card, month-calendar, data-table, not-available-yet
+  checkbox-group, number-field, date-field                         # composite form fields
 ```
 
 ## Components
@@ -63,6 +64,13 @@ Built on the primitives and the tokens; each has its accessibility contract in t
 
 - `Field`: label, control, description and error; the control gets `id`, `aria-describedby`,
   `aria-invalid` and `aria-required`, and the error id is `<id>-error`.
+- `CheckboxGroup`: a fieldset whose legend is the question, one labelled checkbox per option
+  (Tab between boxes, Space toggles), every checked box submitting `name=value` so a server
+  reads `formData.getAll(name)`; the value keeps the options' order; description and error
+  describe the fieldset; controlled or uncontrolled.
+- `NumberField`: a number typed as text (`inputmode` numeric or decimal, no scroll-to-change)
+  with the range in words under it ("Between 0 and 1,00,000."); `DateField`: the browser's
+  date input with `min` and `max`, always submitting YYYY-MM-DD. Both are wired through `Field`.
 - `StatusChip`, `Badge`, `Banner`, `Timeline`: the `Tone` vocabulary (neutral, success,
   warning, danger, info); the text carries the meaning, colour only reinforces it. A danger
   Banner is `role="alert"`, the other tones `role="status"`.

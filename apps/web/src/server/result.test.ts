@@ -5,6 +5,7 @@ import {
   defaultMessageFor,
   err,
   isProblem,
+  mapBody,
   mapResult,
   ok,
   statusForKind,
@@ -48,6 +49,24 @@ describe("Result", () => {
   it("unwraps with a fallback", () => {
     expect(unwrapOr(ok([1]), [])).toEqual([1]);
     expect(unwrapOr(err(apiError()), [])).toEqual([]);
+  });
+
+  it("maps a body, and reports a success without one as a server error with its request id", () => {
+    expect(mapBody(ok<number | undefined>(2, REQUEST_ID), (n) => n + 1)).toEqual({
+      ok: true,
+      value: 3,
+      requestId: REQUEST_ID,
+    });
+    const failure = err(apiError());
+    expect(mapBody(failure, (n: number) => n)).toBe(failure);
+    const empty = mapBody(ok<number | undefined>(undefined, REQUEST_ID), (n) => n);
+    expect(empty.ok).toBe(false);
+    if (!empty.ok) {
+      expect(empty.error).toMatchObject({ kind: "server", status: 500, requestId: REQUEST_ID });
+      expect(isProblem(empty.error, "web-empty-body")).toBe(true);
+    }
+    const anonymous = mapBody(ok<number | undefined>(undefined), (n) => n);
+    expect(!anonymous.ok && anonymous.error.requestId).toBe("");
   });
 });
 

@@ -27,12 +27,16 @@ src/app/            route files only: page.tsx is gate, query, render; layouts, 
 src/features/       one directory per screen family: model/, ui/, index.ts (ports, gateway, queries and
                     actions join when a feature reads data); today: home, sitemap, legal, not-available,
                     admin-home, system-pages, design-catalogue, auth (the fake sign-in form, the signIn action,
-                    the seed-state query), account
+                    the seed-state query), account, business (the gateway over the business API and the
+                    profile node routes, the attribute, snapshot, review-task and progress view models,
+                    AttributeControl, AnswerButtons, ValueStateChip)
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
                     problem/ types the RFC 9457 body every service returns (from the generated contracts);
                     session/ the session claims, the render-safe view and the time helpers;
                     ontology/ the attributes with their questions, value labels and operators, from
-                    GET /v1/ontology, and the lookups over them (by key, by level, answerable, labels)
+                    GET /v1/ontology, and the lookups over them (by key, by level, answerable, labels);
+                    business/ a business, its registrations and nodes, stored values, onboarding, prefill,
+                    review tasks and snapshots, with the mappers both ways
 src/server/         server-only modules; every file starts with `import "server-only"`
                     env.ts validates every CW_WEB_* variable (zod; parsed at the first request, never at build)
                     session.ts: the encrypted cw_session cookie (jose), its options, set and clear (actions only)
@@ -41,7 +45,8 @@ src/server/         server-only modules; every file starts with `import "server-
                     auth/provider.ts: the AuthProvider port and providerFor(env); auth/fake.ts: the development
                     adapter (CW_WEB_AUTH_PROVIDER=fake, local and test only) minting a session for a chosen
                     tenant, kind, roles and name
-                    result.ts: Result, ApiError and the mapping to a form's ActionState
+                    result.ts: Result, ApiError, mapBody (a success must carry its body) and the mapping to
+                    a form's ActionState
                     api/client.ts: one openapi-fetch client per service (x-request-id, accept, time limit) and call()
                     api/problem.ts: RFC 9457 parsing to ApiError kinds and field errors
                     api/services.ts: the client factories (tenant header from the session; rulebookAdmin() adds
