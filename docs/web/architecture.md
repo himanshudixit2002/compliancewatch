@@ -71,7 +71,8 @@ apps/web/
                                api/ (typed clients, problem parsing, idempotency), cache.ts (tags and revalidation),
                                session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a
                                POST handler), auth/ (the provider port and the fake adapter), legal.ts,
-                               ontology.ts (the ontology read, cached an hour by tag)
+                               ontology.ts (the ontology read, cached an hour by tag), flags.ts (the flag
+                               reader), analytics.ts (product events behind the flag and the consent)
   src/shared/config/           screens.ts, roles.ts, permissions.ts, flags.ts, nav.ts, services.ts, legal-docs.ts
   src/shared/lib/              dates, financial years, decimal money, humanise, identifiers, pagination, urls, assert
   src/shared/i18n/             messages/en.json and t()

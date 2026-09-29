@@ -74,7 +74,7 @@ export type { BusinessHeaderLinks, BusinessViewer, LaterScreenLink } from "./nav
 export type { BusinessFormFields, ParsedBusinessForm } from "./model/business-form";
 export { businessStepResult, lookupRows } from "./model/prefill";
 export type { BusinessStepResult, PrefillRow, StepHrefs } from "./model/prefill";
-export { doneSummaryView, questionStepView } from "./model/onboarding-step";
+export { doneSummaryView, questionStepView, summaryViewedEvent } from "./model/onboarding-step";
 export type {
   DoneSummaryView,
   OnboardingState,

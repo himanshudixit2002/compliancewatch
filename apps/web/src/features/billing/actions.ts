@@ -1,5 +1,6 @@
 "use server";
 
+import { track } from "@/server/analytics";
 import { requireScreenSession } from "@/server/dal";
 import { toActionState } from "@/server/result";
 import { can } from "@/shared/config/permissions";
@@ -39,5 +40,9 @@ export async function startSubscription(
   if (!parsed.ok) return fieldFailure(parsed.fieldErrors);
   const started = await gateway.subscribe(parsed.value);
   if (!started.ok) return toActionState(started);
+  await track(session, {
+    name: "subscription_started",
+    properties: { plan_key: parsed.value.planKey },
+  });
   return actionSuccess(subscriptionView(started.value, plans.value));
 }

@@ -12,8 +12,9 @@ const SECURITY_HEADERS = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  // The shared UI kit is consumed from TypeScript source (packages/ui/src); Next compiles it.
-  transpilePackages: ["@compliancewatch/ui"],
+  // The shared UI kit and the flag registry's client are consumed from TypeScript source
+  // (packages/ui/src, packages/flags/src); Next compiles them.
+  transpilePackages: ["@compliancewatch/ui", "@compliancewatch/flags"],
   // Links are checked against the route tree; registry links go through hrefFor().
   typedRoutes: true,
   // Linting is the separate `lint` turbo task: Next 16 removed `next lint` and the `eslint` option.

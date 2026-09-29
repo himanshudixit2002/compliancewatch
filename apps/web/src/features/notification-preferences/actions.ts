@@ -2,6 +2,7 @@
 
 import { stateOf } from "@/entities/consent/mappers";
 import { recipientLabel } from "@/entities/notification/mappers";
+import { track } from "@/server/analytics";
 import { afterMutation } from "@/server/cache";
 import { requireScreenSession } from "@/server/dal";
 import {
@@ -126,6 +127,10 @@ export async function savePreference(
     quietHoursEnd: choice.quietHoursEnd,
   });
   if (!saved.ok) return toActionState(saved);
+  await track(session, {
+    name: "notification_preference_saved",
+    properties: { channel, opted_in: saved.value.optedIn },
+  });
   afterMutation({ paths: [hrefFor(screen)] });
   return actionSuccess(
     undefined,

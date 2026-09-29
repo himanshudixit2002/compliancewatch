@@ -451,3 +451,22 @@ provider for a manual demo, and `make web-e2e BILLING=memory` tells the spec to 
 subscription instead; the unit tests cover both answers. A form that refuses a submit puts the
 submitted values back (React resets a form after its action), on this page and on the
 notifications page.
+
+## D-034: Product events are log lines behind the flag and a consent read on every event
+
+2026-09-29. The onboarding funnel and the settings changes need product events, the plan rules
+out third-party analytics, and `docs/legal` makes analytics an optional purpose the person can
+withdraw. `server/analytics.ts` writes each event as one JSON line on stdout and adds it to the
+active OpenTelemetry span (`@opentelemetry/api`, pinned at 1.9.1, is the API Next's own tracing
+resolves first; with no tracer registered the span event is a no-op). An event goes out only
+while `web.analytics_enabled` is on, read through the new `server/flags.ts` over
+`@compliancewatch/flags/server`, and the person's latest analytics record grants it at the
+privacy notice's current version, read from identity on every event. Considered and rejected:
+the session's `analyticsConsent` claim, which would keep events flowing after a withdrawal until
+the session is refreshed; and running `track` in Next's `after()`, which needs a request scope the
+unit tests do not have, for a cost (one consent read) paid only while the flag is on. The web
+override variables count in local and test only; elsewhere the reader strips them, so Unleash is
+the only way to switch a web flag on in staging or production. Consequences: with the flag off
+nothing is read or written; with it on, each event adds one identity read to the action or page
+that emits it; the events are a closed union, so a new one is a code change reviewed for
+personal data; turning the flag on waits for counsel's view on the analytics purpose.

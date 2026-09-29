@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import type { ConsentPurpose } from "@/entities/consent/types";
+import { track } from "@/server/analytics";
 import { afterMutation } from "@/server/cache";
 import { requireScreenSession } from "@/server/dal";
 import { readLegalVersions } from "@/server/legal";
@@ -88,6 +89,7 @@ export async function recordConsents(
     await rememberRecipient(session.userId, "whatsapp", recipient);
   }
 
+  await track(session, { name: "onboarding_step_completed", properties: { step: "consent" } });
   afterMutation({ paths: [hrefFor(screen)] });
   redirect(hrefFor(screenById("owner.onboarding.business")));
 }
@@ -196,6 +198,10 @@ export async function changeConsent(
       );
     }
     recordedAt = formatDateTime(written.value.recordedAt);
+    await track(session, {
+      name: "consent_changed",
+      properties: { purpose: choice.purpose, change: choice.change },
+    });
   }
 
   if (recipient !== null && choice.change === "give") {

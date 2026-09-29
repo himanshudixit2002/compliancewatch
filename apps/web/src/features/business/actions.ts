@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { attributeOf } from "@/entities/ontology/mappers";
+import { track } from "@/server/analytics";
 import { idempotencyHeaders } from "@/server/api/idempotency";
 import { afterMutation } from "@/server/cache";
 import { requireScreenSession } from "@/server/dal";
@@ -52,6 +53,14 @@ export async function createBusiness(
   );
   if (!created.ok) return toActionState(created);
 
+  await track(session, {
+    name: "onboarding_step_completed",
+    properties: {
+      step: "business",
+      created: created.value.created,
+      looked_up: created.value.prefill?.lookedUp ?? false,
+    },
+  });
   const ontology = await getOntology();
   const businessId = created.value.business.id;
   afterMutation({ paths: [hrefFor(screenById("owner.businesses"))] });
@@ -107,6 +116,10 @@ export async function answerQuestion(
     changes: [parsed.answer],
   });
   if (!updated.ok) return answerRefused(updated.error);
+  await track(session, {
+    name: "onboarding_step_completed",
+    properties: { step: "question", attribute: input.key, state: parsed.answer.state },
+  });
 
   await rememberSkip(
     input.businessId,

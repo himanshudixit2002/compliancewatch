@@ -1,5 +1,6 @@
 import type { Business, Onboarding, QuestionState, ReviewTask } from "@/entities/business/types";
 import type { Ontology, OntologyAttribute } from "@/entities/ontology/types";
+import type { ProductEvent } from "@/server/analytics";
 import { t } from "@/shared/i18n";
 import { attributeLabel } from "./attributes";
 import { onboardingProgress, type OnboardingProgress } from "./progress";
@@ -167,5 +168,19 @@ export function doneSummaryView(state: OnboardingState): DoneSummaryView {
     unsure: open("unsure"),
     missing: open("missing"),
     reviewTasks: openTaskRows(state),
+  };
+}
+
+/** The product event for a view of the summary: counts only, no names or identifiers. */
+export function summaryViewedEvent(view: DoneSummaryView): ProductEvent {
+  return {
+    name: "onboarding_summary_viewed",
+    properties: {
+      complete: view.progress.complete,
+      answered: view.progress.answered,
+      total: view.progress.total,
+      unsure: view.unsure.length,
+      open_review_tasks: view.reviewTasks.length,
+    },
   };
 }

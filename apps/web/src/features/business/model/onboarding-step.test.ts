@@ -9,7 +9,12 @@ import {
   REVIEW_TASK_DTO,
 } from "@/test/business-fixture";
 import { ontologyFixture } from "@/test/ontology-fixture";
-import { doneSummaryView, questionStepView, type OnboardingState } from "./onboarding-step";
+import {
+  doneSummaryView,
+  questionStepView,
+  summaryViewedEvent,
+  type OnboardingState,
+} from "./onboarding-step";
 import { skipKey } from "./questions";
 
 const base = onboardingFromDto(ONBOARDING_DTO);
@@ -132,5 +137,19 @@ describe("doneSummaryView", () => {
     });
     expect(view.reviewTasks).toHaveLength(1);
     expect(view.progress.complete).toBe(true);
+  });
+
+  it("gives the summary's product event as counts only", () => {
+    const view = doneSummaryView(state(null));
+    expect(summaryViewedEvent(view)).toEqual({
+      name: "onboarding_summary_viewed",
+      properties: {
+        complete: true,
+        answered: view.progress.answered,
+        total: view.progress.total,
+        unsure: 1,
+        open_review_tasks: 1,
+      },
+    });
   });
 });

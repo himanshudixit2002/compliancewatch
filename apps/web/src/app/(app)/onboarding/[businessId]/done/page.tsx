@@ -1,6 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { ANSWER_FIELDS, DoneSummary, getDoneSummary, revisitUnsure } from "@/features/business";
+import {
+  ANSWER_FIELDS,
+  DoneSummary,
+  getDoneSummary,
+  revisitUnsure,
+  summaryViewedEvent,
+} from "@/features/business";
+import { track } from "@/server/analytics";
 import { requireScreenSession } from "@/server/dal";
 import { hrefFor, screenById } from "@/shared/config/screens";
 import { isUuid } from "@/shared/lib/identifiers";
@@ -25,6 +32,7 @@ export default async function OnboardingDonePage({ params }: Props) {
     if (summary.error.kind === "not_found") notFound();
     return <ServiceError heading={SCREEN.title} error={summary.error} />;
   }
+  await track(session, summaryViewedEvent(summary.value));
   return (
     <DoneSummary
       title={SCREEN.title}

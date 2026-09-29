@@ -5,7 +5,10 @@ import { redirect } from "next/navigation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionWindow } from "@/entities/session/mappers";
 import type { SessionClaims } from "@/entities/session/types";
+import { analyticsNoticeVersion } from "@/server/analytics";
 import { resetEnvCache } from "@/server/env";
+import { resetFlagReader } from "@/server/flags";
+import { readLegalVersions } from "@/server/legal";
 import { encryptSession } from "@/server/session";
 import {
   BUSINESS_CREATED_DTO,
@@ -18,6 +21,7 @@ import {
   TENANT_ID,
   USER_ID,
 } from "@/test/business-fixture";
+import { grantedState, summaryDto } from "@/test/consent-fixture";
 import { fakeCookies } from "@/test/fake-cookies";
 import { fakeFetch, jsonResponse, problemResponse, type RecordedRequest } from "@/test/fake-fetch";
 import { ONTOLOGY_DTO } from "@/test/ontology-fixture";
@@ -191,6 +195,64 @@ const ANSWER = {
   key: "example_flag",
   as_of_fy: "",
 };
+
+describe("product analytics", () => {
+  beforeEach(async () => {
+    await resetFlagReader();
+    vi.stubEnv("CW_WEB_ENV", "test");
+    vi.stubEnv("CW_WEB_FLAG_ANALYTICS_ENABLED", "true");
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await resetFlagReader();
+  });
+
+  /** The profile service, and identity answering the analytics consent at the current notice. */
+  function servicesWithConsent() {
+    const notice = analyticsNoticeVersion(readLegalVersions());
+    const identity = fakeFetch([
+      {
+        method: "GET",
+        path: "/v1/identity/consents",
+        body: summaryDto([grantedState("analytics", notice)]),
+      },
+    ]);
+    const services = profile();
+    return (input: Request, init?: RequestInit) =>
+      new URL(input.url).pathname === "/v1/identity/consents"
+        ? identity.fetchImpl(input, init)
+        : services.fetchImpl(input, init);
+  }
+
+  function productEvents(log: { mock: { calls: unknown[][] } }): unknown[] {
+    return log.mock.calls
+      .map((call) => JSON.parse(String(call[0])) as { event?: string })
+      .filter((line) => line.event === "product_event");
+  }
+
+  it("emits the business step and each answer when the flag is on and analytics is consented", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await signedInAs();
+    vi.stubGlobal("fetch", servicesWithConsent());
+    expect((await createBusiness(IDLE, form(VALID))).status).toBe("ok");
+    await expect(answerQuestion(IDLE, form({ ...ANSWER, state: "unsure" }))).rejects.toThrow(
+      "redirect",
+    );
+    expect(productEvents(log)).toEqual([
+      expect.objectContaining({
+        name: "onboarding_step_completed",
+        tenant_id: TENANT_ID,
+        user_id: USER_ID,
+        properties: { step: "business", created: true, looked_up: false },
+      }),
+      expect.objectContaining({
+        name: "onboarding_step_completed",
+        properties: { step: "question", attribute: "example_flag", state: "unsure" },
+      }),
+    ]);
+  });
+});
 
 describe("answerQuestion", () => {
   it("stores a value on the checklist's node and moves on, naming what was saved", async () => {

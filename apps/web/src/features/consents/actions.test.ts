@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionWindow } from "@/entities/session/mappers";
 import type { SessionClaims } from "@/entities/session/types";
 import { resetEnvCache } from "@/server/env";
+import { resetFlagReader } from "@/server/flags";
 import { readLegalVersions } from "@/server/legal";
 import { readRememberedRecipients } from "@/server/remembered-recipients";
 import { encryptSession } from "@/server/session";
@@ -111,6 +112,82 @@ afterEach(() => {
   resetEnvCache();
   vi.mocked(redirect).mockReset();
   vi.clearAllMocks();
+});
+
+describe("product analytics", () => {
+  beforeEach(async () => {
+    await resetFlagReader();
+    vi.stubEnv("CW_WEB_ENV", "test");
+    vi.stubEnv("CW_WEB_FLAG_ANALYTICS_ENABLED", "true");
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await resetFlagReader();
+  });
+
+  function productEvents(log: { mock: { calls: unknown[][] } }): unknown[] {
+    return log.mock.calls
+      .map((call) => JSON.parse(String(call[0])) as { event?: string })
+      .filter((line) => line.event === "product_event");
+  }
+
+  it("emits the consent step when the person also gave the analytics consent", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await signedInAs();
+    vi.stubGlobal("fetch", services({ states: [grantedState("analytics", PRIVACY)] }).fetchImpl);
+    await expect(recordConsents(IDLE, form(REQUIRED))).rejects.toThrow(Redirected);
+    expect(productEvents(log)).toEqual([
+      expect.objectContaining({
+        name: "onboarding_step_completed",
+        properties: { step: "consent" },
+      }),
+    ]);
+  });
+
+  it("emits nothing for a person who did not give the analytics consent", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await signedInAs();
+    vi.stubGlobal("fetch", services().fetchImpl);
+    await expect(recordConsents(IDLE, form(REQUIRED))).rejects.toThrow(Redirected);
+    expect(productEvents(log)).toEqual([]);
+  });
+
+  /** Identity holding one analytics state that each recorded change replaces. */
+  function analyticsState(granted: boolean) {
+    let current = granted;
+    return fakeFetch((request: RecordedRequest) => {
+      if (request.method === "GET") {
+        return jsonResponse(200, summaryDto([grantedState("analytics", PRIVACY, current)]));
+      }
+      const body = request.body as { granted: boolean };
+      current = body.granted;
+      return jsonResponse(201, {
+        id: "00000000-0000-4000-8000-000000000c02",
+        recorded_at: "2000-01-01T00:00:00Z",
+        ...(request.body as object),
+      });
+    });
+  }
+
+  it("stops at a withdrawal of the analytics consent and starts again when it is given", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await signedInAs();
+    vi.stubGlobal("fetch", analyticsState(true).fetchImpl);
+    const withdrawn = await changeConsent(IDLE, form({ purpose: "analytics", change: "withdraw" }));
+    expect(withdrawn.status).toBe("ok");
+    expect(productEvents(log)).toEqual([]);
+
+    vi.stubGlobal("fetch", analyticsState(false).fetchImpl);
+    const given = await changeConsent(IDLE, form({ purpose: "analytics", change: "give" }));
+    expect(given.status).toBe("ok");
+    expect(productEvents(log)).toEqual([
+      expect.objectContaining({
+        name: "consent_changed",
+        properties: { purpose: "analytics", change: "give" },
+      }),
+    ]);
+  });
 });
 
 describe("recordConsents", () => {

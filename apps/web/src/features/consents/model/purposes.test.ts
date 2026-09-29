@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CONSENT_PURPOSES } from "@/entities/consent/types";
+import { analyticsNoticeVersion } from "@/server/analytics";
 import { VERSIONS } from "@/test/consent-fixture";
 import {
   ONBOARDING_PURPOSES,
@@ -45,5 +46,9 @@ describe("purposes", () => {
     for (const purpose of ONBOARDING_PURPOSES) {
       expect(Object.keys(VERSIONS)).toContain(PURPOSE_DOCUMENT[purpose]);
     }
+  });
+
+  it("gives the analytics consent the notice version the analytics gate asks for", () => {
+    expect(noticeFor("analytics", VERSIONS)).toBe(analyticsNoticeVersion(VERSIONS));
   });
 });
