@@ -282,9 +282,12 @@ starting anything it also runs `make openapi-ts-check`, which no other job ran. 
 web-e2e` stays a build plus Playwright, so the suite runs without Python; the one test that
 needs the seed (the seeded-tenant sign-in) is skipped when `var/seed/last.json` is absent and
 fails on CI instead. Consequences: the job takes the Python install time (cached by setup-uv);
-a broken service start or seed fails the web gate; the job stays keyed on the `typescript`
-path filter, so a service-only change does not run it; a later screen's spec may assume the
-seeded tenant and the recorded notification exist.
+a broken service start or seed fails the web gate; the job runs when either the `typescript`
+or the `python` path filter matches, so a change to a service, to the Python packages the
+services share, to `uv.lock` or `pyproject.toml`, to the Makefile's web-stack and seed recipes,
+or to the recorded fixture the seed hashes is caught in its own pull request rather than by
+the next unrelated web change; a later screen's spec may assume the seeded tenant and the
+recorded notification exist.
 
 ## D-023: The web flags are entries in the shared flag registry
 

@@ -574,7 +574,10 @@ jobs:
   web-e2e:
     name: Web e2e (Playwright with axe against next start and the services)
     needs: changes
-    if: needs.changes.outputs.typescript == 'true'
+    # The suite drives the services through the Makefile's web-stack and seeds them, so a change
+    # to a service, the Python packages they share, the lock file or the Makefile (the python
+    # filter) can break it as surely as a change to the app (the typescript filter).
+    if: needs.changes.outputs.typescript == 'true' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

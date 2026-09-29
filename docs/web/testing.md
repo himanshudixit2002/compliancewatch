@@ -164,7 +164,7 @@ TypeScript part; `pnpm format` is the prettier check.
 Two jobs in `.github/workflows/ci.yml` cover the app, both keyed on the `typescript` path filter
 (`apps/**`, `packages/ui/**`, `packages/contracts/**`, the workspace files, and `docs/legal/**`
 and `docs/web/**` because the build renders the legal drafts and the tests compare
-`docs/web/screens.md` with the registry):
+`docs/web/screens.md` with the registry); `web-e2e` also runs on the `python` filter:
 
 - `typescript` runs `pnpm format` and `pnpm turbo run lint typecheck test build` for every
   package. No `CW_WEB_*` variable is set there, so the web build must not need one.
@@ -181,7 +181,9 @@ and `docs/web/**` because the build renders the legal drafts and the tests compa
   and the seed state.
 
 Both are in the `needs` of the `CI gate` job, the one check branch protection requires;
-`make ci-gate-check` fails when a job is missing from that list. `web-e2e` starts the services
-but stays keyed on the `typescript` filter, so a change to a service alone does not run it; the
-`python` job's tests cover that change, and the next change under `apps/**` runs the suite
-against it.
+`make ci-gate-check` fails when a job is missing from that list. Because `web-e2e` starts the
+services with the Makefile's recipes and seeds them over HTTP, it also runs when the `python`
+filter matches (`services/**`, the shared Python packages, `pyproject.toml`, `uv.lock`, the
+`Makefile`, `tools/**`, `evals/**`): a service change that breaks the stack, the seed or a
+recorded fixture the seed hashes fails in its own pull request instead of in the next unrelated
+web change.
