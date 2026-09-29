@@ -1,0 +1,628 @@
+"""Migration 0001 on Postgres: the tables, row-level security by tenant on the tenant tables, the
+store's repositories, one row per dedupe key under concurrent writes, the work index under two
+dispatchers, the consumer's transaction, and the outbox. Needs Docker.
+
+The store runs as a plain database role, not the container's superuser: a superuser bypasses
+row-level security whatever the table says, so the service's runtime role must never be one.
+Each test uses its own tenants, and the tests that claim work use their own years and remove
+what they leave, because a claim sees every tenant's due work.
+"""
+
+import threading
+from collections.abc import Iterator, Sequence
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from uuid import UUID, uuid4
+
+import pytest
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import Connection, Engine, create_engine, inspect, select, text
+from sqlalchemy.exc import DBAPIError
+from testcontainers.community.postgres import PostgresContainer
+
+from domain_kernel.channels import Channel
+from domain_kernel.dedupe import DedupeKey
+from domain_kernel.ids import BusinessId, NotificationId, ObligationId, TenantId
+from notification.application.preferences import SetOptIn
+from notification.application.send import SendNotification
+from notification.domain.ids import DispatchId, RecipientId
+from notification.domain.model import NotificationRequest, Outcome
+from notification.domain.notification import DeliveryState, Notification
+from notification.domain.occasions import OccasionKind
+from notification.domain.preferences import (
+    ChannelPreference,
+    ConsentSource,
+    QuietHours,
+    Suppression,
+    SuppressionReason,
+)
+from notification.domain.repository import PageAfter, WorkEntry
+from notification.infrastructure.repository import PostgresUnitOfWorkFactory, SqlAlchemyUnitOfWork
+from notification.infrastructure.work_index import PostgresWorkIndex, claim_rows
+from notification.testing import NOON_IST, FakeChannel
+from py_common.events import EventMessage, to_message
+from py_common.outbox import (
+    ConsumerConfig,
+    IdempotentConsumer,
+    InboundRecord,
+    SyncProcessedStore,
+    outbox_event,
+    processed_event,
+    sync_handler,
+)
+from py_common.outbox import Outcome as ConsumerOutcome
+from py_common.outbox.testing import FakeProducer
+
+SERVICE_DIR = Path(__file__).resolve().parents[2]
+IMAGE = "pgvector/pgvector:0.8.6-pg16"
+SCHEMA = "notification"
+TENANT_TABLES = ("recipient", "recipient_address", "recipient_business", "notification")
+SHARED_TABLES = ("channel_preference", "suppression", "address_directory", "work_index")
+TABLES = {*TENANT_TABLES, *SHARED_TABLES, "outbox_event", "processed_event", "alembic_version"}
+APP_ROLE = "notification_app"
+APP_PASSWORD = "app-role-for-tests"
+GROUP = "notification.obligations"
+LEASE = timedelta(seconds=60)
+
+
+@pytest.fixture(scope="module")
+def database_url() -> Iterator[str]:
+    with PostgresContainer(IMAGE, driver="psycopg") as postgres:
+        base_url = postgres.get_connection_url()
+        admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
+        with admin.connect() as connection:
+            connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+        admin.dispose()
+        yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
+
+
+@pytest.fixture(scope="module")
+def migrated(database_url: str) -> Iterator[Config]:
+    with pytest.MonkeyPatch.context() as env:
+        env.setenv("CW_DATABASE_URL", database_url)
+        env.setenv("CW_DB_SCHEMA", SCHEMA)
+        config = Config(str(SERVICE_DIR / "alembic.ini"))
+        command.upgrade(config, "head")
+        yield config
+
+
+@pytest.fixture(scope="module")
+def engine(database_url: str, migrated: Config) -> Iterator[Engine]:
+    engine = create_engine(database_url)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture(scope="module")
+def app_engine(database_url: str, migrated: Config) -> Iterator[Engine]:
+    """An engine for a role that owns nothing and is not a superuser, so the policies apply."""
+    admin = create_engine(database_url, isolation_level="AUTOCOMMIT")
+    with admin.connect() as connection:
+        connection.execute(text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'"))
+        connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
+        connection.execute(
+            text(
+                "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "
+                f"{SCHEMA} TO {APP_ROLE}"
+            )
+        )
+    admin.dispose()
+    url = database_url.replace("test:test@", f"{APP_ROLE}:{APP_PASSWORD}@")
+    engine = create_engine(url, pool_size=10)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def factory(app_engine: Engine) -> PostgresUnitOfWorkFactory:
+    return PostgresUnitOfWorkFactory(app_engine)
+
+
+def item(
+    n: int,
+    tenant: TenantId,
+    *,
+    at: datetime = NOON_IST,
+    business: BusinessId | None = None,
+    recipient: RecipientId | None = None,
+    **changes: object,
+) -> Notification:
+    values: dict[str, object] = {
+        "tenant_id": tenant,
+        "business_id": business or BusinessId.new(),
+        "obligation_id": ObligationId.new(),
+        "recipient_id": recipient or RecipientId.new(),
+        "channel": Channel.WHATSAPP,
+        "address": "+919876543210",
+        "occasion": OccasionKind.REMINDER,
+        "template_key": "obligation_due_soon",
+        "language": "en",
+        "params": {"title": f"obligation {n}", "steps": ["Reconcile", "File"]},
+        "dedupe_key": DedupeKey(uuid4().hex * 2),
+        "now": at,
+    }
+    values.update(changes)
+    return Notification.queue(**values)  # type: ignore[arg-type]
+
+
+def enqueue(factory: PostgresUnitOfWorkFactory, *items: Notification) -> None:
+    for notification in items:
+        with factory(notification.tenant_id) as unit:
+            assert unit.notifications.add_if_absent(notification)
+            unit.work.add(WorkEntry.of(notification))
+
+
+def purge(factory: PostgresUnitOfWorkFactory, tenant: TenantId) -> None:
+    with factory(tenant) as unit:
+        unit.notifications.purge(datetime(2100, 1, 1, tzinfo=UTC))
+
+
+def test_migration_creates_the_tables_with_row_level_security_where_it_belongs(
+    engine: Engine,
+) -> None:
+    assert set(inspect(engine).get_table_names(schema=SCHEMA)) == TABLES
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                "SELECT relname, relrowsecurity, relforcerowsecurity, "
+                "obj_description(oid, 'pg_class') AS comment FROM pg_class "
+                "WHERE relkind = 'r' AND relnamespace = CAST(:schema AS regnamespace)"
+            ),
+            {"schema": SCHEMA},
+        ).all()
+        policies = {
+            (row.tablename, row.policyname)
+            for row in connection.execute(
+                text("SELECT tablename, policyname FROM pg_policies WHERE schemaname = :schema"),
+                {"schema": SCHEMA},
+            )
+        }
+    by_table = {row.relname: row for row in rows}
+    for table in TENANT_TABLES:
+        assert (by_table[table].relrowsecurity, by_table[table].relforcerowsecurity) == (
+            True,
+            True,
+        ), table
+    assert policies == {(table, f"{table}_tenant_isolation") for table in TENANT_TABLES}
+    for table in SHARED_TABLES:
+        assert not by_table[table].relrowsecurity, table
+        assert by_table[table].comment.startswith("No row-level security: "), table
+
+
+def test_the_container_user_is_a_superuser_and_the_app_role_is_not(
+    engine: Engine, app_engine: Engine
+) -> None:
+    query = text("SELECT usesuper FROM pg_user WHERE usename = current_user")
+    with engine.connect() as connection:
+        container_user_is_super: bool = connection.execute(query).scalar_one()
+    with app_engine.connect() as connection:
+        app_role_is_super: bool = connection.execute(query).scalar_one()
+    assert container_user_is_super
+    assert not app_role_is_super
+
+
+def _as_tenant(connection: Connection, tenant: TenantId | None) -> None:
+    connection.execute(
+        text("SELECT set_config('app.tenant_id', :value, true)"),
+        {"value": "" if tenant is None else str(tenant)},
+    )
+
+
+def _seed_tenant_rows(connection: Connection, tenant: TenantId) -> None:
+    values: dict[str, object] = {
+        "tenant": tenant.value,
+        "recipient": uuid4(),
+        "business": uuid4(),
+        "id": uuid4(),
+        "key": uuid4().hex * 2,
+    }
+    connection.execute(
+        text(
+            "INSERT INTO recipient (id, tenant_id, role, created_at, updated_at) "
+            "VALUES (:recipient, :tenant, 'owner', now(), now())"
+        ),
+        values,
+    )
+    connection.execute(
+        text(
+            "INSERT INTO recipient_address (tenant_id, recipient_id, channel, address, position) "
+            "VALUES (:tenant, :recipient, 'whatsapp', '+919876543210', 0)"
+        ),
+        values,
+    )
+    connection.execute(
+        text(
+            "INSERT INTO recipient_business (tenant_id, recipient_id, business_id) "
+            "VALUES (:tenant, :recipient, :business)"
+        ),
+        values,
+    )
+    connection.execute(
+        text(
+            "INSERT INTO notification (id, tenant_id, business_id, obligation_id, channel, "
+            "address, occasion, template_key, language, dedupe_key, state, available_at, "
+            "created_at, updated_at) VALUES (:id, :tenant, :business, gen_random_uuid(), "
+            "'whatsapp', '+919876543210', 'manual', 'obligation_due_soon', 'en', :key, "
+            "'queued', now(), now(), now())"
+        ),
+        values,
+    )
+
+
+def test_the_app_role_sees_only_the_rows_of_its_tenant(app_engine: Engine) -> None:
+    tenant, other = TenantId.new(), TenantId.new()
+    with app_engine.begin() as connection:
+        _as_tenant(connection, tenant)
+        _seed_tenant_rows(connection, tenant)
+
+    def counts(as_tenant: TenantId | None) -> dict[str, int]:
+        with app_engine.begin() as connection:
+            _as_tenant(connection, as_tenant)
+            return {
+                table: connection.execute(
+                    text(f"SELECT count(*) FROM {table} WHERE tenant_id IN (:a, :b)"),
+                    {"a": tenant.value, "b": other.value},
+                ).scalar_one()
+                for table in TENANT_TABLES
+            }
+
+    assert counts(tenant) == dict.fromkeys(TENANT_TABLES, 1)
+    assert counts(other) == dict.fromkeys(TENANT_TABLES, 0)
+    assert counts(None) == dict.fromkeys(TENANT_TABLES, 0), "no setting, no rows"
+
+    def write_as_the_other_tenant() -> None:
+        with app_engine.begin() as connection:
+            _as_tenant(connection, tenant)
+            _seed_tenant_rows(connection, other)
+
+    with pytest.raises(DBAPIError, match="row-level security"):
+        write_as_the_other_tenant()
+
+
+def test_the_repositories_round_trip_under_row_level_security(
+    factory: PostgresUnitOfWorkFactory, engine: Engine
+) -> None:
+    tenant, other = TenantId.new(), TenantId.new()
+    base = datetime(2001, 3, 1, 6, 30, tzinfo=UTC)
+    business, recipient, obligation = BusinessId.new(), RecipientId.new(), ObligationId.new()
+    early = item(
+        1, tenant, at=base, business=business, recipient=recipient, obligation_id=obligation
+    )
+    late = item(
+        2,
+        tenant,
+        at=base + timedelta(minutes=10),
+        business=business,
+        recipient=recipient,
+        obligation_id=obligation,
+        params={"title": "newest"},
+    )
+    theirs = item(3, other, at=base, business=business)
+    enqueue(factory, early, late, theirs)
+
+    with factory(tenant) as unit:
+        notifications = unit.notifications
+        assert not notifications.add_if_absent(item(4, tenant, dedupe_key=early.dedupe_key))
+        assert not notifications.add_if_absent(item(5, tenant, notification_id=early.id))
+        assert not notifications.add_if_absent(item(6, tenant, dedupe_key=theirs.dedupe_key)), (
+            "keys are unique across tenants"
+        )
+        assert notifications.get(early.id) == early
+        assert notifications.get(theirs.id) is None, "row-level security hides the other tenant"
+        assert notifications.by_dedupe_key(late.dedupe_key) == late
+        due = notifications.due_for(recipient, Channel.WHATSAPP, base + timedelta(minutes=1))
+        assert [n.id for n in due] == [early.id]
+        assert notifications.latest_params(obligation) == {"title": "newest"}
+        first_page = notifications.page(business, limit=1)
+        assert [n.id for n in first_page] == [late.id]
+        after = PageAfter(first_page[0].created_at, first_page[0].id)
+        assert [n.id for n in notifications.page(business, limit=5, after=after)] == [early.id]
+        assert notifications.page(business, state=DeliveryState.SENT, limit=5) == []
+
+        dispatch = DispatchId.new()
+        sent, _ = early.sent(dispatch, "wamid.round-trip", base + timedelta(minutes=2))
+        notifications.save(sent)
+        unit.work.complete(early.id, provider_message_id="wamid.round-trip")
+        assert notifications.get(early.id) == sent
+        assert [n.id for n in notifications.by_dispatch(dispatch)] == [early.id]
+        assert [n.id for n in notifications.by_provider_message("wamid.round-trip")] == [early.id]
+        assert notifications.by_provider_message("") == []
+        assert notifications.page(business, state=DeliveryState.SENT, limit=5) == [sent]
+
+    work = PostgresWorkIndex(factory.engine)
+    assert work.tenant_for_provider_message("wamid.round-trip") == tenant
+    assert work.tenant_for_provider_message("wamid.unknown") is None
+    assert work.tenant_for_provider_message("") is None
+    claimed = work.claim(limit=10, now=base + timedelta(minutes=30), lease=LEASE)
+    assert {e.id for e in claimed} == {late.id, theirs.id}, "the index spans tenants"
+    with factory(tenant) as unit:
+        unit.work.reschedule(late.id, base + timedelta(hours=2))
+    again = work.claim(limit=10, now=base + timedelta(minutes=30, seconds=30), lease=LEASE)
+    assert again == [], "a rescheduled entry waits, a leased one is held"
+    assert tenant in work.tenants()
+
+    with factory(tenant) as unit:
+        assert unit.notifications.strip_params(base + timedelta(minutes=5)) == 1
+        assert unit.notifications.get(early.id) == replace(sent, params={})
+        assert unit.notifications.purge(base + timedelta(minutes=5)) == 1
+        assert unit.notifications.get(early.id) is None
+    with engine.connect() as connection:
+        left: int = connection.execute(
+            text("SELECT count(*) FROM work_index WHERE id = :id"), {"id": early.id.value}
+        ).scalar_one()
+    assert left == 0, "the work entry goes with its notification"
+    purge(factory, tenant)
+    purge(factory, other)
+
+
+def test_consents_inbound_times_and_suppressions(factory: PostgresUnitOfWorkFactory) -> None:
+    phone, other_phone = "+919800000001", "+919800000002"
+    preference = ChannelPreference(
+        Channel.WHATSAPP,
+        phone,
+        True,
+        ConsentSource.WHATSAPP_KEYWORD,
+        NOON_IST,
+        language="hi",
+        quiet_hours=QuietHours.parse("22:00", "07:00"),
+    )
+    with factory.shared() as unit:
+        unit.preferences.save(preference)
+        unit.preferences.record_inbound(Channel.WHATSAPP, phone, NOON_IST)
+        unit.preferences.record_inbound(Channel.WHATSAPP, phone, NOON_IST - LEASE)
+        unit.preferences.record_inbound(Channel.WHATSAPP, other_phone, NOON_IST)
+        unit.suppressions.add(
+            Suppression(Channel.EMAIL, "gone@example.com", SuppressionReason.BOUNCE, NOON_IST)
+        )
+        unit.suppressions.add(
+            Suppression(
+                Channel.EMAIL, "gone@example.com", SuppressionReason.COMPLAINT, NOON_IST, "abuse"
+            )
+        )
+    opted_out = ChannelPreference(
+        Channel.WHATSAPP, phone, False, ConsentSource.WHATSAPP_KEYWORD, NOON_IST + LEASE
+    )
+    with factory(TenantId.new()) as unit:
+        assert unit.preferences.get(Channel.WHATSAPP, phone) == preference
+        assert unit.preferences.get(Channel.WHATSAPP, other_phone) is None, "inbound only"
+        assert unit.preferences.last_inbound_at(Channel.WHATSAPP, phone) == NOON_IST
+        assert unit.preferences.last_inbound_at(Channel.WHATSAPP, "+919800000003") is None
+        unit.preferences.save(opted_out)
+        assert unit.preferences.get(Channel.WHATSAPP, phone) == opted_out
+        assert unit.preferences.last_inbound_at(Channel.WHATSAPP, phone) == NOON_IST
+        found = unit.suppressions.get(Channel.EMAIL, "gone@example.com")
+        assert found is not None
+        assert (found.reason, found.detail) == (SuppressionReason.COMPLAINT, "abuse")
+        assert unit.suppressions.remove(Channel.EMAIL, "gone@example.com")
+        assert not unit.suppressions.remove(Channel.EMAIL, "gone@example.com")
+        assert unit.suppressions.get(Channel.EMAIL, "gone@example.com") is None
+
+
+def test_concurrent_writes_of_one_dedupe_key_keep_one_row(
+    factory: PostgresUnitOfWorkFactory, engine: Engine
+) -> None:
+    tenant = TenantId.new()
+    key = DedupeKey(uuid4().hex * 2)
+    writers = 8
+    start = threading.Barrier(writers)
+    results: list[bool] = []
+    lock = threading.Lock()
+
+    def write() -> None:
+        candidate = item(0, tenant, dedupe_key=key)
+        start.wait()
+        with factory(tenant) as unit:
+            added = unit.notifications.add_if_absent(candidate)
+        with lock:
+            results.append(added)
+
+    threads = [threading.Thread(target=write) for _ in range(writers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert sorted(results) == [False] * (writers - 1) + [True]
+    with engine.connect() as connection:
+        rows: int = connection.execute(
+            text("SELECT count(*) FROM notification WHERE dedupe_key = :key"), {"key": key.value}
+        ).scalar_one()
+    assert rows == 1
+    purge(factory, tenant)
+
+
+def test_two_dispatchers_never_claim_one_entry(
+    factory: PostgresUnitOfWorkFactory, app_engine: Engine
+) -> None:
+    tenant = TenantId.new()
+    base = datetime(2000, 1, 1, tzinfo=UTC)
+    entries = [item(n, tenant, at=base + timedelta(seconds=n)) for n in range(10)]
+    enqueue(factory, *entries)
+    now = base + timedelta(minutes=1)
+
+    first = app_engine.connect()
+    second = app_engine.connect()
+    try:
+        first.begin()
+        mine = claim_rows(first, limit=4, now=now, lease=LEASE)
+        second.begin()
+        theirs = claim_rows(second, limit=10, now=now, lease=LEASE)
+        first.commit()
+        second.commit()
+    finally:
+        first.close()
+        second.close()
+    assert [e.id for e in mine] == [e.id for e in entries[:4]], "oldest first"
+    assert {e.id for e in theirs} == {e.id for e in entries[4:]}, "locked rows are skipped"
+    work = PostgresWorkIndex(app_engine)
+    assert work.claim(limit=10, now=now, lease=LEASE) == [], "every entry is leased"
+
+    racing: list[list[WorkEntry]] = []
+    lock = threading.Lock()
+    start = threading.Barrier(4)
+
+    def claim() -> None:
+        start.wait()
+        got = list(work.claim(limit=3, now=now + LEASE, lease=LEASE))
+        with lock:
+            racing.append(got)
+
+    threads = [threading.Thread(target=claim) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    claimed = [entry.id for batch in racing for entry in batch]
+    assert len(claimed) == len(set(claimed)) == 10, "after the lease, each entry exactly once"
+    with pytest.raises(ValueError, match="limit"):
+        work.claim(limit=0, now=now, lease=LEASE)
+    purge(factory, tenant)
+
+
+def _record(message: EventMessage, offset: int) -> InboundRecord:
+    return InboundRecord(
+        topic="obligation.created",
+        partition=0,
+        offset=offset,
+        key=b"k",
+        value=message.model_dump_json().encode(),
+    )
+
+
+async def test_the_consumer_commits_the_notification_with_its_inbox_row(
+    factory: PostgresUnitOfWorkFactory, app_engine: Engine, engine: Engine
+) -> None:
+    tenant = TenantId.new()
+    planned: dict[UUID, Notification] = {}
+
+    def message_for(notification: Notification) -> EventMessage:
+        """Any event of the tenant carries the message; the handler looks up what to write."""
+        _, (event,) = notification.sent(DispatchId.new(), "", NOON_IST)
+        message = to_message(event)
+        planned[message.event_id] = notification
+        return message
+
+    def handle(message: EventMessage, connection: Connection) -> None:
+        notification = planned[message.event_id]
+        with SqlAlchemyUnitOfWork.on_connection(connection, notification.tenant_id) as unit:
+            assert unit.notifications.add_if_absent(notification)
+            unit.work.add(WorkEntry.of(notification))
+            _, events = notification.sent(DispatchId.new(), "", NOON_IST)
+            for event in events:
+                unit.events.publish(event)
+
+    def explode(message: EventMessage, connection: Connection) -> None:
+        handle(message, connection)
+        raise RuntimeError("cannot handle")
+
+    producer = FakeProducer()
+
+    def consumer(handler: object) -> IdempotentConsumer:
+        return IdempotentConsumer(
+            group_id=GROUP,
+            store=SyncProcessedStore(app_engine, group_id=GROUP),
+            handler=sync_handler(handler),  # type: ignore[arg-type]
+            producer=producer,
+            config=ConsumerConfig(max_handler_attempts=2, retry_backoff_seconds=0),
+        )
+
+    kept, dropped = item(1, tenant), item(2, tenant)
+    good, bad = message_for(kept), message_for(dropped)
+    assert await consumer(handle).process(_record(good, 0)) is ConsumerOutcome.PROCESSED
+    assert await consumer(handle).process(_record(good, 1)) is ConsumerOutcome.SKIPPED
+    assert await consumer(explode).process(_record(bad, 2)) is ConsumerOutcome.DEAD
+
+    with engine.connect() as connection:
+        stored: set[UUID] = set(
+            connection.execute(
+                text("SELECT id FROM notification WHERE tenant_id = :tenant"),
+                {"tenant": tenant.value},
+            ).scalars()
+        )
+        work: set[UUID] = set(
+            connection.execute(
+                text("SELECT id FROM work_index WHERE tenant_id = :tenant"),
+                {"tenant": tenant.value},
+            ).scalars()
+        )
+        inbox: set[UUID] = set(
+            connection.execute(
+                select(processed_event.c.event_id).where(processed_event.c.consumer_group == GROUP)
+            ).scalars()
+        )
+        outbox: Sequence[str] = (
+            connection.execute(
+                select(outbox_event.c.topic).where(outbox_event.c.tenant_id == tenant.value)
+            )
+            .scalars()
+            .all()
+        )
+    assert stored == work == {kept.id.value}, "the failed handler's rows rolled back"
+    assert good.event_id in inbox
+    assert bad.event_id not in inbox, "the inbox row rolled back with them"
+    assert list(outbox) == ["notification.sent"]
+    assert producer.topics() == [f"obligation.created.{GROUP}.dlq"]
+    with app_engine.connect() as idle, pytest.raises(ValueError, match="inside a transaction"):
+        SqlAlchemyUnitOfWork.on_connection(idle, tenant).__enter__()
+    purge(factory, tenant)
+
+
+def test_sends_write_their_outbox_rows_for_sent_and_failed(
+    factory: PostgresUnitOfWorkFactory, engine: Engine
+) -> None:
+    tenant = TenantId.new()
+    channel = FakeChannel(clock=lambda: NOON_IST)
+    send = SendNotification(factory, {Channel.WHATSAPP: channel}, clock=lambda: NOON_IST)
+    SetOptIn(factory, clock=lambda: NOON_IST).run(
+        Channel.WHATSAPP, "+91 98765 00001", opted_in=True, source=ConsentSource.API
+    )
+
+    def request(**changes: object) -> NotificationRequest:
+        values: dict[str, object] = {
+            "notification_id": NotificationId.new(),
+            "tenant_id": tenant,
+            "obligation_id": ObligationId.new(),
+            "business_id": BusinessId.new(),
+            "channel": Channel.WHATSAPP,
+            "recipient": "919876500001",
+            "template_key": "obligation_due_soon",
+            "params": {"business_name": "Acme", "title": "T", "due_date": "D", "steps": "S"},
+        }
+        values.update(changes)
+        return NotificationRequest(**values)  # type: ignore[arg-type]
+
+    ok = request()
+    assert send.run(ok).outcome is Outcome.SENT
+    assert send.run(ok).outcome is Outcome.DUPLICATE
+    channel.fail_next = 1
+    assert send.run(request(), attempt=2).outcome is Outcome.FAILED
+
+    with factory(tenant) as unit:
+        stored = unit.notifications.get(ok.notification_id)
+    assert stored is not None
+    assert (stored.state, stored.address, stored.provider_message_id) == (
+        DeliveryState.SENT,
+        "+919876500001",
+        "fake-1",
+    )
+    assert PostgresWorkIndex(factory.engine).tenant_for_provider_message("fake-1") == tenant
+    with engine.connect() as connection:
+        topics: Sequence[str] = (
+            connection.execute(
+                select(outbox_event.c.topic)
+                .where(outbox_event.c.tenant_id == tenant.value)
+                .order_by(outbox_event.c.topic)
+            )
+            .scalars()
+            .all()
+        )
+    assert list(topics) == ["notification.failed", "notification.sent"]
+    purge(factory, tenant)
+
+
+def test_downgrade_and_upgrade(migrated: Config, engine: Engine) -> None:
+    command.downgrade(migrated, "base")
+    assert set(inspect(engine).get_table_names(schema=SCHEMA)) == {"alembic_version"}
+    command.upgrade(migrated, "head")
+    assert set(inspect(engine).get_table_names(schema=SCHEMA)) == TABLES

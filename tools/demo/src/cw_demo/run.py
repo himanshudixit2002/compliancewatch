@@ -31,7 +31,7 @@ from notification.application.preferences import SetOptIn
 from notification.application.send import SendNotification
 from notification.domain.model import NotificationRequest
 from notification.domain.preferences import ConsentSource as PreferenceSource
-from notification.infrastructure.memory import LogEventSink, MemoryPreferences, MemorySentLog
+from notification.infrastructure.memory import MemoryStore as NotificationStore
 from notification.testing import FakeChannel
 from obligation.application.materialise import MaterialiseObligations, MaterialiseRequest
 from obligation.infrastructure.memory import MemoryStore as ObligationStore
@@ -183,8 +183,8 @@ def run_demo(*, now: datetime | None = None) -> DemoReport:
         for o in obligations
     ]
 
-    preferences = MemoryPreferences()
-    SetOptIn(preferences, clock=lambda: now).run(
+    notifications = NotificationStore()
+    SetOptIn(notifications, clock=lambda: now).run(
         Channel.WHATSAPP,
         demo.OWNER_PHONE,
         opted_in=True,
@@ -192,9 +192,7 @@ def run_demo(*, now: datetime | None = None) -> DemoReport:
         language="hi",
     )
     channel = FakeChannel(clock=lambda: now)
-    sender = SendNotification(
-        preferences, MemorySentLog(), LogEventSink(), {Channel.WHATSAPP: channel}, clock=lambda: now
-    )
+    sender = SendNotification(notifications, {Channel.WHATSAPP: channel}, clock=lambda: now)
     if obligations:
         first = obligations[0]
         outcome = sender.run(

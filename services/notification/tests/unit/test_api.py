@@ -2,8 +2,10 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from domain_kernel.channels import Channel
+from notification.domain.preferences import ConsentSource
 from notification.main import WHATSAPP_DISABLED, build_app, wire
-from notification.testing import notification_settings
+from notification.testing import NOON_IST, FakeChannel, notification_settings
 
 PHONE = "919876543210"
 TENANT = {"x-tenant-id": str(uuid4())}
@@ -44,13 +46,44 @@ def test_preferences_round_trip(client: TestClient) -> None:
     assert put.status_code == 200, put.text
     body = put.json()
     assert (body["opted_in"], body["language"], body["quiet_hours_start"]) == (True, "hi", "22:00")
-    got = client.get(f"/v1/notification/preferences/whatsapp/{PHONE}")
+    assert (body["recipient"], body["address"]) == (PHONE, "+919876543210")
+    got = client.get("/v1/notification/preferences/whatsapp/+91 98765 43210")
     assert got.json()["opted_in"] is True
+    assert got.json()["recipient"] == "+91 98765 43210"
     bad = client.put(
         f"/v1/notification/preferences/whatsapp/{PHONE}",
         json={"opted_in": True, "source": "carrier pigeon"},
     )
     assert bad.status_code == 422
+
+
+def test_an_address_that_is_not_one_is_a_422_problem(client: TestClient) -> None:
+    for method in ("GET", "PUT"):
+        response = client.request(
+            method,
+            "/v1/notification/preferences/whatsapp/call-me-maybe",
+            json={"opted_in": True, "source": "api"},
+        )
+        assert response.status_code == 422
+        assert response.json()["type"].endswith(":notification-address-invalid")
+    email = client.get("/v1/notification/preferences/email/nobody")
+    assert email.status_code == 422
+
+
+def test_sends_go_through_the_channels_given_to_build_app() -> None:
+    channel = FakeChannel(clock=lambda: NOON_IST)
+    app = build_app(notification_settings(), channels={Channel.WHATSAPP: channel})
+    wiring = app.state.wiring
+    wiring.set_opt_in.run(Channel.WHATSAPP, PHONE, opted_in=True, source=ConsentSource.API)
+    body = send_body()
+    with TestClient(app) as client:
+        first = client.post("/v1/notification/send", json=body, headers=TENANT)
+        again = client.post("/v1/notification/send", json=body, headers=TENANT)
+    assert first.json()["outcome"] in {"sent", "deferred"}
+    if first.json()["outcome"] == "sent":
+        assert first.json()["provider_message_id"] == "fake-1"
+        assert again.json()["outcome"] == "duplicate"
+        assert channel.sent[0].recipient == "+919876543210"
 
 
 def test_quiet_hours_past_23_59_are_a_422_problem(client: TestClient) -> None:

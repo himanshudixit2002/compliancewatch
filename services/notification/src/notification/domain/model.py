@@ -1,15 +1,13 @@
-"""A request to notify, and what became of it."""
+"""A request to send one notification now (``POST /send``), and what became of it."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Protocol
 
 from domain_kernel._validation import freeze_mapping, require_instance, require_text
 from domain_kernel.channels import Channel
 from domain_kernel.dedupe import DedupeKey
-from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, NotificationId, ObligationId, TenantId
 from domain_kernel.notifications import DeliveryReceipt
 
@@ -58,15 +56,3 @@ class SendOutcome:
     receipt: DeliveryReceipt | None = None
     scheduled_for: datetime | None = None
     language: str = "en"
-
-
-class SentLog(Protocol):
-    """What has gone out, by dedupe key: the guard against sending one change twice."""
-
-    def seen(self, dedupe_key: DedupeKey) -> bool: ...
-
-    def record(self, dedupe_key: DedupeKey, at: datetime) -> None: ...
-
-
-class EventSink(Protocol):
-    def publish(self, event: DomainEvent) -> None: ...

@@ -111,6 +111,11 @@
       },
       "PreferenceOut": {
         "properties": {
+          "address": {
+            "description": "The address as it is stored: +<digits> for WhatsApp, lower case for email",
+            "title": "Address",
+            "type": "string"
+          },
           "channel": {
             "$ref": "#/components/schemas/Channel"
           },
@@ -131,6 +136,7 @@
             "type": "string"
           },
           "recipient": {
+            "description": "The address as the request gave it",
             "title": "Recipient",
             "type": "string"
           },
@@ -146,6 +152,7 @@
         "required": [
           "channel",
           "recipient",
+          "address",
           "opted_in",
           "source",
           "language",

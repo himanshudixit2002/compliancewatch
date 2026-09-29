@@ -30,7 +30,10 @@ class PreferenceIn(Strict):
 
 class PreferenceOut(BaseModel):
     channel: Channel
-    recipient: str
+    recipient: str = Field(description="The address as the request gave it")
+    address: str = Field(
+        description="The address as it is stored: +<digits> for WhatsApp, lower case for email"
+    )
     opted_in: bool
     source: ConsentSource
     language: str
@@ -39,10 +42,11 @@ class PreferenceOut(BaseModel):
     updated_at: datetime
 
     @classmethod
-    def from_preference(cls, preference: ChannelPreference) -> "PreferenceOut":
+    def from_preference(cls, preference: ChannelPreference, *, recipient: str) -> "PreferenceOut":
         return cls(
             channel=preference.channel,
-            recipient=preference.recipient,
+            recipient=recipient,
+            address=preference.address,
             opted_in=preference.opted_in,
             source=preference.source,
             language=preference.language,

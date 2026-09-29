@@ -73,6 +73,7 @@ NOT_FLAGS: Mapping[str, str] = {
     "CW_PROFILE_STORE": _STORE,
     "CW_RULEBOOK_STORE": _STORE,
     "CW_OBLIGATION_STORE": _STORE,
+    "CW_NOTIFICATION_STORE": _STORE,
     "CW_LLM_LEDGER": "store selector of the gateway's usage ledger: memory or postgres",
     "CW_LLM_EMBEDDING_DIMENSIONS_PARAM": (
         "provider compatibility: whether an embedding request carries dimensions=512, for a "

@@ -36,3 +36,14 @@ class UnknownChannelError(DomainError):
 
     def __init__(self, channel: str) -> None:
         super().__init__(f"no channel adapter for {channel!r}")
+
+
+class InvalidAddressError(DomainError):
+    """A phone number or email address that cannot be normalised. The detail names the channel
+    and the rule it breaks, never the address itself, which is personal data."""
+
+    type_slug: ClassVar[str] = "notification-address-invalid"
+    title: ClassVar[str] = "Notification address invalid"
+
+    def __init__(self, channel: str, reason: str) -> None:
+        super().__init__(f"not a valid {channel} address: {reason}")

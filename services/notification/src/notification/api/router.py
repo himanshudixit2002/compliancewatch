@@ -1,8 +1,10 @@
 """Routes of the notification service. Business logic lives in application use cases.
 
-Preferences are keyed by channel and recipient and carry no tenant: an opt-out typed on
+Preferences are keyed by channel and address and carry no tenant: an opt-out typed on
 WhatsApp arrives before we know which tenant the number belongs to, and must be honoured
-either way. Sends are tenant data and need the header.
+either way. The address in the path is normalised first, so ``919876543210`` and
+``+91 98765 43210`` are one record; an address that cannot be normalised is a 422 problem.
+Sends are tenant data and need the header.
 """
 
 from fastapi import APIRouter, HTTPException, status
@@ -49,19 +51,19 @@ def set_preference(
         language=body.language,
         quiet_hours=quiet_hours,
     )
-    return PreferenceOut.from_preference(preference)
+    return PreferenceOut.from_preference(preference, recipient=recipient)
 
 
 @router.get(
     "/preferences/{channel}/{recipient}",
     summary="The recorded preference, 404 when the recipient never opted in or out",
-    responses=problem_responses(404),
+    responses=problem_responses(404, 422),
 )
 def get_preference(channel: Channel, recipient: str, wired: Wired) -> PreferenceOut:
-    preference = wired.preferences.get(channel, recipient)
+    preference = wired.get_preference.run(channel, recipient)
     if preference is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no preference recorded")
-    return PreferenceOut.from_preference(preference)
+    return PreferenceOut.from_preference(preference, recipient=recipient)
 
 
 @router.post(

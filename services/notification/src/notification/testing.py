@@ -31,7 +31,12 @@ class FakeChannel:
 
 
 def notification_settings(**overrides: Any) -> NotificationSettings:
-    """Settings that ignore the repo ``.env``; the channel stays disabled by default."""
-    values: dict[str, Any] = {"_env_file": None, "service_name": "notification"}
+    """Settings that ignore the repo ``.env``, on the memory store; the channels stay disabled
+    by default."""
+    values: dict[str, Any] = {
+        "_env_file": None,
+        "service_name": "notification",
+        "notification_store": "memory",
+    }
     values.update(overrides)
     return NotificationSettings(**values)

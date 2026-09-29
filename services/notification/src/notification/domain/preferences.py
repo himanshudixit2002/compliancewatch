@@ -1,15 +1,20 @@
 """What a recipient has agreed to and when they may be disturbed.
 
-A preference is per channel and recipient (an E.164 phone number for WhatsApp, an address for
-email). Nobody receives a business-initiated message without ``opted_in``; an opt-out is
-honoured from the moment it is recorded. Quiet hours are a window in Indian Standard Time
-during which a message is held and sent at the window's end (guide section 7, F9).
+A preference is per channel and address, in the normalised form of ``addresses`` (an E.164
+phone number for WhatsApp, a lower-cased email address). Nobody receives a business-initiated
+message without ``opted_in``; an opt-out is honoured from the moment it is recorded. Quiet hours
+are a window in Indian Standard Time during which a message is held and sent at the window's end
+(guide section 7, F9).
+
+A suppression is the other way an address is closed: the provider told us it cannot or must not
+receive mail (a permanent bounce, a complaint), or support closed it by hand. It holds whatever
+the preference says, until it is lifted.
 """
 
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from enum import StrEnum
-from typing import Protocol, Self
+from typing import Self
 
 from domain_kernel._validation import require_aware, require_bool, require_instance, require_text
 from domain_kernel.channels import Channel
@@ -73,7 +78,8 @@ DEFAULT_QUIET_HOURS = QuietHours(time(21, 0), time(8, 0))
 @dataclass(frozen=True, slots=True)
 class ChannelPreference:
     channel: Channel
-    recipient: str
+    address: str
+    """Normalised (``normalise_address``)."""
     opted_in: bool
     source: ConsentSource
     updated_at: datetime
@@ -82,7 +88,7 @@ class ChannelPreference:
 
     def __post_init__(self) -> None:
         require_instance(self.channel, Channel, "channel")
-        require_text(self.recipient, "recipient")
+        require_text(self.address, "address")
         require_bool(self.opted_in, "opted_in")
         require_instance(self.source, ConsentSource, "source")
         require_aware(self.updated_at, "updated_at")
@@ -90,7 +96,28 @@ class ChannelPreference:
         require_instance(self.quiet_hours, QuietHours, "quiet_hours")
 
 
-class PreferenceRepository(Protocol):
-    def get(self, channel: Channel, recipient: str) -> ChannelPreference | None: ...
+class SuppressionReason(StrEnum):
+    BOUNCE = "bounce"
+    """The provider reported a permanent bounce."""
+    COMPLAINT = "complaint"
+    """The person marked a message as spam."""
+    MANUAL = "manual"
+    """Closed by support."""
 
-    def save(self, preference: ChannelPreference) -> None: ...
+
+@dataclass(frozen=True, slots=True)
+class Suppression:
+    channel: Channel
+    address: str
+    """Normalised (``normalise_address``)."""
+    reason: SuppressionReason
+    at: datetime
+    detail: str = ""
+    """What the provider said, such as the bounce type; never message content."""
+
+    def __post_init__(self) -> None:
+        require_instance(self.channel, Channel, "channel")
+        require_text(self.address, "address")
+        require_instance(self.reason, SuppressionReason, "reason")
+        require_aware(self.at, "at")
+        require_instance(self.detail, str, "detail")
