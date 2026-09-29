@@ -104,7 +104,9 @@ checked against `.next/types`, which `next build`, `next dev` and `next typegen`
 adding a route, run one of them before relying on `tsc` for link errors.
 
 `make check` runs every gate CI runs without Docker, including `web-screens-check`
-(`docs/web/screens.md` matches the registry). `pnpm turbo run lint typecheck test build` is the
+(`docs/web/screens.md` matches the registry) and `openapi-ts-check` (the TypeScript types under
+`packages/contracts/clients/typescript/openapi` match the committed OpenAPI specs; `make
+openapi-ts` regenerates them). `pnpm turbo run lint typecheck test build` is the
 TypeScript part; `pnpm format` is the prettier check.
 
 ## CI

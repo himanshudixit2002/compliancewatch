@@ -414,8 +414,8 @@ openapi-public: check-uv ## Merge the operations the services tag public into pa
 	$(UV) run python packages/contracts/scripts/generate_rest.py
 
 # ---- Web app (apps/web, packages/ui) ---------------------------------------------------------
-.PHONY: web-dev web-e2e-install web-e2e web-screens web-screens-check
-CHECKS += web-screens-check
+.PHONY: web-dev web-e2e-install web-e2e web-screens web-screens-check openapi-ts openapi-ts-check
+CHECKS += web-screens-check openapi-ts-check
 # The port comes from WEB_PORT in .env (3000 unless the file says otherwise); a value already in
 # the environment wins, as for every variable the recipes source.
 
@@ -436,3 +436,9 @@ web-screens: check-pnpm ## Regenerate docs/web/screens.md from the screen regist
 
 web-screens-check: check-pnpm ## docs/web/screens.md matches the screen registry (part of make check)
 	$(PNPM) --filter web screens:check
+
+openapi-ts: check-pnpm ## Generate TypeScript types from packages/contracts/openapi into clients/typescript/openapi
+	$(PNPM) --filter @compliancewatch/contracts openapi-ts
+
+openapi-ts-check: check-pnpm ## The generated OpenAPI types match the committed specs (part of make check)
+	$(PNPM) --filter @compliancewatch/contracts openapi-ts:check
