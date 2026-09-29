@@ -16,7 +16,9 @@ src/features/       one directory per screen family: ports.ts, gateway.ts, queri
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports)
 src/server/         server-only modules; every file starts with `import "server-only"`
 src/shared/config/  the screen registry (screens.ts), roles and permissions, flags, navigation
-src/shared/         isomorphic code: lib helpers, i18n, app-level ui
+src/shared/lib/     IST dates, financial years, money and decimal strings, identifiers, pagination, urls
+src/shared/i18n/    messages/en.json and the typed t(); another locale falls back key by key
+src/shared/ui/      app-level compositions over the UI kit (never duplicated primitives)
 src/test/           vitest setup and the architecture rules
 src/app/globals.css Tailwind v4 plus the UI kit's token file (@compliancewatch/ui/styles/tokens.css)
 next.config.ts      typed routes, security headers; eslint.config.mjs: Next flat config plus repo rules
@@ -39,6 +41,11 @@ a waiting entry names at least one route or file that is still absent and has no
 catch-all routes serve it); a planned entry awaits routes nobody has scheduled. When an awaited
 route lands, the test fails with "backend merged: flip `<id>` to live". Roles and role sets in
 `roles.ts` are copied from the identity design; `permissions.ts` maps capabilities to roles.
+
+User-visible chrome strings go through `t("key")` from `src/shared/i18n` (keys are typed from
+`messages/en.json`; a test checks every literal exists). Screen titles are registry data. Dates
+render in Asia/Kolkata through `shared/lib/dates.ts`, financial years as `2026-27`, and money
+from paise or decimal strings without float arithmetic.
 
 Colours come from the token classes (`bg-bg`, `text-fg`, `border-line`, ...); the eslint config
 rejects hex literals in class strings.
