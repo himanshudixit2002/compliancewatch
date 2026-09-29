@@ -382,10 +382,12 @@ version = "0.1.0"
 source = { editable = "tools/demo" }
 dependencies = [
     { name = "compliancewatch-identity" },
+    { name = "compliancewatch-llm-gateway" },
     { name = "compliancewatch-notification" },
     { name = "compliancewatch-obligation" },
     { name = "compliancewatch-pipeline" },
     { name = "compliancewatch-profile" },
+    { name = "compliancewatch-qa" },
     { name = "compliancewatch-rulebook" },
     { name = "domain-kernel" },
     { name = "fastapi" },
@@ -397,10 +399,12 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "compliancewatch-identity", editable = "services/identity" },
+    { name = "compliancewatch-llm-gateway", editable = "services/llm-gateway" },
     { name = "compliancewatch-notification", editable = "services/notification" },
     { name = "compliancewatch-obligation", editable = "services/obligation" },
     { name = "compliancewatch-pipeline", editable = "services/pipeline" },
     { name = "compliancewatch-profile", editable = "services/profile" },
+    { name = "compliancewatch-qa", editable = "services/qa" },
     { name = "compliancewatch-rulebook", editable = "services/rulebook" },
     { name = "domain-kernel", editable = "packages/domain-kernel" },
     { name = "fastapi", specifier = ">=0.120" },
