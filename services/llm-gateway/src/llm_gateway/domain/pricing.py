@@ -71,9 +71,16 @@ PRICE_TABLE: Mapping[str, ModelPrice] = MappingProxyType(
         "google/gemini-3.1-flash-lite": _price("0.10", "0.40"),
         "zai/glm-4.7-flash": _price("0.07", "0.25"),
         "fake/echo": _price("0.10", "0.40"),
+        # An estimate: nothing in the repo sources a Voyage price. Check it before trusting
+        # the ledger for retrieval; the gateway's reported cost wins whenever it gives one.
+        "voyage/voyage-3.5-lite": _price("0.02", "0"),
+        "fake/hash-ngram-512": _price("0.10", "0"),
     }
 )
-"""Estimates pinned on 2026-09-27; only used when the gateway omits the actual cost."""
+"""Estimates pinned on 2026-09-27; only used when the gateway omits the actual cost.
+
+Embedding models price input tokens only. The fake embedder has a price so budgets bite in tests.
+"""
 
 DEFAULT_PRICE = _price("1.00", "3.00")
 """A deliberately high estimate for a model the table does not know."""

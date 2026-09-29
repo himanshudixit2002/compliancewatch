@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:rule.deadline_changed:v1",
+  "title": "rule.deadline_changed",
+  "description": "A newer rule version moved the due date of a published version, for one period of a recurring rule or for a one-off rule. Producer: rulebook (when the causing version is published). Consumers: obligation.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "rulebook (when the causing version is published)",
+  "x-tenant-scoped": false,
+  "properties": {
+    "rule_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The rule of the version whose deadline changed."
+    },
+    "rule_version_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The version whose deadline changed; its obligations are the ones to reschedule."
+    },
+    "caused_by_rule_version_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The newer version that changes the deadline."
+    },
+    "period_label": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "description": "The period whose due date moved, as obligations carry it; null for a one-off rule."
+    },
+    "new_due_on": {
+      "type": "string",
+      "format": "date",
+      "description": "The due date after the change."
+    },
+    "reason": {
+      "type": "string",
+      "enum": ["deadline_extended", "corrected"],
+      "description": "Why the date moved."
+    },
+    "evidence_clause_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The clause of the causing version's document that states the change."
+    }
+  },
+  "required": [
+    "rule_id",
+    "rule_version_id",
+    "caused_by_rule_version_id",
+    "period_label",
+    "new_due_on",
+    "reason",
+    "evidence_clause_id"
+  ]
+}

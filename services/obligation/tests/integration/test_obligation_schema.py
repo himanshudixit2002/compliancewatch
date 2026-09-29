@@ -1,5 +1,5 @@
 """Migration 0001 on Postgres: the table, row-level security by tenant, the unit of work with
-the outbox, and the use cases end to end. Needs Docker.
+the outbox, the use cases end to end, and the listing a read goes through. Needs Docker.
 
 The use cases run as a plain database role, not the container's superuser: a superuser bypasses
 row-level security whatever the table says, so the service's runtime role must never be one.
@@ -16,10 +16,18 @@ from sqlalchemy import Engine, create_engine, inspect, text
 from testcontainers.community.postgres import PostgresContainer
 
 from domain_kernel.ids import BusinessId, DecisionId, TenantId
-from domain_kernel.status import ObligationStatus
-from obligation.application.changes import ApplyDeadlineChange, DeadlineChange, WithdrawRule
+from domain_kernel.recurrence import Recurrence
+from domain_kernel.status import ClosureReason, ObligationStatus
+from obligation.application.changes import (
+    ApplyDeadlineChange,
+    CloseObligation,
+    DeadlineChange,
+    WithdrawRule,
+)
 from obligation.application.materialise import IST, MaterialiseObligations, MaterialiseRequest
+from obligation.application.queries import ListObligations, ObligationQuery
 from obligation.domain.events import RescheduleReason
+from obligation.domain.model import DueWindow
 from obligation.infrastructure.repository import PostgresUnitOfWorkFactory
 from obligation.testing import rule
 
@@ -165,6 +173,66 @@ def test_use_cases_run_end_to_end_with_the_outbox(app_engine: Engine) -> None:
         ("obligation.created", 2),
         ("obligation.rescheduled", 1),
     ]
+
+
+def test_listing_a_business_under_row_level_security(app_engine: Engine) -> None:
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    tenant, other = TenantId.new(), TenantId.new()
+    business, other_business = BusinessId.new(), BusinessId.new()
+    on_the_20th, on_the_11th, undated = (
+        rule(),
+        rule(recurrence=Recurrence.monthly(11)),
+        rule(recurrence=None),
+    )
+    for the_rule in (on_the_20th, undated, on_the_11th):
+        MaterialiseObligations(factory, window=2).run(
+            MaterialiseRequest(tenant, business, DecisionId.new(), the_rule, date(2026, 9, 28))
+        )
+    MaterialiseObligations(factory, window=2).run(
+        MaterialiseRequest(other, other_business, DecisionId.new(), on_the_20th, date(2026, 9, 28))
+    )
+    list_obligations = ListObligations(factory)
+
+    def due_days(query: ObligationQuery) -> list[date | None]:
+        return [
+            None if o.due_at is None else o.due_at.astimezone(IST).date()
+            for o in list_obligations.run(query)
+        ]
+
+    everything = list_obligations.run(ObligationQuery(tenant, business))
+    assert [None if o.due_at is None else o.due_at.astimezone(IST).date() for o in everything] == [
+        date(2026, 10, 11),
+        date(2026, 10, 20),
+        date(2026, 11, 11),
+        date(2026, 11, 20),
+        None,
+    ]
+    assert {o.tenant_id for o in everything} == {tenant}
+    assert due_days(
+        ObligationQuery(tenant, business, DueWindow(date(2026, 10, 20), date(2026, 11, 11)))
+    ) == [date(2026, 10, 20), date(2026, 11, 11)]
+    assert due_days(
+        ObligationQuery(tenant, business, rule_version_id=on_the_11th.rule_version_id)
+    ) == [date(2026, 10, 11), date(2026, 11, 11)]
+    assert due_days(ObligationQuery(tenant, business, limit=2)) == [
+        date(2026, 10, 11),
+        date(2026, 10, 20),
+    ]
+
+    CloseObligation(factory).run(tenant, everything[0].id, ClosureReason.COMPLETED)
+    (closed,) = list_obligations.run(
+        ObligationQuery(tenant, business, DueWindow(due_to=date(2026, 10, 11)))
+    )
+    assert closed.status is ObligationStatus.DONE
+    assert closed == list_obligations.run(ObligationQuery(tenant, business))[0]
+
+    assert list_obligations.run(ObligationQuery(tenant, other_business)) == (), (
+        "row-level security hides the other tenant's rows"
+    )
+    assert list_obligations.run(ObligationQuery(other, business)) == ()
+    other_rows = list_obligations.run(ObligationQuery(other, other_business))
+    assert [o.period_label for o in other_rows] == ["2026-09", "2026-10"]
+    assert {o.tenant_id for o in other_rows} == {other}
 
 
 def test_downgrade_and_upgrade(migrated: Config, engine: Engine) -> None:

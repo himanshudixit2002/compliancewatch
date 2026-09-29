@@ -31,11 +31,14 @@ src/pipeline/
   infrastructure/rulebook_client.py    # HttpRulebook: the rulebook's write API as a KnowledgeSink
   settings.py      # PipelineSettings: CW_PIPELINE_KNOWLEDGE_ENABLED, CW_RULEBOOK_URL, CW_RULEBOOK_WRITE_TOKEN
   backfill.py      # pipeline-backfill: list, fetch, store, parse and detect from the command line
+  embed.py         # pipeline-embed: embed the stored clauses that have no vector yet
+  application/embedding.py  # EmbeddingStage: unembedded clauses to the gateway, vectors to the rulebook
+  domain/embedding.py       # embedding_text: the clause with its context header
   label.py         # pipeline-label: index, prepare and check golden extraction cases (make label)
-  infrastructure/gateway.py  # GatewayProvider: the llm-gateway as the kernel's LLMProvider
+  infrastructure/gateway.py  # GatewayProvider: the llm-gateway as the kernel's LLMProvider; GatewayEmbedder
   infrastructure/prompts.py  # loads prompts/<name>.v<version>.md; the registry holds its digest
 prompts/           # extraction.rule_candidate.v1.md (owner regulatory-intelligence)
-  testing.py       # FixtureTransport (replays tests/fixtures), ScriptedProvider, MemoryRulebook
+  testing.py       # FixtureTransport (replays tests/fixtures), ScriptedProvider, ScriptedEmbedder, MemoryRulebook
   worker.py        # python -m pipeline.worker: the Temporal worker on task queue "pipeline"
   main.py          # composition root: create_app(...) from py-common
 migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA)
@@ -83,7 +86,7 @@ mentions and citations point into them. Bump the parser's `PARSER_VERSION` with 
 can alter clause text, so the refusal names both versions; what to do with stored documents
 after such a change is an open decision (ADR-018). Deploy the rulebook before the pipeline.
 
-## Knowledge extraction (KAG phase 2, ADR-017)
+## Knowledge extraction (ADR-017)
 
 Once a document is registered, the ingest runs the child workflow `pipeline.extract_knowledge`
 (behind `workflow.patched("kag-extract-v1")`, same flag). It has three activities:
@@ -109,6 +112,35 @@ Once a document is registered, the ingest runs the child workflow `pipeline.extr
 `RelationStage` are its two stages, called from the activities. A failed extraction is reported
 in the ingest result (`knowledge_error`) and does not fail the ingest. The relation suite of the
 eval harness (`make eval`) runs the same stages over `evals/golden/relations`.
+
+## Clause embeddings
+
+Between registration and the extraction child, the ingest runs `pipeline.embed_clauses`
+(behind `workflow.patched("kag-embed-v1")`, same flag) so the rulebook's clause search has a
+vector for every clause. `EmbeddingStage` (`application/embedding.py`) pages through the
+document's clauses that have no vector from the run's model
+(`GET /v1/rulebook/clauses/unembedded`), 64 at a time, embeds each page in one gateway call
+(`POST /v1/llm-gateway/embeddings`, feature `retrieval`) and stores the vectors
+(`PUT /v1/rulebook/clauses/embeddings`; a clause keeps its first vector from a model). Each
+text is the clause behind a header (`domain/embedding.embedding_text`): regulator, document
+type, number or title, date and clause reference, cut at 6,000 characters.
+
+Vectors from two models do not compare, so a run pins one: it first sends a one-line probe to
+learn which model the gateway's retrieval route serves, asks the rulebook about that model's
+gaps, and refuses any batch from another model. An answer of another length than 512, another
+count or another model raises `EmbeddingContractError`, which is not retried. A failed embedding
+is reported in the ingest result (`embedding_error`; `clauses_embedded` counts the vectors
+stored) and does not fail the ingest.
+
+`pipeline-embed` runs the same stage over every document: it catches up clauses registered
+before this step, and with `--model` fills a new model's vectors before the gateway's route
+(`CW_LLM_ROUTES__RETRIEVAL`) switches to it. It uses the worker's `CW_RULEBOOK_URL`,
+`CW_RULEBOOK_WRITE_TOKEN` and `CW_LLM_GATEWAY_URL`.
+
+```bash
+uv run --package compliancewatch-pipeline pipeline-embed --limit 500
+uv run --package compliancewatch-pipeline pipeline-embed --model voyage/voyage-3.5-lite
+```
 
 ## Sources
 

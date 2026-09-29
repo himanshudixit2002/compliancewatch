@@ -1,0 +1,18 @@
+{
+  "event_id": "4c5d6e7f-8a9b-4c0d-9e1f-2a3b4c5d6e7f",
+  "topic": "rule.deadline_changed",
+  "schema_version": "1.0.0",
+  "occurred_at": "2026-10-18T16:45:03+05:30",
+  "tenant_id": null,
+  "correlation_id": "5d6e7f8a-9b0c-4d1e-8f2a-3b4c5d6e7f8a",
+  "causation_id": "6e7f8a9b-0c1d-4e2f-9a3b-4c5d6e7f8a9b",
+  "payload": {
+    "rule_id": "7f8a9b0c-1d2e-4f3a-8b4c-5d6e7f8a9b0c",
+    "rule_version_id": "8a9b0c1d-2e3f-4a4b-9c5d-6e7f8a9b0c1d",
+    "caused_by_rule_version_id": "9b0c1d2e-3f4a-4b5c-8d6e-7f8a9b0c1d2e",
+    "period_label": "2026-09",
+    "new_due_on": "2026-10-27",
+    "reason": "deadline_extended",
+    "evidence_clause_id": "0c1d2e3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f"
+  }
+}

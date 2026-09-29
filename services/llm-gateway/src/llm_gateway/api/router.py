@@ -12,6 +12,8 @@ from llm_gateway.api.schemas import (
     MONTH_PATTERN,
     CompletionIn,
     CompletionOut,
+    EmbeddingIn,
+    EmbeddingOut,
     ModelRouteOut,
     PromptOut,
     UsageOut,
@@ -38,6 +40,19 @@ def completions(
     """Synchronous. No `Idempotency-Key` header yet; identical deterministic calls are cached."""
     outcome = gateway.complete.run(body.to_request(tenant), correlation_id=correlation_id)
     return CompletionOut.from_outcome(outcome, correlation_id=correlation_id)
+
+
+@router.post(
+    "/embeddings",
+    summary="Embed texts for retrieval through routing, budget, provider and ledger",
+    responses=problem_responses(422, 429, 502, 503),
+)
+def embeddings(
+    body: EmbeddingIn, tenant: Tenant, correlation_id: Correlation, gateway: Gateway
+) -> EmbeddingOut:
+    """Synchronous and uncached. One model, no fallback: store `model_served` with the vectors."""
+    outcome = gateway.embed.run(body.to_request(tenant), correlation_id=correlation_id)
+    return EmbeddingOut.from_outcome(outcome, correlation_id=correlation_id)
 
 
 @router.get(

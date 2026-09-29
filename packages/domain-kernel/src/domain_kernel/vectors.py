@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Final
 
 from domain_kernel._validation import require_date, require_finite, require_instance, require_text
 from domain_kernel.documents import DocumentType
@@ -10,6 +11,9 @@ from domain_kernel.ids import ClauseId, DocumentId
 from domain_kernel.periods import EffectivePeriod
 
 type Vector = tuple[float, ...]
+
+EMBEDDING_DIMS: Final = 512
+"""Length of every stored and query vector. A schema constant: changing it is a migration."""
 
 
 @dataclass(frozen=True, slots=True)

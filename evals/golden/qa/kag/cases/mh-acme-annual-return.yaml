@@ -1,0 +1,64 @@
+case_id: mh-acme-annual-return
+category: multi_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: mixed
+question: "Is Acme Bengaluru exempt from filing the annual return under notification 15/2025-Central Tax?"
+as_of: 2026-09-28
+business: acme_monthly
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: text
+    value: up to two crore rupees
+    support:
+      document: n15_2025
+      clause_ref: en.p4
+      quote: up to two crore rupees
+  - kind: text
+    value: the annual return rule applies to it
+    support:
+      seed_rule: gstr9_annual
+      field: specification
+      value:
+        all_of:
+        - attribute: registration_type
+          operator: eq
+          value: regular
+        - attribute: turnover_band
+          operator: gt
+          value: 1_5_crore_to_2_crore
+  must_not_mention:
+  - Acme Bengaluru is exempt
+  citations:
+  - document: n15_2025
+    clause_ref: en.p4
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: gstr9_annual
+    - id: s2
+      op: evaluate_applicability
+      source: s1
+    - id: s3
+      op: retrieve_clauses
+      source: s1
+    - id: s4
+      op: answer
+      sources:
+      - s2
+      - s3
+  answer:
+    covered: true
+    answer: "No. Notification No. 15/2025-Central Tax exempts only a registered person whose aggregate turnover in the financial year is up to two crore rupees; Acme Bengaluru's profile places its turnover above the band of 1.5 crore to 2 crore rupees, so the annual return rule applies to it."
+    citations:
+    - document: n15_2025
+      clause_ref: en.p4
+      quote: "hereby exempts the registered person whose aggregate turnover in any financial year is up to two crore rupees, from filing annual return that said financial year"
+refusal_reason: null
+notes: "The limit is en.p4's; the yes or no is the seed predicate (regular, turnover band above 1.5 to 2 crore) evaluated on the fictional profile's band, which is not a regulatory fact."

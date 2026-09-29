@@ -10,12 +10,13 @@ from fastapi.testclient import TestClient
 from domain_kernel.documents import document_id_for
 from domain_kernel.status import RuleVersionStatus
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
-from rulebook.testing import WRITE_TOKEN
+from rulebook.testing import REVIEW_TOKEN, WRITE_TOKEN
 
 DIGEST = "51f5dbee1615f0ec47256abddb11061a348e81b883051e89733a06b062bcebed"
 DOC = document_id_for(DIGEST)
 BASE = "/v1/rulebook"
 AUTH = {"x-cw-write-token": WRITE_TOKEN}
+REVIEW = {"x-cw-review-token": REVIEW_TOKEN}
 P3 = "hereby extends the due date for furnishing the return in FORM GSTR-3B for March, 2026"
 
 
@@ -135,15 +136,17 @@ def test_deciding_a_group_creates_the_entity(registered: TestClient) -> None:
         "decision": "create_entity",
         "decided_by": "analyst",
     }
-    response = registered.post(f"{BASE}/review/entities/decisions", json=decision, headers=AUTH)
+    response = registered.post(f"{BASE}/review/entities/decisions", json=decision, headers=REVIEW)
     assert response.status_code == 200
     body = response.json()
     assert (body["status"], body["resolution"], body["items_closed"]) == ("resolved", "created", 1)
-    again = registered.post(f"{BASE}/review/entities/decisions", json=decision, headers=AUTH)
+    again = registered.post(f"{BASE}/review/entities/decisions", json=decision, headers=REVIEW)
     assert again.status_code == 409
     missing = {**decision, "proposed_name": "GSTR-9"}
     assert (
-        registered.post(f"{BASE}/review/entities/decisions", json=missing, headers=AUTH).status_code
+        registered.post(
+            f"{BASE}/review/entities/decisions", json=missing, headers=REVIEW
+        ).status_code
         == 404
     )
 
@@ -158,7 +161,7 @@ def test_deciding_a_group_creates_the_entity(registered: TestClient) -> None:
 )
 def test_a_decision_needs_what_it_names(registered: TestClient, decision: dict[str, str]) -> None:
     body = {"entity_type": "form", "proposed_name": "GSTR-3B", "decided_by": "a", **decision}
-    response = registered.post(f"{BASE}/review/entities/decisions", json=body, headers=AUTH)
+    response = registered.post(f"{BASE}/review/entities/decisions", json=body, headers=REVIEW)
     assert response.status_code == 422
 
 
@@ -188,7 +191,7 @@ def test_candidates_are_staged_listed_and_approved(app: FastAPI, registered: Tes
     approve = registered.post(
         f"{BASE}/review/relations/{candidate_id}/approve",
         json={"from_rule_version_id": str(new_version), "decided_by": "analyst"},
-        headers=AUTH,
+        headers=REVIEW,
     )
     assert approve.status_code == 422
     assert approve.json()["type"].endswith("rulebook-target-version-required")
@@ -199,14 +202,14 @@ def test_candidates_are_staged_listed_and_approved(app: FastAPI, registered: Tes
             "target_rule_version_id": str(affected),
             "decided_by": "analyst",
         },
-        headers=AUTH,
+        headers=REVIEW,
     )
     assert approve.status_code == 200
     assert approve.json()["candidate_id"] == candidate_id
     again = registered.post(
         f"{BASE}/review/relations/{candidate_id}/reject",
         json={"reason": "duplicate", "decided_by": "analyst"},
-        headers=AUTH,
+        headers=REVIEW,
     )
     assert again.status_code == 409
     approved = registered.get(f"{BASE}/review/relations", params={"status": "approved"}).json()
@@ -223,7 +226,7 @@ def test_a_candidate_can_be_rejected(registered: TestClient) -> None:
     rejected = registered.post(
         f"{BASE}/review/relations/{candidate_id}/reject",
         json={"reason": "wrong_target", "decided_by": "analyst", "note": "cites only"},
-        headers=AUTH,
+        headers=REVIEW,
     )
     assert rejected.status_code == 200
     assert (rejected.json()["status"], rejected.json()["reject_reason"]) == (
@@ -233,7 +236,7 @@ def test_a_candidate_can_be_rejected(registered: TestClient) -> None:
     unknown = registered.post(
         f"{BASE}/review/relations/{UUID(int=3)}/reject",
         json={"reason": "wrong_target", "decided_by": "analyst"},
-        headers=AUTH,
+        headers=REVIEW,
     )
     assert unknown.status_code == 404
 
@@ -258,19 +261,33 @@ def test_rules_are_listed(app: FastAPI, client: TestClient) -> None:
     assert [(r["rule_key"], r["title"]) for r in rules] == [("gstr1_monthly", "GSTR-1 monthly")]
 
 
-@pytest.mark.parametrize(
-    ("method", "path"),
-    [
-        ("put", f"/documents/{DOC}/mentions"),
-        ("put", f"/documents/{DOC}/relation-candidates"),
-        ("post", "/review/entities/decisions"),
-        ("post", f"/review/relations/{UUID(int=1)}/approve"),
-        ("post", f"/review/relations/{UUID(int=1)}/reject"),
-    ],
-)
-def test_every_write_needs_the_token(client: TestClient, method: str, path: str) -> None:
-    response = getattr(client, method)(f"{BASE}{path}", json={})
-    assert response.status_code == 401
+PIPELINE_WRITES = [
+    ("put", f"/documents/{DOC}"),
+    ("put", f"/documents/{DOC}/mentions"),
+    ("put", f"/documents/{DOC}/relation-candidates"),
+    ("put", "/clauses/embeddings"),
+]
+ANALYST_ACTIONS = [
+    ("post", "/review/entities/decisions"),
+    ("post", f"/review/relations/{UUID(int=1)}/approve"),
+    ("post", f"/review/relations/{UUID(int=1)}/reject"),
+]
+
+
+@pytest.mark.parametrize(("method", "path"), PIPELINE_WRITES)
+def test_pipeline_writes_need_the_write_token(client: TestClient, method: str, path: str) -> None:
+    for headers in ({}, REVIEW, {"x-cw-write-token": REVIEW_TOKEN}):
+        response = client.request(method, f"{BASE}{path}", json={}, headers=headers)
+        assert response.status_code == 401
+        assert response.json()["type"].endswith("rulebook-write-token-invalid")
+
+
+@pytest.mark.parametrize(("method", "path"), ANALYST_ACTIONS)
+def test_analyst_actions_need_the_review_token(client: TestClient, method: str, path: str) -> None:
+    for headers in ({}, AUTH, {"x-cw-review-token": WRITE_TOKEN}):
+        response = client.request(method, f"{BASE}{path}", json={}, headers=headers)
+        assert response.status_code == 401
+        assert response.json()["type"].endswith("rulebook-review-token-invalid")
 
 
 def test_an_unqualified_group_is_decided_by_its_items(registered: TestClient) -> None:
@@ -294,12 +311,12 @@ def test_an_unqualified_group_is_decided_by_its_items(registered: TestClient) ->
         "reject_reason": "text_artifact",
         "decided_by": "analyst",
     }
-    unnamed = registered.post(f"{BASE}/review/entities/decisions", json=body, headers=AUTH)
+    unnamed = registered.post(f"{BASE}/review/entities/decisions", json=body, headers=REVIEW)
     assert unnamed.status_code == 422
     named = registered.post(
         f"{BASE}/review/entities/decisions",
         json={**body, "review_ids": [items[0]["review_id"]]},
-        headers=AUTH,
+        headers=REVIEW,
     )
     assert named.status_code == 200
     assert named.json()["items_closed"] == 1

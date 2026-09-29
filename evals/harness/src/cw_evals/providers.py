@@ -34,8 +34,10 @@ def scripted(cases: Sequence[GoldenCase]) -> ScriptedProvider:
 
 
 @contextmanager
-def fake_gateway() -> Iterator[GatewayProvider]:
-    """The gateway app in process, fake provider, memory ledger, the repo's prompt registry."""
+def gateway_client(completion_provider: LLMProvider | None = None) -> Iterator[TestClient]:
+    """The gateway app in process: fake provider, memory ledger, no cache, the repo's prompt
+    registry. ``completion_provider`` answers every completion in place of the fake (embeddings
+    stay fake), so scripted answers still pass the registry check, the masking and the ledger."""
     settings = GatewaySettings(
         _env_file=None,
         service_name="llm-gateway",
@@ -43,11 +45,19 @@ def fake_gateway() -> Iterator[GatewayProvider]:
         llm_ledger="memory",
         llm_cache_ttl_seconds=0,
         llm_feature_monthly_budget_inr=Decimal("100000"),
+        llm_tenant_monthly_budget_inr=Decimal("100000"),
         langfuse_host=None,
         langfuse_public_key=None,
         langfuse_secret_key=None,
     )
-    with TestClient(build_app(settings)) as client:
+    with TestClient(build_app(settings, completion_provider=completion_provider)) as client:
+        yield client
+
+
+@contextmanager
+def fake_gateway() -> Iterator[GatewayProvider]:
+    """The gateway app in process with its fake provider, as the pipeline's client sees it."""
+    with gateway_client() as client:
         yield GatewayProvider(client=client, tenant_id=None)
 
 

@@ -46,3 +46,21 @@ not appear in a service's dependencies.
   structured output checks. That code is a few hundred lines and it is ours to read.
 - Revisit if a framework offers a stable, inspectable abstraction that the evals can still
   judge, or if the gateway becomes the latency bottleneck for the question-answering path.
+
+## Addendum 2026-09-29: embeddings and the versioned-prompt rule
+
+Retrieval needs embeddings, and they go through the gateway like every other model call:
+`POST /v1/llm-gateway/embeddings` with the feature `retrieval`, routed to one model, masked,
+budgeted, metered in the same ledger and traced. An embedding call carries no prompt text, so
+the prompt registry has nothing to check. The rule exists so that an eval run knows exactly what
+produced a result; for embeddings the same things are pinned this way:
+
+- **The model** is pinned by the routing table (`voyage/voyage-3.5-lite` by default, per
+  ADR-013) and has no fallback, because vectors from two models do not compare. The model that
+  served a call is returned as `model_served` and stored with every vector.
+- **The vector length** is `EMBEDDING_DIMS` in `domain_kernel.vectors`, a schema constant rather
+  than a setting. Every answer is checked against it, and a mismatch is refused.
+- **The input preparation** (masking) is versioned as `retrieval.embedding@1`, which the ledger
+  records in place of a prompt reference. It is bumped when that preparation changes.
+- **The text embedded**, such as a clause with its header, is built by the caller, which owns
+  and versions that format.

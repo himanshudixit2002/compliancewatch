@@ -1,27 +1,85 @@
 """The Postgres unit of work for regulator documents and the knowledge tables.
 
 Inserts use ``ON CONFLICT DO NOTHING``: documents, clauses, mentions, review items, candidates,
-relations and runs are keyed by ids every writer derives the same way, so a repeated insert is a
-no-op rather than an error. Decisions lock the rows they change (``SELECT ... FOR UPDATE``).
+relations, runs and clause embeddings are keyed by ids every writer derives the same way, so a
+repeated insert is a no-op rather than an error. Decisions lock the rows they change
+(``SELECT ... FOR UPDATE``).
+
+Clause search runs two queries. The lexical leg matches ``clause.search_vector`` against the
+query's terms joined by OR and ranks with ``ts_rank_cd``. The vector leg orders by cosine
+distance over the HNSW index with ``hnsw.ef_search`` raised and pgvector's iterative scan on,
+so filters applied after the index scan still leave enough rows; iterative scan may return rows
+slightly out of order, so the outer query sorts them again.
+
+The review and publish flow locks the versions it changes, and publishing, withdrawing and the
+transition sweep also hold an advisory lock for their transaction. Their events go to
+``outbox_event`` through py-common's ``OutboxWriter`` on the same connection, so an event
+commits or rolls back with the change it describes; the ``rule_version`` trigger checks the
+same rules as the use cases.
 """
 
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any, Self
 from uuid import UUID
 
-from sqlalchemy import Engine, and_, create_engine, func, select, text, tuple_, update
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session
+from sqlalchemy import (
+    ColumnElement,
+    Engine,
+    Float,
+    Select,
+    Text,
+    and_,
+    bindparam,
+    cast,
+    create_engine,
+    func,
+    literal_column,
+    or_,
+    select,
+    text,
+    tuple_,
+    update,
+)
+from sqlalchemy.dialects.postgresql import TSQUERY, insert
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy.pool import NullPool
 
 from domain_kernel.documents import DocumentType
-from domain_kernel.ids import CanonicalEntityId, ClauseId, DocumentId, RuleVersionId, SourceId
+from domain_kernel.ids import (
+    CanonicalEntityId,
+    ClauseId,
+    DocumentId,
+    RuleId,
+    RuleVersionId,
+    SourceId,
+    UserId,
+)
 from domain_kernel.knowledge import EntityRef, EntityType, RelationKind, RuleRelation
+from domain_kernel.ontology import AttributeLevel
 from domain_kernel.status import RuleVersionStatus
+from domain_kernel.vectors import ClauseFilter, Vector
+from py_common.outbox import OutboxWriter
 from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.documents import StoredClause, StoredDocument
+from rulebook.domain.errors import UnknownRuleVersionError
+from rulebook.domain.events import RuleEvent
+from rulebook.domain.graph import (
+    ClauseDetail,
+    EntityRecord,
+    MentionedClause,
+    MentionSpan,
+    RelationQuery,
+    RelationRecord,
+)
+from rulebook.domain.publication import (
+    REPLACING,
+    DecisionAction,
+    PendingReplacement,
+    RuleVersionDecision,
+)
 from rulebook.domain.relations import (
     CandidateIssue,
     CandidateRejectReason,
@@ -34,11 +92,22 @@ from rulebook.domain.review import (
     EntityReviewItem,
     MentionGroup,
     Resolution,
+    ReviewQueueStats,
     ReviewStatus,
 )
+from rulebook.domain.rule_versions import (
+    CITING_STATUSES,
+    IN_FORCE_STATUSES,
+    CitationRecord,
+    RuleVersionRecord,
+)
 from rulebook.domain.runs import ExtractionRun, RuleSummary
+from rulebook.domain.search import CitedClause, ClauseEmbedding
+from rulebook.domain.seed import SeedStatus
 from rulebook.infrastructure.models import (
     CanonicalEntityRow,
+    CitationRow,
+    ClauseEmbeddingRow,
     ClauseEntityRow,
     ClauseRow,
     DocumentRow,
@@ -47,12 +116,21 @@ from rulebook.infrastructure.models import (
     RelationCandidateRow,
     RuleRelationRow,
     RuleRow,
+    RuleVersionDecisionRow,
     RuleVersionRow,
 )
 
 EXAMPLES_PER_GROUP = 5
 SUPERSESSION_LOCK = 0x72756C6573757073
 """Advisory lock key held for the rest of a transaction that approves a supersession."""
+PUBLICATION_LOCK = 0x72756C657075626C
+"""Advisory lock key held for the rest of a transaction that publishes, withdraws or sweeps."""
+PUBLISHED_STATUSES = sorted(status.value for status in IN_FORCE_STATUSES)
+CITING_STATUS_VALUES = sorted(status.value for status in CITING_STATUSES)
+REPLACING_KINDS = sorted(kind.value for kind in REPLACING)
+ENGLISH: ColumnElement[str] = literal_column("'english'::regconfig")
+HNSW_EF_SEARCH = 100
+"""Candidates the HNSW scan keeps (pgvector's default is 40): at least the largest pool."""
 
 
 class SqlAlchemyDocumentRepository:
@@ -96,6 +174,14 @@ class SqlAlchemyDocumentRepository:
             for clause in clauses
         ]
         self._session.execute(insert(ClauseRow).values(values).on_conflict_do_nothing())
+
+    def clause(self, clause_id: ClauseId) -> ClauseDetail | None:
+        found = self._session.execute(
+            select(ClauseRow, DocumentRow)
+            .join(DocumentRow, DocumentRow.id == ClauseRow.document_id)
+            .where(ClauseRow.id == clause_id.value)
+        ).first()
+        return None if found is None else ClauseDetail(_to_clause(found[0]), _to_document(found[1]))
 
 
 class SqlAlchemyEntityRepository:
@@ -153,6 +239,14 @@ class SqlAlchemyEntityRepository:
         )
         return self._session.execute(statement).first() is not None
 
+    def describe(self, entity_id: CanonicalEntityId) -> EntityRecord | None:
+        row = self._session.get(CanonicalEntityRow, entity_id.value)
+        if row is None:
+            return None
+        return EntityRecord(
+            CanonicalEntityId(row.id), EntityType(row.type), row.canonical_name, tuple(row.aliases)
+        )
+
 
 class SqlAlchemyMentionRepository:
     def __init__(self, session: Session) -> None:
@@ -200,6 +294,49 @@ class SqlAlchemyMentionRepository:
             .limit(1)
         )
         return None if found is None else CanonicalEntityId(found)
+
+    def clauses_mentioning(
+        self, entity_id: CanonicalEntityId, as_of: date | None, limit: int
+    ) -> Sequence[MentionedClause]:
+        mentioned = select(ClauseEntityRow.clause_id).where(
+            ClauseEntityRow.entity_id == entity_id.value
+        )
+        statement = (
+            select(ClauseRow, DocumentRow)
+            .join(DocumentRow, DocumentRow.id == ClauseRow.document_id)
+            .where(ClauseRow.id.in_(mentioned))
+            .order_by(
+                DocumentRow.published_at.desc().nulls_last(), DocumentRow.id, ClauseRow.ordinal
+            )
+            .limit(limit)
+        )
+        if as_of is not None:
+            statement = statement.where(DocumentRow.published_at <= as_of)
+        rows = self._session.execute(statement).all()
+        spans: dict[UUID, list[MentionSpan]] = {}
+        for clause_id, mention_text, span_start, span_end in self._session.execute(
+            select(
+                ClauseEntityRow.clause_id,
+                ClauseEntityRow.mention_text,
+                ClauseEntityRow.span_start,
+                ClauseEntityRow.span_end,
+            )
+            .where(
+                ClauseEntityRow.entity_id == entity_id.value,
+                ClauseEntityRow.clause_id.in_([clause.id for clause, _ in rows]),
+            )
+            .order_by(ClauseEntityRow.clause_id, ClauseEntityRow.span_start)
+        ).all():
+            spans.setdefault(clause_id, []).append(MentionSpan(mention_text, span_start, span_end))
+        out = _out_of_force(self._session, [clause.id for clause, _ in rows], as_of)
+        return [
+            MentionedClause(
+                ClauseDetail(_to_clause(clause), _to_document(document)),
+                tuple(spans[clause.id]),
+                clause.id in out,
+            )
+            for clause, document in rows
+        ]
 
 
 class SqlAlchemyReviewRepository:
@@ -295,6 +432,18 @@ class SqlAlchemyReviewRepository:
                 decided_at=item.decided_at,
                 note=item.note,
             )
+        )
+
+    def queue_stats(self) -> ReviewQueueStats:
+        statement = (
+            select(EntityReviewRow.entity_type, func.count(), func.min(EntityReviewRow.created_at))
+            .where(EntityReviewRow.status == ReviewStatus.OPEN.value)
+            .group_by(EntityReviewRow.entity_type)
+        )
+        rows = self._session.execute(statement).all()
+        return ReviewQueueStats(
+            by_type={EntityType(entity_type): int(count) for entity_type, count, _ in rows},
+            oldest_open_at=min((oldest.astimezone(UTC) for _, _, oldest in rows), default=None),
         )
 
 
@@ -426,6 +575,63 @@ class SqlAlchemyRelationRepository:
             text("SELECT pg_advisory_xact_lock(:key)"), {"key": SUPERSESSION_LOCK}
         )
 
+    def find(self, query: RelationQuery) -> Sequence[RelationRecord]:
+        statement = (
+            select(
+                RuleRelationRow,
+                ClauseRow.clause_ref,
+                ClauseRow.document_id,
+                RelationCandidateRow.period_label,
+                RelationCandidateRow.new_due_on,
+            )
+            .join(ClauseRow, ClauseRow.id == RuleRelationRow.clause_id)
+            .outerjoin(
+                RelationCandidateRow, RelationCandidateRow.id == RuleRelationRow.candidate_id
+            )
+            .order_by(RuleRelationRow.id)
+            .limit(query.limit)
+        )
+        if query.from_rule_version_id is not None:
+            statement = statement.where(
+                RuleRelationRow.from_rule_version_id == query.from_rule_version_id.value
+            )
+        if query.to_rule_version_id is not None:
+            statement = statement.where(
+                RuleRelationRow.to_rule_version_id == query.to_rule_version_id.value
+            )
+        if query.to_entity_id is not None:
+            statement = statement.where(RuleRelationRow.to_entity_id == query.to_entity_id.value)
+        if query.relation is not None:
+            statement = statement.where(RuleRelationRow.relation == query.relation.value)
+        if query.published_only:
+            statement = statement.join(
+                RuleVersionRow, RuleVersionRow.id == RuleRelationRow.from_rule_version_id
+            ).where(RuleVersionRow.status.in_(PUBLISHED_STATUSES))
+        return [
+            RelationRecord(
+                relation_id=row.id,
+                from_rule_version_id=RuleVersionId(row.from_rule_version_id),
+                relation=RelationKind(row.relation),
+                to_kind=row.to_kind,
+                to_ref=row.to_ref,
+                to_rule_version_id=None
+                if row.to_rule_version_id is None
+                else RuleVersionId(row.to_rule_version_id),
+                to_entity_id=None
+                if row.to_entity_id is None
+                else CanonicalEntityId(row.to_entity_id),
+                evidence_clause_id=ClauseId(row.clause_id),
+                evidence_clause_ref=clause_ref,
+                evidence_document_id=DocumentId(document_id),
+                candidate_id=row.candidate_id,
+                period_label=period_label,
+                new_due_on=new_due_on,
+            )
+            for row, clause_ref, document_id, period_label, new_due_on in self._session.execute(
+                statement
+            ).all()
+        ]
+
 
 class SqlAlchemyRuleCatalog:
     def __init__(self, session: Session) -> None:
@@ -467,6 +673,348 @@ class SqlAlchemyRuleCatalog:
         return None if found is None else RuleVersionStatus(found)
 
 
+class SqlAlchemyRuleVersionRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def in_force(
+        self,
+        as_of: date,
+        *,
+        rule_key: str | None,
+        regulator: str | None,
+        limit: int,
+        after: str | None,
+    ) -> Sequence[RuleVersionRecord]:
+        statement = (
+            _versions()
+            .where(_in_force_on(as_of))
+            .order_by(RuleRow.rule_key, RuleVersionRow.version)
+            .limit(limit)
+        )
+        if rule_key is not None:
+            statement = statement.where(RuleRow.rule_key == rule_key)
+        if regulator is not None:
+            statement = statement.where(RuleRow.regulator == regulator)
+        if after is not None:
+            statement = statement.where(RuleRow.rule_key > after)
+        return [_to_version(*row) for row in self._session.execute(statement).all()]
+
+    def get(self, rule_version_id: RuleVersionId) -> RuleVersionRecord | None:
+        row = self._session.execute(
+            _versions().where(RuleVersionRow.id == rule_version_id.value)
+        ).first()
+        return None if row is None else _to_version(*row)
+
+    def lock(self, rule_version_id: RuleVersionId) -> RuleVersionRecord | None:
+        row = self._session.execute(
+            _versions()
+            .where(RuleVersionRow.id == rule_version_id.value)
+            .with_for_update(of=RuleVersionRow)
+        ).first()
+        return None if row is None else _to_version(*row)
+
+    def lock_many(
+        self, rule_version_ids: Sequence[RuleVersionId]
+    ) -> Mapping[RuleVersionId, RuleVersionRecord]:
+        ids = sorted({version.value for version in rule_version_ids}, key=str)
+        if not ids:
+            return {}
+        rows = self._session.execute(
+            _versions()
+            .where(RuleVersionRow.id.in_(ids))
+            .order_by(RuleVersionRow.id)
+            .with_for_update(of=RuleVersionRow)
+        ).all()
+        records = [_to_version(*row) for row in rows]
+        return {record.rule_version_id: record for record in records}
+
+    def of_rule(self, rule_id: RuleId) -> Sequence[RuleVersionRecord]:
+        rows = self._session.execute(
+            _versions()
+            .where(RuleVersionRow.rule_id == rule_id.value)
+            .order_by(RuleVersionRow.version)
+        ).all()
+        return [_to_version(*row) for row in rows]
+
+    def save_lifecycle(self, record: RuleVersionRecord) -> None:
+        row = self._session.get(RuleVersionRow, record.rule_version_id.value)
+        if row is None:
+            raise UnknownRuleVersionError(str(record.rule_version_id))
+        row.status = record.status.value
+        row.seed_status = record.seed_status.value
+        row.effective_to = record.effective_to
+        row.published_at = record.published_at
+        row.submitted_at = record.submitted_at
+        row.high_impact = record.high_impact
+        self._session.flush()
+
+    def record_decision(self, decision: RuleVersionDecision) -> None:
+        self._session.execute(
+            insert(RuleVersionDecisionRow).values(
+                id=decision.decision_id,
+                rule_version_id=decision.rule_version_id.value,
+                action=decision.action.value,
+                from_status=decision.from_status.value,
+                to_status=decision.to_status.value,
+                actor_id=None if decision.actor_id is None else decision.actor_id.value,
+                caused_by_rule_version_id=None
+                if decision.caused_by is None
+                else decision.caused_by.value,
+                note=decision.note,
+                decided_at=decision.decided_at,
+            )
+        )
+
+    def approvers(self, rule_version_id: RuleVersionId, since: datetime) -> frozenset[UserId]:
+        found = self._session.scalars(
+            select(RuleVersionDecisionRow.actor_id)
+            .where(
+                RuleVersionDecisionRow.rule_version_id == rule_version_id.value,
+                RuleVersionDecisionRow.action == DecisionAction.APPROVED.value,
+                RuleVersionDecisionRow.actor_id.is_not(None),
+                RuleVersionDecisionRow.decided_at >= since,
+            )
+            .distinct()
+        )
+        return frozenset(UserId(actor) for actor in found if actor is not None)
+
+    def replaced_by_others(
+        self, rule_version_ids: Sequence[RuleVersionId], excluding: RuleVersionId
+    ) -> frozenset[RuleVersionId]:
+        if not rule_version_ids:
+            return frozenset()
+        found = self._session.scalars(
+            select(RuleRelationRow.to_rule_version_id)
+            .join(RuleVersionRow, RuleVersionRow.id == RuleRelationRow.from_rule_version_id)
+            .where(
+                RuleRelationRow.relation.in_(REPLACING_KINDS),
+                RuleRelationRow.to_rule_version_id.in_([v.value for v in rule_version_ids]),
+                RuleRelationRow.from_rule_version_id != excluding.value,
+                RuleVersionRow.status.in_(PUBLISHED_STATUSES),
+            )
+            .distinct()
+        )
+        return frozenset(RuleVersionId(target) for target in found if target is not None)
+
+    def pending_replacements(self, today: date) -> Sequence[PendingReplacement]:
+        replacing = aliased(RuleVersionRow)
+        target = aliased(RuleVersionRow)
+        rows = self._session.execute(
+            select(
+                RuleRelationRow.relation,
+                target.id,
+                target.rule_id,
+                replacing.id,
+                replacing.effective_from,
+            )
+            .join(replacing, replacing.id == RuleRelationRow.from_rule_version_id)
+            .join(target, target.id == RuleRelationRow.to_rule_version_id)
+            .where(
+                RuleRelationRow.relation.in_(REPLACING_KINDS),
+                replacing.status.in_(PUBLISHED_STATUSES),
+                replacing.effective_from <= today,
+                target.status == RuleVersionStatus.PUBLISHED.value,
+            )
+            .order_by(replacing.effective_from, target.id, replacing.id)
+        ).all()
+        return [
+            PendingReplacement(
+                relation=RelationKind(relation),
+                target_id=RuleVersionId(target_id),
+                target_rule_id=RuleId(target_rule_id),
+                replacing_id=RuleVersionId(replacing_id),
+                replacing_from=replacing_from,
+            )
+            for relation, target_id, target_rule_id, replacing_id, replacing_from in rows
+        ]
+
+    def lock_publication(self) -> None:
+        self._session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PUBLICATION_LOCK})
+
+
+class SqlAlchemyCitationRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def for_version(self, rule_version_id: RuleVersionId) -> tuple[CitationRecord, ...]:
+        statement = (
+            select(CitationRow, ClauseRow.clause_ref, ClauseRow.document_id)
+            .join(ClauseRow, ClauseRow.id == CitationRow.clause_id)
+            .where(CitationRow.rule_version_id == rule_version_id.value)
+            .order_by(ClauseRow.document_id, ClauseRow.ordinal, CitationRow.id)
+        )
+        return tuple(
+            CitationRecord(
+                citation_id=row.id,
+                rule_version_id=RuleVersionId(row.rule_version_id),
+                clause_id=ClauseId(row.clause_id),
+                document_id=DocumentId(document_id),
+                clause_ref=clause_ref,
+                quote=row.quote,
+                verified=row.verified,
+                match_score=None if row.match_score is None else float(row.match_score),
+                verified_at=row.verified_at,
+            )
+            for row, clause_ref, document_id in self._session.execute(statement).all()
+        )
+
+    def add(self, citation: CitationRecord) -> bool:
+        statement = (
+            insert(CitationRow)
+            .values(
+                id=citation.citation_id,
+                rule_version_id=citation.rule_version_id.value,
+                clause_id=citation.clause_id.value,
+                quote=citation.quote,
+                verified=citation.verified,
+                match_score=None if citation.match_score is None else _score(citation.match_score),
+                verified_at=citation.verified_at,
+            )
+            .on_conflict_do_nothing()
+            .returning(CitationRow.id)
+        )
+        return self._session.execute(statement).first() is not None
+
+
+class SqlAlchemyEventSink:
+    """Writes each event into ``outbox_event`` on the unit of work's connection, keyed by its
+    rule, so the event commits or rolls back with the change it describes."""
+
+    def __init__(self, session: Session, writer: OutboxWriter) -> None:
+        self._session = session
+        self._writer = writer
+
+    def publish(self, event: RuleEvent) -> None:
+        self._writer.write(self._session.connection(), event, partition_key=event.partition_key)
+
+
+class SqlAlchemyClauseIndex:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def store(self, model: str, embeddings: Sequence[ClauseEmbedding]) -> tuple[int, int]:
+        if not embeddings:
+            return 0, 0
+        values = [
+            {"clause_id": e.clause_id.value, "model": model, "embedding": e.vector}
+            for e in embeddings
+        ]
+        inserted = self._session.execute(
+            insert(ClauseEmbeddingRow)
+            .values(values)
+            .on_conflict_do_nothing()
+            .returning(ClauseEmbeddingRow.clause_id)
+        ).all()
+        return len(inserted), len(embeddings) - len(inserted)
+
+    def unknown_clauses(self, clause_ids: Sequence[ClauseId]) -> frozenset[ClauseId]:
+        found = set(
+            self._session.scalars(
+                select(ClauseRow.id).where(ClauseRow.id.in_([c.value for c in clause_ids]))
+            )
+        )
+        return frozenset(c for c in clause_ids if c.value not in found)
+
+    def unembedded(
+        self, model: str, document_id: DocumentId | None, limit: int, after: ClauseId | None
+    ) -> Sequence[ClauseDetail]:
+        embedded = select(ClauseEmbeddingRow.clause_id).where(
+            ClauseEmbeddingRow.clause_id == ClauseRow.id, ClauseEmbeddingRow.model == model
+        )
+        statement = (
+            select(ClauseRow, DocumentRow)
+            .join(DocumentRow, DocumentRow.id == ClauseRow.document_id)
+            .where(~embedded.exists())
+            .order_by(ClauseRow.id)
+            .limit(limit)
+        )
+        if document_id is not None:
+            statement = statement.where(ClauseRow.document_id == document_id.value)
+        if after is not None:
+            statement = statement.where(ClauseRow.id > after.value)
+        return [
+            ClauseDetail(_to_clause(clause), _to_document(document))
+            for clause, document in self._session.execute(statement).all()
+        ]
+
+    def lexical(self, text: str, filters: ClauseFilter, pool: int) -> Sequence[ClauseId]:
+        query = _any_term(text)
+        if not self._session.scalar(select(func.numnode(query))):
+            return []
+        statement = (
+            select(ClauseRow.id)
+            .join(DocumentRow, DocumentRow.id == ClauseRow.document_id)
+            .where(ClauseRow.search_vector.bool_op("@@")(query))
+            .order_by(func.ts_rank_cd(ClauseRow.search_vector, query).desc(), ClauseRow.id)
+            .limit(pool)
+        )
+        return [ClauseId(found) for found in self._session.scalars(_filtered(statement, filters))]
+
+    def nearest(
+        self, vector: Vector, model: str, filters: ClauseFilter, pool: int
+    ) -> Sequence[ClauseId]:
+        # set_config(..., true) is SET LOCAL with the value as a bind parameter.
+        self._session.execute(
+            text("SELECT set_config('hnsw.ef_search', :value, true)"),
+            {"value": str(HNSW_EF_SEARCH)},
+        )
+        self._session.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
+        distance = ClauseEmbeddingRow.embedding.op("<=>", return_type=Float())(
+            bindparam("query_vector", vector, type_=ClauseEmbeddingRow.embedding.type)
+        )
+        ranked = _filtered(
+            select(ClauseEmbeddingRow.clause_id, distance.label("distance"))
+            .join(ClauseRow, ClauseRow.id == ClauseEmbeddingRow.clause_id)
+            .join(DocumentRow, DocumentRow.id == ClauseRow.document_id)
+            .where(ClauseEmbeddingRow.model == model)
+            .order_by(distance)
+            .limit(pool),
+            filters,
+        ).subquery()
+        nearest: Select[UUID] = select(ranked.c.clause_id).order_by(
+            ranked.c.distance, ranked.c.clause_id
+        )
+        return [ClauseId(found) for found in self._session.scalars(nearest)]
+
+    def hits(
+        self, clause_ids: Sequence[ClauseId], as_of: date | None
+    ) -> Mapping[ClauseId, CitedClause]:
+        ids = [clause_id.value for clause_id in clause_ids]
+        if not ids:
+            return {}
+        citing = (
+            select(CitationRow.clause_id, CitationRow.rule_version_id)
+            .join(RuleVersionRow, RuleVersionRow.id == CitationRow.rule_version_id)
+            .where(
+                CitationRow.clause_id.in_(ids),
+                CitationRow.verified.is_(True),
+                RuleVersionRow.status.in_(PUBLISHED_STATUSES),
+            )
+            .distinct()
+            .order_by(CitationRow.clause_id, CitationRow.rule_version_id)
+        )
+        if as_of is not None:
+            citing = citing.where(_in_force_on(as_of))
+        cited_by: dict[UUID, list[RuleVersionId]] = {}
+        for clause_id, rule_version_id in self._session.execute(citing).all():
+            cited_by.setdefault(clause_id, []).append(RuleVersionId(rule_version_id))
+        rows = self._session.execute(
+            select(ClauseRow, DocumentRow)
+            .join(DocumentRow, DocumentRow.id == ClauseRow.document_id)
+            .where(ClauseRow.id.in_(ids))
+        ).all()
+        out = _out_of_force(self._session, ids, as_of)
+        return {
+            ClauseId(clause.id): CitedClause(
+                ClauseDetail(_to_clause(clause), _to_document(document)),
+                tuple(cited_by.get(clause.id, ())),
+                clause.id in out,
+            )
+            for clause, document in rows
+        }
+
+
 class SqlAlchemyRunRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -491,7 +1039,7 @@ class SqlAlchemyRunRepository:
 
 
 class SqlAlchemyKnowledgeUnitOfWork:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, writer: OutboxWriter) -> None:
         self._documents = SqlAlchemyDocumentRepository(session)
         self._entities = SqlAlchemyEntityRepository(session)
         self._mentions = SqlAlchemyMentionRepository(session)
@@ -499,7 +1047,11 @@ class SqlAlchemyKnowledgeUnitOfWork:
         self._candidates = SqlAlchemyCandidateRepository(session)
         self._relations = SqlAlchemyRelationRepository(session)
         self._rules = SqlAlchemyRuleCatalog(session)
+        self._rule_versions = SqlAlchemyRuleVersionRepository(session)
+        self._citations = SqlAlchemyCitationRepository(session)
+        self._index = SqlAlchemyClauseIndex(session)
         self._runs = SqlAlchemyRunRepository(session)
+        self._events = SqlAlchemyEventSink(session, writer)
 
     @property
     def documents(self) -> SqlAlchemyDocumentRepository:
@@ -530,15 +1082,32 @@ class SqlAlchemyKnowledgeUnitOfWork:
         return self._rules
 
     @property
+    def rule_versions(self) -> SqlAlchemyRuleVersionRepository:
+        return self._rule_versions
+
+    @property
+    def citations(self) -> SqlAlchemyCitationRepository:
+        return self._citations
+
+    @property
+    def index(self) -> SqlAlchemyClauseIndex:
+        return self._index
+
+    @property
     def runs(self) -> SqlAlchemyRunRepository:
         return self._runs
+
+    @property
+    def events(self) -> SqlAlchemyEventSink:
+        return self._events
 
 
 class PostgresKnowledgeUnitOfWorkFactory:
     """``factory()`` opens one transaction; the block's clean exit commits it."""
 
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, engine: Engine, *, writer: OutboxWriter | None = None) -> None:
         self._engine = engine
+        self._writer = writer or OutboxWriter()
 
     @classmethod
     def from_url(cls, database_url: str) -> Self:
@@ -554,7 +1123,7 @@ class PostgresKnowledgeUnitOfWorkFactory:
     @contextmanager
     def _open(self) -> Iterator[KnowledgeUnitOfWork]:
         with Session(self._engine, expire_on_commit=False) as session, session.begin():
-            yield SqlAlchemyKnowledgeUnitOfWork(session)
+            yield SqlAlchemyKnowledgeUnitOfWork(session, self._writer)
 
     def ping(self) -> bool:
         with self._engine.connect() as connection:
@@ -609,6 +1178,88 @@ def _to_clause(row: ClauseRow) -> StoredClause:
         text=row.text,
         text_sha256=row.text_sha256,
         page=row.page,
+    )
+
+
+def _any_term(text: str) -> ColumnElement[str]:
+    """``plainto_tsquery`` with its ANDs turned into ORs: a clause that matches any term is a
+    candidate, and ``ts_rank_cd`` ranks the ones matching more terms, closer together, higher."""
+    return cast(func.replace(cast(func.plainto_tsquery(ENGLISH, text), Text), "&", "|"), TSQUERY)
+
+
+def _filtered[*Row](statement: Select[*Row], filters: ClauseFilter) -> Select[*Row]:
+    """The statement (already joined to ``document``) restricted to the filters; ``as_of``
+    keeps documents published on or before it, so an undated document is left out."""
+    if filters.regulator is not None:
+        statement = statement.where(DocumentRow.regulator == filters.regulator)
+    if filters.doc_types:
+        statement = statement.where(
+            DocumentRow.doc_type.in_(sorted(doc_type.value for doc_type in filters.doc_types))
+        )
+    if filters.as_of is not None:
+        statement = statement.where(DocumentRow.published_at <= filters.as_of)
+    return statement
+
+
+def _in_force_on(as_of: date) -> ColumnElement[bool]:
+    """``rule_versions.in_force`` in SQL: published or superseded, and ``as_of`` in the
+    half-open effective period."""
+    return and_(
+        RuleVersionRow.status.in_(PUBLISHED_STATUSES),
+        RuleVersionRow.effective_from <= as_of,
+        or_(RuleVersionRow.effective_to.is_(None), RuleVersionRow.effective_to > as_of),
+    )
+
+
+def _out_of_force(session: Session, clause_ids: Sequence[UUID], as_of: date | None) -> set[UUID]:
+    """``rule_versions.out_of_force`` in SQL: the clauses among ``clause_ids`` cited with a
+    verified quote by a version published at some time, none of them in force on ``as_of``."""
+    if as_of is None or not clause_ids:
+        return set()
+    found = session.scalars(
+        select(CitationRow.clause_id)
+        .join(RuleVersionRow, RuleVersionRow.id == CitationRow.rule_version_id)
+        .where(
+            CitationRow.clause_id.in_(clause_ids),
+            CitationRow.verified.is_(True),
+            RuleVersionRow.status.in_(CITING_STATUS_VALUES),
+        )
+        .group_by(CitationRow.clause_id)
+        .having(func.bool_or(_in_force_on(as_of)).is_(False))
+    )
+    return set(found)
+
+
+def _versions() -> Select[RuleVersionRow, str, str, str]:
+    return select(RuleVersionRow, RuleRow.rule_key, RuleRow.regulator, RuleRow.level).join(
+        RuleRow, RuleRow.id == RuleVersionRow.rule_id
+    )
+
+
+def _to_version(
+    row: RuleVersionRow, rule_key: str, regulator: str, level: str
+) -> RuleVersionRecord:
+    return RuleVersionRecord(
+        rule_version_id=RuleVersionId(row.id),
+        rule_id=RuleId(row.rule_id),
+        rule_key=rule_key,
+        regulator=regulator,
+        level=AttributeLevel(level),
+        version=row.version,
+        status=RuleVersionStatus(row.status),
+        title=row.title,
+        summary=row.summary,
+        specification=row.specification,
+        obligation_template=row.obligation_template,
+        recurrence=row.recurrence,
+        effective_from=row.effective_from,
+        effective_to=row.effective_to,
+        source=row.source,
+        seed_status=SeedStatus(row.seed_status),
+        todo=tuple(str(item) for item in row.todo),
+        published_at=row.published_at,
+        high_impact=row.high_impact,
+        submitted_at=row.submitted_at,
     )
 
 

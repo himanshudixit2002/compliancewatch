@@ -1,6 +1,7 @@
 """The pipeline's rulebook client against the rulebook app, in process: what one sends the other
 accepts, and both derive the same clause ids. Runs the recorded 01/2026-Central Tax PDF (English
-and Hindi) through the real parser, so the contract covers real clause text."""
+and Hindi) through the real parser, so the contract covers real clause text, and fills the
+clause search index through the embedding stage."""
 
 import base64
 import dataclasses
@@ -15,10 +16,13 @@ from fastapi.testclient import TestClient
 
 from domain_kernel.documents import DocumentRef, RawDocument, clause_id_for
 from domain_kernel.ids import SourceId
+from pipeline.application.embedding import EmbeddingStage
+from pipeline.domain.embedding import embedding_text
 from pipeline.domain.errors import RulebookConflictError, RulebookRejectedError
 from pipeline.domain.knowledge import DocumentRecord
 from pipeline.infrastructure.parsers import PdfParser
 from pipeline.infrastructure.rulebook_client import HttpRulebook
+from pipeline.testing import ScriptedEmbedder, hash_vector
 from rulebook.main import build_app
 from rulebook.testing import WRITE_TOKEN, rulebook_settings
 
@@ -84,3 +88,29 @@ def test_a_wrong_token_is_rejected(client: TestClient) -> None:
         HttpRulebook(token="wrong", client=client).register_document(
             recorded("gst-ct-01-2026.pdf.json")
         )
+
+
+def test_the_embedding_stage_fills_the_search_index(client: TestClient) -> None:
+    record = recorded("gst-ct-01-2026.pdf.json")
+    rulebook = HttpRulebook(token=WRITE_TOKEN, client=client)
+    rulebook.register_document(record)
+    document = record.document
+    waiting = rulebook.unembedded_clauses(ScriptedEmbedder.MODEL, document_id=document.document_id)
+    assert [c.clause_ref for c in sorted(waiting, key=lambda c: c.clause_ref)] == sorted(
+        c.clause_ref for c in document.clauses
+    )
+    assert {(c.regulator, c.external_ref) for c in waiting} == {("CBIC", "01/2026-Central Tax")}
+    stage = EmbeddingStage(ScriptedEmbedder(), rulebook, batch_size=2)
+    run = stage.embed_missing(document.document_id)
+    assert (run.embedded, run.unchanged) == (len(document.clauses), 0)
+    assert rulebook.unembedded_clauses(ScriptedEmbedder.MODEL) == ()
+    third = next(c for c in waiting if c.clause_ref == document.clauses[2].clause_ref)
+    body = {
+        "text": "GSTR-3B",
+        "vector": list(hash_vector(embedding_text(third))),
+        "model": ScriptedEmbedder.MODEL,
+        "k": 3,
+    }
+    hits = client.post("/v1/rulebook/search", json=body).json()
+    nearest = next(hit for hit in hits if hit["vector_rank"] == 1)
+    assert nearest["clause_id"] == str(third.clause_id)

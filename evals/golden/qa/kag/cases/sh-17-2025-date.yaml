@@ -1,0 +1,47 @@
+case_id: sh-17-2025-date
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: On what date was notification 17/2025-Central Tax issued?
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: date
+    value: 2025-10-18
+    support:
+      document: n17_2025
+      clause_ref: en.p3
+      quote: New Delhi, the 18 October, 2025
+  must_not_mention: []
+  citations:
+  - document: n17_2025
+    clause_ref: en.p3
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: find_entity
+      entity_type: notification
+      name: 17/2025-Central Tax
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: Notification No. 17/2025-Central Tax was issued at New Delhi on 18 October 2025.
+    citations:
+    - document: n17_2025
+      clause_ref: en.p3
+      quote: NOTIFICATION No. 17/2025 – CENTRAL TAX New Delhi, the 18 October, 2025
+refusal_reason: null
+notes: Reached through the notification's own mention in its heading clause.

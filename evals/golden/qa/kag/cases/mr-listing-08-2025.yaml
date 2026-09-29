@@ -1,0 +1,39 @@
+case_id: mr-listing-08-2025
+category: must_refuse
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: none
+question: Which late fee did notification 08/2025-Central Tax waive?
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: not_covered
+  facts: []
+  must_not_mention: []
+  citations: []
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: find_entity
+      entity_type: notification
+      name: 08/2025-Central Tax
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: The late fee was waived.
+    citations:
+    - document: n10_2025
+      clause_ref: en.p1
+      quote: the late fee is waived in full
+refusal_reason: listing_only
+notes: 08/2025-Central Tax is only in the recorded CBIC listing.

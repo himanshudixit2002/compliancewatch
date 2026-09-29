@@ -7,7 +7,10 @@ is marked dead only when that send succeeds, so nothing is lost while the broker
 Delivery is at least once: a crash between the send and the commit republishes the row.
 
 ``python -m py_common.outbox`` runs it against ``CW_DATABASE_URL`` (whose ``search_path``
-picks the service schema) and ``CW_KAFKA_BOOTSTRAP`` until SIGTERM or SIGINT.
+picks the service schema) and ``CW_KAFKA_BOOTSTRAP`` until SIGTERM or SIGINT. With
+``CW_OTEL_ENDPOINT`` set it exports the published, retried and dead counters by topic and the
+``outbox_relay_pending`` gauge by ``db_schema`` (``CW_DB_SCHEMA``), which ``OutboxBacklog``
+alerts on.
 """
 
 import asyncio
@@ -23,12 +26,19 @@ from sqlalchemy import Connection, inspect
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from domain_kernel.events import utc_now
+from py_common import __version__
 from py_common.events import CONTENT_TYPE
 from py_common.logging import configure_logging, get_logger
 from py_common.outbox.producer import AiokafkaProducer, MessageProducer
 from py_common.outbox.schema import OUTBOX_TABLE
 from py_common.outbox.store import ClaimedMessage, OutboxBatch, OutboxStore, PostgresOutboxStore
 from py_common.settings import Settings
+from py_common.telemetry import configure_telemetry
+
+SERVICE_NAME = "outbox-relay"
+UNSET_SCHEMA = "unset"
+"""The ``db_schema`` label when ``CW_DB_SCHEMA`` is not set."""
+PENDING_GAUGE = "outbox_relay_pending"
 
 log = get_logger(__name__)
 meter = metrics.get_meter("py_common.outbox.relay")
@@ -51,12 +61,20 @@ class RelayConfig:
     base_backoff_seconds: float = 1.0
     max_backoff_seconds: float = 300.0
     dlq_suffix: str = ".dlq"
+    pending_interval_seconds: float = 15.0
 
     def __post_init__(self) -> None:
         if self.batch_size < 1 or self.max_attempts < 1:
             raise ValueError("batch_size and max_attempts must be at least 1")
-        if self.poll_interval_seconds <= 0 or self.base_backoff_seconds <= 0:
-            raise ValueError("poll_interval_seconds and base_backoff_seconds must be positive")
+        if (
+            self.poll_interval_seconds <= 0
+            or self.base_backoff_seconds <= 0
+            or self.pending_interval_seconds <= 0
+        ):
+            raise ValueError(
+                "poll_interval_seconds, base_backoff_seconds and pending_interval_seconds "
+                "must be positive"
+            )
         if self.max_backoff_seconds < self.base_backoff_seconds:
             raise ValueError("max_backoff_seconds must not be below base_backoff_seconds")
 
@@ -111,11 +129,18 @@ class OutboxRelay:
         producer: MessageProducer,
         config: RelayConfig = DEFAULT_CONFIG,
         clock: Callable[[], datetime] = utc_now,
+        db_schema: str = UNSET_SCHEMA,
+        meter: metrics.Meter = meter,
     ) -> None:
         self._store = store
         self._producer = producer
         self._config = config
         self._clock = clock
+        self._attributes = {"db_schema": db_schema}
+        # No unit: the collector's Prometheus exporter would add a suffix to the name.
+        self._pending_gauge = meter.create_gauge(
+            PENDING_GAUGE, description="Outbox rows waiting to be published"
+        )
 
     async def run_once(self) -> RelayStats:
         """Claim and publish one batch; returns what happened to each row."""
@@ -196,10 +221,21 @@ class OutboxRelay:
         retried_counter.add(1, {"topic": message.topic})
         return RelayStats(retried=1)
 
+    async def report_pending(self) -> int:
+        """Set the pending gauge to the rows still to publish; returns the count."""
+        count = await self._store.pending()
+        self._pending_gauge.set(count, self._attributes)
+        return count
+
     async def run_forever(self, stop: asyncio.Event) -> RelayStats:
-        """Loop until ``stop`` is set; waits ``poll_interval_seconds`` after an empty pass."""
+        """Loop until ``stop`` is set; waits ``poll_interval_seconds`` after an empty pass and
+        reports the pending count at the start and every ``pending_interval_seconds``."""
         total = RelayStats()
+        report_at = self._clock()
         while not stop.is_set():
+            if self._clock() >= report_at:
+                await self.report_pending()
+                report_at = self._clock() + timedelta(seconds=self._config.pending_interval_seconds)
             stats = await self.run_once()
             total += stats
             if stats.claimed == 0:
@@ -239,7 +275,12 @@ async def run(settings: Settings, *, config: RelayConfig = DEFAULT_CONFIG) -> bo
         async with AiokafkaProducer(
             settings.kafka_bootstrap, client_id="cw-outbox-relay"
         ) as producer:
-            relay = OutboxRelay(store=PostgresOutboxStore(engine), producer=producer, config=config)
+            relay = OutboxRelay(
+                store=PostgresOutboxStore(engine),
+                producer=producer,
+                config=config,
+                db_schema=settings.db_schema or UNSET_SCHEMA,
+            )
             log.info(
                 "outbox.relay_started",
                 kafka_bootstrap=settings.kafka_bootstrap,
@@ -253,11 +294,18 @@ async def run(settings: Settings, *, config: RelayConfig = DEFAULT_CONFIG) -> bo
 
 
 def main() -> None:
-    settings = Settings(service_name="outbox-relay")
+    settings = Settings(service_name=SERVICE_NAME)
     configure_logging(
-        service_name="outbox-relay", log_level=settings.log_level, json_output=settings.log_json
+        service_name=SERVICE_NAME, log_level=settings.log_level, json_output=settings.log_json
     )
-    if not asyncio.run(run(settings)):
+    telemetry = configure_telemetry(
+        service_name=SERVICE_NAME, version=__version__, settings=settings
+    )
+    try:
+        started = asyncio.run(run(settings))
+    finally:
+        telemetry.shutdown()
+    if not started:
         raise SystemExit(1)
 
 

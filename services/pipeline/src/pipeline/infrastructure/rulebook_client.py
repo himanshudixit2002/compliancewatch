@@ -1,6 +1,7 @@
-"""The rulebook's HTTP API as the pipeline's ``KnowledgeSink`` and ``RulebookReader``."""
+"""The rulebook's HTTP API as the pipeline's ``KnowledgeSink``, ``RulebookReader`` and
+``ClauseIndexSink``."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any
 from uuid import UUID
@@ -9,6 +10,7 @@ import httpx2
 
 from domain_kernel.documents import Clause, DocumentType, ParsedDocument
 from domain_kernel.ids import ClauseId, DocumentId
+from pipeline.domain.embedding import ClauseToEmbed, ClauseVector, EmbeddingsStored
 from pipeline.domain.errors import (
     RulebookConflictError,
     RulebookRejectedError,
@@ -29,6 +31,8 @@ DOCUMENTS_PATH = "/v1/rulebook/documents/{document_id}"
 MENTIONS_PATH = DOCUMENTS_PATH + "/mentions"
 RELATIONS_PATH = DOCUMENTS_PATH + "/relation-candidates"
 RULES_PATH = "/v1/rulebook/rules"
+UNEMBEDDED_PATH = "/v1/rulebook/clauses/unembedded"
+EMBEDDINGS_PATH = "/v1/rulebook/clauses/embeddings"
 WRITE_TOKEN_HEADER = "x-cw-write-token"
 WRITES_DISABLED = "rulebook-writes-disabled"
 """The problem type of the 503 a rulebook without a write token answers: configuration, not an
@@ -155,11 +159,47 @@ class HttpRulebook:
         data = self._send("get", RULES_PATH)
         return tuple(RuleKey(str(rule["rule_key"]), str(rule["title"])) for rule in data)
 
-    def _send(self, method: str, path: str, body: Mapping[str, object] | None = None) -> Any:
+    def unembedded_clauses(
+        self,
+        model: str,
+        *,
+        document_id: DocumentId | None = None,
+        limit: int = 64,
+        after: ClauseId | None = None,
+    ) -> tuple[ClauseToEmbed, ...]:
+        params: dict[str, str | int] = {"model": model, "limit": limit}
+        if document_id is not None:
+            params["document_id"] = str(document_id)
+        if after is not None:
+            params["after"] = str(after)
+        data = self._send("get", UNEMBEDDED_PATH, params=params)
+        return tuple(_clause_to_embed(item) for item in data)
+
+    def put_embeddings(
+        self, model: str, dims: int, items: Sequence[ClauseVector]
+    ) -> EmbeddingsStored:
+        body = {
+            "model": model,
+            "dims": dims,
+            "items": [
+                {"clause_id": str(item.clause_id), "vector": list(item.vector)} for item in items
+            ],
+        }
+        data = self._send("put", EMBEDDINGS_PATH, body)
+        return EmbeddingsStored(stored=int(data["stored"]), unchanged=int(data["unchanged"]))
+
+    def _send(
+        self,
+        method: str,
+        path: str,
+        body: Mapping[str, object] | None = None,
+        *,
+        params: Mapping[str, str | int] | None = None,
+    ) -> Any:
         headers = {WRITE_TOKEN_HEADER: self._token} if self._token and method != "get" else {}
         try:
             if method == "get":
-                response = self._client.get(path)
+                response = self._client.get(path, params=dict(params or {}))
             else:
                 response = self._client.put(path, json=dict(body or {}), headers=headers)
         except httpx2.TransportError as exc:
@@ -179,3 +219,18 @@ class HttpRulebook:
 
 def _issue(issue: Issue) -> dict[str, str]:
     return {"code": issue.code, "detail": issue.detail[:2_000]}
+
+
+def _clause_to_embed(item: Mapping[str, Any]) -> ClauseToEmbed:
+    published = item.get("published_at")
+    return ClauseToEmbed(
+        clause_id=ClauseId(UUID(str(item["clause_id"]))),
+        document_id=DocumentId(UUID(str(item["document_id"]))),
+        clause_ref=str(item["clause_ref"]),
+        text=str(item["text"]),
+        regulator=str(item["regulator"]),
+        doc_type=DocumentType(str(item["doc_type"])),
+        external_ref=str(item.get("external_ref") or ""),
+        title=str(item.get("title") or ""),
+        published_at=None if published is None else date.fromisoformat(str(published)),
+    )

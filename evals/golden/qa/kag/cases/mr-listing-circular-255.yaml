@@ -1,0 +1,38 @@
+case_id: mr-listing-circular-255
+category: must_refuse
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: none
+question: "What did circular 255/01/2026-GST clarify about the jurisdiction of migrated taxable persons?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: not_covered
+  facts: []
+  must_not_mention: []
+  citations: []
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: find_entity
+      entity_type: circular
+      name: 255/01/2026-GST
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: The jurisdiction moves with the taxable person.
+    citations:
+    - clause: C13
+      quote: the jurisdiction moves with the taxable person
+refusal_reason: listing_only
+notes: Circular 255/01/2026-GST is only in the recorded CBIC listing of circulars.

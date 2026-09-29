@@ -1,0 +1,70 @@
+case_id: mh-tamil-nadu-entries
+category: multi_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: Which entries for Tamil Nadu did notification 10/2025-Central Tax substitute?
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: text
+    value: Chennai Outer
+    support:
+      document: n10_2025
+      clause_ref: en.p4
+      quote: 23. Chennai Outer Districts of Viluppuram
+  - kind: text
+    value: Madurai
+    support:
+      document: n10_2025
+      clause_ref: en.p8
+      quote: 63. Madurai Districts of Madurai
+  - kind: text
+    value: Tiruchirapalli
+    support:
+      document: n10_2025
+      clause_ref: en.p11
+      quote: 100. Tiruchirapalli Districts of Tiruchirappalli
+  must_not_mention: []
+  citations:
+  - document: n10_2025
+    clause_ref: en.p4
+  - document: n10_2025
+    clause_ref: en.p8
+  - document: n10_2025
+    clause_ref: en.p11
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: find_entity
+      entity_type: state
+      name: Tamil Nadu
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+      k: 8
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "Three entries: serial number 23 (Chennai Outer), serial number 63 (Madurai) and serial number 100 (Tiruchirapalli)."
+    citations:
+    - document: n10_2025
+      clause_ref: en.p4
+      quote: 23. Chennai Outer Districts of Viluppuram
+    - document: n10_2025
+      clause_ref: en.p8
+      quote: 63. Madurai Districts of Madurai
+    - document: n10_2025
+      clause_ref: en.p11
+      quote: 100. Tiruchirapalli Districts of Tiruchirappalli
+refusal_reason: null
+notes: The state entity Tamil Nadu, then the clauses that mention it.

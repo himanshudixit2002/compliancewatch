@@ -5,16 +5,25 @@ document that fills the schema's required fields (the first value of an enum, nu
 type allows it); the judgement feature gets an "unsure"
 verdict; everything else is echoed back. ``fail_next`` injects failures so callers can test
 their fallback paths.
+
+Embeddings are hashed features of the text (``hash_embedding``): lexical, not semantic, but
+texts that share words score closer than texts that do not, which is what retrieval tests need.
 """
 
 import hashlib
 import json
 import math
+import re
 import threading
+import unicodedata
+from collections import Counter
 from collections.abc import Mapping
+from itertools import pairwise
 
 from domain_kernel._validation import require_int
 from domain_kernel.llm import CompletionRequest
+from domain_kernel.vectors import EMBEDDING_DIMS, Vector
+from llm_gateway.domain.embeddings import EmbeddingRequest, EmbeddingResult
 from llm_gateway.domain.errors import ProviderUnavailableError
 from llm_gateway.domain.features import Feature
 from llm_gateway.domain.providers import ProviderResponse
@@ -25,6 +34,11 @@ ECHO_TAIL = 200
 """How many trailing characters of the user text the echo repeats."""
 CHARS_PER_TOKEN = 4
 """The token estimate: four characters per token, rounded up."""
+EMBEDDING_MODEL = "fake/hash-ngram-512"
+"""The model every fake embedding names, whatever the request asked for."""
+FEATURE_WEIGHTS: Mapping[str, float] = {"word": 1.0, "pair": 0.5, "tri": 0.25}
+"""Weight per feature kind: words, adjacent word pairs, character trigrams inside a word."""
+_WORD = re.compile(r"\w+")
 
 
 class FakeProvider:
@@ -58,6 +72,59 @@ class FakeProvider:
             cost_usd=None,
             generation_id="fake-" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:16],
         )
+
+    def embed(self, req: EmbeddingRequest) -> EmbeddingResult:
+        with self._lock:
+            self.calls += 1
+            if self._failures > 0:
+                self._failures -= 1
+                raise ProviderUnavailableError("fake provider: injected failure")
+        joined = "\x00".join(req.inputs)
+        return EmbeddingResult(
+            vectors=tuple(hash_embedding(text) for text in req.inputs),
+            model=EMBEDDING_MODEL,
+            input_tokens=sum(_tokens(text) for text in req.inputs),
+            provider="fake",
+            cost_usd=None,
+            generation_id="fake-" + hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16],
+        )
+
+
+def hash_embedding(text: str) -> Vector:
+    """A unit vector of ``EMBEDDING_DIMS`` from hashed features of ``text``; deterministic.
+
+    The text is NFKC-normalised and casefolded, then split into ``\\w+`` words (Unicode, so
+    Devanagari counts). Each word, each adjacent pair and each character trigram of a word with
+    ``<`` and ``>`` marking its ends is a feature, weighted by kind and by ``1 + ln(tf)``. The
+    8-byte blake2b of ``kind:feature`` picks the slot (low bits) and the sign (top bit); Python's
+    ``hash`` is salted per process and would not do. Text with no features, or whose features
+    cancel out, gets a unit vector at the slot its own digest picks.
+    """
+    words = _WORD.findall(unicodedata.normalize("NFKC", text).casefold())
+    counts: Counter[tuple[str, str]] = Counter()
+    for word in words:
+        counts["word", word] += 1
+        marked = f"<{word}>"
+        for start in range(len(marked) - 2):
+            counts["tri", marked[start : start + 3]] += 1
+    for first, second in pairwise(words):
+        counts["pair", f"{first} {second}"] += 1
+
+    vector = [0.0] * EMBEDDING_DIMS
+    for (kind, feature), tf in counts.items():
+        digest = _digest(f"{kind}:{feature}")
+        sign = -1.0 if digest >> 63 else 1.0
+        vector[digest % EMBEDDING_DIMS] += sign * FEATURE_WEIGHTS[kind] * (1 + math.log(tf))
+    norm = math.sqrt(sum(component * component for component in vector))
+    if norm == 0:
+        unit = [0.0] * EMBEDDING_DIMS
+        unit[_digest(text) % EMBEDDING_DIMS] = 1.0
+        return tuple(unit)
+    return tuple(component / norm for component in vector)
+
+
+def _digest(text: str) -> int:
+    return int.from_bytes(hashlib.blake2b(text.encode("utf-8"), digest_size=8).digest(), "big")
 
 
 def _tokens(text: str) -> int:

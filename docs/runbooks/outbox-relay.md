@@ -20,6 +20,20 @@ schema (`make relay SERVICE=<name>` locally).
   their handler could not process after three attempts; those messages were delivered correctly
   and the fix lives in the consumer.
 
+## Alerts
+
+With `CW_OTEL_ENDPOINT` set, the relay exports `outbox_relay_published_total`,
+`outbox_relay_retried_total` and `outbox_relay_dead_total` by `topic`, and the gauge
+`outbox_relay_pending` by `db_schema` (its `CW_DB_SCHEMA`, `unset` when empty): the pending rows,
+counted at start and every 15 seconds.
+
+- `OutboxDeadLetters` (page): a row of `topic` went dead in the last 30 minutes. See "A row is
+  `dead`" below.
+- `OutboxBacklog` (page): more than 1000 pending rows in `db_schema` for 15 minutes. See
+  "Nothing is being published" below. The collector drops the series five minutes after the
+  relay stops, so a relay that died shows as no data for its schema rather than as a backlog:
+  check that the relay is running first.
+
 ## Nothing is being published
 
 1. Is a relay running for that schema? `make relay SERVICE=<name>` locally; in a deployment, the

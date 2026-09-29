@@ -12,7 +12,7 @@ from typing import Literal, Protocol, Self
 
 from langfuse import Langfuse  # type: ignore[import-untyped]
 
-from llm_gateway.domain.features import CallStatus
+from llm_gateway.domain.features import CallKind, CallStatus
 from llm_gateway.domain.tracing import CallRecord
 from py_common.logging import get_logger
 
@@ -116,12 +116,8 @@ class LangfuseTracer:
         generation = trace.generation(
             name=prompt,
             model=entry.model_served,
-            model_parameters={
-                "temperature": str(call.temperature),
-                "max_tokens": call.max_tokens,
-                "json_schema": call.has_schema,
-            },
-            input=_messages(call),
+            model_parameters=_parameters(call),
+            input=_messages(call) if call.kind is CallKind.COMPLETION else call.user,
             start_time=entry.occurred_at,
             metadata={
                 "pii": dict(call.pii_counts),
@@ -137,6 +133,17 @@ class LangfuseTracer:
             status_message=call.error_detail or None,
             usage=_usage(entry.input_tokens, entry.output_tokens, entry.cost_usd),
         )
+
+
+def _parameters(call: CallRecord) -> ModelParameters:
+    """Sampling parameters of a completion; an embedding has none but its kind."""
+    if call.kind is CallKind.EMBEDDING:
+        return {"kind": call.kind.value}
+    return {
+        "temperature": str(call.temperature),
+        "max_tokens": call.max_tokens,
+        "json_schema": call.has_schema,
+    }
 
 
 def _messages(call: CallRecord) -> list[Mapping[str, str]]:

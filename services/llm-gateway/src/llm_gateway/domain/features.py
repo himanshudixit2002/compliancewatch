@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 
-from llm_gateway.domain.errors import UnknownFeatureError
+from llm_gateway.domain.errors import FeatureMismatchError, UnknownFeatureError
 
 
 class Feature(StrEnum):
@@ -13,6 +13,18 @@ class Feature(StrEnum):
     QA = "qa"
     CLASSIFICATION = "classification"
     SMOKE = "smoke"
+    RETRIEVAL = "retrieval"
+
+
+class CallKind(StrEnum):
+    """What a call asks the model for: text from a prompt, or vectors for retrieval."""
+
+    COMPLETION = "completion"
+    EMBEDDING = "embedding"
+
+
+EMBEDDING_FEATURES: frozenset[Feature] = frozenset({Feature.RETRIEVAL})
+"""Features served by the embeddings route; every other feature is a completion."""
 
 
 class CostSource(StrEnum):
@@ -34,3 +46,15 @@ def parse_feature(text: str) -> Feature:
         return Feature(text)
     except ValueError as exc:
         raise UnknownFeatureError(text) from exc
+
+
+def kind_of(feature: Feature) -> CallKind:
+    """The kind of call ``feature`` is served by."""
+    return CallKind.EMBEDDING if feature in EMBEDDING_FEATURES else CallKind.COMPLETION
+
+
+def require_kind(feature: Feature, kind: CallKind) -> Feature:
+    """``feature`` when ``kind`` calls serve it; otherwise a ``FeatureMismatchError``."""
+    if kind_of(feature) is not kind:
+        raise FeatureMismatchError(feature.value, kind.value)
+    return feature

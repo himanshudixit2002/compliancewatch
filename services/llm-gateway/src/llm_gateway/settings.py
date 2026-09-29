@@ -41,6 +41,9 @@ class GatewaySettings(Settings):
     # SDK retries sleep for the server's Retry-After (up to 120 s) inside the request; the use
     # case's fallback model and the breaker are the retry policy, so the default is none.
     ai_gateway_max_retries: int = Field(default=0, ge=0)
+    # Sends dimensions=512 with every embedding call. Turn it off only for a retrieval model
+    # that has no such parameter and already returns 512 dimensions; every vector is checked.
+    llm_embedding_dimensions_param: bool = True
 
     llm_usd_inr: Decimal = Field(default=Decimal("88.00"), gt=0)
     # Budgets are ceilings, so zero is not a budget; the domain refuses it and so does this.

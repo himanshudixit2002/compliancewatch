@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:rule.withdrawn:v1",
+  "title": "rule.withdrawn",
+  "description": "A published rule version was withdrawn and stops being in force, either by an analyst or because a newer version that withdraws it took effect. Producer: rulebook (on withdrawal, or when the withdrawing version takes effect). Consumers: applicability-engine, obligation, qa.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "rulebook (on withdrawal, or when the withdrawing version takes effect)",
+  "x-tenant-scoped": false,
+  "properties": {
+    "rule_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The rule."
+    },
+    "rule_version_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The version that is now withdrawn."
+    },
+    "withdrawn_by_rule_version_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "The version that withdraws it; null when an analyst withdrew it directly."
+    },
+    "effective_from": {
+      "type": "string",
+      "format": "date",
+      "description": "The day the withdrawal took effect."
+    }
+  },
+  "required": ["rule_id", "rule_version_id", "withdrawn_by_rule_version_id", "effective_from"]
+}

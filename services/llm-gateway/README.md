@@ -6,7 +6,8 @@ Design reference: Project Foundation guide, sections 7, 8 and 14; decision recor
 
 - **Owns:** provider routing per feature with a fallback model, the prompt registry, an exact-match
   response cache, the cost ledger in USD and INR, per-tenant and per-feature monthly budgets, PII
-  masking, a circuit breaker per provider and model, and tracing to Langfuse
+  masking, a circuit breaker per provider and model, tracing to Langfuse, and the embeddings that
+  retrieval stores and searches
 - **Owning team:** AI Platform
 - **Consumes:** every LLM call from every service; the Vercel AI Gateway when a key is configured
 - **Emits / publishes:** `llm.call.completed` and `llm.budget.alarmed` (log publisher for now),
@@ -65,6 +66,7 @@ curl -s http://localhost:8008/health; curl -s http://localhost:8008/ready; curl 
 | Route | What it does |
 | --- | --- |
 | `POST /v1/llm-gateway/completions` | One completion through prompt check, PII masking, budget check, cache, breaker, provider (with fallback), ledger, trace and event. Synchronous. |
+| `POST /v1/llm-gateway/embeddings` | Vectors for 1 to 64 texts through PII masking, budget check, breaker, provider (one model, no fallback), vector check, ledger, trace and event. Synchronous, never cached. See [Embeddings](#embeddings). |
 | `GET /v1/llm-gateway/usage` | Spend for one UTC month. `tenant_id` (query, defaults to the header) gives the tenant scope; `feature` alone gives the feature scope; neither is a 422. `month=YYYY-MM` defaults to the current month. |
 | `GET /v1/llm-gateway/models` | The routing table: per feature the primary and fallback model, provider filters, sort, reasoning effort, timeout and whether the row is a default or an override. |
 | `GET /v1/llm-gateway/prompts` | The prompt registry: name, version, owner, eval case count, sha256 and description. |
@@ -74,7 +76,7 @@ Request body of `POST /completions` (unknown fields are rejected):
 
 | Field | Meaning |
 | --- | --- |
-| `feature` | `extraction`, `judgement`, `qa`, `classification` or `smoke`; picks the route and the budget bucket |
+| `feature` | `extraction`, `judgement`, `qa`, `classification` or `smoke`; picks the route and the budget bucket. `retrieval` is a 422 `llm-feature-mismatch`: it is served by `/embeddings` |
 | `prompt` | Registered prompt reference `name@version`, for example `smoke.echo@1` |
 | `system`, `user` | Prompt text; `user` is required. Both are masked before they leave the process |
 | `model` | Optional model id override, `creator/model` of at most 120 characters (anything else is a 422 `request-invalid`); disables the fallback |
@@ -101,8 +103,9 @@ Every error is `application/problem+json` (RFC 9457) with a stable `type` URI, t
 | `request-invalid` | 422 | Body or header validation failed; `errors[].loc` names the field |
 | `llm-prompt-unregistered` | 422 | The `name@version` is not in the registry |
 | `llm-feature-unknown` | 422 | Startup only: a `CW_LLM_ROUTES__*` override naming an unknown feature stops the process from wiring. The API answers an unknown `feature` with `request-invalid` |
+| `llm-feature-mismatch` | 422 | A completion for `retrieval`, the one feature the embeddings route serves |
 | `llm-budget-exceeded` | 429 | Tenant or feature monthly budget spent, or the Vercel quota; `Retry-After` counts to the first of next month UTC |
-| `llm-provider-response-invalid` | 502 | The provider answered with something the gateway cannot use (no choices, empty content, bad request rejected upstream) |
+| `llm-provider-response-invalid` | 502 | The provider answered with something the gateway cannot use (no choices, empty content, bad request rejected upstream, or embeddings of the wrong count or length) |
 | `llm-provider-unavailable` | 503 | Every candidate model failed, the breaker is open, or the gateway has no credits; `Retry-After` when the provider gave one |
 | `internal-error` | 500 | Anything else; the detail never carries internals |
 
@@ -118,6 +121,7 @@ empty means unset). Everything below is read at process start.
 | `CW_AI_GATEWAY_API_KEY` | unset | Vercel AI Gateway key. Never committed; the process refuses to start with `vercel` and no key |
 | `CW_AI_GATEWAY_BASE_URL` | `https://ai-gateway.vercel.sh/v1` | OpenAI-compatible endpoint |
 | `CW_AI_GATEWAY_ZERO_DATA_RETENTION` | `true` | Asks the gateway for providers with zero data retention; needs a Vercel Pro plan, set `false` on Hobby |
+| `CW_LLM_EMBEDDING_DIMENSIONS_PARAM` | `true` | Sends `dimensions=512` with every embedding call. Set `false` only for a retrieval model that has no such parameter and already returns 512 dimensions; every vector is checked either way |
 | `CW_AI_GATEWAY_MAX_RETRIES` | `0` | SDK retries per attempt, off by default: the fallback model and the breaker are the retry policy, and an SDK retry would sleep for the server's `Retry-After` (up to 120 s) inside the request |
 | `CW_LLM_USD_INR` | `88.00` | Conversion rate for the ledger |
 | `CW_LLM_TENANT_MONTHLY_BUDGET_INR` | `1500` | Monthly ceiling per tenant |
@@ -145,6 +149,7 @@ primary is unavailable or its breaker is open; an explicit `model` in the reques
 | `qa` | `deepseek/deepseek-v4.1-flash` | `google/gemini-3.1-flash-lite` | togetherai, runware, deepinfra, parasail, fireworks, google, vertex | `sort ttft`, reasoning effort `none` | 8 s |
 | `classification` | `alibaba/qwen3.7-flash` | `zai/glm-4.7-flash` | alibaba, bedrock, deepinfra | | 15 s |
 | `smoke` | `fake/echo` | none | | | 5 s |
+| `retrieval` | `voyage/voyage-3.5-lite` | never | | | 15 s |
 
 Why these: the calls are high volume and low margin, so the table prefers cheap, efficient
 models, Chinese-origin ones where they are adequate, and pins a bigger model only where the
@@ -156,6 +161,10 @@ The `only` lists leave out the native `deepseek` endpoint and the Alibaba-hosted
 both double their price during Indian working hours. No provider runs inference in India; text
 leaves the country on every real call, which is why masking happens before the call and zero
 data retention is requested.
+
+Retrieval follows ADR-013, which names Voyage for the MVP embeddings, and has no fallback on
+purpose: vectors from two models do not compare, so a `primary,fallback` override for it stops
+the process at startup.
 
 Model quality and Hindi rankings are judgement, not measurement. Run a bake-off on gold
 documents before the extraction and question-answering pipelines rely on these defaults, and
@@ -172,6 +181,62 @@ The SDK does not retry (`CW_AI_GATEWAY_MAX_RETRIES=0`): a retry would sleep for 
 decide what happens after a failure. The worst case for one call is therefore the route timeout
 once per candidate: 240 s for `extraction`, 16 s for `qa`. `latency_ms` covers the whole call,
 failed primary attempt included.
+
+## Embeddings
+
+`POST /v1/llm-gateway/embeddings` turns texts into vectors for retrieval: clauses to store, and
+questions to search them with.
+
+```bash
+curl -s -X POST http://localhost:8008/v1/llm-gateway/embeddings \
+  -H 'content-type: application/json' \
+  -d '{"feature":"retrieval","inputs":["Section 39. Every registered person shall furnish a return."]}'
+```
+
+The answer carries `model_requested`, `model_served`, `provider`, `dims` (always 512), `vectors`
+(one list per input, in input order), `input_tokens`, the cost fields, `latency_ms`,
+`trace_id`, `generation_id`, `correlation_id` and `pii_masked`; there is no `text` and no `cached`.
+
+Request body (unknown fields are rejected):
+
+| Field | Meaning |
+| --- | --- |
+| `feature` | `retrieval`, the only embedding feature; anything else is a 422 `request-invalid` |
+| `inputs` | 1 to 64 texts of 1 to 8,000 characters each; masked before they leave the process |
+| `model` | Optional model id override, for a re-embed with another model; there is still no fallback |
+| `metadata` | String map copied onto the trace |
+
+- **One model, stored with the vectors.** The route names one model, the request may name
+  another, and nothing falls back. A caller stores `model_served` next to every vector and only
+  compares vectors of the same model; changing models means re-embedding.
+- **The length is a schema constant.** `EMBEDDING_DIMS = 512` lives in
+  `domain_kernel.vectors`. The Vercel provider asks for it with `dimensions` and
+  `encoding_format="float"` (the SDK asks for base64 otherwise). Every answer is checked: the
+  wrong number of vectors, or a vector of another length, is a 502 with an error row, and no
+  vector is returned. Whether the Vercel AI Gateway passes `dimensions` through to Voyage is not
+  verified yet; the nightly run is the first real call.
+- **Masking, budgets, breaker and ledger as for completions.** Each input is scrubbed and the
+  counts summed. The row's feature is `retrieval` and its prompt is `retrieval.embedding@1`,
+  with zero output tokens. The cost is the gateway's figure or the table's input price; the
+Voyage row in the table is an unsourced estimate, so check it before trusting retrieval spend. The
+  breaker is shared with completions, and so is the budget guard, so a budget alarm fires once
+  per scope and month whichever route crossed it. Only an unavailable provider counts against the
+  breaker for an embedding: a refused request or a wrong vector (a 502) does not, so a model that
+  serves no embeddings, named in an override, cannot open the circuit for its completions.
+- **The fake.** With `CW_LLM_PROVIDER=fake` every embedding is served as `fake/hash-ngram-512`:
+  blake2b-hashed words, word pairs and in-word character trigrams of the NFKC-normalised,
+  casefolded text, L2-normalised. It is lexical, not semantic, but deterministic, so retrieval
+  tests and the dev stack rank texts that share words above texts that do not.
+
+### Embeddings and the prompt rule
+
+Every model call needs a registered, owned, versioned prompt with eval cases (ADR-008). An
+embedding call sends no prompt, so the registry is not involved; what the rule protects is
+pinned another way. The model is pinned by the routing table and recorded as `model_served`
+with every stored vector. The vector length is the kernel constant. The preparation of the input
+(masking) is versioned as `retrieval.embedding@1` in the ledger; bump it when that preparation
+changes. The text that is embedded, such as a clause with its header, is built, owned and
+versioned by the caller.
 
 ## Cost ledger and budgets
 
@@ -207,10 +272,14 @@ callers still keep personal data out of prompts where they can. Phone numbers ar
 `prompts/registry.toml` lists every prompt the gateway accepts, one `[[prompts]]` table each
 with `name` (dotted, lower case), `version`, `owner`, `eval_cases` (at least one), an optional
 `sha256` of the prompt text and a `description`. A completion names a prompt as `name@version`
-and an entry that is not there is a 422. Two entries exist today: `smoke.echo@1`, served by the
-fake provider, and `extraction.rule_candidate@0`, a placeholder until the extraction pipeline
-brings its prompt text. Prompt wording changes are reviewed by a Regulatory Analyst and merged
-with a green eval run; the eval harness that enforces the registry is not built yet.
+and an entry that is not there is a 422. Five entries exist today: `smoke.echo@1`, served by the
+fake provider; `extraction.rule_candidate@1` and `extraction.rule_relations@1` (owner
+regulatory-intelligence, text in `services/pipeline/prompts`); `qa.plan@1` and `qa.answer@1`
+(owner ai-platform, text in `services/qa/prompts`). Prompt wording changes are reviewed by a
+Regulatory Analyst and merged with a green eval run. The eval harness's registry test
+(`evals/harness/tests/unit/test_harness.py`) fails when a registered prompt's file no longer
+matches its `sha256` or has fewer labelled golden cases than its `eval_cases`, so a wording
+change needs a new version and digest.
 
 ## Cache and breaker
 
@@ -250,8 +319,10 @@ src/llm_gateway/
   wiring.py         # GatewayWiring: what main.py builds and the API reads from app.state
   main.py           # composition root: wire(settings) -> create_app(...) from py-common
   domain/           # features, errors, prompts, routing, pricing, budgets, breaker, cache key,
-                    # scrub, ledger entry, tracing record, events, config; stdlib + domain-kernel only
-  application/      # Complete (the call pipeline) and Usage (budget reports)
+                    # scrub, ledger entry, tracing record, events, config, embeddings;
+                    # stdlib + domain-kernel only
+  application/      # Complete and Embed (the call pipelines), BudgetGuard and error rows
+                    # (metering), Usage (budget reports)
   infrastructure/   # providers/{fake,vercel}, ledger/{memory,sqlalchemy,models}, cache/memory,
                     # prompts/toml, tracing/{log,langfuse,composite}, events/log
   api/              # schemas, dependencies (tenant header, correlation id), router
@@ -287,9 +358,14 @@ make py-test-integration                    # testcontainers Postgres for the SQ
 make check                                  # ruff, mypy --strict, import-linter, coverage gate
 ```
 
+`build_app(completion_provider=...)` (and `wire`) serves every completion route from the given
+provider instead of the configured ones, which is how the eval harness puts scripted answers
+through the real completion path; embeddings stay on the configured embedder.
+
 The domain and application layers are covered by the 80 percent gate. The provider tests use a
 stub OpenAI client and real SDK response objects; the Langfuse tests use a stub client. CI builds
-the image and smokes `/health`, `/ready` and one `smoke.echo@1` completion.
+the image and smokes `/health`, `/ready`, one `smoke.echo@1` completion and one embedding of 512
+dimensions.
 
 ## Not built yet
 

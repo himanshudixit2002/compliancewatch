@@ -15,11 +15,14 @@ extraction/     # document -> expected RuleCandidate; see extraction/README.md f
   cbic_notifications/index.yaml   # the 50 Central Tax notifications listed for labelling
   cbic_notifications/cases/*.yaml # one file per document: clauses, detector prefill, expected
 relations/      # document -> expected relations to the targets its grammar finds; see relations/README.md
-  cbic_notifications/cases/*.yaml # one draft case so far (01/2026-Central Tax)
-qa/             # question -> expected grounded answer and citations (or not_covered); empty
+  cbic_notifications/cases/*.yaml # three draft cases: 01/2026, 17/2025 and 10/2025-Central Tax
+qa/             # question -> expected grounded answer and citations (or not_covered); see qa/README.md
+  kag/world.yaml                  # the notifications, entities, relations, rule versions and businesses asked about
+  kag/cases/*.yaml                # 56 draft cases: single-hop, multi-hop, date or threshold, must-refuse
 applicability/  # (profile, rule version) -> expected decision; empty
 ```
 
 ## How to run
 
-`make label ARGS="check"` validates every case; `make eval` scores them (see evals/harness).
+`make label ARGS="check"` validates every extraction case and `make eval-check` the QA set and its
+world; `make eval` scores them (see evals/harness).

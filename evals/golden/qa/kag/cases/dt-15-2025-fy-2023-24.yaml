@@ -1,0 +1,36 @@
+case_id: dt-15-2025-fy-2023-24
+category: date_threshold
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Does notification 15/2025-Central Tax exempt anyone from filing the annual return for financial year 2023-24?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: text
+    value: 2024-25 onwards
+    support:
+      document: n15_2025
+      clause_ref: en.p4
+      quote: in respect of filing of annual return for the financial year 2024-25 onwards
+  must_not_mention: []
+  citations:
+  - document: n15_2025
+    clause_ref: en.p4
+scripted:
+  plan:
+    as_of: null
+    steps: []
+  answer:
+    covered: true
+    answer: "No. Notification No. 15/2025-Central Tax exempts in respect of the annual return for the financial year 2024-25 onwards, so it does not cover 2023-24."
+    citations:
+    - document: n15_2025
+      clause_ref: en.p4
+      quote: in respect of filing of annual return for the financial year 2024-25 onwards
+refusal_reason: null
+notes: "A plain search: the planner defers and hybrid search finds en.p4."

@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -6,9 +6,13 @@ from domain_kernel.errors import InvalidTransitionError, InvariantViolationError
 from domain_kernel.ids import ObligationId, RuleVersionId, UserId
 from domain_kernel.recurrence import Period, Recurrence
 from domain_kernel.status import ClosureReason, ObligationStatus, close_obligation
-from obligation.domain.errors import ObligationClosedError, ObligationNotFoundError
+from obligation.domain.errors import (
+    ObligationClosedError,
+    ObligationNotFoundError,
+    ObligationWindowInvalidError,
+)
 from obligation.domain.events import RescheduleReason
-from obligation.domain.model import Obligation, due_at_end_of_day, period_matches
+from obligation.domain.model import DueWindow, Obligation, due_at_end_of_day, period_matches
 from obligation.testing import BUSINESS, DECISION, NOW, TENANT, rule
 
 PERIOD = Recurrence.monthly(20).period_containing(NOW.date())
@@ -125,11 +129,37 @@ def test_period_helpers() -> None:
 
 
 def test_due_at_end_of_day() -> None:
-    from datetime import timezone
-
     ist = timezone(timedelta(hours=5, minutes=30))
     due = due_at_end_of_day(NOW.date(), ist)
     assert (due.hour, due.minute, due.second) == (23, 59, 59)
     assert due.tzinfo == ist
     with pytest.raises(InvariantViolationError, match="tzinfo"):
         due_at_end_of_day(NOW.date(), "IST")
+
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def test_a_due_window_is_days_in_india_with_the_end_day_included() -> None:
+    window = DueWindow(date(2026, 10, 1), date(2026, 10, 31))
+    after, before = window.bounds(IST)
+    assert after == datetime(2026, 10, 1, tzinfo=IST)
+    assert before == datetime(2026, 11, 1, tzinfo=IST)
+    assert DueWindow().bounds(IST) == (None, None)
+    assert DueWindow(due_from=date(2026, 10, 1)).bounds(IST) == (after, None)
+    assert DueWindow(due_to=date(2026, 10, 31)).bounds(IST) == (None, before)
+    assert DueWindow(date(2026, 10, 1), date(2026, 10, 1)).bounds(IST) == (
+        after,
+        datetime(2026, 10, 2, tzinfo=IST),
+    )
+
+
+def test_a_due_window_spans_at_most_a_leap_year() -> None:
+    assert DueWindow(date(2027, 4, 1), date(2028, 3, 31)).due_to == date(2028, 3, 31)
+    with pytest.raises(ObligationWindowInvalidError, match="367 days"):
+        DueWindow(date(2027, 4, 1), date(2028, 4, 1))
+    with pytest.raises(ObligationWindowInvalidError, match="after due_to"):
+        DueWindow(date(2026, 10, 2), date(2026, 10, 1))
+    with pytest.raises(ObligationWindowInvalidError, match="last date there is"):
+        DueWindow(due_to=date.max)
+    assert ObligationWindowInvalidError.type_slug == "obligation-window-invalid"

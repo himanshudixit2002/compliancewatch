@@ -17,6 +17,8 @@ openapi/                 # OpenAPI 3.1 specs, public /v1 and internal service AP
   identity.v1.json         # services/identity
   notification.v1.json     # services/notification
   rulebook.v1.json         # services/rulebook
+  obligation.v1.json       # services/obligation
+  qa.v1.json               # services/qa
   BREAKING.md              # deliberate breaking changes, one row per break of an operation, each with an ADR
 consumers/               # consumer contracts: <consumer>/<provider>.json, recorded HTTP calls both sides replay (consumers/README.md)
 events/
@@ -73,13 +75,13 @@ rewords a phrase may require regenerating the specs.
 
 ## Events
 
-Fourteen topics have a schema: `document.discovered`, `document.parsed`,
-`rule.candidate.created`, `rule.published`, `rule.superseded`, `profile.updated`,
-`applicability.decided`, `obligation.created`, `obligation.due_soon`, `obligation.closed`,
-`obligation.rescheduled`, `notification.sent`, `notification.failed` and
-`tenant.deletion.requested`. The gateway's `llm.call.completed` and `llm.budget.alarmed` are
-still log lines and get a schema when they gain a consumer; until then they are listed, with the
-reason, in `LOG_ONLY_TOPICS` in `scripts/check_topics.py`.
+Sixteen topics have a schema: `document.discovered`, `document.parsed`,
+`rule.candidate.created`, `rule.published`, `rule.superseded`, `rule.withdrawn`,
+`rule.deadline_changed`, `profile.updated`, `applicability.decided`, `obligation.created`,
+`obligation.due_soon`, `obligation.closed`, `obligation.rescheduled`, `notification.sent`,
+`notification.failed` and `tenant.deletion.requested`. The gateway's `llm.call.completed` and
+`llm.budget.alarmed` are still log lines and get a schema when they gain a consumer; until then
+they are listed, with the reason, in `LOG_ONLY_TOPICS` in `scripts/check_topics.py`.
 
 A message on the bus is the envelope (`events/schemas/envelope.v1.json`): `event_id`, `topic`,
 `schema_version`, `occurred_at`, `tenant_id` (null for regulatory events), `correlation_id`,

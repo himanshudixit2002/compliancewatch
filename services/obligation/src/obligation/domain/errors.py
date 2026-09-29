@@ -20,3 +20,16 @@ class ObligationClosedError(DomainError, ValueError):
         super().__init__(f"obligation {obligation_id} is {status} and cannot change")
         self.obligation_id = obligation_id
         self.status = status
+
+
+class ObligationTenantRequiredError(DomainError, PermissionError):
+    type_slug = "obligation-tenant-required"
+    title = "Tenant required for obligations"
+
+    def __init__(self) -> None:
+        super().__init__("the request names no tenant (x-tenant-id header)")
+
+
+class ObligationWindowInvalidError(DomainError, ValueError):
+    type_slug = "obligation-window-invalid"
+    title = "Due window is invalid"
