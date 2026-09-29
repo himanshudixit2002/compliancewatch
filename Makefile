@@ -340,3 +340,21 @@ openapi-check: check-uv ## Every service that serves API routes commits its spec
 
 openapi-compat: check-uv ## Committed specs break no client of a base ref: make openapi-compat [BASE=origin/main]
 	$(UV) run python packages/contracts/scripts/check_openapi_compat.py --base-ref $(BASE)
+
+# ---- Security scans (guide section 17: SAST and dependency scanning) -------------------------
+.PHONY: sast deps-scan
+# Pinned images. The sast CI job runs this target; the dependency-scan job runs the same Trivy
+# version through its action, so bump both together.
+SEMGREP_IMAGE := semgrep/semgrep:1.178.0
+TRIVY_IMAGE := aquasec/trivy:0.74.0
+SEMGREP_PACKS := p/python p/typescript p/dockerfile p/github-actions
+SEMGREP = docker run --rm -v "$(CURDIR):/src" --workdir /src $(SEMGREP_IMAGE) semgrep
+
+sast: check-docker ## Semgrep: registry packs and the rules in .semgrep; an ERROR finding fails (writes semgrep.sarif)
+	$(SEMGREP) scan $(addprefix --config ,$(SEMGREP_PACKS)) --config .semgrep \
+	  --metrics off --severity ERROR --error --sarif-output=semgrep.sarif
+	$(SEMGREP) --test --metrics off --config .semgrep/cw.yml .semgrep/cw.py
+
+deps-scan: check-docker ## Trivy: fixable HIGH and CRITICAL vulnerabilities and misconfigurations (settings in .trivy.yaml)
+	docker run --rm -v "$(CURDIR):/src:ro" --workdir /src -v compliancewatch-trivy-cache:/root/.cache/trivy \
+	  $(TRIVY_IMAGE) fs --config .trivy.yaml .

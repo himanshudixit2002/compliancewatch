@@ -39,6 +39,7 @@ coverage/
 htmlcov/
 coverage.xml
 junit.xml
+*.sarif
 playwright-report/
 test-results/
 

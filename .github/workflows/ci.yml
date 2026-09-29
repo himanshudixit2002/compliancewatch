@@ -6,7 +6,8 @@
 # example replay and by the Redpanda schema registry; the migration lint's file rules in the ops
 # job and its catalog rules in the dev-stack job), 4 integration tests (testcontainers) for the
 # packages a change affects, an ops job (runbook links, promtool rules, actionlint), a compose
-# dev-stack smoke, and secrets scanning. Steps 5-7 are listed as TODO at the end.
+# dev-stack smoke, secrets scanning, SAST (semgrep) and a dependency and config scan (trivy), both
+# reported to code scanning. Steps 5-7 are listed as TODO at the end.
 name: ci
 
 on:
@@ -42,6 +43,8 @@ jobs:
       evals: ${{ steps.filter.outputs.evals }}
       ops: ${{ steps.filter.outputs.ops }}
       integration_targets: ${{ steps.integration.outputs.targets }}
+      sast: ${{ steps.filter.outputs.sast }}
+      dependencies: ${{ steps.filter.outputs.dependencies }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -132,6 +135,27 @@ jobs:
               - 'Makefile'
               - 'pyproject.toml'
               - 'docker-compose.yml' # alerts-check runs promtool from the compose Prometheus image
+            sast: # code the semgrep packs and the rules in .semgrep read
+              - 'services/**'
+              - 'packages/**'
+              - 'apps/**'
+              - 'evals/**'
+              - 'tools/**'
+              - 'infra/**'
+              - 'conftest.py'
+              - 'eslint.config.mjs'
+              - '.semgrep/**'
+              - '.semgrepignore'
+              - '.github/workflows/**'
+              - 'Makefile'
+            dependencies: # what trivy reads: lockfiles, Dockerfiles, infrastructure config
+              - 'uv.lock'
+              - 'pnpm-lock.yaml'
+              - '**/Dockerfile'
+              - 'infra/**'
+              - '.trivy.yaml'
+              - '.trivyignore.yaml'
+              - '.github/workflows/ci.yml'
       - uses: dorny/paths-filter@v4
         id: changed
         with:
@@ -452,6 +476,72 @@ jobs:
           GITLEAKS_CONFIG: .gitleaks.toml
           GITLEAKS_ENABLE_COMMENTS: "false" # PR comments need pull-requests: write; summary + SARIF suffice
           # GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # required only once the repo moves under a GitHub organisation
+
+  sast:
+    name: SAST (semgrep registry packs and repository rules)
+    needs: changes
+    if: needs.changes.outputs.sast == 'true'
+    runs-on: ubuntu-latest # Docker runs the pinned semgrep image, as make sast does locally
+    permissions:
+      contents: read
+      actions: read # upload-sarif reads the workflow run; a private repository requires it
+      security-events: write # findings go to code scanning
+    steps:
+      - uses: actions/checkout@v7
+      # p/python, p/typescript, p/dockerfile and p/github-actions from the registry plus the rules
+      # in .semgrep, with metrics off; a finding of severity ERROR fails. Then the rules' cases.
+      - name: Semgrep scan and the repository rules' test cases
+        run: make sast
+      - name: Findings to code scanning
+        if: always() && hashFiles('semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  dependency-scan:
+    name: Dependency and config scan (trivy)
+    needs: changes
+    if: needs.changes.outputs.dependencies == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # upload-sarif reads the workflow run; a private repository requires it
+      security-events: write # findings go to code scanning
+    steps:
+      - uses: actions/checkout@v7
+      # uv.lock, pnpm-lock.yaml and the Dockerfiles: HIGH and CRITICAL vulnerabilities that have a
+      # fix, and misconfigurations. Settings in .trivy.yaml (the same file make deps-scan reads);
+      # accepted findings in .trivyignore.yaml, each with a statement and an expiry date. The
+      # action is pinned to the commit of its tag, since a tag can be moved.
+      - name: Vulnerabilities and misconfigurations (fails on a finding)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          trivy-config: .trivy.yaml
+          version: v0.74.0 # keep in step with TRIVY_IMAGE in the Makefile
+          cache-dir: ${{ runner.temp }}/trivy # outside the checkout, so the scan never reads it
+      - name: The same findings as SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          trivy-config: .trivy.yaml
+          format: sarif
+          output: trivy.sarif
+          exit-code: "0"
+          limit-severities-for-sarif: "true"
+          skip-setup-trivy: "true"
+          cache: "false" # the first step restored the database into cache-dir
+          cache-dir: ${{ runner.temp }}/trivy
+      - name: Findings to code scanning
+        if: always() && hashFiles('trivy.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
 
 # -----------------------------------------------------------------------------------------------
 # TODO (guide section 17, steps 5-7) - not implemented yet:

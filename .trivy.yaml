@@ -1,0 +1,22 @@
+# Trivy settings for the repository scan: `make deps-scan`, the dependency-scan CI job and the
+# nightly rescan all pass this file with --config. Image scans do not read it.
+severity:
+  - HIGH
+  - CRITICAL
+exit-code: 1
+ignorefile: .trivyignore.yaml
+scan:
+  scanners:
+    - vuln
+    - misconfig
+  # Local build output and caches; a CI checkout has none of them.
+  skip-dirs:
+    - "**/node_modules"
+    - .venv
+    - var
+    - .turbo
+    - apps/web/.next
+vulnerability:
+  # A finding without a released fix cannot be acted on in this repository; the nightly rescan
+  # reports it once a fix ships.
+  ignore-unfixed: true
