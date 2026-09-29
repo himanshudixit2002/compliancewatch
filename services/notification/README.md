@@ -142,12 +142,27 @@ one tenant at a time.
 
 ### Metrics and alerts
 
-`notification_sends_total{channel, outcome}`, `notification_delivery_lag_seconds{channel}`,
-`notification_duplicate_sent_total{channel}`, `notification_enqueued_total{channel, outcome}`
-and `notification_receipts_total{channel, kind, outcome}`, exported when `CW_OTEL_ENDPOINT` is
-set. The `notification` alert group (`NotificationDeliveryFailures`,
-`NotificationDuplicateSent`, `NotificationEmailBounces`) links
-`docs/runbooks/notification-delivery.md`.
+`infrastructure/metrics.py` emits exactly these series, exported when `CW_OTEL_ENDPOINT` is set.
+The names are the programme's interface contract, which dashboards, SLOs and alerts use as
+written here. `channel` is `whatsapp` or `email` on every series.
+
+| Series | Labels | Meaning |
+| --- | --- | --- |
+| `notification_sends_total` (counter) | `channel`, `outcome` | One per notification each time the dispatcher settles it. `sent`: the channel took it. `retry`: the attempt failed and another follows. `failed`: the last attempt failed (a fallback, if any, is a notification of its own). `suppressed`: the address opted out or was suppressed after the notification was queued, so it did not go |
+| `notification_delivery_lag_seconds` (histogram; `_bucket`, `_sum`, `_count`) | `channel` | Seconds from the moment a notification was due to the moment the channel took it, one per notification sent. The batching window, the digest time and quiet hours set that moment, so they are not delay. Buckets from 1 s to 6 h; 900 s is the 15-minute delivery objective |
+| `notification_duplicate_sent_total` (counter) | `channel` | A delivery of a notification that was already sent: one delivery outlasted its whole lease and another dispatcher sent the message meanwhile. Should stay at zero |
+| `notification_enqueued_total` (counter) | `channel`, `outcome` | Notifications that obligation events queued. `queued`, or `duplicate` for an occasion that already had its notification (a redelivered event), which is expected. `POST /send` and fallbacks are not counted here |
+| `notification_receipts_total` (counter) | `channel`, `kind`, `outcome` | Provider reports after a message was taken: WhatsApp statuses the bot forwards and SES feedback. `kind`: `sent`, `delivered`, `read`, `failed`, `bounced` or `complained`. `outcome`: `applied` (it moved a notification on), `unchanged` (late, repeated, or for a notification in no state to take it) or `unknown` (no notification carries the message id, as with the bot's own replies) |
+
+The older names in the WP13 brief body are not emitted. Their counterparts: sent and failed
+attempts are `notification_sends_total{outcome="sent"}` and `{outcome=~"retry|failed"}`
+(`failed` is the final one), a duplicate the dedupe key caught is
+`notification_enqueued_total{outcome="duplicate"}`, a suppression is
+`notification_sends_total{outcome="suppressed"}`, and the delivery time is
+`notification_delivery_lag_seconds`.
+
+The `notification` alert group (`NotificationDeliveryFailures`, `NotificationDuplicateSent`,
+`NotificationEmailBounces`) reads them and links `docs/runbooks/notification-delivery.md`.
 
 ## Layout
 
