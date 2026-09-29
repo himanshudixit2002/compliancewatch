@@ -17,6 +17,8 @@ serves Temporal and the other consumers.
 - ``run_consumer(settings, group_id=..., topics=..., handler=..., stop=...)``: a standalone
   consumer process: the engine from ``CW_DATABASE_URL``, the store, and the aiokafka producer for
   the dead-letter topic ``<topic>.<group_id>.dlq``; it returns when ``stop`` is set.
+  ``store_factory`` builds the store from the engine and the group, ``SyncProcessedStore`` by
+  default (``sync_store``).
 
 Any SQLAlchemy engine works, SQLite included, so tests of a handler can run the store on a file
 database without a broker or Postgres.
@@ -37,13 +39,15 @@ from py_common.logging import get_logger
 from py_common.outbox.consumer import DEFAULT_CONFIG, ConsumerConfig, Handler, IdempotentConsumer
 from py_common.outbox.producer import AiokafkaProducer
 from py_common.outbox.schema import processed_event
-from py_common.outbox.store import UnitOfWork
+from py_common.outbox.store import ProcessedStore, UnitOfWork
 from py_common.settings import Settings
 
 log = get_logger(__name__)
 
 SyncHandler = Callable[[EventMessage, Connection], None]
 """A handler that writes through the unit's connection; it must not commit or roll back."""
+StoreFactory = Callable[[Engine, str], ProcessedStore]
+"""The processed-event store of a consumer group on an engine."""
 
 
 class SyncUnit:
@@ -122,6 +126,11 @@ class SyncProcessedStore:
         return self._unit()
 
 
+def sync_store(engine: Engine, group_id: str) -> ProcessedStore:
+    """The default ``StoreFactory``: a ``SyncProcessedStore`` of the group on the engine."""
+    return SyncProcessedStore(engine, group_id=group_id)
+
+
 def sync_handler(fn: SyncHandler) -> Handler:
     """The consumer handler that runs ``fn(message, connection)`` in the unit's transaction.
 
@@ -147,6 +156,7 @@ async def run_consumer(
     handler: Handler,
     stop: asyncio.Event,
     config: ConsumerConfig = DEFAULT_CONFIG,
+    store_factory: StoreFactory = sync_store,
 ) -> int:
     """Consume ``topics`` as ``group_id`` until ``stop`` is set; returns the records handled.
 
@@ -160,7 +170,7 @@ async def run_consumer(
         async with AiokafkaProducer(kafka, client_id=f"cw-consumer-{group_id}") as producer:
             consumer = IdempotentConsumer(
                 group_id=group_id,
-                store=SyncProcessedStore(engine, group_id=group_id),
+                store=store_factory(engine, group_id),
                 handler=handler,
                 producer=producer,
                 config=config,

@@ -5,10 +5,13 @@ import pytest
 from fastapi import APIRouter, FastAPI, Header
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
+from starlette.requests import Request
+from starlette.types import Receive, Scope, Send
 
 from domain_kernel.errors import DomainError, InvariantViolationError, UnknownAttributeError
 from py_common.app import create_app
-from py_common.problems import PROBLEM_MEDIA_TYPE, problem_responses
+from py_common.problems import PROBLEM_MEDIA_TYPE, problem_response, problem_responses
+from py_common.request_context import REQUEST_ID_HEADER, RequestContextMiddleware
 
 PREFIX = "urn:compliancewatch:problem:"
 
@@ -169,3 +172,30 @@ def test_undecodable_body_is_a_400_problem(client: TestClient) -> None:
     response = client.post("/t/things", content=b'{"name": "\xff"}', headers=headers)
     assert response.status_code == 400
     assert response.headers["content-type"].startswith(PROBLEM_MEDIA_TYPE)
+
+
+def test_problem_response_answers_from_plain_asgi_code() -> None:
+    async def not_here(scope: Scope, receive: Receive, send: Send) -> None:
+        response = problem_response(
+            Request(scope),
+            status=404,
+            type_uri=PREFIX + "route-not-found",
+            title="Route not found",
+            detail="No route serves this path here",
+            headers={"Cache-Control": "no-store"},
+        )
+        await response(scope, receive, send)
+
+    client = TestClient(RequestContextMiddleware(not_here))  # no lifespan: an HTTP-only app
+    response = client.get("/v1/elsewhere", headers={REQUEST_ID_HEADER: "req-7"})
+    assert response.status_code == 404
+    assert response.headers["content-type"] == PROBLEM_MEDIA_TYPE
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "type": PREFIX + "route-not-found",
+        "title": "Route not found",
+        "status": 404,
+        "detail": "No route serves this path here",
+        "instance": "/v1/elsewhere",
+        "correlation_id": "req-7",
+    }

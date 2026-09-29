@@ -54,6 +54,12 @@ empty by default, so the compose Redpanda, Temporal and collector work as before
 
 ``with_search_path(url, schema)`` is a database URL whose connections put ``schema`` first on
 their ``search_path``, the way one database serves every service schema.
+
+``db_pool_size`` and ``db_max_overflow`` size the connection pool of each engine
+``py_common.database.create_pooled_engine`` builds: that many connections stay open, and up to
+the overflow more are opened under load. They are small because a process that hosts several
+services holds one pool per engine of each, and a managed Postgres caps the connections of the
+whole deployment.
 """
 
 import re
@@ -95,6 +101,8 @@ class Settings(BaseSettings):
     log_json: bool = True
     database_url: str = "postgresql+psycopg://cw:cw@localhost:5432/compliancewatch"
     db_schema: str | None = None
+    db_pool_size: int = Field(default=3, ge=1, le=100)
+    db_max_overflow: int = Field(default=2, ge=0, le=100)
     kafka_bootstrap: str = "localhost:19092"
     kafka_security_protocol: KafkaSecurityProtocol = "PLAINTEXT"
     kafka_sasl_mechanism: KafkaSaslMechanism | None = None

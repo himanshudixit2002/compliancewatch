@@ -5,7 +5,9 @@ sqlalchemy, alembic), so every line carries ``timestamp``, ``level``, ``logger``
 ``service``, ``correlation_id``, ``tenant_id`` and ``actor``, plus ``trace_id`` and ``span_id``
 inside a recording OpenTelemetry span. Request-scoped fields are bound via contextvars; ``actor``
 names who acted (``user:<uuid>``, ``service:<client>`` or ``anonymous``) and is bound by
-``py_common.auth.context``, and a field nothing bound is null.
+``py_common.auth.context``, and a field nothing bound is null. ``service`` is the configured
+service name unless a ``service`` context variable is bound: a process that hosts several
+services binds the owning service per request, so its lines stay attributable.
 """
 
 import logging
@@ -22,7 +24,7 @@ _CONTEXT_FIELDS = ("correlation_id", "tenant_id", "actor")
 
 def _add_service(service_name: str) -> Processor:
     def processor(_: WrappedLogger, __: str, event_dict: EventDict) -> EventDict:
-        event_dict["service"] = service_name
+        event_dict.setdefault("service", service_name)
         return event_dict
 
     return processor
