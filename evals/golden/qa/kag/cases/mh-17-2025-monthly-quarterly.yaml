@@ -1,0 +1,61 @@
+case_id: mh-17-2025-monthly-quarterly
+category: multi_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "How did notification 17/2025-Central Tax treat monthly and quarterly GSTR-3B filers?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: date
+    value: 2025-10-25
+    support:
+      document: n17_2025
+      clause_ref: en.p5
+      quote: till twenty-fifth day of October, 2025
+  - kind: text
+    value: proviso
+    support:
+      document: n17_2025
+      clause_ref: en.p6
+      quote: proviso to sub-section (1) of section 39
+  must_not_mention: []
+  citations:
+  - document: n17_2025
+    clause_ref: en.p5
+  - document: n17_2025
+    clause_ref: en.p6
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: gstr3b_extension_2025_09
+    - id: s2
+      op: follow
+      source: s1
+      relations:
+      - extends_deadline
+      direction: out
+      depth: 1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "It gave both the same date: the return under sub-section (1) of section 39 for the month of September 2025, and the return under its proviso for the quarter July to September 2025, could be furnished till 25 October 2025."
+    citations:
+    - document: n17_2025
+      clause_ref: en.p5
+      quote: "(i) sub-section (1) of section 39, for the month of September,2025, till twenty-fifth day of October, 2025"
+    - document: n17_2025
+      clause_ref: en.p6
+      quote: "(ii) proviso to sub-section (1) of section 39, for the quarter of July, 2025 to September, 2025, till twenty-fifth day of October, 2025."
+refusal_reason: null
+notes: The two extends_deadline relations of the 17/2025 version, followed out.

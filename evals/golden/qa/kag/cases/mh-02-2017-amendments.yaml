@@ -1,0 +1,68 @@
+case_id: mh-02-2017-amendments
+category: multi_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: Which notifications have amended notification 02/2017-Central Tax?
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: entity
+    type: notification
+    value: 10/2025-Central Tax
+    support:
+      document: n10_2025
+      clause_ref: en.p1
+      quote: Notification No. 10/2025 – Central Tax
+  - kind: entity
+    type: notification
+    value: 27/2024-Central Tax
+    support:
+      document: n10_2025
+      clause_ref: en.p13
+      quote: notification No. 27/2024-Central Tax
+  must_not_mention: []
+  citations:
+  - document: n10_2025
+    clause_ref: en.p1
+  - document: n10_2025
+    clause_ref: en.p13
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: find_entity
+      entity_type: notification
+      name: 02/2017-Central Tax
+    - id: s2
+      op: follow
+      source: s1
+      relations:
+      - amends
+      direction: in
+      depth: 1
+    - id: s3
+      op: retrieve_clauses
+      source: s1
+    - id: s4
+      op: answer
+      sources:
+      - s2
+      - s3
+  answer:
+    covered: true
+    answer: "In the rulebook, notification No. 10/2025-Central Tax amends notification No. 02/2017-Central Tax; its note records that 02/2017-Central Tax was last amended before that by notification No. 27/2024-Central Tax, dated 25 November 2024."
+    citations:
+    - document: n10_2025
+      clause_ref: en.p1
+      quote: "hereby makes the following further amendments in the notification of the Government of India, in the Ministry of Finance (Department of Revenue), No. 02/2017-Central Tax"
+    - document: n10_2025
+      clause_ref: en.p13
+      quote: "was last amended by notification No. 27/2024-Central Tax, published in the Gazette of India, Extraordinary, vide number G.S.R. 729(E), dated the 25th November 2024"
+refusal_reason: null
+notes: "The amends relation into the 02/2017 entity, and the clauses mentioning it. 27/2024 itself is not recorded; only the note of 10/2025 names it."

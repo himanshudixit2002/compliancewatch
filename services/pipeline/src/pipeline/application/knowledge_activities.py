@@ -5,7 +5,8 @@ rather than carrying clause text through the workflow history, and checks that t
 derived the same clause ids the kernel gives here. ``ExtractMentions`` runs the mention grammar
 over the stored document and hands the mentions to alignment; ``ProposeRelations`` asks the
 model which of them the document acts on, and ``SubmitRelations`` stages the answer for review.
-All four sit behind ``CW_PIPELINE_KNOWLEDGE_ENABLED``: disabled, they answer ``skipped`` without
+``EmbedClauses`` stores a vector for each of the document's clauses, for the rulebook's search.
+All five sit behind ``CW_PIPELINE_KNOWLEDGE_ENABLED``: disabled, they answer ``skipped`` without
 a call.
 """
 
@@ -23,6 +24,7 @@ from domain_kernel.knowledge import EntityType, RelationKind
 from domain_kernel.protocols import DocumentParser
 from pipeline.application.activities import Frozen, ParseRequest, parse_fetched
 from pipeline.application.detector import detect
+from pipeline.application.embedding import EmbeddingStage
 from pipeline.application.mentions import MentionInput, MentionStage
 from pipeline.application.relations import RelationInput, RelationStage
 from pipeline.domain.errors import KnowledgeContractError
@@ -296,6 +298,50 @@ class SubmitRelations(ActivityBase[RelationBatchOut, RelationsReport]):
         return RelationsReport(
             outcome=input.outcome, created=report.created, unchanged=report.unchanged
         )
+
+
+class EmbedRequest(Frozen):
+    document_id: UUID
+    regulator: str = ""
+
+
+class EmbedReport(Frozen):
+    embedded: int = 0
+    unchanged: int = 0
+    model: str = ""
+    skipped: bool = False
+
+
+class EmbedClauses(ActivityBase[EmbedRequest, EmbedReport]):
+    """Embed the stored document's clauses that have no vector yet, through the gateway, and
+    store the vectors in the rulebook's search index. A retry re-embeds only what is missing."""
+
+    name: ClassVar[str] = "pipeline.embed_clauses"
+    input_type: ClassVar[type[EmbedRequest]] = EmbedRequest
+    output_type: ClassVar[type[EmbedReport]] = EmbedReport
+    start_to_close: ClassVar[timedelta] = timedelta(minutes=10)
+    retry_policy: ClassVar[RetryPolicy] = RetryPolicy(
+        initial_interval=timedelta(seconds=10),
+        backoff_coefficient=2.0,
+        maximum_interval=timedelta(minutes=2),
+        maximum_attempts=3,
+        non_retryable_error_types=["RulebookRejectedError", "EmbeddingContractError"],
+    )
+
+    def __init__(self, stage: EmbeddingStage | None, *, enabled: bool) -> None:
+        if enabled and stage is None:
+            raise ValueError("an enabled embedding activity needs its stage")
+        self._stage = stage
+        self._enabled = enabled
+
+    async def run(self, input: EmbedRequest) -> EmbedReport:
+        if not self._enabled or self._stage is None:
+            return EmbedReport(skipped=True)
+        metadata = {"document_id": str(input.document_id)}
+        if input.regulator:
+            metadata["regulator"] = input.regulator
+        run = self._stage.embed_missing(DocumentId(input.document_id), metadata=metadata)
+        return EmbedReport(embedded=run.embedded, unchanged=run.unchanged, model=run.model)
 
 
 def _issue_out(issue: Issue) -> IssueOut:

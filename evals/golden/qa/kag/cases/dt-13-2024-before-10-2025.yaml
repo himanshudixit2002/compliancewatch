@@ -1,0 +1,87 @@
+case_id: dt-13-2024-before-10-2025
+category: date_threshold
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Which was issued earlier: notification 13/2024-Central Tax or notification 10/2025-Central Tax?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: date
+    value: 2024-07-10
+    support:
+      document: n13_2024
+      clause_ref: en.p4
+      quote: New Delhi, the 10th July, 2024
+  - kind: date
+    value: 2025-03-13
+    support:
+      document: n10_2025
+      clause_ref: en.p1
+      quote: New Delhi, the 13th March, 2025
+  - kind: entity
+    type: notification
+    value: 13/2024-Central Tax
+    support:
+      document: n13_2024
+      clause_ref: en.p3
+      quote: NOTIFICATION No. 13/2024 – Central Tax
+  must_not_mention: []
+  citations:
+  - document: n13_2024
+    clause_ref: en.p4
+  - document: n10_2025
+    clause_ref: en.p1
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: rescission_27_2022_2024_07
+    - id: s2
+      op: rules_in_force
+      rule_key: amendment_02_2017_2025_03
+    - id: s3
+      op: aggregate
+      source: s1
+      fn: min_effective
+    - id: s4
+      op: aggregate
+      source: s2
+      fn: min_effective
+    - id: s5
+      op: compare
+      left: s3
+      comparator: lt
+      right: s4
+    - id: s6
+      op: retrieve_clauses
+      source: s1
+      k: 1
+    - id: s7
+      op: retrieve_clauses
+      source: s2
+      k: 1
+    - id: s8
+      op: answer
+      sources:
+      - s5
+      - s6
+      - s7
+  answer:
+    covered: true
+    answer: "Notification No. 13/2024-Central Tax, dated 10 July 2024, was issued before notification No. 10/2025-Central Tax, dated 13 March 2025."
+    citations:
+    - document: n13_2024
+      clause_ref: en.p4
+      quote: New Delhi, the 10th July, 2024
+    - document: n10_2025
+      clause_ref: en.p1
+      quote: Notification No. 10/2025 – Central Tax New Delhi, the 13th March, 2025
+refusal_reason: null
+notes: Two versions' starts compared; each start is the date its notification bears.

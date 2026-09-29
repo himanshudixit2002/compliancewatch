@@ -2,15 +2,21 @@
 
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from domain_kernel.ids import TenantId
 from domain_kernel.llm import CompletionRequest
 from llm_gateway.application.complete import CompletionOutcome
+from llm_gateway.application.embed import EmbeddingOutcome
 from llm_gateway.application.usage import UsageReport
 from llm_gateway.domain.budgets import BudgetScope
+from llm_gateway.domain.embeddings import (
+    MAX_EMBEDDING_INPUT_CHARS,
+    MAX_EMBEDDING_INPUTS,
+    EmbeddingRequest,
+)
 from llm_gateway.domain.features import Feature
 from llm_gateway.domain.ledger import MAX_MODEL_ID
 from llm_gateway.domain.prompts import PROMPT_NAME, PROMPT_VERSION, PromptSpec
@@ -105,6 +111,82 @@ class CompletionOut(BaseModel):
             input_tokens=outcome.input_tokens,
             output_tokens=outcome.output_tokens,
             cached=outcome.cached,
+            cost_usd=None if outcome.cost_usd is None else money(outcome.cost_usd),
+            cost_inr=money(outcome.cost_inr),
+            cost_source=outcome.cost_source.value,
+            latency_ms=outcome.latency_ms,
+            trace_id=outcome.trace_id,
+            generation_id=outcome.generation_id,
+            correlation_id=correlation_id,
+            pii_masked=dict(outcome.pii_counts),
+        )
+
+
+EmbeddingInput = Annotated[str, Field(min_length=1, max_length=MAX_EMBEDDING_INPUT_CHARS)]
+
+
+class EmbeddingIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feature: Literal["retrieval"]
+    inputs: list[EmbeddingInput] = Field(
+        min_length=1,
+        max_length=MAX_EMBEDDING_INPUTS,
+        description="Texts to embed, one vector each, in order; masked before they leave",
+    )
+    model: str | None = Field(
+        default=None,
+        pattern=MODEL_ID_PATTERN,
+        max_length=MAX_MODEL_ID,
+        description=(
+            "Model id override as creator/model, for a re-embed; the routing table decides when "
+            "absent. There is never a fallback"
+        ),
+        examples=["voyage/voyage-3.5-lite"],
+    )
+    metadata: dict[str, str] | None = Field(
+        default=None, description="Trace tags, for example a document id"
+    )
+
+    def to_request(self, tenant_id: TenantId | None) -> EmbeddingRequest:
+        return EmbeddingRequest(
+            feature=self.feature,
+            inputs=tuple(self.inputs),
+            model=self.model,
+            tenant_id=tenant_id,
+            metadata=self.metadata or {},
+        )
+
+
+class EmbeddingOut(BaseModel):
+    model_requested: str
+    model_served: str = Field(
+        description="Store it with every vector: only same-model vectors compare"
+    )
+    provider: str
+    dims: int
+    vectors: list[list[float]] = Field(description="One vector per input, in input order")
+    input_tokens: int
+    cost_usd: str | None
+    cost_inr: str
+    cost_source: str
+    latency_ms: int
+    trace_id: str
+    generation_id: str
+    correlation_id: str
+    pii_masked: dict[str, int] = Field(
+        description="How many identifiers of each kind were masked before the call"
+    )
+
+    @classmethod
+    def from_outcome(cls, outcome: EmbeddingOutcome, *, correlation_id: str) -> Self:
+        return cls(
+            model_requested=outcome.model_requested,
+            model_served=outcome.model_served,
+            provider=outcome.provider,
+            dims=outcome.dims,
+            vectors=[list(vector) for vector in outcome.vectors],
+            input_tokens=outcome.input_tokens,
             cost_usd=None if outcome.cost_usd is None else money(outcome.cost_usd),
             cost_inr=money(outcome.cost_inr),
             cost_source=outcome.cost_source.value,

@@ -144,7 +144,13 @@ from domain_kernel.status import (
     closing_status,
     parse_closure_reason,
 )
-from domain_kernel.vectors import ClauseFilter, EmbeddedClause, ScoredClause, Vector
+from domain_kernel.vectors import (
+    EMBEDDING_DIMS,
+    ClauseFilter,
+    EmbeddedClause,
+    ScoredClause,
+    Vector,
+)
 
 __version__ = "0.1.0"
 
@@ -153,6 +159,7 @@ __all__ = [
     "ATTRIBUTE_KEY_PATTERN",
     "CERTAIN",
     "DASHES",
+    "EMBEDDING_DIMS",
     "ENUM_TYPES",
     "FY_LABEL_PATTERN",
     "GSTIN_PATTERN",

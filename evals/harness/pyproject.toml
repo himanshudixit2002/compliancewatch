@@ -12,10 +12,15 @@ dependencies = [
   "ontology",
   "compliancewatch-pipeline",
   "compliancewatch-llm-gateway",
+  "compliancewatch-qa",
+  "compliancewatch-rulebook",
+  "compliancewatch-profile",
+  "compliancewatch-obligation",
 ]
 
 [project.scripts]
 eval-harness = "cw_evals.run:main"
+eval-golden-check = "cw_evals.qa.check:main"
 
 [tool.uv.sources]
 py-common = { workspace = true }
@@ -23,6 +28,10 @@ domain-kernel = { workspace = true }
 ontology = { workspace = true }
 compliancewatch-pipeline = { workspace = true }
 compliancewatch-llm-gateway = { workspace = true }
+compliancewatch-qa = { workspace = true }
+compliancewatch-rulebook = { workspace = true }
+compliancewatch-profile = { workspace = true }
+compliancewatch-obligation = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

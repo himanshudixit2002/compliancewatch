@@ -50,7 +50,8 @@ from rulebook.domain.relations import (
     find_supersedes_cycle,
 )
 from rulebook.domain.review import EntityRejectReason, MentionDecision, Resolution, ReviewStatus
-from rulebook.infrastructure.memory import MemoryKnowledgeStore
+from rulebook.domain.rule_versions import RuleVersionRecord
+from rulebook.infrastructure.memory import MemoryKnowledgeStore, MemoryRuleVersionRepository
 
 DIGEST = "51f5dbee1615f0ec47256abddb11061a348e81b883051e89733a06b062bcebed"
 DOC = document_id_for(DIGEST)
@@ -512,19 +513,45 @@ def test_an_entity_target_must_be_aligned_first(store: MemoryKnowledgeStore) -> 
 
 
 @pytest.mark.parametrize(
-    ("status", "error"),
+    "status",
     [
-        (RuleVersionStatus.PUBLISHED, RuleVersionNotEditableError),
-        (RuleVersionStatus.WITHDRAWN, RuleVersionNotEditableError),
+        RuleVersionStatus.IN_REVIEW,
+        RuleVersionStatus.APPROVED,
+        RuleVersionStatus.PUBLISHED,
+        RuleVersionStatus.WITHDRAWN,
     ],
 )
-def test_the_from_version_must_be_before_publication(
-    store: MemoryKnowledgeStore, status: RuleVersionStatus, error: type[Exception]
+def test_the_from_version_must_be_a_draft(
+    store: MemoryKnowledgeStore, status: RuleVersionStatus
 ) -> None:
     _, version = store.add_rule("r", status=status)
     (candidate_id,) = stage(store, REFERS)
-    with pytest.raises(error):
+    with pytest.raises(RuleVersionNotEditableError, match=status.value):
         ApproveRelationCandidate(store, clock).run(candidate_id, version, None, decided_by="a")
+    assert store.rule_relations() == []
+
+
+def test_approval_locks_the_version_before_reading_its_status(
+    store: MemoryKnowledgeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, version = store.add_rule("r")
+    (candidate_id,) = stage(store, REFERS)
+    AlignMentions(store).run(DOC, GRAMMAR, [SECTION_MENTION])
+    DecideMentionGroup(store, clock).run(
+        EntityType.SECTION, "39(6)@cgst-act", MentionDecision.CREATE_ENTITY, decided_by="a"
+    )
+    locked: list[RuleVersionId] = []
+    lock = MemoryRuleVersionRepository.lock
+
+    def recording(
+        repository: MemoryRuleVersionRepository, rule_version_id: RuleVersionId
+    ) -> RuleVersionRecord | None:
+        locked.append(rule_version_id)
+        return lock(repository, rule_version_id)
+
+    monkeypatch.setattr(MemoryRuleVersionRepository, "lock", recording)
+    ApproveRelationCandidate(store, clock).run(candidate_id, version, None, decided_by="a")
+    assert locked == [version]
 
 
 def test_unknown_versions_and_candidates(store: MemoryKnowledgeStore) -> None:

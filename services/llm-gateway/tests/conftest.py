@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from hypothesis import settings
 
+from domain_kernel.protocols import LLMProvider
 from llm_gateway.main import build_app
 from llm_gateway.settings import GatewaySettings
 from llm_gateway.wiring import GatewayWiring
@@ -35,8 +36,8 @@ def gateway_settings(**overrides: Any) -> GatewaySettings:
 
 @pytest.fixture
 def make_app() -> AppFactory:
-    def factory(**overrides: Any) -> FastAPI:
-        return build_app(gateway_settings(**overrides))
+    def factory(*, completion_provider: LLMProvider | None = None, **overrides: Any) -> FastAPI:
+        return build_app(gateway_settings(**overrides), completion_provider=completion_provider)
 
     return factory
 

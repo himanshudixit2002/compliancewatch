@@ -15,6 +15,8 @@ dependencies = [
   "compliancewatch-obligation",
   "compliancewatch-notification",
   "compliancewatch-pipeline",
+  "compliancewatch-llm-gateway",
+  "compliancewatch-qa",
 ]
 
 [project.scripts]
@@ -30,6 +32,8 @@ compliancewatch-rulebook = { workspace = true }
 compliancewatch-obligation = { workspace = true }
 compliancewatch-notification = { workspace = true }
 compliancewatch-pipeline = { workspace = true }
+compliancewatch-llm-gateway = { workspace = true }
+compliancewatch-qa = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

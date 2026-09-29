@@ -42,13 +42,13 @@ groups:
           summary: "Dead-letter depth above zero for 30 minutes on {{ $labels.topic }}"
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/outbox-relay.md
       - alert: OutboxBacklog
-        expr: max by (service) (outbox_relay_pending) > 1000
+        expr: max by (db_schema) (outbox_relay_pending) > 1000
         for: 15m
         labels:
           severity: page
           team: platform
         annotations:
-          summary: "More than 1000 unpublished outbox rows for 15 minutes in {{ $labels.service }}"
+          summary: "More than 1000 unpublished outbox rows for 15 minutes in schema {{ $labels.db_schema }}"
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/outbox-relay.md
   - name: workers
     rules:
@@ -61,3 +61,23 @@ groups:
         annotations:
           summary: "No traces have reached the collector for 30 minutes: the worker or the collector is down"
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/temporal-worker.md
+  - name: rulebook-review
+    rules:
+      - alert: EntityReviewQueueStale
+        expr: max(rulebook_entity_review_oldest_open_age_seconds) > 172800
+        for: 1h
+        labels:
+          severity: ticket
+          team: regulatory-intelligence
+        annotations:
+          summary: "The oldest open entity review item has waited more than 48 hours"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/entity-review-queue.md
+      - alert: EntityReviewQueueBacklog
+        expr: sum(max by (entity_type) (rulebook_entity_review_open_items)) > 500
+        for: 6h
+        labels:
+          severity: ticket
+          team: regulatory-intelligence
+        annotations:
+          summary: "More than 500 entity review items have been open for 6 hours"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/entity-review-queue.md

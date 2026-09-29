@@ -1,0 +1,66 @@
+case_id: dt-27-2024-before-10-2025
+category: date_threshold
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Was notification 02/2017-Central Tax amended by notification 27/2024-Central Tax before notification 10/2025-Central Tax was issued?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: date
+    value: 2024-11-25
+    support:
+      document: n10_2025
+      clause_ref: en.p13
+      quote: dated the 25th November 2024
+  - kind: date
+    value: 2025-03-13
+    support:
+      document: n10_2025
+      clause_ref: en.p1
+      quote: New Delhi, the 13th March, 2025
+  must_not_mention: []
+  citations:
+  - document: n10_2025
+    clause_ref: en.p13
+  - document: n10_2025
+    clause_ref: en.p1
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: find_entity
+      entity_type: notification
+      name: 27/2024-Central Tax
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+    - id: s3
+      op: find_entity
+      entity_type: notification
+      name: 10/2025-Central Tax
+    - id: s4
+      op: retrieve_clauses
+      source: s3
+    - id: s5
+      op: answer
+      sources:
+      - s2
+      - s4
+  answer:
+    covered: true
+    answer: "Yes. Notification No. 10/2025-Central Tax, dated 13 March 2025, records that notification No. 02/2017-Central Tax was last amended by notification No. 27/2024-Central Tax, dated 25 November 2024."
+    citations:
+    - document: n10_2025
+      clause_ref: en.p13
+      quote: "was last amended by notification No. 27/2024-Central Tax, published in the Gazette of India, Extraordinary, vide number G.S.R. 729(E), dated the 25th November 2024"
+    - document: n10_2025
+      clause_ref: en.p1
+      quote: Notification No. 10/2025 – Central Tax New Delhi, the 13th March, 2025
+refusal_reason: null
+notes: ''

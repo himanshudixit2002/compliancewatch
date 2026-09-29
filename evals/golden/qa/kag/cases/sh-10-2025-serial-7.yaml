@@ -1,0 +1,36 @@
+case_id: sh-10-2025-serial-7
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Which districts does serial number 7 cover after notification 10/2025-Central Tax?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: text
+    value: Khairthal-Tijara
+    support:
+      document: n10_2025
+      clause_ref: en.p2
+      quote: Alwar Districts of Alwar, Khairthal-Tijara, Kotputli-Behror
+  must_not_mention: []
+  citations:
+  - document: n10_2025
+    clause_ref: en.p2
+scripted:
+  plan:
+    as_of: null
+    steps: []
+  answer:
+    covered: true
+    answer: "Notification No. 10/2025-Central Tax substituted the entry for serial number 7 as: Alwar Districts of Alwar, Khairthal-Tijara, Kotputli-Behror, Bharatpur, Deeg, Dholpur, Dausa, Karauli, Sawaimadhopur, Sikar and Jhunjhunu in the state of Rajasthan."
+    citations:
+    - document: n10_2025
+      clause_ref: en.p2
+      quote: "Alwar Districts of Alwar, Khairthal-Tijara, Kotputli-Behror, Bharatpur, Deeg, Dholpur, Dausa, Karauli, Sawaimadhopur, Sikar and Jhunjhunu in the state of Rajasthan"
+refusal_reason: null
+notes: "A plain search: the planner defers and hybrid search finds en.p2."

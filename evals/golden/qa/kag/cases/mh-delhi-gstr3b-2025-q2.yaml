@@ -1,0 +1,54 @@
+case_id: mh-delhi-gstr3b-2025-q2
+category: multi_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: Till when could QRMP Delhi furnish its GSTR-3B for July to September 2025?
+as_of: 2026-09-28
+business: qrmp_delhi
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: date
+    value: 2025-10-25
+    support:
+      document: n17_2025
+      clause_ref: en.p6
+      quote: till twenty-fifth day of October, 2025
+  must_not_mention:
+  - 21 April
+  citations:
+  - document: n17_2025
+    clause_ref: en.p6
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+    - id: s2
+      op: evaluate_applicability
+      source: s1
+    - id: s3
+      op: follow
+      source: s1
+      relations:
+      - extends_deadline
+      direction: in
+      depth: 1
+    - id: s4
+      op: answer
+      sources:
+      - s2
+      - s3
+  answer:
+    covered: true
+    answer: "QRMP Delhi files FORM GSTR-3B every quarter; for the quarter July to September 2025 notification No. 17/2025-Central Tax extended the time limit till 25 October 2025."
+    citations:
+    - document: n17_2025
+      clause_ref: en.p6
+      quote: "(ii) proviso to sub-section (1) of section 39, for the quarter of July, 2025 to September, 2025, till twenty-fifth day of October, 2025."
+refusal_reason: null
+notes: "Every rule in force is evaluated for the business (the quarterly group B rule applies, from the seed's predicates) and its extension is followed."

@@ -30,10 +30,9 @@ from domain_kernel.knowledge import (
 from domain_kernel.status import RuleVersionStatus
 from rulebook.domain.errors import TargetUnresolvedError, TargetVersionRequiredError
 
-EDITABLE_FROM_STATUSES = frozenset(
-    {RuleVersionStatus.DRAFT, RuleVersionStatus.IN_REVIEW, RuleVersionStatus.APPROVED}
-)
-"""A relation is approved together with the version it starts from, before publication."""
+EDITABLE_FROM_STATUSES = frozenset({RuleVersionStatus.DRAFT})
+"""Relations and citations are added while the version is a draft, so a review round approves
+what is published; a version under review or approved is returned to draft to change them."""
 
 
 class CandidateStatus(StrEnum):

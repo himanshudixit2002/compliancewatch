@@ -1,0 +1,81 @@
+case_id: mh-rajasthan-entries
+category: multi_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Which entries for districts in Rajasthan did notification 10/2025-Central Tax substitute?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: text
+    value: Alwar
+    support:
+      document: n10_2025
+      clause_ref: en.p2
+      quote: Alwar Districts of Alwar
+  - kind: text
+    value: Jaipur
+    support:
+      document: n10_2025
+      clause_ref: en.p5
+      quote: Jaipur Districts of Jaipur
+  - kind: text
+    value: Jodhpur
+    support:
+      document: n10_2025
+      clause_ref: en.p6
+      quote: Jodhpur Districts of Jodhpur
+  - kind: text
+    value: Udaipur
+    support:
+      document: n10_2025
+      clause_ref: en.p12
+      quote: Udaipur Districts of Udaipur
+  must_not_mention: []
+  citations:
+  - document: n10_2025
+    clause_ref: en.p2
+  - document: n10_2025
+    clause_ref: en.p5
+  - document: n10_2025
+    clause_ref: en.p6
+  - document: n10_2025
+    clause_ref: en.p12
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: find_entity
+      entity_type: state
+      name: Rajasthan
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+      k: 8
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "Four entries: serial number 7 (Alwar), serial number 49 (Jaipur), serial number 53 (Jodhpur) and serial number 102 (Udaipur)."
+    citations:
+    - document: n10_2025
+      clause_ref: en.p2
+      quote: "(i) for serial number 7 and the entries relating thereto, the following shall be substituted"
+    - document: n10_2025
+      clause_ref: en.p5
+      quote: "(iii) for serial number 49 and the entries relating thereto, the following shall be substituted"
+    - document: n10_2025
+      clause_ref: en.p6
+      quote: "(iv) for serial number 53 and the entries relating thereto, the following shall be substituted"
+    - document: n10_2025
+      clause_ref: en.p12
+      quote: "(vii) for serial number 102 and the entries relating thereto, the following shall be substituted"
+refusal_reason: null
+notes: The state entity Rajasthan, then the clauses that mention it.

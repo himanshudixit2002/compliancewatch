@@ -12,6 +12,14 @@ primary_region = "bom"
   CW_LOG_JSON = "true"
   CW_DB_SCHEMA = "qa"
   CW_OTEL_ENDPOINT = ""
+  # KAG planner and solver (ADR-017): owner ai-platform; removed when ADR-017 is Accepted.
+  # CW_QA_KAG_TENANTS is a comma list of tenant UUIDs; empty means every tenant.
+  CW_QA_KAG_ENABLED = "false"
+  CW_QA_KAG_TENANTS = ""
+  CW_RULEBOOK_URL = "http://compliancewatch-rulebook.internal:8000"
+  CW_PROFILE_URL = "http://compliancewatch-profile.internal:8000"
+  CW_OBLIGATION_URL = "http://compliancewatch-obligation.internal:8000"
+  CW_LLM_GATEWAY_URL = "http://compliancewatch-llm-gateway.internal:8000"
 
 [deploy]
   # release_command = "alembic -c alembic.ini upgrade head"  # once the service has a migration

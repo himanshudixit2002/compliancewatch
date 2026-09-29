@@ -5,6 +5,7 @@ unresolved name tends to appear in many clauses: one decision closes them all. A
 creates the entity, adds the name as an alias of an existing one, or rejects the group.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
@@ -109,3 +110,25 @@ class MentionGroup:
     proposed_name: str
     open_count: int
     examples: tuple[EntityReviewItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewQueueStats:
+    """The open part of the queue: items per entity type and when the oldest was queued."""
+
+    by_type: Mapping[EntityType, int]
+    oldest_open_at: datetime | None
+
+    @property
+    def open_items(self) -> int:
+        return sum(self.by_type.values())
+
+    def counts(self) -> dict[EntityType, int]:
+        """Open items for every entity type, zero where none is open."""
+        return {entity_type: self.by_type.get(entity_type, 0) for entity_type in EntityType}
+
+    def oldest_open_age_seconds(self, now: datetime) -> float:
+        """How long the oldest open item has waited at ``now``; zero when nothing is open."""
+        if self.oldest_open_at is None:
+            return 0.0
+        return max((now - self.oldest_open_at).total_seconds(), 0.0)

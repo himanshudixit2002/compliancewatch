@@ -1,0 +1,56 @@
+case_id: sh-13-2024-rescinds
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: Which notification does notification 13/2024-Central Tax rescind?
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: entity
+    type: notification
+    value: 27/2022-Central Tax
+    support:
+      document: n13_2024
+      clause_ref: en.p4
+      quote: number 27/2022 - Central Tax
+  - kind: date
+    value: 2022-12-26
+    support:
+      document: n13_2024
+      clause_ref: en.p4
+      quote: dated the 26 th December, 2022
+  must_not_mention: []
+  citations:
+  - document: n13_2024
+    clause_ref: en.p4
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: rescission_27_2022_2024_07
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "It rescinds notification No. 27/2022-Central Tax, dated 26 December 2022, except as respects things done or omitted to be done before the rescission."
+    citations:
+    - document: n13_2024
+      clause_ref: en.p4
+      quote: "hereby rescinds the notification of the Government of India in the Ministry of Finance, Department of Revenue, number 27/2022 - Central Tax, dated the 26 th December, 2022"
+    - document: n13_2024
+      clause_ref: en.p4
+      quote: except as respects things done or omitted to be done before such rescission
+refusal_reason: null
+notes: ''

@@ -5,9 +5,11 @@ stays a name and the candidate carries the issue ``target_unaligned`` until the 
 for that name is decided. Nothing the pipeline sent is dropped: proposals it could not turn into
 candidates are kept verbatim in the run's issues.
 
-Approval needs the rule version the relation starts from, still before publication, and for a
-relation that must target a rule version the version it targets. It writes one ``rule_relation``
-row pointing back at the candidate; a supersession that would close a cycle is refused.
+Approval needs the rule version the relation starts from, still a draft, and for a relation
+that must target a rule version the version it targets. It locks that version before checking
+its status, as citing and submitting do, so a relation cannot slip in beside a submission. It
+writes one ``rule_relation`` row pointing back at the candidate; a supersession that would close
+a cycle is refused.
 """
 
 from collections.abc import Mapping, Sequence
@@ -203,12 +205,12 @@ class ApproveRelationCandidate:
                 raise CandidateNotFoundError(f"relation candidate {candidate_id} does not exist")
             if candidate.status is not CandidateStatus.OPEN:
                 raise CandidateClosedError(f"candidate {candidate_id} is {candidate.status.value}")
-            status = uow.rules.version_status(from_rule_version_id)
-            if status is None:
+            version = uow.rule_versions.lock(from_rule_version_id)
+            if version is None:
                 raise UnknownRuleVersionError(str(from_rule_version_id))
-            if status not in EDITABLE_FROM_STATUSES:
+            if version.status not in EDITABLE_FROM_STATUSES:
                 raise RuleVersionNotEditableError(
-                    f"rule version {from_rule_version_id} is {status.value}"
+                    f"rule version {from_rule_version_id} is {version.status.value}"
                 )
             if (
                 target_rule_version_id is not None

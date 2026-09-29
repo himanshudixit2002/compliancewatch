@@ -1,5 +1,6 @@
-# promtool unit tests for alerts.yml (`make alerts-check`, the ops job in ci.yml). Only the
-# api-slo group has cases so far; each package appends the cases for the alert group it owns.
+# promtool unit tests for alerts.yml (`make alerts-check`, the ops job in ci.yml). The api-slo,
+# outbox and rulebook-review groups have cases; each package appends the cases for the alert
+# group it owns.
 rule_files:
   - alerts.yml
 
@@ -63,3 +64,82 @@ tests:
             exp_annotations:
               summary: "identity p95 read latency above 600 ms over 1h (2x the 300 ms objective)"
               runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/api-slo-burn.md
+
+  # Pending outbox rows: obligation holds 1200 (above 1000), profile 10. The rule needs 15 minutes.
+  - interval: 1m
+    input_series:
+      - series: 'outbox_relay_pending{db_schema="obligation"}'
+        values: '1200x30'
+      - series: 'outbox_relay_pending{db_schema="profile"}'
+        values: '10x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: OutboxBacklog
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: OutboxBacklog
+        exp_alerts:
+          - exp_labels:
+              db_schema: obligation
+              severity: page
+              team: platform
+            exp_annotations:
+              summary: "More than 1000 unpublished outbox rows for 15 minutes in schema obligation"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/outbox-relay.md
+
+  # The oldest open review item is 50 hours old and ageing; the rule needs 1 hour above 48 hours.
+  - interval: 1m
+    input_series:
+      - series: 'rulebook_entity_review_oldest_open_age_seconds{instance="rulebook-1"}'
+        values: '180000+60x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: EntityReviewQueueStale
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: EntityReviewQueueStale
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              team: regulatory-intelligence
+            exp_annotations:
+              summary: "The oldest open entity review item has waited more than 48 hours"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/entity-review-queue.md
+
+  # Two rulebook replicas report the same 300 open forms, which count once, plus 250 sections:
+  # 550 open items, above 500. The rule needs 6 hours.
+  - interval: 1m
+    input_series:
+      - series: 'rulebook_entity_review_open_items{entity_type="form", instance="rulebook-1"}'
+        values: '300x480'
+      - series: 'rulebook_entity_review_open_items{entity_type="form", instance="rulebook-2"}'
+        values: '300x480'
+      - series: 'rulebook_entity_review_open_items{entity_type="section", instance="rulebook-1"}'
+        values: '250x480'
+    alert_rule_test:
+      - eval_time: 5h
+        alertname: EntityReviewQueueBacklog
+        exp_alerts: []
+      - eval_time: 7h
+        alertname: EntityReviewQueueBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              team: regulatory-intelligence
+            exp_annotations:
+              summary: "More than 500 entity review items have been open for 6 hours"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/entity-review-queue.md
+
+  # 450 open items (a form count reported by two replicas counts once): no alert.
+  - interval: 1m
+    input_series:
+      - series: 'rulebook_entity_review_open_items{entity_type="form", instance="rulebook-1"}'
+        values: '300x480'
+      - series: 'rulebook_entity_review_open_items{entity_type="form", instance="rulebook-2"}'
+        values: '300x480'
+      - series: 'rulebook_entity_review_open_items{entity_type="section", instance="rulebook-1"}'
+        values: '150x480'
+    alert_rule_test:
+      - eval_time: 7h
+        alertname: EntityReviewQueueBacklog
+        exp_alerts: []

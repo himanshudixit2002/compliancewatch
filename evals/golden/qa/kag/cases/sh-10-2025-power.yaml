@@ -1,0 +1,53 @@
+case_id: sh-10-2025-power
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Under which provisions did the Central Government issue notification 10/2025-Central Tax?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: text
+    value: section 3 read with section 5
+    support:
+      document: n10_2025
+      clause_ref: en.p1
+      quote: section 3 read with section 5 of the Central Goods and Services Tax Act, 2017
+  - kind: text
+    value: Integrated Goods and Services Tax Act
+    support:
+      document: n10_2025
+      clause_ref: en.p1
+      quote: section 3 of the Integrated Goods and Services Tax Act, 2017
+  must_not_mention: []
+  citations:
+  - document: n10_2025
+    clause_ref: en.p1
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: find_entity
+      entity_type: notification
+      name: 10/2025-Central Tax
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "The Central Government issued it in exercise of the powers conferred by section 3 read with section 5 of the Central Goods and Services Tax Act, 2017 and section 3 of the Integrated Goods and Services Tax Act, 2017."
+    citations:
+    - document: n10_2025
+      clause_ref: en.p1
+      quote: "In exercise of the powers conferred by section 3 read with section 5 of the Central Goods and Services Tax Act, 2017 (12 of 2017) and section 3 of the Integrated Goods and Services Tax Act, 2017 (13 of 2017), the Central Government"
+refusal_reason: null
+notes: ''

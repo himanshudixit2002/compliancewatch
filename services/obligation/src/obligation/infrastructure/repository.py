@@ -3,7 +3,7 @@ the obligation repository on it, and the outbox writer as the event sink."""
 
 from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Self
 
 from sqlalchemy import Connection, Engine, create_engine, select, text
@@ -64,6 +64,34 @@ class SqlAlchemyObligationRepository:
         )
         if period_label is not None:
             statement = statement.where(ObligationRow.period_label == period_label)
+        return [_to_obligation(row) for row in self._session.scalars(statement).all()]
+
+    def list_for_business(
+        self,
+        business_id: BusinessId,
+        *,
+        due_after: datetime | None,
+        due_before: datetime | None,
+        rule_version_id: RuleVersionId | None,
+        limit: int,
+    ) -> Sequence[Obligation]:
+        statement = (
+            select(ObligationRow)
+            .where(ObligationRow.business_id == business_id.value)
+            .order_by(
+                ObligationRow.due_at.asc().nulls_last(),
+                ObligationRow.period_start.asc().nulls_last(),
+                ObligationRow.created_at,
+                ObligationRow.id,
+            )
+            .limit(limit)
+        )
+        if due_after is not None:
+            statement = statement.where(ObligationRow.due_at >= due_after)
+        if due_before is not None:
+            statement = statement.where(ObligationRow.due_at < due_before)
+        if rule_version_id is not None:
+            statement = statement.where(ObligationRow.rule_version_id == rule_version_id.value)
         return [_to_obligation(row) for row in self._session.scalars(statement).all()]
 
     def add(self, obligation: Obligation) -> None:

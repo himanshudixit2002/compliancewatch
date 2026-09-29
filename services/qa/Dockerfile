@@ -35,6 +35,9 @@ COPY --from=builder --chown=app:app /app/.venv /app/.venv
 # Alembic needs the scripts at runtime (pre-sync migration job: alembic -c alembic.ini upgrade head)
 COPY --from=builder --chown=app:app /app/services/qa/alembic.ini /app/alembic.ini
 COPY --from=builder --chown=app:app /app/services/qa/migrations /app/migrations
+# The plan and answer prompts, read when the app starts and by the readiness check.
+COPY --from=builder --chown=app:app /app/services/qa/prompts /app/prompts
+ENV CW_QA_PROMPTS_DIR=/app/prompts
 USER app
 EXPOSE 8000
 CMD ["uvicorn", "qa.main:app", "--host", "0.0.0.0", "--port", "8000"]

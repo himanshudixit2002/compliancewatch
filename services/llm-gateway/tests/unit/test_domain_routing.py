@@ -49,11 +49,13 @@ EXPECTED = {
         timeout_seconds=15.0,
     ),
     Feature.SMOKE: Route(Feature.SMOKE, "fake/echo", timeout_seconds=5.0),
+    Feature.RETRIEVAL: Route(Feature.RETRIEVAL, "voyage/voyage-3.5-lite", timeout_seconds=15.0),
 }
 
 
-def test_the_five_default_routes() -> None:
+def test_the_six_default_routes() -> None:
     assert dict(DEFAULT_ROUTES) == EXPECTED
+    assert DEFAULT_ROUTES[Feature.RETRIEVAL].models == ("voyage/voyage-3.5-lite",)
     assert all(route.source == "default" for route in DEFAULT_ROUTES.values())
     assert all(route.sort is None for f, route in DEFAULT_ROUTES.items() if f is not Feature.QA)
     assert DEFAULT_ROUTES[Feature.SMOKE].models == ("fake/echo",)
@@ -211,3 +213,21 @@ def test_routing_table_invariants() -> None:
 def test_model_ids_are_bounded_for_the_ledger() -> None:
     with pytest.raises(InvariantViolationError, match="at most 120"):
         RoutingTable.default().with_overrides({"smoke": "fake/" + "m" * 130})
+
+
+def test_an_embedding_route_takes_no_fallback() -> None:
+    message = "the retrieval route takes no fallback"
+    with pytest.raises(InvariantViolationError, match=message):
+        Route(Feature.RETRIEVAL, "voyage/voyage-3.5-lite", "voyage/voyage-3.5")
+    with pytest.raises(InvariantViolationError, match=message):
+        RoutingTable.default().with_overrides(
+            {"retrieval": "voyage/voyage-3.5-lite,voyage/voyage-3.5"}
+        )
+    table = RoutingTable.default().with_overrides({"retrieval": "voyage/voyage-3.5"})
+    retrieval = table[Feature.RETRIEVAL]
+    assert (retrieval.primary, retrieval.fallback, retrieval.source) == (
+        "voyage/voyage-3.5",
+        None,
+        "override",
+    )
+    assert retrieval.timeout_seconds == 15.0

@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from domain_kernel.ids import ClauseId, DocumentId, EntityId, derive_id
+from domain_kernel.ids import ClauseId, DocumentId, EntityId, RuleVersionId, derive_id
 from domain_kernel.knowledge import EntityType, RelationKind
 
 
@@ -48,3 +48,8 @@ def rule_relation_id_for(
         to_ref,
         str(clause_id),
     ).value
+
+
+def citation_id_for(rule_version_id: RuleVersionId, clause_id: ClauseId, quote: str) -> UUID:
+    """One citation per version, clause and quote: adding the same citation again is a no-op."""
+    return derive_id(EntityId, "citation", str(rule_version_id), str(clause_id), quote).value

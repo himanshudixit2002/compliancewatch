@@ -1,7 +1,7 @@
 # Relation golden set
 
-Expected relations per document for the relation stage (`extraction.rule_relations`, KAG
-phase 2, ADR-017). A case names the extraction case that holds the document's clauses, the
+Expected relations per document for the relation stage (`extraction.rule_relations`,
+ADR-017). A case names the extraction case that holds the document's clauses, the
 document's own number, and the relations an analyst expects:
 
 ```yaml
@@ -24,3 +24,10 @@ compares candidates with the label on (relation, target type, target name). Ever
 a draft until an analyst reviews it; the CI gates run on the scripted and fake providers only,
 and the nightly relation numbers are reported, not gated, until at least five cases are
 reviewed.
+
+Three draft cases so far: 01/2026 (the GSTR-3B extension for March 2026), 17/2025 (the
+extensions for September 2025 and the July to September 2025 quarter) and 10/2025 (the amendment
+of 02/2017-Central Tax). The two 17/2025 relations stage with the validator flag
+`target_not_in_evidence`: the form is named in the lead-in clause en.p4, not in the list items
+en.p5 and en.p6 that carry the periods and the date; their quotes and dates check. The KAG
+world (`evals/golden/qa/kag/world.yaml`) approves these relations from its rule versions.

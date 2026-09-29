@@ -1,0 +1,27 @@
+case_id: mr-out-of-domain-fssai
+category: must_refuse
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: none
+question: When do I need to renew my FSSAI food business licence?
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: not_covered
+  facts: []
+  must_not_mention: []
+  citations: []
+scripted:
+  plan:
+    as_of: null
+    steps: []
+  answer:
+    covered: true
+    answer: The licence is renewed every year.
+    citations:
+    - clause: C13
+      quote: the licence is renewed every year
+refusal_reason: out_of_domain
+notes: Food safety licensing is not GST.

@@ -1,0 +1,54 @@
+case_id: sh-10-2025-last-amended
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "According to notification 10/2025-Central Tax, which notification had last amended notification 02/2017-Central Tax?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: entity
+    type: notification
+    value: 27/2024-Central Tax
+    support:
+      document: n10_2025
+      clause_ref: en.p13
+      quote: notification No. 27/2024-Central Tax
+  - kind: date
+    value: 2024-11-25
+    support:
+      document: n10_2025
+      clause_ref: en.p13
+      quote: dated the 25th November 2024
+  must_not_mention: []
+  citations:
+  - document: n10_2025
+    clause_ref: en.p13
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: find_entity
+      entity_type: notification
+      name: 02/2017-Central Tax
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "Its note says notification No. 02/2017-Central Tax was last amended by notification No. 27/2024-Central Tax, published vide number G.S.R. 729(E) dated 25 November 2024."
+    citations:
+    - document: n10_2025
+      clause_ref: en.p13
+      quote: "was last amended by notification No. 27/2024-Central Tax, published in the Gazette of India, Extraordinary, vide number G.S.R. 729(E), dated the 25th November 2024"
+refusal_reason: null
+notes: Reached through the clauses that mention 02/2017-Central Tax.

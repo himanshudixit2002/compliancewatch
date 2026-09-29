@@ -6,6 +6,7 @@ import pytest
 from domain_kernel.errors import PROBLEM_TYPE_PREFIX, DomainError
 from llm_gateway.domain.errors import (
     BudgetExceededError,
+    FeatureMismatchError,
     ProviderResponseError,
     ProviderUnavailableError,
     UnknownFeatureError,
@@ -18,6 +19,7 @@ ERRORS: list[tuple[type[DomainError], str, str]] = [
     (ProviderResponseError, "llm-provider-response-invalid", "LLM provider response invalid"),
     (UnknownPromptError, "llm-prompt-unregistered", "LLM prompt not registered"),
     (UnknownFeatureError, "llm-feature-unknown", "LLM feature unknown"),
+    (FeatureMismatchError, "llm-feature-mismatch", "LLM feature mismatch"),
 ]
 
 
