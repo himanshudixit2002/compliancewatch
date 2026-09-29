@@ -4,8 +4,10 @@ Part of the ComplianceWatch monorepo. Health routes, alembic wiring, regulator d
 clauses with a write and read API, the knowledge schema with entity alignment, the entity review
 queue and relation candidates with their review API, the rule tables with the seed calendar, and
 a read API over rule versions, entities, relations and clauses for the Q&A service, a hybrid
-clause search index (full text and pgvector), and the citation, review and publish flow with its
-rule events written through the transactional outbox (behind `CW_RULEBOOK_PUBLISH_ENABLED`).
+clause search index (full text and pgvector) whose hits say when their rule is out of force, and
+the citation, review and publish flow (analyst actions behind their own review token, separate
+from the pipeline's write token) with its rule events written through the transactional outbox
+(behind `CW_RULEBOOK_PUBLISH_ENABLED`).
 Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architecture Reference 3.2, 5.2 and 6.2; ADR-017 and ADR-018.
 
 - **Owns:** Rules, RuleVersions, Documents, Clauses, Citations, embeddings; versioning, supersession graph, hybrid search index, as-of queries;

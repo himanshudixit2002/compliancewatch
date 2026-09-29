@@ -139,6 +139,10 @@ text. The spec is
 - **Eval tags**: every model call carries metadata `question_id` (the request's `x-request-id`),
   `stage` (`plan` or `answer`), `attempt` (`1` or `2`) and `layer`, so the eval harness can
   script each call per case.
+- **Evals**: `make eval` asks the KAG golden set (`evals/golden/qa/kag`) with the layer on and
+  off. With it on, a case whose labels plan steps counts only when the KAG layer decides it, and
+  a scripted answer is served only when the evidence in its prompt writes every date the case
+  expects (`evals/harness/README.md`; the numbers are in ADR-017, Evaluation).
 
 ## How to run
 

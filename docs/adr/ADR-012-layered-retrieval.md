@@ -71,9 +71,12 @@ The qa service (`POST /v1/qa/ask`) runs the layers in this order: structured, th
 when the flag targets the tenant, then hybrid search. Against the four layers of the Decision:
 
 1. **Structured: shipped.** Two phrasings only, "when is my `<form>` due" and "what is due this
-   (or next) month", answered from the business's obligations with the rule version's verified
-   citations, each checked again against its clause. No model call. Any other question passes
-   on; this layer never refuses.
+   (or next) month", answered from the business's obligations of rule versions in force on the
+   question's date, with the rule version's verified citations, each checked again against its
+   clause. No model call. It passes the question on when a version in force extends the chosen
+   obligation's deadline (`extends_deadline`, for its period when the relation names one),
+   because the obligation's own due date may not have moved yet: the obligation service does
+   not consume the rule events. Any other question passes on too; this layer never refuses.
 2. **Hybrid RAG: shipped.** The rulebook's `POST /search`: an English `tsvector` leg (the terms
    of `plainto_tsquery` joined by OR, ranked by `ts_rank_cd`, so not BM25) and a pgvector HNSW
    cosine leg over `clause_embedding`, each drawing a pool of 40 for `k=8`, fused by reciprocal
@@ -105,10 +108,12 @@ is the proof, and `CW_LLM_EMBEDDING_DIMENSIONS_PARAM` exists for a model without
 CI embeds with the gateway's fake `fake/hash-ngram-512`, which is lexical, not semantic, so CI
 numbers say nothing about vector quality.
 
-The scripted CI run of the KAG golden set (ADR-017, Evaluation; commit `614df20`) gives these
+The scripted CI run of the KAG golden set (ADR-017, Evaluation; commit `9ee75e9`) gives these
 layer shares: with the KAG layer on, structured 0.05, KAG 0.77, hybrid 0.18; with it off,
-structured 0.05 and hybrid 0.95. The hybrid baseline scores grounded-answer rate 0.870,
-citation correctness 1.000 and refusal accuracy 1.000 on the 56 draft cases. The gate for that
-run is refusal accuracy and answer safety at 1.0 for hybrid, which it meets. Context recall and
+structured 0.05 and hybrid 0.95. The hybrid baseline scores grounded-answer rate 0.804,
+citation correctness 1.000 and refusal accuracy 1.000 on the 56 draft cases. A scripted answer
+now counts for it only when every date the case expects is in the hybrid evidence, so a due date
+that only the business's obligations give no longer counts. The gate for that run is refusal
+accuracy and answer safety at 1.0 for hybrid, which it meets. Context recall and
 precision are not measured yet (the harness does not compute them), and no real model has
 answered these cases.

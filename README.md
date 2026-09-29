@@ -9,8 +9,9 @@
 > rule relations, citations, rules and versions with the seed calendar of thirteen standing GST
 > obligations pending analyst review), the rulebook's read API over rule versions, entities,
 > relations and clauses, its hybrid clause search index (English full text and pgvector
-> embeddings fused by reciprocal rank) and its citation, review and publish flow behind a flag
-> (rule events through the outbox, a daily transition sweep, an alert on the entity review
+> embeddings fused by reciprocal rank) and its citation, review and publish flow (analyst
+> actions behind their own review token, edits only while a version is a draft, publishing behind
+> a flag, rule events through the outbox, a daily transition sweep, an alert on the entity review
 > queue), KAG-style knowledge extraction behind a flag (a mention
 > grammar for notifications, sections, rules, forms, codes, rates, amounts and states; alignment
 > to canonical entities with an analyst review queue; relation proposals through a registered
@@ -18,8 +19,9 @@
 > (obligations per period, deadline changes, withdrawals, row-level security by tenant, events
 > through the outbox) with a read route by business and due window, the qa service (answers in
 > three layers: structured answers from obligations, a KAG plan and solve over the rulebook
-> behind a per-tenant flag, hybrid clause search; every quote checked against its clause or the
-> answer is "not covered"), the profile service's business hierarchy (entity, registration, location;
+> behind a per-tenant flag, hybrid clause search that drops clauses whose rule is out of force;
+> every quote checked against its clause or the answer is "not covered"), the profile service's
+> business hierarchy (entity, registration, location;
 > attribute values per node and financial year; snapshots for the engine; one-question onboarding;
 > review tasks) behind the second committed OpenAPI spec,
 > the LLM gateway skeleton (routing, prompt registry, cost ledger,
@@ -305,4 +307,4 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - The obligation service's consumer of the rule events (`rule.deadline_changed`, `rule.withdrawn`, `rule.superseded`): published changes reach the outbox but do not yet move or close any obligation
 - In qa: the fourth, agentic layer of ADR-012 and a reranker; a router so single-hop questions skip the planner (with the KAG flag on, every question past the structured layer costs a planner call)
 - The applicability engine's API (qa's solver evaluates rule predicates with the kernel until it exists)
-- Full text for ADR-009 to ADR-011; the identity service itself (ADR-014 decides Supabase Auth for the MVP; nothing is created until the maintainer opens the project)
+- Full text for ADR-009 to ADR-011; the identity service itself (ADR-014 decides Supabase Auth for the MVP; nothing is created until the maintainer opens the project). Until it exists the rulebook's review token is a shared secret and the approver ids in review and publish requests are asserted by the caller (ADR-018)
