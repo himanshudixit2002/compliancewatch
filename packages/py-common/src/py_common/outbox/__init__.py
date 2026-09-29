@@ -10,6 +10,9 @@ consume them once.
   ``max_attempts``; ``python -m py_common.outbox`` runs it for one service schema.
 - ``consumer``: ``IdempotentConsumer`` processes each event id once per consumer group and
   dead-letters what its handler cannot process.
+- ``sync``: ``SyncProcessedStore`` and ``sync_handler`` run a handler written against a sync
+  connection in the consumer's transaction, on a thread of its own; ``run_consumer`` runs one
+  consumer group until a stop event.
 """
 
 from py_common.outbox.consumer import ConsumerConfig, IdempotentConsumer, InboundRecord, Outcome
@@ -33,6 +36,13 @@ from py_common.outbox.store import (
     ProcessedStore,
     UnitOfWork,
 )
+from py_common.outbox.sync import (
+    SyncHandler,
+    SyncProcessedStore,
+    SyncUnit,
+    run_consumer,
+    sync_handler,
+)
 from py_common.outbox.writer import OutboxRecord, OutboxWriter
 
 __all__ = [
@@ -54,6 +64,9 @@ __all__ = [
     "ProcessedStore",
     "RelayConfig",
     "RelayStats",
+    "SyncHandler",
+    "SyncProcessedStore",
+    "SyncUnit",
     "UnitOfWork",
     "backoff_seconds",
     "create_outbox_table",
@@ -62,4 +75,6 @@ __all__ = [
     "drop_processed_event_table",
     "outbox_event",
     "processed_event",
+    "run_consumer",
+    "sync_handler",
 ]

@@ -58,6 +58,20 @@
       ]
     },
     {
+      "name": "notification.email",
+      "type": "bool",
+      "default": false,
+      "owner": "core-product",
+      "description": "Wires the SMTP email channel in the notification service (CW_SMTP_HOST, CW_EMAIL_FROM and the SMTP credentials). Off, every email send fails with that reason and the fallback to email goes nowhere.",
+      "removal": "Removed when the in-region SMTP or SES sending domain is verified and email has run in production for 30 days. After that the channel is wired whenever CW_SMTP_HOST is set.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_EMAIL_ENABLED",
+      "services": [
+        "notification"
+      ]
+    },
+    {
       "name": "notification.whatsapp",
       "type": "bool",
       "default": false,

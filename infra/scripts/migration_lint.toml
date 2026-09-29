@@ -55,3 +55,37 @@ number before any tenant owns it, so there is no tenant_id to isolate by. Only i
 service-token routes read or write it, and a trigger keeps it append-only (migration 0002 of
 identity).
 """
+
+[[exemptions]]
+table = "notification.channel_preference"
+reason = """
+Consent per channel and normalised address, recorded before any tenant links the address: an
+opt-out typed on WhatsApp must be honoured for every tenant, so there is no tenant_id to isolate
+by. It also holds when the address last wrote to us (migration 0001 of notification).
+"""
+
+[[exemptions]]
+table = "notification.suppression"
+reason = """
+Addresses closed by a permanent bounce, a complaint or support, keyed by channel and address: a
+closed address holds for every tenant that sends to it, so there is no tenant_id (migration 0001
+of notification).
+"""
+
+[[exemptions]]
+table = "notification.address_directory"
+reason = """
+Routes a normalised address to the tenants and recipients that registered it, for inbound messages
+and receipts that name only the address, and lists the tenants the retention sweep visits one
+tenant unit at a time. It holds ids and addresses, no message content (migration 0001 of
+notification).
+"""
+
+[[exemptions]]
+table = "notification.work_index"
+reason = """
+The dispatch queue across tenants: the dispatcher claims due entries with FOR UPDATE SKIP LOCKED
+before it knows their tenant, then handles each in a unit of work of the entry's tenant, and
+receipts find their tenant by the provider's message id. It holds ids and times, no message
+content (migration 0001 of notification).
+"""

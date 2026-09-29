@@ -158,6 +158,7 @@ const NOTIFICATIONS_LIST = servicesTrack(
   "GET",
   "/v1/notification/notifications",
 );
+const NOTIFICATIONS = uses("notification", "GET", "/v1/notification/notifications");
 const BUDGET_ALARMS = servicesTrack("WP27", "eval", "GET", "/v1/eval/budget-alarms");
 const QA_COVERAGE = servicesTrack("WP28", "eval", "GET", "/v1/eval/qa-coverage");
 const REVIEW_STATS = kagTrack("rulebook", "GET", "/v1/rulebook/review/stats");
@@ -750,9 +751,9 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [],
+    uses: [NOTIFICATIONS],
     awaits: [NOTIFICATIONS_LIST],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "9, F9",
     nav: { group: "business", order: 8 },
@@ -907,14 +908,19 @@ const SCREEN_LIST = [
     section: "owner",
     roles: TENANT_ADMINS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [],
+    uses: [
+      uses("notification", "GET", "/v1/notification/recipients"),
+      uses("notification", "PUT", "/v1/notification/recipients/{recipient_id}"),
+      uses("notification", "GET", "/v1/notification/recipients/{recipient_id}"),
+      uses("notification", "DELETE", "/v1/notification/recipients/{recipient_id}"),
+    ],
     awaits: [
       servicesTrack("WP13", "notification", "GET", "/v1/notification/recipients"),
       servicesTrack("WP13", "notification", "PUT", "/v1/notification/recipients/{recipient_id}"),
       servicesTrack("WP13", "notification", "GET", "/v1/notification/recipients/{recipient_id}"),
       servicesTrack("WP13", "notification", "DELETE", "/v1/notification/recipients/{recipient_id}"),
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "9, F9",
     parent: "owner.settings.notifications",
@@ -1393,7 +1399,10 @@ const SCREEN_LIST = [
     section: "admin",
     roles: ["analyst", "admin"],
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [
+      NOTIFICATIONS,
+      uses("notification", "POST", "/v1/notification/notifications/{notification_id}/resend"),
+    ],
     awaits: [
       NOTIFICATIONS_LIST,
       servicesTrack(
@@ -1403,7 +1412,7 @@ const SCREEN_LIST = [
         "/v1/notification/notifications/{notification_id}/resend",
       ),
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15; 9",
     nav: { group: "operations", order: 4 },
@@ -1417,7 +1426,7 @@ const SCREEN_LIST = [
     section: "admin",
     roles: ["analyst", "admin"],
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [uses("notification", "GET", "/v1/notification/notifications/{notification_id}")],
     awaits: [
       servicesTrack(
         "WP13",
@@ -1426,7 +1435,7 @@ const SCREEN_LIST = [
         "/v1/notification/notifications/{notification_id}",
       ),
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15",
     parent: "admin.notifications",

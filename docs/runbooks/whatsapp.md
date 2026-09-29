@@ -13,8 +13,16 @@ channel, preferences, templates, Python).
    **verify token** and paste the **app secret**. The bot checks both
    (`WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`). Subscribe to the `messages` field.
 3. Submit the message templates in `services/notification/src/notification/domain/templates.py`
-   (`meta_name` values) for approval under the utility category; set their `status` in code
-   to `submitted`, then `approved`, as Meta answers. Reminders cannot leave until approval.
+   (`meta_name` values) for approval under the utility category: `cw_obligation_due_soon_*`,
+   `cw_obligation_created_*`, `cw_change_card_*`, `cw_obligation_closed_*`,
+   `cw_obligation_deadline_extended_*`, `cw_obligation_corrected_*`,
+   `cw_obligation_withdrawn_*`, `cw_batch_summary_*`, `cw_daily_digest_*` and `cw_ca_digest_*`,
+   each in English (`_en`) and Hindi (`_hi`). The Hindi copy needs an analyst's review first;
+   decide whether the pilot needs it at all. Set each template's `status` in code to
+   `submitted`, then `approved`, as Meta answers. Until a template is approved, its message
+   goes out only to a number that wrote to the business in the last 24 hours (see
+   [the 24-hour window](#delivery-statuses-and-the-24-hour-window)); to anyone else it fails at
+   once and falls back to email.
 4. Flip the flags: bot `WHATSAPP_SEND_ENABLED=true` with `WHATSAPP_PHONE_NUMBER_ID` and
    `WHATSAPP_ACCESS_TOKEN`; notification service `CW_WHATSAPP_ENABLED=true` with
    `CW_WHATSAPP_PHONE_NUMBER_ID` and `CW_WHATSAPP_ACCESS_TOKEN`. Until then the bot logs the
@@ -25,6 +33,11 @@ channel, preferences, templates, Python).
    (`docs/legal/README.md`) and identity runs in the deployed profile: set the same secret as
    `CW_IDENTITY_CHANNEL_TOKEN` on identity and `IDENTITY_SERVICE_TOKEN` on the bot, point
    `IDENTITY_API_URL` at identity, and set `WHATSAPP_CONSENT_RECORDING_ENABLED=true` on the bot.
+7. Delivery statuses: generate one shared secret and set it as `CW_NOTIFICATION_BOT_TOKEN` on
+   the notification service and `NOTIFICATION_BOT_TOKEN` on the bot, with the bot's
+   `NOTIFICATION_API_URL` pointing at notification. Without it the bot forwards nothing and
+   warns once at start: notification then never sees a message delivered or read, and treats
+   every number as outside the 24-hour window.
 
 ## Consent recording (`WHATSAPP_CONSENT_RECORDING_ENABLED`)
 
@@ -72,22 +85,52 @@ token never verifies, by design).
    `updated_at`; an opt-out is honoured from that moment.
 2. Check the bot log for the inbound STOP: was it delivered, and did the preference call
    succeed (a failed PUT throws and Meta retries the delivery)?
-3. Check the sent log for the dedupe key of the message; the send use case refuses
-   `not_opted_in` before rendering.
+3. Find the message: `GET /v1/notification/notifications?business_id=<id>` (with the tenant's
+   `x-tenant-id`) lists the business's notifications with the address, state and `sent_at`.
+   Consent is checked when a notification is queued and again when it goes out, so one sent
+   before the opt-out's `updated_at` was allowed; one sent after it is a bug to report to core
+   product.
 4. Reply to the person from the business number with the opt-out confirmation and record a
    support opt-out (`source: support`).
 
 ## Reminders are late or not sent
 
-- `deferred` outcomes mean quiet hours (default 21:00 to 08:00 IST); the scheduler retries at
-  `scheduled_for`.
+- `deferred` outcomes mean quiet hours (default 21:00 to 08:00 IST); the notification stays
+  queued and the service's dispatcher sends it at `scheduled_for`.
+- Batching and digests delay on purpose: a notification waits up to
+  `CW_NOTIFICATION_BATCH_WINDOW_SECONDS` (300) for others to the same person, and a recipient
+  with a daily digest, or anyone at a CA firm, hears at `CW_NOTIFICATION_DIGEST_AT` (09:00 IST).
+- Nothing is dispatched at all: the notification worker (`python -m notification.worker`) is
+  not running; its log says `notification.dispatched` for every run that sent something.
 - `failed` with "channel disabled": the flag is off (see the manual steps).
+- `failed` with "outside the 24-hour customer service window": the number has not written to
+  the business in the last day and the template is not approved yet (manual step 3). The
+  email fallback goes at once when the recipient has an open email address.
 - `failed` with a Graph API status: 401 means an expired token, 400 with error 131047 means
   the 24-hour window closed and a template is required, 131026 means the number is not on
-  WhatsApp, 130429 means rate limits. The retry policy is three attempts; after that the
-  obligation stays visible in the web app and the email channel is the fallback once wired.
+  WhatsApp, 130429 means rate limits. The service retries after 60 and 300 seconds; after the
+  third failure it queues the fallback on the recipient's next open address (email, with
+  `CW_EMAIL_ENABLED`), and the obligation stays visible in the web app.
+  [notification-delivery.md](notification-delivery.md) has the queries and the alerts.
 - A drop in Meta's quality rating limits the number of business-initiated conversations;
   the dashboard shows it. Too many opt-outs or blocks lower it: check the template wording.
+
+## Delivery statuses and the 24-hour window
+
+The bot forwards every webhook delivery's statuses and the times numbers wrote to the business
+to `POST /v1/notification/receipts/whatsapp` before it handles any message. A number that wrote
+in the last 24 hours gets free text; anyone else only an approved template.
+
+- **The bot answers 500 to Meta** and its log says `... not forwarded to notification, so
+  nothing was handled: Error: receipts: <status>`. `401`: the two tokens differ (manual step
+  7). `503`: notification has no `CW_NOTIFICATION_BOT_TOKEN`. A connection error: notification
+  is down. Meta delivers the webhook again with backoff, and no reply goes out until the
+  forward succeeds, so a short outage loses nothing.
+- **Statuses counted as `unknown`** (`notification_receipts_total{outcome="unknown"}`) are the
+  bot's own replies, which notification did not send; that is expected.
+- **A status arrived but the notification did not move**: a status only moves a notification
+  forward (sent, delivered, read), so a late `delivered` after `read` changes nothing and is
+  counted `unchanged`.
 
 ## Templates rejected
 

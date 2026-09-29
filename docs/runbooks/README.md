@@ -15,10 +15,11 @@ Flat; one markdown file per alert or operational procedure.
 - [api-slo-burn.md](api-slo-burn.md): the availability and latency SLO alerts on the product APIs.
 - [backup-restore.md](backup-restore.md): what holds state, dev backups, the quarterly restore drill.
 - [entity-review-queue.md](entity-review-queue.md): mentions waiting too long or piling up in the rulebook's entity review queue (EntityReviewQueueStale, EntityReviewQueueBacklog).
+- [notification-delivery.md](notification-delivery.md): notifications that fail for good, are delivered twice or wait past the 15-minute objective, and email bounces and complaints (NotificationDeliveryFailures, NotificationDuplicateSent, NotificationPendingOverdue, NotificationEmailBounces), the delivery metrics and receipts, the SES feedback subscription, and where a failure's cause shows.
 - [outbox-relay.md](outbox-relay.md): events not reaching Kafka, `dead` outbox rows (OutboxDeadLetters, OutboxBacklog), replay by hand, pruning.
 - [rulebook-data-quality.md](rulebook-data-quality.md): the nightly data-quality checks over rule versions, citations and relations, what each violation means, and the read-only role for a deployed database.
 - [temporal-worker.md](temporal-worker.md): a task queue with no worker (TemporalWorkerDown), no spans reaching the collector (TelemetrySilent), a worker that will not start, a task queue backing up, a failed workflow.
-- [whatsapp.md](whatsapp.md): the Meta manual steps, consent recording and its flag, webhook signature failures, opt-outs that must be honoured, late or failed reminders, template rejections.
+- [whatsapp.md](whatsapp.md): the Meta manual steps, consent recording and its flag, webhook signature failures, opt-outs that must be honoured, late or failed reminders, delivery statuses the bot forwards and the 24-hour window, template rejections.
 
 ## Alerts
 
@@ -31,6 +32,9 @@ change to a tested rule, comes with its cases there. A `runbook_url` may name a 
 runbook (`temporal-worker.md#temporalworkerdown`), and the check then also requires a heading
 with that anchor.
 Wired now: `ApiErrorBurnRate`, `ApiLatencyBurnRate`, `OutboxDeadLetters`, `OutboxBacklog`,
-`TemporalWorkerDown`, `TelemetrySilent`, `EntityReviewQueueStale`, `EntityReviewQueueBacklog`. Pending their metrics: source freshness (two missed cadences),
-decision-flip rate after a deploy, notification failure rate and duplicates, LLM spend past
-80% of the monthly budget before the 20th.
+`TemporalWorkerDown`, `TelemetrySilent`, `EntityReviewQueueStale`, `EntityReviewQueueBacklog`,
+`NotificationDeliveryFailures`, `NotificationDuplicateSent`, `NotificationPendingOverdue`,
+`NotificationEmailBounces`.
+Pending their metrics: source
+freshness (two missed cadences), decision-flip rate after a deploy, LLM spend past 80% of the
+monthly budget before the 20th.

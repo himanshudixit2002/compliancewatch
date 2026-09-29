@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.ts";
-import { consentLedger } from "./clients.ts";
+import {
+  HttpReceiptsClient,
+  NoReceiptsForwarding,
+  consentLedger,
+  receiptsClient,
+} from "./clients.ts";
 import type { ConsentLedger, Deps } from "./conversation.ts";
+import type { ReceiptsBody, ReceiptsClient } from "./receipts.ts";
 import { signBody } from "./signature.ts";
 
 const SECRET = "test-app-secret";
@@ -67,13 +73,28 @@ function inbound(text: string, from = "919876543210") {
   };
 }
 
-function build(requireSignature = true, ledger?: ConsentLedger) {
+function build(requireSignature = true, ledger?: ConsentLedger, receipts?: ReceiptsClient) {
   const fakes = fakeDeps(ledger);
   const app = createApp(
     { verifyToken: "verify-me", appSecret: SECRET, requireSignature },
     fakes.deps,
+    receipts,
   );
   return { app, ...fakes };
+}
+
+/** A receipts client that records each forward in the shared call log, or fails when asked. */
+function forwarding(calls?: string[]) {
+  const forwarded: ReceiptsBody[] = [];
+  const state = { failing: false };
+  const client: ReceiptsClient = {
+    async forward(body) {
+      calls?.push(`forward ${body.statuses.length} ${body.inbound.length}`);
+      if (state.failing) throw new Error("receipts: 503");
+      forwarded.push(body);
+    },
+  };
+  return { client, forwarded, state };
 }
 
 async function post(app: ReturnType<typeof createApp>, payload: unknown, sign = true) {
@@ -229,6 +250,118 @@ describe("whatsapp-bot http surface", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(optIns.get("919876543210")).toBe(false);
     expect(lines[0]).toContain("would record the opt-in of ********3210");
+  });
+
+  it("statuses and inbound times are forwarded with the token before anything is handled", async () => {
+    const fakes = fakeDeps();
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      fakes.calls.push("forward");
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const app = createApp(
+      { verifyToken: "verify-me", appSecret: SECRET, requireSignature: true },
+      fakes.deps,
+      new HttpReceiptsClient("http://notification.test", "bot-token", fetchImpl),
+    );
+    const payload = inbound("START");
+    payload.entry[0]?.changes[0]?.value.messages.push({
+      from: "919876543210",
+      id: "wamid.2",
+      timestamp: "1790000000",
+      type: "text",
+      text: { body: "HELP" },
+    });
+    const withStatus = {
+      ...payload,
+      entry: [
+        ...payload.entry,
+        {
+          id: "2",
+          changes: [
+            {
+              field: "messages",
+              value: {
+                statuses: [
+                  {
+                    id: "wamid.sent",
+                    recipient_id: "919876543210",
+                    status: "failed",
+                    timestamp: "1790000000",
+                    errors: [{ code: 131026, title: "Message undeliverable" }],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const res = await post(app, withStatus);
+    expect(res.status).toBe(200);
+    expect(fakes.calls[0]).toBe("forward");
+    expect(fakes.calls.slice(1, 3)).toEqual(["consent true START wamid.1", "preference true"]);
+    expect(fakes.sent).toHaveLength(2);
+    expect(requests[0]?.url).toBe("http://notification.test/v1/notification/receipts/whatsapp");
+    expect(requests[0]?.init?.headers).toEqual({
+      "content-type": "application/json",
+      "x-cw-bot-token": "bot-token",
+    });
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
+      statuses: [
+        {
+          provider_message_id: "wamid.sent",
+          status: "failed",
+          at: "2026-09-21T14:13:20.000Z",
+          error_code: 131026,
+          error_title: "Message undeliverable",
+        },
+      ],
+      inbound: [{ address: "919876543210", at: "2026-09-21T14:13:20.000Z" }],
+    });
+  });
+
+  it("a forward that fails answers 500 and sends no reply", async () => {
+    const calls: string[] = [];
+    const receipts = forwarding(calls);
+    receipts.state.failing = true;
+    const { app, sent, logged, optIns } = build(true, undefined, receipts.client);
+    const res = await post(app, inbound("START"));
+    expect(res.status).toBe(500);
+    expect(calls).toEqual(["forward 0 1"]);
+    expect(sent).toHaveLength(0);
+    expect(optIns.size).toBe(0);
+    expect(logged[0]).toContain("not forwarded to notification, so nothing was handled");
+    receipts.state.failing = false;
+    const again = await post(app, inbound("START"));
+    expect(again.status).toBe(200);
+    expect(sent).toHaveLength(1);
+    expect(receipts.forwarded[0]?.inbound).toEqual([
+      { address: "919876543210", at: "1970-01-01T00:00:01.000Z" },
+    ]);
+  });
+
+  it("a delivery with nothing to report makes no forward", async () => {
+    const receipts = forwarding();
+    const { app } = build(true, undefined, receipts.client);
+    const res = await post(app, { object: "whatsapp_business_account", entry: [] });
+    expect(res.status).toBe(200);
+    expect(receipts.forwarded).toEqual([]);
+  });
+
+  it("without the bot token forwarding is skipped with a warning", async () => {
+    const warnings: string[] = [];
+    const fetchImpl = vi.fn(async () => new Response("{}")) as unknown as typeof fetch;
+    const receipts = receiptsClient({}, fetchImpl, (line) => warnings.push(line));
+    expect(receipts).toBeInstanceOf(NoReceiptsForwarding);
+    expect(warnings[0]).toContain("NOTIFICATION_BOT_TOKEN is not set");
+    const { app, sent } = build(true, undefined, receipts);
+    const res = await post(app, inbound("HELP"));
+    expect(res.status).toBe(200);
+    expect(sent).toHaveLength(1);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(receiptsClient({ NOTIFICATION_BOT_TOKEN: "t" })).toBeInstanceOf(HttpReceiptsClient);
   });
 
   it("signature can be switched off for local runs", async () => {

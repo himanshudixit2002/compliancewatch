@@ -4,7 +4,7 @@
   "title": "notification.failed",
   "description": "A channel refused or failed to deliver a notification; will_retry says whether another attempt or channel follows. Producer: notification. Consumers: obligation (audit).",
   "type": "object",
-  "x-version": "1.0.0",
+  "x-version": "1.0.1",
   "x-producer": "notification",
   "x-tenant-scoped": true,
   "properties": {
@@ -31,7 +31,7 @@
     "dedupe_key": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",
-      "description": "Idempotency key over rule version, business and channel."
+      "description": "Idempotency key of the occasion: one change card per rule version, business, recipient and channel; one reminder per obligation, reminder number, recipient and channel; one closure per obligation, recipient and channel; one reschedule per obligation, new due date, recipient and channel; one manual send per obligation, business, channel and template; one fallback per notification and fallback channel."
     },
     "error": {
       "type": "string",

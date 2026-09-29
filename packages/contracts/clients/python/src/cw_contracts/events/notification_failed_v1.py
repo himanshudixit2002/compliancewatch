@@ -33,7 +33,7 @@ class NotificationFailedV1(BaseModel):
     dedupe_key: Annotated[
         str,
         Field(
-            description="Idempotency key over rule version, business and channel.",
+            description="Idempotency key of the occasion: one change card per rule version, business, recipient and channel; one reminder per obligation, reminder number, recipient and channel; one closure per obligation, recipient and channel; one reschedule per obligation, new due date, recipient and channel; one manual send per obligation, business, channel and template; one fallback per notification and fallback channel.",
             pattern="^[0-9a-f]{64}$",
         ),
     ]

@@ -1,5 +1,6 @@
 import type { ConsentLedger, PreferencesClient, QaClient, Sender } from "./conversation.ts";
 import { maskNumber } from "./conversation.ts";
+import type { ReceiptsBody, ReceiptsClient } from "./receipts.ts";
 import type { Language } from "./replies.ts";
 
 type Fetch = typeof fetch;
@@ -7,6 +8,7 @@ type Fetch = typeof fetch;
 /** The version line of docs/legal/whatsapp-consent.md: the notice a keyword opt-in agrees to. */
 export const DEFAULT_NOTICE_VERSION = "whatsapp-consent 0.1-draft";
 export const DEFAULT_IDENTITY_API_URL = "http://localhost:8001";
+export const DEFAULT_NOTIFICATION_API_URL = "http://localhost:8006";
 
 /** The notification service's preference endpoints; recipient is the E.164 number. */
 export class HttpPreferencesClient implements PreferencesClient {
@@ -38,6 +40,64 @@ export class HttpPreferencesClient implements PreferencesClient {
     const body = (await res.json()) as { opted_in?: unknown };
     return body.opted_in === true;
   }
+}
+
+/**
+ * The notification service's receipt route: the statuses and inbound times of a webhook delivery,
+ * with the bot's shared token (NOTIFICATION_BOT_TOKEN here, CW_NOTIFICATION_BOT_TOKEN there).
+ */
+export class HttpReceiptsClient implements ReceiptsClient {
+  private readonly baseUrl: string;
+  private readonly token: string;
+  private readonly fetchImpl: Fetch;
+
+  constructor(baseUrl: string, token: string, fetchImpl: Fetch = fetch) {
+    this.baseUrl = baseUrl;
+    this.token = token;
+    this.fetchImpl = fetchImpl;
+  }
+
+  async forward(body: ReceiptsBody): Promise<void> {
+    const res = await this.fetchImpl(
+      `${this.baseUrl.replace(/\/$/, "")}/v1/notification/receipts/whatsapp`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-cw-bot-token": this.token },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) throw new Error(`receipts: ${res.status}`);
+  }
+}
+
+/** What runs without NOTIFICATION_BOT_TOKEN: nothing is forwarded. */
+export class NoReceiptsForwarding implements ReceiptsClient {
+  async forward(): Promise<void> {}
+}
+
+/**
+ * The receipts client the environment allows. Without NOTIFICATION_BOT_TOKEN the bot still runs,
+ * but warns once that delivery statuses and inbound times stay with it: the notification
+ * service then never sees a message delivered, and treats every number as outside the 24-hour
+ * window.
+ */
+export function receiptsClient(
+  env: Readonly<Record<string, string | undefined>>,
+  fetchImpl: Fetch = fetch,
+  warn: (line: string) => void = console.warn,
+): ReceiptsClient {
+  const token = env.NOTIFICATION_BOT_TOKEN ?? "";
+  if (token === "") {
+    warn(
+      "whatsapp-bot: NOTIFICATION_BOT_TOKEN is not set; delivery statuses and inbound times are not forwarded to notification",
+    );
+    return new NoReceiptsForwarding();
+  }
+  return new HttpReceiptsClient(
+    env.NOTIFICATION_API_URL || DEFAULT_NOTIFICATION_API_URL,
+    token,
+    fetchImpl,
+  );
 }
 
 /**

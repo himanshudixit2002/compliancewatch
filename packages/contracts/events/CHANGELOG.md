@@ -6,6 +6,8 @@ patch. Every line names the topic and its version.
 
 ## 2026-09-29
 
+- notification.sent 1.0.1: the dedupe_key description names the key of each occasion
+- notification.failed 1.0.1: the dedupe_key description names the key of each occasion
 - rule.withdrawn 1.0.0: first version
 - rule.deadline_changed 1.0.0: first version
 

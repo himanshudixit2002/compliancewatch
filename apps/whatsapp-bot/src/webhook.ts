@@ -16,6 +16,10 @@ export interface StatusUpdate {
   readonly recipient: string;
   readonly status: string;
   readonly timestamp: string;
+  /** The code of the first error Meta gave a failed status; null when it gave none. */
+  readonly errorCode: number | null;
+  /** The title of that error ("Message undeliverable"); empty when it gave none. */
+  readonly errorTitle: string;
 }
 
 export interface ParsedWebhook {
@@ -62,11 +66,15 @@ export function parseWebhook(payload: unknown): ParsedWebhook {
       }
       for (const status of Array.isArray(value.statuses) ? value.statuses : []) {
         if (!isObject(status)) continue;
+        const errors = Array.isArray(status.errors) ? status.errors : [];
+        const error: Json = isObject(errors[0]) ? errors[0] : {};
         statuses.push({
           id: str(status.id),
           recipient: str(status.recipient_id),
           status: str(status.status),
           timestamp: str(status.timestamp),
+          errorCode: Number.isInteger(error.code) ? (error.code as number) : null,
+          errorTitle: str(error.title),
         });
       }
     }
