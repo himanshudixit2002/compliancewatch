@@ -53,11 +53,13 @@ describe("ConsentChange", () => {
     renderChange(action, true);
     await user.click(screen.getByRole("button", { name: "Withdraw: Example reminders" }));
     await user.click(await screen.findByRole("button", { name: "Withdraw" }));
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe("Example recorded message."),
+    );
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(sent?.get("purpose")).toBe("whatsapp_reminders");
     expect(sent?.get("change")).toBe("withdraw");
     expect(sent?.get("whatsapp_number")).toBe("+910000000000");
-    expect(screen.getByRole("status").textContent).toBe("Example recorded message.");
   });
 
   it("moves focus to the status line once the page shows the flipped change", async () => {
@@ -74,6 +76,7 @@ describe("ConsentChange", () => {
     const { rerender } = render(<ConsentChange {...props} change="give" />);
     await user.click(screen.getByRole("button", { name: "Give consent: Example analytics" }));
     await user.click(await screen.findByRole("button", { name: "Agree" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Example recorded."));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     rerender(<ConsentChange {...props} change="withdraw" />);
     expect(screen.getByRole("button", { name: "Withdraw: Example analytics" })).toBeDefined();

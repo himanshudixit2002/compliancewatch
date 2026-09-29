@@ -22,6 +22,19 @@ import type { ActionState } from "@/shared/lib/action-state";
 
 export type PreferenceAction = (state: ActionState, formData: FormData) => Promise<ActionState>;
 
+interface Values {
+  optedIn: boolean;
+  language: string;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+}
+
+interface Attempt {
+  state: ActionState;
+  submitted: Values;
+  count: number;
+}
+
 export interface PreferenceFormProps {
   action: PreferenceAction;
   channel: string;
@@ -34,7 +47,7 @@ export interface PreferenceFormProps {
     quietStart: string;
     quietEnd: string;
   };
-  values: { optedIn: boolean; language: string; quietHoursStart: string; quietHoursEnd: string };
+  values: Values;
   languages: readonly { value: string; label: string }[];
   /** False while the user's consent to the channel's reminders is not on file. */
   consentGiven: boolean;
@@ -60,7 +73,29 @@ export function PreferenceForm({
   consentsHref,
 }: PreferenceFormProps) {
   const id = useId();
-  const [state, formAction, pending] = useActionState(action, idleAction());
+  // React resets a form after its action: a refused form comes back with what was submitted,
+  // a saved one with the values the page now reads from the service.
+  const [attempt, formAction, pending] = useActionState(
+    async (previous: Attempt, formData: FormData): Promise<Attempt> => {
+      const read = (name: string) => {
+        const value = formData.get(name);
+        return typeof value === "string" ? value : "";
+      };
+      return {
+        state: await action(previous.state, formData),
+        submitted: {
+          optedIn: read(fields.optedIn) === "in",
+          language: read(fields.language),
+          quietHoursStart: read(fields.quietStart),
+          quietHoursEnd: read(fields.quietEnd),
+        },
+        count: previous.count + 1,
+      };
+    },
+    { state: idleAction(), submitted: values, count: 0 },
+  );
+  const { state } = attempt;
+  const shown = state.status === "error" ? attempt.submitted : values;
   const problem = state.status === "error" ? state.problem : undefined;
   const formErrors = state.status === "error" ? (state.formErrors ?? []) : [];
   const optedError = fieldErrorOf(state, fields.optedIn);
@@ -87,69 +122,71 @@ export function PreferenceForm({
           </Link>
         </Banner>
       )}
-      <div className="grid gap-2">
-        <span id={optedLabel} className="text-sm font-medium text-fg">
-          {t("notifications.optedInLegend")}
-        </span>
-        <RadioGroup
-          id={opted.control}
-          name={fields.optedIn}
-          defaultValue={values.optedIn ? "in" : "out"}
-          aria-labelledby={optedLabel}
-          aria-describedby={describedBy(optedError ? opted.error : undefined)}
-          aria-invalid={optedError ? true : undefined}
-          className="gap-2"
-        >
-          {(["in", "out"] as const).map((value) => (
-            <div key={value} className="flex items-center gap-2">
-              <RadioGroupItem id={`${opted.control}-${value}`} value={value} />
-              <Label htmlFor={`${opted.control}-${value}`}>
-                {value === "in" ? t("notifications.choice.in") : t("notifications.choice.out")}
-              </Label>
-            </div>
-          ))}
-        </RadioGroup>
-        {optedError ? (
-          <p id={opted.error} data-slot="field-error" className="text-sm text-danger">
-            {optedError}
-          </p>
-        ) : null}
-      </div>
-      <Field
-        id={`${id}-language`}
-        label={t("notifications.language")}
-        description={t("notifications.languageHelp")}
-        error={fieldErrorOf(state, fields.language)}
-        className="max-w-xs"
-      >
-        <Select name={fields.language} defaultValue={values.language} options={languages} />
-      </Field>
-      <fieldset className="grid gap-2" aria-describedby={`${id}-quiet-help`}>
-        <legend className="mb-1 text-sm font-medium text-fg">
-          {t("notifications.quietLegend")}
-        </legend>
-        <p id={`${id}-quiet-help`} className="text-sm text-fg-muted">
-          {t("notifications.quietHelp")}
-        </p>
-        <div className="grid max-w-md gap-3 sm:grid-cols-2">
-          <Field
-            id={`${id}-quiet-start`}
-            label={t("notifications.quietStart")}
-            error={fieldErrorOf(state, fields.quietStart)}
-            required
+      <div key={attempt.count} className="contents">
+        <div className="grid gap-2">
+          <span id={optedLabel} className="text-sm font-medium text-fg">
+            {t("notifications.optedInLegend")}
+          </span>
+          <RadioGroup
+            id={opted.control}
+            name={fields.optedIn}
+            defaultValue={shown.optedIn ? "in" : "out"}
+            aria-labelledby={optedLabel}
+            aria-describedby={describedBy(optedError ? opted.error : undefined)}
+            aria-invalid={optedError ? true : undefined}
+            className="gap-2"
           >
-            <Input name={fields.quietStart} type="time" defaultValue={values.quietHoursStart} />
-          </Field>
-          <Field
-            id={`${id}-quiet-end`}
-            label={t("notifications.quietEnd")}
-            error={fieldErrorOf(state, fields.quietEnd)}
-            required
-          >
-            <Input name={fields.quietEnd} type="time" defaultValue={values.quietHoursEnd} />
-          </Field>
+            {(["in", "out"] as const).map((value) => (
+              <div key={value} className="flex items-center gap-2">
+                <RadioGroupItem id={`${opted.control}-${value}`} value={value} />
+                <Label htmlFor={`${opted.control}-${value}`}>
+                  {value === "in" ? t("notifications.choice.in") : t("notifications.choice.out")}
+                </Label>
+              </div>
+            ))}
+          </RadioGroup>
+          {optedError ? (
+            <p id={opted.error} data-slot="field-error" className="text-sm text-danger">
+              {optedError}
+            </p>
+          ) : null}
         </div>
-      </fieldset>
+        <Field
+          id={`${id}-language`}
+          label={t("notifications.language")}
+          description={t("notifications.languageHelp")}
+          error={fieldErrorOf(state, fields.language)}
+          className="max-w-xs"
+        >
+          <Select name={fields.language} defaultValue={shown.language} options={languages} />
+        </Field>
+        <fieldset className="grid gap-2" aria-describedby={`${id}-quiet-help`}>
+          <legend className="mb-1 text-sm font-medium text-fg">
+            {t("notifications.quietLegend")}
+          </legend>
+          <p id={`${id}-quiet-help`} className="text-sm text-fg-muted">
+            {t("notifications.quietHelp")}
+          </p>
+          <div className="grid max-w-md gap-3 sm:grid-cols-2">
+            <Field
+              id={`${id}-quiet-start`}
+              label={t("notifications.quietStart")}
+              error={fieldErrorOf(state, fields.quietStart)}
+              required
+            >
+              <Input name={fields.quietStart} type="time" defaultValue={shown.quietHoursStart} />
+            </Field>
+            <Field
+              id={`${id}-quiet-end`}
+              label={t("notifications.quietEnd")}
+              error={fieldErrorOf(state, fields.quietEnd)}
+              required
+            >
+              <Input name={fields.quietEnd} type="time" defaultValue={shown.quietHoursEnd} />
+            </Field>
+          </div>
+        </fieldset>
+      </div>
       {problem ? (
         <ErrorState
           title={problem.title}

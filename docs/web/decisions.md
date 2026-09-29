@@ -438,3 +438,16 @@ forms check their values on the server only (the browser's own email check is of
 messages are the same in every browser. Consequence: a number opted in by writing START on
 WhatsApp shows as opted in here even without the web consent, and the page says the consent is
 not on file.
+
+## D-033: Billing shows the provider's answer, including "not connected"
+
+2026-09-29. The billing page shows the plans exactly as the identity service states them and
+starts a subscription with its provider; the web app decides no price and never takes payment
+details. The stack the e2e suite runs on has no billing provider (`CW_BILLING_PROVIDER=none`), so
+subscribing answers 503 `billing-disabled`; the form shows that as its own honest state ("billing
+is not connected yet", nothing started, nothing charged, the request id) rather than as a
+failure, and the spec asserts it. `make web-stack BILLING=memory` starts identity with the memory
+provider for a manual demo, and `make web-e2e BILLING=memory` tells the spec to expect a started
+subscription instead; the unit tests cover both answers. A form that refuses a submit puts the
+submitted values back (React resets a form after its action), on this page and on the
+notifications page.

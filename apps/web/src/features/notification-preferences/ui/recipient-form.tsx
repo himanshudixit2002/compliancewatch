@@ -8,6 +8,12 @@ import type { ActionState } from "@/shared/lib/action-state";
 
 export type RecipientAction = (state: ActionState, formData: FormData) => Promise<ActionState>;
 
+interface Attempt {
+  state: ActionState;
+  typed: string;
+  count: number;
+}
+
 export interface RecipientFormProps {
   action: RecipientAction;
   channel: string;
@@ -35,7 +41,19 @@ export function RecipientForm({
   fields,
 }: RecipientFormProps) {
   const id = useId();
-  const [state, formAction, pending] = useActionState(action, idleAction());
+  // React resets a form after its action; a refused value is put back so it can be corrected.
+  const [attempt, formAction, pending] = useActionState(
+    async (previous: Attempt, formData: FormData): Promise<Attempt> => {
+      const typed = formData.get(fields.recipient);
+      return {
+        state: await action(previous.state, formData),
+        typed: typeof typed === "string" ? typed : "",
+        count: previous.count + 1,
+      };
+    },
+    { state: idleAction(), typed: "", count: 0 },
+  );
+  const { state } = attempt;
   const problem = state.status === "error" ? state.problem : undefined;
   const formErrors = state.status === "error" ? (state.formErrors ?? []) : [];
   return (
@@ -56,6 +74,8 @@ export function RecipientForm({
         required
       >
         <Input
+          key={attempt.count}
+          defaultValue={state.status === "error" ? attempt.typed : ""}
           name={fields.recipient}
           type={inputType}
           inputMode={inputType}

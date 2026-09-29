@@ -33,6 +33,10 @@ describe("RecipientForm", () => {
     await waitFor(() => expect(screen.getByText("Example field error.")).toBeDefined());
     expect(sent?.get("channel")).toBe("whatsapp");
     expect(sent?.get("recipient")).toBe("+910000000000");
+    // The refused number is put back so it can be corrected.
+    expect((screen.getByLabelText(/WhatsApp number/) as HTMLInputElement).value).toBe(
+      "+910000000000",
+    );
     expect(await runAxe(container)).toHaveNoViolations();
   });
 

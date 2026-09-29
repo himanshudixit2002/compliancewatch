@@ -96,4 +96,22 @@ describe("PreferenceForm", () => {
     expect(screen.getByRole("radiogroup").getAttribute("aria-invalid")).toBe("true");
     expect(screen.getByText("Example time error.")).toBeDefined();
   });
+
+  it("puts the submitted values back after a refusal", async () => {
+    const user = userEvent.setup();
+    renderForm({
+      action: vi.fn(async (): Promise<ActionState> => ({
+        status: "error",
+        formErrors: ["Example form error."],
+      })),
+    });
+    await user.selectOptions(screen.getByLabelText(/Language/), "en");
+    await user.click(screen.getByRole("radio", { name: "Do not send reminders" }));
+    await user.click(screen.getByRole("button", { name: "Save the preference" }));
+    await screen.findByText("Example form error.");
+    expect((screen.getByLabelText(/Language/) as HTMLSelectElement).value).toBe("en");
+    expect(
+      screen.getByRole("radio", { name: "Do not send reminders" }).getAttribute("aria-checked"),
+    ).toBe("true");
+  });
 });

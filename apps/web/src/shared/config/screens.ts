@@ -859,12 +859,14 @@ const SCREEN_LIST = [
       uses("identity", "GET", "/v1/identity/billing/plans"),
       uses("identity", "POST", "/v1/identity/billing/subscriptions"),
     ],
-    awaits: [],
-    status: "ready",
-    e2e: [],
+    awaits: [servicesTrack("WP25", "identity", "GET", "/v1/identity/entitlements")],
+    status: "live",
+    e2e: ["owner-settings-billing.spec.ts", "a11y.spec.ts"],
     guideRef: "6; G32, G33",
     nav: { group: "settings", order: 3 },
     parent: "owner.settings",
+    notes:
+      "The plans as the identity service states them and starting a subscription with its billing provider; with no provider connected the page says billing is not connected. Plan usage and entitlement limits arrive with the route it awaits.",
   },
   {
     id: "owner.settings.notification-recipients",

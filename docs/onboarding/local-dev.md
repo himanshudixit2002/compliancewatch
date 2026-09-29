@@ -194,8 +194,8 @@ builds the app and runs Playwright against `next start` on `WEB_PORT`.
 The services behind the web app come up together with `make web-stack`: every service on
 `SERVICE_PORT_BASE`+1 to +10 in the `SERVICES` order (8001 to 8010 with the example `.env`;
 `SERVICE_PORT_BASE=9200` in a second copy), on memory stores so no container is needed, with
-the profile's static GSTIN lookup, the billing provider `none`, the publish flow and the KAG
-layer off, and the rulebook write token from `.env` or the placeholder `local-write-token`;
+the profile's static GSTIN lookup, the billing provider `none` (`BILLING=memory` for a
+subscription demo), the publish flow and the KAG layer off, and the rulebook write token from `.env` or the placeholder `local-write-token`;
 pids and logs land in `var/web-stack`. `make web-stack-wait` waits for every `/health`,
 `make web-stack-logs SERVICE=identity` tails one log, `make web-stack-down` stops them all
 (memory stores forget their rows then; `STORE=postgres` runs the stores on the compose

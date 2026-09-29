@@ -441,6 +441,24 @@ does not check it; opting out and changing the language or the window need no co
 email section says that the service's email channel is not connected on `main`: a preference is
 recorded all the same.
 
+## Billing
+
+`features/billing/gateway.ts` reads the plans (`GET /v1/identity/billing/plans`, the same for
+every tenant, cached for five minutes under `identity:plans`) and starts a subscription (`POST
+/v1/identity/billing/subscriptions` with `plan_key`, `email` and `name`, x-tenant-id from the
+session) over the typed identity client. `/settings/billing` (owner and CA admin) shows each
+plan as the service states it: the name, the amount in paise formatted as rupees with its
+period, and the service's description, which is where a zero price is called a placeholder; the
+page decides no price. `startSubscription` checks the billing capability again, checks the form
+against the plans the service offers, and returns the service's answer: the subscription (plan,
+status, the provider's id, the start in IST, and a link to the provider's checkout page when it
+returned an http or https one), or the problem. The route takes no Idempotency-Key, so the
+submit button is disabled while one is pending. With no billing provider connected the identity
+service answers 503 `billing-disabled`, and the form says in plain words that billing is not
+connected, nothing was started and nothing was charged, with the request id; `make web-stack`
+starts identity that way unless it is given `BILLING=memory`. No card or bank detail is a field:
+the provider's checkout page takes payment.
+
 ## Idempotency and natural keys
 
 Two routes on `main` require an `Idempotency-Key`: the business API's `POST /v1/businesses`
