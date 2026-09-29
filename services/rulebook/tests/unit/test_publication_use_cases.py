@@ -452,6 +452,34 @@ def test_a_future_replacement_waits_for_the_sweep(
     assert [d.action for d in store.decisions(old)] == [DecisionAction.WITHDRAWN]
 
 
+@pytest.mark.parametrize(
+    ("effective_to", "cut"), [(None, JULY), (date(2026, 6, 1), date(2026, 6, 1))]
+)
+def test_the_sweep_cuts_a_moved_version_at_its_replacement(
+    store: MemoryKnowledgeStore,
+    flow: Flow,
+    clause: ClauseId,
+    effective_to: date | None,
+    cut: date,
+) -> None:
+    _, old = store.add_rule(
+        "gstr3b_monthly",
+        status=RuleVersionStatus.PUBLISHED,
+        effective_from=APRIL,
+        effective_to=effective_to,
+    )
+    new = store.add_version(
+        "gstr3b_monthly", status=RuleVersionStatus.PUBLISHED, effective_from=JULY
+    )
+    relate(store, new, RelationKind.SUPERSEDES, old, clause)
+    (moved,) = flow.sweep.run().transitions
+    assert moved.target_id == old
+    with store() as uow:
+        superseded = uow.rule_versions.get(old)
+    assert superseded is not None
+    assert (superseded.status, superseded.effective_to) == (RuleVersionStatus.SUPERSEDED, cut)
+
+
 def test_extends_deadline_announces_the_new_date(
     store: MemoryKnowledgeStore, flow: Flow, clause: ClauseId
 ) -> None:

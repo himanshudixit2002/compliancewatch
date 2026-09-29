@@ -3,6 +3,7 @@ approved rule relation, plus the checks migration 0005 adds and the review queue
 Needs Docker."""
 
 import hashlib
+import threading
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, date, datetime
@@ -37,7 +38,7 @@ from rulebook.application.review import (
 )
 from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.documents import StoredDocument
-from rulebook.domain.errors import SupersessionCycleError
+from rulebook.domain.errors import RuleVersionNotEditableError, SupersessionCycleError
 from rulebook.domain.relations import CandidateRejectReason, CandidateStatus
 from rulebook.domain.review import (
     EntityRejectReason,
@@ -285,6 +286,67 @@ def test_supersession_cycles_and_rejections(factory: PostgresKnowledgeUnitOfWork
         three, CandidateRejectReason.OUT_OF_SCOPE, decided_by="a"
     )
     assert rejected.status is CandidateStatus.REJECTED
+
+
+def test_a_relation_approval_waits_for_a_submission_of_its_version(
+    factory: PostgresKnowledgeUnitOfWorkFactory,
+) -> None:
+    first, second = rule(factory, "race_a", "draft"), rule(factory, "race_b", "draft")
+    supersedes = replace(
+        EXTENDS,
+        relation=RelationKind.SUPERSEDES,
+        target_type=EntityType.NOTIFICATION,
+        target_name="04/2026-central tax",
+        target_clause_ref="en.p1",
+        target_span_start=0,
+        target_span_end=38,
+        evidence_clause_ref="en.p1",
+        evidence_quote="NOTIFICATION No. 01/2026",
+        rule_key=None,
+        period_label=None,
+        new_due_on=None,
+    )
+    (candidate_id,) = (
+        StageRelationCandidates(factory)
+        .run(DOC, RelationSubmission("p@1", "m", "ok", (supersedes,)))
+        .candidate_ids
+    )
+    outcome: list[Exception | None] = []
+
+    def approve() -> None:
+        try:
+            ApproveRelationCandidate(factory, clock).run(
+                candidate_id, first, second, decided_by="a"
+            )
+        except RuleVersionNotEditableError as exc:
+            outcome.append(exc)
+        else:
+            outcome.append(None)
+
+    approval = threading.Thread(target=approve)
+    with factory.engine.connect() as submission, submission.begin():
+        submission.execute(
+            text("SELECT id FROM rule_version WHERE id = :id FOR UPDATE"), {"id": first.value}
+        )
+        submission.execute(
+            text(
+                "UPDATE rule_version SET status = 'in_review', submitted_at = clock_timestamp()"
+                " WHERE id = :id"
+            ),
+            {"id": first.value},
+        )
+        approval.start()
+        approval.join(timeout=1)
+        assert approval.is_alive(), "the approval waits for the submission to commit"
+    approval.join(timeout=30)
+    (refused,) = outcome
+    assert isinstance(refused, RuleVersionNotEditableError)
+    with factory.engine.connect() as connection:
+        related: int = connection.execute(
+            text("SELECT count(*) FROM rule_relation WHERE candidate_id = :id"),
+            {"id": candidate_id},
+        ).scalar_one()
+    assert related == 0
 
 
 def test_decisions_must_be_complete_in_the_table(

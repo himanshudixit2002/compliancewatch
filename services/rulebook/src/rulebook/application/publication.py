@@ -482,7 +482,9 @@ class WithdrawVersion:
 class ApplyDueTransitions:
     """The daily sweep: every published version whose replacement has taken effect by ``as_of``
     (today in India by default) moves to superseded or withdrawn, with its event. Running it
-    twice moves nothing twice. It never runs ahead of today."""
+    twice moves nothing twice. It never runs ahead of today. Publication has cut the moved
+    version's ``effective_to`` already; the sweep cuts it again to the replacement's start if it
+    ends later, so a moved version never overlaps its replacement."""
 
     def __init__(
         self,
@@ -514,7 +516,12 @@ class ApplyDueTransitions:
                 target = targets.get(transition.target_id)
                 if target is None or target.status is not RuleVersionStatus.PUBLISHED:
                     continue
-                uow.rule_versions.save_lifecycle(replace(target, status=transition.moves_to))
+                cut = transition.replacing_from
+                if target.effective_to is not None and target.effective_to < cut:
+                    cut = target.effective_to
+                uow.rule_versions.save_lifecycle(
+                    replace(target, status=transition.moves_to, effective_to=cut)
+                )
                 uow.rule_versions.record_decision(
                     _decision(
                         target,

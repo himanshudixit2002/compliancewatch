@@ -134,10 +134,11 @@ A version goes draft, in_review, approved, published (ADR-006): cite its clauses
 approve it (one approver; two different ones when `high_impact`), publish it. Citations and
 relations are added only while the version is a draft, so the round approves exactly what is
 published; to change them, return the version (under review or approved) to draft, which starts
-a new round. Every step is one
-transaction that locks the version, checks the move against the kernel's transition table and
-appends a row to `rule_version_decision`; the kernel's `InvalidTransitionError` is a 409. Days
-are days in India: "today" is the date in Asia/Kolkata when the step runs.
+a new round. Every step is one transaction that locks the version, checks the move against the
+kernel's transition table and appends a row to `rule_version_decision`; the kernel's
+`InvalidTransitionError` is a 409. Citing and approving a relation lock the version the same way
+before checking that it is a draft, so neither slips in beside a submission. Days are days in
+India: "today" is the date in Asia/Kolkata when the step runs.
 
 Publishing checks, in order (`rulebook.domain.publication.plan_publication`):
 
@@ -172,7 +173,8 @@ for good. A mistaken publication dated in the future is corrected by publishing 
 that corrects or supersedes it, not by withdrawing it before it takes effect.
 
 The sweep moves every published version whose replacement's `effective_from` has come, earliest
-replacement first, with its event and a decision naming the replacing version. It is idempotent:
+replacement first, with its event and a decision naming the replacing version, and cuts its
+`effective_to` to that date when it still ends later. It is idempotent:
 
 ```bash
 CW_RULEBOOK_PUBLISH_ENABLED=true CW_DATABASE_URL=... uv run --package compliancewatch-rulebook rulebook-transitions [--as-of YYYY-MM-DD]
