@@ -72,3 +72,30 @@ export function readLegalDocument(name: LegalDocName, dir: string = legalDir()):
 export function readLegalDocuments(dir: string = legalDir()): LegalDocument[] {
   return LEGAL_DOC_NAMES.map((name) => readLegalDocument(name, dir));
 }
+
+/** A document's heading and Version line without rendering it: what a consent records. */
+export interface LegalVersion {
+  name: LegalDocName;
+  title: string;
+  version: string;
+  isDraft: boolean;
+}
+
+/**
+ * Every published document's version, read from docs/legal on each call (three small files) so
+ * a page shows, and a consent records, the version the running build ships.
+ */
+export function readLegalVersions(dir: string = legalDir()): Record<LegalDocName, LegalVersion> {
+  const versions = {} as Record<LegalDocName, LegalVersion>;
+  for (const name of LEGAL_DOC_NAMES) {
+    const markdown = readFileSync(join(dir, `${name}.md`), "utf8");
+    const version = extractVersion(markdown);
+    versions[name] = {
+      name,
+      title: extractTitle(markdown),
+      version,
+      isDraft: version.endsWith("-draft"),
+    };
+  }
+  return versions;
+}

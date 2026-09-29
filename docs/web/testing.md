@@ -5,10 +5,10 @@ without a request scope: components, view models, mappers, config, helpers, serv
 called directly. The Playwright suite covers what unit tests cannot: the route files (a
 `page.tsx` is an async server component that needs a request), the shells with real
 navigation, the built app's headers and status codes, and page-level accessibility. Both levels
-run axe. No test uses a mock service, and no e2e test uses a mock of anything: no page on
-`main` calls a service, the suite signs in through the real sign-in form on the fake provider
-where a page needs a session, and the one test that needs the services (the seeded-tenant
-sign-in) runs against the real ones, started and seeded before the suite.
+run axe. No test uses a mock service, and no e2e test uses a mock of anything: the suite signs
+in through the real sign-in form on the fake provider where a page needs a session, and the
+pages that read a service read the real ones, started by `make web-stack` and seeded by `make
+web-seed` before the suite (`make web-e2e` points the app at the stack's ports).
 
 ## Unit tests
 
@@ -93,6 +93,7 @@ The specs on `main`:
 | `not-available.spec.ts`  | an admin tool's awaited routes and breadcrumbs, a parameterised tenant route through the catch-all, `/forbidden` for the wrong tenant kind, a planned tool's sentence and note, a ready tool's sentence and what it will use, real 404s with and without a session |
 | `forbidden.spec.ts`      | the page and its two links                                                                                                                                |
 | `health.spec.ts`         | the health JSON, the static security headers, no `x-powered-by`                                                                                            |
+| `owner-onboarding.spec.ts` | the consent step against identity and notification (needs the seed): a new owner of the seeded tenant sees the draft banner with the versions and the unticked boxes, is refused without the required boxes and with a malformed WhatsApp number (values kept, errors focused), agrees, lands on the business step, finds each record with its `<document>@<version>` on the step, and the number opted in on the notification service; a CA admin has no WhatsApp box; a compliance lead is sent to `/forbidden` |
 
 Every live page entry in the registry names its spec files in `e2e`, and `screens.test.ts`
 checks they exist. A spec is named after what it covers, not after the registry id. The
@@ -104,7 +105,11 @@ The seeded-tenant test in `sign-in.spec.ts` reads the file the seed writes
 `var/seed/last.json` at the repository root, the same default the app uses), picks "Use the
 last seeded tenant" on the form, signs in as an owner and finds that tenant id on `/account`.
 Without the file it is skipped, except on CI (`CI` set), where the job seeds first and a
-missing file fails the test instead.
+missing file fails the test instead. `owner-onboarding.spec.ts` follows the same rule, signs in
+as a new user of the seeded tenant (a fresh display name is a fresh user id, so no earlier
+run's consents are on file), and reads back what the page wrote with `serviceUrl(service)` in
+`fixtures.ts` (`CW_WEB_<SERVICE>_URL`, else `SERVICE_PORT_BASE` plus the service's position,
+as `make web-stack` assigns them).
 
 ## Running things
 

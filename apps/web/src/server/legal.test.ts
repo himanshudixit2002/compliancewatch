@@ -9,6 +9,7 @@ import {
   legalDir,
   readLegalDocument,
   readLegalDocuments,
+  readLegalVersions,
   renderLegalMarkdown,
 } from "./legal";
 
@@ -70,6 +71,20 @@ describe("docs/legal", () => {
       expect(doc.html, doc.name).toContain(`<h1>${doc.title}</h1>`);
     }
     expect(readLegalDocument("privacy-notice", legalDir(REPO_ROOT)).title).toBe("Privacy notice");
+  });
+
+  it("reads every published document's heading and version without rendering it", () => {
+    const versions = readLegalVersions(legalDir(REPO_ROOT));
+    const documents = readLegalDocuments(legalDir(REPO_ROOT));
+    expect(Object.keys(versions)).toEqual(LEGAL_DOC_NAMES);
+    for (const doc of documents) {
+      expect(versions[doc.name]).toEqual({
+        name: doc.name,
+        title: doc.title,
+        version: doc.version,
+        isDraft: doc.isDraft,
+      });
+    }
   });
 
   it("fails on a document that is not there", () => {

@@ -312,6 +312,29 @@ each value (this node, inherited from a named ancestor, or worked out by the ser
 `reviewTaskRows` and `onboardingProgress`. `AttributeControl` is the one place a control is
 chosen for an attribute type, and `AnswerButtons` submits the state.
 
+## Consents
+
+`features/consents/gateway.ts` reads a subject's consent states and history
+(`GET /v1/identity/consents?subject=`, uncached) and appends a record (`POST
+/v1/identity/consents`) over the typed identity client, and sets a reminder preference (`PUT
+/v1/notification/preferences/{channel}/{recipient}`) over the typed notification client. The
+consent step at `/onboarding` records, for the signed-in user (subject and `recorded_by` are the
+user id, `source` is `web_onboarding`), one row per ticked purpose that is not already granted
+at the current notice version, in the order they are asked: terms, privacy notice and profile
+processing (required), then WhatsApp reminders, email reminders and product analytics
+(optional). `notice_version` is `<document>@<Version line>` read from docs/legal at request time
+(`readLegalVersions()` in `server/legal.ts`): `terms-of-service@0.1-draft` for the terms,
+`privacy-notice@...` for the privacy notice, profile processing, email reminders and analytics,
+`whatsapp-consent@...` for WhatsApp reminders. The evidence is the checkbox sentence as shown;
+the WhatsApp sentence is the one `docs/legal/whatsapp-consent.md` publishes, and a unit test
+holds the two together. With the WhatsApp box ticked the action then opts the number in (`{
+opted_in: true, source: "web_onboarding" }`), keyed like the bot's opt-ins by the digits without
+the plus, as WhatsApp reports a number; the number travels in the form's POST body and the
+server's call, never in a URL the browser sees. Each POST stands alone, so a failure part-way
+leaves the earlier rows and the form says which purposes were recorded; submitting again
+records only the rest. A CA firm is not offered WhatsApp reminders (they are set per client
+business).
+
 ## Idempotency and natural keys
 
 Two routes on `main` require an `Idempotency-Key`: the business API's `POST /v1/businesses`

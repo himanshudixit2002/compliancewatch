@@ -36,6 +36,31 @@ export function seededTenantId(): string | null {
   return null;
 }
 
+const SERVICE_ORDER = [
+  "identity",
+  "profile",
+  "rulebook",
+  "applicability-engine",
+  "obligation",
+  "notification",
+  "qa",
+  "llm-gateway",
+  "eval",
+  "pipeline",
+] as const;
+
+/**
+ * Where a service of the running stack listens, for a spec that reads back what a page wrote:
+ * CW_WEB_<SERVICE>_URL when set, else SERVICE_PORT_BASE + its position in the Makefile's
+ * SERVICES order (8001-8010 by default), the same rule make web-stack and make web-e2e use.
+ */
+export function serviceUrl(service: (typeof SERVICE_ORDER)[number]): string {
+  const configured = process.env[`CW_WEB_${service.toUpperCase().replace(/-/g, "_")}_URL`]?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  const base = Number(process.env.SERVICE_PORT_BASE ?? 8000);
+  return `http://localhost:${base + SERVICE_ORDER.indexOf(service) + 1}`;
+}
+
 export interface ViolationSummary {
   id: string;
   impact: string;

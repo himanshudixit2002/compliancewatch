@@ -4,10 +4,11 @@ import { defineConfig, devices } from "@playwright/test";
  * Runs against `next start` on PORT (3000 unless set; the ui clone uses 3200). The server is
  * started with CW_WEB_ENV=test so the local-only pages exist, with the fake sign-in provider so
  * the specs can sign in through the form, and with a fixed session secret (32 bytes of "e2e",
- * not a secret: it only keys the cookies of this run). No page on `main` calls a service. The
- * one test that needs the services is the seeded-tenant sign-in: it runs once `make web-stack`,
- * `make web-stack-wait` and `make web-seed` have written var/seed/last.json (the CI job runs
- * them first and fails the test without that file; elsewhere it is skipped).
+ * not a secret: it only keys the cookies of this run). The pages that read a service call the
+ * ones `make web-stack` starts (`make web-e2e` points the app at their ports); the specs that
+ * need the services and the seeded tenant run once `make web-stack`, `make web-stack-wait` and
+ * `make web-seed` have written var/seed/last.json (the CI job runs them first and fails such a
+ * spec without that file; elsewhere it is skipped).
  */
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE_URL = `http://localhost:${PORT}`;

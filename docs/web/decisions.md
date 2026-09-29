@@ -333,3 +333,29 @@ that lets a person move past "Not sure" keeps its own list of what was skipped; 
 the entity node's id, and a registration is addressed by `nodeId` inside an answer. Because a feature may not import
 another, the onboarding steps that create and question a business are views of the business
 feature, next to the business pages, and the attribute controls live there too.
+
+## D-026: A consent's notice version names its document
+
+2026-09-29. `docs/legal/consent-record.md` asks every grant to carry the version of the notice
+the person saw, and the drafts in docs/legal all start at the same `Version:` value, so the bare
+value could not tell the terms from the privacy notice. The web app records
+`<document>@<Version line>` (`terms-of-service@0.1-draft`), read from the files at request time,
+with each purpose mapped to the document it refers to (`PURPOSE_DOCUMENT` in
+`features/consents/model/purposes.ts`). Consequences: a new Version line on a document makes the
+step ask again for the purposes that refer to it and nothing else; the value fits the service's
+40-character limit, which the model checks; the seed's demo consents, written with the bare
+version, do not count as current for a user of the web app, which is harmless because the
+seed's owner is not a user the fake sign-in can mint.
+
+## D-027: The e2e suite reads the services from the consent step on
+
+2026-09-29. D-011 and D-022 kept `make web-e2e` a build plus Playwright because no page called a
+service. The consent step at `/onboarding` reads and writes identity and notification, so its
+spec needs the stack and the seed, like the seeded-tenant sign-in: it is skipped locally without
+`var/seed/last.json` and fails on CI without it. `make web-e2e` now points the app at the stack
+(`CW_WEB_<SERVICE>_URL` from `SERVICE_PORT_BASE` and the Makefile's service order, unless the
+environment already names one), so a second working copy on 9201-9210 runs the suite without an
+`apps/web/.env.local`. Consequences: the local sequence is `make web-stack`, `make
+web-stack-wait`, `make web-seed`, `make web-e2e`, `make web-stack-down`; a page whose read fails
+still renders its h1 and the service's problem (`ServiceError` with a heading), so the page sweep
+reports an unreachable service as a failed read rather than a missing heading.

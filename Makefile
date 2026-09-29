@@ -510,10 +510,17 @@ web-seed: check-pnpm ## Seed the web-stack services with the demo tenant and a r
 web-e2e-install: check-pnpm ## Download Chromium for Playwright, once per machine (the package has no install script)
 	$(PNPM) --filter web e2e:install
 
-# No page on main calls a service, so the suite runs without the stack; the seeded-tenant sign-in
-# test is skipped until make web-stack, web-stack-wait and web-seed have run (CI runs all three).
-web-e2e: check-pnpm ## Build the web app and run Playwright with axe against next start on WEB_PORT (after make web-seed for the seeded-tenant test)
+# The suite runs against the services make web-stack starts (then make web-stack-wait and make
+# web-seed; CI runs all three first): the app is pointed at SERVICE_PORT_BASE+1..10, the stack's
+# ports, unless a CW_WEB_<SERVICE>_URL is already in the environment. Without the stack and the
+# seed, the specs that need them are skipped locally (and fail on CI).
+web-e2e: check-pnpm ## Build the web app and run Playwright with axe against next start on WEB_PORT and the web-stack services (after make web-stack-wait and make web-seed)
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	base=$${SERVICE_PORT_BASE:-8000}; i=0; \
+	for svc in $(SERVICES); do \
+	  i=$$((i+1)); var=CW_WEB_$$(echo "$$svc" | tr 'a-z-' 'A-Z_')_URL; \
+	  eval "[ -n \"\$${$$var:-}\" ] || export $$var=http://localhost:$$((base+i))"; \
+	done; \
 	$(PNPM) --filter web build && \
 	PORT=$${WEB_PORT:-3000} CW_WEB_ENV=test $(PNPM) --filter web e2e
 

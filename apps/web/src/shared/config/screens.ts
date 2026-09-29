@@ -85,6 +85,8 @@ const MEMBERS = TENANT_MEMBER_ROLES;
 const REGULATORY = REGULATORY_ROLES;
 const TENANT_ADMINS: readonly Role[] = ["owner", "ca_admin"];
 const CA: readonly Role[] = ["ca_admin", "ca_staff"];
+/** Who onboards a business: its owner and staff, or a CA firm's people for a client. */
+const ONBOARDING_ROLES: readonly Role[] = ["owner", "staff", "ca_admin", "ca_staff"];
 const BUSINESS_TENANTS: readonly TenantKind[] = ["business", "ca_firm"];
 
 const uses = (service: ServiceName, method: HttpMethod, path: string): RouteRef => ({
@@ -456,6 +458,43 @@ const SCREEN_LIST = [
     nav: { group: "business", order: 1 },
     notes:
       "Where every tenant role lands after signing in; the business API is on main and the list is built with the owner screens.",
+  },
+  {
+    id: "owner.onboarding",
+    kind: "page",
+    route: "/onboarding",
+    title: "Get started",
+    section: "owner",
+    roles: ONBOARDING_ROLES,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      uses("identity", "GET", "/v1/identity/consents"),
+      uses("identity", "POST", "/v1/identity/consents"),
+      uses("notification", "PUT", "/v1/notification/preferences/{channel}/{recipient}"),
+    ],
+    awaits: [],
+    status: "live",
+    e2e: ["owner-onboarding.spec.ts", "a11y.spec.ts"],
+    guideRef: "10, 12, 16; docs/legal/consent-record.md",
+    notes:
+      "The consent step: terms, privacy notice and profile processing required, reminders and analytics optional, each recorded with the notice version from docs/legal.",
+  },
+  {
+    id: "owner.onboarding.business",
+    kind: "page",
+    route: "/onboarding/business",
+    title: "Add a business",
+    section: "owner",
+    roles: ONBOARDING_ROLES,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [uses("profile", "POST", "/v1/businesses"), uses("profile", "GET", "/v1/ontology")],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "2 uc1, F6, 7; ADR-016",
+    parent: "owner.onboarding",
+    notes:
+      "Creates the business from its GSTIN, or its PAN alone, with an Idempotency-Key; the answer carries the pre-fill and the first onboarding question.",
   },
   {
     id: "owner.obligation",
