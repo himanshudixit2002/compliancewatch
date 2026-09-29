@@ -53,9 +53,11 @@ What the signed-in user agreed to, from `GET /v1/identity/consents?subject=<user
 The identity service does not return a user's own phone number or email address yet (`GET
 /v1/identity/me` is awaited), so the pages remember the recipients the user last named on this
 device in `cw_prefs_recipient`: an httpOnly cookie encrypted under the session key and bound to
-the user id (another user on the same browser reads it as empty), path `/settings`, 30 days,
-expired at sign-out. The consent step writes the WhatsApp number it opts in; the settings actions
-write a number or address they use; pages only read it. A preference is keyed by the recipient as
+the user id (another user on the same browser reads it as empty), path `/`, 30 days, expired at
+sign-out. The consent step writes the WhatsApp number it opts in; the settings actions write a
+number or address they use; pages only read it. The path is the whole site because the consent
+step posts to `/onboarding`: a cookie scoped to `/settings` would not reach it, and its write
+would replace a remembered address with the number alone. A preference is keyed by the recipient as
 the notification service keys it: a WhatsApp number as digits without the plus, an address in
 lower case.
 

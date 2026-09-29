@@ -72,12 +72,12 @@ describe("encryptRecipients and decryptRecipients", () => {
 });
 
 describe("the recipient cookie", () => {
-  it("is httpOnly, Lax, scoped to /settings for 30 days, and Secure outside local", () => {
+  it("is httpOnly, Lax, sent to the whole site for 30 days, and Secure outside local", () => {
     expect(recipientCookieOptions()).toEqual({
       httpOnly: true,
       sameSite: "lax",
       secure: true,
-      path: "/settings",
+      path: "/",
       maxAge: 30 * 24 * 60 * 60,
     });
     vi.stubEnv("CW_WEB_ENV", "local");
@@ -95,7 +95,7 @@ describe("the recipient cookie", () => {
     });
     expect(fakeCookies.written(RECIPIENT_COOKIE_NAME)?.options).toMatchObject({
       httpOnly: true,
-      path: "/settings",
+      path: "/",
     });
     expect(await readRememberedRecipients(OTHER_USER)).toEqual({});
   });
@@ -120,7 +120,7 @@ describe("the recipient cookie", () => {
     await forgetRecipient(USER, "whatsapp");
     const written = fakeCookies.written(RECIPIENT_COOKIE_NAME);
     expect(written?.value).toBe("");
-    expect(written?.options).toMatchObject({ maxAge: 0, path: "/settings" });
+    expect(written?.options).toMatchObject({ maxAge: 0, path: "/" });
     expect(await readRememberedRecipients(USER)).toEqual({});
   });
 });

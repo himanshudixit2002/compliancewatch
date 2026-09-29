@@ -13,15 +13,18 @@ import { getEnv, requireSessionSecret, type WebEnv } from "./env";
  * the settings pages remember them here instead of asking on every visit.
  *
  * The cookie `cw_prefs_recipient` is a JWE under the session key (the same `dir`/A256GCM as the
- * session), httpOnly, SameSite=Lax, Secure outside local, scoped to /settings and kept for 30
- * days. It carries the user id it belongs to, so after another user signs in on the same browser
- * it reads as empty. Values are the notification service's keys: a WhatsApp number as digits
- * without the plus, an email address lowercased. Pages read it; only server actions write it
- * (Next allows cookies().set in a Server Function or Route Handler, never during a render), and
- * signing out expires it.
+ * session), httpOnly, SameSite=Lax, Secure outside local, path / and kept for 30 days. The path
+ * is the whole site because the consent step, posted to /onboarding, writes it too: a browser
+ * sends a cookie only under its path, so under /settings the step would read nothing and its
+ * write would replace the cookie with its number alone, dropping a remembered address. It
+ * carries the user id it belongs to, so after another user signs in on the same browser it reads
+ * as empty. Values are the notification service's keys: a WhatsApp number as digits without the
+ * plus, an email address lowercased. Pages read it; only server actions write it (Next allows
+ * cookies().set in a Server Function or Route Handler, never during a render), and signing out
+ * expires it.
  */
 export const RECIPIENT_COOKIE_NAME = "cw_prefs_recipient";
-export const RECIPIENT_COOKIE_PATH = "/settings";
+export const RECIPIENT_COOKIE_PATH = "/";
 export const RECIPIENT_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
 const KIND = "cw-recipients";

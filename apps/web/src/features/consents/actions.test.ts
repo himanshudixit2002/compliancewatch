@@ -8,7 +8,7 @@ import type { SessionClaims } from "@/entities/session/types";
 import { resetEnvCache } from "@/server/env";
 import { resetFlagReader } from "@/server/flags";
 import { readLegalVersions } from "@/server/legal";
-import { readRememberedRecipients } from "@/server/remembered-recipients";
+import { readRememberedRecipients, rememberRecipient } from "@/server/remembered-recipients";
 import { encryptSession } from "@/server/session";
 import { OWNER_ID, grantedState, summaryDto } from "@/test/consent-fixture";
 import { fakeCookies } from "@/test/fake-cookies";
@@ -268,6 +268,26 @@ describe("recordConsents", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/onboarding");
     // The settings pages find the number again on this device.
     expect(await readRememberedRecipients(OWNER_ID)).toEqual({ whatsapp: "919800000000" });
+  });
+
+  it("keeps an address the notifications page remembered when it remembers the number", async () => {
+    // A browser sends a cookie only under its path, and the step posts to /onboarding.
+    fakeCookies.visit("/settings/notifications");
+    await rememberRecipient(OWNER_ID, "email", "owner@example.com");
+    fakeCookies.visit("/onboarding");
+    await signedInAs();
+    vi.stubGlobal("fetch", services().fetchImpl);
+    await expect(
+      recordConsents(
+        IDLE,
+        form({ ...REQUIRED, whatsapp_reminders: "on", whatsapp_number: NUMBER }),
+      ),
+    ).rejects.toMatchObject({ href: "/onboarding/business" });
+    fakeCookies.visit("/settings/notifications");
+    expect(await readRememberedRecipients(OWNER_ID)).toEqual({
+      whatsapp: "919800000000",
+      email: "owner@example.com",
+    });
   });
 
   it("names the required boxes left unticked and records nothing", async () => {

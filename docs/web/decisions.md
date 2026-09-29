@@ -420,12 +420,16 @@ settings page and quotes the sentence shown. Withdrawing WhatsApp reminders opts
 before the record is written, so a failure leaves reminders stopped rather than a withdrawal on
 file with reminders still going. The service does not return the user's own number or address
 yet, so the number used on the consent step or the settings pages is remembered on the device
-in an encrypted, httpOnly cookie bound to the user id (path `/settings`, 30 days, expired at
-sign-out); considered and rejected: asking for the number on every visit (a withdrawal would
-often leave the number opted in) and a hidden form field (it would put the number in the page
-for anyone to change). The settings index is registry-driven and sits in the account group so
-the header links to it; the settings pages share a header with breadcrumbs and tabs from the
-settings group, planned entries left to the index.
+in an encrypted, httpOnly cookie bound to the user id (path `/`, 30 days, expired at
+sign-out). The path is the whole site because the consent step posts to `/onboarding` and a
+browser sends a cookie only under its path: scoped to `/settings`, the step would read nothing
+and replace the cookie with its number alone, dropping a remembered address; not writing it from
+the consent step would lose the number the step opted in. Considered and rejected: asking for
+the number on every visit (a withdrawal would often leave the number opted in) and a hidden form
+field (it would put the number in the page for anyone to change). The settings index is
+registry-driven and sits in the account group so the header links to it; the settings pages
+share a header with breadcrumbs and tabs from the settings group, planned entries left to the
+index.
 
 ## D-032: The notifications page opts in only with the channel's consent on file
 

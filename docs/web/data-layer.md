@@ -431,11 +431,14 @@ and withdrawing still works.
 The identity service does not return a user's own phone or email yet (`GET /v1/identity/me` is
 awaited), so the settings pages remember the recipients a user last named on this device in
 `cw_prefs_recipient` (`server/remembered-recipients.ts`): a JWE under the session key,
-httpOnly, SameSite=Lax, Secure outside local, path `/settings`, 30 days, bound to the user id
+httpOnly, SameSite=Lax, Secure outside local, path `/`, 30 days, bound to the user id
 (another user on the same browser reads it as empty). It holds the notification service's keys
 (a WhatsApp number as digits without the plus, an address lowercased). The consent step writes
 it after opting a number in, the settings actions write it when they use a number, pages only
-read it, and `/sign-out` expires it with the session.
+read it, and `/sign-out` expires it with the session. The path is `/` rather than `/settings`
+because the consent step's action posts to `/onboarding`, where a `/settings` cookie is not
+sent: the step would read nothing and write back its number alone, dropping a remembered
+address.
 
 ## Notification preferences
 

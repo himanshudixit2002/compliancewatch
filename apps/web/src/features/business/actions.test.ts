@@ -438,9 +438,11 @@ describe("answerQuestion", () => {
 describe("revisitUnsure", () => {
   it("forgets the skip list and returns to the questions", async () => {
     await signedInAs();
+    // Where the questions step keeps it: the store drops a cookie only at its own path.
     fakeCookies.set(
       skipCookieName(ENTITY_ID),
       JSON.stringify([skipKey(ENTITY_ID, "example_count")]),
+      { path: "/onboarding" },
     );
     await expect(revisitUnsure(form({ business_id: ENTITY_ID }))).rejects.toThrow(
       `redirect /onboarding/${ENTITY_ID}/questions`,

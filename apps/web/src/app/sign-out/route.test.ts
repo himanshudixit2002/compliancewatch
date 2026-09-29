@@ -28,7 +28,7 @@ describe("POST /sign-out", () => {
     const cookies = response.headers.getSetCookie();
     expect(cookies).toHaveLength(2);
     expect(cookies[1]).toMatch(/^cw_prefs_recipient=;/);
-    expect(cookies[1]).toMatch(/Path=\/settings/);
+    expect(cookies[1]).toMatch(/Path=\/(;|$)/);
     expect(cookies[1]).toMatch(/Max-Age=0/i);
   });
 
