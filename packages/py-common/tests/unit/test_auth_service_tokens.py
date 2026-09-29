@@ -171,15 +171,42 @@ def test_an_unreachable_identity_is_surfaced_as_an_error() -> None:
         source.token()
 
 
-def test_a_failed_refresh_leaves_the_next_call_to_try_again() -> None:
+def test_a_failed_fetch_is_tried_again_after_a_few_seconds() -> None:
     identity, clock = _Identity(), _Clock()
     source = _source(identity, clock)
     source.token()
     clock.now += 600
     identity.answer = lambda: httpx2.Response(503)
-    with pytest.raises(ServiceTokenUnavailableError):
+    with pytest.raises(ServiceTokenUnavailableError, match="503"):
         source.token()
     identity.answer = None
+    clock.now += 4
+    with pytest.raises(ServiceTokenUnavailableError, match="next attempt is in 1 s"):
+        source.token()
+    assert len(identity.requests) == 2, "no call waits on identity until the next attempt"
+    clock.now += 1
+    assert source.token() == "token-2"
+
+
+def test_a_failed_refresh_keeps_the_token_until_it_expires() -> None:
+    identity, clock = _Identity(expires_in=600), _Clock()
+    source = _source(identity, clock)
+    assert source.token() == "token-1"
+    clock.now += 545
+    identity.answer = lambda: httpx2.Response(503)
+    assert source.token() == "token-1", "55 seconds of validity are left"
+    assert len(identity.requests) == 2
+    clock.now += 4
+    assert source.token() == "token-1"
+    assert len(identity.requests) == 2, "the next attempt waits five seconds"
+    clock.now += 1
+    assert source.token() == "token-1"
+    assert len(identity.requests) == 3
+    clock.now += 50
+    with pytest.raises(ServiceTokenUnavailableError, match="503"):
+        source.token()
+    identity.answer = None
+    clock.now += 5
     assert source.token() == "token-2"
 
 

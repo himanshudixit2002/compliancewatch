@@ -130,7 +130,8 @@ set already, so a worker is its service's client. Every outgoing `httpx2` client
 The token comes from `POST /v1/identity/service-tokens`, is kept until a minute before it expires
 and is shared by the clients built from the same settings; a 401 from the called service drops it
 and resends the request once with a fresh one. When identity cannot be reached or refuses the
-client, the call fails with `service-token-unavailable` (503).
+client, the cached token stays in use until it expires and the next attempt waits 5 seconds;
+with no valid token the call fails at once with `service-token-unavailable` (503).
 
 Tests use `py_common.auth.testing.TestIssuer`, which generates its key at run time:
 `Settings(**issuer.settings_overrides("token"))` makes a service verify its tokens, and

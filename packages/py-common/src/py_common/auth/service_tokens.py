@@ -3,7 +3,10 @@
 A service holds a client id and secret at the identity service (``CW_SERVICE_CLIENT_ID`` and
 ``CW_SERVICE_CLIENT_SECRET``). ``ServiceTokenSource`` exchanges them at
 ``POST /v1/identity/service-tokens`` and keeps the token until a minute before it expires, so a
-process asks identity for a token about every nine minutes, not once per call. ``BearerAuth``
+process asks identity for a token about every nine minutes, not once per call. When that refresh
+fails, the token keeps being used until it really expires, and the next attempt waits a few
+seconds; calls in between do not wait on identity, and without a valid token they fail at once.
+``BearerAuth``
 is the ``httpx2.Auth`` that puts the token on every request of a client; when the called
 service answers 401 (the token was signed by a key it no longer trusts, say) the token is
 dropped and the request is sent once more with a fresh one.
@@ -24,23 +27,33 @@ import httpx2
 from pydantic import SecretStr
 
 from py_common.auth.errors import ServiceTokenUnavailableError
+from py_common.logging import get_logger
 from py_common.settings import Settings
 
 SERVICE_TOKENS_PATH: Final = "/v1/identity/service-tokens"
 REFRESH_MARGIN_SECONDS: Final = 60.0
 """A cached token is replaced this long before it expires (at most half its lifetime)."""
+FAILED_FETCH_RETRY_SECONDS: Final = 5.0
+"""After a failed fetch, the next attempt waits this long."""
+
+log = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
 class _Cached:
     token: str
     refresh_at: float
+    expires_at: float
+
+    def valid_at(self, now: float) -> bool:
+        return now < self.expires_at
 
 
 class ServiceTokenSource:
     """Gets and caches this service's access token. Thread-safe: one fetch at a time, and
-    callers waiting on it get the token it fetched. ``client`` lets tests pass an
-    ``httpx2.MockTransport``; it must not carry ``BearerAuth`` itself."""
+    callers waiting on it get the token it fetched. A failed fetch leaves the cached token in use
+    while it is valid, and no fetch is tried again for ``retry_seconds``. ``client`` lets tests
+    pass an ``httpx2.MockTransport``; it must not carry ``BearerAuth`` itself."""
 
     def __init__(
         self,
@@ -50,6 +63,7 @@ class ServiceTokenSource:
         *,
         client: httpx2.Client | None = None,
         timeout_seconds: float = 10.0,
+        retry_seconds: float = FAILED_FETCH_RETRY_SECONDS,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if not client_id.strip():
@@ -59,22 +73,49 @@ class ServiceTokenSource:
         self._secret = client_secret
         self._client = client
         self._timeout_seconds = timeout_seconds
+        self._retry_seconds = retry_seconds
         self._clock = clock
         self._lock = threading.Lock()
         self._cached: _Cached | None = None
+        self._retry_at = 0.0
+        self._failure = ""
 
     @property
     def client_id(self) -> str:
         return self._client_id
 
     def token(self) -> str:
-        """A token valid for at least the refresh margin; ``ServiceTokenUnavailableError`` when
-        identity cannot be reached or refuses the client."""
+        """A token valid for at least the refresh margin, or, while identity cannot give a new
+        one, the cached token until it expires. ``ServiceTokenUnavailableError`` when there is no
+        valid token and identity cannot be reached or refuses the client (at once, without asking
+        identity again, for ``retry_seconds`` after a failure)."""
         with self._lock:
             cached = self._cached
-            if cached is not None and self._clock() < cached.refresh_at:
+            now = self._clock()
+            if cached is not None and now < cached.refresh_at:
                 return cached.token
-            self._cached = self._fetch()
+            if now < self._retry_at:
+                if cached is not None and cached.valid_at(now):
+                    return cached.token
+                raise ServiceTokenUnavailableError(
+                    f"{self._failure}; the next attempt is in {self._retry_at - now:.0f} s"
+                )
+            try:
+                self._cached = self._fetch()
+            except ServiceTokenUnavailableError as exc:
+                failed_at = self._clock()
+                self._retry_at = failed_at + self._retry_seconds
+                self._failure = exc.detail
+                if cached is None or not cached.valid_at(failed_at):
+                    raise
+                log.warning(
+                    "service_token_refresh_failed",
+                    client_id=self._client_id,
+                    error=exc.detail,
+                    expires_in_seconds=round(cached.expires_at - failed_at),
+                )
+                return cached.token
+            self._retry_at = 0.0
             return self._cached.token
 
     def invalidate(self, token: str) -> None:
@@ -102,7 +143,8 @@ class ServiceTokenSource:
             )
         token, expires_in = _parse(response)
         margin = min(REFRESH_MARGIN_SECONDS, expires_in / 2)
-        return _Cached(token=token, refresh_at=requested_at + expires_in - margin)
+        expires_at = requested_at + expires_in
+        return _Cached(token=token, refresh_at=expires_at - margin, expires_at=expires_at)
 
 
 def _problem_type(response: httpx2.Response) -> str:
