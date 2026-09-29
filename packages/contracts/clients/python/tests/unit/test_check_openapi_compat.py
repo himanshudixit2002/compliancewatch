@@ -14,6 +14,7 @@ CONTRACTS = Path(__file__).resolve().parents[4]
 SCRIPT = CONTRACTS / "scripts" / "check_openapi_compat.py"
 OPENAPI = CONTRACTS / "openapi"
 TABLE_HEAD = "| Spec | Operation | Reason | ADR |\n| --- | --- | --- | --- |\n"
+EARLIER_ROW = "| identity.v1.json | POST /v1/identity/consents | An earlier break | ADR-099 |"
 
 Edit = Callable[[dict[str, Any]], None]
 
@@ -257,6 +258,45 @@ def test_a_row_already_on_the_base_allows_nothing_new(base: Path, head: Path) ->
     result = compare(base, head)
     assert result.returncode == 1
     assert "POST /v1/identity/consents: operation removed" in result.stderr
+
+
+def test_a_later_break_of_the_same_operation_is_allowed_by_a_row_of_its_own(
+    base: Path, head: Path
+) -> None:
+    write_rows(base, EARLIER_ROW)
+    write_rows(
+        head, EARLIER_ROW, "| identity.v1.json | POST /v1/identity/consents | Moved | ADR-100 |"
+    )
+    edit_spec(
+        head, "identity.v1.json", lambda doc: doc["paths"]["/v1/identity/consents"].pop("post")
+    )
+    result = compare(base, head)
+    assert result.returncode == 0, result.stderr
+    assert "allowed by BREAKING.md: identity.v1.json POST /v1/identity/consents" in result.stdout
+
+
+def test_a_row_the_branch_edits_or_removes_is_refused(base: Path, head: Path) -> None:
+    write_rows(base, EARLIER_ROW)
+    write_rows(head, "| identity.v1.json | POST /v1/identity/consents | Reworded | ADR-099 |")
+    edit_spec(
+        head, "identity.v1.json", lambda doc: doc["paths"]["/v1/identity/consents"].pop("post")
+    )
+    result = compare(base, head)
+    assert result.returncode == 1
+    assert (
+        "the row for identity.v1.json POST /v1/identity/consents (ADR-099) was edited or removed"
+        in result.stderr
+    )
+
+
+def test_a_row_realigned_by_a_formatter_is_the_same_row(base: Path, head: Path) -> None:
+    write_rows(base, EARLIER_ROW)
+    write_rows(
+        head,
+        "|  `identity.v1.json`  | POST /v1/identity/consents |  An  earlier break  | ADR-099 |",
+    )
+    result = compare(base, head)
+    assert result.returncode == 0, result.stderr
 
 
 def test_a_new_row_that_matches_no_break_is_refused(base: Path, head: Path) -> None:

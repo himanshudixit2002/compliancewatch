@@ -13,8 +13,10 @@ check fails on:
 
 Specs that are new on the branch are skipped, since no client depends on them yet. A deliberate
 break needs a row in ``openapi/BREAKING.md`` added on the branch (spec, operation, reason, ADR).
-Rows already on the base recorded earlier breaks and allow nothing new, and a new row that
-matches no break fails, so the file cannot approve a break in advance.
+Rows are compared by their whole content. Rows already on the base recorded earlier breaks and
+allow nothing new, so a later break of the same operation adds a row of its own. A new row that
+matches no break fails, so the file cannot approve a break in advance, and so does a base row
+that the branch edits or removes.
 
 Usage, from the repo root::
 
@@ -61,8 +63,16 @@ class Finding:
 
 @dataclass(frozen=True, slots=True)
 class Row:
+    """A BREAKING.md row. Two breaks of one operation are two rows, told apart by reason and ADR."""
+
     spec: str
     operation: str
+    reason: str
+    adr: str
+
+    @property
+    def target(self) -> tuple[str, str]:
+        return self.spec, self.operation
 
 
 def load(path: Path) -> dict[str, Any]:
@@ -369,7 +379,9 @@ def breaking_rows(path: Path) -> tuple[set[Row], list[str]]:
             fenced = not fenced
         if fenced or not line.startswith("|"):
             continue
-        cells = [cell.strip().strip("`").strip() for cell in line.strip().strip("|").split("|")]
+        cells = [
+            " ".join(cell.strip().strip("`").split()) for cell in line.strip().strip("|").split("|")
+        ]
         if cells[0].lower() == "spec" or set("".join(cells)) <= set("-: "):
             continue
         if len(cells) != 4:
@@ -383,7 +395,7 @@ def breaking_rows(path: Path) -> tuple[set[Row], list[str]]:
         elif not reason or not ADR.search(adr):
             problems.append(f"{path.name}:{number}: a break needs a reason and an ADR-NNN")
         else:
-            rows.add(Row(spec, operation))
+            rows.add(Row(spec, operation, reason, adr))
     return rows, problems
 
 
@@ -420,11 +432,18 @@ def main(argv: list[str] | None = None) -> int:
     base_rows, _ = breaking_rows(base / BREAKING)
     head_rows, problems = breaking_rows(head / BREAKING)
     new_rows = head_rows - base_rows
-    allowed = [f for f in findings if Row(f.spec, f.operation) in new_rows]
-    breaking = [f for f in findings if Row(f.spec, f.operation) not in new_rows]
-    used = {Row(f.spec, f.operation) for f in allowed}
-    for row in sorted(new_rows - used, key=lambda row: (row.spec, row.operation)):
-        problems.append(f"{BREAKING}: {row.spec} {row.operation} matches no breaking change")
+    approved = {row.target for row in new_rows}
+    allowed = [f for f in findings if (f.spec, f.operation) in approved]
+    breaking = [f for f in findings if (f.spec, f.operation) not in approved]
+    used = {(f.spec, f.operation) for f in allowed}
+    for row in sorted(new_rows, key=lambda row: (row.target, row.adr, row.reason)):
+        if row.target not in used:
+            problems.append(f"{BREAKING}: {row.spec} {row.operation} matches no breaking change")
+    for row in sorted(base_rows - head_rows, key=lambda row: (row.target, row.adr, row.reason)):
+        problems.append(
+            f"{BREAKING}: the row for {row.spec} {row.operation} ({row.adr}) was edited or removed;"
+            " rows are never changed, a later break adds a row"
+        )
     for finding in allowed:
         sys.stdout.write(f"allowed by {BREAKING}: {finding}\n")
     for finding in breaking:

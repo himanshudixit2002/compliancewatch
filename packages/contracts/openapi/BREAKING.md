@@ -9,9 +9,11 @@ Specs that are new on the branch are skipped.
 
 A break that is meant starts with an ADR: who calls the operation, how they move, and when the
 old shape goes. The pull request that makes the break then adds one row per broken operation to
-the table below. The check lets an operation break only when its row is new on the branch. Rows
-already on the base branch recorded earlier breaks and allow nothing new, and a new row that
-matches no break fails, so a row cannot approve a break in advance. Rows are never removed.
+the table below. The check lets an operation break only when the branch adds a row for it. Rows
+already on the base branch recorded earlier breaks and allow nothing new, so a later break of an
+operation that already has a row adds another row with its own reason and ADR. A new row that
+matches no break fails, so a row cannot approve a break in advance. Rows are never edited or
+removed, and the check fails on a base row that the branch changed.
 
 Columns: the spec file name, the operation as `METHOD /path` exactly as the spec writes it, the
 reason in one sentence (without a `|`), and the ADR as `ADR-NNN`.

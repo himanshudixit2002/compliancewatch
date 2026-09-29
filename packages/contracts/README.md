@@ -17,7 +17,7 @@ openapi/                 # OpenAPI 3.1 specs, public /v1 and internal service AP
   identity.v1.json         # services/identity
   notification.v1.json     # services/notification
   rulebook.v1.json         # services/rulebook
-  BREAKING.md              # deliberate breaking changes, one row per operation, each with an ADR
+  BREAKING.md              # deliberate breaking changes, one row per break of an operation, each with an ADR
 events/
   schemas/               # JSON Schema 2020-12: envelope.v1.json and one <topic>.v1.json per event
   examples/<topic>/      # golden messages (envelope + payload) every check replays
