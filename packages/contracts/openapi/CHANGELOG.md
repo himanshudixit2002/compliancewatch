@@ -12,7 +12,8 @@ while the version in `public.meta.json` has no section.
 First version, from the profile service:
 
 - `POST /v1/businesses` creates a business from its GSTIN, or from its PAN alone, and answers
-  the GSTIN pre-fill and the first onboarding question. It takes an `Idempotency-Key`.
+  the GSTIN pre-fill and the first onboarding question. It requires an `Idempotency-Key`
+  header and answers 428 without one.
 - `GET /v1/businesses` lists the tenant's businesses by name, a page at a time, with a search
   over name, PAN and GSTIN.
 - `GET /v1/businesses/{business_id}` and `PATCH /v1/businesses/{business_id}` read and update
@@ -20,6 +21,6 @@ First version, from the profile service:
 - `GET /v1/businesses/{business_id}/onboarding` answers the next onboarding question with its
   wording and labelled options, and how many are answered.
 - `POST /v1/businesses/{business_id}/registrations` adds a GSTIN registration to a business. It
-  takes an `Idempotency-Key`.
+  requires an `Idempotency-Key` header and answers 428 without one.
 - `GET /v1/ontology` answers the profile attributes with their questions, value labels and the
   rule operators per type, with an ETag.

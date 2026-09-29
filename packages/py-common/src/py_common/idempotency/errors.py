@@ -2,9 +2,13 @@
 (``DEFAULT_STATUS_BY_ERROR``): 428, 422 and 409."""
 
 from collections.abc import Mapping
-from typing import ClassVar
+from typing import ClassVar, Final
 
 from domain_kernel.errors import DomainError
+
+IDEMPOTENCY_KEY_HEADER: Final = "Idempotency-Key"
+"""The request header that carries the key. The spec marks it required; its absence is the 428
+problem below rather than request-invalid (``MISSING_HEADER_ERRORS`` in ``py_common.problems``)."""
 
 
 class IdempotencyKeyRequiredError(DomainError):

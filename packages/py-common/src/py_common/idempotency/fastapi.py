@@ -6,12 +6,13 @@ A route that creates something declares ``key: IdempotencyKey`` and wraps its wo
     def create(body: ThingIn, tenant: Tenant, key: IdempotencyKey, wired: Wired) -> JSONResponse:
         return run_idempotent(wired.idempotency, tenant, key, 201, lambda: make(body))
 
-The dependency reads the header (8 to 128 printable characters; a missing one is a 428
-problem) and the body, and fingerprints method, path and body. ``run_idempotent`` claims the key
-and runs ``produce``. A 2xx or 4xx it returns is recorded and replayed, with the header
-``Idempotent-Replayed: true``, to every retry with the same key and request for 24 hours; the
-same key with another request is a 422, and a retry while the first request runs is a 409. A 5xx
-is never recorded: the key is released, as it is when ``produce`` raises, so the retry runs.
+The dependency reads the header (8 to 128 printable characters) and the body, and fingerprints
+method, path and body. The spec marks the header required, and a request without it is answered
+with the 428 problem idempotency-key-required rather than request-invalid. ``run_idempotent``
+claims the key and runs ``produce``. A 2xx or 4xx it returns is recorded and replayed, with the
+header ``Idempotent-Replayed: true``, to every retry with the same key and request for 24 hours;
+the same key with another request is a 422, and a retry while the first request runs is a 409. A
+5xx is never recorded: the key is released, as it is when ``produce`` raises, so the retry runs.
 
 By default each key statement runs in its own short transaction (the store's). Pass
 ``recorder=store.recorder(connection)`` to run them inside the caller's transaction instead: the
@@ -28,8 +29,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from domain_kernel.ids import TenantId
+from py_common.idempotency.errors import IDEMPOTENCY_KEY_HEADER as IDEMPOTENCY_KEY_HEADER
 from py_common.idempotency.errors import (
-    IdempotencyKeyRequiredError,
     IdempotencyKeyReusedError,
     IdempotencyRequestInFlightError,
 )
@@ -47,7 +48,6 @@ from py_common.idempotency.store import (
 from py_common.logging import get_logger
 from py_common.problems import problem_responses
 
-IDEMPOTENCY_KEY_HEADER: Final = "Idempotency-Key"
 REPLAYED_HEADER: Final = "Idempotent-Replayed"
 KEY_PATTERN: Final = r"^[!-~]+$"
 """Printable ASCII without spaces, such as a UUID or a ULID."""
@@ -61,7 +61,7 @@ log = get_logger(__name__)
 async def idempotency_key(
     request: Request,
     key: Annotated[
-        str | None,
+        str,
         Header(
             alias=IDEMPOTENCY_KEY_HEADER,
             min_length=MIN_KEY_LENGTH,
@@ -72,12 +72,11 @@ async def idempotency_key(
                 "and gets the first response back for 24 hours"
             ),
         ),
-    ] = None,
+    ],
 ) -> IdempotencyRequest:
-    """The key with the request it came with. Starlette keeps the body it read for the route's
-    own parameters, so reading it here costs nothing."""
-    if key is None:
-        raise IdempotencyKeyRequiredError()
+    """The key with the request it came with. A request without the header never gets here:
+    py-common's validation handler answers it with IdempotencyKeyRequiredError (428). Starlette
+    keeps the body it read for the route's own parameters, so reading it here costs nothing."""
     return IdempotencyRequest.of(key, request.method, request.url.path, await request.body())
 
 

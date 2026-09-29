@@ -1235,21 +1235,14 @@
             "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
             "in": "header",
             "name": "Idempotency-Key",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 8,
-                  "pattern": "^[!-~]+$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
               "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
-              "title": "Idempotency-Key"
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -1669,21 +1662,14 @@
             "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
             "in": "header",
             "name": "Idempotency-Key",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 8,
-                  "pattern": "^[!-~]+$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
               "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
-              "title": "Idempotency-Key"
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],

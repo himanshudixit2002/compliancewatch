@@ -117,6 +117,8 @@ def test_creating_posts_declare_an_idempotency_key(
     operation: tuple[str, str, dict[str, Any]],
 ) -> None:
     assert "header idempotency-key" in declared(operation[2])
+    [key] = [p for p in operation[2]["parameters"] if p["name"].lower() == "idempotency-key"]
+    assert key["required"] is True, "the services refuse a creating request without it (428)"
 
 
 def test_lists_declare_limit_and_cursor() -> None:
@@ -344,15 +346,17 @@ def test_error_responses_must_be_problem_documents(workspace: Path) -> None:
     assert "GET /v1/y: documents no problem response" in result.stderr
 
 
-def test_a_creating_post_needs_an_idempotency_key(workspace: Path) -> None:
+def test_a_creating_post_needs_a_required_idempotency_key(workspace: Path) -> None:
     key = {"in": "header", "name": "Idempotency-Key", "schema": {"type": "string"}}
+    required = {**key, "required": True}
     write(
         workspace,
         "alpha.v1.json",
         spec(
             {
+                "/v1/w": {"post": operation("create_w", status="201", parameters=[key])},
                 "/v1/x": {"post": operation("create_x", status="201")},
-                "/v1/y": {"post": operation("create_y", status="201", parameters=[key])},
+                "/v1/y": {"post": operation("create_y", status="201", parameters=[required])},
                 "/v1/z": {"post": operation("ask_z")},
             }
         ),
@@ -360,7 +364,8 @@ def test_a_creating_post_needs_an_idempotency_key(workspace: Path) -> None:
     result, _ = build(workspace)
     assert result.returncode == 1
     assert result.stderr.splitlines() == [
-        "public openapi: POST /v1/x: creates (201) without an Idempotency-Key header"
+        "public openapi: POST /v1/w: creates (201) with an optional Idempotency-Key header",
+        "public openapi: POST /v1/x: creates (201) without an Idempotency-Key header",
     ]
 
 

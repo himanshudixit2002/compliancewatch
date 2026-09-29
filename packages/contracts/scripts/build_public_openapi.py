@@ -19,7 +19,8 @@ operation that does not:
 - ``x-roles`` names one or more of the tenant roles in ``ROLES``;
 - every documented 4xx or 5xx response is a problem document (``application/problem+json``),
   and there is at least one;
-- a POST that answers 201 declares the ``Idempotency-Key`` header;
+- a POST that answers 201 declares the ``Idempotency-Key`` header as required, since the
+  services refuse such a request without it (428);
 - a GET that answers a page (``items`` and ``next_cursor``) declares the ``limit`` and
   ``cursor`` query parameters.
 
@@ -304,13 +305,15 @@ def is_page(document: Mapping[str, Any], response: Any) -> bool:
     return "items" in properties and "next_cursor" in properties
 
 
-def parameter_names(document: Mapping[str, Any], operation: Mapping[str, Any]) -> set[str]:
-    """``<in> <name>`` for each parameter; header names in lower case."""
-    found: set[str] = set()
+def parameters_of(
+    document: Mapping[str, Any], operation: Mapping[str, Any]
+) -> dict[str, Mapping[str, Any]]:
+    """Each parameter by ``<in> <name>``; header names in lower case."""
+    found: dict[str, Mapping[str, Any]] = {}
     for raw in operation.get("parameters") or []:
         parameter = resolve(document, raw)
         location, name = str(parameter.get("in", "")), str(parameter.get("name", ""))
-        found.add(f"{location} {name.lower() if location == 'header' else name}")
+        found[f"{location} {name.lower() if location == 'header' else name}"] = parameter
     return found
 
 
@@ -346,9 +349,13 @@ def lint(document: Mapping[str, Any]) -> list[str]:
             content = resolve(document, responses[code]).get("content") or {}
             if set(content) != {PROBLEM_MEDIA}:
                 problems.append(f"{label}: response {code} is not {PROBLEM_MEDIA}")
-        declared = parameter_names(document, operation)
-        if method == "post" and "201" in responses and "header idempotency-key" not in declared:
-            problems.append(f"{label}: creates (201) without an Idempotency-Key header")
+        declared = parameters_of(document, operation)
+        if method == "post" and "201" in responses:
+            key = declared.get("header idempotency-key")
+            if key is None:
+                problems.append(f"{label}: creates (201) without an Idempotency-Key header")
+            elif key.get("required") is not True:
+                problems.append(f"{label}: creates (201) with an optional Idempotency-Key header")
         if method == "get" and is_page(document, responses.get("200")):
             for name in ("limit", "cursor"):
                 if f"query {name}" not in declared:

@@ -301,6 +301,12 @@ def test_a_request_without_a_key_is_428(client: TestClient, service: Service) ->
     assert service.calls == []
 
 
+def test_a_missing_key_is_428_even_when_the_body_is_invalid(client: TestClient) -> None:
+    response = client.post(PATH, json={"title": "a"})
+    assert response.status_code == 428
+    assert problem_type(response) == "idempotency-key-required"
+
+
 @pytest.mark.parametrize("key", ["short", "k" * 129, "has spaces in it"])
 def test_a_malformed_key_is_a_request_error(client: TestClient, key: str) -> None:
     response = client.post(PATH, json={"name": "a"}, headers={IDEMPOTENCY_KEY_HEADER: key})
@@ -382,9 +388,9 @@ def test_the_spec_documents_the_header_and_the_problems() -> None:
     operation = spec["paths"][PATH]["post"]
     header = next(p for p in operation["parameters"] if p["name"] == IDEMPOTENCY_KEY_HEADER)
     assert header["in"] == "header"
-    assert header["required"] is False
-    schema = header["schema"]["anyOf"][0]
-    assert (schema["minLength"], schema["maxLength"]) == (8, 128)
+    assert header["required"] is True, "a request without the key is refused with 428"
+    schema = header["schema"]
+    assert (schema["type"], schema["minLength"], schema["maxLength"]) == ("string", 8, 128)
     assert {"201", "409", "422", "428"} <= set(operation["responses"])
 
 

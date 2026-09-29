@@ -1,8 +1,8 @@
 from collections.abc import Iterator, Mapping
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import pytest
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Header
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
@@ -65,6 +65,10 @@ def _app() -> FastAPI:
     async def boom() -> None:
         raise RuntimeError("secret internals")
 
+    @router.get("/signed")
+    async def signed(signature: Annotated[str, Header(alias="x-signature")]) -> str:
+        return signature
+
     return create_app(
         service_name="t", version="0", routers=[router], problem_status={RateLimitedError: 429}
     )
@@ -112,6 +116,14 @@ def test_validation_error_is_422_with_issues(client: TestClient) -> None:
     assert problem["type"] == PREFIX + "request-invalid"
     assert problem["errors"][0]["loc"] == ["path", "item_id"]
     assert "input" not in problem["errors"][0]
+
+
+def test_a_missing_header_without_its_own_problem_is_request_invalid(client: TestClient) -> None:
+    response = client.get("/t/signed")
+    assert response.status_code == 422
+    problem = response.json()
+    assert problem["type"] == PREFIX + "request-invalid"
+    assert problem["errors"][0]["loc"] == ["header", "x-signature"]
 
 
 def test_unhandled_exception_is_500_without_internals(client: TestClient) -> None:
