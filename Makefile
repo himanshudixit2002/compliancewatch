@@ -510,7 +510,9 @@ web-seed: check-pnpm ## Seed the web-stack services with the demo tenant and a r
 web-e2e-install: check-pnpm ## Download Chromium for Playwright, once per machine (the package has no install script)
 	$(PNPM) --filter web e2e:install
 
-web-e2e: check-pnpm ## Build the web app and run Playwright with axe against next start on WEB_PORT (no service needed)
+# No page on main calls a service, so the suite runs without the stack; the seeded-tenant sign-in
+# test is skipped until make web-stack, web-stack-wait and web-seed have run (CI runs all three).
+web-e2e: check-pnpm ## Build the web app and run Playwright with axe against next start on WEB_PORT (after make web-seed for the seeded-tenant test)
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	$(PNPM) --filter web build && \
 	PORT=$${WEB_PORT:-3000} CW_WEB_ENV=test $(PNPM) --filter web e2e

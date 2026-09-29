@@ -105,7 +105,8 @@ page-level colour and landmark checks belong to the Playwright suite and the con
 `CW_WEB_ENV=test` and visits every registered page: live pages by their route, waiting and
 planned ones through the catch-alls. Consequences: `make web-e2e` and the `web-e2e` CI job need
 no container; the health handler is the readiness signal; a suite that needs services will
-start them explicitly and seed through their HTTP APIs, never through a mock.
+start them explicitly and seed through their HTTP APIs, never through a mock. The CI job does
+that now (D-021).
 
 ## D-012: `CW_WEB_ENV` is read directly until a validated environment module exists
 
@@ -258,3 +259,20 @@ read as a UUID, the kernel's rule. Consequences: a change to the parser, the gra
 means running the recorder again (the README has the `uv` command) and committing the new
 files; the seed blanks the candidate's rule key when the target rulebook does not list that
 rule, as the relation stage's answer schema would; the fixture test fails when the files drift.
+
+## D-021: The e2e job starts the services and seeds them before Playwright
+
+2026-09-29. The screens that follow read real services, and the seeded tenant is the data the
+sign-in form already offers; a suite that only ever ran without the services would not notice
+when the stack stopped starting or the seed stopped working. The `web-e2e` CI job installs uv
+with Python 3.12 and the uv workspace, starts every service with `make web-stack` (memory
+stores, no container), builds the app while they start, waits with `make web-stack-wait`,
+runs `make web-seed`, and only then runs Playwright; it always prints the service log tails and
+stops the stack, and uploads the logs and the seed state with the report on failure. Before
+starting anything it also runs `make openapi-ts-check`, which no other job ran. Locally `make
+web-e2e` stays a build plus Playwright, so the suite runs without Python; the one test that
+needs the seed (the seeded-tenant sign-in) is skipped when `var/seed/last.json` is absent and
+fails on CI instead. Consequences: the job takes the Python install time (cached by setup-uv);
+a broken service start or seed fails the web gate; the job stays keyed on the `typescript`
+path filter, so a service-only change does not run it; a later screen's spec may assume the
+seeded tenant and the recorded notification exist.

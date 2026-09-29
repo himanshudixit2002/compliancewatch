@@ -5,9 +5,10 @@ without a request scope: components, view models, mappers, config, helpers, serv
 called directly. The Playwright suite covers what unit tests cannot: the route files (a
 `page.tsx` is an async server component that needs a request), the shells with real
 navigation, the built app's headers and status codes, and page-level accessibility. Both levels
-run axe. No test uses a mock service, and no e2e test uses a mock of anything: the suite on
-`main` visits only pages that need no service, and signs in through the real sign-in form on
-the fake provider where a page needs a session.
+run axe. No test uses a mock service, and no e2e test uses a mock of anything: no page on
+`main` calls a service, the suite signs in through the real sign-in form on the fake provider
+where a page needs a session, and the one test that needs the services (the seeded-tenant
+sign-in) runs against the real ones, started and seeded before the suite.
 
 ## Unit tests
 
@@ -82,7 +83,7 @@ The specs on `main`:
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `a11y.spec.ts`           | every page in the registry except the catch-alls and the legal route, grouped by the first persona its roles and tenant kinds admit (public pages without a session): live pages by their route, planned, waiting and ready pages through the catch-all with `example` for each parameter; one h1, status 200, the notice on non-live pages, axe |
 | `home.spec.ts`           | the landing links, the skip link moving focus to `main`, the sign-in link leading to the form                                                              |
-| `sign-in.spec.ts`        | the redirect with `next` from a gated page, the server's field errors, an owner signing in, returning to `/account`, the account menu and signing out, the role homes (`/businesses`, `/admin`), a signed-in visit to `/sign-in`, the roles following the tenant kind, `/sign-out` as POST only with the origin check |
+| `sign-in.spec.ts`        | the redirect with `next` from a gated page, the server's field errors, an owner signing in, returning to `/account`, the account menu and signing out, the role homes (`/businesses`, `/admin`), a signed-in visit to `/sign-in`, the last seeded tenant offered by the form and signed into (needs the seed), the roles following the tenant kind, `/sign-out` as POST only with the origin check |
 | `account.spec.ts`        | the session facts in IST, the copy controls, the note on `/me`, the header name linking to `/account`                                                     |
 | `admin-gate.spec.ts`     | anonymous `/admin` to sign-in with `next`, a 404 for a tenant role on every admin path, an analyst opening the tools without the admin-only entries and a 404 on one of them |
 | `sitemap.spec.ts`        | one table per section, a waiting tool's awaited route and owner, a ready tool's chip, the link to its notice                                              |
@@ -98,6 +99,13 @@ checks they exist. A spec is named after what it covers, not after the registry 
 `web-e2e` CI job runs the same command; the fake provider and the fixed secret come from the
 Playwright config, so the job needs no extra variable for them.
 
+The seeded-tenant test in `sign-in.spec.ts` reads the file the seed writes
+(`seededTenantId()` in `fixtures.ts`: `CW_WEB_SEED_STATE_PATH` relative to `apps/web`, else
+`var/seed/last.json` at the repository root, the same default the app uses), picks "Use the
+last seeded tenant" on the form, signs in as an owner and finds that tenant id on `/account`.
+Without the file it is skipped, except on CI (`CI` set), where the job seeds first and a
+missing file fails the test instead.
+
 ## Running things
 
 ```bash
@@ -106,6 +114,7 @@ pnpm --filter web exec vitest run src/shared    # one directory
 pnpm --filter web exec vitest run -t "sitemap"  # tests whose name matches
 make web-e2e-install                            # Chromium, once per machine (no install script runs)
 make web-stack && make web-stack-wait           # every service on SERVICE_PORT_BASE+1..10, memory stores
+make web-seed                                   # the demo tenant and the recorded notification
 make web-stack-logs SERVICE=rulebook            # one service's log (every log without SERVICE)
 make web-e2e                                    # build, then Playwright on WEB_PORT from .env
 make web-stack-down                             # stop the services (memory stores forget their rows)
@@ -127,9 +136,10 @@ but all at once and on memory stores: pids and logs under `var/web-stack`, the p
 GSTIN lookup, the billing provider `none`, the publish flow and the KAG layer off, and the
 rulebook write token from `.env` or the placeholder `local-write-token`, so a fresh clone and CI
 see the same states (`docs/onboarding/local-dev.md`, "Running a second clone", has the ports).
-No page on `main` calls a service yet, so the suite passes without the stack; a spec for a page
-that reads a service starts with the stack up and seeded, and the CI job brings it up before
-Playwright.
+No page on `main` calls a service yet, so the suite passes without the stack apart from the
+seeded-tenant test, which is skipped; with `make web-stack && make web-stack-wait && make
+web-seed` first, `make web-e2e` runs everything, as the CI job does. A spec for a page that
+reads a service later relies on the same order.
 
 `make web-seed` is the seed for that stack (`apps/web/scripts/seed`, run by Node's type
 stripping on the openapi-fetch clients typed from the contracts): real HTTP calls only, no mock
@@ -158,11 +168,20 @@ and `docs/web/**` because the build renders the legal drafts and the tests compa
 
 - `typescript` runs `pnpm format` and `pnpm turbo run lint typecheck test build` for every
   package. No `CW_WEB_*` variable is set there, so the web build must not need one.
-- `web-e2e` installs the workspace, runs `make web-screens-check`, downloads Chromium
-  (`pnpm --filter web e2e:install`; the package has no install script, so `strictDepBuilds`
-  stays satisfied), builds the app with no `CW_WEB_*` variable, runs `pnpm --filter web e2e`
-  with `PORT=3000` and `CW_WEB_ENV=test`, and uploads the Playwright report and test results
-  when the run fails.
+- `web-e2e` installs the workspace (pnpm, and uv with Python 3.12 and `uv sync --all-packages
+  --locked`, because the services run from the uv workspace), runs `make web-screens-check
+  openapi-ts-check` (no other job compares those generated files), starts every service with
+  `make web-stack` (8001-8010, memory stores, the stack's fixed demo settings, no container),
+  downloads Chromium (`pnpm --filter web e2e:install`; the package has no install script, so
+  `strictDepBuilds` stays satisfied) and builds the app with no `CW_WEB_*` variable while the
+  services start, waits for their `/health` (`make web-stack-wait`, 120 seconds), seeds them
+  (`make web-seed`, which fails the job on any failed step), runs `pnpm --filter web e2e` with
+  `PORT=3000` and `CW_WEB_ENV=test`, then always prints the tail of every service log and stops
+  the stack. On failure it uploads the Playwright report, the test results, the service logs
+  and the seed state.
 
 Both are in the `needs` of the `CI gate` job, the one check branch protection requires;
-`make ci-gate-check` fails when a job is missing from that list.
+`make ci-gate-check` fails when a job is missing from that list. `web-e2e` starts the services
+but stays keyed on the `typescript` filter, so a change to a service alone does not run it; the
+`python` job's tests cover that change, and the next change under `apps/**` runs the suite
+against it.

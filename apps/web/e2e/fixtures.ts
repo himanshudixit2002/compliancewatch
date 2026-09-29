@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test as base } from "@playwright/test";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
@@ -7,6 +9,32 @@ import type { Screen } from "../src/shared/config/screens.ts";
 
 /** Impacts that fail a page; moderate and minor findings are reported by the unit-level axe. */
 export const FAILING_IMPACTS: readonly string[] = ["serious", "critical"];
+
+/** True on CI, where the job starts the services and seeds them before the suite. */
+export const IS_CI =
+  process.env.CI !== undefined && process.env.CI !== "" && process.env.CI !== "false";
+
+/** Where the seed records its tenant, relative to apps/web: the app's own default. */
+const DEFAULT_SEED_STATE_PATH = "../../var/seed/last.json";
+
+/**
+ * The tenant `make web-seed` filled last, read from the file the app reads for the sign-in
+ * form's "last seeded tenant" option (CW_WEB_SEED_STATE_PATH relative to apps/web, else
+ * var/seed/last.json at the repository root); null when the seed has not run here.
+ */
+export function seededTenantId(): string | null {
+  const configured = process.env.CW_WEB_SEED_STATE_PATH?.trim();
+  const path = resolve(__dirname, "..", configured || DEFAULT_SEED_STATE_PATH);
+  try {
+    const state: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (typeof state === "object" && state !== null && "tenant_id" in state) {
+      return typeof state.tenant_id === "string" ? state.tenant_id : null;
+    }
+  } catch {
+    // Absent or unreadable: the seed has not run on this machine.
+  }
+  return null;
+}
 
 export interface ViolationSummary {
   id: string;

@@ -1,4 +1,4 @@
-import { ANALYST, OWNER, expect, signInThroughForm, test } from "./fixtures";
+import { ANALYST, IS_CI, OWNER, expect, seededTenantId, signInThroughForm, test } from "./fixtures";
 
 test.describe("sign-in", () => {
   test("an anonymous visit to a gated page lands on the form with the path to return to", async ({
@@ -60,6 +60,31 @@ test.describe("sign-in", () => {
     await signInThroughForm(page, ANALYST);
     await expect(page).toHaveURL(/\/admin$/);
     await expect(page.getByRole("heading", { level: 1, name: "Internal tools" })).toBeVisible();
+  });
+
+  // Needs `make web-stack && make web-stack-wait && make web-seed` first; the CI job runs them,
+  // so there a missing seed state fails the test instead of skipping it.
+  test("the last seeded tenant is offered and an owner signs into it", async ({
+    page,
+    checkA11y,
+  }) => {
+    const tenantId = seededTenantId();
+    test.skip(tenantId === null && !IS_CI, "make web-seed has not run on this machine");
+    if (tenantId === null) {
+      throw new Error("no seed state (var/seed/last.json): the CI job runs make web-seed first");
+    }
+    await page.goto("/sign-in?next=%2Faccount");
+    await page.getByRole("button", { name: "Use the last seeded tenant" }).click();
+    await expect(page.getByLabel("Tenant id")).toHaveValue(tenantId);
+    await checkA11y();
+    await page.getByLabel("Tenant kind").selectOption(OWNER.tenantKind);
+    await page.getByRole("checkbox", { name: "Owner" }).check();
+    await page.getByLabel("Display name").fill(OWNER.displayName);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page).toHaveURL(/\/account$/);
+    const facts = page.locator("dl[data-slot='key-value']");
+    await expect(facts).toContainText(tenantId);
+    await expect(facts).toContainText("Owner");
   });
 
   test("the roles offered follow the tenant kind", async ({ page }) => {

@@ -206,7 +206,8 @@ Postgres after `make dev` and `make migrate`). The web app reaches the stack thr
 recorded CBIC notification with its clauses, mentions and relation candidate for the admin
 review queues), records it in `var/seed/last.json` for the development sign-in, and exits
 non-zero when a step fails; run it again after every `make web-stack`, since memory stores start
-empty.
+empty. `make web-e2e` after the seed also runs the seeded-tenant sign-in test, which is skipped
+without it; CI's `web-e2e` job starts the stack and seeds it before Playwright in the same order.
 
 ## Not in the stack yet
 
