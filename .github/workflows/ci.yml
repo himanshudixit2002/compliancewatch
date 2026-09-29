@@ -60,6 +60,7 @@ jobs:
               - 'packages/py-common/**'
               - 'packages/contracts/**'
               - 'evals/**'
+              - 'tools/**'
               - 'pyproject.toml'
               - 'uv.lock'
               - '.python-version'
