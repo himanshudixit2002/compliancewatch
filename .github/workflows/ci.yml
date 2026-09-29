@@ -1,12 +1,12 @@
 # CI (guide section 17). Implemented: 1 lint + type-check, 2 unit tests with coverage gate,
 # 3 contract checks (import-linter; the OpenAPI spec per service through its contract test, a
 # committed spec for every service that serves API routes, and backward compatibility of the specs
-# against the base branch; the event schemas: metaschema, golden examples, generated clients in
-# sync, backward compatibility against the base branch by example replay and by the Redpanda schema
-# registry; the migration lint's file rules in the ops job and its catalog rules in the dev-stack
-# job), 4 integration tests (testcontainers) for the packages a change affects, an ops job
-# (runbook links, promtool rules, actionlint), a compose dev-stack smoke, and secrets scanning.
-# Steps 5-7 are listed as TODO at the end.
+# against the base branch; the event schemas: metaschema, a schema for every event topic in code,
+# golden examples, generated clients in sync, backward compatibility against the base branch by
+# example replay and by the Redpanda schema registry; the migration lint's file rules in the ops
+# job and its catalog rules in the dev-stack job), 4 integration tests (testcontainers) for the
+# packages a change affects, an ops job (runbook links, promtool rules, actionlint), a compose
+# dev-stack smoke, and secrets scanning. Steps 5-7 are listed as TODO at the end.
 name: ci
 
 on:
@@ -88,6 +88,8 @@ jobs:
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - '.github/workflows/ci.yml'
+              - 'services/*/src/**' # check_topics: every event class in code has a schema
+              - 'packages/*/src/**'
             schemas:
               - 'packages/contracts/events/schemas/**'
             evals:
@@ -252,7 +254,7 @@ jobs:
           cache: pnpm
       - run: uv sync --all-packages --locked
       - run: pnpm install --frozen-lockfile
-      - name: Schemas pass the 2020-12 metaschema and the generated clients match them
+      - name: Schemas pass the 2020-12 metaschema, every topic in code has one, and the generated clients match them
         run: make contracts-check
       - name: Examples and generated models agree with the schemas
         run: uv run pytest packages/contracts -q

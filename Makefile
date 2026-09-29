@@ -287,8 +287,9 @@ openapi: check-uv ## Export a service's OpenAPI spec: make openapi SERVICE=llm-g
 contracts: check-uv check-pnpm ## Generate the event clients (pydantic + TypeScript) from packages/contracts/events/schemas
 	$(UV) run python packages/contracts/scripts/generate_events.py
 
-contracts-check: check-uv check-pnpm ## Event schemas pass the 2020-12 metaschema and the generated clients match them
+contracts-check: check-uv check-pnpm ## Event schemas pass the 2020-12 metaschema, every topic in code has one, and the generated clients match them
 	$(UV) run check-jsonschema --check-metaschema packages/contracts/events/schemas/*.json
+	$(UV) run python packages/contracts/scripts/check_topics.py
 	@$(MAKE) --no-print-directory contracts
 	@drift=$$(git status --porcelain -- packages/contracts/clients/python/src/cw_contracts/events packages/contracts/clients/typescript/events); \
 	if [ -n "$$drift" ]; then echo "$$drift"; echo "error: generated event clients are out of date; commit the output of make contracts"; exit 1; fi

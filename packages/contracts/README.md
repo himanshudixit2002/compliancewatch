@@ -27,6 +27,7 @@ scripts/
   check_compat.py        # CI: backward compatibility against the base branch
   check_openapi_coverage.py  # make openapi-check: a service with API routes commits its spec and test
   check_openapi_compat.py    # CI: the OpenAPI specs break no client of the base branch
+  check_topics.py        # make contracts-check: every event topic in code has its schema
 clients/python/          # compliancewatch-contracts (import cw_contracts): generated pydantic v2 models
 clients/typescript/      # generated .d.ts per topic plus index.ts (EVENT_TOPICS)
 ```
@@ -66,7 +67,8 @@ Fourteen topics have a schema: `document.discovered`, `document.parsed`,
 `applicability.decided`, `obligation.created`, `obligation.due_soon`, `obligation.closed`,
 `obligation.rescheduled`, `notification.sent`, `notification.failed` and
 `tenant.deletion.requested`. The gateway's `llm.call.completed` and `llm.budget.alarmed` are
-still log lines and get a schema when they gain a consumer.
+still log lines and get a schema when they gain a consumer; until then they are listed, with the
+reason, in `LOG_ONLY_TOPICS` in `scripts/check_topics.py`.
 
 A message on the bus is the envelope (`events/schemas/envelope.v1.json`): `event_id`, `topic`,
 `schema_version`, `occurred_at`, `tenant_id` (null for regulatory events), `correlation_id`,
@@ -84,6 +86,11 @@ Rules, checked in CI:
   optional field (minor bump) without breaking an older consumer. A removed or renamed field,
   a new required field or a narrowed enum is a breaking change: a new `v<major>` file next to
   the old one, which stays until every consumer has moved, plus an ADR.
+- Every event class in code has its schema. `scripts/check_topics.py` (part of
+  `make contracts-check`) reads `services/*/src` and `packages/*/src` without importing them,
+  finds each class that sets `topic: ClassVar[str]`, and requires `<topic>.v<major>.json` with
+  `x-version` equal to the class's `schema_version`. A `LOG_ONLY_TOPICS` entry fails once its
+  topic gains a schema or loses its class, so the commit that adds the schema removes the entry.
 - Every version has a line in `events/CHANGELOG.md` and every topic at least one example under
   `events/examples/<topic>/`. The examples are what the backward-compatibility check replays.
 - The clients are generated, never edited: `make contracts` (datamodel-code-generator for
