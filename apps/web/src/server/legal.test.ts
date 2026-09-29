@@ -47,11 +47,15 @@ describe("extraction", () => {
 });
 
 describe("docs/legal", () => {
-  it("contains no raw HTML tag in any file, so the rendered pages carry only markdown", () => {
+  it("contains no raw HTML tag in any published document, so the rendered pages carry only markdown", () => {
+    // Only the documents the app renders are checked. The internal notes in the same folder
+    // (consent-record.md, data-map.md) use angle-bracket placeholders in their tables.
     const dir = legalDir(REPO_ROOT);
     const files = readdirSync(dir).filter((name) => name.endsWith(".md"));
     expect(files.length).toBeGreaterThanOrEqual(LEGAL_DOC_NAMES.length);
-    for (const file of files) {
+    for (const name of LEGAL_DOC_NAMES) {
+      const file = `${name}.md`;
+      expect(files).toContain(file);
       expect(containsRawHtml(readFileSync(join(dir, file), "utf8")), file).toBe(false);
     }
   });
