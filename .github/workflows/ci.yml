@@ -86,6 +86,8 @@ jobs:
               - '**/*.yml' # prettier --check . also covers YAML outside the packages
               - '**/*.yaml'
               - '.github/workflows/ci.yml'
+              - 'docs/legal/**' # next build renders them on /legal/[doc]; legal.test.ts reads them
+              - 'docs/web/**' # screens-doc.test.ts and web-screens-check compare screens.md with the registry
             contracts:
               - 'packages/contracts/**'
               - 'packages/py-common/**'

@@ -105,7 +105,9 @@ TypeScript part; `pnpm format` is the prettier check.
 ## CI
 
 Two jobs in `.github/workflows/ci.yml` cover the app, both keyed on the `typescript` path filter
-(`apps/**`, `packages/ui/**`, `packages/contracts/**`, the workspace files):
+(`apps/**`, `packages/ui/**`, `packages/contracts/**`, the workspace files, and `docs/legal/**`
+and `docs/web/**` because the build renders the legal drafts and the tests compare
+`docs/web/screens.md` with the registry):
 
 - `typescript` runs `pnpm format` and `pnpm turbo run lint typecheck test build` for every
   package. No `CW_WEB_*` variable is set there, so the web build must not need one.
