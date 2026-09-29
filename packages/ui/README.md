@@ -22,9 +22,14 @@ src/lib/cn.ts              # clsx + tailwind-merge
 src/test/axe.ts            # runAxe() and the toHaveNoViolations matcher over axe-core (exported as ./test/axe)
 src/test/setup.ts          # vitest setup: registers the matcher, cleans up after each test
 src/imports.test.ts        # internal imports are relative, never "@/" or the package name
+src/lib/ids.ts             # describedBy() and fieldIds() for aria-describedby wiring
+src/hooks/use-controllable-state.ts  # controlled-or-uncontrolled state for composites
 src/components/            # one file per component, <name>.test.tsx beside it
-  button, input, textarea, label, checkbox, radio-group, select   # form controls
-  dialog, sheet, tabs, table, card, badge, skeleton, toaster      # surfaces and feedback
+  button, input, textarea, label, checkbox, radio-group, select   # form controls (shadcn)
+  dialog, sheet, tabs, table, card, badge, skeleton, toaster      # surfaces and feedback (shadcn)
+  field, status-chip, banner, draft-banner, empty-state, error-state, copy-button, visually-hidden
+  page-header, app-shell, admin-shell, key-value, timeline, json-view, stepper
+  confirm-dialog, reason-dialog, citation-card, month-calendar, data-table, not-available-yet
 ```
 
 ## Components
@@ -51,6 +56,40 @@ Every component exports its props type, sets `data-slot` (and `data-variant`, `d
 `data-side` where it has one) for tests, and has a Testing Library test that drives the keyboard
 behaviour with `@testing-library/user-event` and ends with
 `expect(await runAxe(container)).toHaveNoViolations()`.
+
+### Composites
+
+Built on the primitives and the tokens; each has its accessibility contract in the file:
+
+- `Field`: label, control, description and error; the control gets `id`, `aria-describedby`,
+  `aria-invalid` and `aria-required`, and the error id is `<id>-error`.
+- `StatusChip`, `Badge`, `Banner`, `Timeline`: the `Tone` vocabulary (neutral, success,
+  warning, danger, info); the text carries the meaning, colour only reinforces it. A danger
+  Banner is `role="alert"`, the other tones `role="status"`.
+- `DraftBanner`: the fixed text "Draft - to be reviewed by a lawyer" with the document version.
+- `EmptyState` (says why the list is empty), `ErrorState` (`role="alert"`, the problem title
+  and detail, the correlation id in `<code>` with a `CopyButton`), `PageHeader` (the page's
+  one h1), `Skeleton` inside `SkeletonGroup` (`role="status"` with a screen-reader "Loading").
+- `AppShell` and `AdminShell`: skip link to `<main id="main">`, primary navigation (a Sheet
+  under the md breakpoint), `aria-current="page"` on the active link, a `Link` prop for the
+  app's router link. AdminShell adds the grouped tool sidebar and an internal banner naming
+  the environment.
+- `KeyValue` (`<dl>`), `Timeline` (`<ol>` with `<time>`), `JsonView` (`<pre>` with `<details>`
+  per object or array), `Stepper` (`aria-current="step"`, "Step 2 of 5").
+- `ConfirmDialog` (says what the action records; danger button when destructive; buttons
+  disabled while pending) and `ReasonDialog` (adds a required reason; confirm stays disabled
+  under ten characters; the error shows on blur; `onConfirm` receives the trimmed reason).
+- `CitationCard`: the quote in `<blockquote>`, the clause reference, the document link, and
+  either a "Verified" chip or a "Not verified" warning; the quote is never paraphrased.
+- `MonthCalendar`: `role="grid"` with one focusable cell (roving tabindex), Arrow keys, Home,
+  End, PageUp and PageDown (Shift for a year), Enter or Space to select, `aria-selected` and
+  `aria-current="date"`, month buttons with labels, `renderDay` for per-day content, and a
+  `timeZone` (default Asia/Kolkata) that only decides which day is today.
+- `DataTable`: caption, `aria-sort` on sortable headers, sorting and paging as callbacks for
+  client components or as links (`sortHref`, `nextHref`, `prevHref`) for server-rendered
+  pages; it never fetches.
+- `NotAvailableYet`: title, guide reference, roles and the awaited routes (method, path,
+  owner), or a sentence saying no backend exists yet.
 
 To add a component: generate it with the CLI command above (or write it by hand next to the
 others), replace the shadcn classes with token classes, make the imports relative, export it
