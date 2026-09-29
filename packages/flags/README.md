@@ -78,13 +78,23 @@ when Unleash is chosen. Both answer the same way. `CW_FLAGS_PROVIDER` picks the 
   cased, dots as underscores), else the default. A tenant-targeted flag that is on narrows to its
   allow-list, `tenants_env` or `CW_FLAG_<NAME>__TENANTS`; with no list it is on for every tenant.
 - `unleash` reads an Unleash server at `CW_UNLEASH_URL` with the client token
-  `CW_UNLEASH_API_TOKEN`. Create each flag in Unleash under its registry name; a string flag is a
-  variant whose payload (or name) is one of its values. The tenant id is Unleash's `userId`.
-  `make dev-flags` starts one locally.
+  `CW_UNLEASH_API_TOKEN`. Create each flag the code reads through these clients in Unleash under
+  its registry name; a string flag is a variant whose payload (or name) is one of its values. The
+  tenant id is Unleash's `userId`. `make dev-flags` starts one locally.
 
 A flag Unleash does not hold, or a value that does not parse, answers the default and is
 logged as `flag_evaluation_failed`. A name the registry does not hold throws (`UnknownFlagError`
 in both languages).
+
+Only a flag the code reads through `py_common.flags` or `@compliancewatch/flags` follows
+`CW_FLAGS_PROVIDER`, and today that is `profile.gstin_category_prefill` alone. Every other entry
+(`rulebook.publish`, `qa.kag`, `notification.whatsapp`, `pipeline.knowledge`,
+`identity.billing_provider`, `llm_gateway.provider`, `profile.gstin_lookup`, `flags.provider` and
+the WhatsApp bot's two switches) is a setting or an environment variable that its service reads
+once at start-up. Those entries are registered for their owner, default, removal condition and
+expiry date only: turning one on in Unleash changes nothing. Set its `env` variable and restart
+the service instead. An entry moves to the provider when its code starts reading it through one
+of the two clients.
 
 ## Adding a flag
 
