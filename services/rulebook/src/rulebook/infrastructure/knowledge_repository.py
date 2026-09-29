@@ -954,7 +954,11 @@ class SqlAlchemyClauseIndex:
     def nearest(
         self, vector: Vector, model: str, filters: ClauseFilter, pool: int
     ) -> Sequence[ClauseId]:
-        self._session.execute(text(f"SET LOCAL hnsw.ef_search = {HNSW_EF_SEARCH}"))
+        # set_config(..., true) is SET LOCAL with the value as a bind parameter.
+        self._session.execute(
+            text("SELECT set_config('hnsw.ef_search', :value, true)"),
+            {"value": str(HNSW_EF_SEARCH)},
+        )
         self._session.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
         distance = ClauseEmbeddingRow.embedding.op("<=>", return_type=Float())(
             bindparam("query_vector", vector, type_=ClauseEmbeddingRow.embedding.type)
