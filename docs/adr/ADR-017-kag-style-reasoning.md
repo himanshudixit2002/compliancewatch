@@ -70,7 +70,8 @@ fall back to layered retrieval. A solver executes the plan with repository calls
 evaluation only, no model call, one trace span per step. The answerer phrases from the evidence
 bundle the solver produced and cites only clause refs from that bundle, with the same post-check
 and `not_covered` outcome as the rest of the qa service. Only published rule versions in force on
-the question's date are visible to the solver.
+the question's date are visible to the solver, and a clause cited only by versions not in force
+then is not retrieved.
 
 Knowledge alignment. A `canonical_entity` table holds one row per (type, canonical name) with an
 alias array of names that are already normalised. The kernel owns the normalisation rule per type,
@@ -149,8 +150,9 @@ a summary is not a clause: a citation into a summary cannot be post-checked agai
 text, which the answer policy requires.
 
 Plain hybrid RAG. This is already layer two of ADR-012 and stays. It returns the clauses most
-similar to the question. It does not follow supersedes chains, does not compare a turnover to a
-threshold, and does not know that two mentions are the same notification, so multi-hop and
+similar to the question. It does not follow supersedes chains (as built, it drops a clause cited
+only by versions not in force on the question's date, but it cannot reach the version that
+replaced it), does not compare a turnover to a threshold, and does not know that two mentions are the same notification, so multi-hop and
 date or threshold questions either go to the agentic fallback or get refused.
 
 ## Consequences

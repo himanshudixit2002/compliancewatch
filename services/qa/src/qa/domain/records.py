@@ -96,7 +96,11 @@ class EntityResolution:
 
 @dataclass(frozen=True, slots=True)
 class ClauseRecord:
-    """A clause with what its document says about it: regulator, type, number and title."""
+    """A clause with what its document says about it: regulator, type, number and title.
+
+    ``out_of_force`` is the rulebook's word on a search hit or an entity's clause: rule versions
+    that were published cite the clause, and none of them is in force on the date asked about.
+    A clause no such version cites is never out of force."""
 
     clause_id: ClauseId
     document_id: DocumentId
@@ -107,6 +111,7 @@ class ClauseRecord:
     external_ref: str = ""
     title: str = ""
     published_at: date | None = None
+    out_of_force: bool = False
 
     @property
     def source(self) -> str:

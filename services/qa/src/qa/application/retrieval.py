@@ -3,8 +3,10 @@ fused by reciprocal rank, then the answerer.
 
 The question is embedded through the gateway and searched with the model that served the
 vector, ``k=8``, in the fused order: there is no reranker. When embedding fails or its budget is
-used up, the search runs on full text alone and the span says so. No hit means ``not_covered``
-(``no_evidence``).
+used up, the search runs on full text alone and the span says so. A hit the rulebook marks
+``out_of_force`` (the rule versions citing its clause were published, and none is in force on
+the question's date) is dropped and counted on the span; a clause no version cites stays,
+filtered by its document's date only. No hit means ``not_covered`` (``no_evidence``).
 """
 
 from datetime import date
@@ -23,6 +25,8 @@ SEARCH_K: Final = 8
 SEARCH_STEP: Final = "search"
 """The step id clauses found by hybrid search carry in the bundle."""
 LEXICAL_ONLY: Final = "qa.retrieve.lexical_only"
+OUT_OF_FORCE: Final = "qa.retrieve.out_of_force"
+"""How many clauses were dropped because their rule is out of force on the date."""
 
 
 def search_clauses(
@@ -36,7 +40,8 @@ def search_clauses(
     layer: Layer,
     span: Span,
 ) -> tuple[SearchHit, ...]:
-    """Search ``text`` with its embedding, or on full text alone when embedding fails."""
+    """Search ``text`` with its embedding, or on full text alone when embedding fails; the
+    hits whose rule is out of force on ``as_of`` are dropped."""
     request = ctx.request
     vector: Vector | None = None
     model: str | None = None
@@ -49,7 +54,11 @@ def search_clauses(
         vector, model = embedding.vector, embedding.model
     except (DependencyUnavailableError, ModelBudgetExceededError):
         span.set_attribute(LEXICAL_ONLY, True)
-    return search.search(text, vector=vector, model=model, as_of=as_of, k=k)
+    hits = search.search(text, vector=vector, model=model, as_of=as_of, k=k)
+    kept = tuple(hit for hit in hits if not hit.clause.out_of_force)
+    if len(kept) < len(hits):
+        span.set_attribute(OUT_OF_FORCE, len(hits) - len(kept))
+    return kept
 
 
 class HybridLayer:

@@ -86,12 +86,16 @@ when the flag targets the tenant, then hybrid search. Against the four layers of
 4. **Agentic fallback: not built.** Reciprocal rank fusion gives no score that means "low
    confidence", so nothing could trigger it yet.
 
-The date filter is on documents, not on rule versions: with `as_of`, the search keeps documents
-published on or before it and leaves undated documents out. Each hit names the published or
-superseded versions citing its clause and in force on that date (`cited_by`), but the hybrid
-layer does not yet use that to follow a hit to the version in force, as the Decision describes.
-In the KAG layer a plan reaches rule versions only through the set in force on the date, and a
-`follow` step walks the supersedes links when the plan asks for it.
+The date filter is on documents first: with `as_of`, the search keeps documents published on or
+before it and leaves undated documents out. Each hit also names the published or superseded
+versions citing its clause and in force on that date (`cited_by`), and says whether the clause
+is out of force (`out_of_force`: published, superseded or withdrawn versions cite it and none of
+them is in force on that date). The hybrid layer drops a clause cited only by versions not in
+force on the question's date and counts the drop on its span; a clause no version cites stays,
+filtered by its document's date alone. It does not follow a dropped hit to the version that
+replaced it, as the Decision describes. In the KAG layer a plan reaches rule versions only
+through the set in force on the date, `retrieve_clauses` drops out-of-force clauses the same
+way, and a `follow` step walks the supersedes links when the plan asks for it.
 
 The query and the clauses are embedded through the llm-gateway (ADR-008). The default model is
 `voyage/voyage-3.5-lite` (ADR-013), asked for 512 dimensions (the kernel's `EMBEDDING_DIMS`) and

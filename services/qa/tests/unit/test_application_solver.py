@@ -9,6 +9,7 @@ import pytest
 
 from domain_kernel.knowledge import EntityType, RelationKind
 from qa.application.answerer import render_evidence
+from qa.application.retrieval import OUT_OF_FORCE
 from qa.application.solver import Budget, SolverBudgetExceededError, SolverStepError
 from qa.domain.evidence import EvidenceBundle
 from qa.domain.plan import (
@@ -498,3 +499,26 @@ def test_the_evidence_does_not_depend_on_the_upstream_order(world: World) -> Non
         ("C2", "TEST-02"),
     ]
     assert "may be any of 1/2026, 2/2026" in seen[0][1]
+
+
+def test_clauses_whose_rule_is_out_of_force_are_not_retrieved(world: World) -> None:
+    rulebook = world.rulebook
+    withdrawn_clause = rulebook.add_clause(
+        "The return in FORM GSTR-3B for the month of March, 2025 may be furnished till the "
+        "22nd day of April, 2025.",
+        external_ref="TEST-00",
+        published_at=date(2025, 3, 1),
+    )
+    withdrawn = rulebook.add_version(
+        "gstr3b_extension_2025_03", effective_from=date(2025, 3, 1), status="withdrawn"
+    )
+    rulebook.cite(withdrawn, withdrawn_clause, "may be furnished till the 22nd day of April, 2025")
+    rulebook.mentions[world.form.entity_id].append(withdrawn_clause.clause_id)
+    by_text = solve(world, RetrieveClauses(text="GSTR-3B March furnished till April", k=5))
+    by_entity = solve(
+        world, FindEntity(EntityType.FORM, "GSTR-3B"), RetrieveClauses(source="s1", k=5)
+    )
+    for bundle in (by_text, by_entity):
+        assert sorted(clause.source for clause in bundle.clauses) == ["TEST-01", "TEST-02"]
+    retrieved = [span for span in steps(world) if span["qa.step.op"] == "retrieve_clauses"]
+    assert [span[OUT_OF_FORCE] for span in retrieved] == [1, 1]

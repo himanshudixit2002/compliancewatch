@@ -8,7 +8,7 @@ import pytest
 
 from domain_kernel.ids import TenantId
 from domain_kernel.vectors import Vector
-from qa.application.retrieval import HybridLayer
+from qa.application.retrieval import OUT_OF_FORCE, HybridLayer
 from qa.domain.answer import Outcome, Reason
 from qa.domain.errors import ModelBudgetExceededError
 from qa.domain.records import QueryEmbedding, SearchHit
@@ -96,6 +96,39 @@ def test_an_answer_refused_for_its_budget_ends_the_question(world: World) -> Non
     world.provider.add("q1", world.ANSWER, ModelBudgetExceededError("llm-gateway answered 429"))
     with pytest.raises(ModelBudgetExceededError):
         layer(world).run(world.context("GSTR-3B March"))
+
+
+def test_a_clause_whose_rule_is_out_of_force_is_dropped(world: World) -> None:
+    """Cited only by a version that ended before the question's date: dropped. A clause no
+    version cites stays, dated by its document alone."""
+    rulebook = world.rulebook
+    ended = rulebook.add_clause(
+        "The return in FORM GSTR-3B for the month of March, 2025 may be furnished till the "
+        "22nd day of April, 2025.",
+        external_ref="TEST-00",
+        published_at=date(2025, 3, 1),
+    )
+    rule = rulebook.add_version(
+        "gstr3b_extension_2025_03",
+        effective_from=date(2025, 3, 1),
+        effective_to=date(2025, 5, 1),
+    )
+    rulebook.cite(rule, ended, "may be furnished till the 22nd day of April, 2025")
+    rulebook.add_clause(
+        "A test circular on the GSTR-3B return for March.",
+        external_ref="TEST-05",
+        published_at=date(2026, 1, 1),
+    )
+    world.provider.add("q1", world.ANSWER, answer_text("", covered=False))
+    question = "GSTR-3B March return furnished till April"
+    layer(world).run(world.context(question))
+    span = world.tracer.named("qa.retrieve")[0]
+    assert (span.attributes[OUT_OF_FORCE], span.attributes["qa.retrieve.hits"]) == (1, 3)
+    prompt = world.provider.requests[0].user
+    assert ("TEST-00" in prompt, "TEST-02" in prompt, "TEST-05" in prompt) == (False, True, True)
+    layer(world).run(world.context(question, as_of=date(2025, 4, 10)))
+    assert OUT_OF_FORCE not in world.tracer.named("qa.retrieve")[1].attributes
+    assert "TEST-00" in world.provider.requests[1].user
 
 
 def test_no_hit_is_not_covered_without_a_model_call(world: World) -> None:

@@ -5,8 +5,10 @@ spans; ``memory_ports`` puts them together for ``build_app(ports=...)``.
 ``MemoryRulebook`` answers the rulebook's read API with its rules: the versions in force on a
 date are the published or superseded ones whose period contains it, relations are those from
 versions that have been published, a name resolves by canonical name or by the one alias of
-exactly one entity, and search ranks clauses by the question words they share. Setting ``fail``
-on a fake makes every read raise ``DependencyUnavailableError``.
+exactly one entity, and search ranks clauses by the question words they share. A search hit or
+an entity's clause is ``out_of_force`` on a date when published, superseded or withdrawn
+versions cite it with a verified quote and none of them is in force then. Setting ``fail`` on a
+fake makes every read raise ``DependencyUnavailableError``.
 """
 
 import hashlib
@@ -63,6 +65,8 @@ from qa.wiring import Ports
 
 PUBLISHED: Final = "published"
 HAS_BEEN_PUBLISHED: Final = frozenset({PUBLISHED, "superseded"})
+WAS_PUBLISHED: Final = HAS_BEEN_PUBLISHED | {"withdrawn"}
+"""The statuses whose citations say whether a clause is out of force."""
 _WORD = re.compile(r"[a-z0-9]+(?:[-/.][a-z0-9]+)*")
 _STOP_WORDS: Final = frozenset(
     {"a", "an", "and", "are", "by", "for", "i", "is", "my", "of", "on", "the", "to", "what", "when"}
@@ -235,9 +239,7 @@ class MemoryRulebook:
                 (
                     rule
                     for rule in self.versions.values()
-                    if rule.status in HAS_BEEN_PUBLISHED
-                    and rule.effective_from <= as_of
-                    and (rule.effective_to is None or as_of < rule.effective_to)
+                    if _in_force(rule, as_of)
                     and rule_key in (None, rule.rule_key)
                     and regulator in (None, rule.regulator)
                 ),
@@ -275,7 +277,9 @@ class MemoryRulebook:
     ) -> tuple[ClauseRecord, ...]:
         self._read("entity_clauses")
         found = [self.clauses[clause_id] for clause_id in self.mentions.get(entity_id, [])]
-        return tuple(clause for clause in found if _published_by(clause, as_of))[:limit]
+        return tuple(
+            self._dated(clause, as_of) for clause in found if _published_by(clause, as_of)
+        )[:limit]
 
     def relations(
         self,
@@ -320,9 +324,26 @@ class MemoryRulebook:
         ]
         ranked = sorted((item for item in scored if item[0]), key=lambda item: (-item[0], item[1]))
         return tuple(
-            SearchHit(clause, 1.0 / (60 + rank), self._cited_by(clause.clause_id))
+            SearchHit(
+                self._dated(clause, as_of), 1.0 / (60 + rank), self._cited_by(clause.clause_id)
+            )
             for rank, (_, _, clause) in enumerate(ranked[:k], start=1)
         )
+
+    def _dated(self, clause: ClauseRecord, as_of: date | None) -> ClauseRecord:
+        """The clause with whether its rule is out of force on ``as_of``."""
+        citing = [
+            self.versions[rule_version_id]
+            for rule_version_id, citations in self.citations.items()
+            if self.versions[rule_version_id].status in WAS_PUBLISHED
+            and any(c.clause_id == clause.clause_id and c.verified for c in citations)
+        ]
+        out = (
+            as_of is not None
+            and bool(citing)
+            and not any(_in_force(rule, as_of) for rule in citing)
+        )
+        return replace(clause, out_of_force=out)
 
     def _cited_by(self, clause_id: ClauseId) -> tuple[RuleVersionId, ...]:
         return tuple(
@@ -553,6 +574,14 @@ def answer_text(answer: str, *citations: tuple[str, str], covered: bool = True) 
             "answer": answer,
             "citations": [{"clause": label, "quote": quote} for label, quote in citations],
         }
+    )
+
+
+def _in_force(rule: RuleVersion, as_of: date) -> bool:
+    return (
+        rule.status in HAS_BEEN_PUBLISHED
+        and rule.effective_from <= as_of
+        and (rule.effective_to is None or as_of < rule.effective_to)
     )
 
 

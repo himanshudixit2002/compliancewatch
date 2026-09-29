@@ -34,8 +34,11 @@ Every layer that ran is in the response as `{layer, result, reason}`.
 3. **Hybrid** (`application/retrieval.py`). The question is embedded through the gateway and the
    rulebook's `/search` fuses full text and vectors by reciprocal rank, `k=8`. If embedding
    fails, the search runs on full text alone. No hit is "not covered" (`no_evidence`). The
-   search keeps documents published on or before the question's date; a hit is not yet
-   followed to the rule version in force (ADR-012, Evaluation).
+   search keeps documents published on or before the question's date, and a hit the rulebook
+   marks `out_of_force` (rule versions that were published cite its clause and none of them is
+   in force on that date) is dropped. A clause no version cites stays, filtered by its
+   document's date alone. A dropped hit is not followed to the version that replaced it
+   (ADR-012, Evaluation).
 
 Not built: the fourth, agentic layer of ADR-012 (reciprocal rank fusion gives no meaningful low
 score to trigger it), the cross-encoder rerank (hybrid keeps the fused order), and a router that
@@ -66,6 +69,8 @@ The solver (`application/solver.py`) is deterministic:
 - Relations (by the far end's effective date and rule key), the candidates of an ambiguous name
   and obligations are sorted before use, so the evidence labels and the prompt do not depend on
   the order the upstream services return them in.
+- `retrieve_clauses` drops the search hits and the entity's clauses the rulebook marks
+  `out_of_force` on the plan's date, as hybrid search does.
 - A question may make 40 upstream calls in all and a step may produce 50 items.
 - Applicability is the kernel's `Specification.evaluate` with the packaged ontology, standing in
   until the applicability engine has an API. A specification that does not parse or names an
@@ -128,7 +133,8 @@ text. The spec is
   test fails when a file changes without a new version and digest.
 - **Spans**: `qa.ask` (question id, tenant, deciding layer, outcome, reason), `qa.layer` (layer,
   result, reason), `qa.solve.step` (`qa.step.id`, `op`, `items`, `hidden`, `status`) and
-  `qa.retrieve` (`k`, hits, `lexical_only`). Attributes carry ids, codes and counts, never
+  `qa.retrieve` (`k`, hits, `lexical_only`, `out_of_force`: the hits dropped); a
+  `retrieve_clauses` step's span carries `qa.retrieve.out_of_force` too. Attributes carry ids, codes and counts, never
   question or regulator text.
 - **Eval tags**: every model call carries metadata `question_id` (the request's `x-request-id`),
   `stage` (`plan` or `answer`), `attempt` (`1` or `2`) and `layer`, so the eval harness can

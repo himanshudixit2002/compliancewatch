@@ -9,9 +9,10 @@ step that cannot run (nothing to compare, an upstream failure) stops it too
 
 Only the rule versions in force on the plan's date are visible. A version reached any other way
 (the far end of a relation, an obligation's version) is dropped when it is not in that set, and
-the drop is counted on the step's span. ``follow`` is breadth first with a visited set, so a
-cycle of relations ends. Applicability is the kernel's ``Specification.evaluate`` with the
-injected ontology, standing in until the applicability engine has an API; a specification that
+the drop is counted on the step's span; so is a retrieved clause the rulebook marks out of
+force on that date (``qa.retrieve.out_of_force``). ``follow`` is breadth first with a visited
+set, so a cycle of relations ends. Applicability is the kernel's ``Specification.evaluate`` with
+the injected ontology, standing in until the applicability engine has an API; a specification that
 does not parse or names an unknown attribute gives an ``unsure`` fact, never a crash.
 
 The bundle holds every clause the solver touched as evidence (relation evidence and retrieved
@@ -34,7 +35,7 @@ from domain_kernel.knowledge import EntityType
 from domain_kernel.ontology import Ontology
 from domain_kernel.predicates import Applicability, evaluate_predicate, specification_from_mapping
 from qa.application.context import AskContext
-from qa.application.retrieval import search_clauses
+from qa.application.retrieval import OUT_OF_FORCE, search_clauses
 from qa.domain.answer import Layer
 from qa.domain.errors import DependencyUnavailableError
 from qa.domain.evidence import BundleBuilder, EvidenceBundle
@@ -524,22 +525,29 @@ class _Run:
             )
             found = [hit.clause for hit in hits]
         elif args.source is not None:  # pragma: no branch - the plan names one of the two
-            found = self._clauses_of(self.values[args.source], args.k)
+            found = self._clauses_of(self.values[args.source], args.k, span)
         clauses = list({clause.clause_id: clause for clause in found}.values())[: args.k]
         self.items(len(clauses))
         for clause in clauses:
             self.evidence(clause)
         return StepValue(ValueKind.CLAUSES, clauses=tuple(clauses))
 
-    def _clauses_of(self, source: StepValue, k: int) -> list[ClauseRecord]:
+    def _clauses_of(self, source: StepValue, k: int, span: Span) -> list[ClauseRecord]:
+        """An entity's clauses in force, then the verified citations of the rules."""
         found: list[ClauseRecord] = []
+        dropped = 0
         for entity in source.entities:
             if len(found) >= k:
                 break
             self.call()
-            found.extend(
-                self.solver.rulebook.entity_clauses(entity.entity_id, as_of=self.as_of, limit=k)
+            mentioning = self.solver.rulebook.entity_clauses(
+                entity.entity_id, as_of=self.as_of, limit=k
             )
+            kept = [clause for clause in mentioning if not clause.out_of_force]
+            dropped += len(mentioning) - len(kept)
+            found.extend(kept)
+        if dropped:
+            span.set_attribute(OUT_OF_FORCE, dropped)
         rule_ids = [rule.rule_version_id for rule in source.rules] + [
             item.rule_version_id for item in source.obligations
         ]

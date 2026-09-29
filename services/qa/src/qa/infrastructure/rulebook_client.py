@@ -192,6 +192,7 @@ def _clause(item: Mapping[str, Any]) -> ClauseRecord:
         external_ref=str(item.get("external_ref") or ""),
         title=str(item.get("title") or ""),
         published_at=_date(item.get("published_at")),
+        out_of_force=bool(item.get("out_of_force", False)),
     )
 
 

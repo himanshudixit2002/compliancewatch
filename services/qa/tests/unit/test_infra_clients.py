@@ -194,13 +194,18 @@ def test_resolving_a_name_reads_the_status(
 
 
 def test_the_clauses_of_an_entity() -> None:
-    mentioned = {**CLAUSE_OUT, "mentions": [{"text": "GSTR-3B", "span_start": 0, "span_end": 7}]}
+    mentioned = {
+        **CLAUSE_OUT,
+        "mentions": [{"text": "GSTR-3B", "span_start": 0, "span_end": 7}],
+        "out_of_force": True,
+    }
     routes = Routes(**{f"/v1/rulebook/entities/{ENTITY}/clauses": [mentioned]})
     (clause,) = rulebook(routes).entity_clauses(ENTITY, as_of=date(2026, 4, 10), limit=5)
-    assert (clause.clause_id, clause.source, clause.published_at) == (
+    assert (clause.clause_id, clause.source, clause.published_at, clause.out_of_force) == (
         CLAUSE,
         "01/2026-Central Tax",
         date(2026, 1, 16),
+        True,
     )
     assert dict(routes.requests[0].url.params) == {"limit": "5", "as_of": "2026-04-10"}
     assert rulebook(Routes()).entity_clauses(ENTITY, as_of=None, limit=5) == ()
@@ -245,10 +250,11 @@ def test_a_clause_or_nothing() -> None:
     routes = Routes(**{f"/v1/rulebook/clauses/{CLAUSE}": CLAUSE_OUT})
     clause = rulebook(routes).clause(CLAUSE)
     assert clause is not None
-    assert (clause.clause_ref, clause.text, clause.doc_type) == (
+    assert (clause.clause_ref, clause.text, clause.doc_type, clause.out_of_force) == (
         "en.p3",
         "Clause text.",
         "notification",
+        False,
     )
     assert rulebook(Routes()).clause(CLAUSE) is None
 
@@ -263,12 +269,14 @@ def test_search_sends_the_vector_with_its_model() -> None:
         "lexical_rank": 1,
         "vector_rank": None,
         "cited_by": [str(VERSION.value)],
+        "out_of_force": False,
     }
-    routes = Routes(**{"/v1/rulebook/search": [hit]})
-    (found,) = rulebook(routes).search(
+    routes = Routes(**{"/v1/rulebook/search": [hit, {**hit, "out_of_force": True}]})
+    found, ended = rulebook(routes).search(
         "due date", vector=(0.5, 0.5), model="fake/hash-ngram-512", as_of=date(2026, 4, 10), k=8
     )
     assert (found.score, found.cited_by, found.clause.published_at) == (0.0325, (VERSION,), None)
+    assert (found.clause.out_of_force, ended.clause.out_of_force) == (False, True)
     assert json.loads(routes.requests[0].content) == {
         "text": "due date",
         "k": 8,
