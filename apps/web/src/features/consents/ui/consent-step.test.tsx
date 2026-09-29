@@ -3,7 +3,7 @@ import { runAxe } from "@compliancewatch/ui/test/axe";
 import { describe, expect, it, vi } from "vitest";
 import { consentSummaryFromDto } from "@/entities/consent/mappers";
 import type { ActionState } from "@/shared/lib/action-state";
-import { ACCEPTED_STATES, VERSIONS, summaryDto } from "@/test/consent-fixture";
+import { ACCEPTED_STATES, VERSIONS, grantedState, summaryDto } from "@/test/consent-fixture";
 import { consentStepView } from "../model/consent-step";
 import type { DocumentVersions } from "../model/purposes";
 import { ConsentStep } from "./consent-step";
@@ -20,6 +20,7 @@ function renderStep(states = summaryDto(), versions: DocumentVersions = VERSIONS
       continueHref="/onboarding/business"
       documentHref={(name) => `/legal/${name}`}
       whatsappField="whatsapp_number"
+      settingsHref="/settings/consents"
     />,
   );
 }
@@ -63,5 +64,35 @@ describe("ConsentStep", () => {
       screen.getByRole("link", { name: "Continue to your business" }).getAttribute("href"),
     ).toBe("/onboarding/business");
     expect(await runAxe(accepted)).toHaveNoViolations();
+  });
+
+  it("asks again only for what a new version changed and shows the rest as agreed", () => {
+    // The terms moved to a new Version line; the rest is still granted at its current version.
+    const { container } = renderStep(
+      summaryDto([
+        grantedState("terms", "terms-of-service@9.0"),
+        grantedState("privacy_notice", "privacy-notice@9.9-draft"),
+        grantedState("profile_processing", "privacy-notice@9.9-draft"),
+        grantedState("whatsapp_reminders", "whatsapp-consent@9.8-draft"),
+      ]),
+    );
+    expect(container.querySelector("[data-slot='consent-accepted']")).toBeNull();
+    expect(
+      screen
+        .getAllByRole("checkbox")
+        .map((box) => box.closest("[data-purpose]")?.getAttribute("data-purpose")),
+    ).toEqual(["terms", "email_reminders", "analytics"]);
+    const agreed = [...container.querySelectorAll("[data-slot='consent-agreed']")];
+    expect(agreed.map((line) => line.getAttribute("data-purpose"))).toEqual([
+      "privacy_notice",
+      "profile_processing",
+      "whatsapp_reminders",
+    ]);
+    expect(agreed[2]?.textContent).toContain("Agreed on 1 Jan 2000, 5:30 am IST:");
+    expect(
+      screen
+        .getByRole("link", { name: "Withdraw it in the consent settings" })
+        .getAttribute("href"),
+    ).toBe("/settings/consents");
   });
 });

@@ -5,16 +5,23 @@ import { describe, expect, it, vi } from "vitest";
 import type { ActionState } from "@/shared/lib/action-state";
 import { ConsentForm, type ConsentFormOption } from "./consent-form";
 
-function option(purpose: string, required: boolean, granted = false): ConsentFormOption {
+function option(
+  purpose: string,
+  required: boolean,
+  grantedAt: string | null = null,
+): ConsentFormOption {
   return {
     purpose,
     label: `Example label for ${purpose}.`,
     required,
     document: { title: "Example document", version: "9.9-draft" },
     documentHref: "/legal/privacy-notice",
-    granted,
+    grantedAt,
   };
 }
+
+const AGREED_AT = "1 Jan 2000, 5:30 am IST";
+const SETTINGS = "/settings/consents";
 
 const OPTIONS = [
   option("terms", true),
@@ -22,7 +29,7 @@ const OPTIONS = [
   option("profile_processing", true),
   option("whatsapp_reminders", false),
   option("email_reminders", false),
-  option("analytics", false, true),
+  option("analytics", false),
 ];
 
 describe("ConsentForm", () => {
@@ -34,6 +41,7 @@ describe("ConsentForm", () => {
         options={OPTIONS}
         offerWhatsapp
         whatsappField="whatsapp_number"
+        settingsHref={SETTINGS}
       />,
     );
     expect(screen.getByRole("group", { name: "To use ComplianceWatch (required)" })).toBeDefined();
@@ -43,12 +51,9 @@ describe("ConsentForm", () => {
     const hint = document.getElementById(terms.getAttribute("aria-describedby") as string);
     expect(hint?.textContent).toBe("Example document, version 9.9-draft");
     expect(hint?.querySelector("a")?.getAttribute("href")).toBe("/legal/privacy-notice");
-    // A purpose already granted at the current version starts ticked.
-    expect(
-      screen
-        .getByRole("checkbox", { name: "Example label for analytics." })
-        .getAttribute("aria-checked"),
-    ).toBe("true");
+    for (const box of screen.getAllByRole("checkbox")) {
+      expect(box.getAttribute("aria-checked")).toBe("false");
+    }
     expect(screen.queryByLabelText(/WhatsApp number/)).toBeNull();
     expect(await runAxe(container)).toHaveNoViolations();
   });
@@ -61,6 +66,7 @@ describe("ConsentForm", () => {
         options={OPTIONS}
         offerWhatsapp
         whatsappField="whatsapp_number"
+        settingsHref={SETTINGS}
       />,
     );
     const whatsapp = screen.getByRole("checkbox", {
@@ -93,6 +99,7 @@ describe("ConsentForm", () => {
         options={OPTIONS}
         offerWhatsapp
         whatsappField="whatsapp_number"
+        settingsHref={SETTINGS}
       />,
     );
     await user.click(screen.getByRole("checkbox", { name: "Example label for terms." }));
@@ -137,6 +144,7 @@ describe("ConsentForm", () => {
         options={OPTIONS}
         offerWhatsapp
         whatsappField="whatsapp_number"
+        settingsHref={SETTINGS}
       />,
     );
     await user.click(screen.getByRole("button", { name: "Agree and continue" }));
@@ -152,11 +160,89 @@ describe("ConsentForm", () => {
         options={OPTIONS.filter((item) => item.purpose !== "whatsapp_reminders")}
         offerWhatsapp={false}
         whatsappField="whatsapp_number"
+        settingsHref={SETTINGS}
       />,
     );
     expect(
       screen.getByText("WhatsApp reminders are set for each client business, not for the firm."),
     ).toBeDefined();
     expect(screen.queryByRole("checkbox", { name: /whatsapp/ })).toBeNull();
+  });
+
+  it("shows a purpose agreed at the current version as a line, not a box that could be unticked", async () => {
+    const user = userEvent.setup();
+    let submitted: FormData | undefined;
+    const action = vi.fn(async (_state: ActionState, formData: FormData): Promise<ActionState> => {
+      submitted = formData;
+      return { status: "idle" };
+    });
+    const { container } = render(
+      <ConsentForm
+        action={action}
+        options={[
+          option("terms", true),
+          option("privacy_notice", true, AGREED_AT),
+          option("profile_processing", true, AGREED_AT),
+          option("whatsapp_reminders", false, AGREED_AT),
+          option("email_reminders", false),
+          option("analytics", false, AGREED_AT),
+        ]}
+        offerWhatsapp
+        whatsappField="whatsapp_number"
+        settingsHref={SETTINGS}
+      />,
+    );
+    expect(
+      screen
+        .getAllByRole("checkbox")
+        .map((box) => box.closest("[data-purpose]")?.getAttribute("data-purpose")),
+    ).toEqual(["terms", "email_reminders"]);
+    const agreed = [...container.querySelectorAll("[data-slot='consent-agreed']")];
+    expect(agreed.map((line) => line.getAttribute("data-purpose"))).toEqual([
+      "privacy_notice",
+      "profile_processing",
+      "whatsapp_reminders",
+      "analytics",
+    ]);
+    const whatsapp = agreed[2] as HTMLElement;
+    expect(whatsapp.textContent).toContain("Example label for whatsapp_reminders.");
+    expect(whatsapp.textContent).toContain(
+      `Agreed on ${AGREED_AT}: Example document, version 9.9-draft`,
+    );
+    // An optional purpose is withdrawn on the settings page; a required one is not.
+    expect(
+      [...whatsapp.querySelectorAll("a")].map((link) => [
+        link.textContent,
+        link.getAttribute("href"),
+      ]),
+    ).toEqual([
+      ["Example document, version 9.9-draft", "/legal/privacy-notice"],
+      ["Withdraw it in the consent settings", SETTINGS],
+    ]);
+    expect((agreed[0] as HTMLElement).querySelectorAll("a")).toHaveLength(1);
+    expect(screen.queryByLabelText(/WhatsApp number/)).toBeNull();
+    expect(await runAxe(container)).toHaveNoViolations();
+
+    await user.click(screen.getByRole("checkbox", { name: "Example label for terms." }));
+    await user.click(screen.getByRole("button", { name: "Agree and continue" }));
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    // Only the ticked box is sent: an agreed purpose is neither given again nor read as a stop.
+    expect([...(submitted as FormData).keys()]).toEqual(["terms"]);
+  });
+
+  it("leaves out the settings link where the person cannot open the settings page", () => {
+    const { container } = render(
+      <ConsentForm
+        action={vi.fn(async (): Promise<ActionState> => ({ status: "idle" }))}
+        options={[option("terms", true), option("analytics", false, AGREED_AT)]}
+        offerWhatsapp={false}
+        whatsappField="whatsapp_number"
+        settingsHref={null}
+      />,
+    );
+    const agreed = container.querySelector("[data-slot='consent-agreed']") as HTMLElement;
+    expect([...agreed.querySelectorAll("a")].map((link) => link.textContent)).toEqual([
+      "Example document, version 9.9-draft",
+    ]);
   });
 });

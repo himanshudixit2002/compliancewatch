@@ -7,7 +7,9 @@ import { ONBOARDING_PURPOSES, REQUIRED_PURPOSES } from "./purposes";
 /**
  * The consent form's fields and the shape check of what it posts. Each purpose's checkbox is
  * named after the purpose and submits a value only when ticked; the WhatsApp number is its own
- * field, required when the WhatsApp box is ticked. The number is normalised (spaces, dashes and
+ * field, required when the WhatsApp box is ticked. A purpose already granted at the current
+ * version has no box (the step shows it as agreed), so a required one counts as given when the
+ * action's fresh read of the records says it is granted. The number is normalised (spaces, dashes and
  * brackets dropped) and must be E.164; it goes to the notification service in the server
  * action and is never put in a URL the browser sees. The service keys a WhatsApp preference by
  * the number as WhatsApp reports it, digits without the plus (the bot's opt-ins and the seed use
@@ -32,14 +34,23 @@ export function whatsappRecipient(e164: string): string {
   return e164.replace(/^\+/, "");
 }
 
+export interface ConsentFormOptions {
+  offerWhatsapp: boolean;
+  /** The purposes granted at the current version, from the records read by the action. */
+  granted?: readonly ConsentPurpose[];
+}
+
 export function parseConsentForm(
   formData: FormData,
-  options: { offerWhatsapp: boolean },
+  options: ConsentFormOptions,
 ): ParsedConsentForm {
   const errors: Record<string, string[]> = {};
+  const granted = options.granted ?? [];
   const purposes = ONBOARDING_PURPOSES.filter((purpose) => formData.get(purpose) !== null);
   for (const purpose of REQUIRED_PURPOSES) {
-    if (!purposes.includes(purpose)) errors[purpose] = [t("consent.error.required")];
+    if (!purposes.includes(purpose) && !granted.includes(purpose)) {
+      errors[purpose] = [t("consent.error.required")];
+    }
   }
   let whatsappNumber: string | null = null;
   if (purposes.includes("whatsapp_reminders")) {

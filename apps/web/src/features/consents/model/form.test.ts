@@ -32,6 +32,15 @@ describe("parseConsentForm", () => {
     });
   });
 
+  it("takes a required purpose already granted at the current version as given", () => {
+    expect(
+      parseConsentForm(form({ terms: "on" }), {
+        offerWhatsapp: true,
+        granted: ["privacy_notice", "profile_processing", "analytics"],
+      }),
+    ).toEqual({ ok: true, value: { purposes: ["terms"], whatsappNumber: null } });
+  });
+
   it("needs an E.164 number with the WhatsApp box and normalises it", () => {
     const ok = parseConsentForm(
       form({

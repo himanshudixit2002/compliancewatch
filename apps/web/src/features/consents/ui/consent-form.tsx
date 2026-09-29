@@ -18,7 +18,8 @@ export interface ConsentFormOption {
   document: { title: string; version: string };
   /** /legal/<document>. */
   documentHref: string;
-  granted: boolean;
+  /** When the current grant was recorded (IST); null while the purpose is not granted. */
+  grantedAt: string | null;
 }
 
 export interface ConsentFormProps {
@@ -28,6 +29,8 @@ export interface ConsentFormProps {
   offerWhatsapp: boolean;
   /** The form field of the WhatsApp number. */
   whatsappField: string;
+  /** The consents settings page, where an optional purpose is withdrawn; null without access. */
+  settingsHref: string | null;
 }
 
 interface Values {
@@ -58,27 +61,28 @@ function valuesOf(
 /**
  * The consent checkboxes: the required ones (terms, privacy notice, profile processing), then
  * the optional ones (WhatsApp reminders with the number they go to, email reminders, product
- * analytics), each unticked unless already granted at the current version, each with the
- * document it refers to and its version. The number field appears only while the WhatsApp box
- * is ticked. A refused submit shows the service's problem or the fields to fix, keeps what was
+ * analytics), each unticked, each with the document it refers to and its version. A purpose
+ * already granted at the current version is not a box but a line saying when it was agreed:
+ * submitting records only boxes that are ticked, so a pre-ticked box that was unticked would
+ * look like a withdrawal and record nothing. An optional one links to the settings page, where
+ * it is withdrawn. The number field appears only while the WhatsApp box is ticked. A refused submit shows the service's problem or the fields to fix, keeps what was
  * ticked and typed (the fields remount from the submitted values), and moves focus to the
  * error summary; the submit button is disabled and busy while the action runs.
  */
-export function ConsentForm({ action, options, offerWhatsapp, whatsappField }: ConsentFormProps) {
+export function ConsentForm({
+  action,
+  options,
+  offerWhatsapp,
+  whatsappField,
+  settingsHref,
+}: ConsentFormProps) {
   const [attempt, formAction, pending] = useActionState(
     async (previous: Attempt, formData: FormData): Promise<Attempt> => ({
       state: await action(previous.state, formData),
       values: valuesOf(formData, options, whatsappField),
       count: previous.count + 1,
     }),
-    {
-      state: idleAction(),
-      values: {
-        purposes: options.filter((option) => option.granted).map((option) => option.purpose),
-        whatsappNumber: "",
-      },
-      count: 0,
-    },
+    { state: idleAction(), values: { purposes: [], whatsappNumber: "" }, count: 0 },
   );
   const { state } = attempt;
   const errorsRef = useRef<HTMLDivElement>(null);
@@ -129,6 +133,7 @@ export function ConsentForm({ action, options, offerWhatsapp, whatsappField }: C
           state={state}
           offerWhatsapp={offerWhatsapp}
           whatsappField={whatsappField}
+          settingsHref={settingsHref}
         />
         <div>
           <Button type="submit" disabled={pending} aria-busy={pending || undefined}>
@@ -146,6 +151,45 @@ interface ConsentFieldsProps {
   state: ActionState;
   offerWhatsapp: boolean;
   whatsappField: string;
+  settingsHref: string | null;
+}
+
+function DocumentLink({ option }: { option: ConsentFormOption }) {
+  return (
+    <Link href={option.documentHref as Route} className="text-primary underline">
+      {t("consent.document", {
+        title: option.document.title,
+        version: option.document.version,
+      })}
+    </Link>
+  );
+}
+
+/** A purpose granted at the current version: what was agreed, when, and where to withdraw it. */
+function Agreed({
+  option,
+  date,
+  settingsHref,
+}: {
+  option: ConsentFormOption;
+  date: string;
+  settingsHref: string | null;
+}) {
+  return (
+    <div className="grid gap-0.5" data-purpose={option.purpose} data-slot="consent-agreed">
+      <p className="text-sm leading-snug text-fg">{option.label}</p>
+      <p className="text-xs text-fg-muted">
+        {t("consent.agreedOn", { date })} <DocumentLink option={option} />
+      </p>
+      {option.required || settingsHref === null ? null : (
+        <p className="text-xs">
+          <Link href={settingsHref as Route} className="text-primary underline">
+            {t("consent.withdrawInSettings")}
+          </Link>
+        </p>
+      )}
+    </div>
+  );
 }
 
 function ConsentFields({
@@ -154,6 +198,7 @@ function ConsentFields({
   state,
   offerWhatsapp,
   whatsappField,
+  settingsHref,
 }: ConsentFieldsProps) {
   const id = useId();
   const [whatsapp, setWhatsapp] = useState(initial.purposes.includes(WHATSAPP));
@@ -161,6 +206,16 @@ function ConsentFields({
   const optional = options.filter((option) => !option.required);
 
   const box = (option: ConsentFormOption) => {
+    if (option.grantedAt !== null) {
+      return (
+        <Agreed
+          key={option.purpose}
+          option={option}
+          date={option.grantedAt}
+          settingsHref={settingsHref}
+        />
+      );
+    }
     const boxId = `${id}-${option.purpose}`;
     const documentId = `${boxId}-document`;
     const errorId = `${boxId}-error`;
@@ -184,12 +239,7 @@ function ConsentFields({
               {option.label}
             </Label>
             <p id={documentId} className="text-xs text-fg-muted">
-              <Link href={option.documentHref as Route} className="text-primary underline">
-                {t("consent.document", {
-                  title: option.document.title,
-                  version: option.document.version,
-                })}
-              </Link>
+              <DocumentLink option={option} />
             </p>
           </div>
         </div>

@@ -45,11 +45,18 @@ The page reads the user's consent records (`GET /v1/identity/consents?subject=<u
 what the running build ships.
 
 - Required: the terms (`terms`), the privacy notice (`privacy_notice`) and the processing of the
-  business profile (`profile_processing`). Optional, unticked: WhatsApp reminders (with a number
-  in E.164, which appears when the box is ticked), email reminders, product analytics. Each box
-  links to its document with its version.
-- `recordConsents` records one row per ticked purpose that is not already granted at the current
-  version, in that order: `subject` and `recorded_by` are the user id, `source` is
+  business profile (`profile_processing`). Optional: WhatsApp reminders (with a number in E.164,
+  which appears when the box is ticked), email reminders, product analytics. Every box starts
+  unticked and links to its document with its version.
+- A purpose already granted at the current version (a person asked again because one document
+  moved to a new Version line) is not a box: it is a line saying when it was agreed, with its
+  document, and for an optional purpose a link to `/settings/consents`, where it is withdrawn.
+  The step only ever records what is ticked, so a box that started ticked and was unticked would
+  read as "stop" and record nothing; a withdrawal is a settings change (`granted: false`, and for
+  WhatsApp the number opted out), never a side effect of this form.
+- `recordConsents` reads the records first, so a required purpose granted at the current version
+  needs no box, then records one row per ticked purpose that is not already granted at the
+  current version, in that order: `subject` and `recorded_by` are the user id, `source` is
   `web_onboarding`, `notice_version` is `<document>@<Version line>`
   (`terms-of-service@0.1-draft`; the privacy notice's version for the privacy notice, profile
   processing, email reminders and analytics; the WhatsApp notice's for WhatsApp reminders), and

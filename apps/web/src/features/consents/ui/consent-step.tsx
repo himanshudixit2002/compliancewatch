@@ -16,6 +16,8 @@ export interface ConsentStepProps {
   documentHref: (name: string) => string;
   /** The form field of the WhatsApp number. */
   whatsappField: string;
+  /** The consents settings page, where an optional purpose is withdrawn; null without access. */
+  settingsHref: string | null;
 }
 
 /**
@@ -31,6 +33,7 @@ export function ConsentStep({
   continueHref,
   documentHref,
   whatsappField,
+  settingsHref,
 }: ConsentStepProps) {
   return (
     <div data-slot="consent-step" className="flex max-w-3xl flex-col gap-6">
@@ -72,13 +75,14 @@ export function ConsentStep({
           action={action}
           offerWhatsapp={view.offerWhatsapp}
           whatsappField={whatsappField}
+          settingsHref={settingsHref}
           options={view.options.map((option) => ({
             purpose: option.purpose,
             label: option.label,
             required: option.required,
             document: { title: option.document.title, version: option.document.version },
             documentHref: documentHref(option.document.name),
-            granted: option.granted,
+            grantedAt: option.grantedAt,
           }))}
         />
       )}

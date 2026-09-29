@@ -7,12 +7,13 @@ import {
 } from "@/features/consents";
 import { requireScreenSession } from "@/server/dal";
 import { onboardingGate } from "@/server/legal";
-import { hrefFor, screenById } from "@/shared/config/screens";
+import { hrefFor, isVisibleTo, screenById } from "@/shared/config/screens";
 import { OnboardingClosed } from "@/shared/ui/onboarding-closed";
 import { ServiceError } from "@/shared/ui/service-error";
 
 const SCREEN = screenById("owner.onboarding");
 const LEGAL = screenById("system.legal");
+const SETTINGS = screenById("owner.settings.consents");
 
 export const metadata: Metadata = { title: SCREEN.title };
 
@@ -41,6 +42,9 @@ export default async function OnboardingConsentPage() {
       continueHref={hrefFor(screenById("owner.onboarding.business"))}
       documentHref={(doc) => hrefFor(LEGAL, { doc })}
       whatsappField={WHATSAPP_NUMBER_FIELD}
+      settingsHref={
+        isVisibleTo(SETTINGS, session.roles, session.tenantKind) ? hrefFor(SETTINGS) : null
+      }
     />
   );
 }

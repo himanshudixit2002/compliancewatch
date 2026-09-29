@@ -21,8 +21,11 @@ import {
  *
  * - `accepted`: every required purpose is granted at the notice version this build ships, so
  *   the step shows what was agreed and a way on instead of the form;
- * - `options`: the checkboxes, required first, each with its wording, the document it refers to
- *   and whether it is already granted at the current version;
+ * - `options`: the purposes, required first, each with its wording, the document it refers to
+ *   and, when it is already granted at the current version, when that was recorded; the form
+ *   offers a box only for a purpose not granted yet, and shows a granted one as agreed (a box
+ *   that started ticked could be unticked, which records nothing: withdrawing is the settings
+ *   page's job);
  * - `drafts`: the documents still marked -draft, which the page names under the draft banner.
  *
  * A CA firm gets no WhatsApp box: reminders are set for each client business, not the firm.
@@ -34,8 +37,10 @@ export interface ConsentOption {
   required: boolean;
   document: DocumentVersion;
   noticeVersion: string;
-  /** Granted at the current version already; the box starts ticked. */
+  /** Granted at the current version already: shown as agreed, with no box. */
   granted: boolean;
+  /** When the current grant was recorded, in IST; null while the purpose is not granted. */
+  grantedAt: string | null;
 }
 
 export interface AcceptedPurpose {
@@ -88,27 +93,30 @@ export function consentStepView(
   const purposes = purposesFor(tenantKind);
   const options = purposes.map((purpose): ConsentOption => {
     const noticeVersion = noticeFor(purpose, versions);
+    const state = stateOf(summary, purpose);
+    const granted = state !== undefined && isGrantedAt(summary, purpose, noticeVersion);
     return {
       purpose,
       label: checkboxLabel(purpose),
       required: isRequiredPurpose(purpose),
       document: versions[PURPOSE_DOCUMENT[purpose]],
       noticeVersion,
-      granted: isGrantedAt(summary, purpose, noticeVersion),
+      granted,
+      grantedAt: granted ? formatDateTime(state.since) : null,
     };
   });
-  const acceptedPurposes = options.flatMap((option): AcceptedPurpose[] => {
-    const state = stateOf(summary, option.purpose);
-    if (!option.granted || state === undefined) return [];
-    return [
-      {
-        purpose: option.purpose,
-        label: purposeLabel(option.purpose),
-        noticeVersion: option.noticeVersion,
-        recordedAt: formatDateTime(state.since),
-      },
-    ];
-  });
+  const acceptedPurposes = options.flatMap((option): AcceptedPurpose[] =>
+    option.grantedAt === null
+      ? []
+      : [
+          {
+            purpose: option.purpose,
+            label: purposeLabel(option.purpose),
+            noticeVersion: option.noticeVersion,
+            recordedAt: option.grantedAt,
+          },
+        ],
+  );
   return {
     accepted: hasAcceptedRequired(summary, versions),
     acceptedPurposes,
@@ -116,6 +124,16 @@ export function consentStepView(
     offerWhatsapp: purposes.includes("whatsapp_reminders"),
     drafts: draftDocuments(purposes, versions),
   };
+}
+
+/** The onboarding purposes granted at the current notice version, in the order they are asked. */
+export function grantedPurposes(
+  summary: ConsentSummary,
+  versions: DocumentVersions,
+): ConsentPurpose[] {
+  return ONBOARDING_PURPOSES.filter((purpose) =>
+    isGrantedAt(summary, purpose, noticeFor(purpose, versions)),
+  );
 }
 
 /**
@@ -128,8 +146,8 @@ export function purposesToRecord(
   summary: ConsentSummary,
   versions: DocumentVersions,
 ): ConsentPurpose[] {
+  const granted = grantedPurposes(summary, versions);
   return ONBOARDING_PURPOSES.filter(
-    (purpose) =>
-      chosen.includes(purpose) && !isGrantedAt(summary, purpose, noticeFor(purpose, versions)),
+    (purpose) => chosen.includes(purpose) && !granted.includes(purpose),
   );
 }

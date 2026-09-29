@@ -270,7 +270,7 @@ describe("recordConsents", () => {
     expect(await readRememberedRecipients(OWNER_ID)).toEqual({ whatsapp: "919800000000" });
   });
 
-  it("names the required boxes left unticked and calls nothing", async () => {
+  it("names the required boxes left unticked and records nothing", async () => {
     await signedInAs();
     const fake = services();
     vi.stubGlobal("fetch", fake.fetchImpl);
@@ -282,7 +282,53 @@ describe("recordConsents", () => {
         profile_processing: ["Tick this box to continue."],
       },
     });
-    expect(fake.requests).toEqual([]);
+    expect(fake.requests.map((request) => `${request.method} ${request.pathname}`)).toEqual([
+      "GET /v1/identity/consents",
+    ]);
+  });
+
+  it("takes the required purposes already granted from the records, not from the form", async () => {
+    await signedInAs();
+    const fake = services({
+      states: [
+        grantedState("terms", "terms-of-service@0.0-example"),
+        grantedState("privacy_notice", PRIVACY),
+        grantedState("profile_processing", PRIVACY),
+      ],
+    });
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    await expect(recordConsents(IDLE, form({ terms: "on" }))).rejects.toMatchObject({
+      href: "/onboarding/business",
+    });
+    expect(
+      fake.requests
+        .filter((request) => request.method === "POST")
+        .map((request) => (request.body as { purpose: string }).purpose),
+    ).toEqual(["terms"]);
+  });
+
+  it("never withdraws an agreed purpose the form did not send, and leaves its number opted in", async () => {
+    // WhatsApp reminders and analytics are granted at their current versions, so the step shows
+    // them as agreed, with no box; the terms moved to a new version and are asked again.
+    await signedInAs();
+    const fake = services({
+      states: [
+        grantedState("terms", "terms-of-service@0.0-example"),
+        grantedState("privacy_notice", PRIVACY),
+        grantedState("profile_processing", PRIVACY),
+        grantedState("whatsapp_reminders", WHATSAPP),
+        grantedState("analytics", PRIVACY),
+      ],
+    });
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    await expect(recordConsents(IDLE, form({ terms: "on" }))).rejects.toMatchObject({
+      href: "/onboarding/business",
+    });
+    expect(fake.requests.map((request) => `${request.method} ${request.pathname}`)).toEqual([
+      "GET /v1/identity/consents",
+      "POST /v1/identity/consents",
+    ]);
+    expect(fake.requests[1]?.body).toMatchObject({ purpose: "terms", granted: true });
   });
 
   it("records only what is missing at the current versions", async () => {
@@ -354,7 +400,7 @@ describe("recordConsents", () => {
         "WhatsApp reminders are set for each client business, not for the firm.",
       ],
     });
-    expect(fake.requests).toEqual([]);
+    expect(fake.requests.map((request) => request.method)).toEqual(["GET"]);
   });
 
   it("sends a visitor without a session to sign in, and a role without the step to forbidden", async () => {

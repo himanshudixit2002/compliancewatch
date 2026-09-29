@@ -4,6 +4,7 @@ import { ACCEPTED_STATES, VERSIONS, grantedState, summaryDto } from "@/test/cons
 import {
   consentStepView,
   draftDocuments,
+  grantedPurposes,
   hasAcceptedRequired,
   purposesFor,
   purposesToRecord,
@@ -32,6 +33,7 @@ describe("consentStepView", () => {
       label: "Send me GST reminders for this business on WhatsApp. I can reply STOP at any time.",
       document: { name: "whatsapp-consent", version: "9.8-draft" },
       noticeVersion: "whatsapp-consent@9.8-draft",
+      grantedAt: null,
     });
     expect(view.drafts.map((document) => document.name)).toEqual([
       "privacy-notice",
@@ -64,7 +66,35 @@ describe("consentStepView", () => {
       expect.objectContaining({ purpose: "profile_processing" }),
       expect.objectContaining({ purpose: "analytics", label: "Product analytics" }),
     ]);
-    expect(view.options.find((option) => option.purpose === "analytics")?.granted).toBe(true);
+    expect(view.options.find((option) => option.purpose === "analytics")).toMatchObject({
+      granted: true,
+      grantedAt: "1 Jan 2000, 5:30 am IST",
+    });
+  });
+
+  it("dates only a grant at the current version; an older or withdrawn one is asked again", () => {
+    const summary = consentSummaryFromDto(
+      summaryDto([
+        grantedState("terms", "terms-of-service@9.0"),
+        grantedState("whatsapp_reminders", "whatsapp-consent@9.8-draft", false),
+        grantedState("analytics", "privacy-notice@9.9-draft"),
+      ]),
+    );
+    const view = consentStepView(summary, VERSIONS, "business");
+    expect(view.options.map((option) => [option.purpose, option.grantedAt])).toEqual([
+      ["terms", null],
+      ["privacy_notice", null],
+      ["profile_processing", null],
+      ["whatsapp_reminders", null],
+      ["email_reminders", null],
+      ["analytics", "1 Jan 2000, 5:30 am IST"],
+    ]);
+    expect(grantedPurposes(summary, VERSIONS)).toEqual(["analytics"]);
+    expect(grantedPurposes(accepted, VERSIONS)).toEqual([
+      "terms",
+      "privacy_notice",
+      "profile_processing",
+    ]);
   });
 
   it("asks again when a document's version changed or a purpose was withdrawn", () => {

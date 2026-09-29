@@ -19,21 +19,24 @@ import {
 import { formatDateTime } from "@/shared/lib/dates";
 import { consentsGateway } from "./gateway";
 import { consentChangeRecord, parseConsentChange, type ConsentChangeChoice } from "./model/change";
-import { purposesToRecord } from "./model/consent-step";
+import { grantedPurposes, purposesToRecord } from "./model/consent-step";
 import { parseConsentForm, whatsappRecipient } from "./model/form";
 import { checkboxLabel, noticeFor, purposeLabel } from "./model/purposes";
 import type { ConsentChange } from "./model/settings";
 
 /**
  * The consent step's server action. It runs the screen's gate again (the proxy never sees an
- * action), checks the form's shape, reads the user's current records, and appends one record
+ * action), reads the user's current records, checks the form's shape (a required purpose
+ * already granted at the current version has no box and needs none), and appends one record
  * per ticked purpose not already granted at the current notice version, in the order they are
  * asked: subject and recorded_by are the user id, the source is web_onboarding, the notice
  * version is `<document>@<Version line>`, and the evidence is the checkbox sentence as shown.
  * With the WhatsApp box ticked it then opts the number in on the notification service (keyed,
  * like the bot's opt-ins, by the digits without the plus) and remembers the number on this
  * device for the settings pages (server/remembered-recipients.ts). Only when everything is
- * recorded does it move on to the business step.
+ * recorded does it move on to the business step. It never withdraws: a purpose already granted
+ * is shown as agreed rather than as a box, so leaving it alone cannot read as a choice to stop;
+ * withdrawing is `changeConsent`'s job on the settings page.
  *
  * Records are append-only and each POST stands alone, so a failure part-way leaves the earlier
  * records in place; the form then says which were recorded, and submitting again records only
@@ -58,12 +61,15 @@ export async function recordConsents(
   const session = await requireScreenSession(screen);
   const versions = readLegalVersions();
   if (onboardingGate({ versions }).closed) return actionFailure(t("onboardingClosed.refused"));
-  const parsed = parseConsentForm(formData, { offerWhatsapp: session.tenantKind === "business" });
-  if (!parsed.ok) return fieldFailure(parsed.fieldErrors);
 
   const gateway = consentsGateway({ session });
   const summary = await gateway.summary(session.userId);
   if (!summary.ok) return failedAfter(summary, []);
+  const parsed = parseConsentForm(formData, {
+    offerWhatsapp: session.tenantKind === "business",
+    granted: grantedPurposes(summary.value, versions),
+  });
+  if (!parsed.ok) return fieldFailure(parsed.fieldErrors);
 
   const recorded: ConsentPurpose[] = [];
   for (const purpose of purposesToRecord(parsed.value.purposes, summary.value, versions)) {
