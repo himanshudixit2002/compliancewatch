@@ -8,7 +8,10 @@ theme control, and the error boundaries. The browser never calls a service. Ther
 (`server/`: the validated environment, the typed clients, the encrypted session cookie, the
 gates and the sign-in provider port) is where every service call and every session decision
 lives; no page on `main` calls a service yet, and the reads today are `docs/legal/*.md` at
-build time, `CW_WEB_ENV` per request and the session cookie.
+build time, `CW_WEB_ENV` per request and the session cookie. The rule is a platform decision,
+[ADR-019](../adr/ADR-019-web-server-layer-and-stateless-session.md);
+[data-layer.md](data-layer.md) has the clients, headers, errors, caching and the seed, and
+[auth-and-roles.md](auth-and-roles.md) the session, the gates and the sign-in.
 
 ## Layers
 
@@ -58,8 +61,9 @@ apps/web/
                                auth (sign-in form, action, seed state), account
   src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims)
   src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError, webError),
-                               api/ (typed clients, problem parsing), session.ts (the cookie), dal.ts (the gates),
-                               auth/ (the provider port and the fake adapter), legal.ts
+                               api/ (typed clients, problem parsing, idempotency), cache.ts (tags and revalidation),
+                               session.ts (the cookie), dal.ts (the gates), auth/ (the provider port and the fake
+                               adapter), legal.ts
   src/shared/config/           screens.ts, roles.ts, permissions.ts, flags.ts, nav.ts, services.ts, legal-docs.ts
   src/shared/lib/              dates, financial years, decimal money, humanise, identifiers, pagination, urls, assert
   src/shared/i18n/             messages/en.json and t()
@@ -70,6 +74,7 @@ apps/web/
   src/proxy.ts                 the optimistic redirect to /sign-in for gated screens without a cookie
   src/instrumentation.ts       onRequestError: one JSON line per server error
   scripts/screens-doc.mts      generates docs/web/screens.md; --check and --audit modes
+  scripts/seed/                the demo-tenant seed over the services' HTTP APIs (make web-seed)
   e2e/                         Playwright specs and the axe fixture
 ```
 
@@ -172,7 +177,8 @@ is the fake one, which exists where `CW_WEB_ENV` is `local` or `test`, and `/sig
 clears the cookie. `/design` keeps its environment gate: 404 unless the value is `local` or
 `test` (unset means local; an unknown value is refused at the first request, so a typo never
 opens it). The shells read `sessionForRender()` for their links and the account menu and never
-decide whether to render.
+decide whether to render. [auth-and-roles.md](auth-and-roles.md) has the claims, the cookie,
+every gate and what the identity work changes.
 
 ## Request flow
 
@@ -197,6 +203,11 @@ flowchart TD
   F --> B
   P -. throws .-> E[error.tsx in the shell; instrumentation.ts writes one JSON line]
 ```
+
+A page that reads a service adds one step after its gate: `features/<name>/queries.ts` calls a
+gateway, the gateway calls a typed client from `server/api`, and the answer comes back as a
+`Result` the page renders or shows as `ErrorState` (the sequence is in
+[data-layer.md](data-layer.md)).
 
 The legal pages read `docs/legal/<doc>.md` at build time (`server/legal.ts`, `marked` with its
 defaults; a test asserts the drafts contain no raw HTML tag), prerender the three listed
@@ -254,6 +265,7 @@ supplies `next/link` from the app. And the sign-in provider: `server/auth/provid
 `providerFor(env)` picks the adapter named by `CW_WEB_AUTH_PROVIDER`; `server/auth/fake.ts` is
 the only adapter today, and the identity work adds the real one without touching the pages.
 The feature files reserved above (`ports.ts`, `gateway.ts`) follow the same idea for data: a
-feature declares what it needs, a server-only adapter implements it, tests inject a fake. `features/not-available/ui/previews.tsx`
-is a registry of preview components keyed by the name a registry entry may carry; it is empty
-until a package ships the first preview.
+feature declares what it needs, a server-only adapter implements it over the typed clients, and
+tests inject a fake fetch ([data-layer.md](data-layer.md), "A feature that reads data").
+`features/not-available/ui/previews.tsx` is a registry of preview components keyed by the name
+a registry entry may carry; it is empty until a package ships the first preview.

@@ -3,8 +3,8 @@
 Choices local to the web app, numbered `D-001` onward, newest last. Each entry records the
 date, the context, the decision and its consequences. A choice that binds other parts of the
 platform (how services are called, how a session is carried) is an ADR under `docs/adr/` and is
-referenced from here rather than restated; the first of those is written together with the
-server-side data layer, which is not on `main` yet.
+referenced from here rather than restated: ADR-019 (the browser never calls a service; every
+call goes through the server layer, with an encrypted stateless session) is the first.
 
 ## D-001: The browser never calls a service
 
@@ -14,7 +14,7 @@ has no `NEXT_PUBLIC_*` variable: no service URL and no token is compiled into a 
 Consequences: pages read on the server and render; client components get plain props; the
 server-side data layer is the only place a base URL or a token lives; `apps/web/.env.example`
 holds server-read variables only. The cross-cutting form of this decision (the session cookie
-and the header contract with the services) becomes an ADR when the data layer lands.
+and the header contract with the services) is ADR-019.
 
 ## D-002: shadcn primitives are generated once into `packages/ui` and owned
 
@@ -106,7 +106,7 @@ page-level colour and landmark checks belong to the Playwright suite and the con
 planned ones through the catch-alls. Consequences: `make web-e2e` and the `web-e2e` CI job need
 no container; the health handler is the readiness signal; a suite that needs services will
 start them explicitly and seed through their HTTP APIs, never through a mock. The CI job does
-that now (D-021).
+that now (D-022).
 
 ## D-012: `CW_WEB_ENV` is read directly until a validated environment module exists
 
@@ -144,7 +144,7 @@ Consequences: revocation is by expiry and by the session version identity keeps 
 (re-read in the proxy when `/me` exists); the secret is required only where a session is
 encrypted or decrypted, so a build and the public pages need none; a cookie is written only in
 a server action or a route handler, never during a render; the claims carry no personal data
-beyond the display name.
+beyond the display name. ADR-019 records the platform side of this choice.
 
 ## D-015: The proxy checks presence; the data access layer decides
 
@@ -193,7 +193,7 @@ unit-tested there; the client bundle carries no config module; the tenant shell'
 the business and account groups of the navigation for a session (settings pages stay reachable
 from the sitemap until a settings menu exists).
 
-## D-017: Global reads are cached by tag for five minutes; tenant reads are never cached
+## D-018: Global reads are cached by tag for five minutes; tenant reads are never cached
 
 2026-09-29. Some records are the same for every tenant (billing plans, notification templates,
 the rulebook's rules, documents and review queues, the gateway's prompts and models) and change
@@ -211,7 +211,7 @@ on `main`; a screen that caches a read must name a tag the writing action expire
 call sends `Authorization` or `Cookie` is never cached by Next unless it carries an explicit
 `revalidate`, which is the case for every `cachedRead`.
 
-## D-018: No Idempotency-Key until a route reads it; natural keys make the creating writes safe
+## D-019: No Idempotency-Key until a route reads it; natural keys make the creating writes safe
 
 2026-09-29. No service route reads an `Idempotency-Key` on `main`, yet every creating write the
 screens make is safe to repeat: a profile registration is found by its GSTIN, an entity by its
@@ -226,7 +226,7 @@ renders `<IdempotencyKeyInput />` (one UUID per render of the form) and an actio
 operation's name is added to the set and no form or action changes; a form value that is not a
 UUID is ignored, so the hidden field cannot inject a header.
 
-## D-019: The local service stack for the web app runs on memory stores with fixed demo settings
+## D-020: The local service stack for the web app runs on memory stores with fixed demo settings
 
 2026-09-29. Every screen is built against real services, so the daily loop and the e2e job need
 all ten of them running, and they must look the same on a fresh clone and on CI. `make
@@ -243,7 +243,7 @@ after every `make web-stack`; a second working copy only moves `SERVICE_PORT_BAS
 app's `CW_WEB_*_URL` defaults match the 8000 base; `make web-e2e` stays a build plus Playwright,
 because no page on `main` calls a service yet, and a spec that needs one runs with the stack up.
 
-## D-020: The seed replays the pipeline's recorded request bodies for one notification
+## D-021: The seed replays the pipeline's recorded request bodies for one notification
 
 2026-09-29. The admin review queues are empty on a fresh stack, and the web app must never
 invent regulatory data. Running the pipeline needs a queue, a worker and a model; parsing the
@@ -260,7 +260,7 @@ means running the recorder again (the README has the `uv` command) and committin
 files; the seed blanks the candidate's rule key when the target rulebook does not list that
 rule, as the relation stage's answer schema would; the fixture test fails when the files drift.
 
-## D-021: The e2e job starts the services and seeds them before Playwright
+## D-022: The e2e job starts the services and seeds them before Playwright
 
 2026-09-29. The screens that follow read real services, and the seeded tenant is the data the
 sign-in form already offers; a suite that only ever ran without the services would not notice

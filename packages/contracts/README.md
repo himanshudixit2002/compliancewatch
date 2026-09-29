@@ -95,9 +95,14 @@ from a `Problem`), plus an `index.ts` that re-exports each file as a namespace (
 that went away are removed. `make openapi-ts-check` (part of `make check`) regenerates in memory
 and fails on a missing, stale or differing file, so a spec change lands together with its types.
 The web app imports them type-only, `import type { profile } from
-"@compliancewatch/contracts/openapi"`, and binds them to its `openapi-fetch` clients; nothing
-from this package runs in a browser. There is no generated HTTP client: the request layer is the
-app's own, so the package stays types and schemas.
+"@compliancewatch/contracts/openapi"`, and binds them to its `openapi-fetch` clients on the
+server (`apps/web/src/server/api`); its seed script (`apps/web/scripts/seed`) binds the same
+types to its own clients. Nothing from this package runs in a browser (ADR-019). There is no
+generated HTTP client: the request layer is the app's own (`docs/web/data-layer.md`), so the
+package stays types and schemas. A spec that is new or changed needs `make openapi-ts` in the
+same pull request; `make openapi-ts-check` runs in `make check` locally and in the `web-e2e` CI
+job.
+
 ## The public API spec
 
 `public.v1.json` is the API that clients outside the platform call (guide section 10): the web

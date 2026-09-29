@@ -2,11 +2,13 @@
 
 Numbered ADRs, one file each. Titles and status for ADR-001 to ADR-011 come from the Project
 Foundation guide, section 21 (decision log); ADR-012 and ADR-013 come from the Architecture
-Reference v1.0, section 9.2 (decision log). ADR-001 to ADR-008 and ADR-012 to ADR-018 have their
+Reference v1.0, section 9.2 (decision log). ADR-001 to ADR-008 and ADR-012 to ADR-019 have their
 full text; ADR-009 to ADR-011 are stubs that keep the decision log's one-line rationale until
 they are written. ADR-014 (identity for the MVP), ADR-015 (recurring obligations and deadline
 changes) and ADR-016 (business hierarchy) record decisions of 2026-09-28; ADR-017 the KAG-style
 reasoning decision of the same day, and ADR-018 how the pipeline hands records to the rulebook.
+ADR-019 (2026-09-29) records how the web app reaches the services: through its server layer
+only, with an encrypted stateless session.
 Dated addenda of 2026-09-29 record what the question-answering work built against four of them:
 ADR-003 (embeddings in a side table), ADR-008 (embeddings through the gateway), ADR-012 and
 ADR-017 (what shipped, the first evaluation numbers and what each needs to be Accepted). A new
@@ -31,3 +33,4 @@ sections 4 and 14).
 - [ADR-016: Business hierarchy: legal entity (PAN), registration (GSTIN), location](ADR-016-business-hierarchy-pan-gstin-location.md) (Proposed)
 - [ADR-017: KAG-style reasoning over the rulebook in PostgreSQL](ADR-017-kag-style-reasoning.md) (Proposed)
 - [ADR-018: The pipeline hands regulatory records to the rulebook over its HTTP API](ADR-018-regulatory-records-through-the-rulebook-api.md) (Proposed)
+- [ADR-019: The web app reaches the services only through its server layer, with an encrypted stateless session](ADR-019-web-server-layer-and-stateless-session.md) (Proposed)

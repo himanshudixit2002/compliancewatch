@@ -5,11 +5,13 @@ Design reference: Project Foundation guide, sections 10, 12, 14 and 15.
 
 - **Owns:** Next.js 16 app: owner portal, CA dashboard, and the /admin internal tools (review workbench, source manager, pipeline console, eval dashboard, prompt and model registry, ontology editor, tenant admin, impact explorer, notification console, cost dashboard, backfill and replay, feature flag console). On `main`: the foundation (screen registry, roles, navigation, i18n, helpers), the server-side data layer (validated environment, typed clients, the encrypted session cookie, the gates, the sign-in provider port with its fake adapter), the public pages, the sign-in, sign-out and account pages, the `/admin` tool list behind its gate, the not-available pages for every screen whose backend is absent, the legal pages and the design catalogue
 - **Owning team:** Core Product; the `/admin` routes belong to Regulatory Intelligence (CODEOWNERS) (guide section 14)
-- **Consumes:** the services' REST APIs through a server-only layer (the browser never calls a service; no page calls one yet); the session cookie it encrypts itself; `docs/legal` at build time; packages/ui
+- **Consumes:** the services' REST APIs through a server-only layer (the browser never calls a service, ADR-019; no page calls one yet), typed from `@compliancewatch/contracts/openapi`; the session cookie it encrypts itself; `docs/legal` at build time; packages/ui
 - **Emits / publishes:** n/a (UI)
 
 The reasoning behind the layout, the design system, the tests and the screen procedure is in
-[docs/web](../../docs/web/README.md); this file is the map and the commands.
+[docs/web](../../docs/web/README.md): [data-layer.md](../../docs/web/data-layer.md) for the
+clients, errors, caching and seed, [auth-and-roles.md](../../docs/web/auth-and-roles.md) for the
+session, the gates and the sign-in. This file is the map and the commands.
 
 ## Layout
 
@@ -66,8 +68,9 @@ scripts/seed/       the demo-tenant seed (pnpm --filter web seed, make web-seed)
                     from the contracts; lib.mts the demo facts, arguments and fixture checks; report.mts the
                     summary and var/seed/last.json; fixtures/rulebook/ the recorded notification (README,
                     record.py)
-e2e/                fixtures.ts (the axe check failing on serious or critical) and one spec per live page,
-                    plus a11y.spec.ts over every registered page; tsconfig.scripts.json type-checks them
+e2e/                fixtures.ts (the axe check failing on serious or critical, the personas signed in through
+                    the fake form, the seed-state reader) and one spec per live page, plus a11y.spec.ts over
+                    every registered page; tsconfig.scripts.json type-checks them
 next.config.ts      typed routes, security headers; eslint.config.mjs: Next flat config plus repo rules
 vitest.config.mts   jsdom, Testing Library, 80% coverage floor (route files and proxy.ts are covered by e2e)
 playwright.config.ts  Playwright against `next start` on PORT with CW_WEB_ENV=test, the fake provider and a fixed
@@ -129,16 +132,20 @@ render. `/account` shows the session facts; `POST /sign-out` clears the cookie.
 
 ## End-to-end tests
 
-The Playwright suite visits the built app without any service: the public pages, the sign-in,
-account and admin pages after signing in through the fake form, the design catalogue (group by
-group) and every planned, waiting or ready page through the catch-alls as the first persona its
-roles admit, with `AxeBuilder` failing a page on any serious or critical finding. Once per
+The Playwright suite visits the built app: the public pages, the sign-in, account and admin
+pages after signing in through the fake form, the design catalogue (group by group) and every
+planned, waiting or ready page through the catch-alls as the first persona its roles admit, with
+`AxeBuilder` failing a page on any serious or critical finding. No page calls a service yet;
+the one test that needs the services, the seeded-tenant sign-in, runs after `make web-stack`,
+`make web-stack-wait` and `make web-seed` and is skipped without the seed state. Once per
 machine: `make web-e2e-install` (downloads Chromium; the package has no install script). Then
 `make web-e2e` builds the app and runs the suite on `WEB_PORT` from the root `.env` (3000 unless
 changed; the config starts `next start` there with `CW_WEB_ENV=test`, the fake provider and a
-fixed session secret, or reuses a server already on it outside CI). Every live page entry in the registry names its spec files under `e2e`, and
-the registry test checks they exist. Playwright reports land in `playwright-report/` and
-`test-results/`, both git-ignored. On CI the `web-e2e` job runs the same suite.
+fixed session secret, or reuses a server already on it outside CI). Every live page entry in
+the registry names its spec files under `e2e`, and the registry test checks they exist.
+Playwright reports land in `playwright-report/` and `test-results/`, both git-ignored. On CI the
+`web-e2e` job starts the services, seeds them and runs the same suite, with the seeded-tenant
+test required.
 
 ## How to run
 
