@@ -637,7 +637,9 @@ def test_outside_the_window_a_draft_template_falls_back_to_email_at_once() -> No
     (delivery,) = world.dispatch.run()
     assert delivery.outcome is DeliveryOutcome.FAILED, "no retries: each would fail the same way"
     assert world.whatsapp.sent == []
-    failed, fallback = world.notifications()
+    by_channel = {n.channel: n for n in world.notifications()}
+    assert len(by_channel) == 2, "both are made at the same instant, so order them by channel"
+    failed, fallback = by_channel[WA], by_channel[EMAIL]
     assert (failed.state, failed.attempts) == (DeliveryState.FAILED, 1)
     assert failed.error == (
         "whatsapp: outside the 24-hour customer service window and template cw_change_card_en "

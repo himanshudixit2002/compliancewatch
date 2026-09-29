@@ -62,14 +62,14 @@ TOPICS: Mapping[str, TopicSpec] = MappingProxyType(
         ),
         "notification.failed": TopicSpec(
             topic="notification.failed",
-            version="1.0.0",
+            version="1.0.1",
             model=NotificationFailedV1,
             tenant_scoped=True,
             schema_file="notification.failed.v1.json",
         ),
         "notification.sent": TopicSpec(
             topic="notification.sent",
-            version="1.0.0",
+            version="1.0.1",
             model=NotificationSentV1,
             tenant_scoped=True,
             schema_file="notification.sent.v1.json",
