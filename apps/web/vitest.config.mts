@@ -12,6 +12,9 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
     setupFiles: ["src/test/setup.ts"],
+    // axe runs in jsdom take seconds on hosted CI runners (a month grid took 5.6 s there, over
+    // the 5 s default), so tests get a wider ceiling; a real hang still fails.
+    testTimeout: 30_000,
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
