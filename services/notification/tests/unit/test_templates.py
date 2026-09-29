@@ -7,11 +7,17 @@ from domain_kernel.dedupe import DedupeKey
 from notification.domain.errors import MissingPlaceholderError, UnknownTemplateError
 from notification.domain.templates import (
     CHANGE_TEMPLATES,
+    PHRASES,
     SILENT_CHANGES,
+    SUMMARY_LINES,
     TEMPLATES,
     TemplateStatus,
     find_template,
+    one_line,
+    ordered_params,
+    phrase,
     render,
+    summary_line,
     template_for_change,
 )
 
@@ -170,3 +176,101 @@ def test_a_manual_reschedule_has_no_customer_message() -> None:
 def test_an_unknown_change_raises(topic: str, reason: str) -> None:
     with pytest.raises(UnknownTemplateError, match=reason or "created"):
         template_for_change(topic, reason)
+
+
+CONFIRMATIONS = {"opt_in_confirmed", "opt_out_confirmed"}
+"""Replies inside a conversation the person started: free text, no Meta template."""
+
+NEW_TEMPLATES = {
+    "change_card": {"business_name", "summary", "applies_from", "steps", "due_date", "link"},
+    "obligation_closed": {"business_name", "title", "closed_on", "reason"},
+    "batch_summary": {"business_name", "count", "lines", "link"},
+    "daily_digest": {"count", "lines", "link"},
+    "ca_digest": {"org_label", "count", "client_count", "lines", "link"},
+}
+
+
+@pytest.mark.parametrize(("key", "placeholders"), sorted(NEW_TEMPLATES.items()))
+def test_each_new_template_is_a_meta_ready_draft_in_two_languages_and_email(
+    key: str, placeholders: set[str]
+) -> None:
+    found = {(t.channel, t.language): t for t in TEMPLATES if t.key == key}
+    assert set(found) == {(Channel.WHATSAPP, "en"), (Channel.WHATSAPP, "hi"), (Channel.EMAIL, "en")}
+    for template in found.values():
+        assert template.status is TemplateStatus.DRAFT
+        assert set(template.placeholders) == placeholders, (template.channel, template.language)
+        assert not template.body.startswith("{"), "Meta refuses a body that opens with a value"
+        assert not template.body.rstrip().endswith("}"), "Meta refuses a body that ends with one"
+    for language in ("en", "hi"):
+        assert found[Channel.WHATSAPP, language].meta_name == f"cw_{key}_{language}"
+        assert "STOP" in found[Channel.WHATSAPP, language].body
+    assert found[Channel.EMAIL, "en"].subject
+    assert "\n" not in found[Channel.WHATSAPP, "en"].body
+
+
+def test_every_business_initiated_whatsapp_template_carries_its_meta_name() -> None:
+    for template in TEMPLATES:
+        if template.channel is Channel.WHATSAPP and template.key not in CONFIRMATIONS:
+            assert template.meta_name == f"cw_{template.key}_{template.language}", template.key
+
+
+def test_ordered_params_follow_the_placeholder_order_on_one_line() -> None:
+    template = find_template("change_card", Channel.WHATSAPP, "en")
+    params = {
+        "link": "https://app.example/o/1",
+        "due_date": "20 Oct 2026",
+        "steps": "Reconcile;\nfile",
+        "applies_from": "1 Apr 2026",
+        "summary": "Monthly return",
+        "business_name": "Acme  Traders",
+    }
+    assert ordered_params(template, params) == (
+        "Acme Traders",
+        "Monthly return",
+        "1 Apr 2026",
+        "Reconcile; file",
+        "20 Oct 2026",
+        "https://app.example/o/1",
+    )
+    email = find_template("change_card", Channel.EMAIL, "en")
+    assert ordered_params(email, params)[3] == "Reconcile;\nfile"
+    with pytest.raises(MissingPlaceholderError, match="link"):
+        ordered_params(template, {k: v for k, v in params.items() if k != "link"})
+    assert one_line(" a\tb\n\n c      d ") == "a b c d"
+
+
+def test_the_change_card_renders_what_changed_when_and_what_to_do() -> None:
+    params = {
+        "business_name": "Acme",
+        "summary": "A monthly filer files FORM GSTR-3B",
+        "applies_from": "1 Apr 2026",
+        "steps": "Reconcile; pay; file",
+        "due_date": "20 Oct 2026",
+        "link": "https://app.example/obligations/1",
+    }
+    message = render("change_card", Channel.WHATSAPP, "en", params, recipient="9", dedupe_key=KEY)
+    assert message.body.startswith("What changed for Acme: A monthly filer files FORM GSTR-3B.")
+    assert "It applies to you from 1 Apr 2026. What to do: Reconcile; pay; file." in message.body
+    assert "Open https://app.example/obligations/1 for details." in message.body
+    email = render("change_card", Channel.EMAIL, "hi", params, recipient="a@b.c", dedupe_key=KEY)
+    assert email.language == "en"
+    assert email.subject == "What changed for Acme: applies from 1 Apr 2026"
+
+
+def test_phrases_and_summary_lines_come_in_english_and_hindi() -> None:
+    for table in (PHRASES, SUMMARY_LINES):
+        names = {name for name, _ in table}
+        for name in names:
+            assert {language for n, language in table if n == name} == {"en", "hi"}, name
+    assert phrase("no_due_date", "hi") == "कोई तय तिथि नहीं"
+    assert phrase("firm", "ta") == "your firm"
+    with pytest.raises(UnknownTemplateError):
+        phrase("nothing", "en")
+    extended = {"title": "GSTR-3B", "new_due_date": "25 Oct"}
+    assert (
+        summary_line("obligation_deadline_extended", "en", extended) == "Now due 25 Oct - GSTR-3B"
+    )
+    assert summary_line("obligation_corrected", "ta", extended) == (
+        "Due date corrected to 25 Oct - GSTR-3B"
+    )
+    assert summary_line("obligation_withdrawn", "hi", extended) == "अब लागू नहीं - GSTR-3B"
