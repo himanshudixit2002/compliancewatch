@@ -4,6 +4,11 @@ One model per call and no fallback, because vectors from two models do not compa
 stores ``model_served`` with every vector. There is no cache. As with completions, every call
 that reaches a provider leaves a ledger row, a refusal before that does not, and tracing and
 event publishing never fail a call.
+
+The breaker is keyed by provider and model and shared with completions, so only an unavailable
+provider counts against it. A refusal of the request or an answer the gateway cannot use
+(``ProviderResponseError``, such as a model named in an override that serves no embeddings) does
+not: otherwise a bad embeddings override would open the circuit for that model's completions.
 """
 
 import logging
@@ -26,7 +31,7 @@ from llm_gateway.domain.embeddings import (
     EmbeddingResult,
     require_vectors_for,
 )
-from llm_gateway.domain.errors import ProviderResponseError, ProviderUnavailableError
+from llm_gateway.domain.errors import ProviderUnavailableError
 from llm_gateway.domain.events import EventPublisher, LLMCallCompleted, correlation_id_from
 from llm_gateway.domain.features import (
     CallKind,
@@ -220,7 +225,8 @@ class Embed:
         return EmbeddingOutcome(vectors=result.vectors, entry=entry, pii_counts=pii_counts)
 
     def _call_provider(self, call: _Call) -> tuple[EmbeddingResult, str]:
-        """The one attempt: breaker, provider, then the count and length of the vectors."""
+        """The one attempt: breaker, provider, then the count and length of the vectors. Only
+        ``ProviderUnavailableError`` counts as a breaker failure."""
         name = provider_for(call.model)
         breaker_key = (name, call.model)
         if not self._breaker.allows(breaker_key):
@@ -237,7 +243,7 @@ class Embed:
             raise error
         try:
             result = require_vectors_for(provider.embed(call.clean), len(call.clean.inputs))
-        except (ProviderUnavailableError, ProviderResponseError) as exc:
+        except ProviderUnavailableError as exc:
             self._breaker.record_failure(breaker_key)
             self._fail(call, exc, provider=name)
             raise

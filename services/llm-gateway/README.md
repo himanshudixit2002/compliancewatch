@@ -220,7 +220,9 @@ Request body (unknown fields are rejected):
   with zero output tokens. The cost is the gateway's figure or the table's input price; the
 Voyage row in the table is an unsourced estimate, so check it before trusting retrieval spend. The
   breaker is shared with completions, and so is the budget guard, so a budget alarm fires once
-  per scope and month whichever route crossed it.
+  per scope and month whichever route crossed it. Only an unavailable provider counts against the
+  breaker for an embedding: a refused request or a wrong vector (a 502) does not, so a model that
+  serves no embeddings, named in an override, cannot open the circuit for its completions.
 - **The fake.** With `CW_LLM_PROVIDER=fake` every embedding is served as `fake/hash-ngram-512`:
   blake2b-hashed words, word pairs and in-word character trigrams of the NFKC-normalised,
   casefolded text, L2-normalised. It is lexical, not semantic, but deterministic, so retrieval

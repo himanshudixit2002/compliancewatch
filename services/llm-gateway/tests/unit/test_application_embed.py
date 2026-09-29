@@ -489,7 +489,27 @@ def test_a_wrong_shape_is_a_response_error_with_a_row_and_no_vectors(
     assert (entry.status, entry.error_type) == (CallStatus.ERROR, "llm-provider-response-invalid")
     assert entry.cost_inr == Decimal("0.0000")
     assert harness.publisher.events == []
-    assert harness.breaker.state(("vercel", ROUTE_MODEL)) is BreakerState.OPEN
+    assert harness.breaker.state(("vercel", ROUTE_MODEL)) is BreakerState.CLOSED
+
+
+def test_a_refused_embeddings_override_leaves_the_models_completions_alone(
+    harness: Harness,
+) -> None:
+    """The breaker is shared with completions: a model that serves no embeddings, named in an
+    override, answers 4xx every time, and must not open the circuit for its completions."""
+    harness.breaker = CircuitBreaker(threshold=1, open_seconds=60.0)
+    for _ in range(3):
+        harness.embedder.raise_next(
+            ProviderResponseError("gateway rejected the request: not an embedding model")
+        )
+        with pytest.raises(ProviderResponseError, match="not an embedding model"):
+            harness.run(retrieval(model="fake/echo"))
+    assert harness.breaker.state(("fake", "fake/echo")) is BreakerState.CLOSED
+    completion = CompletionRequest(
+        feature="smoke", prompt_version="smoke.echo@1", system="", user="hi"
+    )
+    outcome = harness.complete().run(completion, correlation_id="req-2")
+    assert (outcome.entry.status, outcome.entry.model_served) == (CallStatus.OK, "fake/echo")
 
 
 def test_a_missing_provider_is_unavailable_with_an_error_row(harness: Harness) -> None:
