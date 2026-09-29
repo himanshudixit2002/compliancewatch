@@ -31,6 +31,18 @@ product problem. Please report anything you find privately.
 
 Only the `main` branch is supported. Fixes land there and ship with the next deployment.
 
+## Scans
+
+Every pull request that changes code runs Semgrep: the registry packs for Python, TypeScript,
+Dockerfiles and GitHub Actions, and the repository's own rules in `.semgrep`. One that changes a
+lockfile, a Dockerfile or the infrastructure config runs Trivy, which looks for vulnerable
+dependencies in `uv.lock` and `pnpm-lock.yaml` and for misconfigured Dockerfiles. Both report to
+the repository's code scanning alerts. A Semgrep finding of severity ERROR, or a HIGH or
+CRITICAL Trivy finding that has a fix, blocks the merge. Trivy repeats its scan every night
+against the day's advisories. Dependabot proposes dependency updates every week, and security
+updates as advisories appear. A finding that is accepted rather than fixed is listed in
+`.trivyignore.yaml` with the reason and an expiry date.
+
 ## Secrets
 
 No real secret belongs in this repository. `.env.example` holds placeholders only, gitleaks

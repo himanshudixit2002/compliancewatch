@@ -35,9 +35,9 @@ clients/typescript/      # generated .d.ts per topic plus index.ts (EVENT_TOPICS
 ## OpenAPI specs
 
 A spec is generated from the running service, committed here, and reviewed like code: the diff in
-the pull request is the contract change. `services/llm-gateway/tests/contract/test_openapi.py`
-fails when the served schema and the committed file differ, so an API change without a spec
-change cannot pass `make test`.
+the pull request is the contract change. Each service's `tests/contract/test_openapi.py` fails
+when the served schema and the committed file differ, so an API change without a spec change
+cannot pass `make test`.
 
 ```bash
 make openapi SERVICE=llm-gateway   # writes openapi/llm-gateway.v1.json (indent 2, sorted keys)
@@ -53,6 +53,16 @@ property or media type that went away, a request body, property or parameter tha
 required, a narrowed request enum, or a type change. Specs new on the branch are skipped. A
 deliberate break gets a row in `openapi/BREAKING.md` (spec, operation, reason, ADR) in the same
 pull request.
+
+The specs are also tested against their services. Each service with a spec has
+`tests/contract/test_api_properties.py`: schemathesis generates valid and invalid requests from
+the served schema, sends them in process with a tenant header, and requires that no response is
+a server error and that each status code, content type and body is one the spec documents. Only
+the operations listed in the file's `OPERATIONS` run, so the change that adds an operation opts
+it in; an operation that cannot pass yet sits in `EXCLUDED` with the reason. CI runs 25
+derandomized examples per operation. The nightly workflow runs 200 random ones
+(`HYPOTHESIS_PROFILE=nightly uv run pytest -m contract`); a failure there opens the
+`nightly-failure` issue, and the run's log holds the example that reproduces it.
 
 The files are generated JSON: prettier ignores `openapi/` and nobody edits them by hand. Every
 service shares one error shape, `Problem` (RFC 9457 problem details from py-common), published
