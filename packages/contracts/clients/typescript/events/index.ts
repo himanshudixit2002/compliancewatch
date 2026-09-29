@@ -16,7 +16,9 @@ export type { RuleDeadlineChanged } from "./rule.deadline_changed.v1";
 export type { RulePublished } from "./rule.published.v1";
 export type { RuleSuperseded } from "./rule.superseded.v1";
 export type { RuleWithdrawn } from "./rule.withdrawn.v1";
+export type { TenantCreated } from "./tenant.created.v1";
 export type { TenantDeletionRequested } from "./tenant.deletion.requested.v1";
+export type { UserRoleChanged } from "./user.role.changed.v1";
 
 export const ENVELOPE_VERSION = "1.0.0";
 
@@ -36,7 +38,9 @@ export const EVENT_TOPICS = {
   "rule.published": { version: "1.0.0", tenantScoped: false },
   "rule.superseded": { version: "1.0.0", tenantScoped: false },
   "rule.withdrawn": { version: "1.0.0", tenantScoped: false },
+  "tenant.created": { version: "1.0.0", tenantScoped: true },
   "tenant.deletion.requested": { version: "1.0.0", tenantScoped: true },
+  "user.role.changed": { version: "1.0.0", tenantScoped: true },
 } as const;
 
 export type EventTopic = keyof typeof EVENT_TOPICS;

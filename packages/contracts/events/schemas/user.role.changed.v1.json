@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:user.role.changed:v1",
+  "title": "user.role.changed",
+  "description": "A user's roles in their tenant changed: the tenant's first user was created, a user was invited, an admin changed a user's roles, or a user was disabled. Each change after creation bumps the user's session version, so the identity service refuses sessions issued before it. Producer: identity. Consumers: none yet.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "identity",
+  "x-tenant-scoped": true,
+  "$defs": {
+    "role": {
+      "type": "string",
+      "enum": [
+        "owner",
+        "staff",
+        "ca_admin",
+        "ca_staff",
+        "compliance_lead",
+        "analyst",
+        "reviewer",
+        "admin"
+      ],
+      "description": "A role a user holds in their tenant."
+    }
+  },
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The user whose roles changed."
+    },
+    "roles": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/role" },
+      "uniqueItems": true,
+      "description": "The roles the user holds after the change, sorted; empty for a disabled user, who holds none."
+    },
+    "previous_roles": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/role" },
+      "uniqueItems": true,
+      "description": "The roles the user held before the change, sorted; empty for a user who was just created or invited."
+    },
+    "reason": {
+      "type": "string",
+      "enum": ["created", "invited", "roles_changed", "disabled"],
+      "description": "Why the roles changed: the first user of a new tenant, an invitation, an admin's change, or the user being disabled."
+    },
+    "changed_by": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "The user who made the change; null when no signed-in user made it, as when an operator set up the internal tenant."
+    },
+    "session_version": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The user's session version after the change; the identity service refuses access tokens that carry an older one."
+    }
+  },
+  "required": ["user_id", "roles", "previous_roles", "reason", "session_version"]
+}

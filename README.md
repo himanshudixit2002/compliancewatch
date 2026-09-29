@@ -26,7 +26,7 @@
 > review tasks) behind the second committed OpenAPI spec, and its public business API (create from a GSTIN or a PAN with an Idempotency-Key, the tenant's list by cursor, an onboarding checklist with worded questions) with `GET /v1/ontology` over the draft English wording of every attribute, all merged into the public API spec (`public.v1.json`, with a changelog, the API rules checked on every public route, and generated Python models),
 > the LLM gateway skeleton (routing, prompt registry, cost ledger,
 > budgets, PII masking, Langfuse tracing, fake provider container, embeddings for retrieval) with the first committed OpenAPI
-> spec, problem-details errors, cursor pagination and idempotency keys in py-common, feature flags (a registry with owners, defaults and expiry dates checked by `make flags-check`, OpenFeature in Python and TypeScript with env and Unleash providers), the event contracts (sixteen topics and the envelope as
+> spec, problem-details errors, cursor pagination and idempotency keys in py-common, feature flags (a registry with owners, defaults and expiry dates checked by `make flags-check`, OpenFeature in Python and TypeScript with env and Unleash providers), the event contracts (eighteen topics and the envelope as
 > JSON Schema with generated pydantic and TypeScript types and compatibility checks in CI), the
 > transactional outbox in py-common (writer, Kafka relay with dead letters, idempotent consumer),
 > the Temporal worker scaffold with the pipeline's sample ingest workflow, the first source
@@ -158,7 +158,7 @@ compliancewatch/
     contracts/               # OpenAPI specs, event schemas (JSON Schema), generated clients (py + ts)
       openapi/               # <service>.v1.json for identity, profile, rulebook, notification, llm-gateway,
                              # obligation and qa; BREAKING.md
-      events/                # schemas/<topic>.v1.json, examples/, CHANGELOG.md (sixteen topics + envelope)
+      events/                # schemas/<topic>.v1.json, examples/, CHANGELOG.md (eighteen topics + envelope)
       clients/python/        # cw_contracts: generated pydantic models (make contracts)
       clients/typescript/    # generated .d.ts per topic and index.ts
     domain-kernel/           # Shared value objects, protocols, ontology model, error types

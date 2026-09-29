@@ -144,11 +144,11 @@ regenerated REST models together.
 
 ## Events
 
-Sixteen topics have a schema: `document.discovered`, `document.parsed`,
+Eighteen topics have a schema: `document.discovered`, `document.parsed`,
 `rule.candidate.created`, `rule.published`, `rule.superseded`, `rule.withdrawn`,
 `rule.deadline_changed`, `profile.updated`, `applicability.decided`, `obligation.created`,
 `obligation.due_soon`, `obligation.closed`, `obligation.rescheduled`, `notification.sent`,
-`notification.failed` and `tenant.deletion.requested`. The gateway's `llm.call.completed` and
+`notification.failed`, `tenant.created`, `tenant.deletion.requested` and `user.role.changed`. The gateway's `llm.call.completed` and
 `llm.budget.alarmed` are still log lines and get a schema when they gain a consumer; until then
 they are listed, with the reason, in `LOG_ONLY_TOPICS` in `scripts/check_topics.py`.
 

@@ -21,7 +21,9 @@ from cw_contracts.events.rule_deadline_changed_v1 import RuleDeadlineChangedV1
 from cw_contracts.events.rule_published_v1 import RulePublishedV1
 from cw_contracts.events.rule_superseded_v1 import RuleSupersededV1
 from cw_contracts.events.rule_withdrawn_v1 import RuleWithdrawnV1
+from cw_contracts.events.tenant_created_v1 import TenantCreatedV1
 from cw_contracts.events.tenant_deletion_requested_v1 import TenantDeletionRequestedV1
+from cw_contracts.events.user_role_changed_v1 import UserRoleChangedV1
 
 ENVELOPE_VERSION = "1.0.0"
 
@@ -144,12 +146,26 @@ TOPICS: Mapping[str, TopicSpec] = MappingProxyType(
             tenant_scoped=False,
             schema_file="rule.withdrawn.v1.json",
         ),
+        "tenant.created": TopicSpec(
+            topic="tenant.created",
+            version="1.0.0",
+            model=TenantCreatedV1,
+            tenant_scoped=True,
+            schema_file="tenant.created.v1.json",
+        ),
         "tenant.deletion.requested": TopicSpec(
             topic="tenant.deletion.requested",
             version="1.0.0",
             model=TenantDeletionRequestedV1,
             tenant_scoped=True,
             schema_file="tenant.deletion.requested.v1.json",
+        ),
+        "user.role.changed": TopicSpec(
+            topic="user.role.changed",
+            version="1.0.0",
+            model=UserRoleChangedV1,
+            tenant_scoped=True,
+            schema_file="user.role.changed.v1.json",
         ),
     }
 )
