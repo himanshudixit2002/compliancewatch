@@ -72,6 +72,16 @@ provider (`CW_PROFILE_GSTIN_LOOKUP=manual`, the default) the person proceeds man
 demo table. A real provider (GSTN through a GSP, or an aggregator) is an account the
 maintainer opens; it plugs in behind the protocol in `domain/lookup.py`.
 
+`http` (`infrastructure/lookup_http.py`) asks the provider's taxpayer search:
+`GET $CW_PROFILE_GSTIN_LOOKUP_URL?gstin=<GSTIN>` with `CW_PROFILE_GSTIN_LOOKUP_API_KEY` as a
+bearer token, waiting at most `CW_PROFILE_GSTIN_LOOKUP_TIMEOUT_SECONDS` (5). A 404 means no such
+GSTIN. A timeout, a 5xx or a body that does not map counts as no answer and logs one line, so the
+`verify_registration` task opens as in manual mode. `GstnTaxpayerMapper` reads the GSTN
+taxpayer-search fields (legal name, trade name, taxpayer type, status, constitution,
+registration date, nature of business). Its field names and label tables are marked
+`needs_review` until they are checked against the chosen provider's sandbox; a label they do not
+hold stays empty. The setting is the flag `profile.gstin_lookup` in `packages/flags`.
+
 Whatever the lookup answers, the GSTIN's first two digits are its state code, so the entity's
 `state_codes` gains that code, joined to the codes it already has, with source `derived`. A
 code the ontology does not list (97, 99) is skipped. `business_category` is written from the

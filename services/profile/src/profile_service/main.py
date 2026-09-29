@@ -38,6 +38,7 @@ from profile_service.infrastructure.lookup import (
     ManualLookupProvider,
     StaticLookupProvider,
 )
+from profile_service.infrastructure.lookup_http import HttpGstinLookupProvider
 from profile_service.infrastructure.memory import MemoryStore
 from profile_service.infrastructure.repository import (
     JsonLinesEvalRecorder,
@@ -90,11 +91,7 @@ def wire(
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)
 
-    lookup: GstinLookupProvider = (
-        StaticLookupProvider(DEMO_LOOKUPS)
-        if settings.profile_gstin_lookup == "static"
-        else ManualLookupProvider()
-    )
+    lookup = _lookup(settings)
     set_attributes = SetAttributes(unit_of_work, loaded)
     return Wiring(
         settings=settings,
@@ -108,6 +105,20 @@ def wire(
         confirm_financial_year=ConfirmFinancialYear(unit_of_work, loaded),
         prefill=PrefillFromGstin(unit_of_work, lookup, loaded, flags),
     )
+
+
+def _lookup(settings: ProfileSettings) -> GstinLookupProvider:
+    """The provider ``CW_PROFILE_GSTIN_LOOKUP`` names (the flag ``profile.gstin_lookup``)."""
+    if settings.profile_gstin_lookup == "static":
+        return StaticLookupProvider(DEMO_LOOKUPS)
+    key = settings.profile_gstin_lookup_api_key
+    if settings.profile_gstin_lookup == "http" and key is not None:
+        return HttpGstinLookupProvider(
+            settings.profile_gstin_lookup_url,
+            api_key=key.get_secret_value(),
+            timeout_seconds=settings.profile_gstin_lookup_timeout_seconds,
+        )
+    return ManualLookupProvider()
 
 
 def _ontology_ready(wiring: Wiring) -> Callable[[], Awaitable[bool]]:
