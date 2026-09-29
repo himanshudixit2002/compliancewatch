@@ -18,10 +18,10 @@ from identity.domain.channel_consent import (
     ConsentChannel,
 )
 from identity.domain.consent import ConsentPurpose, ConsentRecord
-from identity.domain.errors import SubjectRegisteredError
+from identity.domain.errors import InternalTenantExistsError, SubjectRegisteredError
 from identity.domain.repository import UnitOfWork
 from identity.domain.service_clients import ServiceClient
-from identity.domain.tenancy import SubjectEntry, Tenant, User
+from identity.domain.tenancy import SubjectEntry, Tenant, TenantKind, User
 
 
 class RowSecurityViolationError(RuntimeError):
@@ -63,6 +63,10 @@ class MemoryTenantRepository:
         _require_tenant(self._tenant, tenant.id)
         if tenant.id in self._tenants:
             raise RowSecurityViolationError(f"tenant {tenant.id} exists already")
+        if tenant.kind is TenantKind.INTERNAL and any(
+            other.kind is TenantKind.INTERNAL for other in self._tenants.values()
+        ):
+            raise InternalTenantExistsError()
         self._tenants[tenant.id] = tenant
 
     def get(self, tenant_id: TenantId) -> Tenant | None:

@@ -405,3 +405,31 @@ class CreatedTenantOut(BaseModel):
             user=UserOut.from_user(created.user),
             session=SessionOut.from_session(created.session),
         )
+
+
+# ---------------------------------------------------------------- tenant admin
+
+
+class InviteIn(Strict):
+    email: str | None = Field(default=None, max_length=254, pattern=EMAIL_PATTERN)
+    phone: str | None = Field(default=None, pattern=E164_PATTERN, description="E.164 number")
+    display_name: str = Field(default="", max_length=MAX_NAME_CHARS)
+    roles: list[Role] = Field(
+        min_length=1, description="Roles the tenant's kind allows; at least one"
+    )
+
+    @model_validator(mode="after")
+    def _one_contact(self) -> "InviteIn":
+        if not self.email and not self.phone:
+            raise ValueError("give the email address or the phone number to invite")
+        return self
+
+
+class RolesIn(Strict):
+    roles: list[Role] = Field(
+        min_length=1, description="The roles the user holds instead; the tenant's kind allows them"
+    )
+
+
+class UsersOut(BaseModel):
+    items: list[UserOut] = Field(description="The tenant's users, oldest first")

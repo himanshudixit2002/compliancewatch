@@ -3,6 +3,10 @@
 - ``CreateServiceClient``, ``RevokeServiceClient`` and ``ListServiceClients`` are what
   ``identity-admin service-client`` runs. A new client's secret is answered once and only its
   SHA-256 is stored.
+- ``BootstrapInternalTenant`` is ``identity-admin bootstrap-internal``: it creates the internal
+  tenant, where the regulatory team works, with its first admin, whose account it creates at the
+  identity provider. There is one internal tenant; a second run is refused. The admin enrols a
+  second factor at the provider before signing in, since admins sign in with one.
 - ``EnsureDevServiceClients`` makes the development service clients exist with the shared dev
   secret: one client per caller in the committed ``identity_dev_clients.toml`` (or
   ``CW_IDENTITY_DEV_CLIENTS``). The composition root runs it only when ``CW_ENV`` is local or test
@@ -10,13 +14,22 @@
 """
 
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from datetime import datetime
 
 from domain_kernel.access import Scope
 from domain_kernel.events import utc_now
-from identity.domain.errors import ServiceClientExistsError, ServiceClientNotFoundError
+from domain_kernel.ids import TenantId
+from identity.application.tenancy import first_user_events
+from identity.domain.errors import (
+    ProviderUnavailableError,
+    ServiceClientExistsError,
+    ServiceClientNotFoundError,
+)
+from identity.domain.provider import IdentityProvider
 from identity.domain.repository import UnitOfWorkFactory
 from identity.domain.service_clients import ServiceClient
+from identity.domain.tenancy import FIRST_ROLE, Contact, SubjectEntry, Tenant, TenantKind, User
 
 
 class CreateServiceClient:
@@ -91,3 +104,46 @@ class EnsureDevServiceClients:
                     uow.service_clients.save(kept)
                 ensured.append(kept)
         return ensured
+
+
+class BootstrapInternalTenant:
+    def __init__(
+        self,
+        unit_of_work: UnitOfWorkFactory,
+        provider: IdentityProvider,
+        *,
+        clock: Callable[[], datetime] = utc_now,
+    ) -> None:
+        self._unit_of_work = unit_of_work
+        self._provider = provider
+        self._clock = clock
+
+    def run(self, name: str, contact: Contact, *, display_name: str = "") -> tuple[Tenant, User]:
+        """The internal tenant and its first admin. ``InternalTenantExistsError`` when there is
+        one already."""
+        at = self._clock()
+        tenant = Tenant(TenantId.new(), TenantKind.INTERNAL, name.strip(), at)
+        subject = self._provider.provision(
+            email=contact.email, phone=contact.phone, display_name=display_name.strip()
+        )
+        admin = User.new(
+            tenant,
+            provider=self._provider.name,
+            provider_subject=subject,
+            contact=contact,
+            roles=[FIRST_ROLE[TenantKind.INTERNAL]],
+            at=at,
+            display_name=display_name,
+        )
+        try:
+            with self._unit_of_work(tenant.id) as uow:
+                uow.tenants.add(tenant)
+                uow.users.add(admin)
+                uow.subjects.add(SubjectEntry.of(admin))
+                for event in first_user_events(tenant, admin, changed_by=None):
+                    uow.events.publish(event)
+        except Exception:
+            with suppress(ProviderUnavailableError):
+                self._provider.delete(subject)
+            raise
+        return tenant, admin

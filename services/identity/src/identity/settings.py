@@ -111,7 +111,8 @@ class IdentitySettings(Settings):
                 f"CW_IDENTITY_DEV_CLIENT_SECRET needs at least {MIN_DEV_CLIENT_SECRET_CHARS} "
                 "characters"
             )
-        parse_dev_clients(self.identity_dev_clients)
+        if self.is_dev:
+            parse_dev_clients(self.identity_dev_clients)
         return self
 
     @property

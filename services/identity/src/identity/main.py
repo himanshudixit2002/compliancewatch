@@ -30,7 +30,15 @@ from identity.application.bootstrap import EnsureDevServiceClients
 from identity.application.channel_consents import ChannelConsentStatus, RecordChannelConsent
 from identity.application.consents import ConsentStatus, RecordConsent
 from identity.application.sessions import ExchangeSession, IssueServiceToken
-from identity.application.tenancy import CreateTenant, CurrentUser
+from identity.application.tenancy import (
+    ChangeRoles,
+    CreateTenant,
+    CurrentUser,
+    DisableUser,
+    InviteUser,
+    ListUsers,
+)
+from identity.composition import identity_provider
 from identity.domain.billing import BillingProvider
 from identity.domain.channel_consent import ChannelUnitOfWorkFactory
 from identity.domain.errors import (
@@ -40,6 +48,7 @@ from identity.domain.errors import (
     ChannelTokenInvalidError,
     ChannelWritesDisabledError,
     DevSignInUnavailableError,
+    InternalTenantExistsError,
     InvalidWebhookSignatureError,
     LastAdminError,
     MfaRequiredError,
@@ -52,19 +61,19 @@ from identity.domain.errors import (
     SessionRevokedError,
     SubjectRegisteredError,
     TenantInactiveError,
+    TenantNotFoundError,
     TenantRequiredError,
     UserDisabledError,
     UserNotFoundError,
     UserNotProvisionedError,
 )
-from identity.domain.provider import DevIdentityProvider, IdentityProvider
+from identity.domain.provider import DevIdentityProvider
 from identity.domain.repository import UnitOfWorkFactory
 from identity.infrastructure.billing.memory import MemoryBillingProvider
 from identity.infrastructure.billing.razorpay import RazorpayBillingProvider
 from identity.infrastructure.memory import MemoryChannelStore, MemoryStore
 from identity.infrastructure.minter import IssuerMinter
 from identity.infrastructure.providers.fake import FakeIdentityProvider
-from identity.infrastructure.providers.supabase import SupabaseIdentityProvider
 from identity.infrastructure.repository import PostgresUnitOfWorkFactory
 from identity.settings import IdentitySettings
 from identity.wiring import Wiring
@@ -104,6 +113,8 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     SessionRevokedError: 401,
     ServiceClientInvalidError: 401,
     DevSignInUnavailableError: 404,
+    TenantNotFoundError: 404,
+    InternalTenantExistsError: 409,
 }
 
 log = get_logger(__name__)
@@ -125,21 +136,6 @@ def billing_provider(settings: IdentitySettings) -> BillingProvider | None:
             plan_ids=settings.razorpay_plan_ids,
         )
     return None
-
-
-def identity_provider(settings: IdentitySettings) -> IdentityProvider:
-    """The provider ``CW_AUTH_PROVIDER`` names; the settings have checked its configuration."""
-    if settings.auth_provider == "supabase":
-        if settings.supabase_service_role_key is None:  # pragma: no cover - refused by settings
-            raise ValueError("CW_AUTH_PROVIDER=supabase needs CW_SUPABASE_SERVICE_ROLE_KEY")
-        return SupabaseIdentityProvider(
-            settings.supabase_url,
-            settings.supabase_service_role_key,
-            jwt_secret=settings.supabase_jwt_secret,
-        )
-    secret = settings.identity_fake_provider_secret
-    shared = secret.get_secret_value().encode("utf-8") if secret is not None else None
-    return FakeIdentityProvider(shared or None)
 
 
 def signing_keys(settings: IdentitySettings) -> KeySet:
@@ -219,6 +215,10 @@ def wire(settings: IdentitySettings) -> Wiring:
         ),
         create_tenant=CreateTenant(unit_of_work, provider, minter, ttl=access_ttl),
         current_user=CurrentUser(unit_of_work),
+        list_users=ListUsers(unit_of_work),
+        invite_user=InviteUser(unit_of_work, provider),
+        change_roles=ChangeRoles(unit_of_work),
+        disable_user=DisableUser(unit_of_work),
     )
 
 

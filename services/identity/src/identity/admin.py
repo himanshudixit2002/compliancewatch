@@ -6,6 +6,7 @@
     identity-admin service-client create --id pipeline --scope rulebook:write --scope llm:call
     identity-admin service-client revoke --id pipeline
     identity-admin service-client list
+    identity-admin bootstrap-internal --name "Regulatory team" --email admin@example.org
 
 ``signing-key new`` prints a key set with one new ES256 key, the JSON ``CW_IDENTITY_SIGNING_KEYS``
 takes; it touches no store. To rotate, put the new record second in the environment's key set,
@@ -15,8 +16,15 @@ once no token it signed is still alive.
 ``service-client create`` prints the client and its secret as JSON, once: store the secret on the
 caller as ``CW_SERVICE_CLIENT_SECRET``; the store keeps only its SHA-256. ``revoke`` stops new
 tokens at once; tokens already issued expire within the token lifetime. ``list`` shows ids,
-scopes and dates, never a secret. The service-client commands use the database at
-``CW_DATABASE_URL``, whose search_path must name the identity schema, as ``make migrate`` sets it.
+scopes and dates, never a secret.
+
+``bootstrap-internal`` creates the internal tenant, where the regulatory team works, with its first
+admin, whose account it creates at the identity provider (``CW_AUTH_PROVIDER``). There is one
+internal tenant; a second run is refused. The admin enrols a second factor at the provider before
+signing in, and then invites the analysts and reviewers.
+
+The service-client and bootstrap commands use the database at ``CW_DATABASE_URL``, whose
+search_path must name the identity schema, as ``make migrate`` sets it.
 """
 
 import argparse
@@ -28,15 +36,19 @@ from typing import TextIO
 from domain_kernel.access import Scope
 from domain_kernel.errors import DomainError
 from identity.application.bootstrap import (
+    BootstrapInternalTenant,
     CreateServiceClient,
     ListServiceClients,
     RevokeServiceClient,
 )
+from identity.composition import identity_provider
+from identity.domain.provider import IdentityProvider
 from identity.domain.repository import UnitOfWorkFactory
 from identity.domain.service_clients import ServiceClient
+from identity.domain.tenancy import Contact
 from identity.infrastructure.repository import PostgresUnitOfWorkFactory
+from identity.settings import IdentitySettings
 from py_common.auth import KeySet, generate_signing_key
-from py_common.settings import Settings
 
 PROG = "identity-admin"
 
@@ -65,6 +77,15 @@ def parser() -> argparse.ArgumentParser:
     revoke = client_commands.add_parser("revoke", help="revoke a client")
     revoke.add_argument("--id", required=True, dest="client_id")
     client_commands.add_parser("list", help="list the clients, never their secrets")
+
+    bootstrap = commands.add_parser(
+        "bootstrap-internal", help="create the internal tenant and its first admin"
+    )
+    bootstrap.add_argument("--name", required=True, help="the internal tenant's name")
+    bootstrap.add_argument("--display-name", default="", help="the admin's name")
+    contact = bootstrap.add_mutually_exclusive_group(required=True)
+    contact.add_argument("--email", help="the admin's email address")
+    contact.add_argument("--phone", help="the admin's phone number, E.164")
     return root
 
 
@@ -72,21 +93,49 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     unit_of_work: UnitOfWorkFactory | None = None,
+    provider: IdentityProvider | None = None,
     out: TextIO | None = None,
 ) -> int:
-    """Run one command. ``unit_of_work`` replaces the Postgres store (tests)."""
+    """Run one command. ``unit_of_work`` and ``provider`` replace the ones the settings name
+    (tests)."""
     args = parser().parse_args(argv)
     stream = out or sys.stdout
     try:
         if args.command == "signing-key":
             return _new_signing_key(args.kid, stream)
-        store = unit_of_work or PostgresUnitOfWorkFactory.from_url(
-            Settings(service_name="identity-admin").database_url
-        )
+        if unit_of_work is None or provider is None:
+            settings = IdentitySettings(service_name=PROG)
+            store = unit_of_work or PostgresUnitOfWorkFactory.from_url(settings.database_url)
+            chosen = provider or identity_provider(settings)
+        else:
+            store, chosen = unit_of_work, provider
+        if args.command == "bootstrap-internal":
+            return _bootstrap(args, store, chosen, stream)
         return _service_client(args, store, stream)
     except (DomainError, ValueError) as exc:
         sys.stderr.write(f"{PROG}: {exc}\n")
         return 1
+
+
+def _bootstrap(
+    args: argparse.Namespace, store: UnitOfWorkFactory, provider: IdentityProvider, out: TextIO
+) -> int:
+    contact = Contact.of(email=args.email, phone=args.phone)
+    tenant, admin = BootstrapInternalTenant(store, provider).run(
+        args.name, contact, display_name=args.display_name
+    )
+    described = {
+        "tenant_id": str(tenant.id),
+        "tenant_name": tenant.name,
+        "admin_user_id": str(admin.id),
+        "admin_email": admin.contact.email,
+        "admin_phone": admin.contact.phone,
+    }
+    out.write(json.dumps(described, indent=2) + "\n")
+    sys.stderr.write(
+        f"{PROG}: the admin enrols a second factor at the identity provider, then signs in\n"
+    )
+    return 0
 
 
 def _new_signing_key(kid: str, out: TextIO) -> int:

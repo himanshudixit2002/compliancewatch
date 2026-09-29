@@ -15,6 +15,10 @@ Design reference: Project Foundation guide, sections 7, 14 and 16.
 | `POST /v1/identity/sessions` | Exchange an identity provider token for an access token; 404 `identity-user-not-provisioned` when the person has no user yet (the web's cue for sign-up), 403 `identity-mfa-required` when their roles need a second factor the sign-in lacked |
 | `POST /v1/identity/tenants` | Sign-up: a business or CA firm tenant from the provider token of the person signing up, who becomes its first user (owner or CA admin); answers the tenant, the user and a session |
 | `GET /v1/identity/me` | The signed-in user: tenant, roles, session version and whether they signed in with a second factor (a user's bearer token) |
+| `GET /v1/identity/users` | The tenant's users (tenant admins) |
+| `POST /v1/identity/users` | Invite a user by email address or phone number with roles the tenant's kind allows: their account at the identity provider, then the user (tenant admins) |
+| `PUT /v1/identity/users/{user_id}/roles` | Change a user's roles; the user's older sessions are revoked (tenant admins) |
+| `POST /v1/identity/users/{user_id}/disable` | Disable a user: no more sign-ins, sessions revoked (tenant admins) |
 | `POST /v1/identity/service-tokens` | Exchange a service client's id and secret for a service token with the client's scopes |
 | `GET /v1/identity/.well-known/jwks.json` | The public keys every service verifies access tokens with |
 | `POST /v1/identity/dev/provider-tokens` | Development sign-in: a fake provider token for a phone number or an email address; only with `CW_AUTH_PROVIDER=fake` in local and test, 404 elsewhere |
@@ -65,6 +69,16 @@ SHA-256 of their secrets (both without row-level security, exempted with the rea
 `infra/scripts/migration_lint.toml`). `tenant.created` and `user.role.changed` leave through the
 outbox in the same transaction as the change.
 
+Roles depend on the tenant's kind: a business has owners, staff and compliance leads; a CA firm has
+CA admins, CA staff and compliance leads; the internal tenant has analysts, reviewers and admins.
+Tenant admins (owners, CA admins, and admins of the internal tenant) manage users. With a verified
+token the admin's own session version is checked against the store first, so an admin whose roles
+changed a moment ago is refused at once; in header mode, and dual mode without a token, the tenant
+header names the tenant as on every tenant route. The last active admin of a tenant can be neither
+demoted nor disabled. The internal tenant is set up once by an operator with
+`identity-admin bootstrap-internal`, which creates its first admin at the identity provider; that
+admin enrols a second factor there before signing in, then invites the analysts and reviewers.
+
 Service clients (the pipeline, the WhatsApp bot, qa and the other services that call each other)
 exchange their id and secret for a service token with their scopes. `identity-admin` creates them:
 
@@ -73,6 +87,7 @@ identity-admin signing-key new --kid 2026-10          # a key set for CW_IDENTIT
 identity-admin service-client create --id pipeline --scope rulebook:write --scope llm:call
 identity-admin service-client revoke --id pipeline
 identity-admin service-client list
+identity-admin bootstrap-internal --name "Regulatory team" --email admin@example.org
 ```
 
 In local and test runs, with `CW_IDENTITY_DEV_CLIENT_SECRET` set, the service creates the clients
@@ -99,9 +114,10 @@ The OpenAPI spec is `packages/contracts/openapi/identity.v1.json` (`make openapi
 src/identity/
   api/             # routers, request/response schemas, auth dependencies
   domain/          # tenancy.py: Tenant, User, roles by tenant kind; provider.py: IdentityProvider; sessions.py: TokenMinter; service_clients.py; events.py; repository.py: the unit of work; consent.py, channel_consent.py, billing.py
-  application/     # tenancy.py: CreateTenant, CurrentUser; sessions.py: ExchangeSession, IssueServiceToken; bootstrap.py: service clients; consents.py, channel_consents.py, billing.py
+  application/     # tenancy.py: CreateTenant, CurrentUser, InviteUser, ChangeRoles, DisableUser, ListUsers; sessions.py: ExchangeSession, IssueServiceToken; bootstrap.py: BootstrapInternalTenant, service clients; consents.py, channel_consents.py, billing.py
   infrastructure/  # memory.py, models.py, repository.py (Postgres, RLS, outbox); minter.py; providers/{fake,supabase}.py; billing/{memory,razorpay}.py
-  admin.py         # identity-admin: signing keys and service clients
+  admin.py         # identity-admin: signing keys, service clients, the internal tenant
+  composition.py   # the identity provider CW_AUTH_PROVIDER names
   identity_dev_clients.toml  # the service clients local and test runs create
   main.py          # composition root: create_app(...) from py-common
 migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA)

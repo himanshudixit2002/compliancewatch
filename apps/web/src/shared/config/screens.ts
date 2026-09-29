@@ -138,6 +138,12 @@ const DEV_PROVIDER_TOKENS = servicesTrack(
 );
 const SESSIONS = uses("identity", "POST", "/v1/identity/sessions");
 const DEV_TOKENS = uses("identity", "POST", "/v1/identity/dev/provider-tokens");
+const IDENTITY_USER_ROUTES: readonly RouteRef[] = [
+  uses("identity", "GET", "/v1/identity/users"),
+  uses("identity", "POST", "/v1/identity/users"),
+  uses("identity", "PUT", "/v1/identity/users/{user_id}/roles"),
+  uses("identity", "POST", "/v1/identity/users/{user_id}/disable"),
+];
 const IDENTITY_USERS: readonly AwaitedRoute[] = [
   servicesTrack("WP14", "identity", "GET", "/v1/identity/users"),
   servicesTrack("WP14", "identity", "POST", "/v1/identity/users"),
@@ -647,9 +653,9 @@ const SCREEN_LIST = [
     section: "owner",
     roles: TENANT_ADMINS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [],
+    uses: IDENTITY_USER_ROUTES,
     awaits: IDENTITY_USERS,
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "5, 6, 16",
     nav: { group: "settings", order: 6 },
@@ -798,9 +804,9 @@ const SCREEN_LIST = [
     section: "admin",
     roles: ["admin"],
     tenantKinds: ["internal"],
-    uses: [],
+    uses: IDENTITY_USER_ROUTES,
     awaits: IDENTITY_USERS,
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15, 17",
     nav: { group: "identity", order: 3 },

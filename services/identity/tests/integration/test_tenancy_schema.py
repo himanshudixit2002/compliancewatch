@@ -21,13 +21,20 @@ from testcontainers.community.postgres import PostgresContainer
 from domain_kernel.access import Role, Scope
 from domain_kernel.ids import TenantId
 from identity.application.bootstrap import (
+    BootstrapInternalTenant,
     CreateServiceClient,
     ListServiceClients,
     RevokeServiceClient,
 )
 from identity.application.sessions import ExchangeSession, IssueServiceToken
-from identity.application.tenancy import CreateTenant
-from identity.domain.errors import SubjectRegisteredError
+from identity.application.tenancy import (
+    ChangeRoles,
+    CreateTenant,
+    DisableUser,
+    InviteUser,
+    ListUsers,
+)
+from identity.domain.errors import InternalTenantExistsError, SubjectRegisteredError
 from identity.domain.events import RoleChangeReason, TenantCreated, UserRoleChanged, sorted_roles
 from identity.domain.tenancy import Contact, SubjectEntry, Tenant, TenantKind, User
 from identity.infrastructure.minter import IssuerMinter
@@ -298,11 +305,15 @@ def test_the_checks_refuse_what_the_domain_refuses(
 
 def test_there_is_one_internal_tenant(app_engine: Engine) -> None:
     factory = PostgresUnitOfWorkFactory(app_engine)
-    first = new_tenant(TenantKind.INTERNAL, "Regulatory team")
-    sign_up(factory, first, first_user(first, "internal-1"))
-    second = new_tenant(TenantKind.INTERNAL, "Second team")
-    with pytest.raises(IntegrityError, match="ux_tenant_internal"):
-        sign_up(factory, second, first_user(second, "internal-2"))
+    provider = FakeIdentityProvider()
+    bootstrap = BootstrapInternalTenant(factory, provider)
+    tenant, admin = bootstrap.run("Regulatory team", Contact(email="admin@example.org"))
+    with factory(tenant.id) as uow:
+        assert uow.users.list() == [admin]
+    second = Contact(email="second@example.org")
+    with pytest.raises(InternalTenantExistsError):
+        bootstrap.run("Second team", second)
+    assert provider.lookup(provider.subject_for(second)) is None
 
 
 def test_create_tenant_commits_its_outbox_rows_and_a_repeat_rolls_back(
@@ -349,3 +360,39 @@ def test_service_clients_through_a_plain_role(app_engine: Engine) -> None:
     with factory(None) as uow:
         stored = uow.service_clients.get("integration-client")
     assert stored == revoked
+
+
+def test_the_team_use_cases_through_a_plain_role(app_engine: Engine, engine: Engine) -> None:
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    provider = FakeIdentityProvider()
+    issuer = TestIssuer()
+    minter = IssuerMinter(
+        TokenIssuer(issuer.keys, issuer=issuer.issuer_name, audience=issuer.audience)
+    )
+    created = CreateTenant(factory, provider, minter, ttl=timedelta(minutes=10)).run(
+        provider.issue(phone="+919800000002"), TenantKind.BUSINESS, "Team Traders"
+    )
+    owner = created.session.principal
+    staff = InviteUser(factory, provider).run(
+        created.tenant.id, owner, contact=Contact(phone="+919800000003"), roles=[Role.STAFF]
+    )
+    changed = ChangeRoles(factory).run(
+        created.tenant.id, owner, staff.id, [Role.STAFF, Role.COMPLIANCE_LEAD]
+    )
+    disabled = DisableUser(factory).run(created.tenant.id, owner, staff.id)
+    assert (changed.session_version, disabled.session_version) == (1, 2)
+    users = ListUsers(factory).run(created.tenant.id, owner)
+    assert [user.id for user in users] == [created.user.id, staff.id]
+    assert users[1] == disabled
+    with engine.connect() as connection:
+        reasons: list[str] = list(
+            connection.execute(
+                text(
+                    "SELECT message -> 'payload' ->> 'reason' FROM outbox_event "
+                    "WHERE tenant_id = :tenant AND topic = 'user.role.changed' "
+                    "ORDER BY created_at, message -> 'payload' ->> 'session_version'"
+                ),
+                {"tenant": created.tenant.id.value},
+            ).scalars()
+        )
+    assert reasons == ["created", "invited", "roles_changed", "disabled"]

@@ -1,4 +1,5 @@
-"""``identity-admin``: signing keys, and service clients whose secret is shown once."""
+"""``identity-admin``: signing keys, service clients whose secret is shown once, and the internal
+tenant."""
 
 import io
 import json
@@ -6,14 +7,21 @@ import json
 import pytest
 
 from identity.admin import main
+from identity.domain.events import RoleChangeReason, TenantCreated, UserRoleChanged
 from identity.domain.service_clients import secret_digest
+from identity.domain.tenancy import Contact, TenantKind
 from identity.infrastructure.memory import MemoryStore
+from identity.infrastructure.providers.fake import FakeIdentityProvider
 from py_common.auth import load_signing_keys
 
 
-def run(store: MemoryStore, *argv: str) -> tuple[int, str]:
+def run(
+    store: MemoryStore, *argv: str, provider: FakeIdentityProvider | None = None
+) -> tuple[int, str]:
     out = io.StringIO()
-    code = main(list(argv), unit_of_work=store, out=out)
+    code = main(
+        list(argv), unit_of_work=store, provider=provider or FakeIdentityProvider(), out=out
+    )
     return code, out.getvalue()
 
 
@@ -71,3 +79,46 @@ def test_a_bad_client_id_or_scope_is_refused(capsys: pytest.CaptureFixture[str])
     with pytest.raises(SystemExit):
         run(store, "service-client", "create", "--id", "qa", "--scope", "admin")
     assert store.service_clients == {}
+
+
+def test_bootstrap_internal_creates_the_one_internal_tenant_and_its_admin(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store = MemoryStore()
+    provider = FakeIdentityProvider()
+    code, printed = run(
+        store,
+        "bootstrap-internal",
+        "--name",
+        "Regulatory team",
+        "--email",
+        "Admin@Example.org",
+        provider=provider,
+    )
+    assert code == 0, capsys.readouterr().err
+    described = json.loads(printed)
+    (tenant,) = store.tenants.values()
+    (admin,) = store.users.values()
+    assert (tenant.kind, tenant.name) == (TenantKind.INTERNAL, "Regulatory team")
+    assert described["admin_email"] == "admin@example.org"
+    assert described["admin_user_id"] == str(admin.id)
+    assert provider.lookup(admin.provider_subject) is not None
+    created, first = store.events
+    assert isinstance(created, TenantCreated)
+    assert isinstance(first, UserRoleChanged)
+    assert (first.reason, first.changed_by) == (RoleChangeReason.CREATED, None)
+    assert "second factor" in capsys.readouterr().err
+    code, _ = run(
+        store,
+        "bootstrap-internal",
+        "--name",
+        "Second team",
+        "--phone",
+        "+919876543210",
+        provider=provider,
+    )
+    assert code == 1
+    assert "internal tenant exists" in capsys.readouterr().err
+    assert len(store.tenants) == 1
+    removed = provider.subject_for(Contact(phone="+919876543210"))
+    assert provider.lookup(removed) is None, "the refused admin's new account was removed"

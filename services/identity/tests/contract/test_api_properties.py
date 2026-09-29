@@ -52,6 +52,10 @@ OPERATIONS = frozenset(
         "GET /v1/identity/me",
         "POST /v1/identity/dev/provider-tokens",
         "POST /v1/identity/tenants",
+        "GET /v1/identity/users",
+        "POST /v1/identity/users",
+        "PUT /v1/identity/users/{user_id}/roles",
+        "POST /v1/identity/users/{user_id}/disable",
     }
 )
 TOKEN_OPERATIONS = frozenset(
@@ -59,6 +63,10 @@ TOKEN_OPERATIONS = frozenset(
         "GET /v1/identity/me",
         "GET /v1/identity/consents",
         "POST /v1/identity/consents",
+        "GET /v1/identity/users",
+        "POST /v1/identity/users",
+        "PUT /v1/identity/users/{user_id}/roles",
+        "POST /v1/identity/users/{user_id}/disable",
     }
 )
 EXCLUDED: dict[str, str] = {}

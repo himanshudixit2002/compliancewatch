@@ -1,20 +1,24 @@
-"""The fake identity provider, the provider identity, and how settings pick a provider."""
+"""The fake identity provider, the provider identity, and the settings that pick the provider,
+the signing keys and the dev clients."""
 
 import secrets
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import jwt
 import pytest
 from pydantic import SecretStr, ValidationError
 
+from domain_kernel.access import Scope
 from domain_kernel.errors import InvariantViolationError
+from identity.composition import identity_provider
 from identity.domain.errors import ProviderAccountExistsError, ProviderTokenInvalidError
 from identity.domain.provider import AAL1, AAL2, ProviderIdentity
 from identity.domain.tenancy import Contact
 from identity.infrastructure.providers.fake import FakeIdentityProvider
 from identity.infrastructure.providers.supabase import SupabaseIdentityProvider
-from identity.main import identity_provider
+from identity.settings import load_dev_clients_file
 from identity.testing import identity_settings
 
 SHARED_SECRET = secrets.token_hex(20)
@@ -123,3 +127,42 @@ def test_the_secret_settings_stay_secret() -> None:
     settings = identity_settings(supabase_jwt_secret="legacy", identity_fake_provider_secret=None)
     assert isinstance(settings.supabase_jwt_secret, SecretStr)
     assert "legacy" not in repr(settings)
+
+
+def test_dev_clients_come_from_the_committed_file_or_the_setting() -> None:
+    committed = identity_settings().dev_clients
+    assert committed["pipeline"] == {Scope.RULEBOOK_WRITE, Scope.LLM_CALL, Scope.TENANT_ACT}
+    assert set(committed) == {"pipeline", "qa", "whatsapp-bot"}
+    given = identity_settings(
+        identity_dev_clients="qa=llm:call, bot = tenant:act+llm:call"
+    ).dev_clients
+    assert dict(given) == {"qa": {Scope.LLM_CALL}, "bot": {Scope.TENANT_ACT, Scope.LLM_CALL}}
+    for bad in ("qa", "qa=llm:call,=tenant:act", "qa=admin"):
+        with pytest.raises(ValidationError, match=r"CW_IDENTITY_DEV_CLIENTS|scope"):
+            identity_settings(identity_dev_clients=bad)
+    staging = identity_settings(
+        env="staging", identity_dev_client_secret=None, identity_dev_clients="qa"
+    )
+    assert not staging.is_dev
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"env": "staging", "identity_signing_keys": None}, "CW_IDENTITY_SIGNING_KEYS"),
+        ({"env": "staging"}, "local and test only"),
+        ({"identity_dev_client_secret": "short"}, "32"),
+    ],
+)
+def test_settings_guard_the_keys_and_the_dev_secret(
+    overrides: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        identity_settings(**overrides)
+
+
+def test_a_dev_clients_file_needs_scopes_per_client(tmp_path: Path) -> None:
+    broken = tmp_path / "clients.toml"
+    broken.write_text('[qa]\nreason = "no scopes"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="scopes list"):
+        load_dev_clients_file(broken)

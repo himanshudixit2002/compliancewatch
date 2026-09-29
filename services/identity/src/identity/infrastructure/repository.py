@@ -8,6 +8,7 @@ from typing import Self
 
 from sqlalchemy import Connection, Engine, create_engine, select, text
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
@@ -20,7 +21,7 @@ from identity.domain.channel_consent import (
     ConsentChannel,
 )
 from identity.domain.consent import ConsentPurpose, ConsentRecord, ConsentSource
-from identity.domain.errors import SubjectRegisteredError
+from identity.domain.errors import InternalTenantExistsError, SubjectRegisteredError
 from identity.domain.repository import UnitOfWork
 from identity.domain.service_clients import ServiceClient
 from identity.domain.tenancy import (
@@ -33,6 +34,7 @@ from identity.domain.tenancy import (
     UserStatus,
 )
 from identity.infrastructure.models import (
+    INTERNAL_TENANT_INDEX,
     TENANT_SETTING,
     ChannelConsentRow,
     ConsentRow,
@@ -81,6 +83,7 @@ class SqlAlchemyTenantRepository:
         self._session = session
 
     def add(self, tenant: Tenant) -> None:
+        """Insert ``tenant``; a second internal tenant is ``InternalTenantExistsError``."""
         self._session.add(
             TenantRow(
                 id=tenant.id.value,
@@ -91,7 +94,12 @@ class SqlAlchemyTenantRepository:
                 created_at=tenant.created_at,
             )
         )
-        self._session.flush()
+        try:
+            self._session.flush()
+        except IntegrityError as exc:
+            if INTERNAL_TENANT_INDEX in str(exc.orig):
+                raise InternalTenantExistsError() from exc
+            raise
 
     def get(self, tenant_id: TenantId) -> Tenant | None:
         row = self._session.get(TenantRow, tenant_id.value)

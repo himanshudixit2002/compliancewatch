@@ -261,3 +261,25 @@ class ServiceClientNotFoundError(DomainError):
 
     def __init__(self, client_id: str) -> None:
         super().__init__(f"no service client {client_id}")
+
+
+class TenantNotFoundError(DomainError):
+    """The request names a tenant this service does not hold (404)."""
+
+    type_slug: ClassVar[str] = "identity-tenant-not-found"
+    title: ClassVar[str] = "Tenant not found"
+
+    def __init__(self) -> None:
+        super().__init__("no tenant with this id")
+
+
+class InternalTenantExistsError(DomainError):
+    """The internal tenant exists already; there is one (409)."""
+
+    type_slug: ClassVar[str] = "identity-internal-tenant-exists"
+    title: ClassVar[str] = "Internal tenant exists already"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "the internal tenant exists already; its admins invite the regulatory team"
+        )

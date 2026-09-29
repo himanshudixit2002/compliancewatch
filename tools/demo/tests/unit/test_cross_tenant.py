@@ -75,6 +75,10 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "GET /v1/identity/consents",
             "POST /v1/identity/billing/subscriptions",
             "GET /v1/identity/me",
+            "GET /v1/identity/users",
+            "POST /v1/identity/users",
+            "PUT /v1/identity/users/{user_id}/roles",
+            "POST /v1/identity/users/{user_id}/disable",
         }
     ),
     "profile": frozenset(

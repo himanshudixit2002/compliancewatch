@@ -7,7 +7,14 @@ from identity.application.billing import BillingLedger, ReceiveBillingWebhook, S
 from identity.application.channel_consents import ChannelConsentStatus, RecordChannelConsent
 from identity.application.consents import ConsentStatus, RecordConsent
 from identity.application.sessions import ExchangeSession, IssueServiceToken
-from identity.application.tenancy import CreateTenant, CurrentUser
+from identity.application.tenancy import (
+    ChangeRoles,
+    CreateTenant,
+    CurrentUser,
+    DisableUser,
+    InviteUser,
+    ListUsers,
+)
 from identity.domain.channel_consent import ChannelUnitOfWorkFactory
 from identity.domain.provider import DevIdentityProvider, IdentityProvider
 from identity.domain.repository import UnitOfWorkFactory
@@ -37,3 +44,7 @@ class Wiring:
     issue_service_token: IssueServiceToken
     create_tenant: CreateTenant
     current_user: CurrentUser
+    list_users: ListUsers
+    invite_user: InviteUser
+    change_roles: ChangeRoles
+    disable_user: DisableUser

@@ -59,6 +59,7 @@ USER_PHONE_PATTERN: Final[str] = "^\\+[1-9][0-9]{7,14}$"
 SECRET_SHA256_PATTERN: Final[str] = "^[0-9a-f]{64}$"
 CLIENT_ID_PATTERN: Final[str] = "^[a-z0-9][a-z0-9._-]*$"
 NO_RLS: Final[str] = "No row-level security: "
+INTERNAL_TENANT_INDEX: Final[str] = "ux_tenant_internal"
 
 
 def sql_in_list(column: str, values: tuple[str, ...]) -> str:
@@ -159,7 +160,7 @@ class TenantRow(Base):
         CheckConstraint(sql_in_list("region", REGIONS), name="ck_tenant_region"),
         CheckConstraint("btrim(name) <> ''", name="ck_tenant_name"),
         Index(
-            "ux_tenant_internal",
+            INTERNAL_TENANT_INDEX,
             "kind",
             unique=True,
             postgresql_where=text("kind = 'internal'"),
