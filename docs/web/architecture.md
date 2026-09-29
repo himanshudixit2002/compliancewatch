@@ -221,7 +221,10 @@ gateway, the gateway calls a typed client from `server/api`, and the answer come
 The legal pages read `docs/legal/<doc>.md` at build time (`server/legal.ts`, `marked` with its
 defaults; a test asserts the drafts contain no raw HTML tag), prerender the three listed
 documents and render each under the fixed "Draft - to be reviewed by a lawyer" banner with its
-`Version:` line. `/design` and the admin layout are `force-dynamic` so the environment answer is
+`Version:` line while that line ends in `-draft` (a plain version line afterwards); the print
+stylesheet in `globals.css` leaves the shell out and keeps the banner. In production the consent
+and business steps are closed while the terms or the privacy notice is a draft
+(`onboardingGate()` in `server/legal.ts`, D-035). `/design` and the admin layout are `force-dynamic` so the environment answer is
 never baked into the build.
 
 Errors: `error.tsx` renders `ErrorState` inside the segment's shell with the error digest as the

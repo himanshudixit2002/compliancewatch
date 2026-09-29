@@ -5,12 +5,17 @@ import type { ConsentPurpose } from "@/entities/consent/types";
 import { track } from "@/server/analytics";
 import { afterMutation } from "@/server/cache";
 import { requireScreenSession } from "@/server/dal";
-import { readLegalVersions } from "@/server/legal";
+import { onboardingGate, readLegalVersions } from "@/server/legal";
 import { rememberRecipient } from "@/server/remembered-recipients";
 import { toActionState, type Result } from "@/server/result";
 import { hrefFor, screenById } from "@/shared/config/screens";
 import { t } from "@/shared/i18n";
-import { actionSuccess, fieldFailure, type ActionState } from "@/shared/lib/action-state";
+import {
+  actionFailure,
+  actionSuccess,
+  fieldFailure,
+  type ActionState,
+} from "@/shared/lib/action-state";
 import { formatDateTime } from "@/shared/lib/dates";
 import { consentsGateway } from "./gateway";
 import { consentChangeRecord, parseConsentChange, type ConsentChangeChoice } from "./model/change";
@@ -32,7 +37,8 @@ import type { ConsentChange } from "./model/settings";
  *
  * Records are append-only and each POST stands alone, so a failure part-way leaves the earlier
  * records in place; the form then says which were recorded, and submitting again records only
- * the rest.
+ * the rest. In production, while the terms or the privacy notice is a draft, the step is closed
+ * (server/legal.ts, onboardingGate) and the action records nothing.
  */
 function failedAfter(result: Result<unknown>, recorded: readonly ConsentPurpose[]): ActionState {
   const state = toActionState<undefined>(result as Result<undefined>);
@@ -50,10 +56,11 @@ export async function recordConsents(
 ): Promise<ActionState> {
   const screen = screenById("owner.onboarding");
   const session = await requireScreenSession(screen);
+  const versions = readLegalVersions();
+  if (onboardingGate({ versions }).closed) return actionFailure(t("onboardingClosed.refused"));
   const parsed = parseConsentForm(formData, { offerWhatsapp: session.tenantKind === "business" });
   if (!parsed.ok) return fieldFailure(parsed.fieldErrors);
 
-  const versions = readLegalVersions();
   const gateway = consentsGateway({ session });
   const summary = await gateway.summary(session.userId);
   if (!summary.ok) return failedAfter(summary, []);
@@ -152,6 +159,8 @@ function changeMessage(
  * stop even when the record then fails (the answer says so, and trying again records it); with
  * no number it records the withdrawal alone. Giving records the consent first and then opts the
  * number in, as the consent step does. A number used either way is remembered on this device.
+ * While onboarding is closed (production with a required document still a draft) a consent can
+ * be withdrawn but not given.
  */
 export async function changeConsent(
   _state: ActionState<ConsentChangeResult>,
@@ -170,6 +179,10 @@ export async function changeConsent(
     };
   }
   const choice = parsed.value;
+  const versions = readLegalVersions();
+  if (choice.change === "give" && onboardingGate({ versions }).closed) {
+    return actionFailure(t("consentSettings.error.closed"));
+  }
   const gateway = consentsGateway({ session });
   const summary = await gateway.summary(session.userId);
   if (!summary.ok) return changeFailed(summary, t("consentSettings.refused"));
@@ -185,7 +198,7 @@ export async function changeConsent(
     await rememberRecipient(session.userId, "whatsapp", recipient);
   }
 
-  const record = consentChangeRecord(choice, summary.value, readLegalVersions(), session.userId);
+  const record = consentChangeRecord(choice, summary.value, versions, session.userId);
   let recordedAt: string | null = null;
   if (record !== null) {
     const written = await gateway.record(record);

@@ -3,7 +3,12 @@ import "server-only";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { marked } from "marked";
-import { LEGAL_DOC_NAMES, type LegalDocName } from "@/shared/config/legal-docs";
+import {
+  LEGAL_DOC_NAMES,
+  REQUIRED_LEGAL_DOCS,
+  type LegalDocName,
+} from "@/shared/config/legal-docs";
+import { webEnvName, type WebEnvName } from "./env";
 
 /**
  * Reads the legal drafts in docs/legal at build time and renders them to HTML with marked's
@@ -98,4 +103,35 @@ export function readLegalVersions(dir: string = legalDir()): Record<LegalDocName
     };
   }
   return versions;
+}
+
+/** Whether a new customer may agree to the documents and add a business in this deployment. */
+export interface OnboardingGate {
+  /** True in production while a required document is a draft: nothing may be agreed to yet. */
+  closed: boolean;
+  /** The required documents that are still drafts, in docs/legal order. */
+  drafts: LegalVersion[];
+}
+
+export interface OnboardingGateOptions {
+  /** CW_WEB_ENV; read from the environment by default. */
+  env?: WebEnvName;
+  /** The documents' Version lines; read from docs/legal by default. */
+  versions?: Readonly<Record<LegalDocName, LegalVersion>>;
+}
+
+/**
+ * Production onboarding stays closed while any required document (REQUIRED_LEGAL_DOCS: the
+ * terms and the privacy notice) has a Version line ending in -draft: nobody agrees to a draft in
+ * production. Local, test and staging stay open, with the draft banner naming each draft and its
+ * version, so the flow can be built, tested and reviewed before a lawyer has approved the
+ * wording.
+ */
+export function onboardingGate(options: OnboardingGateOptions = {}): OnboardingGate {
+  const versions = options.versions ?? readLegalVersions();
+  const env = options.env ?? webEnvName();
+  const drafts = LEGAL_DOC_NAMES.filter((name) => REQUIRED_LEGAL_DOCS.includes(name))
+    .map((name) => versions[name])
+    .filter((document) => document.isDraft);
+  return { closed: env === "prod" && drafts.length > 0, drafts };
 }

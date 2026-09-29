@@ -6,6 +6,7 @@ import { track } from "@/server/analytics";
 import { idempotencyHeaders } from "@/server/api/idempotency";
 import { afterMutation } from "@/server/cache";
 import { requireScreenSession } from "@/server/dal";
+import { onboardingGate } from "@/server/legal";
 import { can } from "@/shared/config/permissions";
 import { getOntology } from "@/server/ontology";
 import { toActionState, type ApiError } from "@/server/result";
@@ -37,13 +38,15 @@ import { clearSkipList, rememberSkip } from "./skip-list";
  * business and gets the first answer back. The answer (new or already on file, what the GSTIN
  * lookup returned, the first question) becomes the result panel; the ontology words its values,
  * and when the ontology cannot be read the raw values are shown instead of failing a business
- * that was created.
+ * that was created. While onboarding is closed (production with the terms or the privacy notice
+ * still a draft) nothing is created.
  */
 export async function createBusiness(
   _state: ActionState<BusinessStepResult>,
   formData: FormData,
 ): Promise<ActionState<BusinessStepResult>> {
   const session = await requireScreenSession(screenById("owner.onboarding.business"));
+  if (onboardingGate().closed) return actionFailure(t("onboardingClosed.refused"));
   const parsed = parseBusinessForm(formData);
   if (!parsed.ok) return fieldFailure(parsed.fieldErrors);
 

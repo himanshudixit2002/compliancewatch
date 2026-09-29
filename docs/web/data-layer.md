@@ -326,7 +326,9 @@ the ontology, or, with no lookup answer, the plain note and the `verify_registra
 service opened. "Add another business" loads the page afresh, so the next form has a new key. The
 page asks for the consents first (the consent step's query, read by the page): the profile
 service does not check them, so the web app does not offer the form until the required purposes
-are granted at the current notice versions.
+are granted at the current notice versions. In production, while the terms or the privacy notice
+is a draft, the step is closed: the page shows the drafts instead of the form and the action
+creates nothing (`onboardingGate()`, D-035).
 
 ## The questions step and the summary
 
@@ -393,7 +395,9 @@ the plus, as WhatsApp reports a number; the number travels in the form's POST bo
 server's call, never in a URL the browser sees. Each POST stands alone, so a failure part-way
 leaves the earlier rows and the form says which purposes were recorded; submitting again
 records only the rest. A CA firm is not offered WhatsApp reminders (they are set per client
-business).
+business). In production, while the terms or the privacy notice is a draft, the step is closed:
+the page names the drafts and offers no form, and the action records nothing
+(`onboardingGate()` in `server/legal.ts`, D-035).
 
 The settings page at `/settings/consents` reads the same summary and shows, per purpose, the
 latest record (state, notice version, time in IST, source) and every record oldest first. The
@@ -407,7 +411,8 @@ consent step's checkbox sentence to give, `Withdraw consent: <purpose>.` to with
 that is already the state records nothing and says so. Withdrawing WhatsApp reminders opts the
 number out first (`{ opted_in: false }`), so reminders stop even when the record then fails,
 and records the withdrawal alone when no number is known; giving them records the consent and
-then opts the number in, as the consent step does.
+then opts the number in, as the consent step does. While onboarding is closed, giving is refused
+and withdrawing still works.
 
 The identity service does not return a user's own phone or email yet (`GET /v1/identity/me` is
 awaited), so the settings pages remember the recipients a user last named on this device in

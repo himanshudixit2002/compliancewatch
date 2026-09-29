@@ -470,3 +470,25 @@ the only way to switch a web flag on in staging or production. Consequences: wit
 nothing is read or written; with it on, each event adds one identity read to the action or page
 that emits it; the events are a closed union, so a new one is a code change reviewed for
 personal data; turning the flag on waits for counsel's view on the analytics purpose.
+
+## D-035: Production onboarding is closed while the terms or the privacy notice is a draft
+
+2026-09-29. Every document in `docs/legal` is still a draft waiting for a lawyer, and a consent
+records the version a person agreed to, so a person agreeing in production would agree to a
+draft. `onboardingGate()` in `server/legal.ts` closes onboarding when `CW_WEB_ENV` is `prod` and
+any required document (`REQUIRED_LEGAL_DOCS`: the terms and the privacy notice, the documents the
+required purposes refer to; a test holds the list to the purpose mapping) has a Version line
+ending in `-draft`. Closed means: the consent step and the business step show the step's heading,
+the draft banner and each draft with its version and link, and no form; `recordConsents` and
+`createBusiness` refuse before any call; the consents settings page refuses to give a consent,
+while a withdrawal is always recorded. Local, test and staging stay open under the draft banner,
+so the flow can be built, tested and reviewed before the wording is approved; the WhatsApp
+consent notice, for an optional purpose, does not close anything. The questions, the summary and
+the business pages stay open, because they change a business that already exists. The legal
+pages show the draft banner only while a document's version ends in `-draft` (a plain version
+line afterwards, where the first build showed the banner whatever the version), and a print
+stylesheet in `globals.css` prints the page without the shell, in black on white whatever the
+screen's scheme, keeps the banner on a printed draft, and adds a line naming the document and its
+version. Consequences: production onboarding opens with the release that carries the reviewed
+Version lines, with no configuration change; the e2e suite runs in `test` and never sees the
+closed state, which the unit tests cover.

@@ -14,6 +14,15 @@ export type LegalDocName = (typeof LEGAL_DOCS)[number]["name"];
 
 export const LEGAL_DOC_NAMES: readonly LegalDocName[] = LEGAL_DOCS.map((doc) => doc.name);
 
+/**
+ * The documents every customer agrees to before anything else: the ones the required consent
+ * purposes refer to (the terms, and the privacy notice for the privacy notice and profile
+ * processing purposes; features/consents maps each purpose to its document, and its test holds
+ * the two lists together). While one of these is a draft, production onboarding is closed
+ * (server/legal.ts, onboardingGate). The WhatsApp consent notice covers an optional purpose.
+ */
+export const REQUIRED_LEGAL_DOCS: readonly LegalDocName[] = ["privacy-notice", "terms-of-service"];
+
 export function isLegalDoc(value: string): value is LegalDocName {
   return (LEGAL_DOC_NAMES as readonly string[]).includes(value);
 }

@@ -52,7 +52,7 @@ outside `src` and outside the floor.
 | `shared/config` (roles, flags)   | set membership, `can()`, the flag declaration shape                                                                                        |
 | `shared/i18n`                    | every `t("...")` literal in `src` exists in `en.json`; interpolation; the key-by-key fallback                                               |
 | `shared/lib`                     | IST rendering, financial-year labels, decimal money, identifiers, `safeNext`                                                               |
-| `server/legal.ts`                | version and title extraction, and that no file in `docs/legal` contains a raw HTML tag (marked does not sanitise)                          |
+| `server/legal.ts`                | version and title extraction, that no file in `docs/legal` contains a raw HTML tag (marked does not sanitise), and the onboarding gate: closed in prod while the terms or the privacy notice is a draft, open in local, test and staging |
 | `server/session.ts`, `dal.ts`    | the cookie round trip (tamper, expiry, wrong key, wrong shape), the cookie attributes per environment, each gate's redirect or 404 (the cookie store from `src/test/fake-cookies.ts`) |
 | `server/auth/*`                  | `providerFor` per variable value; the fake adapter's validation, stable user id, second-factor assertion and refusal outside local and test |
 | `features/auth`                  | the form (roles per kind, the busy state, the errors it shows) with a fake action; the action's cookie and redirect; the seed-state reader |
@@ -87,7 +87,7 @@ The specs on `main`:
 | `account.spec.ts`        | the session facts in IST, the copy controls, the note on `/me`, the header name linking to `/account`                                                     |
 | `admin-gate.spec.ts`     | anonymous `/admin` to sign-in with `next`, a 404 for a tenant role on every admin path, an analyst opening the tools without the admin-only entries and a 404 on one of them |
 | `sitemap.spec.ts`        | one table per section, a waiting tool's awaited route and owner, a ready tool's chip, the link to its notice                                              |
-| `legal.spec.ts`          | each listed document under the draft banner with its `-draft` version; an unlisted document is a 404                                                        |
+| `legal.spec.ts`          | each listed document under the draft banner with its `-draft` version; an unlisted document is a 404; printed (print media, light and dark schemes): no shell, the banner kept, the paper line, black text on white |
 | `design.spec.ts`         | every catalogue section with axe, the theme control, dialogs (focus, Escape, the ten-character reason), the calendar keys                                   |
 | `admin-home.spec.ts`     | as an analyst: the tool list with status (waiting and ready) and service READMEs, the environment banner, sidebar navigation marking the current tool     |
 | `not-available.spec.ts`  | an admin tool's awaited routes and breadcrumbs, a parameterised tenant route through the catch-all, `/forbidden` for the wrong tenant kind, a planned tool's sentence and note, a ready tool's sentence and what it will use, real 404s with and without a session |

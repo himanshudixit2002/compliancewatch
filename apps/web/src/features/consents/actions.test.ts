@@ -190,6 +190,45 @@ describe("product analytics", () => {
   });
 });
 
+describe("closed onboarding", () => {
+  // In production every document in docs/legal is still a draft, so onboarding is closed.
+  beforeEach(() => {
+    vi.stubEnv("CW_WEB_ENV", "prod");
+  });
+
+  it("records no consent on the consent step", async () => {
+    await signedInAs();
+    const fake = services();
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await recordConsents(IDLE, form(REQUIRED));
+    expect(state).toEqual({
+      status: "error",
+      formErrors: [
+        "Onboarding is closed until the legal documents are reviewed; nothing was recorded.",
+      ],
+    });
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it("refuses to give a consent on the settings page but still records a withdrawal", async () => {
+    await signedInAs();
+    const fake = services({ states: [grantedState("analytics", PRIVACY)] });
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const given = await changeConsent(IDLE, form({ purpose: "email_reminders", change: "give" }));
+    expect(given.status === "error" && given.formErrors?.[0]).toMatch(
+      /^Consents cannot be given while the legal documents are drafts/,
+    );
+    expect(fake.requests).toHaveLength(0);
+
+    const withdrawn = await changeConsent(IDLE, form({ purpose: "analytics", change: "withdraw" }));
+    expect(withdrawn.status).toBe("ok");
+    expect(fake.requests.map((request) => `${request.method} ${request.pathname}`)).toEqual([
+      "GET /v1/identity/consents",
+      "POST /v1/identity/consents",
+    ]);
+  });
+});
+
 describe("recordConsents", () => {
   it("records each ticked purpose with its notice version and evidence, opts the number in and moves on", async () => {
     await signedInAs();

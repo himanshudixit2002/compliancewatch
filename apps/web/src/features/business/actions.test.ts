@@ -196,6 +196,23 @@ const ANSWER = {
   as_of_fy: "",
 };
 
+describe("closed onboarding", () => {
+  it("adds no business in production while the legal documents are drafts", async () => {
+    vi.stubEnv("CW_WEB_ENV", "prod");
+    await signedInAs();
+    const fake = profile();
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await createBusiness(IDLE, form(VALID));
+    expect(state).toEqual({
+      status: "error",
+      formErrors: [
+        "Onboarding is closed until the legal documents are reviewed; nothing was recorded.",
+      ],
+    });
+    expect(fake.requests).toHaveLength(0);
+  });
+});
+
 describe("product analytics", () => {
   beforeEach(async () => {
     await resetFlagReader();
