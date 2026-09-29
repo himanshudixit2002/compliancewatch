@@ -8,7 +8,8 @@ no message id SES reports back, so the message carries its dispatch id in the
 ``X-CW-Dispatch-Id`` header and the receipt names the dispatch id as the provider's message id:
 SES includes that header in its bounce and complaint reports when the configuration set is told
 to (a manual step), which is how a report finds its notifications. A refused recipient, a
-refused login or a connection that fails is a failed receipt, and the dispatcher retries it.
+refused login, a connection that fails, and a message whose headers the email library refuses
+are failed receipts, and the dispatcher retries them.
 
 The channel is wired only behind ``CW_EMAIL_ENABLED`` with ``CW_SMTP_HOST`` and
 ``CW_EMAIL_FROM``; otherwise the composition root wires ``DisabledChannel``.
@@ -18,6 +19,7 @@ import smtplib
 import ssl
 from collections.abc import Callable
 from datetime import datetime
+from email.errors import MessageError
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 
@@ -62,16 +64,16 @@ class SmtpEmailChannel:
         self._clock = clock
 
     def deliver(self, message: OutboundMessage) -> DeliveryReceipt:
-        rendered = message.rendered
-        email = EmailMessage()
-        email["From"] = self._sender
-        email["To"] = rendered.recipient
-        email["Subject"] = rendered.subject
-        email["Date"] = formatdate(usegmt=True)
-        email["Message-ID"] = make_msgid(domain=self._sender.rpartition("@")[2] or None)
-        email[DISPATCH_HEADER] = str(message.dispatch_id)
-        email["Content-Language"] = rendered.language
-        email.set_content(rendered.body)
+        try:
+            email = self._email(message)
+        except (ValueError, TypeError, MessageError) as exc:
+            # A header the email library refuses, such as one with a line break: a failed
+            # receipt like any other, never an exception that would stop the dispatcher.
+            return DeliveryReceipt(
+                DeliveryStatus.FAILED,
+                self._clock(),
+                error=f"email not built: {type(exc).__name__}",
+            )
         sent = False
         try:
             with self._connect(self._host, self._port, self._timeout) as smtp:
@@ -90,6 +92,19 @@ class SmtpEmailChannel:
         return DeliveryReceipt(
             DeliveryStatus.SENT, self._clock(), provider_message_id=str(message.dispatch_id)
         )
+
+    def _email(self, message: OutboundMessage) -> EmailMessage:
+        rendered = message.rendered
+        email = EmailMessage()
+        email["From"] = self._sender
+        email["To"] = rendered.recipient
+        email["Subject"] = rendered.subject
+        email["Date"] = formatdate(usegmt=True)
+        email["Message-ID"] = make_msgid(domain=self._sender.rpartition("@")[2] or None)
+        email[DISPATCH_HEADER] = str(message.dispatch_id)
+        email["Content-Language"] = rendered.language
+        email.set_content(rendered.body)
+        return email
 
 
 def _describe(exc: Exception) -> str:

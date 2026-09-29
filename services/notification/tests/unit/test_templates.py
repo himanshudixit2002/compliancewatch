@@ -72,6 +72,19 @@ def test_hindi_and_fallback_to_english() -> None:
     assert fallback.subject == "File GSTR-3B is due on 20 Oct 2026"
 
 
+def test_an_email_subject_is_one_line_whatever_its_values_hold() -> None:
+    message = render(
+        "obligation_due_soon",
+        Channel.EMAIL,
+        "en",
+        {**PARAMS, "title": "File GSTR-3B\r\nfor Unit 2"},
+        recipient="a@b.c",
+        dedupe_key=KEY,
+    )
+    assert message.subject == "File GSTR-3B for Unit 2 is due on 20 Oct 2026"
+    assert "File GSTR-3B\r\nfor Unit 2" in message.body, "the body keeps the value as given"
+
+
 def test_missing_placeholder_and_unknown_template() -> None:
     with pytest.raises(MissingPlaceholderError, match="title"):
         render(

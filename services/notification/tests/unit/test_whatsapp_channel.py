@@ -132,6 +132,25 @@ def test_graph_errors_and_transport_errors_are_failed_receipts() -> None:
     assert "transport" in receipt.error
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx2.Response(200, text="<html>accepted</html>"),
+        httpx2.Response(200, json=[{"id": "wamid.X"}]),
+        httpx2.Response(200, json={"messages": "wamid.X"}),
+        httpx2.Response(202, json={"messages": [{}]}),
+    ],
+)
+def test_a_success_without_a_readable_message_id_is_still_a_send(answer: httpx2.Response) -> None:
+    receipt = Graph(answer).channel().deliver(message(window=True))
+    assert (receipt.status, receipt.provider_message_id) == (DeliveryStatus.SENT, "")
+
+
+def test_a_redirect_is_no_send() -> None:
+    receipt = Graph(httpx2.Response(302, text="moved")).channel().deliver(message(window=True))
+    assert (receipt.status, receipt.error) == (DeliveryStatus.FAILED, "302: moved")
+
+
 def test_the_disabled_channel_fails_with_its_reason() -> None:
     receipt = DisabledChannel("off", clock=lambda: NOON_IST).deliver(message(window=True))
     assert (receipt.status, receipt.error) == (DeliveryStatus.FAILED, "off")

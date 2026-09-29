@@ -3,18 +3,26 @@ subject and body, and the dispatch id in the X-CW-Dispatch-Id header and as the 
 
 import smtplib
 import ssl
+from dataclasses import replace
 from email.message import EmailMessage
 from types import TracebackType
 
 from domain_kernel.channels import Channel
 from domain_kernel.dedupe import DedupeKey
+from domain_kernel.ids import BusinessId, NotificationId, ObligationId, TenantId
 from domain_kernel.notifications import DeliveryStatus
+from notification.application.dispatch import DispatchDue
+from notification.application.preferences import SetOptIn
+from notification.application.send import SendNow
 from notification.composition import EMAIL_DISABLED, default_channels
 from notification.domain.channels import OutboundMessage, outbound
 from notification.domain.ids import DispatchId
+from notification.domain.model import NotificationRequest, Outcome
+from notification.domain.preferences import ConsentSource
 from notification.infrastructure.email import SmtpEmailChannel
+from notification.infrastructure.memory import MemoryStore
 from notification.infrastructure.whatsapp import DisabledChannel
-from notification.testing import NOON_IST, notification_settings
+from notification.testing import NOON_IST, FakeRuleVersionReader, notification_settings
 
 MAIL = "owner@example.com"
 SMTP_SECRET = "smtp-secret-for-tests"
@@ -135,6 +143,51 @@ def test_refusals_and_connection_failures_are_failed_receipts() -> None:
 
     refused = channel(Server(), connect=refuse).deliver(message())
     assert refused.error == "smtp: ConnectionRefusedError"
+
+
+def test_a_header_the_email_library_refuses_is_a_failed_receipt_without_a_connection() -> None:
+    outgoing = message()
+    broken = replace(outgoing, rendered=replace(outgoing.rendered, subject="Acme\nUnit 2"))
+    server = Server()
+    receipt = channel(server).deliver(broken)
+    assert (receipt.status, receipt.error) == (DeliveryStatus.FAILED, "email not built: ValueError")
+    assert server.connections == []
+
+
+def test_a_send_whose_title_holds_a_line_break_goes_out_under_a_one_line_subject() -> None:
+    store = MemoryStore()
+    SetOptIn(store, clock=lambda: NOON_IST).run(
+        Channel.EMAIL, MAIL, opted_in=True, source=ConsentSource.WEB_ONBOARDING
+    )
+    server = Server()
+    dispatch = DispatchDue(
+        store,
+        store.work_index,
+        {Channel.EMAIL: channel(server)},
+        rules=FakeRuleVersionReader(),
+        web_base_url="https://app.example",
+        clock=lambda: NOON_IST,
+    )
+    outcome = SendNow(store, dispatch, clock=lambda: NOON_IST).run(
+        NotificationRequest(
+            notification_id=NotificationId.new(),
+            tenant_id=TenantId.new(),
+            obligation_id=ObligationId.new(),
+            business_id=BusinessId.new(),
+            channel=Channel.EMAIL,
+            recipient=MAIL,
+            template_key="obligation_due_soon",
+            params={
+                "business_name": "Acme",
+                "title": "GSTR-3B\nUnit 2",
+                "due_date": "20 Oct",
+                "steps": "File",
+            },
+        )
+    )
+    assert outcome.outcome is Outcome.SENT
+    (email,) = server.connections[0].sent
+    assert email["Subject"] == "GSTR-3B Unit 2 is due on 20 Oct"
 
 
 def test_a_failure_after_the_message_was_taken_is_still_a_send() -> None:

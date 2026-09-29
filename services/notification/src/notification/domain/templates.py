@@ -399,7 +399,9 @@ def render(
         recipient=recipient,
         body=template.body.format(**values),
         dedupe_key=dedupe_key,
-        subject=template.subject.format(**values) if template.subject else "",
+        # A subject is one mail header line, which refuses a line break: a value typed over two
+        # lines (a business label, a title) is flattened into it.
+        subject=one_line(template.subject.format(**values)) if template.subject else "",
         language=template.language,
     )
 

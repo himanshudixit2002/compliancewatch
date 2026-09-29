@@ -63,6 +63,12 @@ another channel reaches them.
      with `select template_key, count(*) from notification where error like 'not rendered%'
      group by 1`.
    - `no channel adapter for ...`: the composition root wired no adapter for the channel.
+   - `<channel>: the channel adapter raised <error>`: a bug in the adapter, which raised instead
+     of returning a receipt. The worker logs `notification.channel_error` with the traceback and
+     the dispatch id. The attempt counts as failed and the rest of the run goes on.
+   - `email not built: <error>`: the email library refused a header of the message, so no
+     connection was opened. Every attempt fails the same way until the code is fixed; the
+     fallback then goes to the recipient's next address.
    - `whatsapp: outside the 24-hour customer service window and template ... is draft, not
      approved`: the person has not written to the business number in the last day, and WhatsApp
      then takes only a template Meta approved. The dispatcher does not retry it and the fallback

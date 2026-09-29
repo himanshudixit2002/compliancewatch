@@ -33,7 +33,8 @@ dispatchers never take one entry) and handles them tenant by tenant:
    follows. A message that cannot be rendered (a missing value, a template the channel does not
    have, a value that is not what its template expects), and a WhatsApp message outside the
    window whose template Meta has not approved, fail without retries: another attempt would
-   fail the same way, so the fallback goes at once.
+   fail the same way, so the fallback goes at once. An adapter that raises instead of returning
+   a receipt has failed the attempt like any other failure, and the run goes on with the rest.
 
 A notification that another dispatcher sent meanwhile, because this one's lease ran out while
 it was sending, is left as it is and counted (``notification_duplicate_sent_total``).
@@ -85,6 +86,9 @@ from notification.domain.preferences import DEFAULT_QUIET_HOURS, QuietHours
 from notification.domain.recipients import Recipient
 from notification.domain.repository import UnitOfWork, UnitOfWorkFactory, WorkEntry, WorkIndex
 from notification.domain.values import message_values
+from py_common.logging import get_logger
+
+log = get_logger(__name__)
 
 DEPENDENCY_BACKOFF = timedelta(seconds=60)
 """How long notifications wait when the rulebook could not fill them."""
@@ -293,11 +297,26 @@ class DispatchDue:
             error = f"no channel adapter for {message.channel.value}"
             receipt = DeliveryReceipt(DeliveryStatus.FAILED, now, error=error)
         else:
-            receipt = adapter.deliver(message)
+            receipt = self._deliver(adapter, message)
         policy = self._retry if message.deliverable else NO_RETRIES
         return self._record(
             tenant_id, batch, receipt, rendered.values, now, policy, message.dispatch_id
         )
+
+    def _deliver(self, adapter: ChannelAdapter, message: OutboundMessage) -> DeliveryReceipt:
+        """The adapter's receipt. An adapter that raises instead of answering failed this
+        attempt, which the retry policy handles like any other failure: it must not stop the run
+        and leave the rest of the claim, which may be other tenants' notifications, unsent."""
+        try:
+            return adapter.deliver(message)
+        except Exception as exc:
+            log.exception(
+                "notification.channel_error",
+                channel=message.channel.value,
+                dispatch_id=str(message.dispatch_id),
+            )
+            error = f"{message.channel.value}: the channel adapter raised {type(exc).__name__}"
+            return DeliveryReceipt(DeliveryStatus.FAILED, self._clock(), error=error)
 
     def _render(self, batch: _Batch, dispatch_id: DispatchId) -> _Rendered:
         first = batch.first

@@ -62,6 +62,20 @@ class RacingChannel(FakeChannel):
         return super().deliver(message)
 
 
+class RaisingChannel(FakeChannel):
+    """Raises instead of answering for the addresses in ``broken``, as an adapter with a bug
+    would."""
+
+    def __init__(self, clock: FakeClock, broken: set[str]) -> None:
+        super().__init__(clock=clock)
+        self.broken = broken
+
+    def deliver(self, message: OutboundMessage) -> DeliveryReceipt:
+        if message.rendered.recipient in self.broken:
+            raise ValueError("Header values may not contain linefeed or carriage return characters")
+        return super().deliver(message)
+
+
 class World:
     def __init__(self, now: datetime = NOON_IST, *, window: int = 300) -> None:
         self.clock = FakeClock(now)
@@ -456,6 +470,21 @@ def test_a_channel_without_an_adapter_is_a_failed_attempt() -> None:
     assert delivery.outcome is DeliveryOutcome.RETRY
     assert delivery.receipt is not None
     assert delivery.receipt.error == "no channel adapter for whatsapp"
+
+
+def test_an_adapter_that_raises_fails_its_attempt_and_the_run_goes_on() -> None:
+    world = World(window=0)
+    world.owner((EMAIL, MAIL))
+    world.owner((EMAIL, "staff@example.com"))
+    email = RaisingChannel(world.clock, {MAIL})
+    world.enqueue.run(created())
+    deliveries = world.dispatcher({WA: world.whatsapp, EMAIL: email}).run()
+    assert sorted(outcomes(deliveries)) == [DeliveryOutcome.RETRY, DeliveryOutcome.SENT]
+    assert [message.recipient for message in email.sent] == ["staff@example.com"]
+    failed = next(n for n in world.notifications() if n.address == MAIL)
+    assert (failed.is_pending, failed.attempts) == (True, 1)
+    assert failed.error == "email: the channel adapter raised ValueError"
+    assert failed.available_at == NOON_IST + timedelta(seconds=60), "the retry policy's backoff"
 
 
 def test_a_notification_another_dispatcher_sent_meanwhile_is_a_duplicate_send() -> None:

@@ -18,6 +18,9 @@ import httpx2
 from domain_kernel.events import utc_now
 from domain_kernel.notifications import DeliveryReceipt, DeliveryStatus
 from notification.domain.channels import OutboundMessage
+from py_common.logging import get_logger
+
+log = get_logger(__name__)
 
 GRAPH_URL = "https://graph.facebook.com"
 
@@ -56,20 +59,35 @@ class WhatsAppCloudChannel:
             response = self._client.post(self._url, json=body, headers=self._headers)
         except httpx2.TransportError as exc:
             return DeliveryReceipt(DeliveryStatus.FAILED, self._clock(), error=f"transport: {exc}")
-        if response.status_code >= 400:
+        if not response.is_success:
             return DeliveryReceipt(
                 DeliveryStatus.FAILED,
                 self._clock(),
                 error=f"{response.status_code}: {response.text[:300]}",
             )
-        data = response.json()
-        messages = data.get("messages") or [{}]
         return DeliveryReceipt(
-            DeliveryStatus.SENT, self._clock(), provider_message_id=str(messages[0].get("id", ""))
+            DeliveryStatus.SENT, self._clock(), provider_message_id=_message_id(response)
         )
 
     def close(self) -> None:
         self._client.close()
+
+
+def _message_id(response: httpx2.Response) -> str:
+    """The id Meta gave the message it took, or '' when the answer does not carry one where the
+    Graph API puts it. A success is a send either way: retrying it would send the message twice,
+    and only the statuses Meta reports for it later go unmatched."""
+    try:
+        data = response.json()
+    except ValueError:
+        data = None
+    messages = data.get("messages") if isinstance(data, dict) else None
+    first = messages[0] if isinstance(messages, list) and messages else None
+    message_id = first.get("id") if isinstance(first, dict) else None
+    if not isinstance(message_id, str) or not message_id:
+        log.warning("notification.whatsapp_message_id_missing", status=response.status_code)
+        return ""
+    return message_id
 
 
 def text_payload(to: str, body: str) -> dict[str, object]:
