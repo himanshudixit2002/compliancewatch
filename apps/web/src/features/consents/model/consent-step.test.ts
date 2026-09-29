@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { consentSummaryFromDto } from "@/entities/consent/mappers";
+import { requiredConsentsGranted } from "@/server/required-consents";
 import { ACCEPTED_STATES, VERSIONS, grantedState, summaryDto } from "@/test/consent-fixture";
 import {
   consentStepView,
@@ -112,6 +113,17 @@ describe("consentStepView", () => {
       ]),
     );
     expect(hasAcceptedRequired(withdrawn, VERSIONS)).toBe(false);
+    // The business step's server-side check agrees with the step on every case.
+    for (const [summary, versions] of [
+      [accepted, VERSIONS],
+      [accepted, newer],
+      [withdrawn, VERSIONS],
+      [empty, VERSIONS],
+    ] as const) {
+      expect(requiredConsentsGranted(summary, versions)).toBe(
+        hasAcceptedRequired(summary, versions),
+      );
+    }
   });
 
   it("names no draft when every document is final", () => {

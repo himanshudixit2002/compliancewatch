@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CONSENT_PURPOSES } from "@/entities/consent/types";
 import { analyticsNoticeVersion } from "@/server/analytics";
+import { REQUIRED_CONSENTS, REQUIRED_CONSENT_DOCUMENTS } from "@/server/required-consents";
 import { REQUIRED_LEGAL_DOCS } from "@/shared/config/legal-docs";
 import { VERSIONS } from "@/test/consent-fixture";
 import {
@@ -52,6 +53,13 @@ describe("purposes", () => {
   it("names as required exactly the documents the required purposes refer to", () => {
     const referred = new Set(REQUIRED_PURPOSES.map((purpose) => PURPOSE_DOCUMENT[purpose]));
     expect([...REQUIRED_LEGAL_DOCS].sort()).toEqual([...referred].sort());
+  });
+
+  it("asks for the purposes and documents the server's business gate checks", () => {
+    expect(REQUIRED_CONSENTS).toEqual([...REQUIRED_PURPOSES]);
+    for (const purpose of REQUIRED_PURPOSES) {
+      expect(REQUIRED_CONSENT_DOCUMENTS[purpose]).toBe(PURPOSE_DOCUMENT[purpose]);
+    }
   });
 
   it("gives the analytics consent the notice version the analytics gate asks for", () => {

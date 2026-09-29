@@ -326,9 +326,11 @@ retry with the same key runs. The answer replaces the form with what it holds: n
 file (`created`), the PAN and GSTIN, the progress, and what the GSTIN lookup returned, worded by
 the ontology, or, with no lookup answer, the plain note and the `verify_registration` task the
 service opened. "Add another business" loads the page afresh, so the next form has a new key. The
-page asks for the consents first (the consent step's query, read by the page): the profile
-service does not check them, so the web app does not offer the form until the required purposes
-are granted at the current notice versions. In production, while the terms or the privacy notice
+page asks for the consents first: the profile service does not check them, so the web app does
+not offer the form until the required purposes are granted at the current notice versions, and
+`createBusiness` checks again before `POST /v1/businesses` (`hasRequiredConsents` in
+`server/required-consents.ts`, one check for both, since an action can be posted without the
+page). In production, while the terms or the privacy notice
 is a draft, the step is closed: the page shows the drafts instead of the form and the action
 creates nothing (`onboardingGate()`, D-035).
 
@@ -400,6 +402,14 @@ records only the rest. A CA firm is not offered WhatsApp reminders (they are set
 business). In production, while the terms or the privacy notice is a draft, the step is closed:
 the page names the drafts and offers no form, and the action records nothing
 (`onboardingGate()` in `server/legal.ts`, D-035).
+
+The profile service does not check consents, so the web server does before it creates a
+business: `hasRequiredConsents(principal)` in `server/required-consents.ts` reads the same
+summary (uncached) and answers whether the terms, the privacy notice and profile processing are
+granted at the current `<document>@<Version line>`. The business step's page calls it to decide
+whether to offer the form, and `createBusiness` calls it again before `POST /v1/businesses`; a
+test holds its purpose-to-document table to the consent step's. `server/analytics.ts` reads the
+summary through the same `readConsentSummary`.
 
 The settings page at `/settings/consents` reads the same summary and shows, per purpose, the
 latest record (state, notice version, time in IST, source) and every record oldest first. The

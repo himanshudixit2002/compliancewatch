@@ -370,7 +370,9 @@ GSTIN lookup returned worded by the ontology, the attributes it stored, or the p
 review task when no lookup provider answered, then a link to the questions. The form carries the
 Idempotency-Key minted for its render; "Add another business" is a document load, so the next
 form has a new key rather than replaying the first answer. The step shows the form only once the
-required consents are on file, because the profile service does not check them. Consequences: a
+required consents are on file, because the profile service does not check them, and
+`createBusiness` checks them again before any profile call, because a server action can be
+posted without the page (`server/required-consents.ts`, one check for both). Consequences: a
 reload after adding forgets the panel (the business stays; the list and the business pages show
 it); the page sweep leaves live pages with route parameters (a legal document, a business) to
 their own specs, which visit them with real ids and run axe there.

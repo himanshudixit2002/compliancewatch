@@ -77,6 +77,14 @@ const VALID = {
   idempotency_key: IDEMPOTENCY_KEY,
 };
 
+const LEGAL = readLegalVersions();
+/** The required consents granted at the Version lines this build ships. */
+const REQUIRED_GRANTED = [
+  grantedState("terms", `terms-of-service@${LEGAL["terms-of-service"].version}`),
+  grantedState("privacy_notice", `privacy-notice@${LEGAL["privacy-notice"].version}`),
+  grantedState("profile_processing", `privacy-notice@${LEGAL["privacy-notice"].version}`),
+];
+
 function profile(
   options: {
     create?: Response;
@@ -85,9 +93,13 @@ function profile(
     list?: Response;
     location?: Response;
     business?: Response;
+    consents?: Response;
   } = {},
 ) {
   return fakeFetch((request: RecordedRequest) => {
+    if (request.method === "GET" && request.pathname === "/v1/identity/consents") {
+      return options.consents ?? jsonResponse(200, summaryDto(REQUIRED_GRANTED));
+    }
     if (request.method === "GET" && request.pathname === "/v1/businesses") {
       return options.list ?? jsonResponse(200, { items: [], next_cursor: null });
     }
@@ -187,6 +199,42 @@ describe("createBusiness", () => {
     vi.stubGlobal("fetch", profile().fetchImpl);
     await expect(createBusiness(IDLE, form(VALID))).rejects.toThrow("redirect /forbidden");
   });
+
+  it("creates nothing for a person without the required consents on file", async () => {
+    // A user posting the action directly, without the consent step's records: the page would
+    // not have offered the form, and the profile service does not check consents itself.
+    await signedInAs({ tenantKind: "ca_firm", roles: ["ca_staff"] });
+    const fake = profile({
+      consents: jsonResponse(
+        200,
+        summaryDto([
+          grantedState("terms", `terms-of-service@${LEGAL["terms-of-service"].version}`),
+          grantedState("analytics", `privacy-notice@${LEGAL["privacy-notice"].version}`),
+        ]),
+      ),
+    });
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await createBusiness(IDLE, form(VALID));
+    expect(state).toEqual({
+      status: "error",
+      formErrors: [
+        "A business profile is processed on the strength of your consents. Record them on the consent step, then come back here.",
+      ],
+    });
+    expect(fake.requests.map((request) => `${request.method} ${request.pathname}`)).toEqual([
+      "GET /v1/identity/consents",
+    ]);
+    expect(fake.requests[0]?.url).toContain(`subject=${USER_ID}`);
+  });
+
+  it("creates nothing when the consents cannot be read, and says why", async () => {
+    await signedInAs();
+    const fake = profile({ consents: problemResponse(503, { title: "Identity is unavailable" }) });
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await createBusiness(IDLE, form(VALID));
+    expect(state.status === "error" && state.problem?.title).toBe("Identity is unavailable");
+    expect(fake.requests.some((request) => request.pathname === "/v1/businesses")).toBe(false);
+  });
 });
 
 const ANSWER = {
@@ -232,7 +280,7 @@ describe("product analytics", () => {
       {
         method: "GET",
         path: "/v1/identity/consents",
-        body: summaryDto([grantedState("analytics", notice)]),
+        body: summaryDto([...REQUIRED_GRANTED, grantedState("analytics", notice)]),
       },
     ]);
     const services = profile();

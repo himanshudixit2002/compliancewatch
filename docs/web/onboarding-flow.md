@@ -25,6 +25,7 @@ sequenceDiagram
   W->>I: POST /v1/identity/consents (one per purpose not yet granted)
   W->>N: PUT /v1/notification/preferences/whatsapp/<digits> (WhatsApp box only)
   B->>W: createBusiness (server action, Idempotency-Key)
+  W->>I: GET /v1/identity/consents?subject=<user id>
   W->>P: POST /v1/businesses
   loop one question at a time
     B->>W: GET /onboarding/<id>/questions
@@ -75,6 +76,10 @@ what the running build ships.
 
 The form is offered only once the required purposes are granted at the current versions,
 because the profile service does not check consents; otherwise the page points back to step 1.
+`createBusiness` makes the same check again before any profile call (`hasRequiredConsents` in
+`server/required-consents.ts`, which the page uses too): a server action can be posted without
+the page that rendered it, so without the records it creates nothing and points to the consent
+step, and when identity cannot be read it passes on that problem.
 
 - The person types a GSTIN (upper-cased and stripped of spaces, then matched against the
   kernel's pattern) and the name the business goes by, and optionally a name for the

@@ -9,6 +9,7 @@ import { requireScreenSession } from "@/server/dal";
 import { onboardingGate } from "@/server/legal";
 import { can } from "@/shared/config/permissions";
 import { getOntology } from "@/server/ontology";
+import { hasRequiredConsents } from "@/server/required-consents";
 import { toActionState, type ApiError } from "@/server/result";
 import { hrefFor, screenById } from "@/shared/config/screens";
 import { t } from "@/shared/i18n";
@@ -33,7 +34,9 @@ import { clearSkipList, rememberSkip } from "./skip-list";
 
 /**
  * The business step's server action. It runs the screen's gate again (the proxy never sees an
- * action), checks the form's shape, and creates the business with `POST /v1/businesses`,
+ * action), checks the form's shape, checks that the person's required consents are on file (the
+ * profile service does not, and the action can be posted without the page that hides the form
+ * until they are; server/required-consents.ts), and creates the business with `POST /v1/businesses`,
  * carrying the Idempotency-Key the form was rendered with, so a double submit records one
  * business and gets the first answer back. The answer (new or already on file, what the GSTIN
  * lookup returned, the first question) becomes the result panel; the ontology words its values,
@@ -49,6 +52,9 @@ export async function createBusiness(
   if (onboardingGate().closed) return actionFailure(t("onboardingClosed.refused"));
   const parsed = parseBusinessForm(formData);
   if (!parsed.ok) return fieldFailure(parsed.fieldErrors);
+  const consents = await hasRequiredConsents(session);
+  if (!consents.ok) return toActionState(consents);
+  if (!consents.value) return actionFailure(t("businessStep.consentFirst"));
 
   const created = await businessGateway({ session }).create(
     parsed.value,

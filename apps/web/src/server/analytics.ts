@@ -2,15 +2,14 @@ import "server-only";
 
 import { trace, type Attributes } from "@opentelemetry/api";
 import type { ValueState } from "@/entities/business/types";
-import { consentSummaryFromDto, isGrantedAt } from "@/entities/consent/mappers";
+import { isGrantedAt } from "@/entities/consent/mappers";
 import type { ConsentPurpose } from "@/entities/consent/types";
 import type { LegalDocName } from "@/shared/config/legal-docs";
-import { call, type FetchImpl } from "./api/client";
-import { identityClient, type ClientPrincipal } from "./api/services";
-import { uncachedRead } from "./cache";
+import type { FetchImpl } from "./api/client";
+import type { ClientPrincipal } from "./api/services";
 import { isEnabled } from "./flags";
 import { readLegalVersions, type LegalVersion } from "./legal";
-import { mapBody } from "./result";
+import { readConsentSummary } from "./required-consents";
 
 /**
  * Product analytics: what a person did in the app, as one JSON line on stdout and an event on
@@ -97,14 +96,7 @@ export function analyticsNoticeVersion(
 }
 
 async function consentGranted(principal: AnalyticsPrincipal, deps: TrackDeps): Promise<boolean> {
-  const client = identityClient({ session: principal, fetchImpl: deps.fetchImpl });
-  const result = await call(
-    client.GET("/v1/identity/consents", {
-      params: { query: { subject: principal.userId } },
-      ...uncachedRead(),
-    }),
-  );
-  const summary = mapBody(result, consentSummaryFromDto);
+  const summary = await readConsentSummary(principal, deps.fetchImpl);
   if (!summary.ok) return false;
   const notice = analyticsNoticeVersion(deps.versions ?? readLegalVersions());
   return isGrantedAt(summary.value, ANALYTICS_PURPOSE, notice);

@@ -53,6 +53,7 @@ outside `src` and outside the floor.
 | `shared/i18n`                    | every `t("...")` literal in `src` exists in `en.json`; interpolation; the key-by-key fallback                                               |
 | `shared/lib`                     | IST rendering, financial-year labels, decimal money, identifiers, `safeNext`                                                               |
 | `server/legal.ts`                | version and title extraction, that no file in `docs/legal` contains a raw HTML tag (marked does not sanitise), and the onboarding gate: closed in prod while the terms or the privacy notice is a draft, open in local, test and staging |
+| `server/required-consents.ts`    | the required purposes granted at the current versions (missing, withdrawn and older grants refused), the read's subject, tenant header and no-store, a problem passed on; `createBusiness` makes no profile call without them |
 | `server/session.ts`, `dal.ts`    | the cookie round trip (tamper, expiry, wrong key, wrong shape), the cookie attributes per environment, each gate's redirect or 404 (the cookie store from `src/test/fake-cookies.ts`) |
 | `server/auth/*`                  | `providerFor` per variable value; the fake adapter's validation, stable user id, second-factor assertion and refusal outside local and test |
 | `features/auth`                  | the form (roles per kind, the busy state, the errors it shows) with a fake action; the action's cookie and redirect; the seed-state reader |

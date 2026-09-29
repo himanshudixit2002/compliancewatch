@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { BUSINESS_FORM_FIELDS, BusinessStep, createBusiness } from "@/features/business";
-import { getConsentStep } from "@/features/consents";
 import { IdempotencyKeyInput } from "@/server/api/idempotency";
 import { requireScreenSession } from "@/server/dal";
 import { onboardingGate } from "@/server/legal";
+import { hasRequiredConsents } from "@/server/required-consents";
 import { hrefFor, screenById } from "@/shared/config/screens";
 import { OnboardingClosed } from "@/shared/ui/onboarding-closed";
 import { ServiceError } from "@/shared/ui/service-error";
@@ -28,12 +28,13 @@ export default async function OnboardingBusinessPage() {
       />
     );
   }
-  const consents = await getConsentStep(session);
+  // The same check createBusiness makes again before any profile call.
+  const consents = await hasRequiredConsents(session);
   if (!consents.ok) return <ServiceError heading={SCREEN.title} error={consents.error} />;
   return (
     <BusinessStep
       title={SCREEN.title}
-      consentAccepted={consents.value.accepted}
+      consentAccepted={consents.value}
       consentHref={hrefFor(screenById("owner.onboarding"))}
       action={createBusiness}
       idempotencyInput={<IdempotencyKeyInput />}
