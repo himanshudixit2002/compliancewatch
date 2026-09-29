@@ -40,8 +40,9 @@ interface Attempt {
 /**
  * One attribute's answer: the control the ontology type calls for, the hidden fields naming
  * where it is stored, and the three answer buttons. The action either moves the page on (the
- * questions step redirects to the next question) or returns a message for the status line. A
- * refused answer keeps what was chosen (the control remounts from the submitted values), shows
+ * questions step redirects to the next question) or returns a message for the status line,
+ * which is always rendered and only changes its text, so a screen reader announces the message.
+ * A refused answer keeps what was chosen (the control remounts from the submitted values), shows
  * the message under the control and the service's problem above it, and moves focus to the
  * summary.
  */
@@ -125,11 +126,9 @@ export function AnswerForm({
         disabled={pending}
       />
       <AnswerButtons id={id} pending={pending} valueOnly={valueOnly} />
-      {state.status === "ok" && state.message ? (
-        <p role="status" data-slot="answer-saved" className="text-sm text-fg">
-          {state.message}
-        </p>
-      ) : null}
+      <p role="status" data-slot="answer-saved" className="text-sm text-fg">
+        {state.status === "ok" ? state.message : ""}
+      </p>
     </form>
   );
 }

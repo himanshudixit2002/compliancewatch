@@ -135,4 +135,31 @@ describe("AnswerForm", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect((await screen.findByRole("status")).textContent).toBe("Example saved.");
   });
+
+  it("has its status line in place before the action runs and puts the message in that node", async () => {
+    const user = userEvent.setup();
+    const action = vi.fn(async (): Promise<ActionState> => ({
+      status: "ok",
+      message: "Example saved.",
+    }));
+    render(
+      <AnswerForm
+        action={action}
+        attribute={KIND}
+        id="q"
+        label="Example question?"
+        hidden={HIDDEN}
+        valueField="value"
+        defaultValue="first"
+        valueOnly
+      />,
+    );
+    // A live region announces a change to its text, not a region inserted with its text.
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe("");
+    expect(action).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(status.textContent).toBe("Example saved."));
+    expect(screen.getByRole("status")).toBe(status);
+  });
 });
