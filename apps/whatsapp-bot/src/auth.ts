@@ -6,7 +6,10 @@
  * (BOT_SERVICE_CLIENT_ID, by default whatsapp-bot) and the secret at
  * POST /v1/identity/service-tokens and keeps the token until a minute before it expires (at most
  * half its lifetime), so the bot asks identity about every nine minutes rather than once per
- * message. Callers that need a token while one is being fetched wait for that fetch.
+ * message. Callers that need a token while one is being fetched wait for that fetch. When that
+ * refresh fails, the cached token keeps being used until it really expires, and identity is not
+ * asked again for FAILED_FETCH_RETRY_MS: calls in between do not wait on identity, and without a
+ * valid token they fail at once.
  *
  * authorizedFetch puts the token on a request as `authorization: Bearer`. When the called service
  * refuses the token itself (a 401 whose WWW-Authenticate says invalid_token, or whose problem type
@@ -23,6 +26,8 @@ export const DEFAULT_IDENTITY_API_URL = "http://localhost:8001";
 export const DEFAULT_BOT_CLIENT_ID = "whatsapp-bot";
 /** A cached token is replaced this long before it expires (at most half its lifetime). */
 export const REFRESH_MARGIN_MS = 60_000;
+/** After a failed fetch, the next attempt waits this long. */
+export const FAILED_FETCH_RETRY_MS = 5_000;
 
 /** Where a client gets the bearer token it sends; `invalidate` drops one the callee refused. */
 export interface BearerSource {
@@ -33,6 +38,13 @@ export interface BearerSource {
 interface CachedToken {
   readonly token: string;
   readonly refreshAt: number;
+  readonly expiresAt: number;
+}
+
+/** The last failed fetch and when identity may be asked again. */
+interface FailedFetch {
+  readonly error: Error;
+  readonly retryAt: number;
 }
 
 /** The body of identity's answer, checked before the token is used. */
@@ -57,15 +69,22 @@ function parseToken(body: unknown, clientId: string): { token: string; expiresIn
   return { token, expiresInMs: expiresIn * 1000 };
 }
 
-/** The bot's service token, exchanged with its client credentials and cached until near expiry. */
+/**
+ * The bot's service token, exchanged with its client credentials and cached until near expiry. A
+ * failed refresh leaves the cached token in use while it is valid (with a warning), and no fetch is
+ * tried again for `retryMs`.
+ */
 export class IdentityTokenSource implements BearerSource {
   readonly clientId: string;
   private readonly url: string;
   private readonly clientSecret: string;
   private readonly fetchImpl: Fetch;
   private readonly now: () => number;
+  private readonly warn: (line: string) => void;
+  private readonly retryMs: number;
   private cached: CachedToken | null = null;
   private pending: Promise<CachedToken> | null = null;
+  private failed: FailedFetch | null = null;
 
   constructor(
     identityUrl: string,
@@ -73,6 +92,8 @@ export class IdentityTokenSource implements BearerSource {
     clientSecret: string,
     fetchImpl: Fetch = fetch,
     now: () => number = Date.now,
+    warn: (line: string) => void = console.warn,
+    retryMs: number = FAILED_FETCH_RETRY_MS,
   ) {
     if (clientId.trim() === "") throw new Error("a service token source needs a client id");
     if (clientSecret === "") throw new Error("a service token source needs a client secret");
@@ -81,14 +102,23 @@ export class IdentityTokenSource implements BearerSource {
     this.clientSecret = clientSecret;
     this.fetchImpl = fetchImpl;
     this.now = now;
+    this.warn = warn;
+    this.retryMs = retryMs;
   }
 
-  /** A token valid for at least the refresh margin; rejects when identity refuses or is down. */
+  /**
+   * A token valid for at least the refresh margin, or, while identity cannot give a new one, the
+   * cached token until it expires. Rejects when there is no valid token and identity refuses the
+   * client or is down, at once and without asking identity again for `retryMs` after a failure.
+   */
   async token(): Promise<string> {
     const cached = this.cached;
-    if (cached !== null && this.now() < cached.refreshAt) return cached.token;
+    const now = this.now();
+    if (cached !== null && now < cached.refreshAt) return cached.token;
     if (this.pending === null) {
-      this.pending = this.fetchToken().finally(() => {
+      const failed = this.failed;
+      if (failed !== null && now < failed.retryAt) return backingOff(cached, failed, now);
+      this.pending = this.refresh().finally(() => {
         this.pending = null;
       });
     }
@@ -98,6 +128,24 @@ export class IdentityTokenSource implements BearerSource {
   /** Drop `token` if it is the cached one, so the next call fetches a new token. */
   invalidate(token: string): void {
     if (this.cached?.token === token) this.cached = null;
+  }
+
+  /** A fresh token, or after a failure the cached one while it is valid (not one invalidated). */
+  private async refresh(): Promise<CachedToken> {
+    try {
+      const fresh = await this.fetchToken();
+      this.failed = null;
+      return fresh;
+    } catch (thrown) {
+      const failedAt = this.now();
+      const error = thrown instanceof Error ? thrown : new Error(String(thrown));
+      this.failed = { error, retryAt: failedAt + this.retryMs };
+      const cached = this.cached;
+      if (cached === null || failedAt >= cached.expiresAt) throw error;
+      const left = Math.round((cached.expiresAt - failedAt) / 1000);
+      this.warn(`whatsapp-bot: ${error.message}; keeping the cached token, valid ${left} s more`);
+      return cached;
+    }
   }
 
   private async fetchToken(): Promise<CachedToken> {
@@ -120,9 +168,19 @@ export class IdentityTokenSource implements BearerSource {
     const body: unknown = await res.json().catch(() => null);
     const { token, expiresInMs } = parseToken(body, this.clientId);
     const margin = Math.min(REFRESH_MARGIN_MS, expiresInMs / 2);
-    this.cached = { token, refreshAt: requestedAt + expiresInMs - margin };
+    const expiresAt = requestedAt + expiresInMs;
+    this.cached = { token, refreshAt: expiresAt - margin, expiresAt };
     return this.cached;
   }
+}
+
+/** Between a failed fetch and the next attempt: the cached token while valid, else the failure. */
+function backingOff(cached: CachedToken | null, failed: FailedFetch, now: number): string {
+  if (cached !== null && now < cached.expiresAt) return cached.token;
+  const seconds = Math.ceil((failed.retryAt - now) / 1000);
+  throw new Error(`${failed.error.message}; the next attempt is in ${seconds} s`, {
+    cause: failed.error,
+  });
 }
 
 /**

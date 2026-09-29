@@ -42,9 +42,11 @@ created with `identity-admin service-client create`, which prints the secret onc
 The shared tokens (`NOTIFICATION_BOT_TOKEN`, `IDENTITY_SERVICE_TOKEN`) still go out while they are
 set, so one bot works against services in `header` mode (which read the shared tokens), `dual`
 mode (the bearer when one is sent) and `token` mode (the bearer alone). Without the client secret
-no token is sent and the bot behaves as before. When identity cannot issue a token, the call that
-needed it fails: a preference change is answered with the try-again reply, and a receipts forward
-answers the webhook with a 500 so Meta delivers it again.
+no token is sent and the bot behaves as before. When identity cannot refresh the token, the cached
+token stays in use until it expires (with a warning in the log) and identity is asked again after
+5 seconds. With no valid token the call that needed it fails at once: a preference change is
+answered with the try-again reply, and a receipts forward answers the webhook with a 500 so Meta
+delivers it again.
 
 ## Consent recording
 

@@ -384,6 +384,20 @@ describe("service token", () => {
     return { time, now: () => time.now };
   }
 
+  /** `identity`, answering 503 while `state.down`; `requests` counts every request, failed too. */
+  function flakyIdentity(expiresIn = 600) {
+    const { fetchImpl } = identity(expiresIn);
+    const state = { down: false };
+    const flaky = vi.fn(async (url: string | URL | Request, init?: RequestInit) =>
+      state.down ? new Response("", { status: 503 }) : fetchImpl(url, init),
+    );
+    return {
+      state,
+      requests: () => flaky.mock.calls.length,
+      fetchImpl: flaky as unknown as typeof fetch,
+    };
+  }
+
   it("exchanges the client credentials and keeps the token until a minute before it expires", async () => {
     const { calls, fetchImpl } = identity(600);
     const { time, now } = clock();
@@ -457,16 +471,79 @@ describe("service token", () => {
     await expect(
       new IdentityTokenSource(IDENTITY, "whatsapp-bot", CLIENT_SECRET, mac).token(),
     ).rejects.toThrow("lacks a bearer");
-    const { fetchImpl } = identity();
-    let outage = true;
-    const flaky = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-      if (!outage) return fetchImpl(url, init);
-      outage = false;
-      return new Response("", { status: 503 });
-    }) as unknown as typeof fetch;
-    const source = new IdentityTokenSource(IDENTITY, "whatsapp-bot", CLIENT_SECRET, flaky);
-    await expect(source.token()).rejects.toThrow("identity token: 503");
+  });
+
+  it("a failed fetch is tried again after a few seconds, and calls in between fail at once", async () => {
+    const { state, requests, fetchImpl } = flakyIdentity();
+    const { time, now } = clock();
+    const source = new IdentityTokenSource(IDENTITY, "whatsapp-bot", CLIENT_SECRET, fetchImpl, now);
+    state.down = true;
+    await expect(source.token()).rejects.toThrow("identity token: 503 for client whatsapp-bot");
+    state.down = false;
+    time.now += 4_000;
+    await expect(source.token()).rejects.toThrow(
+      "identity token: 503 for client whatsapp-bot; the next attempt is in 1 s",
+    );
+    expect(requests()).toBe(1);
+    time.now += 1_000;
     expect(await source.token()).toBe("bot-token-1");
+    expect(requests()).toBe(2);
+  });
+
+  it("a failed refresh keeps the cached token until it expires, with a warning", async () => {
+    const { state, requests, fetchImpl } = flakyIdentity(600);
+    const { time, now } = clock();
+    const warnings: string[] = [];
+    const warn = (line: string) => warnings.push(line);
+    const source = new IdentityTokenSource(
+      IDENTITY,
+      "whatsapp-bot",
+      CLIENT_SECRET,
+      fetchImpl,
+      now,
+      warn,
+    );
+    expect(await source.token()).toBe("bot-token-1");
+    time.now += 545_000;
+    state.down = true;
+    const waiting = await Promise.all([source.token(), source.token()]);
+    expect(waiting).toEqual(["bot-token-1", "bot-token-1"]);
+    expect(requests()).toBe(2);
+    expect(warnings).toEqual([
+      "whatsapp-bot: identity token: 503 for client whatsapp-bot; keeping the cached token, valid 55 s more",
+    ]);
+    time.now += 4_000;
+    expect(await source.token()).toBe("bot-token-1");
+    expect(requests()).toBe(2);
+    time.now += 1_000;
+    expect(await source.token()).toBe("bot-token-1");
+    expect(requests()).toBe(3);
+    time.now += 50_000;
+    await expect(source.token()).rejects.toThrow("identity token: 503");
+    expect(requests()).toBe(4);
+    state.down = false;
+    time.now += 5_000;
+    expect(await source.token()).toBe("bot-token-2");
+  });
+
+  it("a token the callee refused is not kept through a failed refresh", async () => {
+    const { state, fetchImpl } = flakyIdentity();
+    const { now } = clock();
+    const warn = vi.fn();
+    const source = new IdentityTokenSource(
+      IDENTITY,
+      "whatsapp-bot",
+      CLIENT_SECRET,
+      fetchImpl,
+      now,
+      warn,
+    );
+    expect(await source.token()).toBe("bot-token-1");
+    source.invalidate("bot-token-1");
+    state.down = true;
+    await expect(source.token()).rejects.toThrow("identity token: 503");
+    await expect(source.token()).rejects.toThrow("the next attempt is in 5 s");
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("needs a client id and a secret", () => {
