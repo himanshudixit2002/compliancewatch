@@ -8,6 +8,10 @@
 # scopes that call needs and no more. Staging and production create their clients with
 # identity-admin service-client create instead; nothing here reaches them.
 
+[notification]
+scopes = []
+reason = "reads the rule versions its messages cite from the rulebook, whose read routes need no scope"
+
 [pipeline]
 scopes = ["rulebook:write", "llm:call", "tenant:act"]
 reason = "writes extracted documents, mentions and relation candidates to the rulebook and calls the gateway, naming a tenant only when it attributes cost"

@@ -12,8 +12,10 @@ is logged for the maintainer to open once.
 statuses of the messages the service sent (sent, delivered, read, failed) and the times numbers
 wrote to the business, which open the 24-hour customer service window. It names no tenant, so
 it is guarded by the bot's shared secret (``x-cw-bot-token``, ``CW_NOTIFICATION_BOT_TOKEN``):
-no configured token is a 503, a missing or wrong one a 401. A status for a message the service
-did not send, such as the bot's own replies, is counted as unknown and otherwise ignored.
+no configured token is a 503, a missing or wrong one a 401. With ``CW_AUTH_MODE`` dual or token
+the bot may send its service token with the notification:receipts scope instead, and token mode
+accepts only that. A status for a message the service did not send, such as the bot's own
+replies, is counted as unknown and otherwise ignored.
 """
 
 from fastapi import APIRouter, Request
@@ -33,7 +35,7 @@ router = APIRouter(prefix="/v1/notification", tags=["notification"])
     "/receipts/whatsapp",
     summary="Record the WhatsApp statuses and inbound times the bot forwards",
     dependencies=[BotAccess],
-    responses=problem_responses(401, 422, 503),
+    responses=problem_responses(401, 403, 422, 503),
 )
 def whatsapp_receipts(body: WhatsAppReceiptsIn, wired: Wired) -> ReceiptsOut:
     receipts: list[Receipt] = []

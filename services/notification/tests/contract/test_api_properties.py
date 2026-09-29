@@ -8,6 +8,11 @@ request leaves the process.
 Each response must not be a server error, and its status code, content type and body must be
 the ones the spec documents.
 
+That app runs in header mode. The routes that read a token run again in token mode, with a
+service token from a ``TestIssuer`` that holds every scope they take (tenant:act,
+notification:preferences, notification:send and notification:receipts) and the tenant header.
+The SES feedback route reads SNS's basic credentials, not a token, and runs only in header mode.
+
 Only the operations in ``OPERATIONS`` run: those served when these tests arrived. A change that
 adds an operation opts it in here. An operation that cannot pass yet, for a defect or because it
 needs a redesign, goes in ``EXCLUDED`` with the reason.
@@ -26,9 +31,11 @@ from schemathesis.specs.openapi.checks import (
     status_code_conformance,
 )
 
+from domain_kernel.access import Scope
 from notification.infrastructure.ses_feedback import SnsFeedbackReader
 from notification.main import build_app
 from notification.testing import BOT_TOKEN, EMAIL_FEEDBACK_TOKEN, FakeSns, notification_settings
+from py_common.auth.testing import TestIssuer, bearer
 
 TENANT_ID = "7d0f4d56-2a8e-4c1b-9f3e-5b6a1c2d3e4f"
 OPERATIONS = frozenset(
@@ -51,6 +58,13 @@ OPERATIONS = frozenset(
         "POST /v1/notification/receipts/email",
     }
 )
+TOKEN_OPERATIONS = OPERATIONS - {
+    "GET /health",
+    "GET /ready",
+    "GET /v1/notification/ping",
+    "GET /v1/notification/templates",
+    "POST /v1/notification/receipts/email",
+}
 EXCLUDED: dict[str, str] = {}
 CHECKS = cast(
     list[CheckFunction],
@@ -79,11 +93,26 @@ schema = schemathesis.openapi.from_asgi("/openapi.json", app).include(
     func=lambda ctx: ctx.operation.label in OPERATIONS and ctx.operation.label not in EXCLUDED
 )
 
+ISSUER = TestIssuer()
+SERVICE_TOKEN = ISSUER.service(
+    "notification-properties",
+    [
+        Scope.TENANT_ACT,
+        Scope.NOTIFICATION_PREFERENCES,
+        Scope.NOTIFICATION_SEND,
+        Scope.NOTIFICATION_RECEIPTS,
+    ],
+)
+token_app = build_app(notification_settings(**ISSUER.settings_overrides("token")))
+token_schema = schemathesis.openapi.from_asgi("/openapi.json", token_app).include(
+    func=lambda ctx: ctx.operation.label in TOKEN_OPERATIONS
+)
+
 
 def test_every_listed_operation_is_served() -> None:
     paths = app.openapi()["paths"]
     labels = {f"{method.upper()} {path}" for path, item in paths.items() for method in item}
-    assert labels >= OPERATIONS | EXCLUDED.keys()
+    assert labels >= OPERATIONS | EXCLUDED.keys() | TOKEN_OPERATIONS
 
 
 @schema.parametrize()
@@ -95,3 +124,14 @@ def test_every_listed_operation_is_served() -> None:
 )
 def test_responses_conform_to_the_spec(case: schemathesis.Case[Any]) -> None:
     case.call_and_validate(headers=HEADERS, checks=CHECKS)
+
+
+@token_schema.parametrize()
+@settings(
+    max_examples=EXAMPLES,
+    suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow],
+)
+def test_responses_to_a_service_token_conform_to_the_spec(case: schemathesis.Case[Any]) -> None:
+    case.call_and_validate(
+        headers={"x-tenant-id": TENANT_ID, **bearer(SERVICE_TOKEN)}, checks=CHECKS
+    )

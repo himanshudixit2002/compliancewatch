@@ -124,7 +124,8 @@ SERVICE_TOKEN = (
 )
 PREFERENCE = (
     "an opt-out typed on WhatsApp arrives before the number is linked to a tenant and must be "
-    "honoured either way; preferences are keyed by channel and recipient"
+    "honoured either way; preferences are keyed by channel and recipient, and a service token "
+    "needs the notification:preferences scope"
 )
 
 EXEMPT_ROUTES: dict[str, dict[str, str]] = {
@@ -171,7 +172,7 @@ EXEMPT_ROUTES: dict[str, dict[str, str]] = {
             "delivery statuses and inbound times forwarded by the WhatsApp bot, which knows only "
             "Meta's message ids and numbers; the service finds each tenant by the message id, and "
             "the bot's shared token (x-cw-bot-token) guards the route: 503 until it is set, 401 "
-            "without it"
+            "without it; a service token needs the notification:receipts scope"
         ),
         "POST /v1/notification/receipts/email": (
             "SES bounces, complaints and deliveries posted by SNS, which names no tenant; the "

@@ -1150,6 +1150,11 @@
         "description": "The credentials in the SNS subscription URL; the password is CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN, the user name is not checked",
         "scheme": "basic",
         "type": "http"
+      },
+      "HTTPBearer": {
+        "description": "An access token from the identity service. Read when CW_AUTH_MODE is dual or token; required when it is token.",
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
@@ -1280,7 +1285,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until identity issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -1294,7 +1299,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until identity issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -1320,6 +1325,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -1331,6 +1346,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "A business's notifications, newest first, a page at a time",
         "tags": [
           "notification"
@@ -1352,7 +1372,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until identity issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -1366,7 +1386,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until identity issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -1391,6 +1411,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -1413,6 +1443,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "One notification of the tenant, 404 when it has none by that id",
         "tags": [
           "notification"
@@ -1434,7 +1469,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until identity issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -1448,7 +1483,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until identity issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -1473,6 +1508,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -1505,6 +1550,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Queue a notification that failed for good again; 409 in any other state",
         "tags": [
           "notification"
@@ -1569,6 +1619,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -1590,6 +1660,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "The recorded preference, 404 when the recipient never opted in or out",
         "tags": [
           "notification"
@@ -1647,6 +1722,26 @@
             },
             "description": "Bad Request"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -1658,6 +1753,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Record an opt-in or opt-out for a channel and recipient",
         "tags": [
           "notification"
@@ -1746,7 +1846,7 @@
         "operationId": "whatsapp_receipts_v1_notification_receipts_whatsapp_post",
         "parameters": [
           {
-            "description": "Shared secret of the WhatsApp bot (CW_NOTIFICATION_BOT_TOKEN)",
+            "description": "Shared secret of the WhatsApp bot (CW_NOTIFICATION_BOT_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs the notification:receipts scope",
             "in": "header",
             "name": "x-cw-bot-token",
             "required": false,
@@ -1759,7 +1859,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret of the WhatsApp bot (CW_NOTIFICATION_BOT_TOKEN)",
+              "description": "Shared secret of the WhatsApp bot (CW_NOTIFICATION_BOT_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a service token needs the notification:receipts scope",
               "title": "X-Cw-Bot-Token"
             }
           }
@@ -1805,6 +1905,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -1826,6 +1936,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Record the WhatsApp statuses and inbound times the bot forwards",
         "tags": [
           "notification"
@@ -1883,7 +1998,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until identity issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -1897,7 +2012,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until identity issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -1923,6 +2038,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -1934,6 +2059,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "The recipients that follow a business, by id, a page at a time",
         "tags": [
           "notification"
@@ -1955,7 +2085,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until identity issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -1969,7 +2099,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until identity issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -1987,6 +2117,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -2009,6 +2149,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Remove a recipient with its addresses and business links",
         "tags": [
           "notification"
@@ -2028,7 +2173,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until identity issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -2042,7 +2187,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until identity issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -2068,6 +2213,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -2089,6 +2244,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "A recipient of the tenant, 404 when it has none by that id",
         "tags": [
           "notification"
@@ -2108,7 +2268,7 @@
             }
           },
           {
-            "description": "Tenant UUID; required until identity issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -2122,7 +2282,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until identity issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -2168,6 +2328,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -2179,6 +2349,11 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Register a recipient, or replace it: role, language, digest, addresses, businesses",
         "tags": [
           "notification"
@@ -2191,7 +2366,7 @@
         "operationId": "send_v1_notification_send_post",
         "parameters": [
           {
-            "description": "Tenant UUID; required until identity issues tokens",
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
             "required": false,
@@ -2205,7 +2380,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Tenant UUID; required until identity issues tokens",
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
           }
@@ -2251,6 +2426,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -2272,6 +2457,11 @@
             "description": "Service Unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Send one notification now: dedupe, consent, quiet hours, queue, deliver",
         "tags": [
           "notification"

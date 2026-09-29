@@ -21,15 +21,38 @@ Design reference: Project Foundation guide, sections 7, 9 and 14.
 | `GET /v1/notification/notifications?business_id=&state=&limit=&cursor=` | A business's notifications, newest first, a page at a time |
 | `GET /v1/notification/notifications/{notification_id}` | One notification of the tenant with its state, attempts, error and delivery times |
 | `POST /v1/notification/notifications/{notification_id}/resend` | Queue a notification that failed for good again (409 `notification-resend-not-allowed` in any other state) |
-| `POST /v1/notification/receipts/whatsapp` | Statuses and inbound times the WhatsApp bot forwards, with `x-cw-bot-token` (`CW_NOTIFICATION_BOT_TOKEN`; unset, 503; missing or wrong, 401) |
+| `POST /v1/notification/receipts/whatsapp` | Statuses and inbound times the WhatsApp bot forwards, with `x-cw-bot-token` (`CW_NOTIFICATION_BOT_TOKEN`; unset, 503; missing or wrong, 401) or its service token (see Authentication) |
 | `POST /v1/notification/receipts/email` | SES bounces, complaints and deliveries that SNS posts, with HTTP basic credentials whose password is `CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN`, and the SNS signature verified |
 | `GET /v1/notification/templates` | Every template with its Meta approval status |
 
-The recipient, send and notification routes need the `x-tenant-id` header, checked before the
-body (a request without it is a 401 `notification-tenant-required` problem). The spec is
+The recipient, send and notification routes act for one tenant, checked before the body (a
+request without one is a 401 `notification-tenant-required` problem). The spec is
 committed at `packages/contracts/openapi/notification.v1.json`
 (`make openapi SERVICE=notification`) and pinned by `tests/contract/test_openapi.py`; the
-schemathesis properties in `tests/contract/test_api_properties.py` cover every route.
+schemathesis properties in `tests/contract/test_api_properties.py` cover every route, in header
+mode and, for the routes that read a token, in token mode.
+
+### Authentication
+
+The caller comes from `py_common.auth` by `CW_AUTH_MODE` (`api/deps.py`). In `header` mode (the
+default) no token is read: the tenant is the `x-tenant-id` header and the bot's receipts carry
+`x-cw-bot-token`, as before tokens existed. In `dual` mode a request with a bearer token is served
+as in `token` mode and one without it as in `header` mode; in `token` mode a bearer is required
+(401 `auth-token-required`). With a token:
+
+| Routes | Who may call |
+| --- | --- |
+| preferences | a service with `notification:preferences` (the WhatsApp bot); no user, since preferences name no tenant |
+| `POST /send` | a service with `notification:send`, naming the tenant in `x-tenant-id` with `tenant:act` |
+| recipients, notifications | a user with a tenant member role, whose token names the tenant (an `x-tenant-id` naming another is a 403 `auth-tenant-mismatch`), or a service with `tenant:act` naming it |
+| `POST /receipts/whatsapp` | a service with `notification:receipts`; `x-cw-bot-token` is accepted only in `header` and `dual` mode |
+| `POST /receipts/email`, `GET /templates` | read no token: SNS posts with basic credentials, and the templates are the same for everyone |
+
+A caller without the role or scope gets a 403 `auth-forbidden`. The dispatcher reads rule versions
+from the rulebook with the service's own access token once `CW_SERVICE_CLIENT_SECRET` is set (its
+client is `notification`, with no scope; `CW_SERVICE_CLIENT_ID` defaults to it under `make run` and
+`make worker`); identity refusing the client is an outage of the rulebook, retried later.
+`tests/unit/test_auth_mode.py` covers the three modes.
 
 ### From an obligation event to a message
 

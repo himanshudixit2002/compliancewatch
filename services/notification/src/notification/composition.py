@@ -1,15 +1,15 @@
 """The composition root's wiring, shared by the API process and the worker.
 
-Guide section 11: wiring of interfaces to implementations happens here, never inside the layers.
-The use cases run on the Postgres unit of work (row-level security by tenant, events through the
-outbox) unless ``CW_NOTIFICATION_STORE=memory``. The WhatsApp channel is real only behind
+Guide section 11: wiring of interfaces to implementations happens here, never inside the layers. The
+use cases run on the Postgres unit of work (row-level security by tenant, events through the outbox)
+unless ``CW_NOTIFICATION_STORE=memory``. The WhatsApp channel is real only behind
 ``CW_WHATSAPP_ENABLED`` with a phone number id and an access token, and the email channel only
-behind ``CW_EMAIL_ENABLED`` with ``CW_SMTP_HOST`` and ``CW_EMAIL_FROM``. The SES feedback is
-read from SNS with its signature verified. The dispatcher reads the
-facts of change cards from the rulebook at ``CW_RULEBOOK_URL`` and counts deliveries through
-OpenTelemetry. ``wire(settings, channels=..., rules=..., email_feedback=...)`` replaces the
-channels, the rulebook reader and the SES feedback reader, which is how the demo and the tests
-send and receive through fakes.
+behind ``CW_EMAIL_ENABLED`` with ``CW_SMTP_HOST`` and ``CW_EMAIL_FROM``. The SES feedback is read
+from SNS with its signature verified. The dispatcher reads the facts of change cards from the
+rulebook at ``CW_RULEBOOK_URL``, with the service's own access token once
+``CW_SERVICE_CLIENT_SECRET`` is set, and counts deliveries through OpenTelemetry. ``wire(settings,
+channels=..., rules=..., email_feedback=...)`` replaces the channels, the rulebook reader and the
+SES feedback reader, which is how the demo and the tests send and receive through fakes.
 
 ``notification.main`` builds the HTTP app on it and ``notification.worker`` the worker's
 components; this module builds no app, so the worker does not start the API's telemetry.
@@ -49,6 +49,7 @@ from notification.infrastructure.ses_feedback import SnsFeedbackReader
 from notification.infrastructure.whatsapp import DisabledChannel, WhatsAppCloudChannel
 from notification.settings import NotificationSettings
 from notification.wiring import Wiring
+from py_common.auth import service_auth_from
 
 WHATSAPP_DISABLED = "whatsapp channel disabled: set CW_WHATSAPP_ENABLED and the Meta credentials"
 EMAIL_DISABLED = "email channel disabled: set CW_EMAIL_ENABLED, CW_SMTP_HOST and CW_EMAIL_FROM"
@@ -109,7 +110,8 @@ def wire(
         unit_of_work,
         work_index,
         wired_channels,
-        rules=rules or HttpRuleVersionReader(settings.rulebook_url),
+        rules=rules
+        or HttpRuleVersionReader(settings.rulebook_url, auth=service_auth_from(settings)),
         web_base_url=settings.web_base_url,
         quiet_hours=quiet_hours,
         batch=batch,

@@ -1,11 +1,11 @@
 """Recipients of a tenant's businesses: who hears about which business, on which addresses.
 
-Recipients are tenant data: every route needs the ``x-tenant-id`` header and sees only its
-tenant's recipients. Registering replaces the recipient whole, so the caller sends everything it
-knows each time (the web app does at onboarding and when a person changes their settings).
-Registering an address gives no consent: it still needs its opt-in on the preferences route.
-A business's recipients are listed by id; the ``cursor`` of a page's ``next_cursor`` reads the
-next.
+Recipients are tenant data: every route acts for one tenant (``deps.Tenant``: a user's token names
+it, otherwise the ``x-tenant-id`` header) and sees only its tenant's recipients. Registering
+replaces the recipient whole, so the caller sends everything it knows each time (the web app does at
+onboarding and when a person changes their settings). Registering an address gives no consent: it
+still needs its opt-in on the preferences route. A business's recipients are listed by id; the
+``cursor`` of a page's ``next_cursor`` reads the next.
 """
 
 from typing import Annotated
@@ -34,7 +34,7 @@ def _keyset(recipient: Recipient) -> RecipientKeyset:
 @router.get(
     "/recipients",
     summary="The recipients that follow a business, by id, a page at a time",
-    responses=problem_responses(401, 422),
+    responses=problem_responses(401, 403, 422),
 )
 def list_recipients(
     tenant: Tenant,
@@ -59,7 +59,7 @@ def list_recipients(
 @router.put(
     "/recipients/{recipient_id}",
     summary="Register a recipient, or replace it: role, language, digest, addresses, businesses",
-    responses=problem_responses(401, 422),
+    responses=problem_responses(401, 403, 422),
 )
 def put_recipient(
     recipient_id: UUID, body: RecipientIn, tenant: Tenant, wired: Wired
@@ -83,7 +83,7 @@ def put_recipient(
 @router.get(
     "/recipients/{recipient_id}",
     summary="A recipient of the tenant, 404 when it has none by that id",
-    responses=problem_responses(401, 404),
+    responses=problem_responses(401, 403, 404),
 )
 def get_recipient(recipient_id: UUID, tenant: Tenant, wired: Wired) -> RecipientOut:
     return RecipientOut.from_recipient(wired.get_recipient.run(tenant, RecipientId(recipient_id)))
@@ -94,7 +94,7 @@ def get_recipient(recipient_id: UUID, tenant: Tenant, wired: Wired) -> Recipient
     summary="Remove a recipient with its addresses and business links",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
-    responses=problem_responses(401, 404),
+    responses=problem_responses(401, 403, 404),
 )
 def delete_recipient(recipient_id: UUID, tenant: Tenant, wired: Wired) -> Response:
     wired.remove_recipient.run(tenant, RecipientId(recipient_id))
