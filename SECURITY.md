@@ -6,9 +6,9 @@ product problem. Please report anything you find privately.
 ## How to report
 
 - Do not open a public issue or pull request for a vulnerability.
-- Send the report to the repository owner directly: open a private security advisory on the
-  repository if your account can, otherwise use the contact below.
-- Contact: <!-- fill in: security email or handle of the maintainer -->
+- Report it through GitHub private vulnerability reporting: open the repository's Security tab
+  and choose 'Report a vulnerability'. The report is a draft security advisory that only you and
+  the maintainer can see; the discussion and the fix stay in it until the advisory is published.
 - Include what you found, where (file, endpoint, environment), how to reproduce it, and what
   you think the impact is. A proof of concept is welcome; exploiting real data is not.
 
