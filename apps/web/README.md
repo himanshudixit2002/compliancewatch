@@ -43,8 +43,8 @@ src/server/         server-only modules; every file starts with `import "server-
                     api/problem.ts: RFC 9457 parsing to ApiError kinds and field errors
                     api/services.ts: the client factories (tenant header from the session; rulebookAdmin() adds
                     the write token after a regulatory-role check)
-                    api/idempotency.ts: the per-render Idempotency-Key input and header (sent only for operations
-                    in IDEMPOTENT_OPERATIONS, empty on main; the natural keys are listed in the module)
+                    api/idempotency.ts: the per-render Idempotency-Key input and header (sent only for the routes
+                    that require it, the business API's two creating POSTs; the natural keys are listed in the module)
                     cache.ts: the cache tags, cachedRead() for global reads (five minutes under tags), uncachedRead()
                     for tenant reads, afterMutation() for actions (updateTag, revalidatePath)
                     legal.ts reads docs/legal at build time (marked)

@@ -26,6 +26,7 @@ describe("kindForStatus", () => {
     expect(kindForStatus(413)).toBe("too_large");
     expect(kindForStatus(415)).toBe("unsupported_media");
     expect(kindForStatus(422)).toBe("validation");
+    expect(kindForStatus(428)).toBe("precondition_required");
     expect(kindForStatus(429)).toBe("rate_limited");
     expect(kindForStatus(503)).toBe("unavailable");
     expect(kindForStatus(500)).toBe("server");

@@ -148,6 +148,7 @@ plain text, which leaves `problem` unset and the kind still follows the status.
 | 409         | `conflict`                       | an inline message: reload and try again                                       |
 | 413, 415    | `too_large`, `unsupported_media` | an inline message on the upload                                               |
 | 422         | `validation`                     | `fieldErrors` per field, the rest as the form's problem                       |
+| 428         | `precondition_required`          | `ErrorState` with the problem: the action left out the `Idempotency-Key`      |
 | 429         | `rate_limited`                   | wait `retryAfterSeconds` (from `Retry-After`, seconds or an HTTP date)        |
 | 503         | `unavailable`                    | the service or a feature of it is off; say so, with the problem's detail      |
 | other 5xx   | `server`                         | `ErrorState` with the correlation id                                          |
@@ -252,10 +253,17 @@ cached read sends `Authorization` or a cookie.
 
 ## Idempotency and natural keys
 
-No service route reads an `Idempotency-Key` on `main`, so `IDEMPOTENT_OPERATIONS` in
-`server/api/idempotency.ts` is empty and `idempotencyHeaders(formData, operation)` answers `{}`
-(D-019). The creating writes the screens make are still safe to repeat, because each has a
-natural key on the service:
+Two routes on `main` require an `Idempotency-Key`: the business API's `POST /v1/businesses`
+(`profile.create-business`) and `POST /v1/businesses/{business_id}/registrations`
+(`profile.add-registration`). Without the header they answer 428 (`idempotency-key-required`,
+kind `precondition_required`); with it they replay the first response for 24 hours, answer 422
+(`idempotency-key-reused`) when the same key comes with a different body, and 409 with
+`Retry-After` while the first request is still running. `IDEMPOTENT_ROUTES` in
+`server/api/idempotency.ts` lists them, and `idempotencyHeaders(formData, operation)` sends the
+key only for an operation there (D-019); `idempotency.test.ts` compares the list with the
+committed specs both ways, so a route that starts or stops requiring the header fails the tests
+until the list follows. Every other creating write the screens make is safe to repeat without a
+key, because each has a natural key on the service:
 
 | Write                                  | Natural key and repeat behaviour                                            |
 | -------------------------------------- | --------------------------------------------------------------------------- |
@@ -267,11 +275,12 @@ natural key on the service:
 | rulebook mentions, relation candidates | the document and the extractor: a repeat reports `unchanged`                |
 | notification preference                | PUT by channel and recipient: a replacement                                 |
 
-The wiring is ready for the routes that will read the header: a page renders
-`<IdempotencyKeyInput />` inside the form (one UUID per render, so a double submit sends the
-same key), and the action spreads `idempotencyHeaders(formData, "<service>.<verb>")` into the
-call's headers. Adding the operation's name to the set is the only change then. A form value
-that is not a UUID is ignored, so the hidden field cannot inject a header.
+For a listed route, a page renders `<IdempotencyKeyInput />` inside the form (one UUID per
+render, so a double submit or a retry after a lost response sends the same key), and the action
+spreads `idempotencyHeaders(formData, "profile.create-business")` into the call's headers. A
+form value that is not a UUID is ignored, so the hidden field cannot inject a header. No screen
+on `main` calls the two business routes yet; the owner and CA screens that do will use this
+wiring.
 
 ## Shared secrets
 

@@ -22,6 +22,7 @@ const KIND_BY_STATUS: Readonly<Record<number, ApiErrorKind>> = {
   413: "too_large",
   415: "unsupported_media",
   422: "validation",
+  428: "precondition_required",
   429: "rate_limited",
   503: "unavailable",
 };

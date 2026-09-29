@@ -15,6 +15,7 @@ import type { ActionProblem, ActionState, FieldErrors } from "@/shared/lib/actio
  *   401 unauthenticated   403 forbidden        404 not_found      409 conflict
  *   402 payment_required  413 too_large        415 unsupported_media
  *   422 validation (with fieldErrors from errors[].loc)            429 rate_limited
+ *   428 precondition_required (a creating route's missing Idempotency-Key)
  *   503 unavailable       other 5xx server     other 4xx bad_request
  *   no response (refused connection, timeout, DNS) network
  */
@@ -27,6 +28,7 @@ export type ApiErrorKind =
   | "too_large"
   | "unsupported_media"
   | "validation"
+  | "precondition_required"
   | "rate_limited"
   | "unavailable"
   | "server"
@@ -93,6 +95,7 @@ const DEFAULT_MESSAGES: Record<ApiErrorKind, string> = {
   too_large: "This is too large to send.",
   unsupported_media: "This file type is not accepted.",
   validation: "Some fields need attention.",
+  precondition_required: "The request was refused: a required header was missing.",
   rate_limited: "Too many requests. Wait a moment and try again.",
   unavailable: "The service is not available right now.",
   server: "The service reported an error.",
@@ -113,6 +116,7 @@ const STATUS_BY_KIND: Readonly<Record<Exclude<ApiErrorKind, "network">, number>>
   too_large: 413,
   unsupported_media: 415,
   validation: 422,
+  precondition_required: 428,
   rate_limited: 429,
   unavailable: 503,
   server: 500,

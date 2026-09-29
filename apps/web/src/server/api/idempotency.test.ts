@@ -1,10 +1,15 @@
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { render } from "@testing-library/react";
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
+import { SERVICES_WITH_SPECS, routeKey } from "@/shared/config/services";
+import type { RouteRef } from "@/shared/config/services";
 import {
   IDEMPOTENCY_KEY_FIELD,
   IDEMPOTENCY_KEY_HEADER,
   IDEMPOTENT_OPERATIONS,
+  IDEMPOTENT_ROUTES,
   IdempotencyKeyInput,
   idempotencyHeaders,
   idempotencyKeyOf,
@@ -32,9 +37,46 @@ describe("newIdempotencyKey", () => {
   });
 });
 
+const SPEC_DIR = join(resolve(__dirname, "../../../../.."), "packages/contracts/openapi");
+
+interface SpecOperation {
+  parameters?: { in?: string; name?: string; required?: boolean }[];
+}
+
+/** "service METHOD path" of every committed route that requires an Idempotency-Key header. */
+function routesRequiringKey(): string[] {
+  const keys: string[] = [];
+  for (const service of SERVICES_WITH_SPECS) {
+    const spec = JSON.parse(readFileSync(join(SPEC_DIR, `${service}.v1.json`), "utf8")) as {
+      paths: Record<string, Record<string, SpecOperation>>;
+    };
+    for (const [path, operations] of Object.entries(spec.paths)) {
+      for (const [method, operation] of Object.entries(operations)) {
+        const header = (operation.parameters ?? []).find(
+          (parameter) =>
+            parameter.in === "header" &&
+            parameter.name?.toLowerCase() === IDEMPOTENCY_KEY_HEADER.toLowerCase(),
+        );
+        if (header?.required === true) {
+          keys.push(
+            routeKey({ service, method: method.toUpperCase() as RouteRef["method"], path }),
+          );
+        }
+      }
+    }
+  }
+  return keys.sort();
+}
+
 describe("IDEMPOTENT_OPERATIONS", () => {
-  it("is empty while no service route reads the header", () => {
-    expect(IDEMPOTENT_OPERATIONS.size).toBe(0);
+  it("names exactly the committed routes that require the header", () => {
+    const listed = Object.values(IDEMPOTENT_ROUTES)
+      .map((route) => routeKey(route))
+      .sort();
+    expect(listed).toEqual(routesRequiringKey());
+    expect([...IDEMPOTENT_OPERATIONS].sort()).toEqual(Object.keys(IDEMPOTENT_ROUTES).sort());
+    expect(isIdempotentOperation("profile.create-business")).toBe(true);
+    expect(isIdempotentOperation("profile.add-registration")).toBe(true);
     expect(isIdempotentOperation("profile.register-business")).toBe(false);
   });
 
@@ -63,6 +105,9 @@ describe("idempotencyHeaders", () => {
   it("sends the form's key for an allow-listed operation", () => {
     const data = form({ [IDEMPOTENCY_KEY_FIELD]: FORM_UUID });
     expect(idempotencyHeaders(data, "profile.register-business", ALLOWED)).toEqual({
+      [IDEMPOTENCY_KEY_HEADER]: FORM_UUID,
+    });
+    expect(idempotencyHeaders(data, "profile.create-business")).toEqual({
       [IDEMPOTENCY_KEY_HEADER]: FORM_UUID,
     });
   });

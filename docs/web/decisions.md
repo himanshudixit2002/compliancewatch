@@ -212,20 +212,27 @@ on `main`; a screen that caches a read must name a tag the writing action expire
 call sends `Authorization` or `Cookie` is never cached by Next unless it carries an explicit
 `revalidate`, which is the case for every `cachedRead`.
 
-## D-019: No Idempotency-Key until a route reads it; natural keys make the creating writes safe
+## D-019: Idempotency-Key only where a route requires it; natural keys make the other creating writes safe
 
-2026-09-29. No service route reads an `Idempotency-Key` on `main`, yet every creating write the
-screens make is safe to repeat: a profile registration is found by its GSTIN, an entity by its
-PAN and a location by its label (a second POST returns the existing node with `created:
-false`); identity consents are append-only and the state is the latest row; a rulebook document
-is keyed by its sha256 (201 created, 200 unchanged, 409 when the metadata differs) and its
-mentions and relation candidates by the document and the extractor; a notification preference
-is a PUT by channel and recipient. `server/api/idempotency.ts` keeps the wiring ready: a page
-renders `<IdempotencyKeyInput />` (one UUID per render of the form) and an action calls
+2026-09-29. Two routes on `main` read an `Idempotency-Key`: the business API's `POST
+/v1/businesses` and `POST /v1/businesses/{business_id}/registrations` require it, answer 428
+(`idempotency-key-required`) without it, replay the first response for 24 hours, and answer 422
+when a key comes back with a different body and 409 while the first request is still running
+(py-common's idempotency module). Every other creating write the screens make is safe to repeat
+without one: a profile registration is found by its GSTIN, an entity by its PAN and a location
+by its label (a second POST returns the existing node with `created: false`); identity consents
+are append-only and the state is the latest row; a rulebook document is keyed by its sha256
+(201 created, 200 unchanged, 409 when the metadata differs) and its mentions and relation
+candidates by the document and the extractor; a notification preference is a PUT by channel
+and recipient. `server/api/idempotency.ts` holds the wiring: a page renders
+`<IdempotencyKeyInput />` (one UUID per render of the form) and an action calls
 `idempotencyHeaders(formData, operation)`, which answers the header only for an operation in
-`IDEMPOTENT_OPERATIONS`, empty today. Consequences: when a route starts reading the header, the
-operation's name is added to the set and no form or action changes; a form value that is not a
-UUID is ignored, so the hidden field cannot inject a header.
+`IDEMPOTENT_ROUTES` (`profile.create-business`, `profile.add-registration`). Consequences: a
+test holds that list to the committed specs both ways, so a route that starts requiring the
+header fails the web tests until its operation is listed, and a listed route that stops
+requiring it fails too; a 428 maps to its own `ApiError` kind, `precondition_required`, because
+it means the web layer left the key out rather than the visitor sending something wrong; a form
+value that is not a UUID is ignored, so the hidden field cannot inject a header.
 
 ## D-020: The local service stack for the web app runs on memory stores with fixed demo settings
 
