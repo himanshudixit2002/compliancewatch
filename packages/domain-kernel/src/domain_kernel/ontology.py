@@ -1,8 +1,11 @@
-"""The ontology model: attribute definitions, value coercion and predicate comparison.
+"""The ontology model: attribute definitions, value coercion and predicate comparison, and the
+wording that puts each attribute to a person.
 
-The YAML file and its loader live in ``packages/ontology``; this module is what they build.
+The YAML files and their loaders live in ``packages/ontology``; this module is what they build.
 Profile values and predicate values are coerced to one canonical form per attribute type so
-that equality and ordering mean the same thing everywhere.
+that equality and ordering mean the same thing everywhere. Wording (a question per attribute
+and a label per allowed value, in one language) is versioned apart from the attributes: it
+changes how a value is shown, never what it means.
 """
 
 from __future__ import annotations
@@ -40,6 +43,8 @@ type PredicateValue = Scalar | tuple[Scalar, ...]
 
 ATTRIBUTE_KEY_PATTERN = re.compile(r"[a-z][a-z0-9_]*")
 SEMVER_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+LANGUAGE_PATTERN = re.compile(r"[a-z]{2}")
+"""A wording language: a two-letter ISO 639-1 code such as ``en`` or ``hi``."""
 
 
 class AttributeType(StrEnum):
@@ -70,6 +75,13 @@ class AttributeLevel(StrEnum):
     ENTITY = "entity"
     REGISTRATION = "registration"
     LOCATION = "location"
+
+
+class WordingReviewStatus(StrEnum):
+    """Whether an analyst has read a wording file line by line (guide section 14)."""
+
+    NEEDS_REVIEW = "needs_review"
+    REVIEWED = "reviewed"
 
 
 ENUM_TYPES = frozenset({AttributeType.ENUM, AttributeType.ORDERED_ENUM, AttributeType.ENUM_SET})
@@ -109,6 +121,8 @@ _ATTRIBUTE_KEYS = frozenset(
 )
 _REQUIRED_ATTRIBUTE_KEYS = frozenset({"key", "type", "definition", "source"})
 _ONTOLOGY_KEYS = frozenset({"version", "attributes"})
+_WORDING_KEYS = frozenset({"version", "language", "review_status", "attributes"})
+_ATTRIBUTE_WORDING_KEYS = frozenset({"key", "question", "help", "labels"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -443,6 +457,177 @@ class Ontology:
         return cls(version=version, attributes=attributes)
 
 
+@dataclass(frozen=True, slots=True)
+class AttributeWording:
+    """How the product puts one attribute to a person, in one language.
+
+    ``question`` is what onboarding asks and ends with ``?``; a derived attribute is never
+    asked, so it may leave the question empty. ``help`` is an optional line shown under the
+    question. ``value_labels`` names allowed values of the enum kinds, each label unique within
+    the attribute. The definition in the ontology decides what a value means; wording only
+    shows it.
+    """
+
+    key: str
+    question: str
+    help: str = ""
+    value_labels: Mapping[str, str] = field(default_factory=dict, hash=False)
+
+    def __post_init__(self) -> None:
+        key = _instance(self.key, str, "wording key")
+        if not ATTRIBUTE_KEY_PATTERN.fullmatch(key):
+            raise OntologyDefinitionError(f"wording key {key!r} must be lowercase snake_case")
+        _trimmed(self.question, f"{key}: question")
+        _trimmed(self.help, f"{key}: help")
+        labels: dict[str, str] = {}
+        for value, label in _mapping(self.value_labels, f"{key}: value_labels").items():
+            if not value.strip() or value != value.strip():
+                raise OntologyDefinitionError(
+                    f"{key}: labelled values must be non-blank without surrounding whitespace"
+                )
+            name = _trimmed(label, f"{key}: label for {value!r}")
+            if not name:
+                raise OntologyDefinitionError(f"{key}: label for {value!r} must not be blank")
+            if name in labels.values():
+                raise OntologyDefinitionError(f"{key}: label {name!r} names two values")
+            labels[value] = name
+        object.__setattr__(self, "value_labels", MappingProxyType(labels))
+
+    def label(self, value: str) -> str:
+        """The label of ``value``, or the value itself when it has none."""
+        return self.value_labels.get(value, value)
+
+    @classmethod
+    def from_mapping(cls, data: object, *, index: int | None = None) -> AttributeWording:
+        """Build the wording from one item of the ``attributes`` list.
+
+        Keys are ``key`` (required), ``question``, ``help`` and ``labels`` (a mapping from
+        allowed value to label, which feeds ``value_labels``).
+        """
+        where = "attributes" if index is None else f"attributes[{index}]"
+        mapping = _mapping(data, where)
+        _check_keys(
+            mapping, allowed=_ATTRIBUTE_WORDING_KEYS, required=frozenset({"key"}), where=where
+        )
+        labels = mapping.get("labels", {})
+        if not isinstance(labels, Mapping):
+            raise OntologyDefinitionError(f"{where}: labels must be a mapping")
+        try:
+            return cls(
+                key=_text(mapping, "key", where),
+                question=_string(mapping, "question", where),
+                help=_string(mapping, "help", where),
+                value_labels=dict(labels),
+            )
+        except OntologyDefinitionError as exc:
+            raise OntologyDefinitionError(f"{where}: {exc.detail}") from exc
+
+
+@dataclass(frozen=True, slots=True)
+class OntologyWording:
+    """The questions and value labels for an ontology in one language.
+
+    ``version`` is the wording's own semver, apart from the ontology's: rewording a question
+    changes no predicate. ``review_status`` stays ``needs_review`` until an analyst has read
+    every line. ``check_against`` says whether the wording fits a given ontology.
+    """
+
+    version: str
+    language: str
+    review_status: WordingReviewStatus
+    attributes: tuple[AttributeWording, ...]
+    _by_key: Mapping[str, AttributeWording] = field(
+        init=False, repr=False, compare=False, hash=False
+    )
+
+    def __post_init__(self) -> None:
+        version = _instance(self.version, str, "wording version")
+        if not SEMVER_PATTERN.fullmatch(version):
+            raise OntologyDefinitionError(f"wording version must be semver, got {version!r}")
+        language = _instance(self.language, str, "wording language")
+        if not LANGUAGE_PATTERN.fullmatch(language):
+            raise OntologyDefinitionError(
+                f"wording language must be a two-letter code such as 'en', got {language!r}"
+            )
+        _instance(self.review_status, WordingReviewStatus, "wording review_status")
+        attributes = _instance(self.attributes, tuple, "wording attributes")
+        by_key: dict[str, AttributeWording] = {}
+        for index, item in enumerate(attributes):
+            wording = _instance(item, AttributeWording, f"attributes[{index}]")
+            if wording.key in by_key:
+                raise OntologyDefinitionError(f"attributes[{index}]: duplicate key {wording.key!r}")
+            by_key[wording.key] = wording
+        object.__setattr__(self, "_by_key", MappingProxyType(by_key))
+
+    def for_key(self, key: str) -> AttributeWording | None:
+        """The wording of attribute ``key``, or None when the file has none."""
+        return self._by_key.get(key)
+
+    def label(self, key: str, value: str) -> str:
+        """The label of ``value`` of attribute ``key``; the raw value when there is none."""
+        wording = self._by_key.get(key)
+        return value if wording is None else wording.label(value)
+
+    def check_against(self, ontology: Ontology) -> list[str]:
+        """Every way this wording does not fit ``ontology``; an empty list means it fits.
+
+        Reported: a key the ontology does not define; a label for a value outside the
+        attribute's allowed values; and, for every attribute that is not derived, a question
+        that is missing or does not end with ``?`` and an allowed value without a label.
+        """
+        problems: list[str] = []
+        for wording in self.attributes:
+            definition = ontology.get(wording.key)
+            if definition is None:
+                problems.append(f"{wording.key}: not an attribute of ontology {ontology.version}")
+                continue
+            problems.extend(
+                f"{wording.key}: label for {value!r}, which is not an allowed value"
+                for value in wording.value_labels
+                if value not in definition.allowed_values
+            )
+        for definition in ontology.attributes:
+            if definition.source is AttributeSource.DERIVED:
+                continue
+            entry = self._by_key.get(definition.key)
+            question = "" if entry is None else entry.question
+            if not question:
+                problems.append(f"{definition.key}: no question")
+            elif not question.endswith("?"):
+                problems.append(f"{definition.key}: question does not end with '?'")
+            labels: Mapping[str, str] = {} if entry is None else entry.value_labels
+            problems.extend(
+                f"{definition.key}: value {value!r} has no label"
+                for value in definition.allowed_values
+                if value not in labels
+            )
+        return problems
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, object]) -> OntologyWording:
+        """Build the wording from the plain mapping a YAML file parses to.
+
+        Top-level keys are ``version``, ``language``, ``review_status`` and ``attributes``;
+        each attribute item is read by ``AttributeWording.from_mapping``. Every structural
+        problem is an OntologyDefinitionError.
+        """
+        mapping = _mapping(data, "wording")
+        _check_keys(mapping, allowed=_WORDING_KEYS, required=_WORDING_KEYS, where="wording")
+        items = mapping["attributes"]
+        if isinstance(items, str) or not isinstance(items, Sequence):
+            raise OntologyDefinitionError("wording: attributes must be a list")
+        return cls(
+            version=_text(mapping, "version", "wording"),
+            language=_text(mapping, "language", "wording"),
+            review_status=_enum(
+                WordingReviewStatus, mapping["review_status"], "review_status", "wording"
+            ),
+            attributes=tuple(
+                AttributeWording.from_mapping(item, index=index) for index, item in enumerate(items)
+            ),
+        )
+
+
 class _Comparable(Protocol):
     def __lt__(self, other: Any, /) -> bool: ...
     def __le__(self, other: Any, /) -> bool: ...
@@ -540,6 +725,22 @@ def _flag(mapping: Mapping[str, object], key: str, where: str) -> bool:
     if not isinstance(raw, bool):
         raise OntologyDefinitionError(f"{where}: {key} must be true or false")
     return raw
+
+
+def _string(mapping: Mapping[str, object], key: str, where: str) -> str:
+    """An optional string field; absent reads as the empty string."""
+    raw = mapping.get(key, "")
+    if not isinstance(raw, str):
+        raise OntologyDefinitionError(f"{where}: {key} must be a string when given")
+    return raw
+
+
+def _trimmed(raw: object, what: str) -> str:
+    """``raw`` when it is a string without surrounding whitespace (it may be empty)."""
+    text = _instance(raw, str, what)
+    if text != text.strip():
+        raise OntologyDefinitionError(f"{what} must not start or end with whitespace")
+    return text
 
 
 def _optional_text(mapping: Mapping[str, object], key: str, where: str) -> str | None:
