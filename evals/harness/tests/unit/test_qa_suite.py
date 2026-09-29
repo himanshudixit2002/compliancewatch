@@ -52,6 +52,17 @@ def test_the_scripted_runs_pass_every_ci_qa_gate(runs: dict[str, QaRun]) -> None
     assert hybrid.plan_validity is None
 
 
+def test_one_case_needs_the_planner_retry(runs: dict[str, QaRun]) -> None:
+    """Its first plan refers to a later step; the retry validates. The first-try share is
+    reported below 1.0 and gates nothing."""
+    retried = next(s for s in runs["qa_kag"].scores if s.case_id == "sh-15-2025-power")
+    assert (retried.plan_valid, retried.plan_first_try, retried.grounded) == (True, False, True)
+    first_try = runs["qa_kag"].aggregate.plan_first_try_validity
+    assert first_try is not None
+    assert first_try < 1.0
+    assert "plan_first_try_validity" not in {g.metric for gates in GATES.values() for g in gates}
+
+
 def test_every_must_refuse_case_is_refused_by_the_citation_check(runs: dict[str, QaRun]) -> None:
     for run in runs.values():
         refused = [s for s in run.scores if not s.answerable]

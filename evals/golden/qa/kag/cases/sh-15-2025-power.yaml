@@ -26,6 +26,19 @@ scripted:
     as_of: null
     steps:
     - id: s1
+      op: retrieve_clauses
+      source: s2
+    - id: s2
+      op: rules_in_force
+      rule_key: gstr9_annual
+    - id: s3
+      op: answer
+      sources:
+      - s1
+  plan_retry:
+    as_of: null
+    steps:
+    - id: s1
       op: rules_in_force
       rule_key: gstr9_annual
     - id: s2
@@ -43,4 +56,4 @@ scripted:
       clause_ref: en.p4
       quote: "In exercise of the powers conferred by the first proviso to sub-section (1) of section 44 of the Central Goods and Services Tax Act, 2017"
 refusal_reason: null
-notes: ''
+notes: "The first plan refers to a later step, which qa's plan check rejects; the retry plan is the valid one, so this case exercises the planner's retry."

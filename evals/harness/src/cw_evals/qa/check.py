@@ -7,8 +7,9 @@ in the world and a notification version carries its CBIC listing title, that eve
 its clause word for word (whitespace aside), that a fact holds in its own support (a date is
 among the dates its quote writes, ordinal words included, and a text is in its quote, casefolded
 and dashes folded), that every seed-calendar support matches the seed file, that the scripted
-plans pass qa's plan rules against the rules the world has in force on the case's date and the
-scripted answers qa's answer shape, that an answerable case's scripted citations are among its
+plans pass qa's plan rules against the rules the world has in force on the case's date (a first
+plan with a ``plan_retry`` must fail them, or the retry is never asked for) and the scripted
+answers qa's answer shape, that an answerable case's scripted citations are among its
 expected ones, and that a must-refuse case's scripted answer is bad on purpose: covered, with
 at least one citation the check must reject, and without stating a date or an amount. It prints
 the count per category and per status, and exits 1 on any problem.
@@ -186,6 +187,9 @@ def _scripted(case: QaCase, spec: WorldSpec) -> list[str]:
         except PlanInvalidError as exc:
             if not (name == "plan" and scripted.plan_retry is not None):
                 problems.append(f"{where}: scripted.{name} is not a valid plan: {exc}")
+            continue
+        if name == "plan" and scripted.plan_retry is not None:
+            problems.append(f"{where}: scripted.plan is valid, so plan_retry is never asked")
     answer = scripted.answer
     if answer is None:
         return problems

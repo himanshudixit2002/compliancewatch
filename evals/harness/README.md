@@ -40,6 +40,13 @@ against the response rate and the run goes on.
 | `ci` | scripted: extraction_acceptance = 1, citation_validity = 1, validator_pass_rate = 1, detector_accuracy >= 0.9, relation_recall = 1, relation_precision = 1, evidence_validity = 1; qa_kag plan_validity, solver_success, citation_correctness, refusal_accuracy, answer_safety and grounded_answer_rate = 1, and grounded_answer_rate >= qa_hybrid's; qa_hybrid refusal_accuracy = 1, answer_safety = 1. fake: parse_rate = 1, relation_parse_rate = 1; qa_kag and qa_hybrid response_rate = 1, answer_safety = 1 | every change under `evals/`, the pipeline, the rulebook, the qa, profile and obligation services, the gateway, the prompts (CI job `evals`, after `make label ARGS="check"` and `make eval-check`) |
 | `nightly` | gateway: extraction_acceptance >= 0.90, citation_validity >= 0.95, parse_rate >= 0.98 (guide section 8); relation and qa numbers reported, not gated, until their cases are reviewed | `.github/workflows/nightly.yml`, 02:30 IST, once the `CW_AI_GATEWAY_API_KEY` secret exists |
 
+The baseline gate (qa_kag's grounded_answer_rate at least qa_hybrid's) cannot fail on its own in
+`ci`, where the KAG run's minimum is already 1; it only bites under a profile whose minimum is
+below 1, as the nightly one will be once its qa cases are reviewed and gated.
+`plan_first_try_validity` is reported, not gated: one case (`sh-15-2025-power`) scripts a first
+plan that refers to a later step and a valid `plan_retry`, so every CI run takes the planner's
+retry path and the scripted first-try share reads below 1.0.
+
 A case is accepted when every labelled field matches (document kind, change kind, effective
 dates, references, predicates, amounts, obligation, recurrence) and the validators raise
 nothing. A qa case is grounded when it is answered, every citation holds in a clause published by

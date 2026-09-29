@@ -119,6 +119,18 @@ def test_main_prints_the_counts_and_exits_on_problems(
         ),
         (
             "sh-15-2025-threshold.yaml",
+            "  answer:\n",
+            "  plan_retry:\n    steps: []\n  answer:\n",
+            "scripted.plan is valid, so plan_retry is never asked",
+        ),
+        (
+            "sh-15-2025-power.yaml",
+            "  plan_retry:\n    as_of: null\n",
+            "  plan_retry:\n    as_of: 2027-01-01\n",
+            "scripted.plan_retry is not a valid plan",
+        ),
+        (
+            "sh-15-2025-threshold.yaml",
             "value: two crore rupees",
             "value: three crore rupees",
             "'three crore rupees' is not in its quote 'up to two crore rupees'",

@@ -60,6 +60,9 @@ notes: ...
   An answer cites a clause by document and clause ref; the harness writes the label the
   evidence gives that clause (`C1`, `C2`, ...), because the labels follow the order the
   solver met the clauses. A case the structured layer answers has no `scripted` block.
+- `scripted.plan_retry` answers the planner's retry. A case that has one scripts a first plan
+  qa's plan check rejects; `sh-15-2025-power` does, with a step that refers to a later one, so
+  the retry path runs in every CI run.
 - A must-refuse case's scripted answer is wrong on purpose: it claims to cover the question
   (`covered: true`) and cites at least one clause, by a label that is not in the evidence, a
   quote its clause does not have, or a clause not yet published on the question's date. It
