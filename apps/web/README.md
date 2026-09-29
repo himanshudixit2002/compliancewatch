@@ -15,7 +15,8 @@ src/app/            route files only: page.tsx is gate, query, render; layout, l
 src/features/       one directory per screen family: ports.ts, gateway.ts, queries.ts, actions.ts, model/, ui/, index.ts
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports)
 src/server/         server-only modules; every file starts with `import "server-only"`
-src/shared/         isomorphic code: config (registry, roles, nav), lib helpers, i18n, app-level ui
+src/shared/config/  the screen registry (screens.ts), roles and permissions, flags, navigation
+src/shared/         isomorphic code: lib helpers, i18n, app-level ui
 src/test/           vitest setup and the architecture rules
 src/app/globals.css Tailwind v4 plus the UI kit's token file (@compliancewatch/ui/styles/tokens.css)
 next.config.ts      typed routes, security headers; eslint.config.mjs: Next flat config plus repo rules
@@ -29,6 +30,15 @@ and `entities`; `shared` imports `shared`. A client component (`"use client"`) i
 `entities` and its own directory only. The contracts package is imported type-only. Files under
 `shared/config` and `shared/lib` use explicit `.ts` relative imports and no `@/` alias so plain
 Node scripts can load them.
+
+Every screen is an entry in `src/shared/config/screens.ts` before anything else exists: the
+navigation, breadcrumbs, sitemap, the "not available yet" pages and the route-coverage test
+read the registry. `screens.test.ts` checks each entry against the committed OpenAPI specs
+(`packages/contracts/openapi`): a live entry only calls routes that exist and has its page file;
+a waiting entry names at least one route or file that is still absent and has no page file (the
+catch-all routes serve it); a planned entry awaits routes nobody has scheduled. When an awaited
+route lands, the test fails with "backend merged: flip `<id>` to live". Roles and role sets in
+`roles.ts` are copied from the identity design; `permissions.ts` maps capabilities to roles.
 
 Colours come from the token classes (`bg-bg`, `text-fg`, `border-line`, ...); the eslint config
 rejects hex literals in class strings.
