@@ -284,3 +284,17 @@ fails on CI instead. Consequences: the job takes the Python install time (cached
 a broken service start or seed fails the web gate; the job stays keyed on the `typescript`
 path filter, so a service-only change does not run it; a later screen's spec may assume the
 seeded tenant and the recorded notification exist.
+
+## D-023: The web flags are entries in the shared flag registry
+
+2026-09-29. The repository's flag registry (`packages/flags/registry.json`, checked by `make
+flags-check`) arrived on `main` with an owner, a default, a removal condition and an expiry date
+for every rollout switch, and a TypeScript SDK. The six `web.*` flags were declared as data in
+`shared/config/flags.ts` until then; they are now registry entries (bool, off, `services:
+["web"]`, expiring 2027-03-31 like the others) and `flags.ts` keeps only the typed list of names.
+Each entry's `env` is `CW_WEB_FLAG_<NAME>`, the override variable the web app has always named,
+so the SDK's env provider reads the same variable the docs promise. Consequences: `flags.test.ts`
+fails when the name list and the registry's web entries differ; adding a web flag touches the
+registry, py-common's generated copy (`make flags`) and `FLAG_NAMES`; the registry is a turbo
+global dependency so a changed entry reruns the web tests; the reader, when a screen needs one,
+reads through `@compliancewatch/flags/server` and honours the override only in local and test.
