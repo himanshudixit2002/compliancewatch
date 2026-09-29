@@ -10,6 +10,8 @@ import {
   isNavGroupKey,
   navFor,
   publicNav,
+  settingsHeaderLinks,
+  settingsNavFor,
   signInHref,
 } from "./nav.ts";
 import { SCREENS, screenById } from "./screens.ts";
@@ -20,6 +22,35 @@ describe("publicNav", () => {
     expect(publicNav().map((link) => link.href)).toEqual(["/", "/sitemap"]);
     expect(publicNav().some((link) => link.active)).toBe(false);
     expect(publicNav("/sitemap").find((link) => link.active)?.id).toBe("system.sitemap");
+  });
+});
+
+describe("settingsNavFor", () => {
+  it("gives the settings pages a session may open, without the planned ones", () => {
+    expect(settingsNavFor({ roles: ["owner"], tenantKind: "business" }).map((l) => l.href)).toEqual(
+      [
+        "/settings/consents",
+        "/settings/notifications",
+        "/settings/billing",
+        "/settings/data-rights",
+        "/settings/team",
+        "/settings/activity",
+      ],
+    );
+    expect(settingsNavFor({ roles: ["staff"], tenantKind: "business" }).map((l) => l.id)).toEqual([
+      "owner.settings.consents",
+      "owner.settings.notifications",
+    ]);
+    expect(settingsNavFor({ roles: ["analyst"], tenantKind: "internal" })).toEqual([]);
+  });
+
+  it("gives a settings page its breadcrumbs up to Settings and its tabs", () => {
+    const links = settingsHeaderLinks(screenById("owner.settings.consents"), {
+      roles: ["owner"],
+      tenantKind: "business",
+    });
+    expect(links.crumbs.map((crumb) => crumb.href)).toEqual(["/settings", "/settings/consents"]);
+    expect(links.tabs[0]?.id).toBe("owner.settings.consents");
   });
 });
 

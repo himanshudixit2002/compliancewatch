@@ -25,6 +25,11 @@ describe("POST /sign-out", () => {
     expect(response.headers.get("location")).toBe("/sign-in");
     expect(response.headers.get("set-cookie")).toMatch(/^cw_session=;/);
     expect(response.headers.get("set-cookie")).toMatch(/Max-Age=0/i);
+    const cookies = response.headers.getSetCookie();
+    expect(cookies).toHaveLength(2);
+    expect(cookies[1]).toMatch(/^cw_prefs_recipient=;/);
+    expect(cookies[1]).toMatch(/Path=\/settings/);
+    expect(cookies[1]).toMatch(/Max-Age=0/i);
   });
 
   it("accepts a browser's same-origin form post on a loopback address", async () => {

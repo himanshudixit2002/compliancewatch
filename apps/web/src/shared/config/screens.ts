@@ -441,7 +441,7 @@ const SCREEN_LIST = [
     status: "waiting",
     e2e: [],
     guideRef: "16, 17",
-    nav: { group: "account", order: 2 },
+    nav: { group: "account", order: 3 },
   },
   // ---- owner ------------------------------------------------------------------------------
   {
@@ -786,6 +786,85 @@ const SCREEN_LIST = [
     guideRef: "8",
   },
   {
+    id: "owner.settings",
+    kind: "page",
+    route: "/settings",
+    title: "Settings",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [],
+    awaits: [],
+    status: "live",
+    e2e: ["owner-settings.spec.ts", "a11y.spec.ts"],
+    guideRef: "16",
+    nav: { group: "account", order: 2 },
+    notes:
+      "Every settings and account page the session may open, with its status; the pages still waiting say which route they need.",
+  },
+  {
+    id: "owner.settings.consents",
+    kind: "page",
+    route: "/settings/consents",
+    title: "Consents",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      uses("identity", "GET", "/v1/identity/consents"),
+      uses("identity", "POST", "/v1/identity/consents"),
+      uses("notification", "PUT", "/v1/notification/preferences/{channel}/{recipient}"),
+    ],
+    awaits: [],
+    status: "live",
+    e2e: ["owner-settings-consents.spec.ts", "a11y.spec.ts"],
+    guideRef: "16; docs/legal/consent-record.md",
+    nav: { group: "settings", order: 1 },
+    parent: "owner.settings",
+    notes:
+      "The latest record per purpose and every record, oldest first; the optional purposes are given or withdrawn here as new records, and withdrawing WhatsApp reminders also opts the number out.",
+  },
+  {
+    id: "owner.settings.notifications",
+    kind: "page",
+    route: "/settings/notifications",
+    title: "Notifications",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      uses("notification", "GET", "/v1/notification/preferences/{channel}/{recipient}"),
+      uses("notification", "PUT", "/v1/notification/preferences/{channel}/{recipient}"),
+      uses("notification", "GET", "/v1/notification/templates"),
+      uses("identity", "GET", "/v1/identity/consents"),
+    ],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "9, F9; docs/legal/whatsapp-consent.md",
+    nav: { group: "settings", order: 2 },
+    parent: "owner.settings",
+  },
+  {
+    id: "owner.settings.billing",
+    kind: "page",
+    route: "/settings/billing",
+    title: "Billing",
+    section: "owner",
+    roles: TENANT_ADMINS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      uses("identity", "GET", "/v1/identity/billing/plans"),
+      uses("identity", "POST", "/v1/identity/billing/subscriptions"),
+    ],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "6; G32, G33",
+    nav: { group: "settings", order: 3 },
+    parent: "owner.settings",
+  },
+  {
     id: "owner.settings.notification-recipients",
     kind: "page",
     route: "/settings/notifications/recipients",
@@ -803,6 +882,7 @@ const SCREEN_LIST = [
     status: "waiting",
     e2e: [],
     guideRef: "9, F9",
+    parent: "owner.settings.notifications",
   },
   {
     id: "owner.settings.data-rights",
@@ -824,6 +904,7 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "16 DPDP; G37",
     nav: { group: "settings", order: 5 },
+    parent: "owner.settings",
   },
   {
     id: "owner.settings.team",
@@ -839,6 +920,7 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "5, 6, 16",
     nav: { group: "settings", order: 6 },
+    parent: "owner.settings",
   },
   {
     id: "owner.settings.activity",
@@ -854,6 +936,7 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "10 GET /v1/audit; F11",
     nav: { group: "settings", order: 7 },
+    parent: "owner.settings",
   },
   // ---- ca ---------------------------------------------------------------------------------
   {
@@ -908,6 +991,7 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "10; F13; G35",
     nav: { group: "settings", order: 8 },
+    parent: "owner.settings",
   },
   {
     id: "ca.settings.api-keys",
@@ -927,6 +1011,7 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "10, 15; G32, G35",
     nav: { group: "settings", order: 9 },
+    parent: "owner.settings",
   },
   {
     id: "ca.settings.digests",
@@ -944,6 +1029,7 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "F12",
     nav: { group: "settings", order: 10 },
+    parent: "owner.settings",
   },
   // ---- admin ------------------------------------------------------------------------------
   {

@@ -1,4 +1,8 @@
-import type { ConsentStateDto, ConsentSummaryDto } from "@/entities/consent/types";
+import type {
+  ConsentRecordDto,
+  ConsentStateDto,
+  ConsentSummaryDto,
+} from "@/entities/consent/types";
 import type { LegalDocName } from "@/shared/config/legal-docs";
 
 /**
@@ -46,8 +50,11 @@ export function grantedState(
   };
 }
 
-export function summaryDto(states: ConsentStateDto[] = []): ConsentSummaryDto {
-  return { subject: OWNER_ID, states, history: [] };
+export function summaryDto(
+  states: ConsentStateDto[] = [],
+  history: ConsentRecordDto[] = [],
+): ConsentSummaryDto {
+  return { subject: OWNER_ID, states, history };
 }
 
 /** Every required purpose granted at the fixture's versions. */
@@ -56,3 +63,27 @@ export const ACCEPTED_STATES: ConsentStateDto[] = [
   grantedState("privacy_notice", "privacy-notice@9.9-draft"),
   grantedState("profile_processing", "privacy-notice@9.9-draft"),
 ];
+
+let recordCount = 0;
+
+/** One history row as the service returns it; ids count up so each row has its own. */
+export function recordDto(
+  purpose: ConsentRecordDto["purpose"],
+  granted: boolean,
+  noticeVersion: string,
+  overrides: Partial<ConsentRecordDto> = {},
+): ConsentRecordDto {
+  recordCount += 1;
+  return {
+    id: `00000000-0000-4000-8000-${String(recordCount).padStart(12, "0")}`,
+    subject: OWNER_ID,
+    purpose,
+    granted,
+    source: "web_onboarding",
+    notice_version: noticeVersion,
+    evidence: "Example evidence",
+    recorded_by: OWNER_ID,
+    recorded_at: "2000-01-01T00:00:00Z",
+    ...overrides,
+  };
+}

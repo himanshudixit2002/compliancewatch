@@ -395,6 +395,29 @@ leaves the earlier rows and the form says which purposes were recorded; submitti
 records only the rest. A CA firm is not offered WhatsApp reminders (they are set per client
 business).
 
+The settings page at `/settings/consents` reads the same summary and shows, per purpose, the
+latest record (state, notice version, time in IST, source) and every record oldest first. The
+required purposes are not changed there: withdrawing them ends the service, so the page points
+to the data rights request. The optional ones are given or withdrawn by `changeConsent`, one new
+record each time and never an edit: a grant carries the current `<document>@<Version line>`, a
+withdrawal (`granted: false`) carries the notice version of the grant it withdraws, the source
+is `web_onboarding` (the identity service's `ConsentSource` has no settings value), and the
+evidence is `Confirmed on the settings page: ` followed by the sentence the dialog showed (the
+consent step's checkbox sentence to give, `Withdraw consent: <purpose>.` to withdraw). A change
+that is already the state records nothing and says so. Withdrawing WhatsApp reminders opts the
+number out first (`{ opted_in: false }`), so reminders stop even when the record then fails,
+and records the withdrawal alone when no number is known; giving them records the consent and
+then opts the number in, as the consent step does.
+
+The identity service does not return a user's own phone or email yet (`GET /v1/identity/me` is
+awaited), so the settings pages remember the recipients a user last named on this device in
+`cw_prefs_recipient` (`server/remembered-recipients.ts`): a JWE under the session key,
+httpOnly, SameSite=Lax, Secure outside local, path `/settings`, 30 days, bound to the user id
+(another user on the same browser reads it as empty). It holds the notification service's keys
+(a WhatsApp number as digits without the plus, an address lowercased). The consent step writes
+it after opting a number in, the settings actions write it when they use a number, pages only
+read it, and `/sign-out` expires it with the session.
+
 ## Idempotency and natural keys
 
 Two routes on `main` require an `Idempotency-Key`: the business API's `POST /v1/businesses`

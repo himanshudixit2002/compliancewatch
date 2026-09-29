@@ -405,3 +405,22 @@ its business unless told otherwise. Found while building the snapshot page: the 
 itself (the earlier fixture had listed the node in its own lineage). The e2e sign-in waits for the
 form to hydrate before typing the tenant id, a controlled input that hydration would otherwise
 reset, which had sent an occasional spec into a new, empty tenant.
+
+## D-031: Settings change consents as new records and remember recipients per device
+
+2026-09-29. The consents page lets a user withdraw and also give the optional purposes (WhatsApp
+reminders, email reminders, analytics). Giving is there because the notification page (next)
+opts a number in only while the channel's consent is given, and a user who withdrew would
+otherwise have no way back on the web; the required purposes stay with the consent step and
+the data rights request. Every change is a new record, with `web_onboarding` as the source
+because the identity service has no settings source; the evidence says it was confirmed on the
+settings page and quotes the sentence shown. Withdrawing WhatsApp reminders opts the number out
+before the record is written, so a failure leaves reminders stopped rather than a withdrawal on
+file with reminders still going. The service does not return the user's own number or address
+yet, so the number used on the consent step or the settings pages is remembered on the device
+in an encrypted, httpOnly cookie bound to the user id (path `/settings`, 30 days, expired at
+sign-out); considered and rejected: asking for the number on every visit (a withdrawal would
+often leave the number opted in) and a hidden form field (it would put the number in the page
+for anyone to change). The settings index is registry-driven and sits in the account group so
+the header links to it; the settings pages share a header with breadcrumbs and tabs from the
+settings group, planned entries left to the index.

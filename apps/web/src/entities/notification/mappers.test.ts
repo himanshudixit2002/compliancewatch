@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { preferenceChangeToDto, preferenceFromDto } from "./mappers";
+import {
+  CHANNELS,
+  emailKeyOf,
+  isChannel,
+  isRecipientKey,
+  preferenceChangeToDto,
+  preferenceFromDto,
+  recipientLabel,
+  whatsappKeyOf,
+  whatsappNumberOf,
+} from "./mappers";
 
 describe("notification preference mappers", () => {
   it("maps the service's preference", () => {
@@ -46,5 +56,34 @@ describe("notification preference mappers", () => {
       quiet_hours_start: "22:00",
       quiet_hours_end: "07:00",
     });
+  });
+});
+
+describe("recipient keys", () => {
+  it("names the channels in display order", () => {
+    expect(CHANNELS).toEqual(["whatsapp", "email"]);
+    expect(isChannel("email")).toBe(true);
+    expect(isChannel("sms")).toBe(false);
+  });
+
+  it("keys a WhatsApp number by its digits and an address lowercased", () => {
+    expect(whatsappKeyOf("+919800000001")).toBe("919800000001");
+    expect(() => whatsappKeyOf("9800000001")).toThrow("not an E.164 number");
+    expect(whatsappNumberOf("919800000001")).toBe("+919800000001");
+    expect(emailKeyOf("  Owner@Example.COM ")).toBe("owner@example.com");
+  });
+
+  it("accepts only the service's own form of a key", () => {
+    expect(isRecipientKey("whatsapp", "919800000001")).toBe(true);
+    expect(isRecipientKey("whatsapp", "+919800000001")).toBe(false);
+    expect(isRecipientKey("whatsapp", "019800000001")).toBe(false);
+    expect(isRecipientKey("email", "owner@example.com")).toBe(true);
+    expect(isRecipientKey("email", "Owner@example.com")).toBe(false);
+    expect(isRecipientKey("email", "owner")).toBe(false);
+  });
+
+  it("shows a number with its plus and an address as it is", () => {
+    expect(recipientLabel("whatsapp", "919800000001")).toBe("+919800000001");
+    expect(recipientLabel("email", "owner@example.com")).toBe("owner@example.com");
   });
 });

@@ -7,11 +7,12 @@ import { sessionWindow } from "@/entities/session/mappers";
 import type { SessionClaims } from "@/entities/session/types";
 import { resetEnvCache } from "@/server/env";
 import { readLegalVersions } from "@/server/legal";
+import { readRememberedRecipients } from "@/server/remembered-recipients";
 import { encryptSession } from "@/server/session";
 import { OWNER_ID, grantedState, summaryDto } from "@/test/consent-fixture";
 import { fakeCookies } from "@/test/fake-cookies";
 import { fakeFetch, jsonResponse, problemResponse, type RecordedRequest } from "@/test/fake-fetch";
-import { recordConsents } from "./actions";
+import { changeConsent, recordConsents } from "./actions";
 
 vi.mock("next/headers", async () => (await import("@/test/fake-cookies")).nextHeadersMock());
 vi.mock("next/cache", () => ({ updateTag: vi.fn(), revalidatePath: vi.fn() }));
@@ -149,6 +150,8 @@ describe("recordConsents", () => {
     expect(put?.pathname).toBe("/v1/notification/preferences/whatsapp/919800000000");
     expect(put?.body).toEqual({ opted_in: true, source: "web_onboarding" });
     expect(revalidatePath).toHaveBeenCalledWith("/onboarding");
+    // The settings pages find the number again on this device.
+    expect(await readRememberedRecipients(OWNER_ID)).toEqual({ whatsapp: "919800000000" });
   });
 
   it("names the required boxes left unticked and calls nothing", async () => {
@@ -219,6 +222,7 @@ describe("recordConsents", () => {
     expect(state.status === "error" && state.formErrors).toEqual([
       "Your consents are recorded, but the WhatsApp number is not opted in yet. Agree again to retry.",
     ]);
+    expect(await readRememberedRecipients(OWNER_ID)).toEqual({});
   });
 
   it("offers no WhatsApp opt-in to a CA firm", async () => {
@@ -245,5 +249,200 @@ describe("recordConsents", () => {
     await expect(recordConsents(IDLE, form(REQUIRED))).rejects.toMatchObject({
       href: "/forbidden",
     });
+  });
+});
+
+describe("changeConsent", () => {
+  const WHATSAPP_GRANT = `whatsapp-consent@0.0-example`;
+
+  it("opts the number out first, then records the withdrawal of the grant, and remembers the number", async () => {
+    await signedInAs();
+    const fake = services({ states: [grantedState("whatsapp_reminders", WHATSAPP_GRANT)] });
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await changeConsent(
+      IDLE,
+      form({ purpose: "whatsapp_reminders", change: "withdraw", whatsapp_number: NUMBER }),
+    );
+    expect(fake.requests.map((request) => `${request.method} ${request.pathname}`)).toEqual([
+      "GET /v1/identity/consents",
+      "PUT /v1/notification/preferences/whatsapp/919800000000",
+      "POST /v1/identity/consents",
+    ]);
+    expect(fake.requests[1]?.body).toEqual({ opted_in: false, source: "web_onboarding" });
+    expect(fake.requests[2]?.body).toEqual({
+      subject: OWNER_ID,
+      purpose: "whatsapp_reminders",
+      granted: false,
+      source: "web_onboarding",
+      notice_version: WHATSAPP_GRANT,
+      evidence: "Confirmed on the settings page: Withdraw consent: WhatsApp reminders.",
+      recorded_by: OWNER_ID,
+    });
+    expect(state).toEqual({
+      status: "ok",
+      value: {
+        purpose: "whatsapp_reminders",
+        change: "withdraw",
+        recorded: true,
+        number: NUMBER,
+      },
+      message: `Withdrawn: WhatsApp reminders, recorded 1 Jan 2000, 5:30 am IST. ${NUMBER} is opted out.`,
+    });
+    expect(await readRememberedRecipients(OWNER_ID)).toEqual({ whatsapp: "919800000000" });
+    expect(revalidatePath).toHaveBeenCalledWith("/settings/consents");
+    expect(revalidatePath).toHaveBeenCalledWith("/settings/notifications");
+  });
+
+  it("records a withdrawal without a number and says no number was opted out", async () => {
+    await signedInAs();
+    const fake = services({ states: [grantedState("whatsapp_reminders", WHATSAPP_GRANT)] });
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await changeConsent(
+      IDLE,
+      form({ purpose: "whatsapp_reminders", change: "withdraw", whatsapp_number: "" }),
+    );
+    expect(fake.requests.some((request) => request.method === "PUT")).toBe(false);
+    expect(state.status === "ok" && state.message).toBe(
+      "Withdrawn: WhatsApp reminders, recorded 1 Jan 2000, 5:30 am IST. No number was opted out.",
+    );
+  });
+
+  it("gives email reminders at the current version with the checkbox sentence", async () => {
+    await signedInAs();
+    const fake = services();
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await changeConsent(IDLE, form({ purpose: "email_reminders", change: "give" }));
+    const post = fake.requests.find((request) => request.method === "POST");
+    expect(post?.body).toMatchObject({
+      purpose: "email_reminders",
+      granted: true,
+      notice_version: PRIVACY,
+      evidence: "Confirmed on the settings page: Send me reminders for this business by email.",
+    });
+    expect(state.status === "ok" && state.message).toBe(
+      "Given: Email reminders, recorded 1 Jan 2000, 5:30 am IST.",
+    );
+  });
+
+  it("gives WhatsApp reminders, then opts the number in", async () => {
+    await signedInAs();
+    const fake = services();
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await changeConsent(
+      IDLE,
+      form({ purpose: "whatsapp_reminders", change: "give", whatsapp_number: NUMBER }),
+    );
+    expect(fake.requests.map((request) => request.method)).toEqual(["GET", "POST", "PUT"]);
+    expect(fake.requests[1]?.body).toMatchObject({ granted: true, notice_version: WHATSAPP });
+    expect(fake.requests[2]?.body).toEqual({ opted_in: true, source: "web_onboarding" });
+    expect(state.status === "ok" && state.message).toBe(
+      `Given: WhatsApp reminders, recorded 1 Jan 2000, 5:30 am IST. ${NUMBER} is opted in.`,
+    );
+    expect(await readRememberedRecipients(OWNER_ID)).toEqual({ whatsapp: "919800000000" });
+  });
+
+  it("records nothing for a change that is already the state", async () => {
+    await signedInAs();
+    const fake = services({ states: [grantedState("analytics", PRIVACY)] });
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const given = await changeConsent(IDLE, form({ purpose: "analytics", change: "give" }));
+    expect(given.status === "ok" && given.message).toBe(
+      "Product analytics was already given for the current version, so nothing new was recorded.",
+    );
+    const withdrawn = await changeConsent(
+      IDLE,
+      form({ purpose: "email_reminders", change: "withdraw" }),
+    );
+    expect(withdrawn).toMatchObject({
+      status: "ok",
+      value: { recorded: false },
+      message: "Email reminders was not given, so nothing new was recorded.",
+    });
+    expect(fake.requests.every((request) => request.method === "GET")).toBe(true);
+  });
+
+  it("records nothing when the number cannot be opted out", async () => {
+    await signedInAs();
+    const fake = services({
+      states: [grantedState("whatsapp_reminders", WHATSAPP_GRANT)],
+      failPut: true,
+    });
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await changeConsent(
+      IDLE,
+      form({ purpose: "whatsapp_reminders", change: "withdraw", whatsapp_number: NUMBER }),
+    );
+    expect(state.status === "error" && state.problem?.title).toBe("Invalid recipient");
+    expect(state.status === "error" && state.formErrors).toEqual([
+      "Nothing was recorded: the number could not be opted out.",
+    ]);
+    expect(fake.requests.some((request) => request.method === "POST")).toBe(false);
+  });
+
+  it("says the number is opted out when the withdrawal record then fails", async () => {
+    await signedInAs();
+    vi.stubGlobal(
+      "fetch",
+      services({
+        states: [grantedState("whatsapp_reminders", WHATSAPP_GRANT)],
+        failPurpose: "whatsapp_reminders",
+      }).fetchImpl,
+    );
+    const state = await changeConsent(
+      IDLE,
+      form({ purpose: "whatsapp_reminders", change: "withdraw", whatsapp_number: NUMBER }),
+    );
+    expect(state.status === "error" && state.formErrors).toEqual([
+      "The number is opted out, but the withdrawal is not recorded yet. Try again.",
+    ]);
+  });
+
+  it("says the consent is recorded when the opt-in then fails", async () => {
+    await signedInAs();
+    vi.stubGlobal("fetch", services({ failPut: true }).fetchImpl);
+    const state = await changeConsent(
+      IDLE,
+      form({ purpose: "whatsapp_reminders", change: "give", whatsapp_number: NUMBER }),
+    );
+    expect(state.status === "error" && state.formErrors).toEqual([
+      "Your consent is recorded, but the number is not opted in yet. Try again.",
+    ]);
+  });
+
+  it("reports a failed record or read as nothing changed", async () => {
+    await signedInAs();
+    vi.stubGlobal("fetch", services({ failPurpose: "analytics" }).fetchImpl);
+    const record = await changeConsent(IDLE, form({ purpose: "analytics", change: "give" }));
+    expect(record.status === "error" && record.formErrors).toEqual(["Nothing was changed"]);
+    vi.stubGlobal(
+      "fetch",
+      fakeFetch([{ path: "/v1/identity/consents", status: 503, problem: { title: "Down" } }])
+        .fetchImpl,
+    );
+    const read = await changeConsent(IDLE, form({ purpose: "analytics", change: "give" }));
+    expect(read.status === "error" && read.problem?.title).toBe("Down");
+  });
+
+  it("refuses a malformed change before calling anything", async () => {
+    await signedInAs({ roles: ["compliance_lead"] });
+    const fake = services();
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    expect(await changeConsent(IDLE, form({ purpose: "terms", change: "withdraw" }))).toEqual({
+      status: "error",
+      formErrors: ["This consent is not changed on this page."],
+    });
+    expect(
+      await changeConsent(IDLE, form({ purpose: "whatsapp_reminders", change: "give" })),
+    ).toEqual({
+      status: "error",
+      fieldErrors: { whatsapp_number: ["Enter the WhatsApp number the reminders go to."] },
+    });
+    expect(fake.requests).toEqual([]);
+  });
+
+  it("sends a visitor without a session to sign in", async () => {
+    await expect(
+      changeConsent(IDLE, form({ purpose: "analytics", change: "give" })),
+    ).rejects.toMatchObject({ href: "/sign-in?next=%2Fsettings%2Fconsents" });
   });
 });
