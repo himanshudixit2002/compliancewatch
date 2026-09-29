@@ -1,4 +1,4 @@
-import type { Problem } from "./types";
+import type { Problem, ValidationIssue } from "./types";
 
 /** Every service names its errors `urn:compliancewatch:problem:<slug>` (domain_kernel.errors). */
 export const PROBLEM_TYPE_PREFIX = "urn:compliancewatch:problem:";
@@ -20,4 +20,26 @@ export function isProblemOf(
   slug: string,
 ): boolean {
   return problemSlug(problem) === slug;
+}
+
+/** The first element of a FastAPI `loc`: where the value came from, not part of the field name. */
+const LOC_ROOTS = new Set(["body", "query", "header", "path", "cookie"]);
+
+/**
+ * Field errors from a 422's issues: `["body", "gstin"]` becomes `gstin`,
+ * `["body", "changes", 0, "value"]` becomes `changes.0.value`, and a bare `["body"]` stays `body`.
+ * Messages for the same field are kept in order.
+ */
+export function fieldErrorsFromIssues(
+  issues: readonly ValidationIssue[] | null | undefined,
+): Readonly<Record<string, readonly string[]>> {
+  const errors: Record<string, string[]> = {};
+  for (const issue of issues ?? []) {
+    const parts = issue.loc.map(String);
+    const [root] = parts;
+    if (parts.length > 1 && root !== undefined && LOC_ROOTS.has(root)) parts.shift();
+    const key = parts.join(".");
+    (errors[key] ??= []).push(issue.msg);
+  }
+  return errors;
 }

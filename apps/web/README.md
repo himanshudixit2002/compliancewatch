@@ -27,13 +27,18 @@ src/entities/       pure domain types and DTO-to-view mappers (no React, no fetc
 src/server/         server-only modules; every file starts with `import "server-only"`
                     env.ts validates every CW_WEB_* variable (zod; parsed at the first request, never at build)
                     result.ts: Result, ApiError and the mapping to a form's ActionState
+                    api/client.ts: one openapi-fetch client per service (x-request-id, accept, time limit) and call()
+                    api/problem.ts: RFC 9457 parsing to ApiError kinds and field errors
+                    api/services.ts: the client factories (tenant header from the session; rulebookAdmin() adds
+                    the write token after a regulatory-role check)
                     legal.ts reads docs/legal at build time (marked)
 src/shared/config/  the screen registry (screens.ts), roles and permissions, flags, navigation, the legal doc list
 src/shared/lib/     IST dates, financial years, money and decimal strings, humanise, identifiers, pagination, urls,
                     action-state (what a server action returns to a form)
 src/shared/i18n/    messages/en.json and the typed t(); another locale falls back key by key
 src/shared/ui/      app-level compositions over the UI kit: the two shells over next/link, breadcrumbs, the status chip
-src/test/           vitest setup, the architecture rules and test, the docs/web/screens.md drift test
+src/test/           vitest setup, the architecture rules and test, the docs/web/screens.md drift test,
+                    fake-fetch.ts (a recording fetch with problem+json answers for client and gateway tests)
 src/app/globals.css Tailwind v4 plus the UI kit's token file (@compliancewatch/ui/styles/tokens.css)
 src/instrumentation.ts  onRequestError writes one JSON line (digest, route, x-request-id) to stderr
 scripts/screens-doc.mts generates docs/web/screens.md from the registry (screens:gen, screens:check, screens:audit)
@@ -73,18 +78,19 @@ from paise or decimal strings without float arithmetic.
 Colours come from the token classes (`bg-bg`, `text-fg`, `border-line`, ...); the eslint config
 rejects hex literals in class strings.
 
-A screen that is not built has no page file: the two catch-all routes match the pathname against
-the registry and render `NotAvailableYet` with the awaited routes, their owner and the guide
-reference, or for a ready screen the sentence that its backend is on main (an unknown path is a
-404). Legal pages render the drafts in `docs/legal` under the draft banner, prerendered from the
-three listed names. `/admin` lists every internal tool from the registry with its status and the
-services it depends on. There is no `loading.tsx` above the catch-alls on purpose: a loading
-boundary above `notFound()` streams the page with status 200, so a later package adds
-`loading.tsx` beside each page that fetches. `server/env.ts` validates every `CW_WEB_*` variable
-with zod: `getEnv()` parses the process environment at the first request (never at import or
-build time), keeps the frozen result, and refuses a bad value with the variable's name; unset
-means the documented default (`CW_WEB_ENV` local, the services on their canonical ports
-8001-8010). No session, gate or service client exists yet: every page renders for every visitor.
+A screen that is not built has no page file: the two catch-all routes match the pathname against the
+registry and render `NotAvailableYet` with the awaited routes, their owner and the guide reference,
+or for a ready screen the sentence that its backend is on main (an unknown path is a 404). Legal
+pages render the drafts in `docs/legal` under the draft banner, prerendered from the three listed
+names. `/admin` lists every internal tool from the registry with its status and the services it
+depends on. There is no `loading.tsx` above the catch-alls on purpose: a loading boundary above
+`notFound()` streams the page with status 200, so a later package adds `loading.tsx` beside each
+page that fetches. `server/env.ts` validates every `CW_WEB_*` variable with zod: `getEnv()` parses
+the process environment at the first request (never at import or build time), keeps the frozen
+result, and refuses a bad value with the variable's name; unset means the documented default
+(`CW_WEB_ENV` local, the services on their canonical ports 8001-8010). The service clients
+(`server/api`) are typed from the generated contracts and used only on the server; no page calls one
+yet, and no session or gate exists: every page renders for every visitor.
 
 ## End-to-end tests
 
