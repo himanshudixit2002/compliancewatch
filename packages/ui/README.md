@@ -51,7 +51,8 @@ tints as `bg-fg/5`), the `tw-animate-css` classes dropped, `sonner.tsx` rewritte
 and the two npm packages the CLI adds for those files (`cn`, `next-themes`) removed again.
 `select.tsx` is a styled native `<select>` rather than the Radix popover: the browser's own
 listbox already gives keyboard and screen-reader support. `badge.tsx` keeps the `tone` API of
-the original component.
+the original component. `Table` takes `scrollLabel` for a table that can be wider than its
+column: the scroll container becomes a named, focusable region, so a keyboard user can scroll it.
 
 Every component exports its props type, sets `data-slot` (and `data-variant`, `data-tone`,
 `data-side` where it has one) for tests, and has a Testing Library test that drives the keyboard
@@ -71,6 +72,9 @@ Built on the primitives and the tokens; each has its accessibility contract in t
 - `NumberField`: a number typed as text (`inputmode` numeric or decimal, no scroll-to-change)
   with the range in words under it ("Between 0 and 1,00,000."); `DateField`: the browser's
   date input with `min` and `max`, always submitting YYYY-MM-DD. Both are wired through `Field`.
+- `ProgressBar`: `role="progressbar"` named by its visible label, with `aria-valuenow`, the
+  range and `aria-valuetext` ("4 of 17 answered" is read out, not a percentage); the value is
+  clamped and the track has a 3:1 border.
 - `StatusChip`, `Badge`, `Banner`, `Timeline`: the `Tone` vocabulary (neutral, success,
   warning, danger, info); the text carries the meaning, colour only reinforces it. A danger
   Banner is `role="alert"`, the other tones `role="status"`.

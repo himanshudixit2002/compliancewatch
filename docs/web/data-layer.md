@@ -328,6 +328,26 @@ page asks for the consents first (the consent step's query, read by the page): t
 service does not check them, so the web app does not offer the form until the required purposes
 are granted at the current notice versions.
 
+## The questions step and the summary
+
+`/onboarding/[businessId]/questions` asks one question at a time from the business API's
+checklist (`GET /v1/businesses/{id}/onboarding`), read together with the business (`GET
+/v1/businesses/{id}`), the ontology and the review tasks of the entity and each registration
+(`loadOnboardingState` in `features/business/queries.ts`). `answerQuestion` stores the answer with
+`PATCH /v1/businesses/{id}`, naming the node the checklist named (`node_id`) and the year for a
+per-year attribute, then redirects to the step with `?saved=<attribute key>` (a key, never a
+value), where a status line names what was saved and focus moves to the next question's h1.
+
+The checklist counts an unsure answer as open and names it as `next` again, so the step keeps a
+skip list: the httpOnly cookie `cw_onboarding_skip_<businessId>` (path `/onboarding`, one day,
+SameSite=Lax, Secure outside local) holding `<node id>:<attribute key>` items, written only by
+the server actions. When `next` is on the list, `pickQuestion` walks the same checklist over the
+business's stored values (the entity, then the registrations, the ontology's order within each)
+to the first open item that is not. When nothing is left the page redirects to
+`/onboarding/[businessId]/done`, which shows the checklist's counts, the questions left unsure,
+the open review tasks and "Answer these now" (`revisitUnsure` clears the cookie). Clearing
+cookies only means the unsure questions are asked again.
+
 ## Consents
 
 `features/consents/gateway.ts` reads a subject's consent states and history

@@ -1,15 +1,29 @@
 "use server";
 
+import { redirect } from "next/navigation";
+import { attributeOf } from "@/entities/ontology/mappers";
 import { idempotencyHeaders } from "@/server/api/idempotency";
 import { afterMutation } from "@/server/cache";
 import { requireScreenSession } from "@/server/dal";
 import { getOntology } from "@/server/ontology";
-import { toActionState } from "@/server/result";
+import { toActionState, type ApiError } from "@/server/result";
 import { hrefFor, screenById } from "@/shared/config/screens";
-import { actionSuccess, fieldFailure, type ActionState } from "@/shared/lib/action-state";
+import { t } from "@/shared/i18n";
+import {
+  actionFailure,
+  actionSuccess,
+  fieldFailure,
+  type ActionState,
+} from "@/shared/lib/action-state";
+import { isUuid } from "@/shared/lib/identifiers";
+import { withQuery } from "@/shared/lib/url";
 import { businessGateway } from "./gateway";
+import { ANSWER_FIELDS, answerFieldErrors, readAnswerForm } from "./model/answer-form";
 import { parseBusinessForm } from "./model/business-form";
 import { businessStepResult, type BusinessStepResult } from "./model/prefill";
+import { skipKey } from "./model/questions";
+import { parseAnswer } from "./model/values";
+import { clearSkipList, rememberSkip } from "./skip-list";
 
 /**
  * The business step's server action. It runs the screen's gate again (the proxy never sees an
@@ -43,4 +57,77 @@ export async function createBusiness(
       done: hrefFor(screenById("owner.onboarding.done"), { businessId }),
     }),
   );
+}
+
+/** A refused answer: the service's problem, with its field errors on the one control. */
+function answerRefused(error: ApiError): ActionState {
+  const state = toActionState<undefined>({ ok: false, error });
+  if (state.status !== "error") return state;
+  const { value, form } = answerFieldErrors(error.fieldErrors);
+  return {
+    status: "error",
+    ...(state.problem === undefined ? {} : { problem: state.problem }),
+    ...(value.length > 0 ? { fieldErrors: { [ANSWER_FIELDS.value]: value } } : {}),
+    ...(form.length > 0 ? { formErrors: form } : {}),
+  };
+}
+
+/**
+ * One answer from the questions step: the value with Save (state known), or Not sure or Does
+ * not apply with no value, stored with `PATCH /v1/businesses/{id}` on the node the checklist
+ * named (and for its year when the attribute is stated per year). A "Not sure" answer joins the
+ * business's skip list so the step moves past it; any other answer leaves it. The step then
+ * renders again with the next question and a note naming what was saved.
+ */
+export async function answerQuestion(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const input = readAnswerForm(formData);
+  if (input === null) return actionFailure(t("question.error.form"));
+  const screen = screenById("owner.onboarding.questions");
+  const session = await requireScreenSession(screen, { businessId: input.businessId });
+
+  const ontology = await getOntology();
+  if (!ontology.ok) return toActionState(ontology);
+  const attribute = attributeOf(ontology.value, input.key);
+  if (attribute === undefined) return actionFailure(t("question.error.unknown"));
+  const parsed = parseAnswer(
+    attribute,
+    { state: input.state, values: input.values },
+    { asOfFy: input.asOfFy, nodeId: input.nodeId },
+  );
+  if (!parsed.ok) return fieldFailure({ [ANSWER_FIELDS.value]: [parsed.error] });
+
+  const updated = await businessGateway({ session }).update(input.businessId, {
+    changes: [parsed.answer],
+  });
+  if (!updated.ok) return answerRefused(updated.error);
+
+  await rememberSkip(
+    input.businessId,
+    skipKey(input.nodeId, input.key),
+    parsed.answer.state === "unsure",
+  );
+  const questions = hrefFor(screen, { businessId: input.businessId });
+  afterMutation({
+    paths: [
+      questions,
+      hrefFor(screenById("owner.onboarding.done"), { businessId: input.businessId }),
+    ],
+  });
+  redirect(withQuery(questions, { saved: input.key }));
+}
+
+/**
+ * Forgets the skip list, so the questions step asks the "Not sure" questions again. A plain
+ * form action: a malformed business id (only a tampered form sends one) does nothing.
+ */
+export async function revisitUnsure(formData: FormData): Promise<void> {
+  const businessId = formData.get(ANSWER_FIELDS.businessId);
+  if (typeof businessId !== "string" || !isUuid(businessId)) return;
+  const screen = screenById("owner.onboarding.questions");
+  await requireScreenSession(screen, { businessId });
+  await clearSkipList(businessId);
+  redirect(hrefFor(screen, { businessId }));
 }

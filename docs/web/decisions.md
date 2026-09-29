@@ -374,3 +374,17 @@ required consents are on file, because the profile service does not check them. 
 reload after adding forgets the panel (the business stays; the list and the business pages show
 it); the page sweep leaves live pages with route parameters (a legal document, a business) to
 their own specs, which visit them with real ids and run axe there.
+
+## D-029: The questions step keeps its own skip list; a missing business is a streamed not-found
+
+2026-09-29. The business API's checklist names an unsure question as the next one again, so a
+step that only followed `next` would ask the same question after every "Not sure". The step keeps
+the items answered "Not sure" in an httpOnly cookie per business (node id and attribute key, a
+day, path `/onboarding`, written only by server actions) and walks the checklist past them; the
+summary lists them and can ask them again. Considered and rejected: the question in the URL
+(the plan keeps answers and questions out of URLs) and a server-side store (none exists for web
+state). The business pages stream behind their `loading.tsx`, so, as Next documents, a business
+that is missing or not the tenant's is the streamed not-found page (status 200, the not-found UI
+and a `noindex` robots tag) rather than a 404 status; the id is checked before any service call.
+A table that can be wider than its column names its scroll container (`scrollLabel` on the kit's
+`Table`) so the region is focusable and axe's scrollable-region rule holds.

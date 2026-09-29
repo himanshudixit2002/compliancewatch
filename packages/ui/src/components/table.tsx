@@ -1,12 +1,26 @@
 import type { ComponentProps } from "react";
 import { cn } from "../lib/cn";
 
-export type TableProps = ComponentProps<"table">;
+export interface TableProps extends ComponentProps<"table"> {
+  /**
+   * Names the scroll container and makes it a focusable region, for a table that can be wider
+   * than its column: a keyboard user tabs to it and scrolls it with the arrow keys.
+   */
+  scrollLabel?: string;
+}
 
 /** Semantic table primitives; give every table a TableCaption and scope on TableHead. */
-export function Table({ className, ...props }: TableProps) {
+export function Table({ className, scrollLabel, ...props }: TableProps) {
+  const region =
+    scrollLabel === undefined
+      ? {}
+      : { role: "region", "aria-label": scrollLabel, tabIndex: 0 as const };
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
+    <div
+      data-slot="table-container"
+      className="relative w-full overflow-x-auto rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus/50"
+      {...region}
+    >
       <table
         data-slot="table"
         className={cn("w-full caption-bottom text-sm", className)}

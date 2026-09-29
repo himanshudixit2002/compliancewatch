@@ -128,6 +128,8 @@ export { NumberField, rangeText } from "./components/number-field";
 export type { NumberFieldProps } from "./components/number-field";
 export { PageHeader } from "./components/page-header";
 export type { PageHeaderProps } from "./components/page-header";
+export { ProgressBar } from "./components/progress-bar";
+export type { ProgressBarProps } from "./components/progress-bar";
 export { REASON_MIN_LENGTH, ReasonDialog } from "./components/reason-dialog";
 export type { ReasonDialogProps } from "./components/reason-dialog";
 export { StatusChip, humaniseStatus } from "./components/status-chip";

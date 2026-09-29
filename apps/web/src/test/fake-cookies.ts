@@ -39,8 +39,9 @@ export class FakeCookieStore {
     return this;
   }
 
-  delete(name: string): this {
-    this.jar.delete(name);
+  /** Like Next's store: a name, or the options naming the cookie (with its path). */
+  delete(nameOrOptions: string | ({ name: string } & Record<string, unknown>)): this {
+    this.jar.delete(typeof nameOrOptions === "string" ? nameOrOptions : nameOrOptions.name);
     return this;
   }
 

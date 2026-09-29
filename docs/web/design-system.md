@@ -71,7 +71,8 @@ and ends with `expect(await runAxe(container)).toHaveNoViolations()`.
 native `<select>`: the browser's listbox already gives keyboard and screen-reader support), Dialog
 (focus trap, Escape, `aria-labelledby`), Sheet (a Dialog sliding in from a side; the mobile
 navigation uses it), Tabs (the panel is focusable after the active trigger and shows the focus
-ring), Table (semantic table primitives with a caption slot), Card, Badge,
+ring), Table (semantic table primitives with a caption slot; `scrollLabel` makes the scroll
+container of a table wider than its column a named, focusable region), Card, Badge,
 Skeleton, Toaster (`sonner` with a polite live region; `toast` is re-exported).
 
 **Composites**, each with its accessibility contract:
@@ -86,6 +87,9 @@ Skeleton, Toaster (`sonner` with a polite live region; `toast` is re-exported).
   a sentence in its description; a native number input changes its value on a scroll and reads
   out poorly. `DateField`: the browser's own date input with `min` and `max`; the value is
   always YYYY-MM-DD.
+- `ProgressBar`: `role="progressbar"` named by its visible label, with `aria-valuenow`, the range
+  and `aria-valuetext`, so a screen reader says "4 of 17 answered" rather than a percentage; the
+  value is clamped and the track has a 3:1 border.
 - `StatusChip`, `Badge`, `Banner`, `Timeline`: the `Tone` vocabulary (`neutral`, `success`,
   `warning`, `danger`, `info`); the text carries the meaning. A danger Banner is `role="alert"`,
   the other tones `role="status"`.
