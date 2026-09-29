@@ -225,6 +225,10 @@ page refers to.
 - `PORT`: what `next dev` and `next start` listen on. `make web-dev` and `make web-e2e` pass
   `WEB_PORT` from the root `.env` (3000 unless changed; a second working copy uses 3200, see
   `docs/onboarding/local-dev.md`). `apps/web/.env.example` lists the variables the app reads.
+- `SERVICE_PORT_BASE` (root `.env`, 8000 unless changed): `make web-stack` starts every service
+  on the base plus 1 to 10 in the Makefile's `SERVICES` order with memory stores and fixed demo
+  settings, `make web-stack-wait` waits for their health, `make web-stack-down` stops them. The
+  app's `CW_WEB_*_URL` values name the same ports (their defaults are the 8000 base).
 - `next.config.ts`: `reactStrictMode`, `poweredByHeader: false`, `transpilePackages` for the UI
   kit (consumed from source), `typedRoutes` (registry hrefs go through `hrefFor()` so typed links
   accept them), and the four static security headers (`vercel.json` carries the same set).

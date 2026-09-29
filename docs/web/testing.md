@@ -105,7 +105,10 @@ pnpm --filter web test                          # unit tests with coverage
 pnpm --filter web exec vitest run src/shared    # one directory
 pnpm --filter web exec vitest run -t "sitemap"  # tests whose name matches
 make web-e2e-install                            # Chromium, once per machine (no install script runs)
+make web-stack && make web-stack-wait           # every service on SERVICE_PORT_BASE+1..10, memory stores
+make web-stack-logs SERVICE=rulebook            # one service's log (every log without SERVICE)
 make web-e2e                                    # build, then Playwright on WEB_PORT from .env
+make web-stack-down                             # stop the services (memory stores forget their rows)
 pnpm --filter web exec playwright test e2e/home.spec.ts        # one spec (needs a built app)
 pnpm --filter web exec playwright test -g "skip link"          # tests whose title matches
 pnpm --filter web exec playwright test --ui                    # the Playwright UI
@@ -118,6 +121,15 @@ build`) and, if a dev server is on the port, that server is reused. Reports land
 `apps/web/playwright-report/` and `apps/web/test-results/`, both git-ignored. Typed links are
 checked against `.next/types`, which `next build`, `next dev` and `next typegen` write; after
 adding a route, run one of them before relying on `tsc` for link errors.
+
+`make web-stack` is the services the app talks to, started as `make run` would start each one
+but all at once and on memory stores: pids and logs under `var/web-stack`, the profile's static
+GSTIN lookup, the billing provider `none`, the publish flow and the KAG layer off, and the
+rulebook write token from `.env` or the placeholder `local-write-token`, so a fresh clone and CI
+see the same states (`docs/onboarding/local-dev.md`, "Running a second clone", has the ports).
+No page on `main` calls a service yet, so the suite passes without the stack; a spec for a page
+that reads a service starts with the stack up and seeded, and the CI job brings it up before
+Playwright.
 
 `make check` runs every gate CI runs without Docker, including `web-screens-check`
 (`docs/web/screens.md` matches the registry) and `openapi-ts-check` (the TypeScript types under

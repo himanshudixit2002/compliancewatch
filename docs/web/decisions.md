@@ -224,3 +224,20 @@ renders `<IdempotencyKeyInput />` (one UUID per render of the form) and an actio
 `IDEMPOTENT_OPERATIONS`, empty today. Consequences: when a route starts reading the header, the
 operation's name is added to the set and no form or action changes; a form value that is not a
 UUID is ignored, so the hidden field cannot inject a header.
+
+## D-019: The local service stack for the web app runs on memory stores with fixed demo settings
+
+2026-09-29. Every screen is built against real services, so the daily loop and the e2e job need
+all ten of them running, and they must look the same on a fresh clone and on CI. `make
+web-stack` starts each service the way `make run` does (uvicorn through `uv run --package`),
+but all at once on `SERVICE_PORT_BASE`+1 to +10, with pids and logs under `var/web-stack`, and
+with the stack's settings fixed in the recipe instead of inherited from `.env`: memory stores
+for identity, profile, rulebook, obligation and the gateway ledger (no container), the
+profile's built-in static GSTIN lookup (the demo GSTIN pre-fills), the billing provider `none`
+(subscribe answers its honest 503), the publish flow and the KAG layer off, the inter-service
+URLs on the same base, and the rulebook write token from `.env` or the placeholder
+`local-write-token`. `STORE=postgres` is the persistent option on the compose Postgres.
+Consequences: memory stores forget their rows when the stack stops, so `make web-seed` runs
+after every `make web-stack`; a second working copy only moves `SERVICE_PORT_BASE`; the web
+app's `CW_WEB_*_URL` defaults match the 8000 base; `make web-e2e` stays a build plus Playwright,
+because no page on `main` calls a service yet, and a spec that needs one runs with the stack up.

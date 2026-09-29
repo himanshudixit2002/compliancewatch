@@ -414,7 +414,7 @@ openapi-public: check-uv ## Merge the operations the services tag public into pa
 	$(UV) run python packages/contracts/scripts/generate_rest.py
 
 # ---- Web app (apps/web, packages/ui) ---------------------------------------------------------
-.PHONY: web-dev web-e2e-install web-e2e web-screens web-screens-check openapi-ts openapi-ts-check
+.PHONY: web-dev web-stack web-stack-wait web-stack-down web-stack-logs web-e2e-install web-e2e web-screens web-screens-check openapi-ts openapi-ts-check
 CHECKS += web-screens-check openapi-ts-check
 # The port comes from WEB_PORT in .env (3000 unless the file says otherwise); a value already in
 # the environment wins, as for every variable the recipes source.
@@ -422,6 +422,78 @@ CHECKS += web-screens-check openapi-ts-check
 web-dev: check-pnpm ## next dev on WEB_PORT from .env; /admin lists the internal tools, /design the UI kit
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	PORT=$${WEB_PORT:-3000} $(PNPM) --filter web dev
+
+# The services behind the web app, every one on SERVICE_PORT_BASE+1 .. +10 in the SERVICES order
+# (8001-8010 unless .env moves the base; a second clone sets 9200), started with nohup, pids and
+# logs under var/web-stack. The stack is defined here rather than inherited from .env so a fresh
+# clone and CI see the same states: memory stores (no container), the profile's built-in static
+# GSTIN lookup (the demo GSTIN pre-fills), the billing provider "none" (subscribe answers 503),
+# the publish flow and the KAG layer off, the inter-service URLs on the same base, and the
+# rulebook write token from .env or the placeholder local-write-token (not a secret). Memory
+# stores lose their rows when the stack stops; STORE=postgres runs every store on the compose
+# Postgres instead (make dev and make migrate first), with the schema search path make run uses.
+WEB_STACK_DIR := var/web-stack
+WEB_STACK_WAIT_SECONDS ?= 60
+STORE ?= memory
+
+web-stack: check-uv ## Start every service on SERVICE_PORT_BASE+1..10 with memory stores (pids and logs in var/web-stack): make web-stack [STORE=postgres]
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	[ "$(STORE)" = "memory" ] || [ "$(STORE)" = "postgres" ] || { echo "usage: make web-stack [STORE=memory|postgres]"; exit 1; }; \
+	mkdir -p $(WEB_STACK_DIR); base=$${SERVICE_PORT_BASE:-8000}; i=0; \
+	token="$${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}"; \
+	echo "web stack: services on $$((base+1))-$$((base+10)), $(STORE) stores"; \
+	for svc in $(SERVICES); do \
+	  i=$$((i+1)); port=$$((base+i)); pidfile=$(WEB_STACK_DIR)/$$svc.pid; \
+	  if [ -f "$$pidfile" ] && kill -0 "$$(cat "$$pidfile")" 2>/dev/null; then \
+	    echo "  $$svc already running (pid $$(cat "$$pidfile")) on http://localhost:$$port"; continue; fi; \
+	  case "$$svc" in profile) pkg=profile_service ;; eval) pkg=eval_service ;; *) pkg=$$(echo "$$svc" | tr - _) ;; esac; \
+	  case "$$svc" in applicability-engine) schema=applicability ;; llm-gateway) schema=llm_gateway ;; *) schema=$$svc ;; esac; \
+	  url="$${CW_DATABASE_URL:-}"; \
+	  if [ "$(STORE)" = "postgres" ]; then \
+	    url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$${schema}%2Cpublic"; \
+	  fi; \
+	  CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$$schema" \
+	  CW_IDENTITY_STORE=$(STORE) CW_PROFILE_STORE=$(STORE) CW_RULEBOOK_STORE=$(STORE) CW_OBLIGATION_STORE=$(STORE) CW_LLM_LEDGER=$(STORE) \
+	  CW_PROFILE_GSTIN_LOOKUP=static CW_BILLING_PROVIDER=none CW_RULEBOOK_PUBLISH_ENABLED=false CW_QA_KAG_ENABLED=false \
+	  CW_RULEBOOK_WRITE_TOKEN="$$token" \
+	  CW_PROFILE_URL="http://localhost:$$((base+2))" CW_RULEBOOK_URL="http://localhost:$$((base+3))" \
+	  CW_OBLIGATION_URL="http://localhost:$$((base+5))" CW_LLM_GATEWAY_URL="http://localhost:$$((base+8))" \
+	  nohup $(UV) run --package compliancewatch-$$svc uvicorn $$pkg.main:app --host 127.0.0.1 --port $$port \
+	    > $(WEB_STACK_DIR)/$$svc.log 2>&1 & \
+	  echo $$! > "$$pidfile"; \
+	  echo "  $$svc  http://localhost:$$port  (log $(WEB_STACK_DIR)/$$svc.log)"; \
+	done; \
+	echo "Next: make web-stack-wait, then make web-seed"
+
+web-stack-wait: ## Wait until every web-stack service answers /health (WEB_STACK_WAIT_SECONDS, default 60)
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	base=$${SERVICE_PORT_BASE:-8000}; deadline=$$((SECONDS + $(WEB_STACK_WAIT_SECONDS))); status=0; i=0; \
+	for svc in $(SERVICES); do \
+	  i=$$((i+1)); port=$$((base+i)); \
+	  until curl -sf "http://localhost:$$port/health" >/dev/null 2>&1; do \
+	    if [ $$SECONDS -ge $$deadline ]; then break; fi; sleep 0.5; \
+	  done; \
+	  if curl -sf "http://localhost:$$port/health" >/dev/null 2>&1; then echo "  $$svc healthy on http://localhost:$$port"; \
+	  else echo "error: $$svc did not answer on http://localhost:$$port/health (see $(WEB_STACK_DIR)/$$svc.log)"; status=1; fi; \
+	done; \
+	exit $$status
+
+web-stack-down: ## Stop the web-stack services and remove their pid files (logs stay in var/web-stack)
+	@for pidfile in $(WEB_STACK_DIR)/*.pid; do \
+	  [ -f "$$pidfile" ] || continue; \
+	  svc=$$(basename "$$pidfile" .pid); pid=$$(cat "$$pidfile"); \
+	  if kill -0 "$$pid" 2>/dev/null; then \
+	    pkill -TERM -P "$$pid" 2>/dev/null; kill -TERM "$$pid" 2>/dev/null; \
+	    n=0; while kill -0 "$$pid" 2>/dev/null && [ $$n -lt 20 ]; do n=$$((n+1)); sleep 0.25; done; \
+	    if kill -0 "$$pid" 2>/dev/null; then pkill -KILL -P "$$pid" 2>/dev/null; kill -KILL "$$pid" 2>/dev/null; fi; \
+	    echo "  $$svc stopped (pid $$pid)"; \
+	  else echo "  $$svc was not running"; fi; \
+	  rm -f "$$pidfile"; \
+	done; true
+
+web-stack-logs: ## Tail a web-stack service's log: make web-stack-logs SERVICE=identity (every log without SERVICE)
+	@if [ -n "$(SERVICE)" ]; then tail -n 100 -f $(WEB_STACK_DIR)/$(SERVICE).log; \
+	else for f in $(WEB_STACK_DIR)/*.log; do [ -f "$$f" ] || continue; echo "==> $$f"; tail -n 20 "$$f"; done; fi
 
 web-e2e-install: check-pnpm ## Download Chromium for Playwright, once per machine (the package has no install script)
 	$(PNPM) --filter web e2e:install

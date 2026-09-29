@@ -140,6 +140,10 @@ the registry test checks they exist. Playwright reports land in `playwright-repo
 `/design` for the UI kit, `/sitemap` for every screen and its status), `pnpm --filter web
 build`, `test`, `lint`, `typecheck` (both tsconfigs), `e2e`. Copy `.env.example` to
 `.env.local` for anything that must differ from the defaults; the build needs no variable at all.
+The services the app talks to come up with `make web-stack && make web-stack-wait` (every
+service on `SERVICE_PORT_BASE`+1 to +10 from the root `.env`, memory stores, pids and logs in
+`var/web-stack`; `make web-stack-logs SERVICE=<name>` and `make web-stack-down`), and
+`.env.local`'s `CW_WEB_*_URL` values point the app at them when the base is not 8000.
 `pnpm --filter web screens:gen` regenerates `docs/web/screens.md` (`screens:check` compares,
 `make web-screens-check` in `make check`; `screens:audit` lists the awaited routes still absent
 from the committed specs). `next dev` maintains `AGENTS.md` (Next.js agent rules); keep it
