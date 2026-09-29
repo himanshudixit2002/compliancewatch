@@ -9,8 +9,9 @@ class UnknownTemplateError(DomainError):
     type_slug: ClassVar[str] = "notification-template-unknown"
     title: ClassVar[str] = "Notification template not found"
 
-    def __init__(self, key: str, language: str) -> None:
-        super().__init__(f"no template {key!r} for language {language!r}")
+    def __init__(self, key: str, language: str | None = None) -> None:
+        where = "" if language is None else f" for language {language!r}"
+        super().__init__(f"no template {key!r}{where}")
 
 
 class MissingPlaceholderError(DomainError):
