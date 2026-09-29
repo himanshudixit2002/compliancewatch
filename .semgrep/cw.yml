@@ -1,0 +1,100 @@
+# Repository rules for Semgrep, run by `make sast` and the sast CI job next to the registry packs.
+# Every rule is severity ERROR, so a finding fails the scan. cw.py holds the annotated cases that
+# `semgrep --test .semgrep` checks: `# ruleid:` above a line that must match, `# ok:` above one that
+# must not. A rule change comes with the case that shows it.
+rules:
+  - id: cw-sql-built-by-string-formatting
+    languages: [python]
+    severity: ERROR
+    message: >-
+      SQL text built by string formatting. Put values in bind parameters instead
+      (text("... WHERE id = :id") with {"id": value}) or build the statement with SQLAlchemy
+      Core, so that no value is ever spliced into the SQL.
+    metadata:
+      category: security
+      cwe: "CWE-89: Improper Neutralization of Special Elements used in an SQL Command"
+    paths:
+      include:
+        - "/services/*/src/"
+    patterns:
+      - pattern-either:
+          - pattern: sqlalchemy.text($SQL, ...)
+          - pattern: $RECEIVER.execute($SQL, ...)
+          - pattern: $RECEIVER.exec_driver_sql($SQL, ...)
+      - pattern-either:
+          - pattern: $F(f"...", ...)
+          - pattern: $F("...".format(...), ...)
+          - pattern: $F("..." % $ARGS, ...)
+          - patterns:
+              - pattern-inside: |
+                  $QUERY = f"..."
+                  ...
+              - pattern: $F($QUERY, ...)
+          - patterns:
+              - pattern-inside: |
+                  $QUERY = "...".format(...)
+                  ...
+              - pattern: $F($QUERY, ...)
+
+  - id: cw-secret-compared-with-equality
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A secret is compared with == or !=, which returns as soon as a byte differs and so leaks
+      its length and prefix through timing. Compare with hmac.compare_digest(given, expected).
+    metadata:
+      category: security
+      cwe: "CWE-208: Observable Timing Discrepancy"
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-either:
+                  - pattern: $SECRET == $OTHER
+                  - pattern: $SECRET != $OTHER
+              - metavariable-regex:
+                  metavariable: $SECRET
+                  regex: (?i)^[\w.]*?(token|secret|signature|passw(or)?d|api_?key|credential)(\.get_secret_value\(\))?$
+          - patterns:
+              - pattern-either:
+                  - pattern: $OTHER == $SECRET
+                  - pattern: $OTHER != $SECRET
+              - metavariable-regex:
+                  metavariable: $SECRET
+                  regex: (?i)^[\w.]*?(token|secret|signature|passw(or)?d|api_?key|credential)(\.get_secret_value\(\))?$
+      # Checks against an empty string, None, a boolean or a number test presence, not the value.
+      - metavariable-regex:
+          metavariable: $OTHER
+          regex: ^(?!(None|True|False)$|-?\d|["']).+
+
+  - id: cw-tls-verification-disabled
+    languages: [python]
+    severity: ERROR
+    message: >-
+      TLS certificate verification is turned off, so any host can answer in place of the real one.
+      Keep the default (verify=True) or pass the path of a CA bundle.
+    metadata:
+      category: security
+      cwe: "CWE-295: Improper Certificate Validation"
+    pattern: $CALL(..., verify=False, ...)
+
+  - id: cw-yaml-load-without-safe-loader
+    languages: [python]
+    severity: ERROR
+    message: >-
+      yaml.load without SafeLoader can build arbitrary Python objects from the document. Use
+      yaml.safe_load, or pass Loader=yaml.SafeLoader.
+    metadata:
+      category: security
+      cwe: "CWE-502: Deserialization of Untrusted Data"
+    patterns:
+      - pattern-either:
+          - pattern: yaml.load(...)
+          - pattern: yaml.load_all(...)
+          - pattern: yaml.unsafe_load(...)
+          - pattern: yaml.unsafe_load_all(...)
+          - pattern: yaml.full_load(...)
+          - pattern: yaml.full_load_all(...)
+      - pattern-not: yaml.$LOAD(..., Loader=yaml.SafeLoader, ...)
+      - pattern-not: yaml.$LOAD(..., Loader=yaml.CSafeLoader, ...)
+      - pattern-not: yaml.$LOAD(..., yaml.SafeLoader)
+      - pattern-not: yaml.$LOAD(..., yaml.CSafeLoader)

@@ -1,5 +1,8 @@
-# Nightly evals against a real model (guide section 8: scripted model in CI, real providers
-# nightly). Needs the repository secret CW_AI_GATEWAY_API_KEY (a Vercel AI Gateway key); until the
+# Nightly jobs (guide sections 8 and 17): evals against a real model (a scripted model runs in CI),
+# a dependency rescan that catches advisories published against unchanged code, and the contract
+# property tests with random inputs and more examples than CI runs. When a job fails, the report
+# job opens one issue labelled nightly-failure, or comments on the one already open.
+# The evals need the repository secret CW_AI_GATEWAY_API_KEY (a Vercel AI Gateway key); until the
 # maintainer adds it the job prints what to do and exits green, so the schedule never pages anyone
 # for a missing account.
 name: nightly
@@ -64,3 +67,93 @@ jobs:
             evals/reports/
             gateway.log
           if-no-files-found: ignore
+
+  dependency-rescan:
+    name: Dependency and config rescan (trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read # upload-sarif reads the workflow run; a private repository requires it
+      security-events: write # findings go to code scanning
+    steps:
+      - uses: actions/checkout@v7
+      # The dependency-scan job of ci.yml runs only when a lockfile, a Dockerfile or the Trivy
+      # settings change. This run repeats it every night against the day's advisory database.
+      - name: Vulnerabilities and misconfigurations (fails on a finding)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          trivy-config: .trivy.yaml
+          version: v0.74.0 # keep in step with TRIVY_IMAGE in the Makefile
+          cache-dir: ${{ runner.temp }}/trivy
+      - name: The same findings as SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          trivy-config: .trivy.yaml
+          format: sarif
+          output: trivy.sarif
+          exit-code: "0"
+          limit-severities-for-sarif: "true"
+          skip-setup-trivy: "true"
+          cache: "false" # the first step restored the database into cache-dir
+          cache-dir: ${{ runner.temp }}/trivy
+      - name: Findings to code scanning
+        if: always() && hashFiles('trivy.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
+  contract-fuzz:
+    name: Contract property tests (nightly Hypothesis profile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --all-packages --locked
+      # CI runs 25 derandomized examples per API operation; the nightly profile (root
+      # conftest.py) runs 200 random ones, so each night tries new inputs. A failure prints the
+      # example and the blob that reproduces it.
+      - name: Contract tests, schemathesis properties included
+        env:
+          HYPOTHESIS_PROFILE: nightly
+        run: uv run pytest -m contract
+
+  report:
+    name: Open or update the nightly-failure issue
+    needs: [evals-nightly, dependency-rescan, contract-fuzz]
+    # Runs when a job failed or timed out, for the schedule and for manual runs on main; a manual
+    # run on another branch is watched by whoever started it, and a run cancelled by hand reports
+    # nothing.
+    if: >-
+      !cancelled() && (github.event_name == 'schedule' || github.ref == 'refs/heads/main') &&
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: One open issue labelled nightly-failure, with a comment for each failing night
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NEEDS: ${{ toJSON(needs) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          failed=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | "- \(.key): \(.value.result)"' <<< "$NEEDS")
+          body=$(printf 'The nightly run of %s failed.\n\n%s\n\nRun: %s\n' "$(date -u +%Y-%m-%d)" "$failed" "$RUN_URL")
+          gh label create nightly-failure --color B60205 --description "A job in the nightly workflow failed" --force
+          number=$(gh issue list --label nightly-failure --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "Nightly run failing" --label nightly-failure --body "$body"
+          fi

@@ -470,7 +470,7 @@
             "type": "string"
           },
           "month": {
-            "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$",
+            "pattern": "^2[0-9]{3}-(0[1-9]|1[0-2])$",
             "title": "Month",
             "type": "string"
           },
@@ -645,6 +645,16 @@
             },
             "description": "Successful Response"
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -817,7 +827,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$",
+                  "pattern": "^2[0-9]{3}-(0[1-9]|1[0-2])$",
                   "type": "string"
                 },
                 {

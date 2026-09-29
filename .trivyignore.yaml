@@ -1,0 +1,15 @@
+# Accepted Trivy findings (make deps-scan, the dependency-scan CI job, the nightly rescan and the
+# image scans all read this file). Fix a finding when you can: bump the package or change the
+# Dockerfile. Add an entry only when there is no fix yet or the finding does not apply, and give
+# every entry a statement (why it is safe to accept, and who decided) and an expired_at date at
+# most 90 days out. Once that date passes Trivy reports the finding again. Entries are removed in
+# the pull request that makes them unnecessary.
+#
+# vulnerabilities:
+#   - id: CVE-2026-00000
+#     paths:
+#       - uv.lock
+#     statement: Reached only through the dev tooling, never in a service image; owner decision.
+#     expired_at: 2026-12-31
+vulnerabilities: []
+misconfigurations: []

@@ -6,9 +6,9 @@ product problem. Please report anything you find privately.
 ## How to report
 
 - Do not open a public issue or pull request for a vulnerability.
-- Send the report to the repository owner directly: open a private security advisory on the
-  repository if your account can, otherwise use the contact below.
-- Contact: <!-- fill in: security email or handle of the maintainer -->
+- Report it through GitHub private vulnerability reporting: open the repository's Security tab
+  and choose 'Report a vulnerability'. The report is a draft security advisory that only you and
+  the maintainer can see; the discussion and the fix stay in it until the advisory is published.
 - Include what you found, where (file, endpoint, environment), how to reproduce it, and what
   you think the impact is. A proof of concept is welcome; exploiting real data is not.
 
@@ -30,6 +30,18 @@ product problem. Please report anything you find privately.
 ## Supported versions
 
 Only the `main` branch is supported. Fixes land there and ship with the next deployment.
+
+## Scans
+
+Every pull request that changes code runs Semgrep: the registry packs for Python, TypeScript,
+Dockerfiles and GitHub Actions, and the repository's own rules in `.semgrep`. One that changes a
+lockfile, a Dockerfile or the infrastructure config runs Trivy, which looks for vulnerable
+dependencies in `uv.lock` and `pnpm-lock.yaml` and for misconfigured Dockerfiles. Both report to
+the repository's code scanning alerts. A Semgrep finding of severity ERROR, or a HIGH or
+CRITICAL Trivy finding that has a fix, blocks the merge. Trivy repeats its scan every night
+against the day's advisories. Dependabot proposes dependency updates every week, and security
+updates as advisories appear. A finding that is accepted rather than fixed is listed in
+`.trivyignore.yaml` with the reason and an expiry date.
 
 ## Secrets
 

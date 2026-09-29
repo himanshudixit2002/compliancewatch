@@ -151,7 +151,7 @@ py-format: check-uv ## ruff format and ruff check --fix
 	$(UV) run ruff format .
 	$(UV) run ruff check --fix .
 
-py-typecheck: check-uv ## mypy --strict per package (src, tests, migrations/env.py) and the root conftest
+py-typecheck: check-uv ## mypy --strict per package (src, tests, migrations/env.py), the root conftest and the repo scripts
 	@status=0; \
 	for d in $(PY_DIRS); do \
 	  targets="$$d/src"; \
@@ -160,7 +160,7 @@ py-typecheck: check-uv ## mypy --strict per package (src, tests, migrations/env.
 	  echo "mypy $$targets"; \
 	  $(UV) run mypy $$targets || status=1; \
 	done; \
-	$(UV) run mypy conftest.py packages/contracts/scripts || status=1; \
+	$(UV) run mypy conftest.py packages/contracts/scripts infra/scripts || status=1; \
 	exit $$status
 
 py-test: check-uv ## pytest: unit and contract tests with the coverage gate (no Docker needed)
@@ -200,6 +200,11 @@ ts-dev: check-pnpm ## next dev (:3000) and whatsapp-bot (:8080) with reload
 
 # ---- Composition (guide sections 13, 17, 19) -------------------------------------------------
 .PHONY: install lint format typecheck test check eval label demo runbooks-check migrate run worker relay seed openapi contracts contracts-check hooks ci-lint
+# The gates `make check` runs. A package adds its own with `CHECKS += <target>` in its section.
+# The prerequisites of check expand a second time when make runs them (.SECONDEXPANSION below),
+# so a `CHECKS +=` line counts wherever it sits in this file.
+CHECKS := lint typecheck test importlint lock-check contracts-check runbooks-check
+
 install: py-sync ts-install ## Install both toolchains
 
 lint: py-lint ts-lint ## Lint both sides (CI step 1)
@@ -210,7 +215,8 @@ typecheck: py-typecheck ts-typecheck ## mypy --strict and tsc --strict (CI step 
 
 test: py-test ts-test ## Unit and contract tests on both sides (CI step 2)
 
-check: lint typecheck test importlint lock-check contracts-check runbooks-check ## Everything CI runs before integration tests
+.SECONDEXPANSION:
+check: $$(CHECKS) ## Everything CI runs before integration tests (the gates listed in CHECKS)
 
 runbooks-check: check-uv ## Every Prometheus alert links an existing runbook (guide section 18)
 	$(UV) run python infra/scripts/check_alert_runbooks.py
@@ -281,8 +287,9 @@ openapi: check-uv ## Export a service's OpenAPI spec: make openapi SERVICE=llm-g
 contracts: check-uv check-pnpm ## Generate the event clients (pydantic + TypeScript) from packages/contracts/events/schemas
 	$(UV) run python packages/contracts/scripts/generate_events.py
 
-contracts-check: check-uv check-pnpm ## Event schemas pass the 2020-12 metaschema and the generated clients match them
+contracts-check: check-uv check-pnpm ## Event schemas pass the 2020-12 metaschema, every topic in code has one, and the generated clients match them
 	$(UV) run check-jsonschema --check-metaschema packages/contracts/events/schemas/*.json
+	$(UV) run python packages/contracts/scripts/check_topics.py
 	@$(MAKE) --no-print-directory contracts
 	@drift=$$(git status --porcelain -- packages/contracts/clients/python/src/cw_contracts/events packages/contracts/clients/typescript/events); \
 	if [ -n "$$drift" ]; then echo "$$drift"; echo "error: generated event clients are out of date; commit the output of make contracts"; exit 1; fi
@@ -294,3 +301,67 @@ hooks: ## Install the pre-commit and commit-msg hooks
 ci-lint: ## Validate GitHub Actions workflows and the pre-commit config without running them
 	actionlint -color
 	pre-commit validate-config
+
+# ---- Migration lint (guide section 17: expand-contract; tenant isolation by row-level security)
+.PHONY: migrations-check migrations-catalog
+CHECKS += migrations-check
+
+migrations-check: check-uv ## Migration files: one head per service, names match revisions, downgrades, marked contract steps
+	$(UV) run python infra/scripts/check_migrations.py static
+
+migrations-catalog: check-uv ## After make migrate: tenant tables have forced row-level security (rules in infra/scripts/migration_lint.toml)
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	$(UV) run python infra/scripts/check_migrations.py catalog \
+	  --dsn "postgresql://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}"
+
+# ---- Alert rules (guide section 18) ---------------------------------------------------------
+.PHONY: alerts-check
+# promtool from the Prometheus image the compose stack runs, so the rules are checked by the same
+# version that loads them.
+PROMETHEUS_IMAGE = $(shell awk '/image: prom\/prometheus:/ { print $$2; exit }' docker-compose.yml)
+PROMTOOL = docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/dev/prometheus:/rules:ro" $(PROMETHEUS_IMAGE)
+
+alerts-check: check-docker ## promtool: alert rules parse and their unit tests pass (infra/dev/prometheus/alerts.test.yml)
+	$(PROMTOOL) check rules /rules/alerts.yml
+	$(PROMTOOL) test rules /rules/alerts.test.yml
+
+# ---- OpenAPI gates (guide section 17 step 3: every endpoint has a schema and a contract test)
+.PHONY: openapi-check openapi-compat
+CHECKS += openapi-check
+BASE ?= origin/main
+
+openapi-check: check-uv ## Every service that serves API routes commits its spec and a contract test
+	@status=0; \
+	for svc in $(SERVICES); do \
+	  CW_LOG_LEVEL=WARNING $(UV) run --package compliancewatch-$$svc \
+	    python packages/contracts/scripts/check_openapi_coverage.py services/$$svc || status=1; \
+	done; \
+	exit $$status
+
+openapi-compat: check-uv ## Committed specs break no client of a base ref: make openapi-compat [BASE=origin/main]
+	$(UV) run python packages/contracts/scripts/check_openapi_compat.py --base-ref $(BASE)
+
+# ---- Security scans (guide section 17: SAST and dependency scanning) -------------------------
+.PHONY: sast deps-scan
+# Pinned images. The sast CI job runs this target; the dependency-scan job runs the same Trivy
+# version through its action, so bump both together.
+SEMGREP_IMAGE := semgrep/semgrep:1.178.0
+TRIVY_IMAGE := aquasec/trivy:0.74.0
+SEMGREP_PACKS := p/python p/typescript p/dockerfile p/github-actions
+SEMGREP = docker run --rm -v "$(CURDIR):/src" --workdir /src $(SEMGREP_IMAGE) semgrep
+
+sast: check-docker ## Semgrep: registry packs and the rules in .semgrep; an ERROR finding fails (writes semgrep.sarif)
+	$(SEMGREP) scan $(addprefix --config ,$(SEMGREP_PACKS)) --config .semgrep \
+	  --metrics off --severity ERROR --error --sarif-output=semgrep.sarif
+	$(SEMGREP) --test --metrics off --config .semgrep/cw.yml .semgrep/cw.py
+
+deps-scan: check-docker ## Trivy: fixable HIGH and CRITICAL vulnerabilities and misconfigurations (settings in .trivy.yaml)
+	docker run --rm -v "$(CURDIR):/src:ro" --workdir /src -v compliancewatch-trivy-cache:/root/.cache/trivy \
+	  $(TRIVY_IMAGE) fs --config .trivy.yaml .
+
+# ---- CI gate (the one check branch protection requires) ------------------------------------
+.PHONY: ci-gate-check
+CHECKS += ci-gate-check
+
+ci-gate-check: check-uv ## Every ci.yml job is in the needs of the required "CI gate" job
+	$(UV) run python infra/scripts/check_ci_gate.py

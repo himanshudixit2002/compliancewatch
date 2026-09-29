@@ -1,0 +1,19 @@
+# Paths the Semgrep scan skips (make sast and the sast CI job). The scan reads only files that git
+# tracks. A .semgrepignore replaces Semgrep's built-in list, so that list is repeated here.
+node_modules/
+build/
+dist/
+vendor/
+.env/
+.venv/
+.tox/
+*.min.js
+.npm/
+.yarn/
+.semgrep_logs/
+# Tests hold fake tokens and fixed values on purpose and never run in a deployment.
+test/
+tests/
+*_test.go
+# The cases for the repository rules: insecure code those rules must find.
+.semgrep/

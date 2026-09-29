@@ -53,6 +53,19 @@ def test_preferences_round_trip(client: TestClient) -> None:
     assert bad.status_code == 422
 
 
+def test_quiet_hours_past_23_59_are_a_422_problem(client: TestClient) -> None:
+    body = {
+        "opted_in": True,
+        "source": "api",
+        "quiet_hours_start": "24:00",
+        "quiet_hours_end": "08:00",
+    }
+    response = client.put(f"/v1/notification/preferences/whatsapp/{PHONE}", json=body)
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["errors"][0]["loc"] == ["body", "quiet_hours_start"]
+
+
 def test_send_needs_a_tenant_then_reports_the_disabled_channel(client: TestClient) -> None:
     unauthenticated = client.post("/v1/notification/send", json=send_body())
     assert unauthenticated.status_code == 401

@@ -1,8 +1,15 @@
 # CI (guide section 17). Implemented: 1 lint + type-check, 2 unit tests with coverage gate,
-# 3 contract checks (import-linter, the OpenAPI spec per service through its contract test, and
-# the event schemas: metaschema, golden examples, generated clients in sync, backward compatibility
-# against the base branch by example replay and by the Redpanda schema registry; migration lint is
-# TODO), a compose dev-stack smoke, and secrets scanning. Steps 4-7 are listed as TODO at the end.
+# 3 contract checks (import-linter; the OpenAPI spec per service through its contract test, a
+# committed spec for every service that serves API routes, and backward compatibility of the specs
+# against the base branch; the event schemas: metaschema, a schema for every event topic in code,
+# golden examples, generated clients in sync, backward compatibility against the base branch by
+# example replay and by the Redpanda schema registry; the migration lint's file rules in the ops
+# job and its catalog rules in the dev-stack job), 4 integration tests (testcontainers) for the
+# packages a change affects, an ops job (runbook links, promtool rules, actionlint), a compose
+# dev-stack smoke, secrets scanning, SAST (semgrep) and a dependency and config scan (trivy), both
+# reported to code scanning. The job "CI gate" needs every other job and is the one check branch
+# protection requires; infra/scripts/check_ci_gate.py fails when a job is missing from its needs.
+# Steps 5-7 are listed as TODO at the end.
 name: ci
 
 on:
@@ -36,6 +43,10 @@ jobs:
       contracts: ${{ steps.filter.outputs.contracts }}
       schemas: ${{ steps.filter.outputs.schemas }}
       evals: ${{ steps.filter.outputs.evals }}
+      ops: ${{ steps.filter.outputs.ops }}
+      integration_targets: ${{ steps.integration.outputs.targets }}
+      sast: ${{ steps.filter.outputs.sast }}
+      dependencies: ${{ steps.filter.outputs.dependencies }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -49,12 +60,15 @@ jobs:
               - 'packages/py-common/**'
               - 'packages/contracts/**'
               - 'evals/**'
+              - 'tools/**'
               - 'pyproject.toml'
               - 'uv.lock'
               - '.python-version'
               - 'conftest.py'
               - 'Makefile'
               - '.github/workflows/ci.yml'
+              - 'infra/scripts/**' # the repository checks: ruff, mypy and their unit tests
+              - '.trivyignore.yaml' # its unit test holds every entry to a statement and an expiry
             typescript:
               - 'apps/**'
               - 'packages/ui/**'
@@ -82,6 +96,8 @@ jobs:
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - '.github/workflows/ci.yml'
+              - 'services/*/src/**' # check_topics: every event class in code has a schema
+              - 'packages/*/src/**'
             schemas:
               - 'packages/contracts/events/schemas/**'
             evals:
@@ -116,6 +132,60 @@ jobs:
               - 'uv.lock'
               - '.python-version'
               - '.github/workflows/ci.yml'
+            ops:
+              - 'infra/**'
+              - 'docs/runbooks/**'
+              - 'services/*/migrations/**'
+              - '.github/**'
+              - 'Makefile'
+              - 'pyproject.toml'
+              - 'docker-compose.yml' # alerts-check runs promtool from the compose Prometheus image
+            sast: # code the semgrep packs and the rules in .semgrep read
+              - 'services/**'
+              - 'packages/**'
+              - 'apps/**'
+              - 'evals/**'
+              - 'tools/**'
+              - 'infra/**'
+              - 'conftest.py'
+              - 'eslint.config.mjs'
+              - '.semgrep/**'
+              - '.semgrepignore'
+              - '.github/workflows/**'
+              - 'Makefile'
+            dependencies: # what trivy reads: lockfiles, Dockerfiles, infrastructure config
+              - 'uv.lock'
+              - 'pnpm-lock.yaml'
+              - '**/Dockerfile'
+              - 'infra/**'
+              - '.trivy.yaml'
+              - '.trivyignore.yaml'
+              - '.github/workflows/ci.yml'
+      - uses: dorny/paths-filter@v4
+        id: changed
+        with:
+          list-files: json
+          filters: |
+            any:
+              - '**'
+      - name: Integration test targets the change affects
+        id: integration
+        env:
+          CHANGED: ${{ steps.changed.outputs.any_files }}
+        # Every directory holding tests/integration is a target. A change to a shared path runs all
+        # of them; otherwise a target runs when a changed file lies under its directory.
+        run: |
+          all=$(git ls-files '*/tests/integration/*.py' | sed 's#/tests/integration/.*##' | sort -u \
+            | jq -Rcs 'split("\n") | map(select(length > 0))')
+          shared='^(packages/(py-common|domain-kernel|ontology)/|(pyproject\.toml|uv\.lock|\.python-version|conftest\.py|Makefile|\.github/workflows/ci\.yml)$)'
+          if jq -e --arg shared "$shared" 'any(.[]; test($shared))' <<< "$CHANGED" > /dev/null; then
+            targets=$all
+          else
+            targets=$(jq -c --argjson changed "$CHANGED" \
+              '[.[] as $dir | select(any($changed[]; startswith($dir + "/"))) | $dir]' <<< "$all")
+          fi
+          echo "integration targets: $targets"
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
 
   python:
     name: Python (ruff, mypy, import-linter, pytest)
@@ -138,11 +208,16 @@ jobs:
       - name: Contract check - import boundaries (import-linter)
         run: make importlint
       # Section 17 step 3: the OpenAPI spec is covered per service by its contract test (pytest
-      # step); the event schemas by the contracts job below. TODO: migration lint (tenant_id + RLS).
+      # step); the event schemas by the contracts job below; migration files by the ops job, and
+      # tenant_id and row-level security by the migration lint after the dev-stack migrations.
       - name: Unit tests with coverage gate (80% on domain and application layers, guide section 19)
         run: make py-test
       - name: Lockfile is current
         run: make lock-check
+      # A service that serves more than health, ready and ping commits its OpenAPI spec and the
+      # contract test that pins it; the check imports each app and lists the routes it serves.
+      - name: Contract check - every service with API routes has a committed spec
+        run: make openapi-check
 
   evals:
     name: Evals (golden sets, scripted and fake provider, section 8 gates)
@@ -189,7 +264,7 @@ jobs:
         run: pnpm turbo run lint typecheck test build
 
   contracts:
-    name: Event contracts (schemas, examples, generated clients, compatibility)
+    name: Contracts (event schemas, generated clients, event and OpenAPI compatibility)
     needs: changes
     if: needs.changes.outputs.contracts == 'true'
     runs-on: ubuntu-latest
@@ -208,13 +283,93 @@ jobs:
           cache: pnpm
       - run: uv sync --all-packages --locked
       - run: pnpm install --frozen-lockfile
-      - name: Schemas pass the 2020-12 metaschema and the generated clients match them
+      - name: Schemas pass the 2020-12 metaschema, every topic in code has one, and the generated clients match them
         run: make contracts-check
       - name: Examples and generated models agree with the schemas
         run: uv run pytest packages/contracts -q
       - name: Backward compatible with the base branch (base examples replayed against these schemas)
         if: github.event_name == 'pull_request'
-        run: uv run python packages/contracts/scripts/check_compat.py --base-ref "origin/${{ github.base_ref }}"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: uv run python packages/contracts/scripts/check_compat.py --base-ref "origin/$BASE_REF"
+      - name: OpenAPI specs break no client of the base branch (deliberate breaks listed in BREAKING.md)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: uv run python packages/contracts/scripts/check_openapi_compat.py --base-ref "origin/$BASE_REF"
+
+  integration:
+    name: Integration tests (${{ matrix.target }})
+    needs: changes
+    if: needs.changes.outputs.integration_targets != '[]'
+    runs-on: ubuntu-latest # testcontainers uses the runner's Docker; no compose stack
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.changes.outputs.integration_targets) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0 # exact tag: astral publishes no floating v10 tag
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --all-packages --locked
+      - name: Temporal CLI version, when the target starts a local Temporal server
+        id: temporal
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          if grep -rqs WorkflowEnvironment "$TARGET/tests/integration"; then
+            version=$(awk '$0 == "name = \"temporalio\"" { getline; gsub(/^version = "|"$/, ""); print; exit }' uv.lock)
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          fi
+      # WorkflowEnvironment.start_local downloads the Temporal CLI into the temporary directory
+      # (TMPDIR below), named after the temporalio version.
+      - uses: actions/cache@v6
+        if: steps.temporal.outputs.version != ''
+        with:
+          path: ${{ runner.temp }}/temporal-sdk-python-${{ steps.temporal.outputs.version }}
+          key: temporal-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.temporal.outputs.version }}
+      # Called without make: the Makefile's TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE default is for
+      # Colima, and the hosted runner's socket needs no override.
+      - name: Integration tests (testcontainers)
+        env:
+          TARGET: ${{ matrix.target }}
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          status=0
+          uv run pytest -m integration "$TARGET" || status=$?
+          # Exit code 5: nothing collected. It fails the job so that a target never passes silently.
+          if [ "$status" -eq 5 ]; then
+            echo "::error::pytest collected no integration tests under $TARGET"
+          fi
+          exit "$status"
+
+  ops:
+    name: Ops (runbook links, migration lint, promtool rules, actionlint)
+    needs: changes
+    if: needs.changes.outputs.ops == 'true'
+    runs-on: ubuntu-latest # Docker runs promtool and actionlint from their images
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0 # exact tag: astral publishes no floating v10 tag
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --all-packages --locked
+      - name: Every alert links an existing runbook
+        run: make runbooks-check
+      - name: Migration files (one head per service, names, downgrades, marked contract steps)
+        run: make migrations-check
+      - name: Every ci.yml job is in the needs of the required check, CI gate
+        run: make ci-gate-check
+      - name: Alert rules pass promtool check and their unit tests (alerts.test.yml)
+        run: make alerts-check
+      # The same check as `make ci-lint`, from the image so the runner needs no install. The
+      # image bundles shellcheck, so run: scripts are linted too.
+      - name: Workflows pass actionlint
+        run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
 
   dev-stack:
     name: Dev stack (docker compose smoke + migrations)
@@ -277,6 +432,8 @@ jobs:
         run: |
           uv sync --all-packages --locked
           make migrate
+      - name: Tenant tables have forced row-level security (migration lint, catalog rules)
+        run: make migrations-catalog
       - name: Observability profile starts and answers (collector, Prometheus, Tempo, Grafana)
         run: |
           docker compose --profile observability up -d --wait --wait-timeout 180 otel-collector prometheus tempo grafana
@@ -327,10 +484,101 @@ jobs:
           GITLEAKS_ENABLE_COMMENTS: "false" # PR comments need pull-requests: write; summary + SARIF suffice
           # GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # required only once the repo moves under a GitHub organisation
 
+  sast:
+    name: SAST (semgrep registry packs and repository rules)
+    needs: changes
+    if: needs.changes.outputs.sast == 'true'
+    runs-on: ubuntu-latest # Docker runs the pinned semgrep image, as make sast does locally
+    permissions:
+      contents: read
+      actions: read # upload-sarif reads the workflow run; a private repository requires it
+      security-events: write # findings go to code scanning
+    steps:
+      - uses: actions/checkout@v7
+      # p/python, p/typescript, p/dockerfile and p/github-actions from the registry plus the rules
+      # in .semgrep, with metrics off; a finding of severity ERROR fails. Then the rules' cases.
+      - name: Semgrep scan and the repository rules' test cases
+        run: make sast
+      - name: Findings to code scanning
+        if: always() && hashFiles('semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  dependency-scan:
+    name: Dependency and config scan (trivy)
+    needs: changes
+    if: needs.changes.outputs.dependencies == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # upload-sarif reads the workflow run; a private repository requires it
+      security-events: write # findings go to code scanning
+    steps:
+      - uses: actions/checkout@v7
+      # uv.lock, pnpm-lock.yaml and the Dockerfiles: HIGH and CRITICAL vulnerabilities that have a
+      # fix, and misconfigurations. Settings in .trivy.yaml (the same file make deps-scan reads);
+      # accepted findings in .trivyignore.yaml, each with a statement and an expiry date. The
+      # action is pinned to the commit of its tag, since a tag can be moved.
+      - name: Vulnerabilities and misconfigurations (fails on a finding)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          trivy-config: .trivy.yaml
+          version: v0.74.0 # keep in step with TRIVY_IMAGE in the Makefile
+          cache-dir: ${{ runner.temp }}/trivy # outside the checkout, so the scan never reads it
+      - name: The same findings as SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          trivy-config: .trivy.yaml
+          format: sarif
+          output: trivy.sarif
+          exit-code: "0"
+          limit-severities-for-sarif: "true"
+          skip-setup-trivy: "true"
+          cache: "false" # the first step restored the database into cache-dir
+          cache-dir: ${{ runner.temp }}/trivy
+      - name: Findings to code scanning
+        if: always() && hashFiles('trivy.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
+  # The one check branch protection requires. A job that path filters skip counts as passed; any
+  # other result, a failure or a cancellation, fails the gate. New jobs go above this one and into
+  # its needs (make ci-gate-check fails otherwise).
+  gate:
+    name: CI gate
+    needs:
+      - changes
+      - python
+      - evals
+      - typescript
+      - contracts
+      - integration
+      - ops
+      - dev-stack
+      - gitleaks
+      - sast
+      - dependency-scan
+    if: always() # a failed need would otherwise skip the gate, and a skipped check passes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job succeeded or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$RESULTS"
+          jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<< "$RESULTS" > /dev/null
+
 # -----------------------------------------------------------------------------------------------
-# TODO (guide section 17, steps 4-7) - not implemented yet:
-#   4. integration: testcontainers (Postgres, Redpanda, Temporal test server) for affected services,
-#                   e.g. `uv run pytest -m integration` (Docker is available on ubuntu-latest)
+# TODO (guide section 17, steps 5-7) - not implemented yet:
 #   5. evals:       done for extraction (job "evals" above, nightly.yml for real providers); the qa
 #                   and applicability suites arrive with their golden sets
 #   6. images:      per-service image build, SBOM (syft), Trivy scan, cosign sign, push to ECR
