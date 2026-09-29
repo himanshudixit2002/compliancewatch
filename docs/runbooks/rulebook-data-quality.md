@@ -1,8 +1,8 @@
 # Rulebook data quality
 
-What to do when the nightly `data-quality` job fails (the nightly issue then carries the label
-`data-quality`) or `make data-quality` reports violations. Owner: Regulatory Intelligence. The
-checks are in `services/rulebook/src/rulebook/domain/quality.py`.
+What to do when the nightly `data-quality` job fails (on violations the nightly issue also
+carries the label `data-quality`) or `make data-quality` reports violations. Owner: Regulatory
+Intelligence. The checks are in `services/rulebook/src/rulebook/domain/quality.py`.
 
 ## How it works
 
@@ -11,17 +11,20 @@ checks are in `services/rulebook/src/rulebook/domain/quality.py`.
   checks and prints each with up to 10 samples (`--json` for the same as JSON). Exit code 0 is
   clean, 1 means at least one violation, 2 means the database could not be read.
 - `make data-quality` points it at the local stack's `rulebook` schema, or at
-  `CW_DQ_DATABASE_URL` when that is set.
+  `CW_DQ_DATABASE_URL` when that is set. make itself exits 2 whenever the command fails; the
+  `Error 1` or `Error 2` at the end of make's output is the command's own exit code.
 - The nightly workflow (`.github/workflows/nightly.yml`, job `data-quality`) runs it on a fresh
   Postgres after `make migrate SERVICE=rulebook` and `make seed SERVICE=rulebook`, or, when the
-  repository secret `CW_DQ_DATABASE_URL` exists, on that database. The run summary lists the
-  count per check and the artifact `data-quality-report` holds the JSON report.
+  repository secret `CW_DQ_DATABASE_URL` exists, on that database. It calls the command
+  directly, with the environment `make data-quality` sets, so the job sees the command's own
+  exit code. The run summary lists the count per check and the artifact `data-quality-report`
+  holds the JSON report.
 
 The checks never change data. Every fix below is an analyst's decision against the cited
 instrument, recorded through the review flow where one exists; a fix by SQL is reviewed by a
 second person and noted in the issue.
 
-## A check failed
+## A check failed (exit code 1)
 
 ### in_force_without_verified_citation
 
@@ -62,11 +65,13 @@ violation means the constraint is missing or the row was loaded around it. Check
 (`\d rulebook.rule_version` in psql), restore it with the migration, and ask the analyst for the
 correct dates.
 
-## The job fails with exit code 2
+## The command exits with code 2
 
 The database could not be read: the local stack is down (`make dev`), the migrations have not
-run, or the `CW_DQ_DATABASE_URL` secret is wrong or its role lacks a grant. The job prints
-`data quality: cannot read the rulebook` and the error class.
+run, or the `CW_DQ_DATABASE_URL` secret is wrong (malformed, or naming a driver SQLAlchemy does
+not know) or its role lacks a grant. The command prints `data quality: cannot read the rulebook`
+and the error class. The nightly `data-quality` step exits with the same code 2, and the nightly
+issue gets no `data-quality` label: only exit code 1, a violation, adds it.
 
 ## A read-only role for CW_DQ_DATABASE_URL
 

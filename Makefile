@@ -368,7 +368,9 @@ ci-gate-check: check-uv ## Every ci.yml job is in the needs of the required "CI 
 
 # ---- Rulebook data quality (checks over versions, citations and relations) --------------------
 .PHONY: data-quality
-# Not in CHECKS: it reads a database. The nightly job runs it after migrate and seed, or against
+# Not in CHECKS: it reads a database. make exits 2 for any failed recipe, so the nightly job calls
+# rulebook-quality directly with the environment below (keep the two in step) to tell violations
+# (1) from an unreadable database (2); it runs after migrate and seed, or against
 # CW_DQ_DATABASE_URL (a read-only role on a deployed rulebook) when that is set.
 data-quality: check-uv ## Rulebook data-quality checks on the local rulebook schema, or CW_DQ_DATABASE_URL: make data-quality [ARGS=--json]
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \

@@ -105,8 +105,9 @@ It prints each check with up to 10 samples and exits 1 on any violation, 0 when 
 the database cannot be read. `make data-quality` reads the local stack's `rulebook` schema, or
 `CW_DQ_DATABASE_URL` when that is set. The nightly workflow runs it on a fresh Postgres with the
 migrations and the seed calendar, or on a deployed database through the repository secret
-`CW_DQ_DATABASE_URL`; a failure opens or updates the nightly issue with the label
-`data-quality`. What to do about a violation: `docs/runbooks/rulebook-data-quality.md`.
+`CW_DQ_DATABASE_URL`; either failing exit code opens or updates the nightly issue, and a
+violation (exit code 1) also labels it `data-quality`. What to do about a violation:
+`docs/runbooks/rulebook-data-quality.md`.
 
 ## Layout
 
