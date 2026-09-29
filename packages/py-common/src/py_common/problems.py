@@ -25,6 +25,7 @@ from domain_kernel.errors import (
     UnknownAttributeError,
 )
 from py_common.logging import get_logger
+from py_common.pagination import InvalidCursorError
 from py_common.request_context import REQUEST_ID_HEADER, correlation_id_of
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
@@ -34,6 +35,7 @@ INTERNAL_TYPE = PROBLEM_TYPE_PREFIX + "internal-error"
 DEFAULT_STATUS_BY_ERROR: Mapping[type[DomainError], int] = {
     InvariantViolationError: 422,
     UnknownAttributeError: 404,
+    InvalidCursorError: 422,
 }
 
 log = get_logger(__name__)
