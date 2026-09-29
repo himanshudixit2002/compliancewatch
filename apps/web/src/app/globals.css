@@ -1,34 +1,7 @@
 @import "tailwindcss";
+/* Colour roles, type scale, radii, focus ring and dark mode come from the UI kit's token file;
+   colours are reachable only through its classes (bg-bg, text-fg, border-line ...). */
+@import "@compliancewatch/ui/styles/tokens.css";
 /* The shared UI kit is reached through a node_modules symlink, which Tailwind's automatic
    source detection skips; register it explicitly (path is relative to this file). */
 @source "../../../../packages/ui/src";
-
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    "Noto Sans",
-    sans-serif;
-}
