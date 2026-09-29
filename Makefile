@@ -365,3 +365,13 @@ CHECKS += ci-gate-check
 
 ci-gate-check: check-uv ## Every ci.yml job is in the needs of the required "CI gate" job
 	$(UV) run python infra/scripts/check_ci_gate.py
+
+# ---- Rulebook data quality (checks over versions, citations and relations) --------------------
+.PHONY: data-quality
+# Not in CHECKS: it reads a database. The nightly job runs it after migrate and seed, or against
+# CW_DQ_DATABASE_URL (a read-only role on a deployed rulebook) when that is set.
+data-quality: check-uv ## Rulebook data-quality checks on the local rulebook schema, or CW_DQ_DATABASE_URL: make data-quality [ARGS=--json]
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	url="$${CW_DQ_DATABASE_URL:-postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}}"; \
+	CW_DATABASE_URL="$$url" CW_DB_SCHEMA=rulebook CW_LOG_LEVEL=WARNING \
+	  $(UV) run --package compliancewatch-rulebook rulebook-quality $(ARGS)
