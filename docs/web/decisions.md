@@ -115,3 +115,17 @@ the one variable: unset means `local`, and an unknown value counts as `prod` so 
 opens a local-only page. Consequences: the build needs no `CW_WEB_*` variable (checked with an
 empty environment); the validated, memoised environment module that arrives with the data layer
 replaces this file's reader without changing its callers.
+
+## D-013: A landed backend moves a screen to ready; building it is its own package
+
+2026-09-29. The registry had three statuses, so a waiting entry whose backend landed on `main`
+could only become `live`, and the "backend merged" failure asked for the whole screen inside
+whatever change met it first. That happened when the flag registry (`packages/flags`) merged:
+the flags console would have been built inside a CI fix. A fourth status, `ready`, sits between
+`waiting` and `live`: every awaited route and file is on `main`, every awaited route is also
+under `uses`, and there is no page file, so the catch-all serves the entry and says the backend
+is on main and the screen has not been built. Consequences: the failure now reads
+`backend merged: flip <id> to ready (or live once built)`; a UI change that meets it only moves
+the entry to `ready` and regenerates `screens.md`; the screen is built, and set `live`, in the
+package that owns it; `screens:audit` lists the ready entries; the status chip shows ready as
+"Ready to build" in the `info` tone.

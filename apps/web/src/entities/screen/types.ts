@@ -3,7 +3,7 @@
  * The registry (shared/config/screens.ts) is the input, described structurally here so this
  * layer stays free of config imports.
  */
-export type ScreenStatus = "live" | "waiting" | "planned";
+export type ScreenStatus = "live" | "ready" | "waiting" | "planned";
 
 export type AwaitOwner = "plan-a" | "plan-k" | "unplanned";
 
@@ -20,6 +20,12 @@ export interface AwaitedFileLike {
   ref?: string;
 }
 
+export interface UsedRouteLike {
+  service: string;
+  method: string;
+  path: string;
+}
+
 export interface ScreenLike {
   id: string;
   route: string;
@@ -27,6 +33,7 @@ export interface ScreenLike {
   section: string;
   roles: readonly string[] | "public";
   status: ScreenStatus;
+  uses?: readonly UsedRouteLike[];
   awaits: readonly AwaitedRouteLike[];
   awaitsFiles?: readonly AwaitedFileLike[];
   guideRef: string;
@@ -46,6 +53,9 @@ export interface NotAvailableView {
   title: string;
   guideRef: string;
   roles: string[];
+  /** True for a ready entry: the backend is on main and only the screen is missing. */
+  backendReady: boolean;
+  /** What the screen waits for; for a ready entry, the routes and files it will use. */
   waitingFor: AwaitedItemView[] | null;
   preview?: string;
   notes?: string;

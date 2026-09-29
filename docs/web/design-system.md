@@ -106,7 +106,8 @@ Skeleton, Toaster (`sonner` with a polite live region; `toast` is re-exported).
   for client components or as links (`sortHref`, `nextHref`, `prevHref`) for server-rendered
   pages, filter and empty slots; it never fetches.
 - `NotAvailableYet`: the title, guide reference, roles and the awaited routes (method, path,
-  owner), or one sentence saying no backend exists yet.
+  owner), or one sentence saying no backend exists yet; with `backendReady`, a sentence saying
+  the backend is on main and the screen has not been built, then the routes it will use.
 - `CopyButton`, `VisuallyHidden`.
 
 The `Tone` type, `humaniseStatus`, `describedBy` and `fieldIds` (for `aria-describedby`

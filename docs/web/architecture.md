@@ -85,22 +85,36 @@ An entry carries:
   track, `plan-k` for the KAG track, `unplanned` for nobody) and a `ref` (the delivering package
   or a note). KAG-track paths carry `unconfirmed: true` until that track's specs are committed.
   `awaitsFiles` names a repository file instead of a route (the flag registry).
-- `status`: `live`, `waiting` or `planned`.
+- `status`: `planned`, `waiting`, `ready` or `live`, in the order a screen moves through them
+  (below).
 - `preview`: the name of a component the not-available page may render under the notice; none
   is registered today.
 - `e2e`: the Playwright spec files that visit a live page.
 - `guideRef`, `nav` (group and order), `parent` (for breadcrumbs), `notes`.
 
+A screen's status moves planned, then waiting, then ready, then live:
+
+| Status    | Backend                                                            | Page file | Served by |
+| --------- | ------------------------------------------------------------------ | --------- | --------- |
+| `planned` | nobody has scheduled it; every awaited item is `unplanned`         | none      | catch-all |
+| `waiting` | at least one awaited route or file is absent from `main`           | none      | catch-all |
+| `ready`   | every awaited route and file is on `main`; the screen is not built | none      | catch-all |
+| `live`    | every `uses` route is in a committed spec; the screen is built     | its own   | its own   |
+
 `screens.test.ts` holds the status rules. A live page has its `page.tsx` (a handler its
 `route.ts`) and names at least one existing e2e spec, and every `uses` path is in a committed
-spec. A waiting entry awaits at least one route or file that is absent, lists any awaited route
-that is already present under `uses` as well, and has no page file. A planned entry awaits only
-from `unplanned` and has no page file. Every `page.tsx` and `route.ts` under `src/app` is
-registered exactly once (route groups such as `(public)` are stripped). When every awaited route
-of a waiting entry has landed, the test fails with `backend merged: flip <id> to live`, which is
-the signal to build the page ([adding-a-screen.md](adding-a-screen.md)). A screen whose routes
-all exist but that has no page is not registered at all: the registry has no status for that
-state, so such a screen is added together with its page.
+spec. A ready entry names at least one route or file, every route and file it awaits is present,
+every awaited route is also under `uses`, and it has no page file. A waiting entry awaits at
+least one route or file that is absent, lists any awaited route that is already present under
+`uses` as well, and has no page file. A planned entry awaits only from `unplanned` and has no
+page file. Every `page.tsx` and `route.ts` under `src/app` is registered exactly once (route
+groups such as `(public)` are stripped). When every awaited item of a waiting entry has landed,
+the test fails with `backend merged: flip <id> to ready (or live once built)`. The change that
+sees it moves the entry to `ready`; building the screen is the work of the package that owns it,
+which then sets `live` ([adding-a-screen.md](adding-a-screen.md), D-013 in
+[decisions.md](decisions.md)). A few screens whose routes all existed before they were listed
+(the obligation list and calendar, ask, and some rulebook tools) are not registered yet; each
+can join as a ready entry with its routes under `uses`.
 
 Helpers: `screenById`, `matchScreen(pathname)` (the most specific page entry with its decoded
 parameters), `hrefFor(screen, params)` (a typed href; a missing parameter throws), `screensFor`
@@ -112,12 +126,14 @@ request is left out.
 
 ## Not available yet
 
-A waiting or planned screen has no page file. `(app)/[...slug]/page.tsx` and
+A planned, waiting or ready screen has no page file. `(app)/[...slug]/page.tsx` and
 `admin/[...slug]/page.tsx` match the pathname against the registry and render the entry through
 `NotAvailablePage`: the title as the page's `h1`, the guide reference, the roles, and each awaited
 route as `METHOD /path` with its owner label (`services track (WP22)`, `KAG track`,
-`not scheduled`), or one sentence saying no backend exists yet; a `notes` text and, when the
-entry names one, a preview component follow. Breadcrumbs come from the parent chain and the back
+`not scheduled`), or one sentence saying no backend exists yet. For a ready entry the notice
+says instead that the backend for the screen is on main and the screen has not been built, and
+lists the awaited routes and files followed by the other routes the entry uses (labelled with
+their service). A `notes` text and, when the entry names one, a preview component follow. Breadcrumbs come from the parent chain and the back
 link goes to the section's home. A path that matches nothing is a real 404 (`notFound()`); a live
 entry never reaches a catch-all because its own page file wins. There is no `loading.tsx` above
 the catch-alls on purpose: a loading boundary above `notFound()` streams the page with status 200.

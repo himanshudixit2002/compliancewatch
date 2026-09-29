@@ -34,11 +34,15 @@ describe("NotAvailablePage", () => {
     expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
   });
 
-  it("renders nothing extra for a preview that does not exist yet", () => {
+  it("says a ready tool's backend is on main, lists what it will use and keeps its preview slot", () => {
     const { container } = render(
       <NotAvailablePage view={toNotAvailableView(screenById("admin.flags"))} backHref="/admin" />,
     );
-    expect(container.querySelector("[data-slot='preview']")).toBeNull();
+    expect(screen.getByText(/The backend for this screen is on main/)).toBeDefined();
+    expect(screen.getByText("It will use:")).toBeDefined();
     expect(screen.getByText("file packages/flags/registry.json")).toBeDefined();
+    expect(screen.queryByText("This screen waits for:")).toBeNull();
+    // FlagTable is named in the registry but not registered yet, so nothing renders for it.
+    expect(container.querySelector("[data-slot='preview']")).toBeNull();
   });
 });

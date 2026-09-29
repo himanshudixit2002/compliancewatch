@@ -10,15 +10,18 @@ import type { HttpMethod, RouteRef, ServiceName } from "./services.ts";
  * pages, the generated docs and the route-coverage test all read this list, so a screen
  * exists here before anything else.
  *
- * Status rules (checked by screens.test.ts against the committed OpenAPI specs):
- *   live     every `uses` path exists in a spec; a page has its page.tsx and e2e specs
- *   waiting  at least one awaited route or file is absent; no page.tsx (the catch-all serves it)
+ * Status rules (checked by screens.test.ts against the committed OpenAPI specs), in the order a
+ * screen moves through them, planned -> waiting -> ready -> live:
  *   planned  every awaited route is unscheduled ("unplanned"); no page.tsx
- * A waiting entry whose awaits have all landed fails the test with "backend merged".
- * A screen whose every route already exists is added together with its page: the registry has
- * no status for a built backend without a page, so such a screen is absent until its package
- * builds it (the obligation list and calendar, ask, and the rule version, canonical entity,
- * relations graph and clause search tools are in that state today).
+ *   waiting  at least one awaited route or file is absent; no page.tsx (the catch-all serves it)
+ *   ready    every awaited route and file is present and every present awaited route is also in
+ *            `uses`; the screen is not built, so no page.tsx (the catch-all serves it)
+ *   live     every `uses` path exists in a spec; a page has its page.tsx and e2e specs
+ * A waiting entry whose awaits have all landed fails the test with "backend merged"; the change
+ * that notices moves it to ready, and building the screen stays with the package that owns it.
+ * Screens whose every route already existed when they were first listed (the obligation list
+ * and calendar, ask, and the rule version, canonical entity, relations graph and clause search
+ * tools) are not registered yet; each can join as a ready entry with its routes under `uses`.
  *
  * Files in this directory use explicit ".ts" relative imports and no "@/" alias so the docs
  * generator can load them under plain Node.
@@ -26,7 +29,7 @@ import type { HttpMethod, RouteRef, ServiceName } from "./services.ts";
 
 export type ScreenKind = "page" | "handler" | "component" | "capability";
 export type ScreenSection = "owner" | "ca" | "account" | "admin" | "system";
-export type ScreenStatus = "live" | "waiting" | "planned";
+export type ScreenStatus = "live" | "ready" | "waiting" | "planned";
 
 /** Who delivers an awaited backend: the services track, the KAG track, or nobody yet. */
 export type AwaitOwner = "plan-a" | "plan-k" | "unplanned";
@@ -252,7 +255,7 @@ const SCREEN_LIST = [
     status: "live",
     e2e: ["not-available.spec.ts", "a11y.spec.ts"],
     guideRef: "15",
-    notes: "Catch-all serving every waiting or planned tenant screen from its registry entry.",
+    notes: "Catch-all serving every tenant screen that is not built, from its registry entry.",
   },
   {
     id: "system.health",
@@ -729,7 +732,7 @@ const SCREEN_LIST = [
     e2e: ["not-available.spec.ts", "a11y.spec.ts"],
     guideRef: "15",
     parent: "admin.home",
-    notes: "Catch-all serving every waiting or planned admin tool from its registry entry.",
+    notes: "Catch-all serving every admin tool that is not built, from its registry entry.",
   },
   {
     id: "admin.team",
@@ -1096,7 +1099,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [],
     awaitsFiles: [{ path: "packages/flags/registry.json", owner: "plan-a", ref: "WP12" }],
-    status: "waiting",
+    status: "ready",
     preview: "FlagTable",
     e2e: [],
     guideRef: "15; G90",

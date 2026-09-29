@@ -62,17 +62,17 @@ runs `AxeBuilder` on the page (or one selector) and fails on any finding of impa
 
 The specs on `main`:
 
-| Spec                     | Covers                                                                                                                                                    |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `a11y.spec.ts`           | every page in the registry except the catch-alls and the legal route: live pages by their route, waiting and planned pages through the catch-all with `example` for each parameter; one h1, status 200, the notice on non-live pages, axe |
-| `home.spec.ts`           | the landing links, the skip link moving focus to `main`, the sign-in link leading to the waiting notice                                                    |
-| `sitemap.spec.ts`        | one table per section, a waiting tool's awaited route and owner, the link to its notice                                                                    |
-| `legal.spec.ts`          | each listed document under the draft banner with its `-draft` version; an unlisted document is a 404                                                        |
-| `design.spec.ts`         | every catalogue section with axe, the theme control, dialogs (focus, Escape, the ten-character reason), the calendar keys                                   |
-| `admin-home.spec.ts`     | the tool list with status and service READMEs, the environment banner, sidebar navigation marking the current tool                                          |
-| `not-available.spec.ts`  | an admin tool's awaited routes and breadcrumbs, a parameterised tenant route through the catch-all, a planned tool's sentence and note, real 404s           |
-| `forbidden.spec.ts`      | the page and its two links                                                                                                                                |
-| `health.spec.ts`         | the health JSON, the static security headers, no `x-powered-by`                                                                                            |
+| Spec                    | Covers                                                                                                                                                                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `a11y.spec.ts`          | every page in the registry except the catch-alls and the legal route: live pages by their route, planned, waiting and ready pages through the catch-all with `example` for each parameter; one h1, status 200, the notice on non-live pages, axe |
+| `home.spec.ts`          | the landing links, the skip link moving focus to `main`, the sign-in link leading to the waiting notice                                                                                                                                          |
+| `sitemap.spec.ts`       | one table per section, a waiting tool's awaited route and owner, a ready tool's chip, the link to its notice                                                                                                                                     |
+| `legal.spec.ts`         | each listed document under the draft banner with its `-draft` version; an unlisted document is a 404                                                                                                                                             |
+| `design.spec.ts`        | every catalogue section with axe, the theme control, dialogs (focus, Escape, the ten-character reason), the calendar keys                                                                                                                        |
+| `admin-home.spec.ts`    | the tool list with status (waiting and ready) and service READMEs, the environment banner, sidebar navigation marking the current tool                                                                                                           |
+| `not-available.spec.ts` | an admin tool's awaited routes and breadcrumbs, a parameterised tenant route through the catch-all, a planned tool's sentence and note, a ready tool's sentence and what it will use, real 404s                                                  |
+| `forbidden.spec.ts`     | the page and its two links                                                                                                                                                                                                                       |
+| `health.spec.ts`        | the health JSON, the static security headers, no `x-powered-by`                                                                                                                                                                                  |
 
 Every live page entry in the registry names its spec files in `e2e`, and `screens.test.ts`
 checks they exist. A spec is named after what it covers, not after the registry id.

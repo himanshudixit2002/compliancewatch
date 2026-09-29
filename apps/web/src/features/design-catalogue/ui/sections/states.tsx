@@ -46,6 +46,14 @@ export function StatesSection() {
           backHref="#catalogue-states"
         />
         <NotAvailableYet
+          title="Example tool whose backend is ready"
+          guideRef="12"
+          roles={["Example role"]}
+          waitingFor={FIXTURES.awaited}
+          backendReady
+          backHref="#catalogue-states"
+        />
+        <NotAvailableYet
           title="Example tool without a backend"
           guideRef="12"
           roles={["Example role"]}

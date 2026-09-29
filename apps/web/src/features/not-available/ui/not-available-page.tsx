@@ -12,7 +12,10 @@ export interface NotAvailablePageProps {
   backHref: string;
 }
 
-/** The honest page for a registered screen without its backend: the notice, notes and preview. */
+/**
+ * The honest page for a registered screen that is not built: the notice (what it waits for, or
+ * that its backend is on main), the notes and the preview.
+ */
 export function NotAvailablePage({ view, crumbs = [], backHref }: NotAvailablePageProps) {
   const preview = renderPreview(view.preview);
   return (
@@ -23,6 +26,7 @@ export function NotAvailablePage({ view, crumbs = [], backHref }: NotAvailablePa
         guideRef={view.guideRef}
         roles={view.roles}
         waitingFor={view.waitingFor}
+        backendReady={view.backendReady}
         backHref={backHref}
       />
       {view.notes ? <p className="max-w-prose text-sm text-fg-muted">{view.notes}</p> : null}

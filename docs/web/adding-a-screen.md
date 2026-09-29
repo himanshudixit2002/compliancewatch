@@ -23,8 +23,11 @@ Add an entry to `SCREEN_LIST`:
 - `awaits`: every route it still needs, through `servicesTrack("WP<n>", ...)` (the delivering
   package), `kagTrack(...)` (path unconfirmed until that track's specs are committed) or
   `unscheduled(...)`. A repository file it needs goes in `awaitsFiles`.
-- `status`: `live` when the page exists and every `uses` route exists; `waiting` when at least
-  one awaited route or file is absent; `planned` when every awaited item is `unscheduled`.
+- `status`, which moves `planned`, then `waiting`, then `ready`, then `live`: `planned` when
+  every awaited item is `unscheduled`; `waiting` when at least one awaited route or file is
+  absent; `ready` when every awaited route and file is on `main` (each awaited route also under
+  `uses`) and the screen is not built; `live` when the page exists and every `uses` route
+  exists.
 - `e2e`: the spec files under `apps/web/e2e` that visit a live page (empty otherwise).
 - `guideRef`: the guide section (and an ADR or a guide table id where one applies).
 - `nav: { group, order }` to show it in the shell (the groups are in `nav.ts`), `parent` for
@@ -34,11 +37,13 @@ Then run `pnpm --filter web test`: `screens.test.ts` checks the entry against th
 route tree, and `screens-doc.test.ts` fails until `pnpm --filter web screens:gen` has rewritten
 `docs/web/screens.md`.
 
-## 2. A screen whose backend is absent
+## 2. A screen that is not built
 
-Stop after step 1. A waiting or planned entry must not have a page file: `(app)/[...slug]` or
-`admin/[...slug]` matches the path against the registry and renders `NotAvailableYet` with the
-awaited routes, their owner and the guide reference, plus the `notes` sentence. Visit the route
+Stop after step 1. A planned, waiting or ready entry must not have a page file: `(app)/[...slug]`
+or `admin/[...slug]` matches the path against the registry and renders `NotAvailableYet` with the
+awaited routes, their owner and the guide reference, plus the `notes` sentence; for a ready entry
+it says the backend is on main and the screen has not been built. A screen whose routes all
+exist already is registered as `ready` with them under `uses`. Visit the route
 to see it, regenerate `screens.md`, and open the pull request. If the notice should show data the
 repository already has (a table generated from a YAML file, for example), register a component
 under `features/not-available/ui/previews.tsx` and name it in `preview`.
@@ -73,22 +78,39 @@ under `features/not-available/ui/previews.tsx` and name it in `preview`.
    screen introduces behaviour worth a page; a `D-0NN` entry in `decisions.md` when a choice was
    made that later screens should follow.
 
-## 4. Flipping a waiting screen to live
+## 4. When the backend lands: waiting to ready
 
-When every awaited route of a waiting entry lands in a committed spec, `screens.test.ts` fails
-with `backend merged: flip <id> to live`. That is the trigger; nothing flips by itself.
+When every awaited route and file of a waiting entry is on `main`, `screens.test.ts` fails with
+`backend merged: flip <id> to ready (or live once built)`. That is the trigger; nothing flips by
+itself. The change that sees the failure (often an unrelated UI change after a merge from
+`main`) only moves the entry:
 
-1. Move the landed routes from `awaits` to `uses` (a live screen may keep an await for an
-   action it renders disabled, as long as that route is still absent).
+1. Add every landed awaited route to `uses` as well; keep it under `awaits` so the notice and
+   `screens.md` still say who delivered it.
+2. Set `status: "ready"`. Keep `preview` and `notes`.
+3. `pnpm --filter web screens:gen`, then `pnpm --filter web test`.
+
+The screen stays unbuilt in that change: the catch-all now says its backend is on main and it
+has not been built yet. Building it is its own package (D-013 in [decisions.md](decisions.md)).
+
+## 5. Building a ready screen: ready to live
+
+1. Delete the landed routes from `awaits` (they are already under `uses`) and the landed files
+   from `awaitsFiles`; a live screen may keep an await for an action it renders disabled, as
+   long as that route is still absent.
 2. Build the page, the feature and the tests as in section 3; add the e2e spec and list it.
 3. Set `status: "live"` and delete `notes`.
 4. `pnpm --filter web screens:gen`, then `pnpm --filter web test` and `make web-e2e`.
 
-`pnpm --filter web screens:audit` lists the awaited routes still absent from a committed spec,
-marking the unconfirmed KAG-track paths; a route that landed under a different path shows up
-there as still absent and the registry entry is corrected by hand.
+A screen whose package is already building it when the backend lands may go straight from
+waiting to live in that package's change.
 
-## 5. Before the pull request
+`pnpm --filter web screens:audit` lists the awaited routes still absent from a committed spec,
+marking the unconfirmed KAG-track paths, and then the ready entries with what each will use; a
+route that landed under a different path shows up there as still absent and the registry entry
+is corrected by hand.
+
+## 6. Before the pull request
 
 ```bash
 pnpm turbo run lint typecheck test build   # 80% floors in apps/web and packages/ui

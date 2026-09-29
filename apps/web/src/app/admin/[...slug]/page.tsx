@@ -24,7 +24,7 @@ export async function generateMetadata({ params }: { params: Promise<Params> }):
   return match === null ? {} : { title: match.screen.title };
 }
 
-// Every waiting or planned admin tool resolves here and shows what it waits for.
+// Every planned, waiting or ready admin tool resolves here and shows its backend state.
 export default async function NotAvailableAdminPage({ params }: { params: Promise<Params> }) {
   const match = matchAdminScreen((await params).slug);
   if (match === null) notFound();

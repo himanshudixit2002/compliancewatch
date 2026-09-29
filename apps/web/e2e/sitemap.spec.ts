@@ -13,6 +13,7 @@ test.describe("sitemap", () => {
     await expect(stats).toContainText("KAG track");
     await expect(stats).toContainText("Waiting for a backend");
     await expect(page.locator("[data-screen='system.sitemap']")).toContainText("Available");
+    await expect(page.locator("[data-screen='admin.flags']")).toContainText("Ready to build");
     await checkA11y();
   });
 

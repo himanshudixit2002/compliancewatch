@@ -159,7 +159,10 @@ describe("screen registry", () => {
         ...routes.filter((route) => !isCommitted(route)),
         ...files.filter((file) => !fileExists(file.path)),
       ];
-      expect(absent.length, `backend merged: flip ${screen.id} to live`).toBeGreaterThan(0);
+      expect(
+        absent.length,
+        `backend merged: flip ${screen.id} to ready (or live once built)`,
+      ).toBeGreaterThan(0);
       for (const route of routes.filter(isCommitted)) {
         const used = screen.uses.some((use) => routeKey(use) === routeKey(route));
         expect(used, `${screen.id} awaits present route ${routeKey(route)} without using it`).toBe(
@@ -171,6 +174,30 @@ describe("screen registry", () => {
         routes.every((route) => route.owner !== "unplanned"),
         screen.id,
       ).toBe(true);
+    }
+  });
+
+  it("keeps ready entries honest: nothing absent, present awaits also used, no page", () => {
+    for (const screen of byStatus("ready")) {
+      const routes = screen.awaits;
+      const files = screen.awaitsFiles ?? [];
+      expect(
+        screen.uses.length + routes.length + files.length,
+        `${screen.id} names no backend`,
+      ).toBeGreaterThan(0);
+      for (const route of routes) {
+        expect(isCommitted(route), `${screen.id} is ready but awaits ${routeKey(route)}`).toBe(
+          true,
+        );
+        const used = screen.uses.some((use) => routeKey(use) === routeKey(route));
+        expect(used, `${screen.id} awaits present route ${routeKey(route)} without using it`).toBe(
+          true,
+        );
+      }
+      for (const file of files) {
+        expect(fileExists(file.path), `${screen.id} is ready but awaits ${file.path}`).toBe(true);
+      }
+      expect(fileForRoute(screen), `${screen.id} is ready but has a route file`).toBe(false);
     }
   });
 

@@ -17,7 +17,8 @@ import type { RouteRef, ServiceName } from "../src/shared/config/services.ts";
  *
  *   node scripts/screens-doc.mts          write docs/web/screens.md
  *   node scripts/screens-doc.mts --check  exit 1 when the committed file differs
- *   node scripts/screens-doc.mts --audit  list awaited routes absent from the committed specs
+ *   node scripts/screens-doc.mts --audit  list awaited routes absent from the committed specs,
+ *                                         then the ready entries
  *
  * src/test/screens-doc.test.ts performs the same comparison as --check, so `pnpm test` catches
  * drift without another CI step.
@@ -114,10 +115,15 @@ export function renderScreensDoc(screens: readonly Screen[] = SCREENS): string {
     "of `make check`) and the vitest test `src/test/screens-doc.test.ts` fail when this file and",
     "the registry differ.",
     "",
-    `${screens.length} entries: ${countBy(screens, "live")} live, ${countBy(screens, "waiting")} waiting, ${countBy(screens, "planned")} planned.`,
+    `${screens.length} entries: ${countBy(screens, "live")} live, ${countBy(screens, "ready")} ready, ${countBy(screens, "waiting")} waiting, ${countBy(screens, "planned")} planned.`,
+    "",
+    "A screen moves through the statuses in the order planned, waiting, ready, live.",
     "",
     "- **live**: the page or handler exists and every route it calls is in a committed OpenAPI",
     "  spec (`packages/contracts/openapi`).",
+    "- **ready**: every awaited route and file is on `main` and each awaited route is also in",
+    "  `uses`, but the screen is not built; the entry has no page file and the catch-all routes",
+    '  render the "not available yet" notice saying the backend is on `main`.',
     "- **waiting**: at least one awaited route or file is absent; the entry has no page file and",
     '  the catch-all routes render the "not available yet" notice with what it waits for.',
     "- **planned**: nobody has scheduled the backend; the awaited paths are indicative.",
@@ -216,7 +222,30 @@ export function auditAwaits(
   );
 }
 
-export function renderAudit(rows: readonly AuditRow[]): string {
+export interface ReadyRow {
+  screenId: string;
+  /** The awaited routes and files, all present, then the routes it only uses. */
+  items: string[];
+}
+
+/** The ready entries: every awaited route and file is on main and the screen is not built. */
+export function readyEntries(screens: readonly Screen[] = SCREENS): ReadyRow[] {
+  return screens
+    .filter((screen) => screen.status === "ready")
+    .map((screen) => {
+      const awaited = [
+        ...screen.awaits.map((route) => `${route.method} ${route.path}`),
+        ...(screen.awaitsFiles ?? []).map((file) => `file ${file.path}`),
+      ];
+      const used = screen.uses
+        .map((route) => `${route.method} ${route.path}`)
+        .filter((item) => !awaited.includes(item));
+      return { screenId: screen.id, items: [...awaited, ...used] };
+    })
+    .sort((a, b) => a.screenId.localeCompare(b.screenId));
+}
+
+export function renderAudit(rows: readonly AuditRow[], ready: readonly ReadyRow[] = []): string {
   const lines: string[] = [];
   const withSpec = rows.filter((row) => row.specExists);
   const withoutSpec = rows.filter((row) => !row.specExists);
@@ -235,6 +264,13 @@ export function renderAudit(rows: readonly AuditRow[]): string {
     `${withoutSpec.length} awaited routes belong to services without a committed spec` +
       (services.length === 0 ? "." : ` (${services.join(", ")}).`),
   );
+  lines.push(
+    `${ready.length} entries are ready: the backend is on main and the screen is not built` +
+      (ready.length === 0 ? "." : ":"),
+  );
+  for (const row of ready) {
+    lines.push(`  ${row.screenId} ready: ${row.items.join("; ")}`);
+  }
   return lines.join("\n");
 }
 
@@ -245,7 +281,7 @@ function relativeOutput(): string {
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
   const mode = argv[0] ?? "--write";
   if (mode === "--audit") {
-    console.log(renderAudit(auditAwaits()));
+    console.log(renderAudit(auditAwaits(), readyEntries()));
     return 0;
   }
   const expected = await formatScreensDoc(renderScreensDoc());

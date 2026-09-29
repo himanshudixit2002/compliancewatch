@@ -24,7 +24,7 @@ export async function generateMetadata({ params }: { params: Promise<Params> }):
   return match === null ? {} : { title: match.screen.title };
 }
 
-// Every waiting or planned tenant screen resolves here and shows what it waits for.
+// Every planned, waiting or ready tenant screen resolves here and shows its backend state.
 export default async function NotAvailableTenantPage({ params }: { params: Promise<Params> }) {
   const match = matchTenantScreen((await params).slug);
   if (match === null) notFound();

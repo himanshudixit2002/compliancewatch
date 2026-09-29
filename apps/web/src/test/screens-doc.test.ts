@@ -6,6 +6,7 @@ import {
   auditAwaits,
   committedRoutes,
   formatScreensDoc,
+  readyEntries,
   renderAudit,
   renderScreensDoc,
   rolesCell,
@@ -91,5 +92,27 @@ describe("awaits audit", () => {
     const text = renderAudit(auditAwaits([stats], new Set()));
     expect(text).toContain("1 awaited routes are absent");
     expect(text).toContain("[unconfirmed]");
+    expect(text).toContain("0 entries are ready");
+  });
+
+  it("lists the ready entries as ready with what they will use", () => {
+    const ready = readyEntries();
+    expect(ready.map((row) => row.screenId)).toContain("admin.flags");
+    expect(ready.find((row) => row.screenId === "admin.flags")?.items).toEqual([
+      "file packages/flags/registry.json",
+    ]);
+    const flags = screenById("admin.flags");
+    const withUses: Screen = {
+      ...flags,
+      uses: [{ service: "profile", method: "GET", path: "/v1/ontology" }],
+      awaits: [{ service: "profile", method: "GET", path: "/v1/ontology", owner: "plan-a" }],
+      awaitsFiles: [],
+    };
+    expect(readyEntries([withUses, screenById("admin.review.stats")])).toEqual([
+      { screenId: "admin.flags", items: ["GET /v1/ontology"] },
+    ]);
+    const text = renderAudit([], readyEntries([flags]));
+    expect(text).toContain("1 entries are ready");
+    expect(text).toContain("  admin.flags ready: file packages/flags/registry.json");
   });
 });

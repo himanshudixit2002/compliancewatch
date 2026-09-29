@@ -15,19 +15,44 @@ export interface NotAvailableYetProps extends Omit<ComponentProps<"section">, "t
   roles: readonly string[];
   /** The routes the screen waits for, or null when no backend exists or is scheduled. */
   waitingFor: readonly AwaitedRoute[] | null;
+  /**
+   * The backend is on main and only the screen is missing: the notice says so, and
+   * `waitingFor` lists the routes and files the screen will use rather than ones to come.
+   */
+  backendReady?: boolean;
   backHref?: string;
 }
 
-/** The honest page for a registered screen whose backend routes do not exist yet. */
+function RouteList({ routes }: { routes: readonly AwaitedRoute[] }) {
+  return (
+    <ul className="flex flex-col gap-1 text-sm">
+      {routes.map((route) => (
+        <li key={`${route.method} ${route.path}`} className="flex flex-wrap items-center gap-2">
+          <code className="rounded-sm bg-surface px-1.5 py-0.5 font-mono text-xs text-fg">
+            {route.method} {route.path}
+          </code>
+          <span className="text-fg-muted">{route.owner}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * The honest page for a registered screen that is not built: its backend routes do not all
+ * exist yet, or they do and the screen itself is still to be written.
+ */
 export function NotAvailableYet({
   title,
   guideRef,
   roles,
   waitingFor,
+  backendReady = false,
   backHref = "/",
   className,
   ...props
 }: NotAvailableYetProps) {
+  const routes = waitingFor ?? [];
   return (
     <section
       data-slot="not-available-yet"
@@ -47,22 +72,22 @@ export function NotAvailableYet({
         <dt className="text-fg-muted">Roles</dt>
         <dd className="text-fg">{roles.join(", ")}</dd>
       </dl>
-      {waitingFor && waitingFor.length > 0 ? (
+      {backendReady ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-fg">
+            The backend for this screen is on main. The screen itself has not been built yet.
+          </p>
+          {routes.length > 0 ? (
+            <>
+              <p className="text-sm text-fg">It will use:</p>
+              <RouteList routes={routes} />
+            </>
+          ) : null}
+        </div>
+      ) : routes.length > 0 ? (
         <div className="flex flex-col gap-2">
           <p className="text-sm text-fg">This screen waits for:</p>
-          <ul className="flex flex-col gap-1 text-sm">
-            {waitingFor.map((route) => (
-              <li
-                key={`${route.method} ${route.path}`}
-                className="flex flex-wrap items-center gap-2"
-              >
-                <code className="rounded-sm bg-surface px-1.5 py-0.5 font-mono text-xs text-fg">
-                  {route.method} {route.path}
-                </code>
-                <span className="text-fg-muted">{route.owner}</span>
-              </li>
-            ))}
-          </ul>
+          <RouteList routes={routes} />
         </div>
       ) : (
         <p className="text-sm text-fg">No backend exists for this tool yet.</p>

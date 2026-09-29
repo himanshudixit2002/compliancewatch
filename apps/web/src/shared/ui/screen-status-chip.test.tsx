@@ -10,9 +10,11 @@ describe("ScreenStatusChip", () => {
     expect(chip.getAttribute("data-status")).toBe("waiting");
   });
 
-  it("uses success for live and neutral for planned", () => {
+  it("uses success for live, info for ready and neutral for planned", () => {
     const { rerender } = render(<ScreenStatusChip status="live" />);
     expect(screen.getByText("Available").getAttribute("data-tone")).toBe("success");
+    rerender(<ScreenStatusChip status="ready" />);
+    expect(screen.getByText("Ready to build").getAttribute("data-tone")).toBe("info");
     rerender(<ScreenStatusChip status="planned" />);
     expect(screen.getByText("No backend scheduled").getAttribute("data-tone")).toBe("neutral");
   });

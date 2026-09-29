@@ -16,8 +16,8 @@ The reasoning behind the layout, the design system, the tests and the screen pro
 ```
 src/app/            route files only: page.tsx is gate, query, render; layouts, error, global-error, not-found
   (public)/         home, /sitemap, /legal/[doc], /forbidden, /design under the visitor shell
-  (app)/            tenant screens under AppShell; [...slug] serves waiting and planned tenant screens
-  admin/            /admin home and layout under AdminShell; [...slug] serves waiting and planned tools
+  (app)/            tenant screens under AppShell; [...slug] serves unbuilt tenant screens
+  admin/            /admin home and layout under AdminShell; [...slug] serves unbuilt tools
   api/health/       liveness handler {status, version, commit}
 src/features/       one directory per screen family: model/, ui/, index.ts (ports, gateway, queries and
                     actions join when a feature reads data); today: home, sitemap, legal, not-available,
@@ -50,14 +50,15 @@ and `entities`; `shared` imports `shared`. A client component (`"use client"`) i
 Node scripts can load them.
 
 Every screen is an entry in `src/shared/config/screens.ts` before anything else exists: the
-navigation, breadcrumbs, sitemap, the "not available yet" pages, the route-coverage test and
-the generated `docs/web/screens.md` read the registry. `screens.test.ts` checks each entry
-against the committed OpenAPI specs (`packages/contracts/openapi`): a live entry only calls
-routes that exist and has its page file; a waiting entry names at least one route or file that
-is still absent and has no page file (the catch-all routes serve it); a planned entry awaits
-routes nobody has scheduled. When an awaited route lands, the test fails with "backend merged:
-flip `<id>` to live". Roles and role sets in `roles.ts` are copied from the identity design;
-`permissions.ts` maps capabilities to roles. The procedure is in
+navigation, breadcrumbs, sitemap, the "not available yet" pages, the route-coverage test and the
+generated `docs/web/screens.md` read the registry. `screens.test.ts` checks each entry against
+the committed OpenAPI specs (`packages/contracts/openapi`): a live entry only calls routes that
+exist and has its page file; a ready entry's awaited routes and files are all on `main` but it
+has no page file yet; a waiting entry names at least one route or file that is still absent and
+has no page file (the catch-all routes serve ready and waiting entries); a planned entry awaits
+routes nobody has scheduled. When the last awaited item lands, the test fails with "backend
+merged: flip `<id>` to ready (or live once built)". Roles and role sets in `roles.ts` are copied
+from the identity design; `permissions.ts` maps capabilities to roles. The procedure is in
 [docs/web/adding-a-screen.md](../../docs/web/adding-a-screen.md).
 
 User-visible chrome strings go through `t("key")` from `src/shared/i18n` (keys are typed from
@@ -68,22 +69,23 @@ from paise or decimal strings without float arithmetic.
 Colours come from the token classes (`bg-bg`, `text-fg`, `border-line`, ...); the eslint config
 rejects hex literals in class strings.
 
-A screen whose backend routes do not exist has no page file: the two catch-all routes match
-the pathname against the registry and render `NotAvailableYet` with the awaited routes, their
-owner and the guide reference (an unknown path is a 404). Legal pages render the drafts in
-`docs/legal` under the draft banner, prerendered from the three listed names. `/admin` lists
-every internal tool from the registry with its status and the services it depends on. There is
-no `loading.tsx` above the catch-alls on purpose: a loading boundary above `notFound()` streams
-the page with status 200, so a later package adds `loading.tsx` beside each page that fetches.
-`CW_WEB_ENV` is read directly by `server/runtime.ts` (unset means local; an unknown value is
-treated as prod) until the validated environment module lands. No session, gate or service
-client exists yet: every page renders for every visitor.
+A screen that is not built has no page file: the two catch-all routes match the pathname against
+the registry and render `NotAvailableYet` with the awaited routes, their owner and the guide
+reference, or for a ready screen the sentence that its backend is on main (an unknown path is a
+404). Legal pages render the drafts in `docs/legal` under the draft banner, prerendered from the
+three listed names. `/admin` lists every internal tool from the registry with its status and the
+services it depends on. There is no `loading.tsx` above the catch-alls on purpose: a loading
+boundary above `notFound()` streams the page with status 200, so a later package adds
+`loading.tsx` beside each page that fetches. `CW_WEB_ENV` is read directly by
+`server/runtime.ts` (unset means local; an unknown value is treated as prod) until the validated
+environment module lands. No session, gate or service client exists yet: every page renders for
+every visitor.
 
 ## End-to-end tests
 
 The Playwright suite visits the built app without any service: the public pages, the admin
-home, the design catalogue (group by group) and every waiting or planned page through the
-catch-alls, with `AxeBuilder` failing a page on any serious or critical finding. Once per
+home, the design catalogue (group by group) and every planned, waiting or ready page through
+the catch-alls, with `AxeBuilder` failing a page on any serious or critical finding. Once per
 machine: `make web-e2e-install` (downloads Chromium; the package has no install script). Then
 `make web-e2e` builds the app and runs the suite on `WEB_PORT` from the root `.env` (3000 unless
 changed; the config starts `next start` there with `CW_WEB_ENV=test`, or reuses a server already

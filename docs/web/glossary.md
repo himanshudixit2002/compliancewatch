@@ -50,17 +50,19 @@ one. Domain terms follow the guide and the services; the last group is the app's
   or a component or capability embedded in a page.
 - **Registry**: the `SCREENS` list; the single source for navigation, sitemap, tool list,
   not-available pages, the accessibility sweep and `screens.md`.
-- **Live, waiting, planned**: a screen's status. Live: built, and every route it calls exists.
-  Waiting: at least one route or file it needs is absent. Planned: nobody has scheduled the
-  backend.
+- **Planned, waiting, ready, live**: a screen's status, in the order a screen moves through
+  them. Planned: nobody has scheduled the backend. Waiting: at least one route or file it needs
+  is absent. Ready: everything it needs is on `main`, but the screen is not built. Live: built,
+  and every route it calls exists.
 - **Uses, awaits**: the routes a screen calls today, and the routes it still needs. Each
   awaited route has an owner: the services track, the KAG track, or nobody.
-- **Catch-all**: `(app)/[...slug]` and `admin/[...slug]`, the routes that render every waiting
-  or planned screen from its registry entry.
-- **Not available yet**: the page a waiting or planned screen renders: title, guide reference,
-  roles and the awaited routes, or the sentence that no backend exists yet.
-- **Flip**: turning a waiting entry live once its routes have landed
-  ([adding-a-screen.md](adding-a-screen.md)).
+- **Catch-all**: `(app)/[...slug]` and `admin/[...slug]`, the routes that render every planned,
+  waiting or ready screen from its registry entry.
+- **Not available yet**: the page a planned, waiting or ready screen renders: title, guide
+  reference, roles and the awaited routes, or the sentence that no backend exists yet; for a
+  ready screen, the sentence that its backend is on main and the screen is not built.
+- **Flip**: moving an entry along its statuses: waiting to ready once its routes have landed,
+  ready to live once the screen is built ([adding-a-screen.md](adding-a-screen.md)).
 - **Feature**: a directory under `src/features` for one screen family: `model/`, `ui/`,
   `index.ts`, and the port, gateway, queries and actions files where the feature reads or
   writes.

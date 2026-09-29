@@ -24,7 +24,7 @@ Flat; markdown files. Reading order for someone new to the app:
 2. [design-system.md](design-system.md): tokens, light and dark schemes, the component
    inventory with the accessibility contract of each component, the catalogue at `/design`.
 3. [adding-a-screen.md](adding-a-screen.md): the procedure for a new screen, including a
-   screen whose backend does not exist yet and the flip from waiting to live.
+   screen whose backend does not exist yet and the moves from waiting to ready to live.
 4. [testing.md](testing.md): unit tests, the axe matcher, Playwright, coverage floors, the CI
    jobs and the make targets.
 5. [i18n.md](i18n.md): the message table, `t()`, and the date, financial-year and money

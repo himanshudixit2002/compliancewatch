@@ -89,7 +89,8 @@ Built on the primitives and the tokens; each has its accessibility contract in t
   client components or as links (`sortHref`, `nextHref`, `prevHref`) for server-rendered
   pages; it never fetches.
 - `NotAvailableYet`: title, guide reference, roles and the awaited routes (method, path,
-  owner), or a sentence saying no backend exists yet.
+  owner), or a sentence saying no backend exists yet; `backendReady` says instead that the
+  backend is on main and the screen has not been built, and lists the routes it will use.
 
 To add a component: generate it with the CLI command above (or write it by hand next to the
 others), replace the shadcn classes with token classes, make the imports relative, export it

@@ -2,10 +2,12 @@ import { StatusChip } from "@compliancewatch/ui";
 import type { Tone } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
 
-export type ScreenStatus = "live" | "waiting" | "planned";
+export type ScreenStatus = "live" | "ready" | "waiting" | "planned";
 
+/** "info" for ready: its dot is checked at 4.5:1 on the chip's surface in both schemes. */
 const TONES: Readonly<Record<ScreenStatus, Tone>> = {
   live: "success",
+  ready: "info",
   waiting: "warning",
   planned: "neutral",
 };

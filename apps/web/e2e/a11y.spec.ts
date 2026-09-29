@@ -4,8 +4,8 @@ import { expect, test } from "./fixtures";
 
 /**
  * Every page in the registry, visited without a session: the live public pages by their route,
- * and every waiting or planned page through the catch-all with "example" for each parameter.
- * The legal documents have their own spec (an "example" document is a 404 by design).
+ * and every planned, waiting or ready page through the catch-all with "example" for each
+ * parameter. The legal documents have their own spec (an "example" document is a 404 by design).
  */
 function exampleHref(screen: Screen): string {
   const params = Object.fromEntries(routeParams(screen.route).map((name) => [name, "example"]));

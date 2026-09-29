@@ -19,7 +19,9 @@ describe("AdminHomeView", () => {
     expect(task?.textContent).toContain("+");
     const flags = container.querySelector("[data-tool='admin.flags']");
     expect(flags?.textContent).toContain("file packages/flags/registry.json");
-    expect(flags?.textContent).toContain("Waiting for a backend");
+    expect(flags?.textContent).toContain("Ready to build");
+    const sources = container.querySelector("[data-tool='admin.sources']");
+    expect(sources?.textContent).toContain("Waiting for a backend");
     expect(await runAxe(container)).toHaveNoViolations();
   }, 20_000);
 

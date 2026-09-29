@@ -48,6 +48,24 @@ test.describe("not available yet", () => {
     await expect(page.getByText(/make backfill/)).toBeVisible();
   });
 
+  test("a ready tool says its backend is on main and lists what it will use", async ({
+    page,
+    checkA11y,
+  }) => {
+    await page.goto("/admin/flags");
+    await expect(page.getByRole("heading", { level: 1, name: "Feature flags" })).toBeVisible();
+    await expect(page.getByText("Not available yet")).toBeVisible();
+    await expect(
+      page.getByText(
+        "The backend for this screen is on main. The screen itself has not been built yet.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByText("file packages/flags/registry.json")).toBeVisible();
+    await expect(page.getByText("services track (WP12)")).toBeVisible();
+    await expect(page.getByText("This screen waits for:")).toHaveCount(0);
+    await checkA11y();
+  });
+
   test("unknown paths are real 404s under both shells", async ({ page }) => {
     for (const path of ["/nowhere", "/admin/nowhere", "/b/example/nope"]) {
       const response = await page.goto(path);

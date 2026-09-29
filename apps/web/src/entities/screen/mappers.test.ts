@@ -28,7 +28,9 @@ describe("screen mappers", () => {
     expect(roleLabels("public")).toEqual(["Public"]);
     expect(roleLabels(["owner", "analyst"])).toEqual(["Owner", "Analyst"]);
     expect(statusLabel("live")).toBe("Available");
+    expect(statusLabel("ready")).toBe("Ready to build");
     expect(statusTone("live")).toBe("success");
+    expect(statusTone("ready")).toBe("info");
     expect(statusTone("waiting")).toBe("warning");
     expect(statusTone("planned")).toBe("neutral");
     expect(ownerLabel("plan-a", "WP22")).toBe("services track (WP22)");
@@ -41,8 +43,34 @@ describe("screen mappers", () => {
       title: "Ask",
       guideRef: "2 uc3",
       roles: ["Owner", "CA admin"],
+      backendReady: false,
       waitingFor: [{ method: "POST", path: "/v1/qa/ask", owner: "KAG track" }],
     });
+  });
+
+  it("marks a ready entry and lists its awaited items, then the routes it only uses", () => {
+    const view = toNotAvailableView({
+      ...waiting,
+      status: "ready",
+      uses: [
+        { service: "qa", method: "POST", path: "/v1/qa/ask" },
+        { service: "rulebook", method: "GET", path: "/v1/rulebook/rule-versions" },
+      ],
+    });
+    expect(view.backendReady).toBe(true);
+    expect(view.waitingFor).toEqual([
+      { method: "POST", path: "/v1/qa/ask", owner: "KAG track" },
+      { method: "GET", path: "/v1/rulebook/rule-versions", owner: "rulebook service" },
+    ]);
+  });
+
+  it("lists only the awaited items of a waiting entry, not its used routes", () => {
+    const view = toNotAvailableView({
+      ...waiting,
+      uses: [{ service: "rulebook", method: "GET", path: "/v1/rulebook/rule-versions" }],
+    });
+    expect(view.backendReady).toBe(false);
+    expect(view.waitingFor).toHaveLength(1);
   });
 
   it("lists awaited files next to routes and keeps preview and notes", () => {
