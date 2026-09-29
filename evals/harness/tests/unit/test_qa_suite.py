@@ -14,6 +14,8 @@ from cw_evals.qa.world import WorldSpec
 from cw_evals.run import main
 from cw_evals.thresholds import GATES, evaluate
 from domain_kernel.llm import CompletionRequest
+from qa.application.solver import StepValue
+from qa.domain.plan import ValueKind
 
 ROOT = Path(__file__).resolve().parents[3]
 GOLDEN = ROOT / "golden"
@@ -65,6 +67,38 @@ def test_the_layers_decide_as_the_cases_expect(runs: dict[str, QaRun]) -> None:
     assert by_id["sh-10-2025-serial-7"].layer == "hybrid"
     assert by_id["mr-listing-12-2025"].reason == "citation_check_failed"
     assert {s.layer for s in runs["qa_hybrid"].scores} == {"structured", "hybrid"}
+
+
+def failed_gates(runs: dict[str, QaRun]) -> set[tuple[str, str]]:
+    measured: dict[str, dict[str, object]] = {
+        suite: {"scripted": run.aggregate} for suite, run in runs.items()
+    }
+    return {
+        (g.gate.suite, g.gate.metric)
+        for g in evaluate("ci", measured)
+        if g.gate.suite.startswith("qa_") and g.gate.provider == "scripted" and not g.passed
+    }
+
+
+def test_a_broken_operator_fails_the_kag_gates(
+    suite: tuple[WorldSpec, list[QaCase]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """retrieve_clauses finding nothing leaves the KAG layer no clause; hybrid search still
+    answers, but that answer does not count for the KAG run and the empty bundle is a solver
+    failure."""
+    spec, cases = suite
+    chosen = [c for c in cases if c.case_id in {"sh-01-2026-effect", "sh-15-2025-threshold"}]
+    monkeypatch.setattr(
+        "qa.application.solver._Run.retrieve", lambda *_: StepValue(ValueKind.CLAUSES)
+    )
+    runs = run_qa(spec, chosen, "scripted", gateway_url=UNUSED)
+    for score in runs["qa_kag"].scores:
+        assert (score.layer, score.outcome, score.reason) == ("hybrid", "answered", None)
+        assert score.solver_failed
+        assert not score.grounded
+        assert "decided by the hybrid layer after no_evidence, not kag" in score.problems
+    assert runs["qa_hybrid"].aggregate.grounded_answer_rate == 1.0
+    assert {("qa_kag", "solver_success"), ("qa_kag", "grounded_answer_rate")} <= failed_gates(runs)
 
 
 def test_an_answer_quoting_what_its_clause_lacks_is_refused(

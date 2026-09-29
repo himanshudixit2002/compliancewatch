@@ -48,7 +48,8 @@ def run_qa(
         for suite, kag in MODES.items():
             with qa_app(world, kag=kag) as client:
                 scores = tuple(
-                    score_case(ask(client, world, model, case), clauses) for case in cases
+                    score_case(ask(client, world, model, case), clauses, kag_on=kag)
+                    for case in cases
                 )
             runs[suite] = QaRun(aggregate(scores), scores)
     return runs

@@ -9,6 +9,13 @@ ISO, "21 April 2026", "21st April, 2026" or "April 21, 2026" form (every expecte
 among them); text casefolded, dashes folded and whitespace collapsed; entities by the canonical
 names the mention grammar finds in the answer.
 
+With the KAG layer on, a case the labels send through it (answerable, with a scripted plan that
+has steps) is grounded only when the KAG layer decided it: a hybrid answer after the KAG layer
+fell back does not count for the KAG run. The solver fails when the KAG layer falls back with
+``step_failed`` or ``step_budget_exceeded``, and also when a valid plan with steps finds no
+clause (``no_evidence``) for an answerable case; for a must-refuse case an empty bundle is the
+right result.
+
 The aggregate follows the plan: ``plan_validity``, ``solver_success`` and the first-try share
 are over the cases where the KAG layer ran; ``grounded_answer_rate`` and
 ``false_refusal_rate`` over the answerable cases; ``refusal_accuracy`` over the must-refuse
@@ -37,6 +44,7 @@ from qa.api.schemas import AskOut
 PLAN: Final = "qa.plan"
 ANSWER: Final = "qa.answer"
 SOLVER_FAILURES: Final = frozenset({"step_failed", "step_budget_exceeded"})
+NO_EVIDENCE: Final = "no_evidence"
 MONTHS: Final = (
     "january",
     "february",
@@ -150,6 +158,8 @@ class QaScore:
     plan_valid: bool = False
     plan_first_try: bool | None = None
     solver_failed: bool = False
+    kag_expected: bool = False
+    """The KAG layer was on and the labels send the case through it (see the module docstring)."""
     citations: int = 0
     valid_citations: int = 0
     correct_citations: int = 0
@@ -175,6 +185,7 @@ class QaScore:
             and self.valid_citations == self.citations
             and self.expected_cited
             and self.facts_ok
+            and (not self.kag_expected or self.layer == "kag")
         )
 
     @property
@@ -207,8 +218,11 @@ class QaAggregate:
     grounded_by_fact_source: dict[str, float | None] = field(default_factory=dict)
 
 
-def score_case(asked: Asked, clauses: Mapping[tuple[str, str], WorldClause]) -> QaScore:
-    """``clauses`` maps (document id as text, clause ref) to the world's clause."""
+def score_case(
+    asked: Asked, clauses: Mapping[tuple[str, str], WorldClause], *, kag_on: bool = False
+) -> QaScore:
+    """``clauses`` maps (document id as text, clause ref) to the world's clause; ``kag_on`` says
+    the KAG layer was on for the question."""
     case = asked.case
     tokens = {
         "input_tokens": sum(call.input_tokens for call in asked.calls),
@@ -231,6 +245,16 @@ def score_case(asked: Asked, clauses: Mapping[tuple[str, str], WorldClause]) -> 
     plan_calls = [call for call in asked.calls if call.prompt.startswith(PLAN + "@")]
     planned = kag is not None
     plan_valid = planned and body.plan is not None
+    kag_expected = kag_on and case.answerable and _has_steps(case.scripted.plan)
+    solver_failed = (
+        kag is not None
+        and kag.result.value == "fallback"
+        and kag.reason is not None
+        and (
+            kag.reason.value in SOLVER_FAILURES
+            or (kag.reason.value == NO_EVIDENCE and case.answerable and _has_steps(body.plan))
+        )
+    )
     problems: list[str] = []
     expected = {(ref.document, ref.clause_ref) for ref in case.expected.citations}
     valid = correct = 0
@@ -260,6 +284,9 @@ def score_case(asked: Asked, clauses: Mapping[tuple[str, str], WorldClause]) -> 
         facts_ok = not missing
     if case.answerable and body.outcome.value != "answered":
         problems.append(f"not covered ({body.reason.value if body.reason else 'no reason'})")
+    elif kag_expected and body.layer.value != "kag":
+        why = f" after {kag.reason.value}" if kag is not None and kag.reason is not None else ""
+        problems.append(f"decided by the {body.layer.value} layer{why}, not kag")
     if not case.answerable and body.outcome.value == "answered":
         problems.append("answered a question it must refuse")
     return QaScore(
@@ -270,10 +297,8 @@ def score_case(asked: Asked, clauses: Mapping[tuple[str, str], WorldClause]) -> 
         planned=planned,
         plan_valid=plan_valid,
         plan_first_try=(plan_valid and len(plan_calls) == 1) if plan_calls else None,
-        solver_failed=kag is not None
-        and kag.result.value == "fallback"
-        and kag.reason is not None
-        and kag.reason.value in SOLVER_FAILURES,
+        solver_failed=solver_failed,
+        kag_expected=kag_expected,
         citations=len(body.citations),
         valid_citations=valid,
         correct_citations=correct,
@@ -282,6 +307,10 @@ def score_case(asked: Asked, clauses: Mapping[tuple[str, str], WorldClause]) -> 
         problems=tuple(problems),
         **base,
     )
+
+
+def _has_steps(plan: Mapping[str, Any] | None) -> bool:
+    return bool(plan and plan.get("steps"))
 
 
 def _valid_body(asked: Asked) -> AskOut | None:

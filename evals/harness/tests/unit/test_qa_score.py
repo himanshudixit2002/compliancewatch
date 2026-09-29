@@ -180,6 +180,33 @@ def test_a_refusal_passes_a_must_refuse_case_and_fails_an_answerable_one() -> No
     assert "answered a question it must refuse" in answered.problems
 
 
+def test_with_kag_on_a_planned_case_counts_only_when_kag_decides() -> None:
+    fell_back = body(
+        "Due on 21 April 2026.",
+        ("en.p3", QUOTE),
+        layer="hybrid",
+        layers=[
+            {"layer": "structured", "result": "passed", "reason": None},
+            {"layer": "kag", "result": "fallback", "reason": "no_evidence"},
+            {"layer": "hybrid", "result": "answered", "reason": None},
+        ],
+        plan={"as_of": None, "steps": [{"id": "s1", "op": "rules_in_force"}]},
+    )
+    asked = Asked(case_2026_03(), 200, fell_back)
+    kag_run = score_case(asked, CLAUSES, kag_on=True)
+    assert (kag_run.kag_expected, kag_run.solver_failed, kag_run.grounded) == (True, True, False)
+    assert "decided by the hybrid layer after no_evidence, not kag" in kag_run.problems
+    assert score_case(asked, CLAUSES).grounded
+    refused = {**fell_back, "outcome": "not_covered", "reason": "citation_check_failed"}
+    refused["layers"] = [
+        *fell_back["layers"][:2],
+        {"layer": "hybrid", "result": "not_covered", "reason": "citation_check_failed"},
+    ]
+    must_refuse = load_qa_case(CASES / "mr-listing-12-2025.yaml")
+    listing = score_case(Asked(must_refuse, 200, refused), CLAUSES, kag_on=True)
+    assert (listing.kag_expected, listing.solver_failed, listing.passed) == (False, False, True)
+
+
 def test_no_response_is_neither_safe_nor_a_refusal() -> None:
     for asked in (
         Asked(case_2026_03(), 503, {"detail": "down"}),

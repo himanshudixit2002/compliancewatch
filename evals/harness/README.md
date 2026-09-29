@@ -43,7 +43,9 @@ A case is accepted when every labelled field matches (document kind, change kind
 dates, references, predicates, amounts, obligation, recurrence) and the validators raise
 nothing. A qa case is grounded when it is answered, every citation holds in a clause published by
 the question's date, an expected citation is among them, the expected facts are in the answer
-and nothing it must not mention is. Cases with `label_status: draft` count like the others and
+and nothing it must not mention is; with the KAG layer on, a case whose scripted plan has steps
+must also be decided by the KAG layer, and a valid plan with steps that finds no clause for an
+answerable case counts as a solver failure. Cases with `label_status: draft` count like the others and
 are named in the report so nobody mistakes a draft for a reviewed truth. The scripted qa answers
 are the labels, so the CI qa numbers prove the harness and the service agree with them, not
 that a model answers well.
