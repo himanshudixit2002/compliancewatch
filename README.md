@@ -128,7 +128,7 @@ One monorepo, one directory per service, one shared contracts package that every
 ```
 compliancewatch/
   apps/
-    web/                     # Next.js 16: owner portal, CA dashboard, /admin internal tools
+    web/                     # Next.js 16: screen registry, public pages, /admin tool list, not-available pages; Playwright with axe (docs/web)
     whatsapp-bot/            # Webhook receiver and conversation state (TypeScript, Hono)
   services/                  # One FastAPI or worker service per directory (Python)
     identity/
@@ -163,7 +163,7 @@ compliancewatch/
     domain-kernel/           # Shared value objects, protocols, ontology model, error types
     ontology/                # GST attribute definitions as YAML (0.2.0), loader and validator
     py-common/               # Settings, logging, telemetry, health routes, problem details, app factory, event envelope, outbox, Temporal scaffold
-    ui/                      # Shared React components and design tokens
+    ui/                      # Design tokens (light and dark, contrast-tested), shadcn-generated primitives and composites
   infra/
     terraform/               # AWS modules: network, EKS, Aurora, MSK, S3, IAM
     helm/                    # One chart per service, values per environment

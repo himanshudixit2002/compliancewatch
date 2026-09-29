@@ -11,7 +11,10 @@
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "e2e:install": "playwright install --with-deps chromium"
+    "e2e:install": "playwright install --with-deps chromium",
+    "screens:gen": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/screens-doc.mts",
+    "screens:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/screens-doc.mts --check",
+    "screens:audit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/screens-doc.mts --audit"
   },
   "dependencies": {
     "@compliancewatch/ui": "workspace:*",
@@ -32,6 +35,7 @@
     "@types/react-dom": "^19.2.0",
     "eslint": "^9.39.5",
     "eslint-config-next": "16.3.6",
+    "prettier": "3.9.9",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.9.3"
   }

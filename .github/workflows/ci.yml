@@ -575,6 +575,8 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Generated screen list is current (docs/web/screens.md)
+        run: make web-screens-check
       # The playwright package has no install script (strictDepBuilds stays satisfied); the
       # browser and its system libraries are fetched here, explicitly.
       - name: Chromium for Playwright
