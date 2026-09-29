@@ -1,7 +1,9 @@
 # Nightly jobs (guide sections 8 and 17): evals against a real model (a scripted model runs in CI),
-# a dependency rescan that catches advisories published against unchanged code, and the contract
-# property tests with random inputs and more examples than CI runs. When a job fails, the report
-# job opens one issue labelled nightly-failure, or comments on the one already open.
+# a dependency rescan that catches advisories published against unchanged code, the contract
+# property tests with random inputs and more examples than CI runs, and the rulebook data-quality
+# checks. When a job fails, the report job opens one issue labelled nightly-failure, or comments
+# on the one already open; a data-quality failure also labels it data-quality, for Regulatory
+# Intelligence.
 # The evals need the repository secret CW_AI_GATEWAY_API_KEY (a Vercel AI Gateway key); until the
 # maintainer adds it the job prints what to do and exits green, so the schedule never pages anyone
 # for a missing account.
@@ -128,9 +130,67 @@ jobs:
           HYPOTHESIS_PROFILE: nightly
         run: uv run pytest -m contract
 
+  data-quality:
+    name: Rulebook data quality (versions, citations, relations)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --all-packages --locked
+      # With the repository secret CW_DQ_DATABASE_URL (a read-only role on a deployed rulebook,
+      # postgresql+psycopg://...) the checks read that database. Without it they read a fresh
+      # Postgres with the migrations and the seed calendar, which keeps the checks and the seed
+      # honest until a deployed rulebook exists.
+      - name: Database to check
+        id: target
+        env:
+          CW_DQ_DATABASE_URL: ${{ secrets.CW_DQ_DATABASE_URL }}
+        run: |
+          if [ -n "$CW_DQ_DATABASE_URL" ]; then
+            echo "deployed=true" >> "$GITHUB_OUTPUT"
+            echo "Checking the database in CW_DQ_DATABASE_URL." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
+            echo "No CW_DQ_DATABASE_URL secret: checking the migrated seed calendar." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Postgres with the rulebook migrated and the seed calendar loaded
+        if: steps.target.outputs.deployed == 'false'
+        run: |
+          docker compose up -d --wait --wait-timeout 120 postgres
+          make migrate SERVICE=rulebook
+          make seed SERVICE=rulebook
+      - name: Data-quality checks (a violation fails the job)
+        env:
+          CW_DQ_DATABASE_URL: ${{ secrets.CW_DQ_DATABASE_URL }}
+        run: |
+          status=0
+          make data-quality ARGS=--json > data-quality.json || status=$?
+          cat data-quality.json
+          {
+            echo "## Rulebook data quality"
+            echo
+            jq -r '.checks[] | "- \(.check): \(.violations) violation(s)"' data-quality.json || true
+            echo
+            echo "Runbook: docs/runbooks/rulebook-data-quality.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: data-quality-report
+          path: data-quality.json
+          if-no-files-found: ignore
+      - name: Teardown
+        if: always() && steps.target.outputs.deployed == 'false'
+        run: docker compose down --volumes --remove-orphans
+
   report:
     name: Open or update the nightly-failure issue
-    needs: [evals-nightly, dependency-rescan, contract-fuzz]
+    needs: [evals-nightly, dependency-rescan, contract-fuzz, data-quality]
     # Runs when a job failed or timed out, for the schedule and for manual runs on main; a manual
     # run on another branch is watched by whoever started it, and a run cancelled by hand reports
     # nothing.
@@ -151,9 +211,20 @@ jobs:
           failed=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | "- \(.key): \(.value.result)"' <<< "$NEEDS")
           body=$(printf 'The nightly run of %s failed.\n\n%s\n\nRun: %s\n' "$(date -u +%Y-%m-%d)" "$failed" "$RUN_URL")
           gh label create nightly-failure --color B60205 --description "A job in the nightly workflow failed" --force
+          # Rulebook data-quality violations go to Regulatory Intelligence
+          # (docs/runbooks/rulebook-data-quality.md).
+          data_quality=$(jq -r '."data-quality".result' <<< "$NEEDS")
+          if [ "$data_quality" = "failure" ]; then
+            gh label create data-quality --color FBCA04 --description "Rulebook data-quality checks found violations (Regulatory Intelligence)" --force
+          fi
           number=$(gh issue list --label nightly-failure --state open --limit 1 --json number --jq '.[0].number // empty')
           if [ -n "$number" ]; then
             gh issue comment "$number" --body "$body"
+            if [ "$data_quality" = "failure" ]; then
+              gh issue edit "$number" --add-label data-quality
+            fi
+          elif [ "$data_quality" = "failure" ]; then
+            gh issue create --title "Nightly run failing" --label nightly-failure --label data-quality --body "$body"
           else
             gh issue create --title "Nightly run failing" --label nightly-failure --body "$body"
           fi
