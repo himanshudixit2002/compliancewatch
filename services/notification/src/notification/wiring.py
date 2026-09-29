@@ -10,6 +10,7 @@ from notification.application.dispatch import DispatchDue
 from notification.application.enqueue import EnqueueNotifications
 from notification.application.preferences import GetPreference, SetOptIn
 from notification.application.recipients import GetRecipient, RegisterRecipient, RemoveRecipient
+from notification.application.retention import PurgeExpired
 from notification.application.send import SendNow
 from notification.domain.preferences import QuietHours
 from notification.domain.repository import UnitOfWorkFactory, WorkIndex
@@ -31,4 +32,5 @@ class Wiring:
     register_recipient: RegisterRecipient
     get_recipient: GetRecipient
     remove_recipient: RemoveRecipient
+    purge: PurgeExpired
     store_ready: Callable[[], Awaitable[bool]]

@@ -471,6 +471,7 @@ class SqlAlchemyNotificationRepository:
             .where(
                 NotificationRow.created_at < before,
                 NotificationRow.params != text("'{}'::jsonb"),
+                NotificationRow.state.not_in(_PENDING),
             )
             .values(params={})
             .returning(NotificationRow.id)

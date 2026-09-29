@@ -9,7 +9,11 @@ dispatchers never take one entry) and handles them tenant by tenant:
    notification as suppressed. In quiet hours the notification is due again when they end.
 2. The rest is gathered per recipient, channel, address and business. One notification keeps
    its own template; two or more go as one ``batch_summary`` (``digest.compose``). A send
-   addressed straight to a number (``POST /send``) always goes alone.
+   addressed straight to a number (``POST /send``) always goes alone. Notifications held for a
+   recipient's digest are gathered per recipient, channel and address across businesses, and go
+   as one ``daily_digest``, or ``ca_digest`` for a CA firm's people, even when there is only
+   one. A dispatcher gathers only the entries it claimed, so a digest longer than one claim
+   (``DEFAULT_CLAIM_LIMIT``) goes out as more than one message.
 3. Outside any transaction the values are filled (``values.message_values``) with the rule
    version's facts, which the ``RuleVersionReader`` reads from the rulebook and caches, and with
    links into the web app (``CW_WEB_BASE_URL``). When the rulebook cannot answer, the
@@ -54,7 +58,7 @@ from notification.domain.errors import (
     UnknownTemplateError,
 )
 from notification.domain.ids import DispatchId, RecipientId
-from notification.domain.notification import SENT_STATES, Notification
+from notification.domain.notification import SENT_STATES, DeliveryState, Notification
 from notification.domain.occasions import OccasionKind, fallback_key
 from notification.domain.policy import (
     DEFAULT_BATCH_POLICY,
@@ -116,11 +120,22 @@ def business_link(base_url: str, business_id: BusinessId) -> str:
     return f"{base_url.rstrip('/')}/obligations?business_id={business_id}"
 
 
+def summary_link(base_url: str, business_ids: Sequence[BusinessId]) -> str:
+    """The link of a summary: the business's obligations, or every obligation the person can see
+    when the summary spans businesses (a CA firm's digest)."""
+    distinct = list(dict.fromkeys(business_ids))
+    if len(distinct) == 1:
+        return business_link(base_url, distinct[0])
+    return f"{base_url.rstrip('/')}/obligations"
+
+
 @dataclass(slots=True)
 class _Batch:
     """Notifications that go out as one message, with their claimed entries."""
 
     recipient: Recipient | None
+    digest: bool = False
+    """The notifications were held for the recipient's digest."""
     entries: list[WorkEntry] = field(default_factory=list)
     members: list[Notification] = field(default_factory=list)
 
@@ -223,9 +238,11 @@ class DispatchDue:
                         notification.recipient_id
                     )
                 recipient = recipients[notification.recipient_id]
+            digest = recipient is not None and notification.state is DeliveryState.DIGEST_PENDING
             together: object = notification.id if recipient is None else recipient.id
-            key = (together, notification.channel, notification.address, notification.business_id)
-            groups.setdefault(key, _Batch(recipient)).add(entry, notification)
+            scope: object = "digest" if digest else notification.business_id
+            key = (together, notification.channel, notification.address, scope)
+            groups.setdefault(key, _Batch(recipient, digest)).add(entry, notification)
         ready: list[_Batch] = []
         for batch in groups.values():
             channel, address = batch.first.channel, batch.first.address
@@ -272,7 +289,7 @@ class DispatchDue:
         filled = {
             notification.id: self._values(notification, batch) for notification in batch.members
         }
-        if len(batch.members) == 1:
+        if len(batch.members) == 1 and not batch.digest:
             key, values = filled[first.id]
             message = render(
                 key,
@@ -291,14 +308,16 @@ class DispatchDue:
             ],
             first.channel,
             batch.recipient,
+            digest=batch.digest,
             language=first.language,
             policy=self._batch,
         )
+        link = summary_link(self._web_base_url, [n.business_id for n in batch.members])
         message = render(
             composition.template_key,
             first.channel,
             first.language,
-            {**composition.params, "link": business_link(self._web_base_url, first.business_id)},
+            {**composition.params, "link": link},
             recipient=first.address,
             dedupe_key=_batch_key(batch.members),
         )
@@ -413,7 +432,8 @@ class DispatchDue:
         recipient: Recipient | None,
         now: datetime,
     ) -> Notification | None:
-        """Queue the notification again on the recipient's next open address, due now."""
+        """Queue the notification again on the recipient's next open address, due now; one held
+        for the digest goes in the digest on that address."""
         if recipient is None or failed.fallback_of is not None:
             return None
         address = recipient.fallback_after(failed.channel, open_in(unit))
@@ -432,6 +452,7 @@ class DispatchDue:
             params=failed.params,
             dedupe_key=fallback_key(failed.dedupe_key, address.channel),
             now=now,
+            digest=failed.state is DeliveryState.DIGEST_PENDING,
             fallback_of=failed.id,
         )
         if not unit.notifications.add_if_absent(fallback):

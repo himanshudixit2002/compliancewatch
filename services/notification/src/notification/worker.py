@@ -13,7 +13,10 @@ process that hosts several services adds to its own:
   processed. A message the handler cannot read goes to ``<topic>.notification.obligations.dlq``
   after the consumer's retries.
 - the dispatcher, ``DispatchDue.run``, every ``CW_NOTIFICATION_DISPATCH_INTERVAL_SECONDS``
-  (5 seconds): it sends what is due, several workers side by side included.
+  (5 seconds): it sends what is due, several workers side by side included. The daily digests
+  are due at ``CW_NOTIFICATION_DIGEST_AT`` (09:00 IST) and go out through it too.
+- the retention sweep, ``PurgeExpired.run``, daily at 03:00 IST: it deletes notifications older
+  than two years and empties the values of those older than 30 days, one tenant at a time.
 
 The consumer writes through Postgres, so the worker needs ``CW_NOTIFICATION_STORE=postgres``.
 The outbox relay that publishes notification.sent and notification.failed runs on its own
@@ -23,6 +26,7 @@ The outbox relay that publishes notification.sent and notification.failed runs o
 from collections import Counter
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
+from datetime import time
 
 from sqlalchemy import Connection
 
@@ -32,8 +36,10 @@ from domain_kernel.protocols import NotificationChannel
 from notification import __version__
 from notification.application.dispatch import DispatchDue
 from notification.application.enqueue import EnqueueNotifications
+from notification.application.retention import PurgeExpired
 from notification.composition import wire
 from notification.domain.ports import RuleVersionReader
+from notification.domain.preferences import IST
 from notification.domain.repository import UnitOfWork
 from notification.domain.routing import TOPICS
 from notification.infrastructure.events_in import notice_from
@@ -47,11 +53,15 @@ from py_common.runtime import (
     ConsumerComponent,
     PeriodicComponent,
     WorkerComponents,
+    daily_at,
     run_worker_process,
 )
 
 GROUP_ID = "notification.obligations"
 DISPATCH_JOB = "notification-dispatch"
+RETENTION_JOB = "notification-retention"
+RETENTION_AT = time(3, 0, tzinfo=IST)
+"""03:00 IST, when little else runs."""
 SERVICE_NAME = "notification-worker"
 
 log = get_logger(__name__)
@@ -100,14 +110,29 @@ def dispatch_job(dispatch: DispatchDue) -> Callable[[], None]:
     return run
 
 
+def retention_job(purge: PurgeExpired) -> Callable[[], None]:
+    """One retention sweep, logged with what it removed."""
+
+    def run() -> None:
+        swept = purge.run()
+        log.info(
+            "notification.retention_swept",
+            tenants=swept.tenants,
+            purged=swept.purged,
+            stripped=swept.stripped,
+        )
+
+    return run
+
+
 def components(
     settings: NotificationSettings,
     *,
     channels: Mapping[Channel, NotificationChannel] | None = None,
     rules: RuleVersionReader | None = None,
 ) -> WorkerComponents:
-    """The consumer and the dispatcher loop; ``channels`` and ``rules`` replace the configured
-    channels and rulebook reader."""
+    """The consumer, the dispatcher loop and the retention sweep; ``channels`` and ``rules``
+    replace the configured channels and rulebook reader."""
     if settings.notification_store != "postgres":
         raise ValueError("the notification worker needs CW_NOTIFICATION_STORE=postgres")
     wiring = wire(settings, channels=channels, rules=rules)
@@ -124,6 +149,9 @@ def components(
                 DISPATCH_JOB,
                 dispatch_job(wiring.dispatch),
                 interval_seconds=settings.notification_dispatch_interval_seconds,
+            ),
+            PeriodicComponent(
+                RETENTION_JOB, retention_job(wiring.purge), next_run=daily_at(RETENTION_AT)
             ),
         ),
     )

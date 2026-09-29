@@ -17,7 +17,7 @@ from notification.domain.occasions import Occasion
 from notification.domain.policy import BatchPolicy
 from notification.domain.ports import AttemptResult, RuleVersionFacts
 from notification.domain.preferences import ConsentSource
-from notification.domain.recipients import BusinessLink, RecipientRole
+from notification.domain.recipients import BusinessLink, DigestMode, RecipientRole
 from notification.domain.routing import ObligationNotice
 from notification.infrastructure.memory import MemoryStore
 from notification.testing import (
@@ -31,6 +31,7 @@ from notification.testing import (
 
 TENANT = TenantId.new()
 BUSINESS = BusinessId.new()
+BETA = BusinessId.new()
 RULE = RuleVersionId.new()
 WA, EMAIL = Channel.WHATSAPP, Channel.EMAIL
 PHONE, MAIL = "+919876543210", "owner@example.com"
@@ -106,6 +107,33 @@ class World:
             self.consent(channel, address, True)
         return recipient_id
 
+    def digest_reader(
+        self,
+        role: RecipientRole,
+        *addresses: tuple[Channel, str],
+        org_label: str = "",
+        digest_mode: DigestMode = DigestMode.OFF,
+    ) -> RecipientId:
+        """A recipient who hears by digest, following Acme Traders and Beta Foods."""
+        recipient_id = RecipientId.new()
+        RegisterRecipient(self.store, clock=self.clock).run(
+            RecipientRegistration(
+                tenant_id=TENANT,
+                recipient_id=recipient_id,
+                role=role,
+                digest_mode=digest_mode,
+                org_label=org_label,
+                addresses=addresses,
+                businesses=[
+                    BusinessLink(BUSINESS, "Acme Traders"),
+                    BusinessLink(BETA, "Beta Foods"),
+                ],
+            )
+        )
+        for channel, address in addresses:
+            self.consent(channel, address, True)
+        return recipient_id
+
     def consent(self, channel: Channel, address: str, opted_in: bool) -> None:
         SetOptIn(self.store, clock=self.clock).run(
             channel, address, opted_in=opted_in, source=ConsentSource.API
@@ -124,10 +152,11 @@ def created(
     rule: RuleVersionId = RULE,
     tenant: TenantId = TENANT,
     title: str = "File GSTR-3B",
+    business: BusinessId = BUSINESS,
 ) -> ObligationNotice:
     return ObligationNotice(
         tenant_id=tenant,
-        business_id=BUSINESS,
+        business_id=business,
         occasion=Occasion.change_card(obligation or ObligationId.new(), rule),
         template_key="change_card",
         params={
@@ -466,3 +495,111 @@ def test_work_entries_of_a_notification_that_is_gone_are_completed() -> None:
         unit.notifications.purge(NOON_IST + timedelta(days=1))
     (delivery,) = world.dispatch.dispatch([entry], world.clock.now)
     assert delivery.outcome is DeliveryOutcome.SKIPPED
+
+
+NINE_IST = datetime(2026, 9, 29, 3, 30, tzinfo=UTC)
+"""09:00 IST the day after NOON_IST: the next digest."""
+
+
+def test_a_daily_digest_gathers_the_days_notifications_across_businesses() -> None:
+    world = World()
+    reader = world.digest_reader(RecipientRole.OWNER, (WA, PHONE), digest_mode=DigestMode.DAILY)
+    world.enqueue.run(created(title="File GSTR-3B"))
+    world.clock.advance(3600)
+    world.enqueue.run(created(title="File FSSAI returns", business=BETA))
+    world.clock.now = NINE_IST - timedelta(seconds=1)
+    assert world.dispatch.run() == (), "held for the digest"
+    world.clock.now = NINE_IST
+    (delivery,) = world.dispatch.run()
+    assert delivery.outcome is DeliveryOutcome.SENT
+    (message,) = world.whatsapp.sent
+    assert message.body == (
+        "Your ComplianceWatch digest for today. Updates: 2. Acme Traders: New - File GSTR-3B; "
+        f"Beta Foods: New - File FSSAI returns. Open {WEB}/obligations for details. "
+        "Reply HELP for help or STOP to opt out."
+    )
+    first, second = world.notifications()
+    assert first.recipient_id == second.recipient_id == reader
+    assert first.state is second.state is DeliveryState.SENT
+    assert first.dispatch_id == second.dispatch_id is not None
+    assert len(world.events(NotificationSent)) == 2
+    assert world.metrics.lags == [(WA, 0.0), (WA, 0.0)], "the wait for the digest is no delay"
+
+
+def test_a_ca_firm_gets_one_client_digest_even_for_one_notification() -> None:
+    world = World()
+    world.digest_reader(RecipientRole.CA_ADMIN, (WA, PHONE), org_label="Rao & Co")
+    world.enqueue.run(created())
+    world.clock.now = NINE_IST
+    world.dispatch.run()
+    (message,) = world.whatsapp.sent
+    assert message.body == (
+        "Client digest for Rao & Co. Updates: 1. Clients: 1. Acme Traders: New - File GSTR-3B. "
+        f"Open {WEB}/obligations?business_id={BUSINESS} for details. "
+        "Reply HELP for help or STOP to opt out."
+    )
+
+
+def test_a_notification_after_the_digest_went_waits_for_the_next_one() -> None:
+    world = World()
+    world.digest_reader(RecipientRole.CA_STAFF, (WA, PHONE))
+    world.enqueue.run(created())
+    world.clock.now = NINE_IST
+    assert outcomes(world.dispatch.run()) == [DeliveryOutcome.SENT]
+    world.clock.advance(30)
+    world.enqueue.run(created(title="File GSTR-1", rule=RuleVersionId.new()))
+    assert world.dispatch.run() == ()
+    world.clock.now = NINE_IST + timedelta(days=1)
+    assert outcomes(world.dispatch.run()) == [DeliveryOutcome.SENT]
+    assert world.whatsapp.sent[1].body.startswith(
+        "Client digest for your firm. Updates: 1. Clients: 1. Acme Traders: New - File GSTR-1."
+    )
+
+
+def test_a_digest_and_a_notification_of_the_same_person_go_as_two_messages() -> None:
+    world = World()
+    world.clock.now = NINE_IST - timedelta(seconds=300)
+    reader = world.digest_reader(RecipientRole.OWNER, (WA, PHONE), digest_mode=DigestMode.DAILY)
+    world.enqueue.run(created(title="Held for the digest"))
+    RegisterRecipient(world.store, clock=world.clock).run(
+        RecipientRegistration(
+            tenant_id=TENANT,
+            recipient_id=reader,
+            role=RecipientRole.OWNER,
+            addresses=[(WA, PHONE)],
+            businesses=[BusinessLink(BUSINESS, "Acme Traders")],
+        )
+    )
+    world.enqueue.run(created(title="Sent on its own", rule=RuleVersionId.new()))
+    world.clock.now = NINE_IST
+    assert outcomes(world.dispatch.run()) == [DeliveryOutcome.SENT, DeliveryOutcome.SENT]
+    bodies = sorted(message.body for message in world.whatsapp.sent)
+    assert bodies[0].startswith("Acme Traders: a new obligation applies to you. Sent on its own")
+    assert bodies[1].startswith(
+        "Your ComplianceWatch digest for today. Updates: 1. "
+        "Acme Traders: New - Held for the digest."
+    )
+
+
+def test_a_failed_digest_falls_back_to_a_digest_on_email() -> None:
+    world = World()
+    world.digest_reader(RecipientRole.CA_ADMIN, (WA, PHONE), (EMAIL, MAIL), org_label="Rao & Co")
+    world.enqueue.run(created())
+    world.enqueue.run(created(title="File FSSAI returns", business=BETA))
+    world.whatsapp.fail_next = 3
+    world.clock.now = NINE_IST
+    for wait in (0, 60, 300):
+        world.clock.advance(wait)
+        world.dispatch.run()
+    notifications = world.notifications()
+    assert [n.state for n in notifications[:2]] == [DeliveryState.FAILED] * 2
+    fallbacks = notifications[2:]
+    assert {(n.channel, n.state) for n in fallbacks} == {(EMAIL, DeliveryState.DIGEST_PENDING)}
+    assert {n.available_at for n in fallbacks} == {world.clock.now}, "due at once"
+    (delivery,) = world.dispatch.run()
+    assert delivery.outcome is DeliveryOutcome.SENT
+    (email,) = world.email.sent
+    assert email.subject == "Client digest for Rao & Co"
+    lines = email.body.split("\n")
+    assert "Acme Traders: New - File GSTR-3B" in lines
+    assert "Beta Foods: New - File FSSAI returns" in lines

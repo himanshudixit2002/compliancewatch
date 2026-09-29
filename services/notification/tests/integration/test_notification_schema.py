@@ -1,7 +1,7 @@
 """Migration 0001 on Postgres: the tables, row-level security by tenant on the tenant tables, the
 store's repositories, recipients with their address directory, one row per dedupe key under
 concurrent writes, the work index under two dispatchers, the consumer's transaction, queueing and
-dispatching a batch, and the outbox. Needs Docker.
+dispatching a batch and a digest, the retention sweep, and the outbox. Needs Docker.
 
 The store runs as a plain database role, not the container's superuser: a superuser bypasses
 row-level security whatever the table says, so the service's runtime role must never be one.
@@ -44,6 +44,7 @@ from notification.application.recipients import (
     RegisterRecipient,
     RemoveRecipient,
 )
+from notification.application.retention import PurgeExpired
 from notification.application.send import SendNow
 from notification.domain.errors import RecipientNotFoundError
 from notification.domain.ids import DispatchId, RecipientId
@@ -843,6 +844,107 @@ def test_queued_notifications_go_out_as_one_batch(
         leased.id
     ]
     purge(factory, tenant)
+
+
+def test_a_ca_firms_notifications_wait_for_one_digest(
+    factory: PostgresUnitOfWorkFactory, app_engine: Engine, engine: Engine
+) -> None:
+    tenant, acme, beta = TenantId.new(), BusinessId.new(), BusinessId.new()
+    noon = datetime(2007, 7, 7, 6, 30, tzinfo=UTC)
+    nine = datetime(2007, 7, 8, 3, 30, tzinfo=UTC)
+    RegisterRecipient(factory, clock=lambda: noon).run(
+        RecipientRegistration(
+            tenant_id=tenant,
+            recipient_id=RecipientId.new(),
+            role=RecipientRole.CA_ADMIN,
+            org_label="Rao & Co",
+            addresses=[(Channel.WHATSAPP, "+91 98765 00007")],
+            businesses=[BusinessLink(acme, "Acme Traders"), BusinessLink(beta, "Beta Foods")],
+        )
+    )
+    SetOptIn(factory, clock=lambda: noon).run(
+        Channel.WHATSAPP, "+919876500007", opted_in=True, source=ConsentSource.API
+    )
+    enqueue = EnqueueNotifications(factory, clock=lambda: noon)
+    for business, title in ((acme, "File GSTR-3B"), (beta, "File FSSAI returns")):
+        rule = RuleVersionId.new()
+        notice = ObligationNotice(
+            tenant_id=tenant,
+            business_id=business,
+            occasion=Occasion.change_card(ObligationId.new(), rule),
+            template_key="change_card",
+            params={"title": title, "rule_version_id": str(rule)},
+        )
+        assert enqueue.run(notice) == Enqueued(queued=1)
+    with engine.connect() as connection:
+        held = connection.execute(
+            text(
+                "SELECT n.state, w.kind, w.available_at FROM notification n "
+                "JOIN work_index w ON w.id = n.id WHERE n.tenant_id = :tenant"
+            ),
+            {"tenant": tenant.value},
+        ).all()
+    assert {(row.state, row.kind, row.available_at) for row in held} == {
+        ("digest_pending", "digest_item", nine)
+    }
+
+    channel = FakeChannel(clock=lambda: nine)
+    dispatch = DispatchDue(
+        factory,
+        PostgresWorkIndex(app_engine),
+        {Channel.WHATSAPP: channel},
+        rules=FakeRuleVersionReader(),
+        web_base_url="https://app.example",
+        clock=lambda: nine,
+    )
+    (delivery,) = dispatch.run()
+    assert delivery.outcome is DeliveryOutcome.SENT
+    (message,) = channel.sent
+    assert message.body.startswith("Client digest for Rao & Co. Updates: 2. Clients: 2.")
+    with factory(tenant) as unit:
+        sent = [*unit.notifications.page(acme, limit=5), *unit.notifications.page(beta, limit=5)]
+    assert {n.state for n in sent} == {DeliveryState.SENT}
+    assert len({n.dispatch_id for n in sent}) == 1
+    purge(factory, tenant)
+
+
+def test_the_retention_sweep_visits_each_tenant_under_row_level_security(
+    factory: PostgresUnitOfWorkFactory, app_engine: Engine, engine: Engine
+) -> None:
+    first, second = TenantId.new(), TenantId.new()
+    base = datetime(1999, 1, 1, 6, 30, tzinfo=UTC)
+    ancient = [item(1, first, at=base), item(2, second, at=base)]
+    month_old = base + timedelta(days=700)
+    sent_long_ago = item(3, first, at=month_old)
+    still_waiting = item(4, second, at=month_old)
+    enqueue(factory, *ancient, sent_long_ago, still_waiting)
+    with factory(first) as unit:
+        sent, _ = sent_long_ago.sent(DispatchId.new(), "wamid.retention", month_old)
+        unit.notifications.save(sent)
+        unit.work.complete(sent.id, provider_message_id="wamid.retention")
+    now = base + timedelta(days=740)
+
+    swept = PurgeExpired(factory, PostgresWorkIndex(app_engine), clock=lambda: now).run()
+    assert (swept.purged, swept.stripped) == (2, 1)
+    assert swept.tenants >= 2, "the tenants come from the tables without row-level security"
+    with factory(first) as unit:
+        assert unit.notifications.get(ancient[0].id) is None
+        kept = unit.notifications.get(sent_long_ago.id)
+    assert kept is not None
+    assert (kept.state, kept.params) == (DeliveryState.SENT, {})
+    with factory(second) as unit:
+        assert unit.notifications.get(ancient[1].id) is None
+        waiting = unit.notifications.get(still_waiting.id)
+    assert waiting is not None
+    assert waiting.params == still_waiting.params, "a pending notification keeps its values"
+    with engine.connect() as connection:
+        left: int = connection.execute(
+            text("SELECT count(*) FROM work_index WHERE id IN (:first, :second)"),
+            {"first": ancient[0].id.value, "second": ancient[1].id.value},
+        ).scalar_one()
+    assert left == 0, "the work entries go with their notifications"
+    purge(factory, first)
+    purge(factory, second)
 
 
 EXAMPLES = SERVICE_DIR.parents[1] / "packages" / "contracts" / "events" / "examples"

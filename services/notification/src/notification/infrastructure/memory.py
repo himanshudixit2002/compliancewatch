@@ -249,7 +249,9 @@ class MemoryNotificationRepository:
         return len(old)
 
     def strip_params(self, before: datetime) -> int:
-        stripped = [n for n in self._mine() if n.created_at < before and n.params]
+        stripped = [
+            n for n in self._mine() if n.created_at < before and n.params and not n.is_pending
+        ]
         for notification in stripped:
             self._state.notifications[notification.id] = replace(notification, params={})
         return len(stripped)

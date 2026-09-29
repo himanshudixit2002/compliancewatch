@@ -22,8 +22,9 @@ from notification.application.dispatch import DispatchDue
 from notification.application.enqueue import EnqueueNotifications
 from notification.application.preferences import GetPreference, SetOptIn
 from notification.application.recipients import GetRecipient, RegisterRecipient, RemoveRecipient
+from notification.application.retention import PurgeExpired
 from notification.application.send import SendNow
-from notification.domain.policy import BatchPolicy
+from notification.domain.policy import BatchPolicy, DigestPolicy
 from notification.domain.ports import RuleVersionReader
 from notification.domain.preferences import QuietHours
 from notification.domain.repository import UnitOfWorkFactory, WorkIndex
@@ -97,12 +98,18 @@ def wire(
         channels=wired_channels,
         quiet_hours=quiet_hours,
         send=SendNow(unit_of_work, dispatch, quiet_hours=quiet_hours),
-        enqueue=EnqueueNotifications(unit_of_work, batch=batch, metrics=metrics),
+        enqueue=EnqueueNotifications(
+            unit_of_work,
+            batch=batch,
+            digest=DigestPolicy.parse(settings.notification_digest_at),
+            metrics=metrics,
+        ),
         dispatch=dispatch,
         set_opt_in=SetOptIn(unit_of_work),
         get_preference=GetPreference(unit_of_work),
         register_recipient=RegisterRecipient(unit_of_work),
         get_recipient=GetRecipient(unit_of_work),
         remove_recipient=RemoveRecipient(unit_of_work),
+        purge=PurgeExpired(unit_of_work, work_index),
         store_ready=store_ready,
     )

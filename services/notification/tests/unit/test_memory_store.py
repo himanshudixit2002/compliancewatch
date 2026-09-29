@@ -161,6 +161,10 @@ def test_latest_params_page_strip_and_purge() -> None:
         after = PageAfter(first[-1].created_at, first[-1].id)
         assert [n.id for n in notifications.page(BUSINESS, limit=2, after=after)] == [older.id]
         assert notifications.page(BUSINESS, state=DeliveryState.SENT, limit=10) == []
+        assert notifications.strip_params(NOON_IST + timedelta(minutes=6)) == 0, "pending"
+        for pending in (older, newer):
+            sent, _ = pending.sent(DispatchId.new(), "wamid.1", NOON_IST + timedelta(minutes=10))
+            notifications.save(sent)
         assert notifications.strip_params(NOON_IST + timedelta(minutes=6)) == 2
         assert notifications.latest_params(obligation) is None
         assert notifications.purge(NOON_IST + timedelta(minutes=6)) == 2

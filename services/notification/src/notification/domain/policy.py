@@ -1,11 +1,13 @@
 """The numbers the service delivers by, as values the use cases take: how often a delivery is
-retried, and how notifications are gathered into a summary."""
+retried, how notifications are gathered into a summary, when the daily digest goes out, and how
+long notifications are kept."""
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
-from domain_kernel._validation import require_int
+from domain_kernel._validation import require_aware, require_instance, require_int
 from domain_kernel.errors import InvariantViolationError
+from notification.domain.preferences import IST
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +72,80 @@ class BatchPolicy:
 
 
 DEFAULT_BATCH_POLICY = BatchPolicy()
+
+DIGEST_AT = time(9, 0)
+"""09:00 IST: the start of the working day, after the default quiet hours end."""
+
+
+@dataclass(frozen=True, slots=True)
+class DigestPolicy:
+    """When the daily digest goes out: once a day at ``at``, a wall-clock time in IST.
+
+    A notification for a recipient who hears by digest waits for the next digest time after it
+    was queued (``next_at``), and every notification waiting for that recipient then goes out as
+    one message.
+    """
+
+    at: time = DIGEST_AT
+
+    def __post_init__(self) -> None:
+        require_instance(self.at, time, "at")
+        if self.at.tzinfo is not None:
+            raise InvariantViolationError("the digest time is a wall-clock time in IST")
+
+    @classmethod
+    def parse(cls, at: str) -> "DigestPolicy":
+        """The policy of an ``HH:MM`` text; anything else is an invariant violation."""
+        try:
+            return cls(time.fromisoformat(at))
+        except ValueError as exc:
+            raise InvariantViolationError(f"the digest time must be HH:MM, got {at!r}") from exc
+
+    def next_at(self, now: datetime) -> datetime:
+        """The first digest time after ``now``: today's in IST, or tomorrow's once it passed."""
+        local = require_aware(now, "now").astimezone(IST)
+        due = local.replace(
+            hour=self.at.hour, minute=self.at.minute, second=self.at.second, microsecond=0
+        )
+        if due <= local:
+            due += timedelta(days=1)
+        return due.astimezone(now.tzinfo)
+
+
+DEFAULT_DIGEST_POLICY = DigestPolicy()
+
+
+@dataclass(frozen=True, slots=True)
+class RetentionPolicy:
+    """How long notifications are kept (guide section 9, docs/legal/data-map.md).
+
+    The record of a notification (who, which occasion, on which channel, when it was sent,
+    delivered or read, and its dedupe key) is kept for ``keep_days``, two years, so that a
+    dispute about a missed reminder can be answered. The values its message was filled with (a
+    title, a date, a business's label) are emptied after ``params_days``, 30, once the
+    notification has gone out or ended; a notification still waiting keeps them, since it
+    cannot go out without them.
+    """
+
+    keep_days: int = 730
+    params_days: int = 30
+
+    def __post_init__(self) -> None:
+        require_int(self.keep_days, "keep_days", minimum=1)
+        require_int(self.params_days, "params_days", minimum=1)
+        if self.params_days > self.keep_days:
+            raise InvariantViolationError("params_days cannot be longer than keep_days")
+
+    def purge_before(self, now: datetime) -> datetime:
+        """Notifications created before this moment are deleted."""
+        return require_aware(now, "now") - timedelta(days=self.keep_days)
+
+    def strip_before(self, now: datetime) -> datetime:
+        """Notifications created before this moment lose their template values."""
+        return require_aware(now, "now") - timedelta(days=self.params_days)
+
+
+DEFAULT_RETENTION_POLICY = RetentionPolicy()
 
 WORK_LEASE = timedelta(seconds=60)
 """How long a dispatcher holds the work it claimed before another may claim it: long enough for

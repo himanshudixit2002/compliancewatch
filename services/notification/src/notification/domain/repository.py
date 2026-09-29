@@ -139,8 +139,9 @@ class NotificationRepository(Protocol):
         ...
 
     def strip_params(self, before: datetime) -> int:
-        """Empty the template values of notifications created before ``before``; returns how
-        many had values."""
+        """Empty the template values of notifications created before ``before`` that are no
+        longer pending; returns how many had values. A pending notification keeps them, since it
+        cannot go out without them."""
         ...
 
 

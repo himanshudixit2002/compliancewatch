@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -11,10 +11,11 @@ from notification.application.recipients import RecipientRegistration, RegisterR
 from notification.domain.ids import RecipientId
 from notification.domain.notification import DeliveryState
 from notification.domain.occasions import Occasion, OccasionKind, dedupe_key
-from notification.domain.policy import BatchPolicy
+from notification.domain.policy import BatchPolicy, DigestPolicy
 from notification.domain.ports import QueueResult
 from notification.domain.preferences import ConsentSource, Suppression, SuppressionReason
-from notification.domain.recipients import BusinessLink, RecipientRole
+from notification.domain.recipients import BusinessLink, DigestMode, RecipientRole
+from notification.domain.repository import WorkKind
 from notification.domain.routing import ObligationNotice
 from notification.infrastructure.memory import MemoryStore
 from notification.testing import NOON_IST, FakeClock, RecordingMetrics
@@ -43,13 +44,16 @@ class Setup:
         businesses: tuple[BusinessId, ...] = (BUSINESS,),
         opt_in: bool = True,
         tenant: TenantId = TENANT,
+        role: RecipientRole = RecipientRole.OWNER,
+        digest_mode: DigestMode = DigestMode.OFF,
     ) -> RecipientId:
         recipient_id = RecipientId.new()
         RegisterRecipient(self.store, clock=self.clock).run(
             RecipientRegistration(
                 tenant_id=tenant,
                 recipient_id=recipient_id,
-                role=RecipientRole.OWNER,
+                role=role,
+                digest_mode=digest_mode,
                 language="hi",
                 addresses=addresses,
                 businesses=[BusinessLink(business) for business in businesses],
@@ -171,3 +175,37 @@ def test_a_window_of_zero_makes_the_notification_due_at_once() -> None:
     )
     (queued,) = setup.store.notifications_of(TENANT)
     assert queued.available_at == NOON_IST
+
+
+NINE_IST_TOMORROW = datetime(2026, 9, 29, 3, 30, tzinfo=UTC)
+
+
+def test_a_digest_recipient_gets_its_notification_held_for_the_next_nine_ist() -> None:
+    setup = Setup()
+    daily = setup.recipient((WA, "+919876543210"), digest_mode=DigestMode.DAILY)
+    firm = setup.recipient((EMAIL, "ca@example.com"), role=RecipientRole.CA_STAFF)
+    owner = setup.recipient((WA, "+919811111111"))
+    assert setup.enqueue.run(created()) == Enqueued(queued=3)
+    by_recipient = {n.recipient_id: n for n in setup.store.notifications_of(TENANT)}
+    for held in (by_recipient[daily], by_recipient[firm]):
+        assert (held.state, held.available_at) == (DeliveryState.DIGEST_PENDING, NINE_IST_TOMORROW)
+        work = setup.store.work_row(held.id)
+        assert work is not None
+        assert (work.entry.kind, work.entry.available_at) == (
+            WorkKind.DIGEST_ITEM,
+            NINE_IST_TOMORROW,
+        )
+    assert (by_recipient[owner].state, by_recipient[owner].available_at) == (
+        DeliveryState.QUEUED,
+        NOON_IST + WINDOW,
+    )
+
+
+def test_the_digest_time_is_the_policys() -> None:
+    setup = Setup()
+    setup.recipient((WA, "+919876543210"), digest_mode=DigestMode.DAILY)
+    EnqueueNotifications(setup.store, digest=DigestPolicy.parse("18:00"), clock=setup.clock).run(
+        created()
+    )
+    (held,) = setup.store.notifications_of(TENANT)
+    assert held.available_at == datetime(2026, 9, 28, 12, 30, tzinfo=UTC), "18:00 IST today"

@@ -6,13 +6,18 @@ quiet hours again, gathers what goes to one person and business into one summary
 message with the rule version's facts from the rulebook, and hands it to the channel. A failed
 attempt is retried after 60 s and again after 300 s; the third failure fails the notification
 and queues a fallback on the recipient's next open address on another channel. `POST /send`
-goes through the same queue and dispatcher.
+goes through the same queue and dispatcher. A recipient who chose a daily digest, and every
+person of a CA firm, gets their notifications held (`digest_pending`) until
+`CW_NOTIFICATION_DIGEST_AT` (09:00 IST) and then as one `daily_digest` or `ca_digest`.
 
 The worker (`python -m notification.worker`, locally `make worker SERVICE=notification`) runs the
 dispatcher every `CW_NOTIFICATION_DISPATCH_INTERVAL_SECONDS` and consumes the obligation events
 in group `notification.obligations`; an event it cannot read goes to
-`<topic>.notification.obligations.dlq`. Its log says `notification.event_queued` per event and
-`notification.dispatched` per run that sent anything. Two alerts link here:
+`<topic>.notification.obligations.dlq`. Daily at 03:00 IST it runs the retention sweep, which
+deletes notifications older than two years and empties the values of those older than 30 days,
+one tenant at a time. Its log says `notification.event_queued` per event,
+`notification.dispatched` per run that sent anything and `notification.retention_swept` per
+sweep. Two alerts link here:
 [NotificationDeliveryFailures](#notificationdeliveryfailures) and
 [NotificationDuplicateSent](#notificationduplicatesent).
 

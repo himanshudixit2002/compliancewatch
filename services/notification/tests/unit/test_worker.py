@@ -8,6 +8,7 @@ inbox row commit together, is covered by tests/integration/test_notification_sch
 import json
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -23,6 +24,7 @@ from notification.application.dispatch import DispatchDue
 from notification.application.enqueue import EnqueueNotifications
 from notification.application.preferences import SetOptIn
 from notification.application.recipients import RecipientRegistration, RegisterRecipient
+from notification.application.retention import PurgeExpired
 from notification.application.send import SendNow
 from notification.domain.ids import RecipientId
 from notification.domain.model import NotificationRequest
@@ -164,7 +166,7 @@ async def test_a_malformed_payload_is_dead_lettered(inbox: Engine) -> None:
     assert setup.notifications() == []
 
 
-def test_the_components_are_the_consumer_and_the_dispatcher_loop() -> None:
+def test_the_components_are_the_consumer_the_dispatcher_loop_and_the_sweep() -> None:
     settings = notification_settings(
         notification_store="postgres", notification_dispatch_interval_seconds=2.5
     )
@@ -178,8 +180,11 @@ def test_the_components_are_the_consumer_and_the_dispatcher_loop() -> None:
         "obligation.closed",
     )
     assert consumer.dead_letter_topics()[0] == DLQ
-    (dispatch,) = components.periodic
+    dispatch, retention = components.periodic
     assert (dispatch.name, dispatch.interval_seconds) == ("notification-dispatch", 2.5)
+    assert (retention.name, retention.interval_seconds) == ("notification-retention", None)
+    assert retention.next_run is not None
+    assert retention.next_run(NOON_IST) == datetime(2026, 9, 28, 21, 30, tzinfo=UTC), "03:00 IST"
     assert components.relays == ()
     assert components.temporal == ()
     with pytest.raises(ValueError, match="postgres"):
@@ -219,6 +224,24 @@ def test_the_dispatch_job_sends_what_is_due() -> None:
     clock.advance(12 * 3600)
     job()
     assert len(channel.sent) == 1
+
+
+def test_the_retention_job_sweeps_every_tenant(caplog: pytest.LogCaptureFixture) -> None:
+    store = MemoryStore()
+    tenant = TenantId.new()
+    RegisterRecipient(store, clock=lambda: NOON_IST).run(
+        RecipientRegistration(
+            tenant_id=tenant,
+            recipient_id=RecipientId.new(),
+            role=RecipientRole.OWNER,
+            addresses=[(Channel.WHATSAPP, PHONE)],
+        )
+    )
+    purge = PurgeExpired(store, store.work_index, clock=lambda: NOON_IST)
+    job = worker.retention_job(purge)
+    with caplog.at_level("INFO"):
+        job()
+    assert "notification.retention_swept" in caplog.text
 
 
 def test_main_runs_the_components_as_a_worker_process(monkeypatch: pytest.MonkeyPatch) -> None:

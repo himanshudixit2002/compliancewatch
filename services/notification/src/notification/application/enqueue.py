@@ -12,7 +12,10 @@ For every recipient that follows the business (``RecipientRepository.for_busines
    obligation's earlier notification.
 4. The notification is due at the end of the batching window. One queued for the same person,
    channel and business while an earlier one still waits joins it and is due with it, so the
-   dispatcher sends them together as one summary.
+   dispatcher sends them together as one summary. A recipient who hears by digest (a daily
+   digest chosen, or a CA firm's people) gets it held for the digest instead
+   (``digest_pending``), due at the next digest time (``DigestPolicy.next_at``, 09:00 IST), when
+   the dispatcher sends everything held for that person as one digest.
 5. Its work queue entry is written in the same transaction.
 
 ``run(notice)`` opens a unit of work of the notice's tenant; ``run_in(unit, notice)`` works in
@@ -32,7 +35,12 @@ from notification.application.consent import open_in
 from notification.domain.ids import RecipientId
 from notification.domain.notification import DeliveryState, Notification
 from notification.domain.occasions import dedupe_key
-from notification.domain.policy import DEFAULT_BATCH_POLICY, BatchPolicy
+from notification.domain.policy import (
+    DEFAULT_BATCH_POLICY,
+    DEFAULT_DIGEST_POLICY,
+    BatchPolicy,
+    DigestPolicy,
+)
 from notification.domain.ports import NO_METRICS, DeliveryMetrics, QueueResult
 from notification.domain.repository import UnitOfWork, UnitOfWorkFactory, WorkEntry
 from notification.domain.routing import ObligationNotice
@@ -54,11 +62,13 @@ class EnqueueNotifications:
         unit_of_work: UnitOfWorkFactory,
         *,
         batch: BatchPolicy = DEFAULT_BATCH_POLICY,
+        digest: DigestPolicy = DEFAULT_DIGEST_POLICY,
         metrics: DeliveryMetrics = NO_METRICS,
         clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._unit_of_work = unit_of_work
         self._batch = batch
+        self._digest = digest
         self._metrics = metrics
         self._clock = clock
 
@@ -97,9 +107,10 @@ class EnqueueNotifications:
                     notice.occasion, notice.business_id, recipient.id, address.channel
                 ),
                 now=now,
-                available_at=self._due_at(
-                    unit, recipient.id, address.channel, notice.business_id, now
-                ),
+                available_at=self._digest.next_at(now)
+                if recipient.by_digest
+                else self._due_at(unit, recipient.id, address.channel, notice.business_id, now),
+                digest=recipient.by_digest,
             )
             if unit.notifications.add_if_absent(notification):
                 unit.work.add(WorkEntry.of(notification))
