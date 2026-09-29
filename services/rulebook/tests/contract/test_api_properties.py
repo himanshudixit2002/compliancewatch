@@ -45,20 +45,7 @@ OPERATIONS = frozenset(
         "GET /v1/rulebook/rules",
     }
 )
-UNLISTED_400 = "a body that is not UTF-8 is answered with a 400 the spec does not list"
-VALIDATION_422 = "the spec gives a 422 as FastAPI's HTTPValidationError, the answer is a Problem"
-EXCLUDED: dict[str, str] = {
-    "GET /v1/rulebook/documents/{document_id}": VALIDATION_422,
-    "PUT /v1/rulebook/documents/{document_id}": UNLISTED_400,
-    "PUT /v1/rulebook/documents/{document_id}/mentions": UNLISTED_400,
-    "PUT /v1/rulebook/documents/{document_id}/relation-candidates": UNLISTED_400,
-    "GET /v1/rulebook/review/entities": VALIDATION_422,
-    "POST /v1/rulebook/review/entities/decisions": UNLISTED_400,
-    "GET /v1/rulebook/review/entities/items": VALIDATION_422,
-    "GET /v1/rulebook/review/relations": VALIDATION_422,
-    "POST /v1/rulebook/review/relations/{candidate_id}/approve": UNLISTED_400,
-    "POST /v1/rulebook/review/relations/{candidate_id}/reject": UNLISTED_400,
-}
+EXCLUDED: dict[str, str] = {}
 CHECKS = cast(
     list[CheckFunction],
     [

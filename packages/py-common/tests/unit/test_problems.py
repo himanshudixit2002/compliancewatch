@@ -4,6 +4,7 @@ from typing import ClassVar
 import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 from domain_kernel.errors import DomainError, InvariantViolationError, UnknownAttributeError
 from py_common.app import create_app
@@ -29,6 +30,10 @@ class UnmappedError(DomainError):
     title = "Unmapped"
 
 
+class Thing(BaseModel):
+    name: str
+
+
 def _app() -> FastAPI:
     router = APIRouter(prefix="/t")
 
@@ -51,6 +56,10 @@ def _app() -> FastAPI:
     @router.get("/items/{item_id}", responses=problem_responses(422))
     async def item(item_id: int) -> dict[str, int]:
         return {"item_id": item_id}
+
+    @router.post("/things")
+    async def things(thing: Thing, limit: int = 1) -> Thing:
+        return thing
 
     @router.get("/boom")
     async def boom() -> None:
@@ -129,3 +138,22 @@ def test_openapi_publishes_the_problem_schema() -> None:
     assert "ValidationIssue" in spec["components"]["schemas"]
     content = spec["paths"]["/t/items/{item_id}"]["get"]["responses"]["422"]["content"]
     assert list(content) == [PROBLEM_MEDIA_TYPE]
+
+
+def test_openapi_documents_problems_for_undecodable_bodies_and_validation() -> None:
+    app = _app()
+    spec = app.openapi()
+    create = spec["paths"]["/t/things"]["post"]["responses"]
+    assert list(create["400"]["content"]) == [PROBLEM_MEDIA_TYPE]
+    assert list(create["422"]["content"]) == [PROBLEM_MEDIA_TYPE]
+    assert "400" not in spec["paths"]["/t/items/{item_id}"]["get"]["responses"]
+    assert "HTTPValidationError" not in spec["components"]["schemas"]
+    assert "ValidationError" not in spec["components"]["schemas"]
+    assert app.openapi() == spec
+
+
+def test_undecodable_body_is_a_400_problem(client: TestClient) -> None:
+    headers = {"content-type": "application/json"}
+    response = client.post("/t/things", content=b'{"name": "\xff"}', headers=headers)
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith(PROBLEM_MEDIA_TYPE)

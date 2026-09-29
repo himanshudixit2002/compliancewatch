@@ -37,13 +37,9 @@ OPERATIONS = frozenset(
         "GET /v1/notification/templates",
     }
 )
-UNLISTED_400 = "a body that is not UTF-8 is answered with a 400 the spec does not list"
-VALIDATION_422 = "the spec gives a 422 as FastAPI's HTTPValidationError, the answer is a Problem"
 QUIET_HOURS_500 = "quiet hours from 24:00 to 29:59 match the pattern and end in a 500"
 EXCLUDED: dict[str, str] = {
-    "GET /v1/notification/preferences/{channel}/{recipient}": VALIDATION_422,
-    "PUT /v1/notification/preferences/{channel}/{recipient}": f"{UNLISTED_400}; {QUIET_HOURS_500}",
-    "POST /v1/notification/send": UNLISTED_400,
+    "PUT /v1/notification/preferences/{channel}/{recipient}": QUIET_HOURS_500,
 }
 CHECKS = cast(
     list[CheckFunction],

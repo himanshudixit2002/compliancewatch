@@ -42,17 +42,7 @@ OPERATIONS = frozenset(
         "POST /v1/profile/registrations/{node_id}/prefill",
     }
 )
-UNLISTED_400 = "a body that is not UTF-8 is answered with a 400 the spec does not list"
-VALIDATION_422 = "the spec gives a 422 as FastAPI's HTTPValidationError, the answer is a Problem"
-EXCLUDED: dict[str, str] = {
-    "POST /v1/profile/entities": UNLISTED_400,
-    "POST /v1/profile/locations": UNLISTED_400,
-    "GET /v1/profile/nodes/{node_id}": VALIDATION_422,
-    "PUT /v1/profile/nodes/{node_id}/attributes": UNLISTED_400,
-    "GET /v1/profile/nodes/{node_id}/review-tasks": VALIDATION_422,
-    "POST /v1/profile/registrations": UNLISTED_400,
-    "POST /v1/profile/registrations/{node_id}/prefill": UNLISTED_400,
-}
+EXCLUDED: dict[str, str] = {}
 CHECKS = cast(
     list[CheckFunction],
     [

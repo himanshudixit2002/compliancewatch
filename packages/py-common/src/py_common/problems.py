@@ -7,6 +7,7 @@ parses one error format. An error may carry extra response headers in ``problem_
 (the gateway's budget error sets ``Retry-After`` that way).
 """
 
+import json
 from collections.abc import Mapping
 from http import HTTPStatus
 from typing import Any
@@ -187,7 +188,8 @@ def _respond(
 
 
 def _publish_problem_schema(app: FastAPI) -> None:
-    """Add ``Problem`` and ``ValidationIssue`` to ``components.schemas`` once, for ``$ref`` use."""
+    """Add ``Problem`` and ``ValidationIssue`` to ``components.schemas`` once, for ``$ref`` use,
+    and document the problem responses every route can return (``_document_problems``)."""
     original = app.openapi
 
     def openapi() -> dict[str, Any]:
@@ -197,6 +199,36 @@ def _publish_problem_schema(app: FastAPI) -> None:
             problem = Problem.model_json_schema(ref_template="#/components/schemas/{model}")
             components.update(problem.pop("$defs", {}))
             components["Problem"] = problem
+            _document_problems(schema)
         return schema
 
     app.openapi = openapi  # type: ignore[method-assign]
+
+
+def _document_problems(schema: dict[str, Any]) -> None:
+    """Make every operation document the problems the handlers above actually return.
+
+    FastAPI documents a 422 as its own ``HTTPValidationError`` in ``application/json`` unless the
+    route declares it, but ``validation_error`` answers with a ``Problem``. And a request body
+    that cannot be decoded (bytes that are not UTF-8) is a 400 before validation runs, on every
+    operation that takes a body.
+    """
+    for path_item in schema.get("paths", {}).values():
+        for operation in path_item.values():
+            responses = operation.get("responses", {})
+            if _is_fastapi_validation_response(responses.get("422")):
+                responses["422"] = problem_responses(422)[422]
+            if "requestBody" in operation and "400" not in responses:
+                responses["400"] = problem_responses(400)[400]
+    components = schema.get("components", {}).get("schemas", {})
+    for name in ("HTTPValidationError", "ValidationError"):
+        others = {key: value for key, value in components.items() if key != name}
+        if f'/{name}"' not in json.dumps([schema.get("paths", {}), others]):
+            components.pop(name, None)
+
+
+def _is_fastapi_validation_response(response: Any) -> bool:
+    if not isinstance(response, dict):
+        return False
+    body = response.get("content", {}).get("application/json", {}).get("schema", {})
+    return str(body.get("$ref", "")).endswith("/HTTPValidationError")

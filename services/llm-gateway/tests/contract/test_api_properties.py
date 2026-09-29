@@ -37,9 +37,7 @@ OPERATIONS = frozenset(
         "GET /v1/llm-gateway/usage",
     }
 )
-UNLISTED_400 = "a body that is not UTF-8 is answered with a 400 the spec does not list"
 EXCLUDED: dict[str, str] = {
-    "POST /v1/llm-gateway/completions": UNLISTED_400,
     "GET /v1/llm-gateway/usage": "months 0000-01 and 9999-12 match the pattern and end in a 500",
 }
 CHECKS = cast(

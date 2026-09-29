@@ -38,14 +38,7 @@ OPERATIONS = frozenset(
         "GET /v1/identity/ping",
     }
 )
-UNLISTED_400 = "a body that is not UTF-8 is answered with a 400 the spec does not list"
-VALIDATION_422 = "the spec gives a 422 as FastAPI's HTTPValidationError, the answer is a Problem"
-EXCLUDED: dict[str, str] = {
-    "POST /v1/identity/billing/subscriptions": UNLISTED_400,
-    "POST /v1/identity/billing/webhook": VALIDATION_422,
-    "GET /v1/identity/consents": VALIDATION_422,
-    "POST /v1/identity/consents": UNLISTED_400,
-}
+EXCLUDED: dict[str, str] = {}
 CHECKS = cast(
     list[CheckFunction],
     [
