@@ -4,13 +4,16 @@ import {
   DEFAULT_NOTICE_VERSION,
   HttpConsentLedger,
   HttpPreferencesClient,
+  HttpReceiptsClient,
   LoggingSender,
   NoConsentLedger,
+  NoReceiptsForwarding,
   NotConnectedQa,
   consentLedger,
 } from "./clients.ts";
 import { detectIntent, detectLanguage, normaliseKeyword } from "./consent.ts";
 import { handleInbound, maskNumber } from "./conversation.ts";
+import { isEmpty, isoFromUnix, receiptsOf } from "./receipts.ts";
 import { REPLY_KEYS, reply } from "./replies.ts";
 import { signBody, verifySignature } from "./signature.ts";
 import { parseWebhook } from "./webhook.ts";
@@ -98,7 +101,87 @@ describe("webhook parsing", () => {
   });
 });
 
+describe("status updates", () => {
+  function statuses(...items: unknown[]) {
+    return parseWebhook({
+      object: "whatsapp_business_account",
+      entry: [{ changes: [{ value: { statuses: items } }] }],
+    }).statuses;
+  }
+
+  it("keep the code and title of a failure's first error", () => {
+    const [failed, delivered, odd] = statuses(
+      {
+        id: "wamid.1",
+        recipient_id: "919876543210",
+        status: "failed",
+        timestamp: "1790000000",
+        errors: [
+          { code: 131047, title: "Re-engagement message", message: "more than 24 hours" },
+          { code: 1, title: "second" },
+        ],
+      },
+      { id: "wamid.2", recipient_id: "9", status: "delivered", timestamp: "1790000001" },
+      { id: "wamid.3", status: "failed", timestamp: "1", errors: [{ code: "131026" }, 3] },
+    );
+    expect(failed).toEqual({
+      id: "wamid.1",
+      recipient: "919876543210",
+      status: "failed",
+      timestamp: "1790000000",
+      errorCode: 131047,
+      errorTitle: "Re-engagement message",
+    });
+    expect([delivered?.errorCode, delivered?.errorTitle]).toEqual([null, ""]);
+    expect([odd?.errorCode, odd?.errorTitle]).toEqual([null, ""]);
+  });
+
+  it("become the reports notification takes, dropping what it could not read", () => {
+    const parsed = {
+      statuses: statuses(
+        { id: "wamid.1", status: "read", timestamp: "1790000000" },
+        { id: "", status: "read", timestamp: "1790000000" },
+        { id: "wamid.2", status: "", timestamp: "1790000000" },
+        { id: "wamid.3", status: "sent", timestamp: "yesterday" },
+      ),
+      messages: [
+        { id: "m1", from: "91", timestamp: "20", text: "a", type: "text", phoneNumberId: "4" },
+        { id: "m2", from: "91", timestamp: "10", text: "b", type: "text", phoneNumberId: "4" },
+        { id: "m3", from: "", timestamp: "30", text: "c", type: "text", phoneNumberId: "4" },
+        { id: "m4", from: "92", timestamp: "", text: "d", type: "text", phoneNumberId: "4" },
+      ],
+    };
+    const body = receiptsOf(parsed);
+    expect(body).toEqual({
+      statuses: [
+        { provider_message_id: "wamid.1", status: "read", at: "2026-09-21T14:13:20.000Z" },
+      ],
+      inbound: [{ address: "91", at: "1970-01-01T00:00:20.000Z" }],
+    });
+    expect(isEmpty(body)).toBe(false);
+    expect(isEmpty(receiptsOf({ statuses: [], messages: [] }))).toBe(true);
+    expect(isoFromUnix("1.5")).toBeNull();
+    expect(isoFromUnix("0")).toBe("1970-01-01T00:00:00.000Z");
+  });
+});
+
 describe("clients", () => {
+  it("receipts client posts to notification and raises when it refuses", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response("{}", { status: calls.length === 1 ? 200 : 401 });
+    }) as unknown as typeof fetch;
+    const client = new HttpReceiptsClient("http://n.test/", "bot", fetchImpl);
+    const body = { statuses: [], inbound: [{ address: "91", at: "1970-01-01T00:00:00.000Z" }] };
+    await client.forward(body);
+    expect(calls[0]?.url).toBe("http://n.test/v1/notification/receipts/whatsapp");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual(body);
+    await expect(client.forward(body)).rejects.toThrow("receipts: 401");
+    await new NoReceiptsForwarding().forward();
+  });
+
   it("preferences client PUTs and GETs the notification service", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {

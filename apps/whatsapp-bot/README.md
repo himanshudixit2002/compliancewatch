@@ -11,13 +11,14 @@ Design reference: Project Foundation guide, sections 7, 12 and 14.
 ## Layout
 
 ```
-src/app.ts           # Hono app: GET /health, GET /webhook (handshake with the verify token), POST /webhook (signature, parse, converse)
+src/app.ts           # Hono app: GET /health, GET /webhook (handshake with the verify token), POST /webhook (signature, parse, forward receipts, converse)
 src/signature.ts     # X-Hub-Signature-256: HMAC-SHA256 of the raw body, constant-time compare
 src/webhook.ts       # Cloud API payload -> InboundMessage / StatusUpdate (anti-corruption layer)
+src/receipts.ts      # statuses and inbound times of a delivery, as notification's receipt route takes them
 src/consent.ts       # STOP / START / HELP keywords in English, Hindi and Hinglish; language detection
 src/conversation.ts  # one message in, one reply out; opt-out first, opt-in prompt for strangers; keywords recorded as consents
 src/replies.ts       # session replies (en, hi); reminders are rendered by the notification service
-src/clients.ts       # preferences client (notification service), consent ledger (identity service), Cloud API sender, logging sender, qa stub
+src/clients.ts       # preferences and receipts clients (notification service), consent ledger (identity service), Cloud API sender, logging sender, qa stub
 src/index.ts         # bootstrap; sending is off unless WHATSAPP_SEND_ENABLED=true with credentials
 src/contracts.test.ts  # the recorded calls to notification and identity (packages/contracts/consumers/whatsapp-bot)
 ```
@@ -37,10 +38,21 @@ is removed, and recording made unconditional, once the lawyer confirms the keywo
 wording (the open question in `docs/legal/README.md`) and identity runs in the deployed
 profile. On, the bot refuses to start without `IDENTITY_SERVICE_TOKEN`.
 
+## Delivery statuses and inbound times
+
+Every webhook delivery's statuses (sent, delivered, read, failed, with Meta's error code and
+title) and the time each number wrote to the business go to notification's
+`POST /v1/notification/receipts/whatsapp` with `NOTIFICATION_BOT_TOKEN` (the same value as
+notification's `CW_NOTIFICATION_BOT_TOKEN`), before any message is handled. The statuses tell
+notification what became of the reminders it sent; the inbound times open WhatsApp's 24-hour
+window, inside which it may send free text instead of an approved template. When the forward
+fails the delivery is answered with a 500 and no reply goes out, so Meta delivers it again.
+Without the token nothing is forwarded and the bot warns once at start.
+
 The calls the bot makes to notification and identity are recorded in
 `packages/contracts/consumers/whatsapp-bot/`: `contracts.test.ts` checks the clients send
 exactly those requests, and each provider's `tests/contract/test_consumers.py` replays them.
 
 ## How to run
 
-`pnpm --filter whatsapp-bot dev` (Node 22+ runs the TypeScript source directly), `build` then `start`, `test`. Copy `.env.example` to `.env`: `WHATSAPP_VERIFY_TOKEN` and `WHATSAPP_APP_SECRET` (both checked; an empty verify token never verifies), `WHATSAPP_REQUIRE_SIGNATURE` (false only locally), `WHATSAPP_SEND_ENABLED` with `WHATSAPP_PHONE_NUMBER_ID` and `WHATSAPP_ACCESS_TOKEN` (replies leave the process only then), `NOTIFICATION_API_URL`, and for consent recording `WHATSAPP_CONSENT_RECORDING_ENABLED`, `IDENTITY_API_URL`, `IDENTITY_SERVICE_TOKEN` and `WHATSAPP_NOTICE_VERSION`. The manual steps on the Meta side and the failure modes are in `docs/runbooks/whatsapp.md`; the consent wording in `docs/legal/whatsapp-consent.md`.
+`pnpm --filter whatsapp-bot dev` (Node 22+ runs the TypeScript source directly), `build` then `start`, `test`. Copy `.env.example` to `.env`: `WHATSAPP_VERIFY_TOKEN` and `WHATSAPP_APP_SECRET` (both checked; an empty verify token never verifies), `WHATSAPP_REQUIRE_SIGNATURE` (false only locally), `WHATSAPP_SEND_ENABLED` with `WHATSAPP_PHONE_NUMBER_ID` and `WHATSAPP_ACCESS_TOKEN` (replies leave the process only then), `NOTIFICATION_API_URL` and `NOTIFICATION_BOT_TOKEN`, and for consent recording `WHATSAPP_CONSENT_RECORDING_ENABLED`, `IDENTITY_API_URL`, `IDENTITY_SERVICE_TOKEN` and `WHATSAPP_NOTICE_VERSION`. The manual steps on the Meta side and the failure modes are in `docs/runbooks/whatsapp.md`; the consent wording in `docs/legal/whatsapp-consent.md`.

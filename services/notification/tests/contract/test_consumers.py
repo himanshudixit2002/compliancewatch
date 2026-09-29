@@ -1,10 +1,10 @@
 """Provider side of the WhatsApp bot's consumer contract with notification.
 
 packages/contracts/consumers/whatsapp-bot/notification.json holds the requests the bot's
-``HttpPreferencesClient`` sends, in order, and the parts of each response it relies on. They
-are replayed against a fresh app: each status must match, and each recorded body must be a
-subset of the served one. The bot's apps/whatsapp-bot/src/contracts.test.ts checks the same
-file from the consumer side.
+``HttpPreferencesClient`` and ``HttpReceiptsClient`` send, in order, and the parts of each
+response it relies on. They are replayed against a fresh app with the bot token of the test
+settings: each status must match, and each recorded body must be a subset of the served one.
+The bot's apps/whatsapp-bot/src/contracts.test.ts checks the same file from the consumer side.
 """
 
 import json
@@ -14,7 +14,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from notification.main import build_app
-from notification.testing import notification_settings
+from notification.testing import BOT_TOKEN, notification_settings
 
 CONTRACT = (
     Path(__file__).resolve().parents[4]
@@ -46,7 +46,8 @@ def test_the_bot_interactions_replay_in_order() -> None:
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
     assert (contract["consumer"], contract["provider"]) == ("whatsapp-bot", "notification")
     assert contract["interactions"]
-    with TestClient(build_app(notification_settings())) as client:
+    app = build_app(notification_settings(notification_bot_token=BOT_TOKEN))
+    with TestClient(app) as client:
         for interaction in contract["interactions"]:
             request, expected = interaction["request"], interaction["response"]
             response = client.request(

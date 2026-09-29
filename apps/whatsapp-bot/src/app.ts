@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import type { Deps } from "./conversation.ts";
 import { handleInbound } from "./conversation.ts";
+import type { ReceiptsClient } from "./receipts.ts";
+import { isEmpty, receiptsOf } from "./receipts.ts";
 import { verifySignature } from "./signature.ts";
 import { parseWebhook } from "./webhook.ts";
 
@@ -14,8 +16,13 @@ export interface AppConfig {
 /**
  * HTTP surface of the WhatsApp webhook receiver (guide section 7).
  * Free of server bootstrap so tests can call `app.request()` directly.
+ *
+ * Before any message is handled, the delivery's statuses and the times numbers wrote to us go to
+ * the notification service (`receipts`). When that fails the delivery is answered with a 500 and
+ * nothing is handled or replied to: Meta delivers the webhook again, and the statuses and
+ * replies go then, once each.
  */
-export function createApp(config: AppConfig, deps: Deps): Hono {
+export function createApp(config: AppConfig, deps: Deps, receipts?: ReceiptsClient): Hono {
   const app = new Hono();
 
   app.get("/health", (c) => c.json({ status: "ok", service: "whatsapp-bot" }));
@@ -50,6 +57,17 @@ export function createApp(config: AppConfig, deps: Deps): Hono {
       return c.json({ error: "invalid json" }, 400);
     }
     const parsed = parseWebhook(payload);
+    const reports = receiptsOf(parsed);
+    if (receipts !== undefined && !isEmpty(reports)) {
+      try {
+        await receipts.forward(reports);
+      } catch (error) {
+        (deps.log ?? console.error)(
+          `whatsapp-bot: ${reports.statuses.length} statuses and ${reports.inbound.length} inbound times not forwarded to notification, so nothing was handled: ${String(error)}`,
+        );
+        return c.json({ error: "forwarding to notification failed" }, 500);
+      }
+    }
     const handled = [];
     for (const message of parsed.messages) {
       handled.push(await handleInbound(message, deps));
