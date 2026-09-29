@@ -1,4 +1,8 @@
-"""Routes of the qa service. Business logic lives in application use cases."""
+"""Routes of the qa service. Business logic lives in application use cases.
+
+A question is asked for the request's tenant (``deps.Tenant``): the tenant a user's access token
+names, the one a service with tenant:act names in ``x-tenant-id``, or without a token the header's.
+"""
 
 from fastapi import APIRouter
 
@@ -22,7 +26,7 @@ async def ping() -> dict[str, str]:
 @router.post(
     "/ask",
     summary="Answer a question with verified citations, or say it is not covered",
-    responses=problem_responses(401, 404, 422, 429, 503),
+    responses=problem_responses(401, 403, 404, 422, 429, 503),
 )
 def ask(body: AskIn, tenant: Tenant, wired: Wired, question_id: QuestionId) -> AskOut:
     try:

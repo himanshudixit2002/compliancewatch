@@ -1,35 +1,43 @@
-"""Request-scoped dependencies: the tenant from the header (required here), the wiring, and
-the question id every model call of the request is tagged with."""
+"""Request-scoped dependencies: the caller and its tenant, the wiring, and the question id every
+model call of the request is tagged with.
 
-from collections.abc import AsyncIterator
+The caller comes from ``py_common.auth.fastapi`` by ``CW_AUTH_MODE``. ``Tenant`` is the tenant a
+member of it asks for:
+
+- a user's access token names the tenant, and an ``x-tenant-id`` header naming another is a 403
+  ``auth-tenant-mismatch``; the user needs one of the tenant member roles;
+- a service names the tenant in ``x-tenant-id`` and needs the tenant:act scope;
+- without a token (``header`` mode, or ``dual`` mode without one) the header names the tenant, as
+  before tokens existed.
+
+Answers read tenant data (profiles, obligations), so no tenant at all is this service's own 401
+``qa-tenant-required``.
+"""
+
 from typing import Annotated
-from uuid import UUID, uuid4
+from uuid import uuid4
 
-import structlog
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Request
 
+from domain_kernel.access import TENANT_MEMBER_ROLES, Principal, Scope
 from domain_kernel.ids import TenantId
+from py_common.auth.fastapi import require_roles, tenant_scope
 from py_common.request_context import correlation_id_of
 from qa.domain.errors import QaTenantRequiredError
 from qa.wiring import Wiring
 
+member = require_roles(TENANT_MEMBER_ROLES, scopes={Scope.TENANT_ACT})
+"""A user with a tenant member role or a service with tenant:act; the anonymous principal of
+``header`` mode passes."""
+tenant_of_request = tenant_scope(True, QaTenantRequiredError)
 
-async def tenant_id_from_header(
-    x_tenant_id: Annotated[
-        UUID | None,
-        Header(description="Tenant UUID; required until the identity service issues tokens"),
-    ] = None,
-) -> AsyncIterator[TenantId]:
-    """Answers read tenant data (profiles, obligations), so the header is required: a missing
-    one is a 401 problem."""
-    if x_tenant_id is None:
-        raise QaTenantRequiredError()
-    tenant_id = TenantId(x_tenant_id)
-    structlog.contextvars.bind_contextvars(tenant_id=str(tenant_id))
-    try:
-        yield tenant_id
-    finally:
-        structlog.contextvars.unbind_contextvars("tenant_id")
+
+async def member_tenant(
+    principal: Annotated[Principal, Depends(member)],
+    tenant: Annotated[TenantId, Depends(tenant_of_request)],
+) -> TenantId:
+    """The request's tenant, once the caller is known to be one of its members."""
+    return tenant
 
 
 def wiring(request: Request) -> Wiring:
@@ -42,6 +50,6 @@ def question_id(request: Request) -> str:
     return correlation_id_of(request) or uuid4().hex
 
 
-Tenant = Annotated[TenantId, Depends(tenant_id_from_header)]
+Tenant = Annotated[TenantId, Depends(member_tenant)]
 Wired = Annotated[Wiring, Depends(wiring)]
 QuestionId = Annotated[str, Depends(question_id)]

@@ -16,16 +16,19 @@ SERVICE: Final = "obligation"
 
 
 class HttpObligations:
-    """``base_url`` is ``CW_OBLIGATION_URL``; the tenant goes in ``x-tenant-id`` on every call."""
+    """``base_url`` is ``CW_OBLIGATION_URL``; the tenant goes in ``x-tenant-id`` on every call,
+    which a service token may name with the tenant:act scope. ``auth`` is the service's token
+    auth (None sends no token)."""
 
     def __init__(
         self,
         base_url: str = "http://localhost:8005",
         *,
         client: httpx2.Client | None = None,
+        auth: httpx2.Auth | None = None,
         timeout_seconds: float = 5.0,
     ) -> None:
-        self._http = JsonHttp(http_client(base_url, timeout_seconds, client), SERVICE)
+        self._http = JsonHttp(http_client(base_url, timeout_seconds, client), SERVICE, auth=auth)
 
     def obligations(
         self,

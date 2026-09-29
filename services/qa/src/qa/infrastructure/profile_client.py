@@ -16,17 +16,20 @@ SERVICE: Final = "profile"
 
 
 class HttpProfiles:
-    """``base_url`` is ``CW_PROFILE_URL``; the tenant goes in ``x-tenant-id`` on every call.
-    JSON lists come back as sets, which is how set-valued attributes are compared."""
+    """``base_url`` is ``CW_PROFILE_URL``; the tenant goes in ``x-tenant-id`` on every call, which
+    a service token may name with the tenant:act scope. ``auth`` is the service's token auth
+    (None sends no token). JSON lists come back as sets, which is how set-valued attributes are
+    compared."""
 
     def __init__(
         self,
         base_url: str = "http://localhost:8002",
         *,
         client: httpx2.Client | None = None,
+        auth: httpx2.Auth | None = None,
         timeout_seconds: float = 5.0,
     ) -> None:
-        self._http = JsonHttp(http_client(base_url, timeout_seconds, client), SERVICE)
+        self._http = JsonHttp(http_client(base_url, timeout_seconds, client), SERVICE, auth=auth)
 
     def snapshot(
         self, tenant: TenantId, business: BusinessId, fy: FinancialYear | None
