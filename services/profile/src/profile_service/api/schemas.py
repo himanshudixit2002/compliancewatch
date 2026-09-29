@@ -154,6 +154,19 @@ class NextQuestionOut(BaseModel):
     allowed_values: list[str]
 
 
+class FinancialYearConfirmationIn(Strict):
+    fy: str | None = Field(
+        default=None,
+        pattern=FY_PATTERN,
+        description="2026-27; empty means the financial year of today's date in IST",
+    )
+
+
+class FinancialYearConfirmationOut(BaseModel):
+    fy: str
+    opened: list[UUID] = Field(description="The review tasks opened now; empty on a rerun")
+
+
 class ReviewTaskOut(BaseModel):
     id: UUID
     node_id: UUID

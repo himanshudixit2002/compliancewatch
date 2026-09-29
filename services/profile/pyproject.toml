@@ -16,6 +16,9 @@ dependencies = [
   "ontology",
 ]
 
+[project.scripts]
+profile-fy-confirm = "profile_service.jobs:main"
+
 [tool.uv.sources]
 py-common = { workspace = true }
 domain-kernel = { workspace = true }

@@ -8,11 +8,13 @@ from fastapi import APIRouter, Query, status
 from domain_kernel.financial_year import FinancialYear
 from domain_kernel.identifiers import Gstin, Pan
 from domain_kernel.ids import BusinessId, UserId
-from profile_service.api.deps import Tenant, Wired
+from profile_service.api.deps import Now, Tenant, Wired
 from profile_service.api.schemas import (
     FY_PATTERN,
     AttributesIn,
     EntityIn,
+    FinancialYearConfirmationIn,
+    FinancialYearConfirmationOut,
     LocationIn,
     LookupResultOut,
     NextQuestionOut,
@@ -24,6 +26,7 @@ from profile_service.api.schemas import (
     SetResultOut,
     SnapshotOut,
 )
+from profile_service.application.attributes import financial_year_in_india
 from profile_service.domain.errors import ProfileNodeNotFoundError
 from profile_service.domain.events import ChangeSource
 from py_common.problems import problem_responses
@@ -192,3 +195,25 @@ def prefill(node_id: UUID, body: PrefillIn, tenant: Tenant, wired: Wired) -> Pre
         applied=list(result.applied),
         review_task=None if result.review_task is None else result.review_task.value,
     )
+
+
+@router.post(
+    "/financial-year-confirmations",
+    summary="Open a confirm_financial_year review task per entity and missing per-year value",
+    responses=problem_responses(401, 422),
+)
+def confirm_financial_year(
+    tenant: Tenant,
+    wired: Wired,
+    now: Now,
+    body: FinancialYearConfirmationIn | None = None,
+) -> FinancialYearConfirmationOut:
+    """Idempotent: a task still open for the same entity, attribute and year is not opened
+    again, so a rerun, or the April run after a manual one, opens nothing."""
+    fy = (
+        financial_year_in_india(now)
+        if body is None or body.fy is None
+        else FinancialYear.parse(body.fy)
+    )
+    opened = wired.confirm_financial_year.run(tenant, fy)
+    return FinancialYearConfirmationOut(fy=fy.label, opened=[task.value for task in opened])

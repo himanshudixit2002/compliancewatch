@@ -31,6 +31,7 @@ OPERATIONS = frozenset(
         "GET /health",
         "GET /ready",
         "POST /v1/profile/entities",
+        "POST /v1/profile/financial-year-confirmations",
         "POST /v1/profile/locations",
         "GET /v1/profile/nodes/{node_id}",
         "PUT /v1/profile/nodes/{node_id}/attributes",
