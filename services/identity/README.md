@@ -31,8 +31,9 @@ Design reference: Project Foundation guide, sections 7, 14 and 16.
 | `POST /v1/identity/billing/webhook` | Provider webhook; the body is verified against the webhook secret (`X-Razorpay-Signature`) before it is read |
 
 Purposes: `terms`, `privacy_notice`, `profile_processing`, `whatsapp_reminders`,
-`email_reminders`, `analytics`. Sources: `web_onboarding`, `whatsapp_keyword`, `api`,
-`support`. The notice versions are the `Version:` lines in `docs/legal`.
+`email_reminders`, `analytics`. Sources: `web_onboarding`, `web_settings` (a change made later
+on the web settings pages), `whatsapp_keyword`, `api`, `support`. The notice versions are the
+`Version:` lines in `docs/legal`.
 
 Channel consents (`identity.channel_consent`) are what a person asked for by writing a keyword
 to the WhatsApp number before they have an account: START records a grant of

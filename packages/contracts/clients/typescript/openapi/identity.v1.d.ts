@@ -465,7 +465,7 @@ export type components = {
      * ConsentSource
      * @enum {string}
      */
-    ConsentSource: "web_onboarding" | "whatsapp_keyword" | "api" | "support";
+    ConsentSource: "web_onboarding" | "whatsapp_keyword" | "api" | "support" | "web_settings";
     /** ConsentStateOut */
     ConsentStateOut: {
       /** Granted */

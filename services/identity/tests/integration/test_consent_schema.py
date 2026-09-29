@@ -1,5 +1,6 @@
 """Migration 0001 on Postgres: the consent table, row-level security by tenant, the unit of
-work end to end as a plain database role. Needs Docker."""
+work end to end as a plain database role; and migration 0004, which adds the web_settings
+source. Needs Docker."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -8,6 +9,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 from testcontainers.community.postgres import PostgresContainer
 
 from domain_kernel.ids import TenantId
@@ -92,6 +94,47 @@ def test_table_policy_and_isolation(
     assert ConsentStatus(factory).run(other, "u").history == ()
     with app_engine.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM consent_record")).scalar_one() == 0
+
+
+def _source_check(engine: Engine) -> str:
+    with engine.connect() as connection:
+        return str(
+            connection.execute(
+                text(
+                    "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                    "WHERE conname = 'ck_consent_record_source'"
+                )
+            ).scalar_one()
+        )
+
+
+def test_web_settings_is_a_source_and_the_downgrade_keeps_the_evidence(
+    migrated: Config, database_url: str, app_engine: Engine
+) -> None:
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    tenant = TenantId.new()
+    RecordConsent(factory).run(
+        tenant,
+        "settings-user",
+        ConsentPurpose.ANALYTICS,
+        granted=False,
+        source=ConsentSource.WEB_SETTINGS,
+        evidence="toggle: Share usage analytics",
+    )
+    (state,) = ConsentStatus(factory).run(tenant, "settings-user").states
+    assert state.source is ConsentSource.WEB_SETTINGS
+
+    engine = create_engine(database_url)
+    with pytest.raises(IntegrityError, match="ck_consent_record_source"):
+        command.downgrade(migrated, "0003")
+    assert "web_settings" in _source_check(engine), "the failed downgrade changed nothing"
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM consent_record WHERE source = 'web_settings'"))
+    command.downgrade(migrated, "0003")
+    assert "web_settings" not in _source_check(engine)
+    command.upgrade(migrated, "head")
+    assert "web_settings" in _source_check(engine)
+    engine.dispose()
 
 
 def test_downgrade_and_upgrade(migrated: Config, database_url: str) -> None:

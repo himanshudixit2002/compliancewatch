@@ -85,6 +85,16 @@ def test_preferences_round_trip(client: TestClient) -> None:
     assert bad.status_code == 422
 
 
+def test_a_preference_changed_on_the_web_settings_pages_keeps_its_source(
+    client: TestClient,
+) -> None:
+    path = "/v1/notification/preferences/email/settings@example.com"
+    put = client.put(path, json={"opted_in": False, "source": "web_settings"})
+    assert put.status_code == 200, put.text
+    assert (put.json()["opted_in"], put.json()["source"]) == (False, "web_settings")
+    assert client.get(path).json()["source"] == "web_settings"
+
+
 def test_an_address_that_is_not_one_is_a_422_problem(client: TestClient) -> None:
     for method in ("GET", "PUT"):
         response = client.request(

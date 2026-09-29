@@ -267,7 +267,7 @@ export type components = {
      * @description How the opt-in or opt-out reached us.
      * @enum {string}
      */
-    ConsentSource: "whatsapp_keyword" | "web_onboarding" | "api" | "support";
+    ConsentSource: "whatsapp_keyword" | "web_onboarding" | "api" | "support" | "web_settings";
     /**
      * DeliveryState
      * @enum {string}

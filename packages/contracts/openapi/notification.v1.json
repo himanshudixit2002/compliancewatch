@@ -57,7 +57,8 @@
           "whatsapp_keyword",
           "web_onboarding",
           "api",
-          "support"
+          "support",
+          "web_settings"
         ],
         "title": "ConsentSource",
         "type": "string"

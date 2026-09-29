@@ -28,6 +28,8 @@ class ConsentSource(StrEnum):
     WHATSAPP_KEYWORD = "whatsapp_keyword"
     API = "api"
     SUPPORT = "support"
+    WEB_SETTINGS = "web_settings"
+    """Changed later on the web settings pages, not at onboarding."""
 
 
 @dataclass(frozen=True, slots=True)
