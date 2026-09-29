@@ -15,7 +15,10 @@ injected ontology, standing in until the applicability engine has an API; a spec
 does not parse or names an unknown attribute gives an ``unsure`` fact, never a crash.
 
 The bundle holds every clause the solver touched as evidence (relation evidence and retrieved
-clauses), in step order, and one fact per finding.
+clauses), in step order, and one fact per finding. Collections the upstream services return in
+an order of their own (relations, the candidates of an ambiguous name, obligations due on the
+same day) are sorted first, so the labels and the prompt do not depend on it; search hits and
+entity clauses keep the order they were ranked in.
 """
 
 import operator
@@ -276,7 +279,7 @@ class _Run:
             entities = (found.entity,)
             self.fact(f"{named} is the known entity {found.entity.canonical_name}")
         elif found.status is ResolutionStatus.AMBIGUOUS:
-            entities = found.candidates
+            entities = tuple(sorted(found.candidates, key=_entity_order))
             names = ", ".join(entity.canonical_name for entity in entities)
             self.fact(f"{named} is ambiguous: it may be any of {names}")
         else:
@@ -349,18 +352,37 @@ class _Run:
             frontier = reached
             if not frontier:
                 break
-        return StepValue(ValueKind.RULES, rules=tuple(found))
+        return StepValue(ValueKind.RULES, rules=tuple(sorted(found, key=_rule_order)))
 
     def _relations(
         self, node: RuleVersionId | CanonicalEntityId, direction: Direction
-    ) -> tuple[Relation, ...]:
+    ) -> list[Relation]:
+        """The node's relations, ordered by the version at their far end (effective date, rule
+        key), then by kind, target, period and evidence."""
         self.call()
         rulebook = self.solver.rulebook
         if isinstance(node, CanonicalEntityId):
-            return rulebook.relations(to_entity_id=node)
-        if direction is Direction.OUT:
-            return rulebook.relations(from_rule_version_id=node)
-        return rulebook.relations(to_rule_version_id=node)
+            found = rulebook.relations(to_entity_id=node)
+        elif direction is Direction.OUT:
+            found = rulebook.relations(from_rule_version_id=node)
+        else:
+            found = rulebook.relations(to_rule_version_id=node)
+
+        def order(relation: Relation) -> tuple[date, str, str, str, str, str, str, str]:
+            target = self._far_end(relation, direction)
+            version = None if target is None else self.visible.get(target)
+            return (
+                date.min if version is None else version.effective_from,
+                "" if version is None else version.rule_key,
+                relation.relation.value,
+                relation.to_kind,
+                relation.to_ref,
+                relation.period_label or "",
+                relation.evidence_clause_ref,
+                str(relation.evidence_clause_id),
+            )
+
+        return sorted(found, key=order)
 
     @staticmethod
     def _far_end(relation: Relation, direction: Direction) -> RuleVersionId | None:
@@ -428,7 +450,7 @@ class _Run:
         if args.rules is not None:
             allowed = {rule.rule_version_id for rule in self.values[args.rules].rules}
         kept: list[ObligationRecord] = []
-        for obligation in found:
+        for obligation in sorted(found, key=_obligation_order):
             if obligation.rule_version_id not in self.visible:
                 self.hidden += 1
             elif allowed is None or obligation.rule_version_id in allowed:
@@ -530,6 +552,26 @@ class _Run:
                 if clause is not None:
                     found.append(clause)
         return found
+
+
+def _entity_order(entity: Entity) -> tuple[str, str, str]:
+    return (entity.entity_type.value, entity.canonical_name, str(entity.entity_id))
+
+
+def _rule_order(rule: RuleVersion) -> tuple[date, str, int, str]:
+    return (rule.effective_from, rule.rule_key, rule.version, str(rule.rule_version_id))
+
+
+def _obligation_order(obligation: ObligationRecord) -> tuple[bool, date, str, str, str]:
+    """Due first, undated last, then by title and period."""
+    due = obligation.due_on
+    return (
+        due is None,
+        due or date.min,
+        obligation.title,
+        obligation.period_label or "",
+        str(obligation.obligation_id),
+    )
 
 
 def _amount(entity: Entity) -> Decimal | None:

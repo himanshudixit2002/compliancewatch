@@ -63,6 +63,9 @@ The solver (`application/solver.py`) is deterministic:
   reached any other way (the far end of a relation, an obligation's version) is dropped, and the
   drop is counted on the step's span.
 - `follow` is breadth first with a visited set, so a cycle of relations ends.
+- Relations (by the far end's effective date and rule key), the candidates of an ambiguous name
+  and obligations are sorted before use, so the evidence labels and the prompt do not depend on
+  the order the upstream services return them in.
 - A question may make 40 upstream calls in all and a step may produce 50 items.
 - Applicability is the kernel's `Specification.evaluate` with the packaged ontology, standing in
   until the applicability engine has an API. A specification that does not parse or names an

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from domain_kernel.knowledge import EntityType, RelationKind
+from qa.application.answerer import render_evidence
 from qa.application.solver import Budget, SolverBudgetExceededError, SolverStepError
 from qa.domain.evidence import EvidenceBundle
 from qa.domain.plan import (
@@ -448,3 +449,52 @@ def test_the_plan_date_moves_what_is_visible(world: World) -> None:
         f"rule {world.EXTENSION_RULE} version 1 (GSTR-3B March 2026 extension) is in force on "
         "2026-03-31, effective from 2026-03-30"
     ]
+
+
+def test_the_evidence_does_not_depend_on_the_upstream_order(world: World) -> None:
+    """Relations, the candidates of an ambiguous name and obligations due on one day come back
+    in the upstream's order; the bundle and the prompt are the same whichever it is."""
+    rulebook = world.rulebook
+    february = rulebook.add_clause(
+        "The return in FORM GSTR-3B for the month of February, 2026 may be furnished till the "
+        "22nd day of March, 2026.",
+        clause_ref="en.p2",
+        external_ref="TEST-04",
+        published_at=date(2026, 3, 1),
+    )
+    earlier = rulebook.add_version("gstr3b_extension_2026_02", effective_from=date(2026, 3, 1))
+    rulebook.relate(
+        earlier,
+        RelationKind.EXTENDS_DEADLINE,
+        world.monthly,
+        february,
+        period_label="2026-02",
+        new_due_on=date(2026, 3, 22),
+    )
+    rulebook.add_entity(EntityType.CIRCULAR, "1/2026", aliases=["one"])
+    rulebook.add_entity(EntityType.CIRCULAR, "2/2026", aliases=["one"])
+    world.obligations.add(
+        world.TENANT, world.BUSINESS, world.monthly, "Annual statement", date(2026, 4, 20)
+    )
+    question_plan = plan(
+        RulesInForce(rule_key=world.MONTHLY_RULE),
+        Follow("s1", EXTENDS, Direction.IN, 1),
+        FindEntity(EntityType.CIRCULAR, "one"),
+        GetObligations(None, date(2026, 4, 1), date(2026, 5, 31)),
+        AnswerFrom(("s2", "s3", "s4")),
+    )
+    request = world.request("Which notices extended GSTR-3B, and what is due?")
+    seen = []
+    for _ in range(2):
+        bundle = world.solver().solve(question_plan, world.context())
+        seen.append((bundle, render_evidence(request, bundle)))
+        rulebook.relation_rows.reverse()
+        rulebook.entities = dict(reversed(rulebook.entities.items()))
+        world.obligations.rows[world.TENANT].reverse()
+    assert seen[0] == seen[1]
+    bundle = seen[0][0]
+    assert [(clause.label, clause.source) for clause in bundle.clauses] == [
+        ("C1", "TEST-04"),
+        ("C2", "TEST-02"),
+    ]
+    assert "may be any of 1/2026, 2/2026" in seen[0][1]
