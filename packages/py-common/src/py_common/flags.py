@@ -5,7 +5,8 @@ py-common loads its generated copy of the registry, ``flags_registry.json`` (``m
 
 - ``env`` (the default): ``EnvFlagProvider``. A flag's value comes from the variable the code
   already reads (the entry's ``env``), else from ``CW_FLAG_<NAME>`` (the name upper-cased, dots
-  as underscores), else the registry default. The environment beats ``.env``, as in the settings.
+  as underscores), else the registry default. The environment beats ``.env``, as in the settings,
+  and settings built with ``_env_file=None`` read no ``.env`` for their flags either.
   A tenant-targeted flag that is on applies to the tenants in its allow-list, the entry's
   ``tenants_env`` or ``CW_FLAG_<NAME>__TENANTS`` (comma-separated tenant ids); with no list it
   applies to every tenant.
@@ -395,12 +396,15 @@ _state = _State()
 
 
 def environment(settings: Settings) -> Mapping[str, str]:
-    """The process environment over the settings' ``.env`` file, as pydantic-settings reads
-    them: a variable in the environment beats the file."""
-    env_file = settings.model_config.get("env_file")
+    """The process environment over the ``.env`` files the settings were read from, as
+    pydantic-settings reads them: a variable in the environment beats the files, and a later
+    file beats an earlier one. Settings built with ``_env_file=None`` read no file here either."""
     values: dict[str, str] = {}
-    if isinstance(env_file, str | Path) and Path(env_file).is_file():
-        values = {key: value for key, value in dotenv_values(env_file).items() if value is not None}
+    for env_file in settings.env_files:
+        if env_file.is_file():
+            values.update(
+                (key, value) for key, value in dotenv_values(env_file).items() if value is not None
+            )
     return ChainMap(os.environ, values)
 
 

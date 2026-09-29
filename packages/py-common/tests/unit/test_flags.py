@@ -282,6 +282,26 @@ def test_the_environment_alone_without_an_env_file() -> None:
     assert dict(environment(settings)) == dict(os.environ)
 
 
+def test_settings_kept_from_the_env_file_keep_their_flags_from_it(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("CW_FLAG_DEMO_SWITCH=true\n", encoding="utf-8")
+    configure_flags(Settings(_env_file=None), registry=REGISTRY)
+    assert flag_enabled("demo.switch") is False
+    configure_flags(Settings(), registry=REGISTRY)
+    assert flag_enabled("demo.switch") is True
+
+
+def test_the_flags_read_the_env_files_the_settings_named(tmp_path: Path) -> None:
+    (tmp_path / "base.env").write_text(
+        "CW_DEMO_PROVIDER=sandbox\nCW_FLAG_DEMO_SWITCH=true\n", encoding="utf-8"
+    )
+    (tmp_path / "local.env").write_text("CW_DEMO_PROVIDER=none\n", encoding="utf-8")
+    settings = Settings(_env_file=("base.env", "local.env", "missing.env"))
+    assert settings.env_files == (Path("base.env"), Path("local.env"), Path("missing.env"))
+    configure_flags(settings, registry=REGISTRY)
+    assert flag_enabled("demo.switch") is True
+    assert flag_value("demo.provider") == "none", "a later file wins, as in the settings"
+
+
 def test_reset_returns_every_flag_to_its_default() -> None:
     use_env(CW_DEMO_ENABLED="true")
     assert flag_enabled("demo.switch") is True

@@ -117,7 +117,10 @@ string flag, and a name the registry does not hold raises `UnknownFlagError`. Wi
 reads, else `CW_FLAG_<NAME>` (dots as underscores, so `CW_FLAG_PROFILE_GSTIN_CATEGORY_PREFILL`),
 else the registry default; a tenant-targeted flag that is on narrows to the tenant ids in its
 allow-list (`CW_FLAG_<NAME>__TENANTS`, or the variable the code already reads, such as
-`CW_QA_KAG_TENANTS`). With `CW_FLAGS_PROVIDER=unleash` the flags come from an Unleash server
+`CW_QA_KAG_TENANTS`). The variables come from the environment over the `.env` files the
+settings read (`settings.env_files`), so settings built with `_env_file=None`, as the tests, the
+demo and the evals build them, read no `.env` for their flags either. With
+`CW_FLAGS_PROVIDER=unleash` the flags come from an Unleash server
 at `CW_UNLEASH_URL` with the client token `CW_UNLEASH_API_TOKEN`, under their registry names;
 the tenant id is Unleash's `userId` and the `tenantId` property. That provider needs the
 optional extra `py-common[unleash]`, so a service that calls `configure_flags` depends on
