@@ -64,6 +64,7 @@ def test_table_policy_and_isolation(
     engine = create_engine(database_url)
     assert set(inspect(engine).get_table_names(schema=SCHEMA)) == {
         "consent_record",
+        "channel_consent",
         "alembic_version",
     }
     with engine.connect() as connection:

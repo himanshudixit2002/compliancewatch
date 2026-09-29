@@ -16,6 +16,7 @@ from notification.application.preferences import SetOptIn
 from notification.application.send import SendNotification
 from notification.domain.errors import (
     MissingPlaceholderError,
+    TenantRequiredError,
     UnknownChannelError,
     UnknownTemplateError,
 )
@@ -28,6 +29,7 @@ from py_common.app import create_app
 
 SERVICE_NAME = "notification"
 PROBLEM_STATUS: dict[type[DomainError], int] = {
+    TenantRequiredError: 401,
     UnknownTemplateError: 422,
     MissingPlaceholderError: 422,
     UnknownChannelError: 503,

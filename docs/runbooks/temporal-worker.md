@@ -3,6 +3,8 @@
 What to do when a service's Temporal worker is down, a task queue is backing up, or a workflow
 failed. Workers are built on `py_common.temporal` (ADR-004); the pipeline's is
 `python -m pipeline.worker` (`make worker SERVICE=pipeline` locally), task queue `pipeline`.
+Two alerts link here: [TemporalWorkerDown](#temporalworkerdown) and
+[TelemetrySilent](#telemetrysilent).
 
 ## How it works
 
@@ -14,6 +16,51 @@ failed. Workers are built on `py_common.temporal` (ADR-004); the pipeline's is
   workflow only ever sees the final outcome.
 - Workflow and activity spans go to Tempo when `CW_OTEL_ENDPOINT` is set; every log line in an
   activity carries `workflow_id`, `activity_id`, `attempt` and, with telemetry on, `trace_id`.
+- While a worker runs, its process reports `temporal_worker_up{task_queue} = 1`
+  (`py_common.temporal.liveness`), exported with the other metrics when `CW_OTEL_ENDPOINT` is
+  set. The series ends when the worker stops or fails, and the collector drops it from
+  Prometheus 5 minutes later.
+
+## TemporalWorkerDown
+
+A task queue that reported `temporal_worker_up` in the last 6 hours has had no worker for 10
+minutes after its series expired, so about 15 minutes after the last worker went away. The
+alert names the queue in `task_queue`. Severity ticket; the team that owns the queue's service
+answers it (`pipeline`: Regulatory Intelligence). Nothing is lost while it fires: Temporal keeps
+the queue's tasks until a worker polls again, but ingestion and anything else the queue runs is
+paused.
+
+1. Is the worker process running? Look at the deployment's process list (locally, the terminal
+   running `make worker`). Its last log lines say how it ended: `worker.stopped` is a clean stop
+   (a deploy, a scale-down, SIGTERM), an error with a traceback is a crash. For a crash follow
+   [The worker will not start](#the-worker-will-not-start), then start it again.
+2. The process runs but the series is missing: the worker is not exporting metrics. Check its
+   `CW_OTEL_ENDPOINT`, and whether [TelemetrySilent](#telemetrysilent) fires too, which points
+   at the collector. Temporal itself says whether anything polls the queue:
+   `docker compose exec temporal temporal task-queue describe --task-queue pipeline --address temporal:7233`
+   lists the pollers, and the Temporal UI shows them on the queue's page.
+3. The queue was retired on purpose (a renamed queue, a service removed): the alert stops by
+   itself 6 hours after the last report; acknowledge the ticket until then.
+
+Check locally: `make dev-observability`, then `CW_OTEL_ENDPOINT=http://localhost:4317 make worker
+SERVICE=pipeline`; `temporal_worker_up` in Prometheus (http://localhost:9090) shows
+`task_queue="pipeline"` = 1. Stop the worker and the series is gone about 5 minutes later.
+
+## TelemetrySilent
+
+Prometheus has no `otelcol_receiver_accepted_spans_total` for 30 minutes: the collector has not
+received a span since it started, or Prometheus cannot scrape it. It says nothing about whether
+workers run; [TemporalWorkerDown](#temporalworkerdown) does. Severity ticket, team Platform.
+
+1. `up{job="otel-collector"}` in Prometheus. At 0 Prometheus cannot reach the collector: check
+   the container (`docker compose ps otel-collector`) and its health endpoint (port 13133 in the
+   container; `OTEL_HEALTH_PORT` on the host).
+2. The collector is up: nothing exports to it. Every service and worker needs `CW_OTEL_ENDPOINT`
+   (`http://localhost:4317` locally, the collector's address when deployed); an empty value
+   turns telemetry off without an error. A restarted collector shows no counter until the first
+   span arrives, so a quiet environment with no traffic can raise it too.
+3. Spans arrive again once the exporters reach the collector; the alert resolves on the next
+   evaluation.
 
 ## The worker will not start
 

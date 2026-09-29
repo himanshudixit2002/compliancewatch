@@ -6,12 +6,16 @@ here is ``draft`` until the maintainer submits it from the Meta business account
 step listed in docs/runbooks/whatsapp.md). Rendering fills ``{placeholders}`` and refuses a
 missing value rather than sending a message with a hole in it. Hindi copy is a first draft
 for the analysts to review.
+
+``CHANGE_TEMPLATES`` names the template for each deadline change a customer is told about:
+extended, corrected or withdrawn (ADR-015). ``template_for_change`` looks it up.
 """
 
 import string
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 
 from domain_kernel.channels import Channel
 from domain_kernel.dedupe import DedupeKey
@@ -43,6 +47,10 @@ class MessageTemplate:
 
 _WA = Channel.WHATSAPP
 _EMAIL = Channel.EMAIL
+
+DEADLINE_EXTENDED = "obligation_deadline_extended"
+CORRECTED = "obligation_corrected"
+WITHDRAWN = "obligation_withdrawn"
 
 TEMPLATES: tuple[MessageTemplate, ...] = (
     MessageTemplate(
@@ -112,6 +120,86 @@ TEMPLATES: tuple[MessageTemplate, ...] = (
         "You receive this because you enabled email reminders in ComplianceWatch.",
         subject="{title} is due on {due_date}",
     ),
+    # The three outcomes of a deadline change (ADR-015). Each opens with what changed;
+    # source_ref names what the regulator published, as the rulebook cites it. The withdrawn
+    # template has no dates: there is no longer a due date to give.
+    MessageTemplate(
+        DEADLINE_EXTENDED,
+        _WA,
+        "en",
+        "Due date extended for {business_name}: {title} was due on {previous_due_date} and is "
+        "now due on {new_due_date}. Source: {source_ref}. Reply HELP for help or STOP to opt out.",
+        meta_name="cw_obligation_deadline_extended_en",
+    ),
+    MessageTemplate(
+        DEADLINE_EXTENDED,
+        _WA,
+        "hi",
+        "सूचना: {business_name} के लिए {title} की अंतिम तिथि {previous_due_date} से बढ़ाकर "
+        "{new_due_date} कर दी गई है। स्रोत: {source_ref}। "
+        "मदद के लिए HELP और बंद करने के लिए STOP लिखें।",
+        meta_name="cw_obligation_deadline_extended_hi",
+    ),
+    MessageTemplate(
+        DEADLINE_EXTENDED,
+        _EMAIL,
+        "en",
+        "Due date extended for {business_name}: {title} was due on {previous_due_date} and is "
+        "now due on {new_due_date}.\n\nSource: {source_ref}\n\n"
+        "You receive this because you enabled email reminders in ComplianceWatch.",
+        subject="Due date extended: {title} is now due on {new_due_date}",
+    ),
+    MessageTemplate(
+        CORRECTED,
+        _WA,
+        "en",
+        "Due date corrected for {business_name}: {title} is due on {new_due_date}, not "
+        "{previous_due_date}. Source: {source_ref}. Reply HELP for help or STOP to opt out.",
+        meta_name="cw_obligation_corrected_en",
+    ),
+    MessageTemplate(
+        CORRECTED,
+        _WA,
+        "hi",
+        "सुधार: {business_name} के लिए {title} की अंतिम तिथि {new_due_date} है, "
+        "{previous_due_date} नहीं। स्रोत: {source_ref}। "
+        "मदद के लिए HELP और बंद करने के लिए STOP लिखें।",
+        meta_name="cw_obligation_corrected_hi",
+    ),
+    MessageTemplate(
+        CORRECTED,
+        _EMAIL,
+        "en",
+        "Due date corrected for {business_name}: {title} is due on {new_due_date}, not "
+        "{previous_due_date}.\n\nSource: {source_ref}\n\n"
+        "You receive this because you enabled email reminders in ComplianceWatch.",
+        subject="Due date corrected: {title} is due on {new_due_date}",
+    ),
+    MessageTemplate(
+        WITHDRAWN,
+        _WA,
+        "en",
+        "Update for {business_name}: {title} no longer applies because the rule behind it was "
+        "withdrawn. Source: {source_ref}. Reply HELP for help or STOP to opt out.",
+        meta_name="cw_obligation_withdrawn_en",
+    ),
+    MessageTemplate(
+        WITHDRAWN,
+        _WA,
+        "hi",
+        "सूचना: {business_name} के लिए {title} अब लागू नहीं है, क्योंकि इसका नियम वापस ले लिया "
+        "गया है। स्रोत: {source_ref}। मदद के लिए HELP और बंद करने के लिए STOP लिखें।",
+        meta_name="cw_obligation_withdrawn_hi",
+    ),
+    MessageTemplate(
+        WITHDRAWN,
+        _EMAIL,
+        "en",
+        "Update for {business_name}: {title} no longer applies because the rule behind it was "
+        "withdrawn.\n\nSource: {source_ref}\n\n"
+        "You receive this because you enabled email reminders in ComplianceWatch.",
+        subject="No longer applies: {title}",
+    ),
 )
 
 _INDEX: Mapping[tuple[str, Channel, str], MessageTemplate] = {
@@ -149,3 +237,29 @@ def render(
         subject=template.subject.format(**values) if template.subject else "",
         language=template.language,
     )
+
+
+CHANGE_TEMPLATES: Mapping[tuple[str, str], str] = MappingProxyType(
+    {
+        ("obligation.rescheduled", "deadline_extended"): DEADLINE_EXTENDED,
+        ("obligation.rescheduled", "corrected"): CORRECTED,
+        ("obligation.closed", "rule_withdrawn"): WITHDRAWN,
+    }
+)
+"""The template of each deadline change the customer hears about, by the obligation event's
+topic and reason (ADR-015). The notification routing table reuses it."""
+
+SILENT_CHANGES: frozenset[tuple[str, str]] = frozenset({("obligation.rescheduled", "manual")})
+"""Changes that send no customer message: a manual reschedule."""
+
+
+def template_for_change(topic: str, reason: str) -> str | None:
+    """The template key for a deadline change, or None for a change that sends no message.
+
+    A (topic, reason) pair that is neither mapped nor silent raises ``UnknownTemplateError``
+    rather than dropping the change without a word.
+    """
+    key = CHANGE_TEMPLATES.get((topic, reason))
+    if key is None and (topic, reason) not in SILENT_CHANGES:
+        raise UnknownTemplateError(f"{topic} with reason {reason}")
+    return key

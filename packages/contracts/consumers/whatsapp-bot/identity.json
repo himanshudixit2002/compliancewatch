@@ -1,0 +1,114 @@
+{
+  "consumer": "whatsapp-bot",
+  "provider": "identity",
+  "interactions": [
+    {
+      "description": "a keyword opt-in is recorded as a channel consent",
+      "request": {
+        "method": "POST",
+        "path": "/v1/identity/channel-consents",
+        "headers": {
+          "content-type": "application/json",
+          "x-cw-service-token": "test-channel-token"
+        },
+        "body": {
+          "channel": "whatsapp",
+          "subject": "919876543210",
+          "purpose": "whatsapp_reminders",
+          "granted": true,
+          "source": "whatsapp_keyword",
+          "notice_version": "whatsapp-consent 0.1-draft",
+          "evidence": "keyword START in WhatsApp message wamid.contract.1 at 2026-09-29T06:30:00.000Z, language en",
+          "message_id": "wamid.contract.1"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "channel": "whatsapp",
+          "subject": "919876543210",
+          "purpose": "whatsapp_reminders",
+          "granted": true,
+          "source": "whatsapp_keyword",
+          "notice_version": "whatsapp-consent 0.1-draft",
+          "message_id": "wamid.contract.1"
+        }
+      }
+    },
+    {
+      "description": "a redelivered opt-in gets back the record the first delivery made",
+      "request": {
+        "method": "POST",
+        "path": "/v1/identity/channel-consents",
+        "headers": {
+          "content-type": "application/json",
+          "x-cw-service-token": "test-channel-token"
+        },
+        "body": {
+          "channel": "whatsapp",
+          "subject": "919876543210",
+          "purpose": "whatsapp_reminders",
+          "granted": true,
+          "source": "whatsapp_keyword",
+          "notice_version": "whatsapp-consent 0.1-draft",
+          "evidence": "keyword START in WhatsApp message wamid.contract.1 at 2026-09-29T06:30:00.000Z, language en",
+          "message_id": "wamid.contract.1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": { "granted": true, "message_id": "wamid.contract.1" }
+      }
+    },
+    {
+      "description": "a keyword opt-out in Hindi is recorded as a withdrawal",
+      "request": {
+        "method": "POST",
+        "path": "/v1/identity/channel-consents",
+        "headers": {
+          "content-type": "application/json",
+          "x-cw-service-token": "test-channel-token"
+        },
+        "body": {
+          "channel": "whatsapp",
+          "subject": "919876543210",
+          "purpose": "whatsapp_reminders",
+          "granted": false,
+          "source": "whatsapp_keyword",
+          "notice_version": "whatsapp-consent 0.1-draft",
+          "evidence": "keyword बंद in WhatsApp message wamid.contract.2 at 2026-09-29T06:30:00.000Z, language hi",
+          "message_id": "wamid.contract.2"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": { "subject": "919876543210", "granted": false, "message_id": "wamid.contract.2" }
+      }
+    },
+    {
+      "description": "a call with the wrong service token is refused",
+      "request": {
+        "method": "POST",
+        "path": "/v1/identity/channel-consents",
+        "headers": {
+          "content-type": "application/json",
+          "x-cw-service-token": "not-the-channel-token"
+        },
+        "body": {
+          "channel": "whatsapp",
+          "subject": "919876543210",
+          "purpose": "whatsapp_reminders",
+          "granted": true,
+          "source": "whatsapp_keyword",
+          "notice_version": "whatsapp-consent 0.1-draft",
+          "evidence": "keyword START in WhatsApp message wamid.contract.3 at 2026-09-29T06:30:00.000Z, language en",
+          "message_id": "wamid.contract.3"
+        }
+      },
+      "response": {
+        "status": 401,
+        "body": { "type": "urn:compliancewatch:problem:identity-channel-token-invalid" }
+      }
+    }
+  ]
+}

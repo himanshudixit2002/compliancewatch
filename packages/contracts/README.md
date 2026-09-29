@@ -20,6 +20,7 @@ openapi/                 # OpenAPI 3.1 specs, public /v1 and internal service AP
   obligation.v1.json       # services/obligation
   qa.v1.json               # services/qa
   BREAKING.md              # deliberate breaking changes, one row per break of an operation, each with an ADR
+consumers/               # consumer contracts: <consumer>/<provider>.json, recorded HTTP calls both sides replay (consumers/README.md)
 events/
   schemas/               # JSON Schema 2020-12: envelope.v1.json and one <topic>.v1.json per event
   examples/<topic>/      # golden messages (envelope + payload) every check replays

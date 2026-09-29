@@ -34,7 +34,7 @@ from obligation.testing import rule
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "obligation"
-TABLES = {"obligation", "outbox_event", "processed_event", "alembic_version"}
+TABLES = {"obligation", "obligation_change", "outbox_event", "processed_event", "alembic_version"}
 APP_ROLE = "obligation_app"
 APP_PASSWORD = "app-role-for-tests"
 

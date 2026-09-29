@@ -2,9 +2,10 @@ from datetime import date, timedelta
 
 import pytest
 
-from domain_kernel.ids import ObligationId, RuleVersionId
+from domain_kernel.ids import ObligationId, RuleVersionId, UserId
 from domain_kernel.recurrence import Recurrence
 from domain_kernel.status import ClosureReason, ObligationStatus
+from obligation.application.audit import record
 from obligation.application.changes import (
     ApplyDeadlineChange,
     CloseObligation,
@@ -16,13 +17,14 @@ from obligation.application.materialise import (
     MaterialiseObligations,
     MaterialiseRequest,
 )
-from obligation.domain.errors import ObligationNotFoundError
+from obligation.domain.errors import ObligationClosedError, ObligationNotFoundError
 from obligation.domain.events import (
     ObligationClosed,
     ObligationCreated,
     ObligationRescheduled,
     RescheduleReason,
 )
+from obligation.domain.history import ChangeKind
 from obligation.infrastructure.memory import MemoryStore
 from obligation.testing import BUSINESS, DECISION, NOW, OTHER_TENANT, TENANT, clock, rule
 
@@ -200,11 +202,11 @@ def test_a_failure_inside_the_unit_of_work_rolls_everything_back() -> None:
     store = MemoryStore()
     the_rule = rule(recurrence=Recurrence.monthly(20))
     MaterialiseObligations(store, clock=clock).run(request(rule=the_rule))
-    before = len(store.events)
+    before = (len(store.events), len(store.changes))
     with pytest.raises(RuntimeError, match="boom"):
         _close_then_fail(store, the_rule.rule_version_id)
     assert all(o.is_open for o in store.of_tenant(TENANT))
-    assert len(store.events) == before
+    assert (len(store.events), len(store.changes)) == before
 
 
 def _close_then_fail(store: MemoryStore, rule_version_id: RuleVersionId) -> None:
@@ -212,5 +214,100 @@ def _close_then_fail(store: MemoryStore, rule_version_id: RuleVersionId) -> None
         obligation = uow.obligations.open_for_rule_version(rule_version_id)[0]
         done, event = obligation.close(ClosureReason.COMPLETED, at=NOW)
         uow.obligations.save(done)
-        uow.events.publish(event)
+        record(uow, event, done)
+        assert len(uow.history.for_obligation(done.id)) == 2, "the unit sees its own append"
         raise RuntimeError("boom")
+
+
+# ---- change log (ADR-015: every change writes an audit row) ---------------------------------
+
+
+def assert_one_change_per_event(store: MemoryStore) -> None:
+    assert [change.id for change in store.changes] == [event.event_id for event in store.events]
+
+
+def test_materialise_appends_one_created_change_per_obligation() -> None:
+    store = MemoryStore()
+    the_rule = rule()
+    use_case = MaterialiseObligations(store, window=2, clock=clock)
+    use_case.run(request(rule=the_rule))
+    assert [change.kind for change in store.changes] == [ChangeKind.CREATED] * 2
+    assert [change.obligation_id for change in store.changes] == [
+        o.id for o in store.of_tenant(TENANT)
+    ]
+    assert_one_change_per_event(store)
+    use_case.run(request(rule=the_rule))
+    assert len(store.changes) == 2, "an existing obligation appends nothing"
+
+
+def test_deadline_change_appends_one_change_per_moved_obligation_and_none_when_unchanged() -> None:
+    store = MemoryStore()
+    the_rule = rule()
+    MaterialiseObligations(store, window=2, clock=clock).run(request(rule=the_rule))
+    amendment = RuleVersionId.new()
+    change = DeadlineChange(
+        TENANT,
+        the_rule.rule_version_id,
+        "2026-09",
+        date(2026, 10, 25),
+        RescheduleReason.DEADLINE_EXTENDED,
+        caused_by=amendment,
+    )
+    ApplyDeadlineChange(store, clock=clock).run(change)
+    assert_one_change_per_event(store)
+    rescheduled = store.changes[-1]
+    assert rescheduled.kind is ChangeKind.RESCHEDULED
+    assert rescheduled.reason == "deadline_extended"
+    assert rescheduled.caused_by_rule_version_id == amendment
+    assert rescheduled.previous_due_at is not None
+    assert rescheduled.new_due_at is not None
+    assert rescheduled.previous_due_at.astimezone(IST).date() == date(2026, 10, 20)
+    assert rescheduled.new_due_at.astimezone(IST).date() == date(2026, 10, 25)
+    assert len(store.changes) == 3
+
+    unchanged = ApplyDeadlineChange(store, clock=clock).run(change)
+    assert unchanged.unchanged == 1
+    assert len(store.changes) == 3
+
+
+def test_closures_append_one_change_each_and_closed_obligations_append_none() -> None:
+    store = MemoryStore()
+    the_rule = rule()
+    MaterialiseObligations(store, window=2, clock=clock).run(request(rule=the_rule))
+    september, october = store.of_tenant(TENANT)
+    user = UserId.new()
+    CloseObligation(store, clock=clock).run(TENANT, september.id, ClosureReason.COMPLETED, by=user)
+    WithdrawRule(store, clock=clock).run(TENANT, the_rule.rule_version_id)
+    assert_one_change_per_event(store)
+    closed_by_user, withdrawn = store.changes[-2:]
+    assert (closed_by_user.obligation_id, closed_by_user.reason) == (september.id, "completed")
+    assert closed_by_user.actor == user
+    assert closed_by_user.status_after is ObligationStatus.DONE
+    assert (withdrawn.obligation_id, withdrawn.reason) == (october.id, "rule_withdrawn")
+    assert withdrawn.status_after is ObligationStatus.CLOSED_NOT_APPLICABLE
+
+    WithdrawRule(store, clock=clock).run(TENANT, the_rule.rule_version_id)
+    assert len(store.changes) == 4, "a closed obligation appends nothing"
+    with pytest.raises(ObligationClosedError):
+        CloseObligation(store, clock=clock).run(TENANT, september.id, ClosureReason.COMPLETED)
+    assert len(store.changes) == 4
+
+
+def test_history_reads_one_obligations_changes_in_order_within_its_tenant() -> None:
+    store = MemoryStore()
+    the_rule = rule()
+    MaterialiseObligations(store, window=2, clock=clock).run(request(rule=the_rule))
+    september = store.of_tenant(TENANT)[0]
+    ApplyDeadlineChange(store, clock=lambda: NOW + timedelta(hours=1)).run(
+        DeadlineChange(
+            TENANT, the_rule.rule_version_id, "2026-09", date(2026, 10, 25), RescheduleReason.MANUAL
+        )
+    )
+    CloseObligation(store, clock=lambda: NOW + timedelta(hours=2)).run(
+        TENANT, september.id, ClosureReason.WAIVED_BY_USER
+    )
+    with store(TENANT) as uow:
+        kinds = [change.kind for change in uow.history.for_obligation(september.id)]
+    assert kinds == [ChangeKind.CREATED, ChangeKind.RESCHEDULED, ChangeKind.CLOSED]
+    with store(OTHER_TENANT) as uow:
+        assert uow.history.for_obligation(september.id) == []

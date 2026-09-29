@@ -165,6 +165,49 @@
         "title": "EntityIn",
         "type": "object"
       },
+      "FinancialYearConfirmationIn": {
+        "additionalProperties": false,
+        "properties": {
+          "fy": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{4}-[0-9]{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "2026-27; empty means the financial year of today's date in IST",
+            "title": "Fy"
+          }
+        },
+        "title": "FinancialYearConfirmationIn",
+        "type": "object"
+      },
+      "FinancialYearConfirmationOut": {
+        "properties": {
+          "fy": {
+            "title": "Fy",
+            "type": "string"
+          },
+          "opened": {
+            "description": "The review tasks opened now; empty on a rerun",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Opened",
+            "type": "array"
+          }
+        },
+        "required": [
+          "fy",
+          "opened"
+        ],
+        "title": "FinancialYearConfirmationOut",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "service": {
@@ -919,6 +962,96 @@
           }
         },
         "summary": "Register a legal entity by PAN",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/v1/profile/financial-year-confirmations": {
+      "post": {
+        "description": "Idempotent: a task still open for the same entity, attribute and year is not opened\nagain, so a rerun, or the April run after a manual one, opens nothing.",
+        "operationId": "confirm_financial_year_v1_profile_financial_year_confirmations_post",
+        "parameters": [
+          {
+            "description": "Tenant UUID; required until the identity service issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; required until the identity service issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/FinancialYearConfirmationIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinancialYearConfirmationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Open a confirm_financial_year review task per entity and missing per-year value",
         "tags": [
           "profile"
         ]

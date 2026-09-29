@@ -7,7 +7,8 @@ a read API over rule versions, entities, relations and clauses for the Q&A servi
 clause search index (full text and pgvector) whose hits say when their rule is out of force, and
 the citation, review and publish flow (analyst actions behind their own review token, separate
 from the pipeline's write token) with its rule events written through the transactional outbox
-(behind `CW_RULEBOOK_PUBLISH_ENABLED`).
+(behind `CW_RULEBOOK_PUBLISH_ENABLED`), and data-quality checks over versions, citations and
+relations.
 Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architecture Reference 3.2, 5.2 and 6.2; ADR-017 and ADR-018.
 
 - **Owns:** Rules, RuleVersions, Documents, Clauses, Citations, embeddings; versioning, supersession graph, hybrid search index, as-of queries;
@@ -233,6 +234,28 @@ parses and checks the file; `rulebook.domain.seed` is the value object. Tests re
 calendar against sample profiles (a monthly filer, a QRMP filer in each state group, a
 composition taxpayer) and check every due date the recurrences produce.
 
+## Data quality
+
+`rulebook-quality` (`make data-quality`, `ARGS=--json` for JSON) reads every rule version with
+its citation counts and open analyst questions, and every relation between rule versions, in
+one read-only transaction, and runs five checks (`rulebook.domain.quality`):
+
+| Check | A violation is |
+| --- | --- |
+| `in_force_without_verified_citation` | a published or superseded version with no citation, or with a citation that is not verified (ADR-006) |
+| `overlapping_in_force_periods` | two published or superseded versions of one rule whose half-open periods `[from, to)` overlap |
+| `supersession_cycle` | a cycle over `supersedes` and `corrects` edges between rule versions |
+| `unknown_predicate_attribute` | a version, other than a withdrawn one, whose specification names an attribute the ontology lacks or cannot be read; a free-text predicate may name a new attribute while the version carries an open analyst question (`todo`), as the seed's ITC-04 rules do |
+| `effective_dates_disordered` | `effective_to` on or before `effective_from` (also refused by `ck_rule_version_effective`) |
+
+It prints each check with up to 10 samples and exits 1 on any violation, 0 when clean and 2 when
+the database cannot be read. `make data-quality` reads the local stack's `rulebook` schema, or
+`CW_DQ_DATABASE_URL` when that is set. The nightly workflow runs it on a fresh Postgres with the
+migrations and the seed calendar, or on a deployed database through the repository secret
+`CW_DQ_DATABASE_URL`; either failing exit code opens or updates the nightly issue, and a
+violation (exit code 1) also labels it `data-quality`. What to do about a violation:
+`docs/runbooks/rulebook-data-quality.md`.
+
 ## Layout
 
 ```
@@ -245,6 +268,7 @@ src/rulebook/
   testing.py       # rulebook_settings() for tests and demos: memory store, known tokens (WRITE_TOKEN, REVIEW_TOKEN)
   wiring.py        # what the api layer gets from the composition root
   seed.py          # rulebook-seed command
+  quality.py       # rulebook-quality command: domain/quality.py checks, application/quality.py, infrastructure/quality_reader.py
   transitions.py   # rulebook-transitions command (the daily sweep)
   main.py          # composition root: build_app(settings), store selection, problem statuses, the review queue gauges when telemetry is on
 seed/gst_calendar.yaml   # the seed calendar

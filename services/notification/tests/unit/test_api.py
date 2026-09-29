@@ -69,6 +69,9 @@ def test_quiet_hours_past_23_59_are_a_422_problem(client: TestClient) -> None:
 def test_send_needs_a_tenant_then_reports_the_disabled_channel(client: TestClient) -> None:
     unauthenticated = client.post("/v1/notification/send", json=send_body())
     assert unauthenticated.status_code == 401
+    assert unauthenticated.json()["type"].endswith(":notification-tenant-required")
+    # The tenant is checked before the body: no tenant and no body is still a 401.
+    assert client.post("/v1/notification/send").status_code == 401
     not_opted = client.post("/v1/notification/send", json=send_body(), headers=TENANT)
     assert not_opted.json()["outcome"] == "not_opted_in"
     client.put(

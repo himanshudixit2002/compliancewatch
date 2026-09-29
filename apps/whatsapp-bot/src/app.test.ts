@@ -1,22 +1,35 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.ts";
-import type { Deps } from "./conversation.ts";
+import { consentLedger } from "./clients.ts";
+import type { ConsentLedger, Deps } from "./conversation.ts";
 import { signBody } from "./signature.ts";
 
 const SECRET = "test-app-secret";
 
-function fakeDeps() {
+function fakeDeps(ledger?: ConsentLedger) {
   const optIns = new Map<string, boolean>();
   const sent: Array<{ to: string; body: string }> = [];
+  /** Calls to the preference store and the consent ledger, in the order they happened. */
+  const calls: string[] = [];
+  const logged: string[] = [];
+  const consents = { failing: false };
   const deps: Deps = {
     preferences: {
       async setOptIn(phone, optedIn) {
+        calls.push(`preference ${optedIn}`);
         optIns.set(phone, optedIn);
       },
       async isOptedIn(phone) {
         return optIns.get(phone) === true;
       },
     },
+    consents: ledger ?? {
+      async record(_phone, granted, keyword, messageId) {
+        calls.push(`consent ${granted} ${keyword} ${messageId}`);
+        if (consents.failing) throw new Error("consents: 503");
+      },
+    },
+    log: (line) => logged.push(line),
     sender: {
       async sendText(to, body) {
         sent.push({ to, body });
@@ -28,7 +41,7 @@ function fakeDeps() {
       },
     },
   };
-  return { deps, optIns, sent };
+  return { deps, optIns, sent, calls, logged, consents };
 }
 
 function inbound(text: string, from = "919876543210") {
@@ -54,8 +67,8 @@ function inbound(text: string, from = "919876543210") {
   };
 }
 
-function build(requireSignature = true) {
-  const fakes = fakeDeps();
+function build(requireSignature = true, ledger?: ConsentLedger) {
+  const fakes = fakeDeps(ledger);
   const app = createApp(
     { verifyToken: "verify-me", appSecret: SECRET, requireSignature },
     fakes.deps,
@@ -166,6 +179,56 @@ describe("whatsapp-bot http surface", () => {
     const res = await post(app, payload);
     expect(await res.json()).toEqual({ received: true, messages: 0, statuses: 1 });
     expect(sent).toHaveLength(0);
+  });
+
+  it("opt-in records the consent before the preference is set", async () => {
+    const { app, calls, optIns, sent } = build();
+    await post(app, inbound("Start!"));
+    expect(calls).toEqual(["consent true START wamid.1", "preference true"]);
+    expect(optIns.get("919876543210")).toBe(true);
+    expect(sent[0]?.body).toContain("Reply STOP");
+  });
+
+  it("an opt-in that cannot be recorded is not applied and asks to try again", async () => {
+    const { app, calls, consents, logged, optIns, sent } = build();
+    consents.failing = true;
+    const res = await post(app, inbound("हाँ"));
+    expect(res.status).toBe(200);
+    expect(calls).toEqual(["consent true हाँ wamid.1"]);
+    expect(optIns.has("919876543210")).toBe(false);
+    expect(sent[0]?.body).toContain("START");
+    expect(/[ऀ-ॿ]/.test(sent[0]?.body ?? "")).toBe(true);
+    expect(logged[0]).toContain("********3210 not recorded, so not applied");
+  });
+
+  it("opt-out is honoured first and even when the withdrawal cannot be recorded", async () => {
+    const { app, calls, consents, logged, optIns, sent } = build();
+    await post(app, inbound("STOP"));
+    expect(calls).toEqual(["preference false", "consent false STOP wamid.1"]);
+    consents.failing = true;
+    await post(app, inbound("band karo"));
+    expect(calls.slice(2)).toEqual(["preference false", "consent false BAND KARO wamid.1"]);
+    expect(optIns.get("919876543210")).toBe(false);
+    expect(sent[1]?.body).toContain("Reply START");
+    expect(logged).toEqual([
+      "whatsapp-bot: opt-out of ********3210 honoured but not recorded: Error: consents: 503",
+    ]);
+  });
+
+  it("with consent recording off, keywords make no identity call", async () => {
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: 201 }));
+    const lines: string[] = [];
+    const ledger = consentLedger(
+      { WHATSAPP_CONSENT_RECORDING_ENABLED: "false", IDENTITY_SERVICE_TOKEN: "t" },
+      fetchImpl as unknown as typeof fetch,
+      (line) => lines.push(line),
+    );
+    const { app, optIns } = build(true, ledger);
+    await post(app, inbound("START"));
+    await post(app, inbound("STOP"));
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(optIns.get("919876543210")).toBe(false);
+    expect(lines[0]).toContain("would record the opt-in of ********3210");
   });
 
   it("signature can be switched off for local runs", async () => {

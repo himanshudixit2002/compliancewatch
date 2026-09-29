@@ -1,8 +1,9 @@
 """Property tests of the identity API against its spec (schemathesis).
 
 Schemathesis generates valid and invalid requests from the served schema, which
-``test_openapi.py`` pins to the committed spec, and sends them in process with a tenant header.
-Each response must not be a server error, and its status code, content type and body must be
+``test_openapi.py`` pins to the committed spec, and sends them in process with a tenant header
+and the service token of the test settings, so the channel consent routes get past their token
+check. Each response must not be a server error, and its status code, content type and body must be
 the ones the spec documents.
 
 Only the operations in ``OPERATIONS`` run: those served when these tests arrived. A change that
@@ -23,7 +24,7 @@ from schemathesis.specs.openapi.checks import (
 )
 
 from identity.main import build_app
-from identity.testing import identity_settings
+from identity.testing import CHANNEL_TOKEN, identity_settings
 
 TENANT_ID = "7d0f4d56-2a8e-4c1b-9f3e-5b6a1c2d3e4f"
 OPERATIONS = frozenset(
@@ -33,6 +34,8 @@ OPERATIONS = frozenset(
         "GET /v1/identity/billing/plans",
         "POST /v1/identity/billing/subscriptions",
         "POST /v1/identity/billing/webhook",
+        "POST /v1/identity/channel-consents",
+        "GET /v1/identity/channel-consents/{channel}/{subject}",
         "GET /v1/identity/consents",
         "POST /v1/identity/consents",
         "GET /v1/identity/ping",
@@ -70,4 +73,6 @@ def test_every_listed_operation_is_served() -> None:
     suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow],
 )
 def test_responses_conform_to_the_spec(case: schemathesis.Case[Any]) -> None:
-    case.call_and_validate(headers={"x-tenant-id": TENANT_ID}, checks=CHECKS)
+    case.call_and_validate(
+        headers={"x-tenant-id": TENANT_ID, "x-cw-service-token": CHANNEL_TOKEN}, checks=CHECKS
+    )

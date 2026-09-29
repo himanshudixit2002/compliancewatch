@@ -4,7 +4,9 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from identity.application.billing import BillingLedger, ReceiveBillingWebhook, StartSubscription
+from identity.application.channel_consents import ChannelConsentStatus, RecordChannelConsent
 from identity.application.consents import ConsentStatus, RecordConsent
+from identity.domain.channel_consent import ChannelUnitOfWorkFactory
 from identity.domain.consent import UnitOfWorkFactory
 from identity.settings import IdentitySettings
 
@@ -16,6 +18,9 @@ class Wiring:
     store_ready: Callable[[], Awaitable[bool]]
     record_consent: RecordConsent
     consent_status: ConsentStatus
+    channel_unit_of_work: ChannelUnitOfWorkFactory
+    record_channel_consent: RecordChannelConsent
+    channel_consent_status: ChannelConsentStatus
     billing_enabled: bool
     billing_ledger: BillingLedger
     start_subscription: StartSubscription | None

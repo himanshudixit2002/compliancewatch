@@ -23,7 +23,9 @@ src/py_common/
     client.py          # connect(settings): pydantic converter + tracing interceptor
     activity.py        # ActivityBase: validate/run/record, retry policy and timeouts on the class, schedule()
     worker.py          # WorkerConfig, build_worker, run_worker (stops on SIGTERM/SIGINT)
+    liveness.py        # running(task_queue): the temporal_worker_up{task_queue} gauge while a worker runs
   events.py            # EventMessage (the envelope), to_message/encode/decode, payload_of(event)
+  migrations.py        # alembic helpers: enable_tenant_rls, create_append_only_guard and their drop twins
   outbox/
     schema.py          # outbox_event and processed_event tables; create_*/drop_* helpers for alembic
     writer.py          # OutboxWriter.write(connection, event): the row commits with the state change
@@ -33,7 +35,7 @@ src/py_common/
     consumer.py        # IdempotentConsumer: once per event id and consumer group, consumer dead-letter topic
     testing.py         # FakeProducer, MemoryOutboxStore, MemoryProcessedStore for service tests
 tests/unit/
-tests/integration/     # the outbox against Postgres and Redpanda (testcontainers)
+tests/integration/     # the outbox against Postgres and Redpanda, the migration helpers on Postgres (testcontainers)
 ```
 
 ## Problem details
@@ -94,6 +96,14 @@ which applies the class's timeouts and retry policy. A worker registers instance
 activities=[FetchDocument(adapter), ...])`; it stops on SIGTERM or SIGINT. The time-skipping
 test server is x86-only; tests use `WorkflowEnvironment.start_local()` (the Temporal CLI dev
 server) instead. `services/pipeline` has the sample workflow.
+
+While a worker runs, its queue reports `temporal_worker_up{task_queue} = 1` through one
+observable gauge per process, and the series ends when the worker stops or fails.
+`run_worker` does this with `liveness.running(task_queue)`; a process that builds its own
+workers wraps each one in it, so several queues in one process share the instrument. With no
+`CW_OTEL_ENDPOINT` the gauge records nothing. `py_common.temporal` takes its meter from
+`opentelemetry.metrics.get_meter` and never imports `py_common.telemetry`, the outbox, FastAPI
+or SQLAlchemy, because workflow and activity modules import it (an import-linter contract).
 
 ## Events and the outbox
 

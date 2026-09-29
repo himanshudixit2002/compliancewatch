@@ -1,6 +1,159 @@
 {
   "components": {
     "schemas": {
+      "ChannelConsentIn": {
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/ConsentChannel"
+          },
+          "evidence": {
+            "default": "",
+            "description": "The keyword and the message",
+            "maxLength": 2000,
+            "title": "Evidence",
+            "type": "string"
+          },
+          "granted": {
+            "default": true,
+            "title": "Granted",
+            "type": "boolean"
+          },
+          "message_id": {
+            "default": "",
+            "description": "The channel's message id; the same id again returns the first record",
+            "maxLength": 255,
+            "title": "Message Id",
+            "type": "string"
+          },
+          "notice_version": {
+            "default": "",
+            "description": "Required when granting",
+            "maxLength": 40,
+            "title": "Notice Version",
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/ConsentPurpose",
+            "description": "whatsapp_reminders is the one WhatsApp purpose"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ConsentSource",
+            "description": "whatsapp_keyword is the one WhatsApp source"
+          },
+          "subject": {
+            "description": "E.164 number; WhatsApp reports it without the plus",
+            "pattern": "^\\+?[1-9][0-9]{7,14}$",
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel",
+          "subject",
+          "purpose",
+          "source"
+        ],
+        "title": "ChannelConsentIn",
+        "type": "object"
+      },
+      "ChannelConsentOut": {
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/ConsentChannel"
+          },
+          "evidence": {
+            "title": "Evidence",
+            "type": "string"
+          },
+          "granted": {
+            "title": "Granted",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "notice_version": {
+            "title": "Notice Version",
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/ConsentPurpose"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ConsentSource"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "channel",
+          "subject",
+          "purpose",
+          "granted",
+          "source",
+          "notice_version",
+          "evidence",
+          "message_id",
+          "recorded_at"
+        ],
+        "title": "ChannelConsentOut",
+        "type": "object"
+      },
+      "ChannelConsentSummaryOut": {
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/ConsentChannel"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ChannelConsentOut"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "states": {
+            "items": {
+              "$ref": "#/components/schemas/ConsentStateOut"
+            },
+            "title": "States",
+            "type": "array"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel",
+          "subject",
+          "states",
+          "history"
+        ],
+        "title": "ChannelConsentSummaryOut",
+        "type": "object"
+      },
+      "ConsentChannel": {
+        "enum": [
+          "whatsapp"
+        ],
+        "title": "ConsentChannel",
+        "type": "string"
+      },
       "ConsentIn": {
         "additionalProperties": false,
         "properties": {
@@ -714,6 +867,198 @@
           }
         },
         "summary": "Provider webhook: verified against the webhook secret before it is read",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/v1/identity/channel-consents": {
+      "post": {
+        "operationId": "record_channel_consent_v1_identity_channel_consents_post",
+        "parameters": [
+          {
+            "description": "Shared secret of the caller (CW_IDENTITY_CHANNEL_TOKEN)",
+            "in": "header",
+            "name": "x-cw-service-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret of the caller (CW_IDENTITY_CHANNEL_TOKEN)",
+              "title": "X-Cw-Service-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelConsentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelConsentOut"
+                }
+              }
+            },
+            "description": "The message was recorded already"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelConsentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Record a keyword opt-in or opt-out for a number no tenant owns yet (service token)",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/v1/identity/channel-consents/{channel}/{subject}": {
+      "get": {
+        "operationId": "channel_consent_status_v1_identity_channel_consents__channel___subject__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ConsentChannel"
+            }
+          },
+          {
+            "description": "E.164 number",
+            "in": "path",
+            "name": "subject",
+            "required": true,
+            "schema": {
+              "description": "E.164 number",
+              "pattern": "^\\+?[1-9][0-9]{7,14}$",
+              "title": "Subject",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Shared secret of the caller (CW_IDENTITY_CHANNEL_TOKEN)",
+            "in": "header",
+            "name": "x-cw-service-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret of the caller (CW_IDENTITY_CHANNEL_TOKEN)",
+              "title": "X-Cw-Service-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelConsentSummaryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "A number's current state per purpose on a channel, with the history (service token)",
         "tags": [
           "identity"
         ]

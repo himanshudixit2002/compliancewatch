@@ -1,4 +1,7 @@
-"""Build and run a worker from workflow classes and activity instances."""
+"""Build and run a worker from workflow classes and activity instances.
+
+While the worker runs, its task queue reports ``temporal_worker_up`` (``liveness.running``).
+"""
 
 import asyncio
 import signal
@@ -13,6 +16,7 @@ from py_common.logging import get_logger
 from py_common.settings import Settings
 from py_common.temporal.activity import ActivityBase
 from py_common.temporal.client import connect
+from py_common.temporal.liveness import running
 
 log = get_logger(__name__)
 
@@ -65,7 +69,8 @@ async def run_worker(
     stop: asyncio.Event | None = None,
     client: Client | None = None,
 ) -> None:
-    """Run until ``stop`` is set or a SIGTERM/SIGINT arrives."""
+    """Run until ``stop`` is set or a SIGTERM/SIGINT arrives. The task queue reports as up
+    while the worker runs, and stops reporting when it stops or fails."""
     stop = stop or asyncio.Event()
     install_stop_signals(stop)
     client = client or await connect(settings)
@@ -78,6 +83,7 @@ async def run_worker(
         workflows=[workflow.__name__ for workflow in workflows],
         activities=[activity.name for activity in activities],
     )
-    async with worker:
-        await stop.wait()
+    with running(config.task_queue):
+        async with worker:
+            await stop.wait()
     log.info("worker.stopped", task_queue=config.task_queue)

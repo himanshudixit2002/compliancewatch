@@ -52,15 +52,34 @@ groups:
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/outbox-relay.md
   - name: workers
     rules:
-      - alert: PipelineWorkerSilent
-        expr: absent(otelcol_receiver_accepted_spans_total) == 1
-        for: 30m
+      # temporal_worker_up{task_queue} is 1 while a worker serves the queue (py_common.temporal
+      # liveness) and the series ends when it stops. A queue seen in the last 6 hours that no
+      # longer reports has lost every worker; the collector expires a stopped series after 5
+      # minutes, so the alert fires about 15 minutes after the last worker went away. Restarts
+      # change the per-process labels, so both sides are taken per task_queue only.
+      - alert: TemporalWorkerDown
+        expr: |
+          max by (task_queue) (max_over_time(temporal_worker_up[6h]))
+            unless on (task_queue)
+          max by (task_queue) (temporal_worker_up)
+        for: 10m
         labels:
           severity: ticket
           team: regulatory-intelligence
         annotations:
-          summary: "No traces have reached the collector for 30 minutes: the worker or the collector is down"
-          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/temporal-worker.md
+          summary: "No worker serves the Temporal task queue {{ $labels.task_queue }}: it reported in the last 6 hours and has stopped"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/temporal-worker.md#temporalworkerdown
+      # Says only that the collector receives no spans: every service and worker has stopped
+      # exporting, or the collector itself is down. It is not a worker alert.
+      - alert: TelemetrySilent
+        expr: absent(otelcol_receiver_accepted_spans_total) == 1
+        for: 30m
+        labels:
+          severity: ticket
+          team: platform
+        annotations:
+          summary: "No spans have reached the collector for 30 minutes: exporters or the collector are down"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/temporal-worker.md#telemetrysilent
   - name: rulebook-review
     rules:
       - alert: EntityReviewQueueStale

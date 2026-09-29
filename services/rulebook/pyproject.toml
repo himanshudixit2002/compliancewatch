@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 rulebook-seed = "rulebook.seed:main"
+rulebook-quality = "rulebook.quality:main"
 rulebook-transitions = "rulebook.transitions:main"
 
 [tool.uv.sources]

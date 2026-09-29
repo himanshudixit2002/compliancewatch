@@ -1,13 +1,29 @@
 """The HTTP surface on the memory store: registration, attributes, snapshot, next question,
-review tasks, and the problem responses."""
+review tasks, the financial year confirmation and the problem responses; and the command that
+runs the confirmation for named tenants."""
 
+from datetime import UTC, datetime
 from uuid import uuid4
 
+import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from profile_service.testing import GSTIN_KARNATAKA, PAN, TENANT
+import ontology as ontology_package
+from domain_kernel.financial_year import FinancialYear
+from profile_service import jobs
+from profile_service.api.deps import clock
+from profile_service.application.attributes import ConfirmFinancialYear
+from profile_service.application.registration import RegisterNodes
+from profile_service.infrastructure.memory import MemoryStore
+from profile_service.testing import GSTIN_KARNATAKA, OTHER_TENANT, PAN, TENANT
 
 HEADERS = {"x-tenant-id": str(TENANT)}
+CONFIRMATIONS = "/v1/profile/financial-year-confirmations"
+LAST_EVENING_OF_MARCH_IST = datetime(2027, 3, 31, 18, 29, tzinfo=UTC)
+"""23:59 IST on 31 March 2027: still financial year 2026-27."""
+FIRST_MINUTE_OF_APRIL_IST = datetime(2027, 3, 31, 18, 30, tzinfo=UTC)
+"""00:00 IST on 1 April 2027, still 31 March in UTC: financial year 2027-28."""
 
 
 def register(client: TestClient) -> tuple[str, str]:
@@ -160,3 +176,84 @@ def test_problem_responses(client: TestClient) -> None:
         client.get(f"/v1/profile/nodes/{uuid4()}", headers={"x-tenant-id": "nope"}).status_code
         == 422
     )
+
+
+def test_the_default_financial_year_comes_from_the_clock_in_ist(
+    app: FastAPI, client: TestClient
+) -> None:
+    register(client)
+    app.dependency_overrides[clock] = lambda: LAST_EVENING_OF_MARCH_IST
+    march = client.post(CONFIRMATIONS, headers=HEADERS)
+    assert march.status_code == 200, march.text
+    assert march.json()["fy"] == "2026-27"
+    app.dependency_overrides[clock] = lambda: FIRST_MINUTE_OF_APRIL_IST
+    april = client.post(CONFIRMATIONS, json={}, headers=HEADERS)
+    assert april.json()["fy"] == "2027-28"
+    assert len(april.json()["opened"]) == len(march.json()["opened"]) >= 1
+
+
+def test_an_explicit_financial_year_opens_its_tasks_once(client: TestClient) -> None:
+    entity_id, _ = register(client)
+    first = client.post(CONFIRMATIONS, json={"fy": "2026-27"}, headers=HEADERS)
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["fy"] == "2026-27"
+    assert body["opened"]
+    tasks = client.get(f"/v1/profile/nodes/{entity_id}/review-tasks", headers=HEADERS).json()
+    confirmations = [t for t in tasks if t["reason"] == "confirm_financial_year"]
+    assert {t["id"] for t in confirmations} == set(body["opened"])
+    assert {t["as_of_fy"] for t in confirmations} == {"2026-27"}
+    again = client.post(CONFIRMATIONS, json={"fy": "2026-27"}, headers=HEADERS)
+    assert again.json() == {"fy": "2026-27", "opened": []}
+    other = client.post(
+        CONFIRMATIONS, json={"fy": "2026-27"}, headers={"x-tenant-id": str(OTHER_TENANT)}
+    )
+    assert other.json() == {"fy": "2026-27", "opened": []}
+
+
+@pytest.mark.parametrize("fy", ["2026", "2026-2027", "26-27", "2026-28", "2026-26"])
+def test_a_malformed_financial_year_is_422(client: TestClient, fy: str) -> None:
+    response = client.post(CONFIRMATIONS, json={"fy": fy}, headers=HEADERS)
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/problem+json")
+
+
+def test_the_confirmation_needs_a_tenant(client: TestClient) -> None:
+    response = client.post(CONFIRMATIONS, json={"fy": "2026-27"})
+    assert response.status_code == 401
+    assert response.json()["type"].endswith("tenant-required")
+
+
+def test_the_command_prints_the_counts_per_tenant(capsys: pytest.CaptureFixture[str]) -> None:
+    store = MemoryStore()
+    RegisterNodes(store).entity(TENANT, PAN, "Acme")
+    confirm = ConfirmFinancialYear(store, ontology_package.load())
+    tenants = ["--tenant", str(TENANT), "--tenant", str(OTHER_TENANT), "--tenant", str(TENANT)]
+    assert jobs.main([*tenants, "--fy", "2026-27"], confirm=confirm) == 0
+    lines = capsys.readouterr().out.splitlines()
+    opened = len(confirm.run(TENANT, FinancialYear(2030)))
+    assert opened >= 1
+    assert lines == [
+        f"{TENANT}: {opened} task(s) opened for 2026-27",
+        f"{OTHER_TENANT}: 0 task(s) opened for 2026-27",
+        f"financial year 2026-27: {opened} task(s) opened for 2 tenant(s)",
+    ]
+    assert jobs.main(tenants[:2], confirm=confirm, clock=lambda: FIRST_MINUTE_OF_APRIL_IST) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        f"financial year 2027-28: {opened} task(s) opened for 1 tenant(s)"
+    )
+
+
+def test_the_command_on_the_memory_store_and_its_argument_errors(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("CW_PROFILE_STORE", "memory")
+    assert jobs.main(["--tenant", str(TENANT), "--fy", "2026-27"]) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        "financial year 2026-27: 0 task(s) opened for 1 tenant(s)"
+    )
+    for argv in ([], ["--tenant", "nope"], ["--tenant", str(TENANT), "--fy", "2026-28"]):
+        with pytest.raises(SystemExit) as exited:
+            jobs.main(argv)
+        assert exited.value.code == 2
+    assert "not a tenant UUID" in capsys.readouterr().err

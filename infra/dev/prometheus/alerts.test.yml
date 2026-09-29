@@ -1,6 +1,6 @@
 # promtool unit tests for alerts.yml (`make alerts-check`, the ops job in ci.yml). The api-slo,
-# outbox and rulebook-review groups have cases; each package appends the cases for the alert
-# group it owns.
+# workers, outbox and rulebook-review groups have cases; each package appends the cases for the
+# alert group it owns.
 rule_files:
   - alerts.yml
 
@@ -64,6 +64,78 @@ tests:
             exp_annotations:
               summary: "identity p95 read latency above 600 ms over 1h (2x the 300 ms objective)"
               runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/api-slo-burn.md
+
+  # TemporalWorkerDown. The pipeline queue reports until 30m and then stops (a stale marker, as
+  # when the collector expires the series); the rulebook queue keeps reporting. Down from 31m,
+  # so pending until it fires at 41m, 10 minutes after the queue stopped reporting.
+  - interval: 1m
+    input_series:
+      - series: 'temporal_worker_up{task_queue="pipeline", service_name="pipeline-worker", service_instance_id="a"}'
+        values: "1x30 stale"
+      - series: 'temporal_worker_up{task_queue="rulebook", service_name="rulebook-worker", service_instance_id="b"}'
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: TemporalWorkerDown
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: TemporalWorkerDown
+        exp_alerts: []
+      - eval_time: 41m
+        alertname: TemporalWorkerDown
+        exp_alerts:
+          - exp_labels:
+              task_queue: pipeline
+              severity: ticket
+              team: regulatory-intelligence
+            exp_annotations:
+              summary: "No worker serves the Temporal task queue pipeline: it reported in the last 6 hours and has stopped"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/temporal-worker.md#temporalworkerdown
+
+  # TemporalWorkerDown stays quiet across a restart: the old process's series stops at 20m and
+  # the new process (another service_instance_id) reports from 22m on the same queue.
+  - interval: 1m
+    input_series:
+      - series: 'temporal_worker_up{task_queue="pipeline", service_name="pipeline-worker", service_instance_id="a"}'
+        values: "1x20 stale"
+      - series: 'temporal_worker_up{task_queue="pipeline", service_name="pipeline-worker", service_instance_id="c"}'
+        values: "_x22 1x40"
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: TemporalWorkerDown
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: TemporalWorkerDown
+        exp_alerts: []
+
+  # TelemetrySilent: no span counter at all from the start fires after 30 minutes.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="otel-collector"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: TelemetrySilent
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: TelemetrySilent
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              team: platform
+            exp_annotations:
+              summary: "No spans have reached the collector for 30 minutes: exporters or the collector are down"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/temporal-worker.md#telemetrysilent
+
+  # TelemetrySilent stays quiet while spans arrive.
+  - interval: 1m
+    input_series:
+      - series: 'otelcol_receiver_accepted_spans_total{receiver="otlp", transport="grpc"}'
+        values: "0+10x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: TelemetrySilent
+        exp_alerts: []
 
   # Pending outbox rows: obligation holds 1200 (above 1000), profile 10. The rule needs 15 minutes.
   - interval: 1m

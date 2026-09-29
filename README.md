@@ -17,7 +17,7 @@
 > to canonical entities with an analyst review queue; relation proposals through a registered
 > prompt, validated against the clause text and approved into rule relations by an analyst), the obligation service's domain and use cases
 > (obligations per period, deadline changes, withdrawals, row-level security by tenant, events
-> through the outbox) with a read route by business and due window, the qa service (answers in
+> through the outbox, an append-only change log of every obligation) with a read route by business and due window, the qa service (answers in
 > three layers: structured answers from obligations, a KAG plan and solve over the rulebook
 > behind a per-tenant flag, hybrid clause search that drops clauses whose rule is out of force;
 > every quote checked against its clause or the answer is "not covered"), the profile service's
@@ -39,11 +39,11 @@
 > baseline), the WhatsApp bot with
 > signature checks, keyword opt-in and opt-out and Hindi replies, the notification service's
 > preferences, quiet hours, template drafts and Cloud API channel behind a flag, consent records
-> in the identity service with the legal drafts in `docs/legal`, the GSTIN lookup protocol with
+> and WhatsApp keyword consents in the identity service with the legal drafts in `docs/legal`, the GSTIN lookup protocol with
 > the manual fallback, the billing protocol with a Razorpay skeleton behind a flag, OpenTelemetry tracing
 > and metrics with a dev observability stack (collector, Prometheus, Tempo, Grafana dashboard),
 > pnpm + Turborepo workspace with the Next.js web app and
-> the WhatsApp bot, paging alert rules with runbooks and a CI link check, dev backup and restore, the MVP deploy profile (Fly.io templates, Vercel config, env matrix) and the one-process demo tenant (`make demo`), Docker Compose dev stack, GitHub Actions CI behind one required check (integration tests for the packages a change touches, a migration lint for tenant tables, OpenAPI coverage, compatibility and property tests, Semgrep and Trivy scans, a nightly rescan and fuzz run) with Dependabot, pre-commit hooks and ADRs 001 to 008
+> the WhatsApp bot, paging alert rules with runbooks and a CI link check, dev backup and restore, the MVP deploy profile (Fly.io templates, Vercel config, env matrix) and the one-process demo tenant (`make demo`), Docker Compose dev stack, GitHub Actions CI behind one required check (integration tests for the packages a change touches, a migration lint for tenant tables, OpenAPI coverage, compatibility and property tests, Semgrep and Trivy scans, a cross-tenant route suite, a nightly rescan, fuzz run and rulebook data-quality check) with Dependabot, pre-commit hooks and ADRs 001 to 008
 > and 012 to 018 (009 to 011 as stubs). No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
 >
 > Source of truth: *ComplianceWatch - Project Foundation (HLD, LLD & Build Guide)*. Section numbers below refer to that guide.

@@ -1,12 +1,15 @@
-"""Request-scoped dependencies: the tenant from the header (required here) and the wiring."""
+"""Request-scoped dependencies: the tenant from the header (required here), the wiring and the
+clock."""
 
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
 import structlog
 from fastapi import Depends, Header, Request
 
+from domain_kernel.events import utc_now
 from domain_kernel.ids import TenantId
 from profile_service.domain.errors import TenantRequiredError
 from profile_service.wiring import Wiring
@@ -36,3 +39,11 @@ def wiring(request: Request) -> Wiring:
 
 Tenant = Annotated[TenantId, Depends(tenant_id_from_header)]
 Wired = Annotated[Wiring, Depends(wiring)]
+
+
+def clock() -> datetime:
+    """The current time; tests override this dependency to fix it."""
+    return utc_now()
+
+
+Now = Annotated[datetime, Depends(clock)]

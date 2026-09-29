@@ -21,6 +21,38 @@ channel, preferences, templates, Python).
    reply it would send and the channel returns a failed receipt saying it is disabled.
 5. Legal: the privacy notice and the WhatsApp consent wording in `docs/legal` must be reviewed
    before the opt-in checkbox goes live.
+6. Consent recording, once the lawyer has confirmed that a keyword opt-in is valid consent
+   (`docs/legal/README.md`) and identity runs in the deployed profile: set the same secret as
+   `CW_IDENTITY_CHANNEL_TOKEN` on identity and `IDENTITY_SERVICE_TOKEN` on the bot, point
+   `IDENTITY_API_URL` at identity, and set `WHATSAPP_CONSENT_RECORDING_ENABLED=true` on the bot.
+
+## Consent recording (`WHATSAPP_CONSENT_RECORDING_ENABLED`)
+
+With the flag on, every START and STOP is recorded as a channel consent in identity
+(`POST /v1/identity/channel-consents`, `docs/legal/consent-record.md`). The flag is off by
+default (owner core-product); off, the bot logs `consent recording disabled; would record ...`
+and behaves as before. It is removed, and recording made unconditional, once the lawyer
+confirms the keyword opt-in wording and identity runs in the deployed profile.
+
+- **The bot will not start**, with `WHATSAPP_CONSENT_RECORDING_ENABLED=true needs
+  IDENTITY_SERVICE_TOKEN`: the flag is on and the token is empty. Set the token (the value of
+  identity's `CW_IDENTITY_CHANNEL_TOKEN`) or turn the flag off. The bot refuses to start rather
+  than switch reminders on without a record.
+- **Opt-ins fail closed while identity is down.** An opt-in is recorded first and switched on
+  only once the record exists. When the call fails, the person gets the "try again later" reply,
+  the log says `opt-in of ****1234 not recorded, so not applied` with the status (`consents: 503`
+  when identity has no `CW_IDENTITY_CHANNEL_TOKEN`, `consents: 401` for a token that differs from
+  the bot's), and no preference is set. Nothing to replay: the person sends START again once
+  identity answers.
+- **Opt-outs never wait for identity.** The preference is set first; the withdrawal is recorded
+  afterwards on a best-effort basis, and a failure is logged as `opt-out of ****1234 honoured but
+  not recorded`. The person is opted out either way (the notification preference and its
+  `updated_at` are the record of it); only the channel consent history misses that withdrawal,
+  and the log masks the number, so note the incident rather than guess the number.
+- A number's recorded history: `GET /v1/identity/channel-consents/whatsapp/<number>` with the
+  service token in `x-cw-service-token`.
+- A redelivered webhook is harmless: the message id finds the first record and identity answers
+  200 with it.
 
 ## Webhook returns 401
 

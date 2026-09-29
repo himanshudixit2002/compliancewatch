@@ -3,7 +3,8 @@
 ``ApplyDeadlineChange`` moves every open obligation of a rule version and period to the new
 date and publishes ``obligation.rescheduled``; ``WithdrawRule`` closes every open obligation
 of a rule version with reason ``rule_withdrawn``; ``CloseObligation`` closes one obligation for
-a user's reason. Closed obligations are never touched: history stays as it was.
+a user's reason. Closed obligations are never touched: history stays as it was. Every event is
+recorded with its change log row (``audit.record``).
 """
 
 from collections.abc import Callable
@@ -13,6 +14,7 @@ from datetime import date, datetime
 from domain_kernel.events import utc_now
 from domain_kernel.ids import ObligationId, RuleVersionId, TenantId, UserId
 from domain_kernel.status import ClosureReason
+from obligation.application.audit import record
 from obligation.application.materialise import IST
 from obligation.domain.errors import ObligationNotFoundError
 from obligation.domain.events import RescheduleReason
@@ -59,7 +61,7 @@ class ApplyDeadlineChange:
                     new_due_at, reason=change.reason, at=now, caused_by=change.caused_by
                 )
                 uow.obligations.save(moved)
-                uow.events.publish(event)
+                record(uow, event, moved)
                 changed.append(moved.id)
         return ChangeResult(tuple(changed), unchanged)
 
@@ -78,7 +80,7 @@ class WithdrawRule:
             for obligation in uow.obligations.open_for_rule_version(rule_version_id):
                 done, event = obligation.close(ClosureReason.RULE_WITHDRAWN, at=now)
                 uow.obligations.save(done)
-                uow.events.publish(event)
+                record(uow, event, done)
                 closed.append(done.id)
         return ChangeResult(tuple(closed), 0)
 
@@ -105,5 +107,5 @@ class CloseObligation:
                 raise ObligationNotFoundError(str(obligation_id))
             done, event = obligation.close(reason, at=now, by=by)
             uow.obligations.save(done)
-            uow.events.publish(event)
+            record(uow, event, done)
         return done.id

@@ -5,13 +5,14 @@ the node bumps its version, ``profile.updated`` goes to the outbox, a ``not_appl
 opens a review task and records an eval case. ``NextQuestion`` returns one attribute to ask.
 ``BuildSnapshot`` merges the lineage for the applicability engine. ``ConfirmFinancialYear``
 opens a confirmation task for every entity whose per-year values are missing for the new year
-(the April task of ADR-016).
+(the April task of ADR-016); ``financial_year_in_india`` names the year a moment falls in.
 """
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
+from domain_kernel._validation import require_aware
 from domain_kernel.events import utc_now
 from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ids import BusinessId, TenantId, UserId
@@ -106,8 +107,20 @@ class BuildSnapshot:
             return node.snapshot(uow.profiles.lineage(node), as_of_fy=as_of_fy)
 
 
+IST = timezone(timedelta(hours=5, minutes=30), "IST")
+"""Indian Standard Time, in which the financial year turns: midnight on 1 April."""
+
+
+def financial_year_in_india(at: datetime) -> FinancialYear:
+    """The financial year of the date ``at`` falls on in IST."""
+    return FinancialYear.for_date(require_aware(at, "at").astimezone(IST).date())
+
+
 class ConfirmFinancialYear:
-    """Open one ``confirm_financial_year`` task per entity and missing per-year attribute."""
+    """Open one ``confirm_financial_year`` task per entity and missing per-year attribute.
+
+    Idempotent: a task still open for the same entity, attribute and year is not opened again.
+    """
 
     def __init__(
         self,
