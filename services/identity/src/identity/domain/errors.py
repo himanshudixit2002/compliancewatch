@@ -131,3 +131,33 @@ class SubjectRegisteredError(DomainError):
         super().__init__(
             "this sign-in already belongs to a user; exchange it for a session instead"
         )
+
+
+class ProviderTokenInvalidError(DomainError):
+    """The identity provider's token failed a check: signature, issuer, audience, expiry or
+    claims (401)."""
+
+    type_slug: ClassVar[str] = "identity-provider-token-invalid"
+    title: ClassVar[str] = "Identity provider token is invalid"
+
+
+class ProviderUnavailableError(DomainError):
+    """The identity provider could not be reached, or its keys could not be fetched, so a new
+    sign-in fails closed (503)."""
+
+    type_slug: ClassVar[str] = "identity-provider-unavailable"
+    title: ClassVar[str] = "Identity provider is unavailable"
+
+
+class ProviderAccountExistsError(DomainError):
+    """The identity provider already has an account for this email address or phone number
+    (409)."""
+
+    type_slug: ClassVar[str] = "identity-provider-account-exists"
+    title: ClassVar[str] = "Identity provider already has this account"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "the identity provider already has an account for this address, and an invitation "
+            "cannot claim an account it did not create"
+        )

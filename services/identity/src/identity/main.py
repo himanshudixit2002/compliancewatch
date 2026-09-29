@@ -29,10 +29,13 @@ from identity.domain.errors import (
     NoticeVersionRequiredError,
     TenantRequiredError,
 )
+from identity.domain.provider import IdentityProvider
 from identity.domain.repository import UnitOfWorkFactory
 from identity.infrastructure.billing.memory import MemoryBillingProvider
 from identity.infrastructure.billing.razorpay import RazorpayBillingProvider
 from identity.infrastructure.memory import MemoryChannelStore, MemoryStore
+from identity.infrastructure.providers.fake import FakeIdentityProvider
+from identity.infrastructure.providers.supabase import SupabaseIdentityProvider
 from identity.infrastructure.repository import PostgresUnitOfWorkFactory
 from identity.settings import IdentitySettings
 from identity.wiring import Wiring
@@ -67,6 +70,21 @@ def billing_provider(settings: IdentitySettings) -> BillingProvider | None:
             plan_ids=settings.razorpay_plan_ids,
         )
     return None
+
+
+def identity_provider(settings: IdentitySettings) -> IdentityProvider:
+    """The provider ``CW_AUTH_PROVIDER`` names; the settings have checked its configuration."""
+    if settings.auth_provider == "supabase":
+        if settings.supabase_service_role_key is None:  # pragma: no cover - refused by settings
+            raise ValueError("CW_AUTH_PROVIDER=supabase needs CW_SUPABASE_SERVICE_ROLE_KEY")
+        return SupabaseIdentityProvider(
+            settings.supabase_url,
+            settings.supabase_service_role_key,
+            jwt_secret=settings.supabase_jwt_secret,
+        )
+    secret = settings.identity_fake_provider_secret
+    shared = secret.get_secret_value().encode("utf-8") if secret is not None else None
+    return FakeIdentityProvider(shared or None)
 
 
 def wire(settings: IdentitySettings) -> Wiring:
