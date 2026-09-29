@@ -93,7 +93,11 @@ STARTTLS; the channel logs in when `CW_SMTP_USERNAME` is set, and every message 
 dispatch id in the `X-CW-Dispatch-Id` header, by which SES's reports find it. SES feedback
 comes through SNS: the route accepts only SignatureVersion 2 signatures by a certificate on
 `https://sns.<region>.amazonaws.com/`, and only the topic `CW_NOTIFICATION_SES_TOPIC_ARN` when
-that is set. The secret travels as the SNS subscription's HTTP basic credentials, never in the
+that is set. SNS signs with version 1 by default, so before subscribing set the topic to
+version 2: `aws sns set-topic-attributes --topic-arn <arn> --attribute-name SignatureVersion
+--attribute-value 2`, or in the SNS console edit the topic and set its message signature version
+to 2 (SHA-256); otherwise even the subscription confirmation is refused. The secret travels as
+the SNS subscription's HTTP basic credentials, never in the
 path, so logs and spans record the route template only. A permanent bounce or a complaint
 suppresses the mailbox for every tenant. `docs/runbooks/notification-delivery.md` has the SES
 setup and the alerts.

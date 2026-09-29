@@ -148,13 +148,20 @@ SES feedback, once per environment (manual, in the AWS console):
    notification).
 2. Generate a secret, set it as `CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN`, and set the topic's ARN
    as `CW_NOTIFICATION_SES_TOPIC_ARN`.
-3. Subscribe `https://sns:<secret>@<api-host>/v1/notification/receipts/email` to the topic
+3. Make the topic sign with SHA-256. SNS signs with `SignatureVersion` 1 (SHA-1) by default, and
+   the route accepts only version 2, the subscription confirmation included:
+   `aws sns set-topic-attributes --topic-arn <arn> --attribute-name SignatureVersion
+   --attribute-value 2`, or in the SNS console edit the topic and set its message signature
+   version to 2 (SHA-256).
+4. Subscribe `https://sns:<secret>@<api-host>/v1/notification/receipts/email` to the topic
    (HTTPS). The secret travels as HTTP basic credentials, never in the path that logs and
    spans record.
-4. The service logs `notification.ses_subscription_pending` with the `subscribe_url`; open that
+5. The service logs `notification.ses_subscription_pending` with the `subscribe_url`; open that
    URL once to confirm the subscription.
 
 The route answers 503 while the secret is unset, 401 without the credentials, and 422 for a
 body that is not an SNS message signed with SHA-256 (`SignatureVersion` 2) by a certificate on
-`sns.<region>.amazonaws.com`, or that comes from another topic. A 503 with `SNS signing
-certificate` in its detail means the certificate could not be fetched; SNS retries.
+`sns.<region>.amazonaws.com`, or that comes from another topic. A 422 saying `only
+SignatureVersion 2 (SHA-256) is accepted` means the topic still signs with version 1: do step 3,
+then subscribe again if the confirmation was refused. A 503 with `SNS signing certificate` in
+its detail means the certificate could not be fetched; SNS retries.
