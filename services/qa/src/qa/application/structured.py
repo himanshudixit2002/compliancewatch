@@ -6,6 +6,10 @@ due in that month. Only obligations of rule versions in force on the date count,
 cites the rule version's verified citations, each checked again against its clause. Anything
 else, no obligation, or no citation that holds passes the question to the next layer: this
 layer never answers ``not_covered``.
+
+An obligation whose deadline a version in force extends (``extends_deadline``, for the
+obligation's period when the relation names one) passes the question on too: the obligation's
+due date may not have moved yet, and the next layer reads the extension itself.
 """
 
 import re
@@ -15,6 +19,7 @@ from typing import Final
 
 from domain_kernel.citations import evidence_tokens_missing, quote_matches
 from domain_kernel.ids import BusinessId, RuleVersionId, TenantId
+from domain_kernel.knowledge import RelationKind
 from qa.application.context import AskContext
 from qa.domain.answer import MAX_CITATIONS, Answer, AnswerCitation
 from qa.domain.intents import DueForForm, DueInWindow, Intent, match_intent
@@ -53,12 +58,27 @@ class StructuredLayer:
                 ][:1]
             case DueInWindow(start=start, end=end):  # pragma: no branch - the other intent
                 chosen = reader.due(start, end)
-        if not chosen:
+        if not chosen or self._extended(chosen, visible):
             return None
         citations = self._citations(dict.fromkeys(item.rule_version_id for item in chosen))
         if not citations:
             return None
         return Answer.answered(_text(intent, chosen), citations)
+
+    def _extended(
+        self, chosen: Iterable[ObligationRecord], visible: Mapping[RuleVersionId, RuleVersion]
+    ) -> bool:
+        """Whether a version in force extends the deadline of a chosen obligation."""
+        periods: dict[RuleVersionId, set[str | None]] = {}
+        for obligation in chosen:
+            periods.setdefault(obligation.rule_version_id, set()).add(obligation.period_label)
+        return any(
+            relation.relation is RelationKind.EXTENDS_DEADLINE
+            and relation.from_rule_version_id in visible
+            and (relation.period_label is None or relation.period_label in labels)
+            for rule_version_id, labels in periods.items()
+            for relation in self._rulebook.relations(to_rule_version_id=rule_version_id)
+        )
 
     def _citations(self, rule_version_ids: Iterable[RuleVersionId]) -> list[AnswerCitation]:
         """The verified citations of the versions whose quotes still hold in their clauses."""

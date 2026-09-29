@@ -54,15 +54,13 @@ def problem_type(response: Any) -> str:
 def test_a_structured_answer(world: World) -> None:
     with api(world) as client:
         response = client.post(
-            ASK, json=body(world, "When is my GSTR-3B due?"), headers=headers(world)
+            ASK, json=body(world, "What is due next month?"), headers=headers(world)
         )
     assert response.status_code == 200
     clause = world.monthly_clause
     assert response.json() == {
         "outcome": "answered",
-        "answer": (
-            "Your next GSTR-3B is due on 20 April 2026: File GSTR-3B for the month (2026-03)."
-        ),
+        "answer": "Due next month: File GSTR-3B for the month (2026-04), due on 20 May 2026.",
         "citations": [
             {
                 "clause_ref": "en.p1",
@@ -153,7 +151,7 @@ def test_the_date_defaults_to_today_in_india(world: World) -> None:
     with TestClient(app) as client:
         response = client.post(
             ASK,
-            json={"question": "When is my GSTR-3B due?", "business_node_id": str(world.BUSINESS)},
+            json={"question": "What is due next month?", "business_node_id": str(world.BUSINESS)},
             headers=headers(world),
         )
     assert (response.json()["as_of"], response.json()["layer"]) == ("2026-04-10", "structured")

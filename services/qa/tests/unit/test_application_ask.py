@@ -40,7 +40,7 @@ def cited(world: World) -> str:
 
 
 def test_the_structured_layer_answers_first_without_a_model_call(world: World) -> None:
-    result = world.ask().run(world.request("When is my GSTR-3B due?"))
+    result = world.ask().run(world.request("What is due next month?"))
     assert (result.outcome, result.layer, result.reason, result.plan) == (
         Outcome.ANSWERED,
         Layer.STRUCTURED,

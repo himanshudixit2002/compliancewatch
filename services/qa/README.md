@@ -20,8 +20,11 @@ Every layer that ran is in the response as `{layer, result, reason}`.
    answers two phrasings from the business's own obligations: "when is my `<form>` due" (the
    earliest open obligation of that form due within a year) and "what is due this month" or
    "next month". Only obligations of rule versions in force on the date count, and the answer
-   cites the rule version's verified citations, each checked again against its clause. Anything
-   else passes the question on; this layer never answers "not covered".
+   cites the rule version's verified citations, each checked again against its clause. An
+   obligation whose deadline a version in force extends (`extends_deadline`, for its period when
+   the relation names one) passes the question on, because the obligation's due date may not
+   have moved yet. Anything else passes the question on too; this layer never answers "not
+   covered".
 2. **KAG** (`application/kag.py`, behind the flag). The planner (`qa.plan@1`) turns the question
    into a plan of at most 8 typed steps; the solver runs it with repository calls only; the
    answerer (`qa.answer@1`) phrases the answer from the evidence the solver collected. A plan
