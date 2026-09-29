@@ -1,0 +1,46 @@
+case_id: sh-15-2025-power
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Under which provision of the CGST Act was the annual return exemption in notification 15/2025-Central Tax granted?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: text
+    value: first proviso to sub-section (1) of section 44
+    support:
+      document: n15_2025
+      clause_ref: en.p4
+      quote: the first proviso to sub-section (1) of section 44
+  must_not_mention: []
+  citations:
+  - document: n15_2025
+    clause_ref: en.p4
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: gstr9_annual
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "The Commissioner granted it on the recommendations of the Council, in exercise of the powers conferred by the first proviso to sub-section (1) of section 44 of the Central Goods and Services Tax Act, 2017."
+    citations:
+    - document: n15_2025
+      clause_ref: en.p4
+      quote: "In exercise of the powers conferred by the first proviso to sub-section (1) of section 44 of the Central Goods and Services Tax Act, 2017"
+refusal_reason: null
+notes: ''

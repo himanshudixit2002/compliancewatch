@@ -1,0 +1,54 @@
+case_id: mh-delhi-annual-return
+category: multi_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Is QRMP Delhi exempt from filing the annual return under notification 15/2025-Central Tax?"
+as_of: 2026-09-28
+business: qrmp_delhi
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: text
+    value: up to two crore rupees
+    support:
+      document: n15_2025
+      clause_ref: en.p4
+      quote: up to two crore rupees
+  must_not_mention:
+  - not exempt
+  citations:
+  - document: n15_2025
+    clause_ref: en.p4
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: gstr9_annual
+    - id: s2
+      op: evaluate_applicability
+      source: s1
+    - id: s3
+      op: retrieve_clauses
+      source: s1
+    - id: s4
+      op: answer
+      sources:
+      - s2
+      - s3
+  answer:
+    covered: true
+    answer: "Yes. Notification No. 15/2025-Central Tax exempts a registered person whose aggregate turnover in the financial year is up to two crore rupees from filing the annual return, from financial year 2024-25 onwards; QRMP Delhi's profile does not place its turnover above the band of 1.5 crore to 2 crore rupees, so the annual return rule does not apply to it."
+    citations:
+    - document: n15_2025
+      clause_ref: en.p4
+      quote: "hereby exempts the registered person whose aggregate turnover in any financial year is up to two crore rupees, from filing annual return that said financial year"
+    - document: n15_2025
+      clause_ref: en.p4
+      quote: in respect of filing of annual return for the financial year 2024-25 onwards
+refusal_reason: null
+notes: "The applicability fact compares the fictional profile's turnover band with the seed's predicate; the band is not a regulatory fact."

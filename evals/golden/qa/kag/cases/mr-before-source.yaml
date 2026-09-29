@@ -1,0 +1,42 @@
+case_id: mr-before-source
+category: must_refuse
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: none
+question: "Till what date was the due date for furnishing FORM GSTR-3B for March 2026 extended?"
+as_of: 2026-04-10
+business: null
+fy: null
+expected:
+  outcome: not_covered
+  facts: []
+  must_not_mention: []
+  citations: []
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: gstr3b_monthly
+    - id: s2
+      op: follow
+      source: s1
+      relations:
+      - extends_deadline
+      direction: in
+      depth: 1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: The due date was extended.
+    citations:
+    - document: n01_2026
+      clause_ref: en.p3
+      quote: hereby extends the due date for furnishing the return in FORM GSTR-3B
+refusal_reason: before_source
+notes: "Asked on 10 April 2026: 01/2026-Central Tax is dated 21 April 2026 and in effect from 20 April 2026, so neither its version nor its clauses are visible yet. The scripted answer quotes it anyway; its clause is not in the evidence, so it cannot be cited."

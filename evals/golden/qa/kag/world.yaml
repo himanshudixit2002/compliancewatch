@@ -1,0 +1,231 @@
+# The world the KAG question-answering cases are asked against: the recorded notifications, the
+# entities an analyst would create for their mentions, the draft relations, the rule versions a
+# recorded clause supports, two fictional test businesses and their obligations. The eval
+# harness builds it in memory (cw_evals.qa.world) through each service's own API; nothing here
+# is written to a database.
+#
+# Every date and quote is copied from a recorded clause (checked by `make eval-check`) or taken
+# from the seed calendar. The seed rules published here keep the seed's own values (effective
+# 1 April 2026, the due days, the predicates); only the citation comes from a recorded clause.
+world_id: kag-qa-v1
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ""
+seed_calendar: services/rulebook/seed/gst_calendar.yaml
+
+documents:
+  - key: n01_2026
+    extraction_case: extraction/cbic_notifications/cases/01-2026-central-tax.yaml
+    own_ref: 01/2026-Central Tax
+    published_on: 2026-04-21
+    published_on_support: {clause_ref: en.p2, quote: "New Delhi, dated the 21st April, 2026"}
+  - key: n17_2025
+    extraction_case: extraction/cbic_notifications/cases/17-2025-central-tax.yaml
+    own_ref: 17/2025-Central Tax
+    published_on: 2025-10-18
+    published_on_support: {clause_ref: en.p3, quote: "New Delhi, the 18 October, 2025"}
+  - key: n15_2025
+    extraction_case: extraction/cbic_notifications/cases/15-2025-central-tax.yaml
+    own_ref: 15/2025-Central Tax
+    published_on: 2025-09-17
+    published_on_support: {clause_ref: en.p4, quote: "New Delhi, the 17th day of September 2025"}
+  - key: n10_2025
+    extraction_case: extraction/cbic_notifications/cases/10-2025-central-tax.yaml
+    own_ref: 10/2025-Central Tax
+    published_on: 2025-03-13
+    published_on_support: {clause_ref: en.p1, quote: "New Delhi, the 13th March, 2025"}
+  - key: n13_2024
+    extraction_case: extraction/cbic_notifications/cases/13-2024-central-tax.yaml
+    own_ref: 13/2024-Central Tax
+    published_on: 2024-07-10
+    published_on_support: {clause_ref: en.p4, quote: "New Delhi, the 10th July, 2024"}
+
+# Review groups the mention grammar queues for these documents, decided with create_entity.
+# Section "3" of 10/2025 names no statute, so it cannot name one entity and stays open.
+entities:
+  - {type: form, name: GSTR-3B}
+  - {type: notification, name: 01/2026-central tax}
+  - {type: notification, name: 17/2025-central tax}
+  - {type: notification, name: 15/2025-central tax}
+  - {type: notification, name: 10/2025-central tax}
+  - {type: notification, name: 13/2024-central tax}
+  - {type: notification, name: 02/2017-central tax}
+  - {type: notification, name: 27/2024-central tax}
+  - {type: notification, name: 27/2022-central tax}
+  - {type: section, name: 39(6)@cgst-act}
+  - {type: section, name: 39(1)@cgst-act}
+  - {type: section, name: 168@cgst-act}
+  - {type: section, name: 44(1)@cgst-act}
+  - {type: section, name: 5@cgst-act}
+  - {type: section, name: 3@igst-act}
+  - {type: rule, name: 61(1)(i)@cgst-rules}
+  - {type: rule, name: 8(4B)@cgst-rules}
+  - {type: state, name: rajasthan}
+  - {type: state, name: tamil nadu}
+  - {type: state, name: puducherry}
+
+# Rule versions, published in this order after their relations are approved. A seed rule takes
+# every field from the seed calendar; a notification version stands for one recorded
+# notification, titled with its number and the CBIC listing title (the case's source.title).
+rules:
+  - rule_key: gstr3b_monthly
+    seed: true
+    citations:
+      - document: n01_2026
+        clause_ref: en.p3
+        quote: "for the registered persons who are required to furnish return under sub-section (1) of section 39 read with clause (i) of sub -rule (1) of  rule 61 of the Central Goods and Services Tax Rules, 2017"
+    note: >-
+      The clause names the monthly return in FORM GSTR-3B of registered persons under section
+      39(1) read with rule 61(1)(i). The due day (20) and the predicates stay the seed's.
+  - rule_key: gstr3b_quarterly_group_a
+    seed: true
+    citations:
+      - document: n17_2025
+        clause_ref: en.p4
+        quote: "hereby extends the time limit for furnishing the return in FORM GSTR-3B electronically, through the common portal"
+      - document: n17_2025
+        clause_ref: en.p6
+        quote: "(ii) proviso to sub-section (1) of section 39, for the quarter of July, 2025 to September, 2025"
+    note: >-
+      The clauses name the quarterly return in FORM GSTR-3B under the proviso to section 39(1).
+      The due day (22) and the list of states stay the seed's, which the seed marks for review.
+  - rule_key: gstr3b_quarterly_group_b
+    seed: true
+    citations:
+      - document: n17_2025
+        clause_ref: en.p4
+        quote: "hereby extends the time limit for furnishing the return in FORM GSTR-3B electronically, through the common portal"
+      - document: n17_2025
+        clause_ref: en.p6
+        quote: "(ii) proviso to sub-section (1) of section 39, for the quarter of July, 2025 to September, 2025"
+    note: Same clauses as group A; the due day (24) and the complement list stay the seed's.
+  - rule_key: gstr9_annual
+    seed: true
+    citations:
+      - document: n15_2025
+        clause_ref: en.p4
+        quote: "in respect of filing of annual return for the financial year 2024-25 onwards, hereby exempts the registered person whose aggregate turnover in any financial year is up to two crore rupees, from filing annual return that said financial year"
+    note: >-
+      The clause states the exemption up to two crore rupees that the seed's turnover predicate
+      encodes. It does not name FORM GSTR-9 or the due date; those stay the seed's.
+  - rule_key: gstr3b_extension_2026_03
+    title: "01/2026-Central Tax: Seeks to extends the due date for furnishing the return in FORM GSTR-3B for the month of March, 2026 till the twenty-first day of April, 2026"
+    effective_from: 2026-04-20
+    effective_from_support: {document: n01_2026, clause_ref: en.p4, quote: "This notification shall come into effect from 20th day of April, 2026."}
+    citations:
+      - document: n01_2026
+        clause_ref: en.p2
+        quote: "NOTIFICATION No. 01/2026 – Central Tax New Delhi, dated the 21st April, 2026"
+      - document: n01_2026
+        clause_ref: en.p3
+        quote: "hereby extends the due  date for furnishing the return in FORM GSTR-3B for the month of March, 2026 till the twenty -first day of April, 2026"
+      - document: n01_2026
+        clause_ref: en.p4
+        quote: "This notification shall come into effect from 20th day of April, 2026."
+  - rule_key: gstr3b_extension_2025_09
+    title: "17/2025-Central Tax: Seeks to extend date of filing GSTR-3B."
+    effective_from: 2025-10-18
+    effective_from_support: {document: n17_2025, clause_ref: en.p3, quote: "New Delhi, the 18 October, 2025"}
+    citations:
+      - document: n17_2025
+        clause_ref: en.p3
+        quote: "NOTIFICATION No. 17/2025 – CENTRAL TAX New Delhi, the 18 October, 2025"
+      - document: n17_2025
+        clause_ref: en.p4
+        quote: "In  exercise  of  the  powers  conferred  by  sub-section  (6) of  section 39 read with section 168 of  the  Central  Goods  and Services  Tax  Act,  2017"
+      - document: n17_2025
+        clause_ref: en.p5
+        quote: "(i) sub-section (1) of section 39, for the month of September,2025, till twenty-fifth day of October, 2025"
+      - document: n17_2025
+        clause_ref: en.p6
+        quote: "(ii) proviso to sub-section (1) of section 39, for the quarter of July, 2025 to September, 2025, till twenty-fifth day of October, 2025."
+    note: The notification states no date of effect; the version starts on the date it bears.
+  - rule_key: amendment_02_2017_2025_03
+    title: "10/2025-Central Tax: Seeks to amend notification No. 02/2017-Central Tax."
+    effective_from: 2025-03-13
+    effective_from_support: {document: n10_2025, clause_ref: en.p1, quote: "New Delhi, the 13th March, 2025"}
+    citations:
+      - document: n10_2025
+        clause_ref: en.p1
+        quote: "the Central Government, hereby makes the following further amendments in the notification of the Government of India, in the Ministry of Finance (Department of Revenue), No. 02/2017-Central Tax"
+    note: The notification states no date of effect; the version starts on the date it bears.
+  - rule_key: rescission_27_2022_2024_07
+    title: "13/2024-Central Tax: Seeks to rescind Notification no. 27/2022-Central Tax dated 26.12.2022."
+    effective_from: 2024-07-10
+    effective_from_support: {document: n13_2024, clause_ref: en.p4, quote: "New Delhi, the 10th July, 2024"}
+    citations:
+      - document: n13_2024
+        clause_ref: en.p4
+        quote: "hereby rescinds the notification of the Government of India in the Ministry of Finance, Department of Revenue, number 27/2022 - Central Tax, dated the 26 th December, 2022"
+      - document: n13_2024
+        clause_ref: en.p5
+        quote: "This notification shall come into force from the date of its publication in Official Gazette."
+    note: >-
+      In force from its publication in the Gazette (en.p5); the version starts on the date the
+      notification bears. No withdraws relation: its target, 27/2022, has no rule version here.
+
+# Relation golden cases, each expected relation approved from one version to its target.
+relations:
+  - relation_case: relations/cbic_notifications/cases/01-2026-central-tax.yaml
+    evidence_clause_ref: en.p3
+    from_rule: gstr3b_extension_2026_03
+    target_rule: gstr3b_monthly
+  - relation_case: relations/cbic_notifications/cases/17-2025-central-tax.yaml
+    evidence_clause_ref: en.p5
+    from_rule: gstr3b_extension_2025_09
+    target_rule: gstr3b_monthly
+  - relation_case: relations/cbic_notifications/cases/17-2025-central-tax.yaml
+    evidence_clause_ref: en.p6
+    from_rule: gstr3b_extension_2025_09
+    target_rule: gstr3b_quarterly_group_b
+    note: >-
+      en.p6 names every quarterly filer under the proviso; a relation targets one version, so it
+      targets group B, the version the Delhi registration's quarterly returns come from.
+  - relation_case: relations/cbic_notifications/cases/10-2025-central-tax.yaml
+    evidence_clause_ref: en.p1
+    from_rule: amendment_02_2017_2025_03
+    target_rule: null
+
+# Fictional test businesses, one tenant each (they share the test PAN, so one tenant would make
+# them one legal entity). Attribute values are profile answers, not regulatory facts.
+businesses:
+  - key: acme_monthly
+    source: tools/demo/src/cw_demo/tenant.py (the demo tenant; registration_type from the static lookup)
+    gstin: 29ABCDE1234F1Z5
+    name: Acme Bengaluru
+    entity_name: Acme Traders Private Limited
+    fys: ["2025-26", "2026-27"]
+    attributes:
+      registration_type: regular
+      state_codes: ["29"]
+      business_category: wholesale_trade
+      turnover_band: 2_crore_to_5_crore
+      peak_turnover_band: 2_crore_to_5_crore
+      employee_count: 12
+      supply_type: goods
+      filing_scheme: regular_monthly
+      return_filing_frequency: monthly
+      makes_inter_state_supplies: true
+      makes_zero_rated_supplies: false
+      ecommerce_role: none
+      pays_reverse_charge: false
+      generates_eway_bills: true
+  - key: qrmp_delhi
+    source: the profile service's test GSTIN (profile_service.testing.GSTIN_DELHI); attributes made up
+    gstin: 07ABCDE1234F1Z9
+    name: QRMP Delhi
+    entity_name: QRMP Test Traders
+    fys: ["2025-26", "2026-27"]
+    attributes:
+      registration_type: regular
+      state_codes: ["07"]
+      turnover_band: 75_lakh_to_1_5_crore
+      filing_scheme: regular_qrmp
+      return_filing_frequency: quarterly
+
+# Obligations the published seed rules imply for each business the rule applies to, created
+# from this date, one period ahead of the other up to the window, then the deadline changes
+# the extensions published.
+obligations:
+  materialise_as_of: 2026-04-01
+  windows: {monthly: 12, quarterly: 4, annual: 1}

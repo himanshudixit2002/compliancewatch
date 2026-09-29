@@ -1,0 +1,47 @@
+case_id: sh-13-2024-in-force
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: From when does notification 13/2024-Central Tax come into force?
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: text
+    value: date of its publication
+    support:
+      document: n13_2024
+      clause_ref: en.p5
+      quote: come into force from the date of its publication in Official Gazette
+  must_not_mention:
+  - 10 July
+  citations:
+  - document: n13_2024
+    clause_ref: en.p5
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: rescission_27_2022_2024_07
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "Notification No. 13/2024-Central Tax comes into force from the date of its publication in the Official Gazette."
+    citations:
+    - document: n13_2024
+      clause_ref: en.p5
+      quote: "This notification shall come into force from the date of its publication in Official Gazette."
+refusal_reason: null
+notes: The clause gives no calendar date, so the answer names none.

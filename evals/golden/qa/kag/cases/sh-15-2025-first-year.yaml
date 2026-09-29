@@ -1,0 +1,43 @@
+case_id: sh-15-2025-first-year
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "From which financial year does the annual return exemption in notification 15/2025-Central Tax apply?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: text
+    value: 2024-25
+    support:
+      document: n15_2025
+      clause_ref: en.p4
+      quote: in respect of filing of annual return for the financial year 2024-25 onwards
+  must_not_mention: []
+  citations:
+  - document: n15_2025
+    clause_ref: en.p4
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: retrieve_clauses
+      text: "exemption from filing annual return for the financial year onwards notification 15/2025"
+    - id: s2
+      op: answer
+      sources:
+      - s1
+  answer:
+    covered: true
+    answer: "The exemption applies in respect of the annual return for the financial year 2024-25 onwards."
+    citations:
+    - document: n15_2025
+      clause_ref: en.p4
+      quote: in respect of filing of annual return for the financial year 2024-25 onwards
+refusal_reason: null
+notes: The planner searches the text.

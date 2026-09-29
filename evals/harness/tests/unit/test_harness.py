@@ -77,7 +77,7 @@ def test_gates_and_report() -> None:
     text = markdown("ci", extraction, aggregates, {}, gates, relations, {})
     assert "| extraction_acceptance |" in text
     assert "| relation_recall |" in text
-    assert "Relation golden set: 1 cases." in text
+    assert "Relation golden set: 3 cases." in text
     assert "50 indexed" in text
     assert {g.provider for g in GATES["ci"]} == {"scripted", "fake"}
 

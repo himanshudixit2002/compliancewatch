@@ -1,0 +1,60 @@
+case_id: mh-section-39-6
+category: multi_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Which notifications in the rulebook were issued under sub-section (6) of section 39 of the CGST Act?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: entity
+    type: notification
+    value: 01/2026-Central Tax
+    support:
+      document: n01_2026
+      clause_ref: en.p2
+      quote: NOTIFICATION No. 01/2026 – Central Tax
+  - kind: entity
+    type: notification
+    value: 17/2025-Central Tax
+    support:
+      document: n17_2025
+      clause_ref: en.p3
+      quote: NOTIFICATION No. 17/2025 – CENTRAL TAX
+  must_not_mention: []
+  citations:
+  - document: n01_2026
+    clause_ref: en.p3
+  - document: n17_2025
+    clause_ref: en.p4
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: find_entity
+      entity_type: section
+      name: 39(6)@cgst-act
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "Two: notification No. 01/2026-Central Tax, and notification No. 17/2025-Central Tax, which reads it with section 168."
+    citations:
+    - document: n01_2026
+      clause_ref: en.p3
+      quote: "In exercise of the powers conferred by sub -section (6) of section 39 of the Central Goods and Services Tax Act, 2017"
+    - document: n17_2025
+      clause_ref: en.p4
+      quote: "In exercise of the powers conferred by sub-section (6) of section 39 read with section 168 of the Central Goods and Services Tax Act, 2017"
+refusal_reason: null
+notes: The section entity 39(6)@cgst-act, then the clauses that mention it.

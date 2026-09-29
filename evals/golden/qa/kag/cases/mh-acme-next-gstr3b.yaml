@@ -1,0 +1,29 @@
+case_id: mh-acme-next-gstr3b
+category: multi_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: seed_calendar
+question: When is my GSTR-3B due?
+as_of: 2026-09-28
+business: acme_monthly
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: date
+    value: 2026-10-20
+    support:
+      seed_rule: gstr3b_monthly
+      field: recurrence
+      value:
+        frequency: monthly
+        due_day: 20
+        due_month_offset: 0
+  must_not_mention: []
+  citations:
+  - document: n01_2026
+    clause_ref: en.p3
+scripted: null
+refusal_reason: null
+notes: "Answered by the structured layer from the business's obligations: the seed's due day 20 for period 2026-09, with the monthly rule's citation. No model call."

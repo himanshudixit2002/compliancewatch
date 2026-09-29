@@ -1,0 +1,81 @@
+case_id: mh-gstr3b-extensions
+category: multi_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Which notifications in the rulebook extended the due date of FORM GSTR-3B, and till when?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: entity
+    type: notification
+    value: 01/2026-Central Tax
+    support:
+      document: n01_2026
+      clause_ref: en.p2
+      quote: NOTIFICATION No. 01/2026 – Central Tax
+  - kind: entity
+    type: notification
+    value: 17/2025-Central Tax
+    support:
+      document: n17_2025
+      clause_ref: en.p3
+      quote: NOTIFICATION No. 17/2025 – CENTRAL TAX
+  - kind: date
+    value: 2026-04-21
+    support:
+      document: n01_2026
+      clause_ref: en.p3
+      quote: till the twenty -first day of April, 2026
+  - kind: date
+    value: 2025-10-25
+    support:
+      document: n17_2025
+      clause_ref: en.p5
+      quote: till twenty-fifth day of October, 2025
+  must_not_mention:
+  - 12/2025
+  - 02/2025
+  citations:
+  - document: n01_2026
+    clause_ref: en.p3
+  - document: n17_2025
+    clause_ref: en.p5
+  - document: n17_2025
+    clause_ref: en.p6
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+    - id: s2
+      op: follow
+      source: s1
+      relations:
+      - extends_deadline
+      direction: in
+      depth: 1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "In the rulebook, two notifications: No. 01/2026-Central Tax extended the due date for FORM GSTR-3B for March 2026 till 21 April 2026, and No. 17/2025-Central Tax extended it for September 2025 and for the quarter July to September 2025 till 25 October 2025."
+    citations:
+    - document: n01_2026
+      clause_ref: en.p3
+      quote: "hereby extends the due date for furnishing the return in FORM GSTR-3B for the month of March, 2026 till the twenty -first day of April, 2026"
+    - document: n17_2025
+      clause_ref: en.p5
+      quote: "(i) sub-section (1) of section 39, for the month of September,2025, till twenty-fifth day of October, 2025"
+    - document: n17_2025
+      clause_ref: en.p6
+      quote: "(ii) proviso to sub-section (1) of section 39, for the quarter of July, 2025 to September, 2025, till twenty-fifth day of October, 2025."
+refusal_reason: null
+notes: "The CBIC listing names other GSTR-3B extensions (02/2025, 12/2025) that are not recorded here; the answer must not name them."

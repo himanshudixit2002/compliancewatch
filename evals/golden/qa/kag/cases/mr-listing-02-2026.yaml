@@ -1,0 +1,27 @@
+case_id: mr-listing-02-2026
+category: must_refuse
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: none
+question: "What does notification 02/2026-Central Tax empower the Principal Bench of the Appellate Tribunal to hear?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: not_covered
+  facts: []
+  must_not_mention: []
+  citations: []
+scripted:
+  plan:
+    as_of: null
+    steps: []
+  answer:
+    covered: true
+    answer: The Principal Bench may hear such appeals.
+    citations:
+    - clause: C13
+      quote: the Principal Bench may hear such appeals
+refusal_reason: listing_only
+notes: 02/2026-Central Tax is only in the recorded CBIC listing.
