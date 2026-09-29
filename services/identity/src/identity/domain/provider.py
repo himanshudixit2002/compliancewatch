@@ -84,3 +84,11 @@ class IdentityProvider(Protocol):
     def delete(self, subject: str) -> None:
         """Remove the provider's account for ``subject``; an account already gone is fine."""
         ...
+
+
+class DevIdentityProvider(IdentityProvider, Protocol):
+    """A provider that signs its own tokens, for development sign-in: the fake provider."""
+
+    def issue(self, *, email: str = "", phone: str = "", aal: str = AAL1) -> str:
+        """A provider token for the person with this email address or phone number."""
+        ...

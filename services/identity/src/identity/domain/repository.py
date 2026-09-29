@@ -1,10 +1,11 @@
-"""The identity service's unit of work: consents, tenants, users, the subject index and the
-events, in one transaction.
+"""The identity service's unit of work: consents, tenants, users, the subject index, service
+clients and the events, in one transaction.
 
 ``UnitOfWorkFactory(tenant_id)`` opens a transaction for one tenant: row-level security admits
 that tenant's rows only (and, on the tenant table, the tenant itself). ``tenant_id=None`` opens
 one without a tenant, in which tenant rows are invisible and cannot be written; it serves the
-subject index, which the session exchange reads before it knows the tenant.
+subject index, which the session exchange reads before it knows the tenant, and the service
+clients, which belong to no tenant.
 """
 
 from contextlib import AbstractContextManager
@@ -13,6 +14,7 @@ from typing import Protocol
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import TenantId, UserId
 from identity.domain.consent import ConsentRepository
+from identity.domain.service_clients import ServiceClientRepository
 from identity.domain.tenancy import SubjectEntry, Tenant, User
 
 
@@ -62,6 +64,9 @@ class UnitOfWork(Protocol):
 
     @property
     def subjects(self) -> SubjectIndex: ...
+
+    @property
+    def service_clients(self) -> ServiceClientRepository: ...
 
     @property
     def events(self) -> EventSink: ...

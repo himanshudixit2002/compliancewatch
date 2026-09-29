@@ -1,5 +1,6 @@
 """Errors of the identity service; the composition root maps them to problem statuses."""
 
+from collections.abc import Mapping
 from typing import ClassVar
 
 from domain_kernel.errors import DomainError
@@ -161,3 +162,102 @@ class ProviderAccountExistsError(DomainError):
             "the identity provider already has an account for this address, and an invitation "
             "cannot claim an account it did not create"
         )
+
+
+class UserNotProvisionedError(DomainError):
+    """The provider's subject signs in as no user yet (404). The web treats this as sign-up:
+    ``POST /v1/identity/tenants`` creates a tenant with this person as its first user."""
+
+    type_slug: ClassVar[str] = "identity-user-not-provisioned"
+    title: ClassVar[str] = "No user for this sign-in yet"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "this sign-in belongs to no user yet: create a tenant with POST /v1/identity/tenants, "
+            "or ask a tenant admin for an invitation"
+        )
+
+
+class MfaRequiredError(DomainError):
+    """The user's roles need a second factor and the sign-in had one factor only (403)."""
+
+    type_slug: ClassVar[str] = "identity-mfa-required"
+    title: ClassVar[str] = "Second factor required for these roles"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "these roles sign in with a second factor: verify it at the identity provider "
+            "(assurance level aal2) and exchange the new provider token"
+        )
+
+
+class TenantInactiveError(DomainError):
+    """The user's tenant asked for deletion or was erased, so nobody signs in to it (403)."""
+
+    type_slug: ClassVar[str] = "identity-tenant-inactive"
+    title: ClassVar[str] = "Tenant is not active"
+
+    def __init__(self) -> None:
+        super().__init__("this tenant asked for deletion or was erased; nobody signs in to it")
+
+
+class SessionRevokedError(DomainError):
+    """The access token names a session version the user no longer has: the user's roles
+    changed or the user was disabled after it was issued (401)."""
+
+    type_slug: ClassVar[str] = "identity-session-revoked"
+    title: ClassVar[str] = "Session was revoked"
+    problem_headers: ClassVar[Mapping[str, str]] = {
+        "WWW-Authenticate": 'Bearer error="invalid_token"'
+    }
+
+    def __init__(self) -> None:
+        super().__init__(
+            "this session was revoked when the user's roles changed or the user was disabled; "
+            "sign in again"
+        )
+
+
+class ServiceClientInvalidError(DomainError):
+    """The client id is unknown or revoked, or the secret is wrong (401)."""
+
+    type_slug: ClassVar[str] = "identity-service-client-invalid"
+    title: ClassVar[str] = "Service client or secret is wrong"
+
+    def __init__(self) -> None:
+        super().__init__("the client id is unknown or revoked, or the secret is wrong")
+
+
+class DevSignInUnavailableError(DomainError):
+    """The development sign-in answers only with the fake provider in local and test (404)."""
+
+    type_slug: ClassVar[str] = "identity-dev-sign-in-unavailable"
+    title: ClassVar[str] = "Development sign-in is not served here"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "development provider tokens are issued only with CW_AUTH_PROVIDER=fake and CW_ENV "
+            "local or test"
+        )
+
+
+class ServiceClientExistsError(DomainError):
+    """A service client with this id exists already (409)."""
+
+    type_slug: ClassVar[str] = "identity-service-client-exists"
+    title: ClassVar[str] = "Service client exists already"
+
+    def __init__(self, client_id: str) -> None:
+        super().__init__(
+            f"service client {client_id} exists; revoke it and create the new one under another id"
+        )
+
+
+class ServiceClientNotFoundError(DomainError):
+    """No service client with this id (404)."""
+
+    type_slug: ClassVar[str] = "identity-service-client-not-found"
+    title: ClassVar[str] = "Service client not found"
+
+    def __init__(self, client_id: str) -> None:
+        super().__init__(f"no service client {client_id}")

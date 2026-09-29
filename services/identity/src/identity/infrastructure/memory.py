@@ -1,6 +1,7 @@
 """In-memory stores: tests, demos and the app before Postgres.
 
-``MemoryStore`` holds consents, tenants, users, the subject index and the published events. A
+``MemoryStore`` holds consents, tenants, users, the subject index, service clients and the
+published events. A
 unit of work keeps what it did only when it ends without an error, as a Postgres transaction
 would, and it mirrors row-level security: it sees the rows of its own tenant, none when it has no
 tenant, and refuses to write another tenant's rows.
@@ -19,6 +20,7 @@ from identity.domain.channel_consent import (
 from identity.domain.consent import ConsentPurpose, ConsentRecord
 from identity.domain.errors import SubjectRegisteredError
 from identity.domain.repository import UnitOfWork
+from identity.domain.service_clients import ServiceClient
 from identity.domain.tenancy import SubjectEntry, Tenant, User
 
 
@@ -102,6 +104,25 @@ class MemorySubjectIndex:
         return self._entries.get((provider, provider_subject))
 
 
+class MemoryServiceClientRepository:
+    def __init__(self, clients: dict[str, ServiceClient]) -> None:
+        self._clients = clients
+
+    def add(self, client: ServiceClient) -> None:
+        if client.client_id in self._clients:
+            raise RowSecurityViolationError(f"service client {client.client_id} exists already")
+        self._clients[client.client_id] = client
+
+    def save(self, client: ServiceClient) -> None:
+        self._clients[client.client_id] = client
+
+    def get(self, client_id: str) -> ServiceClient | None:
+        return self._clients.get(client_id)
+
+    def list(self) -> list[ServiceClient]:
+        return [self._clients[client_id] for client_id in sorted(self._clients)]
+
+
 class MemorySink:
     def __init__(self) -> None:
         self.pending: list[DomainEvent] = []
@@ -116,10 +137,12 @@ class MemoryUnitOfWork:
         self._tenants = dict(store.tenants)
         self._users = dict(store.users)
         self._subjects = dict(store.subjects)
+        self._clients = dict(store.service_clients)
         self.consents = MemoryConsentRepository(self._records, tenant_id)
         self.tenants = MemoryTenantRepository(self._tenants, tenant_id)
         self.users = MemoryUserRepository(self._users, tenant_id)
         self.subjects = MemorySubjectIndex(self._subjects)
+        self.service_clients = MemoryServiceClientRepository(self._clients)
         self.events = MemorySink()
 
     def commit(self, store: "MemoryStore") -> None:
@@ -130,6 +153,8 @@ class MemoryUnitOfWork:
         store.users.update(self._users)
         store.subjects.clear()
         store.subjects.update(self._subjects)
+        store.service_clients.clear()
+        store.service_clients.update(self._clients)
         store.events.extend(self.events.pending)
 
 
@@ -139,6 +164,7 @@ class MemoryStore:
         self.tenants: dict[TenantId, Tenant] = {}
         self.users: dict[UserId, User] = {}
         self.subjects: dict[tuple[str, str], SubjectEntry] = {}
+        self.service_clients: dict[str, ServiceClient] = {}
         self.events: list[DomainEvent] = []
 
     def __call__(self, tenant_id: TenantId | None) -> AbstractContextManager[UnitOfWork]:

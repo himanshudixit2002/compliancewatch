@@ -74,6 +74,7 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "POST /v1/identity/consents",
             "GET /v1/identity/consents",
             "POST /v1/identity/billing/subscriptions",
+            "GET /v1/identity/me",
         }
     ),
     "profile": frozenset(
@@ -130,6 +131,25 @@ EXEMPT_ROUTES: dict[str, dict[str, str]] = {
         "POST /v1/identity/billing/webhook": (
             "called by the billing provider, which names no tenant; the body is verified "
             "against the webhook signature before it is read"
+        ),
+        "POST /v1/identity/sessions": (
+            "sign-in: the caller has no session yet, so no tenant; the identity provider's token "
+            "in the body names the person, and the tenant is the one their user belongs to"
+        ),
+        "POST /v1/identity/tenants": (
+            "sign-up creates the tenant, so there is none to name yet; the identity provider's "
+            "token in the body names the person who becomes its first user"
+        ),
+        "POST /v1/identity/service-tokens": (
+            "service clients belong to no tenant; the client id and secret in the body are "
+            "checked, and a service acts for a tenant later only with the tenant:act scope"
+        ),
+        "GET /v1/identity/.well-known/jwks.json": (
+            "the public keys every service verifies tokens with, the same for every caller"
+        ),
+        "POST /v1/identity/dev/provider-tokens": (
+            "development sign-in: signs a fake provider token for a phone number or an email "
+            "address, answers only with the fake provider in local and test, and 404 elsewhere"
         ),
     },
     "profile": {

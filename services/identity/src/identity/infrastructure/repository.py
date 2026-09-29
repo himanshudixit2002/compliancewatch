@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
-from domain_kernel.access import Role
+from domain_kernel.access import Role, Scope
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import ConsentId, TenantId, UserId
 from identity.domain.channel_consent import (
@@ -22,6 +22,7 @@ from identity.domain.channel_consent import (
 from identity.domain.consent import ConsentPurpose, ConsentRecord, ConsentSource
 from identity.domain.errors import SubjectRegisteredError
 from identity.domain.repository import UnitOfWork
+from identity.domain.service_clients import ServiceClient
 from identity.domain.tenancy import (
     Contact,
     SubjectEntry,
@@ -35,6 +36,7 @@ from identity.infrastructure.models import (
     TENANT_SETTING,
     ChannelConsentRow,
     ConsentRow,
+    ServiceClientRow,
     TenantRow,
     UserRow,
     UserSubjectRow,
@@ -156,6 +158,27 @@ class SqlAlchemySubjectIndex:
         )
 
 
+class SqlAlchemyServiceClientRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, client: ServiceClient) -> None:
+        self._session.add(_client_row(client))
+        self._session.flush()
+
+    def save(self, client: ServiceClient) -> None:
+        self._session.merge(_client_row(client))
+        self._session.flush()
+
+    def get(self, client_id: str) -> ServiceClient | None:
+        row = self._session.get(ServiceClientRow, client_id)
+        return None if row is None else _to_client(row)
+
+    def list(self) -> list[ServiceClient]:
+        rows = self._session.scalars(select(ServiceClientRow).order_by(ServiceClientRow.client_id))
+        return [_to_client(row) for row in rows]
+
+
 class OutboxSink:
     def __init__(self, connection: Connection, writer: OutboxWriter) -> None:
         self._connection = connection
@@ -180,6 +203,7 @@ class SqlAlchemyUnitOfWork:
         self.tenants = SqlAlchemyTenantRepository(session)
         self.users = SqlAlchemyUserRepository(session)
         self.subjects = SqlAlchemySubjectIndex(session)
+        self.service_clients = SqlAlchemyServiceClientRepository(session)
         self.events = OutboxSink(connection, writer)
 
 
@@ -245,6 +269,28 @@ def _to_user(row: UserRow) -> User:
         display_name=row.display_name,
         status=UserStatus(row.status),
         session_version=row.session_version,
+    )
+
+
+def _client_row(client: ServiceClient) -> ServiceClientRow:
+    return ServiceClientRow(
+        client_id=client.client_id,
+        secret_sha256=client.secret_sha256,
+        scopes=sorted(scope.value for scope in client.scopes),
+        created_at=client.created_at,
+        revoked_at=client.revoked_at,
+    )
+
+
+def _to_client(row: ServiceClientRow) -> ServiceClient:
+    """A stored client; a scope this code no longer knows is left out, so it grants nothing."""
+    known = {scope.value: scope for scope in Scope}
+    return ServiceClient(
+        client_id=row.client_id,
+        secret_sha256=row.secret_sha256,
+        scopes=frozenset(known[value] for value in row.scopes if value in known),
+        created_at=row.created_at,
+        revoked_at=row.revoked_at,
     )
 
 

@@ -5,7 +5,7 @@ Do not edit by hand: `pnpm --filter web screens:check` (also `make web-screens-c
 of `make check`) and the vitest test `src/test/screens-doc.test.ts` fail when this file and
 the registry differ.
 
-68 entries: 12 live, 6 ready, 36 waiting, 14 planned.
+68 entries: 12 live, 10 ready, 32 waiting, 14 planned.
 
 A screen moves through the statuses in the order planned, waiting, ready, live.
 
@@ -36,9 +36,9 @@ hides the screen while it is off. Guide numbers refer to the Project Foundation 
 | `system.forbidden`          | `/forbidden`                                   | Forbidden            | page       | public                                                                      | live    |                                                                                                                                              | 15, 16              |
 | `system.not-available`      | `/[...slug]`                                   | Not available yet    | page       | public                                                                      | live    |                                                                                                                                              | 15                  |
 | `system.health`             | `/api/health`                                  | Health               | handler    | public                                                                      | live    |                                                                                                                                              | 17                  |
-| `system.sign-in-email-sent` | `/sign-in/email-sent`                          | Check your email     | page       | public                                                                      | waiting | `POST /v1/identity/sessions` (services track, WP14)                                                                                          | ADR-014             |
-| `system.sign-up`            | `/sign-up`                                     | Create your account  | page       | public                                                                      | waiting | `POST /v1/identity/tenants` (services track, WP14)                                                                                           | 6, 10               |
-| `system.auth-callback`      | `/auth/callback`                               | Email link callback  | handler    | public                                                                      | waiting | `POST /v1/identity/sessions` (services track, WP14)                                                                                          | ADR-014             |
+| `system.sign-in-email-sent` | `/sign-in/email-sent`                          | Check your email     | page       | public                                                                      | ready   | `POST /v1/identity/sessions` (services track, WP14)                                                                                          | ADR-014             |
+| `system.sign-up`            | `/sign-up`                                     | Create your account  | page       | public                                                                      | ready   | `POST /v1/identity/tenants` (services track, WP14)                                                                                           | 6, 10               |
+| `system.auth-callback`      | `/auth/callback`                               | Email link callback  | handler    | public                                                                      | ready   | `POST /v1/identity/sessions` (services track, WP14)                                                                                          | ADR-014             |
 | `system.sign-in-sso`        | `/sign-in/sso`                                 | Single sign-on       | page       | compliance_lead                                                             | planned | `POST /v1/identity/sso/exchange` (not scheduled; indicative path; no design exists)                                                          | 10; G92             |
 | `system.quality`            | `/quality`                                     | Quality numbers      | page       | owner, staff, ca_admin, ca_staff, compliance_lead, analyst, reviewer, admin | planned | `GET /v1/eval/quality` (not scheduled; indicative path; no design exists)                                                                    | 1 commitment 3      |
 | `system.hindi-ui`           | `/`                                            | Hindi interface      | capability | public                                                                      | planned | `file packages/ontology/src/ontology/data/wording.hi.yaml` (not scheduled); `file apps/web/src/shared/i18n/messages/hi.json` (not scheduled) | G54                 |
@@ -74,10 +74,10 @@ hides the screen while it is off. Guide numbers refer to the Project Foundation 
 
 ## Account
 
-| Id             | Route          | Title                 | Kind | Roles                                                                       | Status  | Waits for                                                                                                           | Guide  |
-| -------------- | -------------- | --------------------- | ---- | --------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- | ------ |
-| `account.home` | `/account`     | Account               | page | owner, staff, ca_admin, ca_staff, compliance_lead, analyst, reviewer, admin | live    | `GET /v1/identity/me` (services track, WP14)                                                                        | 6, 16  |
-| `account.mfa`  | `/account/mfa` | Two-step verification | page | owner, staff, ca_admin, ca_staff, compliance_lead, analyst, reviewer, admin | waiting | `POST /v1/identity/sessions` (services track, WP14); `POST /v1/identity/dev/provider-tokens` (services track, WP14) | 16, 17 |
+| Id             | Route          | Title                 | Kind | Roles                                                                       | Status | Waits for                                                                                                           | Guide  |
+| -------------- | -------------- | --------------------- | ---- | --------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------- | ------ |
+| `account.home` | `/account`     | Account               | page | owner, staff, ca_admin, ca_staff, compliance_lead, analyst, reviewer, admin | live   | `GET /v1/identity/me` (services track, WP14)                                                                        | 6, 16  |
+| `account.mfa`  | `/account/mfa` | Two-step verification | page | owner, staff, ca_admin, ca_staff, compliance_lead, analyst, reviewer, admin | ready  | `POST /v1/identity/sessions` (services track, WP14); `POST /v1/identity/dev/provider-tokens` (services track, WP14) | 16, 17 |
 
 ## Internal tools
 

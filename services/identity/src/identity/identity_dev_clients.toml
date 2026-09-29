@@ -1,0 +1,21 @@
+# The service clients the identity service creates in local and test runs (EnsureDevServiceClients),
+# all with the one dev secret CW_IDENTITY_DEV_CLIENT_SECRET. Each caller runs with
+# CW_SERVICE_CLIENT_ID set to its client id (the Makefile's run and worker targets default it to the
+# service name) and CW_SERVICE_CLIENT_SECRET set to the dev secret. CW_IDENTITY_DEV_CLIENTS replaces
+# this list, as client=scope+scope,client=scope.
+#
+# A caller that starts calling another service adds its line here in the same change, with the
+# scopes that call needs and no more. Staging and production create their clients with
+# identity-admin service-client create instead; nothing here reaches them.
+
+[pipeline]
+scopes = ["rulebook:write", "llm:call", "tenant:act"]
+reason = "writes extracted documents, mentions and relation candidates to the rulebook and calls the gateway, naming a tenant only when it attributes cost"
+
+[qa]
+scopes = ["llm:call", "tenant:act"]
+reason = "answers a tenant's question: reads the tenant's profile and obligations and calls the gateway for that tenant"
+
+[whatsapp-bot]
+scopes = ["notification:preferences", "notification:receipts", "identity:channel-consents", "tenant:act"]
+reason = "records keyword consents at identity, reads and changes channel preferences and reports delivery receipts to notification"

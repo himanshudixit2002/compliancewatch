@@ -6,7 +6,7 @@ The role owns nothing and is not a superuser, as the service's own role would be
 
 import importlib
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -18,13 +18,24 @@ from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from testcontainers.community.postgres import PostgresContainer
 
-from domain_kernel.access import Role
+from domain_kernel.access import Role, Scope
 from domain_kernel.ids import TenantId
+from identity.application.bootstrap import (
+    CreateServiceClient,
+    ListServiceClients,
+    RevokeServiceClient,
+)
+from identity.application.sessions import ExchangeSession, IssueServiceToken
+from identity.application.tenancy import CreateTenant
 from identity.domain.errors import SubjectRegisteredError
 from identity.domain.events import RoleChangeReason, TenantCreated, UserRoleChanged, sorted_roles
 from identity.domain.tenancy import Contact, SubjectEntry, Tenant, TenantKind, User
+from identity.infrastructure.minter import IssuerMinter
 from identity.infrastructure.models import Base
+from identity.infrastructure.providers.fake import FakeIdentityProvider
 from identity.infrastructure.repository import PostgresUnitOfWorkFactory
+from py_common.auth import TokenIssuer
+from py_common.auth.testing import TestIssuer
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
@@ -292,3 +303,49 @@ def test_there_is_one_internal_tenant(app_engine: Engine) -> None:
     second = new_tenant(TenantKind.INTERNAL, "Second team")
     with pytest.raises(IntegrityError, match="ux_tenant_internal"):
         sign_up(factory, second, first_user(second, "internal-2"))
+
+
+def test_create_tenant_commits_its_outbox_rows_and_a_repeat_rolls_back(
+    app_engine: Engine, engine: Engine
+) -> None:
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    provider = FakeIdentityProvider()
+    issuer = TestIssuer()
+    minter = IssuerMinter(
+        TokenIssuer(issuer.keys, issuer=issuer.issuer_name, audience=issuer.audience)
+    )
+    create = CreateTenant(factory, provider, minter, ttl=timedelta(minutes=10))
+    token = provider.issue(phone="+919800000001")
+    created = create.run(token, TenantKind.BUSINESS, "Signed Up Traders")
+    assert outbox_topics(engine, created.tenant) == ["tenant.created", "user.role.changed"]
+    with pytest.raises(SubjectRegisteredError):
+        create.run(token, TenantKind.BUSINESS, "Again Traders")
+    session = ExchangeSession(factory, provider, minter, ttl=timedelta(minutes=10)).run(token)
+    assert (session.tenant, session.user) == (created.tenant, created.user)
+    with engine.connect() as connection:
+        tenants: int = connection.execute(
+            text("SELECT count(*) FROM tenant WHERE name = 'Again Traders'")
+        ).scalar_one()
+    assert tenants == 0
+
+
+def test_service_clients_through_a_plain_role(app_engine: Engine) -> None:
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    client, secret = CreateServiceClient(factory).run(
+        "integration-client", frozenset({Scope.LLM_CALL})
+    )
+    issuer = TestIssuer()
+    minter = IssuerMinter(
+        TokenIssuer(issuer.keys, issuer=issuer.issuer_name, audience=issuer.audience)
+    )
+    issued = IssueServiceToken(factory, minter, ttl=timedelta(minutes=10)).run(
+        "integration-client", secret
+    )
+    assert issued.principal.scopes == {Scope.LLM_CALL}
+    revoked = RevokeServiceClient(factory).run("integration-client")
+    assert revoked.revoked_at is not None
+    listed = ListServiceClients(factory).run()
+    assert [c.client_id for c in listed if c.client_id == client.client_id] == [client.client_id]
+    with factory(None) as uow:
+        stored = uow.service_clients.get("integration-client")
+    assert stored == revoked
