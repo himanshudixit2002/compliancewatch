@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { NAV_GROUPS, adminNavFor, breadcrumbsFor, isActive, isNavGroupKey, navFor } from "./nav.ts";
+import {
+  NAV_GROUPS,
+  adminNavFor,
+  breadcrumbsFor,
+  isActive,
+  isNavGroupKey,
+  navFor,
+  publicNav,
+} from "./nav.ts";
 import { SCREENS } from "./screens.ts";
+
+describe("publicNav", () => {
+  it("links the home page and the sitemap for every visitor and marks the current one", () => {
+    expect(publicNav().map((link) => link.href)).toEqual(["/", "/sitemap"]);
+    expect(publicNav().some((link) => link.active)).toBe(false);
+    expect(publicNav("/sitemap").find((link) => link.active)?.id).toBe("system.sitemap");
+  });
+});
 
 describe("navFor", () => {
   it("gives an anonymous visitor nothing and an owner the business group once a business is known", () => {

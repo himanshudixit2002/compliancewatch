@@ -32,3 +32,23 @@ export function pathnameOf(value: string): string {
   const stop = value.search(/[?#]/);
   return stop === -1 ? value : value.slice(0, stop);
 }
+
+/** A link is active on its own path and on paths below it, except the root and section homes. */
+export function isActivePath(
+  href: string,
+  currentPath: string,
+  roots: readonly string[] = ["/", "/admin"],
+): boolean {
+  if (roots.includes(href)) return currentPath === href;
+  return currentPath === href || currentPath.startsWith(`${href}/`);
+}
+
+/** The one href to mark current: the longest of those active on the path, or null. */
+export function activeHref(hrefs: readonly string[], currentPath: string): string | null {
+  let best: string | null = null;
+  for (const href of hrefs) {
+    if (isActivePath(href, currentPath) && (best === null || href.length > best.length))
+      best = href;
+  }
+  return best;
+}

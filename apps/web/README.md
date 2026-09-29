@@ -11,16 +11,23 @@ Design reference: Project Foundation guide, sections 10, 12, 14 and 15.
 ## Layout
 
 ```
-src/app/            route files only: page.tsx is gate, query, render; layout, loading, error, not-found
+src/app/            route files only: page.tsx is gate, query, render; layouts, error, global-error, not-found
+  (public)/         home, /sitemap, /legal/[doc], /forbidden under the visitor shell
+  (app)/            tenant screens under AppShell; [...slug] serves waiting and planned tenant screens
+  admin/            /admin home and layout under AdminShell; [...slug] serves waiting and planned tools
+  api/health/       liveness handler {status, version, commit}
 src/features/       one directory per screen family: ports.ts, gateway.ts, queries.ts, actions.ts, model/, ui/, index.ts
+                    today: home, sitemap, legal, not-available, admin-home, system-pages
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports)
 src/server/         server-only modules; every file starts with `import "server-only"`
+                    legal.ts reads docs/legal at build time (marked); runtime.ts reads CW_WEB_ENV (default local)
 src/shared/config/  the screen registry (screens.ts), roles and permissions, flags, navigation
 src/shared/lib/     IST dates, financial years, money and decimal strings, identifiers, pagination, urls
 src/shared/i18n/    messages/en.json and the typed t(); another locale falls back key by key
-src/shared/ui/      app-level compositions over the UI kit (never duplicated primitives)
+src/shared/ui/      app-level compositions over the UI kit: the two shells over next/link, breadcrumbs, the status chip
 src/test/           vitest setup and the architecture rules
 src/app/globals.css Tailwind v4 plus the UI kit's token file (@compliancewatch/ui/styles/tokens.css)
+src/instrumentation.ts  onRequestError writes one JSON line (digest, route, x-request-id) to stderr
 next.config.ts      typed routes, security headers; eslint.config.mjs: Next flat config plus repo rules
 vitest.config.mts   jsdom, Testing Library, 80% coverage floor (route files are covered by e2e)
 ```
@@ -49,6 +56,16 @@ from paise or decimal strings without float arithmetic.
 
 Colours come from the token classes (`bg-bg`, `text-fg`, `border-line`, ...); the eslint config
 rejects hex literals in class strings.
+
+A screen whose backend routes do not exist has no page file: the two catch-all routes match
+the pathname against the registry and render `NotAvailableYet` with the awaited routes, their
+owner and the guide reference (an unknown path is a 404). Legal pages render the drafts in
+`docs/legal` under the draft banner, prerendered from the three listed names. `/admin` lists
+every internal tool from the registry with its status and the services it depends on. There is
+no `loading.tsx` above the catch-alls on purpose: a loading boundary above `notFound()` streams
+the page with status 200, so a later package adds `loading.tsx` beside each page that fetches.
+`CW_WEB_ENV` is read directly by `server/runtime.ts` (unset means local; an unknown value is
+treated as prod) until the validated environment module lands.
 
 ## How to run
 

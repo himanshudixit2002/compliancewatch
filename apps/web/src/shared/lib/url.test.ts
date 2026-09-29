@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pathnameOf, safeNext, withQuery } from "./url.ts";
+import { activeHref, isActivePath, pathnameOf, safeNext, withQuery } from "./url.ts";
 
 describe("safeNext", () => {
   it("accepts relative paths inside the app", () => {
@@ -30,5 +30,27 @@ describe("withQuery and pathnameOf", () => {
     expect(withQuery("/sign-in", {})).toBe("/sign-in");
     expect(pathnameOf("/a/b?x=1#y")).toBe("/a/b");
     expect(pathnameOf("/a/b")).toBe("/a/b");
+  });
+});
+
+describe("isActivePath", () => {
+  it("marks a link active on its path and below, and section homes only on their own path", () => {
+    expect(isActivePath("/settings/team", "/settings/team")).toBe(true);
+    expect(isActivePath("/settings/team", "/settings/team/invite")).toBe(true);
+    expect(isActivePath("/settings/team", "/settings/teams")).toBe(false);
+    expect(isActivePath("/", "/")).toBe(true);
+    expect(isActivePath("/", "/sitemap")).toBe(false);
+    expect(isActivePath("/admin", "/admin/review")).toBe(false);
+    expect(isActivePath("/b", "/b/1", [])).toBe(true);
+  });
+});
+
+describe("activeHref", () => {
+  it("picks the deepest active link so only one carries aria-current", () => {
+    const hrefs = ["/admin", "/admin/review", "/admin/review/stats", "/admin/sources"];
+    expect(activeHref(hrefs, "/admin/review/stats")).toBe("/admin/review/stats");
+    expect(activeHref(hrefs, "/admin/review/t1")).toBe("/admin/review");
+    expect(activeHref(hrefs, "/admin")).toBe("/admin");
+    expect(activeHref(hrefs, "/settings")).toBeNull();
   });
 });

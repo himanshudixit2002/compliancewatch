@@ -1,5 +1,6 @@
 import type { FlagName } from "./flags.ts";
 import type { Role, TenantKind } from "./roles.ts";
+import { isActivePath } from "../lib/url.ts";
 import { SCREENS, hrefFor, isVisibleTo, routeParams, screenById } from "./screens.ts";
 import type { Screen, ScreenId } from "./screens.ts";
 
@@ -81,8 +82,17 @@ function toLink(screen: Screen, ctx: NavContext): NavLink {
 
 /** A link is active on its own path and on paths below it, except the home links. */
 export function isActive(href: string, currentPath: string): boolean {
-  if (href === "/" || href === "/admin") return currentPath === href;
-  return currentPath === href || currentPath.startsWith(`${href}/`);
+  return isActivePath(href, currentPath);
+}
+
+/** The screens every visitor can open from the header: the home page and the sitemap. */
+const PUBLIC_NAV_IDS: readonly ScreenId[] = ["system.home", "system.sitemap"];
+
+/** The header links for a visitor without a session (and above the tenant groups with one). */
+export function publicNav(currentPath?: string): NavLink[] {
+  const ctx: NavContext = { roles: null };
+  if (currentPath !== undefined) ctx.currentPath = currentPath;
+  return PUBLIC_NAV_IDS.map((id) => toLink(screenById(id), ctx));
 }
 
 function sectionsFor(groups: readonly NavGroupKey[], ctx: NavContext): NavSection[] {
