@@ -1,0 +1,54 @@
+case_id: sh-01-2026-persons
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Which registered persons does the extension of the March 2026 GSTR-3B due date cover?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: text
+    value: sub-section (1) of section 39
+    support:
+      document: n01_2026
+      clause_ref: en.p3
+      quote: required to furnish return under sub-section (1) of section 39
+  - kind: text
+    value: rule 61
+    support:
+      document: n01_2026
+      clause_ref: en.p3
+      quote: clause (i) of sub -rule (1) of rule 61
+  must_not_mention: []
+  citations:
+  - document: n01_2026
+    clause_ref: en.p3
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: find_entity
+      entity_type: form
+      name: GSTR-3B
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+      k: 4
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "It covers the registered persons who are required to furnish the return under sub-section (1) of section 39 read with clause (i) of sub-rule (1) of rule 61 of the Central Goods and Services Tax Rules, 2017."
+    citations:
+    - document: n01_2026
+      clause_ref: en.p3
+      quote: "for the registered persons who are required to furnish return under sub-section (1) of section 39 read with clause (i) of sub -rule (1) of rule 61 of the Central Goods and Services Tax Rules, 2017"
+refusal_reason: null
+notes: "Reached through the form GSTR-3B: the clauses that mention it, newest first."

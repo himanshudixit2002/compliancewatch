@@ -95,6 +95,10 @@ def test_the_schema_argument_sets_the_search_path(base_url: str) -> None:
 
 def test_planted_rows_trip_each_check(engine: Engine, ontology: Ontology) -> None:
     with engine.begin() as connection:
+        # The planted rows are the bad data the checks exist for: rows a manual fix or an old
+        # import wrote past the publish guard. The table's own triggers (the status and content
+        # guard, the insert guard) would refuse them, so they are off while the rows go in.
+        connection.execute(text("ALTER TABLE rule_version DISABLE TRIGGER USER"))
         monthly = version_id(connection, "gstr3b_monthly")
         gstr1 = version_id(connection, "gstr1_monthly")
         connection.execute(
@@ -188,6 +192,7 @@ def test_planted_rows_trip_each_check(engine: Engine, ontology: Ontology) -> Non
     finally:
         with engine.begin() as connection:
             connection.execute(text("UPDATE rule_version SET effective_to = NULL"))
+            connection.execute(text("ALTER TABLE rule_version ENABLE TRIGGER USER"))
             connection.execute(
                 text(
                     "ALTER TABLE rule_version ADD CONSTRAINT ck_rule_version_effective"

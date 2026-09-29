@@ -389,6 +389,7 @@ dependencies = [
     { name = "compliancewatch-obligation" },
     { name = "compliancewatch-pipeline" },
     { name = "compliancewatch-profile" },
+    { name = "compliancewatch-qa" },
     { name = "compliancewatch-rulebook" },
     { name = "domain-kernel" },
     { name = "fastapi" },
@@ -405,6 +406,7 @@ requires-dist = [
     { name = "compliancewatch-obligation", editable = "services/obligation" },
     { name = "compliancewatch-pipeline", editable = "services/pipeline" },
     { name = "compliancewatch-profile", editable = "services/profile" },
+    { name = "compliancewatch-qa", editable = "services/qa" },
     { name = "compliancewatch-rulebook", editable = "services/rulebook" },
     { name = "domain-kernel", editable = "packages/domain-kernel" },
     { name = "fastapi", specifier = ">=0.120" },
@@ -446,7 +448,11 @@ version = "0.1.0"
 source = { editable = "evals/harness" }
 dependencies = [
     { name = "compliancewatch-llm-gateway" },
+    { name = "compliancewatch-obligation" },
     { name = "compliancewatch-pipeline" },
+    { name = "compliancewatch-profile" },
+    { name = "compliancewatch-qa" },
+    { name = "compliancewatch-rulebook" },
     { name = "domain-kernel" },
     { name = "fastapi" },
     { name = "httpx2" },
@@ -458,7 +464,11 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "compliancewatch-llm-gateway", editable = "services/llm-gateway" },
+    { name = "compliancewatch-obligation", editable = "services/obligation" },
     { name = "compliancewatch-pipeline", editable = "services/pipeline" },
+    { name = "compliancewatch-profile", editable = "services/profile" },
+    { name = "compliancewatch-qa", editable = "services/qa" },
+    { name = "compliancewatch-rulebook", editable = "services/rulebook" },
     { name = "domain-kernel", editable = "packages/domain-kernel" },
     { name = "fastapi", specifier = ">=0.120" },
     { name = "httpx2", specifier = ">=2.13" },
@@ -665,7 +675,11 @@ version = "0.1.0"
 source = { editable = "services/qa" }
 dependencies = [
     { name = "alembic" },
+    { name = "domain-kernel" },
     { name = "fastapi" },
+    { name = "httpx2" },
+    { name = "ontology" },
+    { name = "opentelemetry-api" },
     { name = "psycopg", extra = ["binary"] },
     { name = "py-common" },
     { name = "pydantic" },
@@ -677,7 +691,11 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.16" },
+    { name = "domain-kernel", editable = "packages/domain-kernel" },
     { name = "fastapi", specifier = ">=0.120" },
+    { name = "httpx2", specifier = ">=2.13" },
+    { name = "ontology", editable = "packages/ontology" },
+    { name = "opentelemetry-api", specifier = "==1.45.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "py-common", editable = "packages/py-common" },
     { name = "pydantic", specifier = ">=2.11" },
@@ -695,6 +713,7 @@ dependencies = [
     { name = "domain-kernel" },
     { name = "fastapi" },
     { name = "ontology" },
+    { name = "opentelemetry-api" },
     { name = "psycopg", extra = ["binary"] },
     { name = "py-common" },
     { name = "pydantic" },
@@ -710,6 +729,7 @@ requires-dist = [
     { name = "domain-kernel", editable = "packages/domain-kernel" },
     { name = "fastapi", specifier = ">=0.120" },
     { name = "ontology", editable = "packages/ontology" },
+    { name = "opentelemetry-api", specifier = "==1.45.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "py-common", editable = "packages/py-common" },
     { name = "pydantic", specifier = ">=2.11" },

@@ -1,0 +1,55 @@
+case_id: mh-acme-gstr3b-2026-03
+category: multi_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: When was Acme Bengaluru's GSTR-3B for March 2026 due?
+as_of: 2026-04-22
+business: acme_monthly
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: date
+    value: 2026-04-21
+    support:
+      document: n01_2026
+      clause_ref: en.p3
+      quote: till the twenty -first day of April, 2026
+  must_not_mention:
+  - 25 October
+  citations:
+  - document: n01_2026
+    clause_ref: en.p3
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: gstr3b_monthly
+    - id: s2
+      op: evaluate_applicability
+      source: s1
+    - id: s3
+      op: follow
+      source: s1
+      relations:
+      - extends_deadline
+      direction: in
+      depth: 1
+    - id: s4
+      op: answer
+      sources:
+      - s2
+      - s3
+  answer:
+    covered: true
+    answer: "Acme Bengaluru files FORM GSTR-3B every month, and notification No. 01/2026-Central Tax extended the due date for March 2026 till 21 April 2026."
+    citations:
+    - document: n01_2026
+      clause_ref: en.p3
+      quote: "hereby extends the due date for furnishing the return in FORM GSTR-3B for the month of March, 2026 till the twenty -first day of April, 2026"
+refusal_reason: null
+notes: "Business, then the monthly rule it applies to, then the extension of that rule for the period 2026-03."

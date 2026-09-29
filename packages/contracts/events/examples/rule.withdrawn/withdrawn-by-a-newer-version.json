@@ -1,0 +1,15 @@
+{
+  "event_id": "6a7b8c9d-0e1f-4a2b-9c3d-4e5f6a7b8c9d",
+  "topic": "rule.withdrawn",
+  "schema_version": "1.0.0",
+  "occurred_at": "2026-11-01T00:30:12+05:30",
+  "tenant_id": null,
+  "correlation_id": "7b8c9d0e-1f2a-4b3c-8d4e-5f6a7b8c9d0e",
+  "causation_id": "8c9d0e1f-2a3b-4c4d-9e5f-6a7b8c9d0e1f",
+  "payload": {
+    "rule_id": "9d0e1f2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a",
+    "rule_version_id": "0e1f2a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b",
+    "withdrawn_by_rule_version_id": "1f2a3b4c-5d6e-4f7a-8b8c-9d0e1f2a3b4c",
+    "effective_from": "2026-11-01"
+  }
+}

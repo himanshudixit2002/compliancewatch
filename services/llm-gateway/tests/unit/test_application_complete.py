@@ -17,6 +17,7 @@ from domain_kernel.events import DomainEvent
 from domain_kernel.ids import CorrelationId, TenantId
 from domain_kernel.llm import CompletionRequest, CompletionResponse
 from llm_gateway.application.complete import Complete, CompletionOutcome
+from llm_gateway.application.metering import BudgetGuard
 from llm_gateway.domain.breaker import BreakerState, CircuitBreaker
 from llm_gateway.domain.budgets import BudgetLimits, BudgetScope, month_bounds
 from llm_gateway.domain.config import GatewayConfig
@@ -206,6 +207,7 @@ class Harness:
             registry=self.registry,
             providers=self.providers,
             breaker=self.breaker,
+            budgets=BudgetGuard(ledger=self.ledger, publisher=self.publisher, config=self.config),
             cache=self.cache,
             ledger=self.ledger,
             tracer=self.tracer,
@@ -412,7 +414,7 @@ def test_regulatory_call_ignores_the_tenant_budget_but_not_the_feature_budget() 
 def test_alarm_fires_once_per_scope_and_month(caplog: Any) -> None:
     harness = Harness(budgets=BudgetLimits(Decimal("0.0120"), Decimal("20000"), Decimal("0.8")))
     tenant = TenantId.new()
-    with caplog.at_level(logging.WARNING, logger="llm_gateway.application.complete"):
+    with caplog.at_level(logging.WARNING, logger="llm_gateway.application.metering"):
         harness.run(smoke(tenant_id=tenant))
         assert not [e for e in harness.publisher.events if isinstance(e, BudgetAlarmed)]
         harness.run(smoke(tenant_id=tenant))

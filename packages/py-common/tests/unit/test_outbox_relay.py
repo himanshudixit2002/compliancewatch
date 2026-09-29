@@ -5,12 +5,23 @@ from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
 import pytest
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader, NumberDataPoint
 
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import TenantId
 from py_common.events import decode, to_message
-from py_common.outbox.relay import OutboxRelay, RelayConfig, RelayStats, backoff_seconds
+from py_common.outbox import relay as relay_module
+from py_common.outbox.relay import (
+    PENDING_GAUGE,
+    OutboxRelay,
+    RelayConfig,
+    RelayStats,
+    backoff_seconds,
+)
 from py_common.outbox.testing import FakeProducer, MemoryOutboxStore
+from py_common.settings import Settings
+from py_common.telemetry import Telemetry
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -200,6 +211,7 @@ def test_backoff_doubles_and_caps() -> None:
         {"poll_interval_seconds": 0},
         {"base_backoff_seconds": 0},
         {"base_backoff_seconds": 10, "max_backoff_seconds": 5},
+        {"pending_interval_seconds": 0},
     ],
 )
 def test_config_rejects_nonsense(kwargs: dict[str, float]) -> None:
@@ -209,3 +221,105 @@ def test_config_rejects_nonsense(kwargs: dict[str, float]) -> None:
 
 def test_stats_add() -> None:
     assert RelayStats(1, 1) + RelayStats(2, 0, 1, 1) == RelayStats(3, 1, 1, 1)
+
+
+def pending_points(reader: InMemoryMetricReader) -> dict[str, float]:
+    """The pending gauge's current value per ``db_schema``."""
+    data = reader.get_metrics_data()
+    found: dict[str, float] = {}
+    if data is None:
+        return found
+    for resource in data.resource_metrics:
+        for scope in resource.scope_metrics:
+            for metric in scope.metrics:
+                if metric.name != PENDING_GAUGE:
+                    continue
+                for point in metric.data.data_points:
+                    assert isinstance(point, NumberDataPoint)
+                    assert point.attributes is not None
+                    found[str(point.attributes["db_schema"])] = point.value
+    return found
+
+
+def metered_relay(
+    store: MemoryOutboxStore, clock: Clock, **config: object
+) -> tuple[OutboxRelay, InMemoryMetricReader]:
+    reader = InMemoryMetricReader()
+    relay = OutboxRelay(
+        store=store,
+        producer=FakeProducer(),
+        config=RelayConfig(**config),  # type: ignore[arg-type]
+        clock=clock,
+        db_schema="rulebook",
+        meter=MeterProvider(metric_readers=[reader]).get_meter("test"),
+    )
+    return relay, reader
+
+
+async def test_pending_counts_rows_still_to_publish() -> None:
+    store, producer, clock = MemoryOutboxStore(), FakeProducer(), Clock()
+    seed(store, 3)
+    seed(store, 1, at=T0 + timedelta(minutes=5))
+    producer.fail_times["obligation.created"] = 1
+    assert await store.pending() == 4
+    assert await make_relay(store, producer, clock).run_once() == RelayStats(
+        claimed=3, published=2, retried=1
+    )
+    assert await store.pending() == 2, "a row backing off and one not yet due still count"
+
+
+async def test_report_pending_sets_the_gauge_for_the_schema() -> None:
+    store, clock = MemoryOutboxStore(), Clock()
+    seed(store, 3)
+    relay, reader = metered_relay(store, clock)
+    assert await relay.report_pending() == 3
+    assert pending_points(reader) == {"rulebook": 3}
+
+
+async def test_run_forever_reports_pending_at_start_and_every_interval() -> None:
+    store, clock = MemoryOutboxStore(), Clock()
+    seed(store, 2)
+    relay, reader = metered_relay(
+        store, clock, poll_interval_seconds=0.01, pending_interval_seconds=15
+    )
+    stop = asyncio.Event()
+    seen: list[dict[str, float]] = []
+
+    async def drive() -> None:
+        await asyncio.sleep(0.05)
+        seen.append(pending_points(reader))
+        clock.advance(15)
+        await asyncio.sleep(0.05)
+        stop.set()
+
+    total, _ = await asyncio.gather(relay.run_forever(stop), drive())
+    assert total == RelayStats(claimed=2, published=2)
+    assert seen == [{"rulebook": 2}], "reported before the first pass, not again until due"
+    assert pending_points(reader) == {"rulebook": 0}
+
+
+def test_main_installs_telemetry_as_the_outbox_relay(monkeypatch: pytest.MonkeyPatch) -> None:
+    installed: list[str] = []
+    shut_down: list[bool] = []
+
+    class Recorded(Telemetry):
+        def shutdown(self) -> None:
+            shut_down.append(True)
+
+    def configure(*, service_name: str, version: str, settings: Settings) -> Telemetry:
+        installed.append(service_name)
+        return Recorded(enabled=False, service_name=service_name, endpoint=None)
+
+    outcomes = iter([True, False])
+
+    async def run(settings: Settings, **_: object) -> bool:
+        return next(outcomes)
+
+    monkeypatch.setattr(relay_module, "configure_logging", lambda **_: None)
+    monkeypatch.setattr(relay_module, "configure_telemetry", configure)
+    monkeypatch.setattr(relay_module, "run", run)
+    relay_module.main()
+    with pytest.raises(SystemExit):
+        relay_module.main()
+    assert installed == ["outbox-relay", "outbox-relay"]
+    assert shut_down == [True, True]

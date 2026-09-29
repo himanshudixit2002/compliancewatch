@@ -71,6 +71,7 @@ def test_a_served_call_logs_one_info_line_with_the_ledger_fields() -> None:
     [line] = logs
     assert line["event"] == "llm.call.completed"
     assert line["log_level"] == "info"
+    assert line["kind"] == "completion"
     assert line["feature"] == "extraction"
     assert line["prompt"] == "extraction.rule_candidate@0"
     assert (line["model_requested"], line["model_served"], line["provider"]) == (

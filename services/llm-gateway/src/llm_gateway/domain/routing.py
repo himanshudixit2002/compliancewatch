@@ -4,6 +4,7 @@ Model ids are ``creator/model`` as the Vercel AI Gateway lists them; ``fake/...`
 deterministic fake provider. The defaults prefer cheap models and exclude the hosts whose
 DeepSeek prices double during Indian business hours. Overrides come from settings; the routes
 are judgement, not documentation, and a bake-off on gold documents should confirm them.
+An embedding route has no fallback: vectors from two models do not compare.
 """
 
 import re
@@ -14,7 +15,7 @@ from typing import Literal, Self
 
 from domain_kernel._validation import require_finite, require_instance, require_text
 from domain_kernel.errors import InvariantViolationError
-from llm_gateway.domain.features import Feature, parse_feature
+from llm_gateway.domain.features import EMBEDDING_FEATURES, Feature, parse_feature
 from llm_gateway.domain.ledger import MAX_MODEL_ID, require_bounded
 
 MODEL_ID = re.compile(r"[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*")
@@ -65,6 +66,11 @@ class Route:
             require_model_id(self.fallback, "fallback")
             if self.fallback == self.primary:
                 raise InvariantViolationError("fallback must differ from primary")
+            if self.feature in EMBEDDING_FEATURES:
+                raise InvariantViolationError(
+                    f"the {self.feature.value} route takes no fallback: "
+                    "vectors from two models do not compare"
+                )
         object.__setattr__(self, "only", _names(self.only, "only"))
         object.__setattr__(self, "has", _names(self.has, "has"))
         if self.sort not in _SORTS:
@@ -138,6 +144,7 @@ DEFAULT_ROUTES: Mapping[Feature, Route] = MappingProxyType(
             timeout_seconds=15.0,
         ),
         Feature.SMOKE: Route(Feature.SMOKE, "fake/echo", timeout_seconds=5.0),
+        Feature.RETRIEVAL: Route(Feature.RETRIEVAL, "voyage/voyage-3.5-lite", timeout_seconds=15.0),
     }
 )
 

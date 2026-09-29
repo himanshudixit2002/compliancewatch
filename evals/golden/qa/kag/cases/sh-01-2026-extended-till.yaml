@@ -1,0 +1,47 @@
+case_id: sh-01-2026-extended-till
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Till what date did notification 01/2026-Central Tax extend the due date for furnishing FORM GSTR-3B for March 2026?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: date
+    value: 2026-04-21
+    support:
+      document: n01_2026
+      clause_ref: en.p3
+      quote: till the twenty -first day of April, 2026
+  must_not_mention:
+  - 20 April 2026
+  citations:
+  - document: n01_2026
+    clause_ref: en.p3
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: gstr3b_extension_2026_03
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "Notification No. 01/2026-Central Tax extended the due date for furnishing FORM GSTR-3B for March 2026 till 21 April 2026."
+    citations:
+    - document: n01_2026
+      clause_ref: en.p3
+      quote: "hereby extends the due date for furnishing the return in FORM GSTR-3B for the month of March, 2026 till the twenty -first day of April, 2026"
+refusal_reason: null
+notes: The rule version of 01/2026 cites en.p3, which states the new date in words.

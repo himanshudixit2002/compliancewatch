@@ -1,0 +1,51 @@
+case_id: sh-17-2025-september
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Till when was the time limit for furnishing FORM GSTR-3B for September 2025 extended for monthly filers?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: date
+    value: 2025-10-25
+    support:
+      document: n17_2025
+      clause_ref: en.p5
+      quote: till twenty-fifth day of October, 2025
+  must_not_mention: []
+  citations:
+  - document: n17_2025
+    clause_ref: en.p4
+  - document: n17_2025
+    clause_ref: en.p5
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: gstr3b_extension_2025_09
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "Notification No. 17/2025-Central Tax extended the time limit for furnishing FORM GSTR-3B under sub-section (1) of section 39 for the month of September 2025 till 25 October 2025."
+    citations:
+    - document: n17_2025
+      clause_ref: en.p4
+      quote: "hereby extends the time limit for furnishing the return in FORM GSTR-3B electronically, through the common portal"
+    - document: n17_2025
+      clause_ref: en.p5
+      quote: "(i) sub-section (1) of section 39, for the month of September,2025, till twenty-fifth day of October, 2025"
+refusal_reason: null
+notes: en.p4 names the form and en.p5 the month and the date; they are read together.

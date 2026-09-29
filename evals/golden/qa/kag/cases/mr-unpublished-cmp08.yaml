@@ -1,0 +1,27 @@
+case_id: mr-unpublished-cmp08
+category: must_refuse
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: none
+question: "By when must a composition taxpayer pay tax through FORM GST CMP-08 for a quarter?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: not_covered
+  facts: []
+  must_not_mention: []
+  citations: []
+scripted:
+  plan:
+    as_of: null
+    steps: []
+  answer:
+    covered: true
+    answer: The tax is paid through FORM GST CMP-08 every quarter.
+    citations:
+    - clause: C13
+      quote: paid through FORM GST CMP-08 every quarter
+refusal_reason: unpublished_seed_rule
+notes: "cmp08_quarterly is a seed rule that stays unpublished: no recorded clause supports it."

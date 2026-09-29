@@ -7,17 +7,26 @@
 > (fixed ids derived from the digest, append-only, a write API the pipeline calls behind a flag,
 > the fourth committed OpenAPI spec) and knowledge schema (canonical entities, clause mentions,
 > rule relations, citations, rules and versions with the seed calendar of thirteen standing GST
-> obligations pending analyst review), KAG-style knowledge extraction behind a flag (a mention
+> obligations pending analyst review), the rulebook's read API over rule versions, entities,
+> relations and clauses, its hybrid clause search index (English full text and pgvector
+> embeddings fused by reciprocal rank) and its citation, review and publish flow (analyst
+> actions behind their own review token, edits only while a version is a draft, publishing behind
+> a flag, rule events through the outbox, a daily transition sweep, an alert on the entity review
+> queue), KAG-style knowledge extraction behind a flag (a mention
 > grammar for notifications, sections, rules, forms, codes, rates, amounts and states; alignment
 > to canonical entities with an analyst review queue; relation proposals through a registered
 > prompt, validated against the clause text and approved into rule relations by an analyst), the obligation service's domain and use cases
 > (obligations per period, deadline changes, withdrawals, row-level security by tenant, events
-> through the outbox, an append-only change log of every obligation), the profile service's business hierarchy (entity, registration, location;
+> through the outbox, an append-only change log of every obligation) with a read route by business and due window, the qa service (answers in
+> three layers: structured answers from obligations, a KAG plan and solve over the rulebook
+> behind a per-tenant flag, hybrid clause search that drops clauses whose rule is out of force;
+> every quote checked against its clause or the answer is "not covered"), the profile service's
+> business hierarchy (entity, registration, location;
 > attribute values per node and financial year; snapshots for the engine; one-question onboarding;
 > review tasks) behind the second committed OpenAPI spec,
 > the LLM gateway skeleton (routing, prompt registry, cost ledger,
-> budgets, PII masking, Langfuse tracing, fake provider container) with the first committed OpenAPI
-> spec, problem-details errors in py-common, the event contracts (fourteen topics and the envelope as
+> budgets, PII masking, Langfuse tracing, fake provider container, embeddings for retrieval) with the first committed OpenAPI
+> spec, problem-details errors in py-common, the event contracts (sixteen topics and the envelope as
 > JSON Schema with generated pydantic and TypeScript types and compatibility checks in CI), the
 > transactional outbox in py-common (writer, Kafka relay with dead letters, idempotent consumer),
 > the Temporal worker scaffold with the pipeline's sample ingest workflow, the first source
@@ -25,7 +34,9 @@
 > Maharashtra GST notifications) with PDF and HTML parsers, a change detector, a backfill command
 > and recorded fixtures, the rule extractor with deterministic validators behind the gateway, the
 > labelling tool and the first extraction golden set (50 CBIC notifications listed, one draft
-> label), the eval harness with `make eval`, a CI gate and a nightly run, the WhatsApp bot with
+> label), the eval harness with `make eval`, a CI gate and a nightly run, and its KAG
+> question-answering suite (56 draft cases asked with the KAG layer on and against the hybrid
+> baseline), the WhatsApp bot with
 > signature checks, keyword opt-in and opt-out and Hindi replies, the notification service's
 > preferences, quiet hours, template drafts and Cloud API channel behind a flag, consent records
 > and WhatsApp keyword consents in the identity service with the legal drafts in `docs/legal`, the GSTIN lookup protocol with
@@ -60,7 +71,8 @@ flowchart LR
   end
   GW[llm-gateway: prompt registry, budgets, fake provider]
   EVALS[evals: golden sets and harness]
-  RULEBOOK[rulebook: versioned rules, seed calendar, knowledge tables]
+  RULEBOOK[rulebook: versioned rules, knowledge tables, clause search, publish flow]
+  QA[qa: structured, KAG, hybrid answers]
   PROFILE[profile: hierarchy, attributes, GSTIN lookup]
   ENGINE[applicability-engine]
   OBLIG[obligation: calendar, reschedules]
@@ -81,6 +93,10 @@ flowchart LR
   WEB --> PROFILE
   WEB --> IDENT
   WEB --> OBLIG
+  RULEBOOK --> QA
+  PROFILE --> QA
+  OBLIG --> QA
+  QA --> GW
 ```
 
 Events between services travel through the transactional outbox and Redpanda (topics in
@@ -121,7 +137,8 @@ compliancewatch/
     applicability-engine/
     obligation/
     notification/
-    qa/
+    qa/                      # questions in layers: structured, KAG plan and solve, hybrid search (ADR-012, ADR-017)
+      prompts/               # qa.plan.v1.md and qa.answer.v1.md; digests recorded in the gateway registry
     llm-gateway/             # routing, prompt registry, cost ledger, budgets, PII masking, tracing (ADR-008)
       prompts/               # registry.toml: every prompt with a version, an owner and an eval case
     eval/
@@ -138,8 +155,9 @@ compliancewatch/
       workflows/             # pointer to src/pipeline/workflows
   packages/
     contracts/               # OpenAPI specs, event schemas (JSON Schema), generated clients (py + ts)
-      openapi/               # <service>.v1.json for identity, profile, rulebook, notification and llm-gateway; BREAKING.md
-      events/                # schemas/<topic>.v1.json, examples/, CHANGELOG.md (fourteen topics + envelope)
+      openapi/               # <service>.v1.json for identity, profile, rulebook, notification, llm-gateway,
+                             # obligation and qa; BREAKING.md
+      events/                # schemas/<topic>.v1.json, examples/, CHANGELOG.md (sixteen topics + envelope)
       clients/python/        # cw_contracts: generated pydantic models (make contracts)
       clients/typescript/    # generated .d.ts per topic and index.ts
     domain-kernel/           # Shared value objects, protocols, ontology model, error types
@@ -155,12 +173,12 @@ compliancewatch/
     scripts/                 # repository checks: alert runbooks, migration lint (migration_lint.toml), the CI gate's needs
   docs/legal/                # Draft privacy notice, terms, WhatsApp consent, data map, consent record (to be reviewed by a lawyer)
   tools/
-    demo/                    # Workspace package cw_demo: the demo tenant end to end (make demo)
+    demo/                    # Workspace package cw_demo: the demo tenant end to end (make demo); in-process flow tests across services
   evals/
-    golden/                  # Golden sets: extraction/cbic_notifications (index + cases), qa/, applicability/
+    golden/                  # Golden sets: extraction/cbic_notifications (index + cases), relations/, qa/kag (world + 56 draft cases), applicability/
     harness/                 # Workspace package cw_evals: runner, metrics, thresholds (make eval)
   docs/
-    adr/                     # Architecture decision records (001 to 008 and 012 to 017 written; 009 to 011 stubs)
+    adr/                     # Architecture decision records (001 to 008 and 012 to 018 written; 009 to 011 stubs)
     runbooks/
     onboarding/              # local-dev.md
   .github/workflows/         # ci.yml (every gate, behind the required "CI gate" job), nightly.yml, pr-checks.yml; dependabot.yml
@@ -232,6 +250,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | `make check` | lint, typecheck, test, import-linter, uv lock check, contracts check, runbook links, migration files, OpenAPI coverage, the CI gate's needs (every CI gate that needs no Docker) |
 | `make migrations-catalog` / `openapi-compat` / `alerts-check` / `sast` / `deps-scan` | Tenant tables under forced row-level security after `make migrate`; OpenAPI compatibility with `BASE=origin/main`; promtool rule tests; Semgrep; Trivy (Docker for the last three) |
 | `make eval` | Eval harness against `evals/golden`: `EVAL_PROFILE=ci` (default, no tokens) or `nightly` (a real model behind the gateway) |
+| `make eval-check` | The KAG question-answering golden set and its world are well formed: verbatim quotes, seed supports, scripted plans and answers against qa's schemas |
 | `make label` | Labelling tool for the extraction golden set: `ARGS="check"`, `"index ..."`, `"prepare ..."` |
 | `make demo` | The demo tenant end to end in one process: consent, profile, rules, obligations, a reminder ([docs/onboarding/demo.md](docs/onboarding/demo.md)) |
 | `make runbooks-check` | Every Prometheus alert links an existing runbook (part of `make check`) |
@@ -247,7 +266,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | Domain layer imports nothing from infrastructure or third-party I/O | import-linter | wired |
 | Every public endpoint has an OpenAPI schema and a contract test | CI job fails on undocumented routes | wired: `make openapi-check` fails when a service serves routes without a committed spec and contract test, the contracts job fails on a breaking change against the base branch (deliberate ones in `BREAKING.md`), and schemathesis tests each opted-in operation against its spec |
 | Every event has a JSON Schema in packages/contracts and a changelog entry | Schema registry compatibility check in CI | wired: metaschema, a schema for every event class in code (`check_topics.py`), golden examples, generated clients in sync, base-branch examples replayed against the new schemas, and `rpk registry schema check-compatibility` in the dev-stack job (the gateway's two log-only events get schemas with their first consumer) |
-| Every prompt file has a version, an owner and at least one eval case | Eval harness refuses to run an unregistered prompt | partly: the gateway refuses a prompt that is not in `services/llm-gateway/prompts/registry.toml`; the eval harness is not built |
+| Every prompt file has a version, an owner and at least one eval case | Eval harness refuses to run an unregistered prompt | wired: the gateway refuses a prompt that is not in `services/llm-gateway/prompts/registry.toml`, and the harness's registry test fails when a registered prompt's file no longer matches its sha256 or has fewer labelled golden cases than its `eval_cases` |
 | Every table with tenant data has tenant_id and an RLS policy | Migration lint script | wired: `make migrations-catalog` in the dev-stack job fails when a tenant table lacks tenant_id or forced row-level security with the tenant policy; exemptions carry a reason in `infra/scripts/migration_lint.toml` (`llm_gateway.cost_ledger` is cross-tenant metering and has no RLS on purpose) |
 | Conventional commits; squash merge; PR template with risk and rollback sections | pre-commit commit-msg hook, PR title check, PR template | wired; branch protection and title-only squash merges are repository settings ([docs/onboarding/repository-settings.md](docs/onboarding/repository-settings.md)) |
 | Type checking is strict on both sides | mypy --strict, tsc --strict | wired |
@@ -280,12 +299,15 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - Terraform staging cluster and Keycloak (the gateway trusts an `x-tenant-id` header until then)
 - Accounts the maintainer opens: the Meta WhatsApp business account (bot and channel stay in logging mode), Razorpay (billing answers 503), a GSTIN lookup provider (every registration gets a verify task), Supabase Auth; the legal drafts need a lawyer before onboarding shows them
 - Postgres tables for notification preferences and the sent log (in memory now); the email channel (SES)
-- A service that writes to the outbox (the writer, relay and consumer exist in py-common; the first producer adds the `outbox_event` migration)
-- Alert rules for source freshness, decision-flip rate, notification failures and LLM budget (their metrics do not exist yet; the API SLO, outbox and worker alerts do, with runbooks)
+- Alert rules for source freshness, decision-flip rate, notification failures and LLM budget (their metrics do not exist yet; the API SLO, outbox, worker and entity review queue alerts do, with runbooks)
 - The EKS path of the guide (Terraform, Helm, Argo CD canaries); the MVP profile in `infra/deploy` targets Fly.io and Vercel and has not been applied
 - The ingest workflow wired to the real adapters and the outbox (the adapters, parsers and detector exist and run from `make backfill`; the workflow still runs on the in-memory fakes); OCR for scanned PDFs
 - The 50-document sample rulebook (the seed calendar of standing obligations exists, pending analyst review)
-- Prompt texts for judgement, question answering and classification (extraction exists); the qa and applicability golden sets and their harness suites
-- Analyst labels: 45 of the 50 listed CBIC notifications have no case yet, and the five case files (01/2026 with a draft label; 17/2025, 15/2025, 10/2025 and 13/2024 with clauses and detector output only) are unreviewed; the nightly eval needs the `CW_AI_GATEWAY_API_KEY` repository secret
-- Full text for ADR-009 to ADR-011; the identity service itself (ADR-014 decides Supabase Auth for the MVP; nothing is created until the maintainer opens the project)
-- KAG-style reasoning beyond extraction: the logical-form planner and solver in qa and its eval gate (ADR-017); a publish flow that turns approved candidates into published versions and events; an alert on the entity review queue
+- Prompt texts for judgement and classification (extraction, relations and question answering exist); the applicability golden set and its harness suite
+- Analyst labels: 45 of the 50 listed CBIC notifications have no case yet, and the five case files (01/2026 with a draft label; 17/2025, 15/2025, 10/2025 and 13/2024 with clauses and detector output only) are unreviewed; so are the 56 draft question-answering cases, their world and the relation drafts they rely on
+- Four more multi-hop question-answering cases, which need more recorded notifications (56 of the 60 planned exist)
+- Real-model nightly numbers: the nightly eval needs the `CW_AI_GATEWAY_API_KEY` repository secret, and its first run is also the proof that the gateway's `dimensions=512` reaches the Voyage embedding model; ADR-012 and ADR-017 stay Proposed until reviewed cases meet their gates with a real model
+- The obligation service's consumer of the rule events (`rule.deadline_changed`, `rule.withdrawn`, `rule.superseded`): published changes reach the outbox but do not yet move or close any obligation
+- In qa: the fourth, agentic layer of ADR-012 and a reranker; a router so single-hop questions skip the planner (with the KAG flag on, every question past the structured layer costs a planner call)
+- The applicability engine's API (qa's solver evaluates rule predicates with the kernel until it exists)
+- Full text for ADR-009 to ADR-011; the identity service itself (ADR-014 decides Supabase Auth for the MVP; nothing is created until the maintainer opens the project). Until it exists the rulebook's review token is a shared secret and the approver ids in review and publish requests are asserted by the caller (ADR-018)

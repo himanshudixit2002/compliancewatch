@@ -7,8 +7,8 @@
 ## Context
 
 The rulebook owns regulator documents, their clauses and the knowledge tables (Architecture
-Reference, sections 4.1 and 6.2; ADR-017). The pipeline fetches and parses the documents, and in
-phase 2 of ADR-017 it also finds the entities each clause mentions and proposes relations between
+Reference, sections 4.1 and 6.2; ADR-017). The pipeline fetches and parses the documents, and
+under ADR-017 it also finds the entities each clause mentions and proposes relations between
 rules. Services never import each other and never share tables, so the parsed records have to
 cross a service boundary.
 
@@ -31,9 +31,18 @@ activities:
   and each clause's id is derived from the document id and its ref (`clause_id_for`). The call is
   idempotent: the same parse again returns what is stored. A different parse of stored bytes is a
   409 and is never applied, because documents and clauses are append-only.
-- Phase 2b adds the same kind of calls for entity mentions and relation candidates.
-- Writes need the shared secret `CW_RULEBOOK_WRITE_TOKEN` in the `x-cw-write-token` header, and
-  a rulebook without a token refuses every write (fail closed). Reads need no token.
+- Calls of the same kind store entity mentions, relation candidates and clause embeddings.
+- The pipeline's writes need the shared secret `CW_RULEBOOK_WRITE_TOKEN` in the
+  `x-cw-write-token` header, and a rulebook without that token refuses them (fail closed). Reads
+  need no token.
+- The analyst's actions on the same API (entity review decisions, relation approvals and
+  rejections, citations, the rule version lifecycle and the transition sweep) need a second
+  shared secret, `CW_RULEBOOK_REVIEW_TOKEN` in `x-cw-review-token`, and fail closed the same
+  way. The pipeline keeps the write token and never gets the review token, and the write token
+  does not open the analyst's routes, so a leaked pipeline secret cannot approve or publish a
+  rule. The review token is a secret, not an identity: the `actor_id` and `decided_by` in those
+  requests are still asserted by the caller until the identity service exists and issues them
+  (ADR-014).
 - The pipeline side sits behind `CW_PIPELINE_KNOWLEDGE_ENABLED`, default off, and behind
   `workflow.patched` in the ingest workflow, so recorded workflow histories replay unchanged. A
   failed registration is reported in the ingest result (`registered=False`,
@@ -64,9 +73,10 @@ own one schema's invariants.
   Whether stored documents are then kept as parsed, or get a second clause set under the new
   parser version (which would put the parser version into the clause id), is still to be
   decided, before the first parser change that alters clause text.
-- The rulebook's write routes are reachable on its public Fly app, protected only by the shared
-  token until identity issues service tokens (ADR-014). The token must be long and rotated with
-  the other secrets.
+- The rulebook's write and analyst routes are reachable on its public Fly app, protected only by
+  the two shared tokens until identity issues service tokens and user identities (ADR-014). Both
+  must be long, different from each other and rotated with the other secrets; until then an
+  approval records whichever approver id the caller sends.
 - No `document.parsed` event is emitted yet; nothing consumes it today.
 - Revisit when the pipeline gets its own tables, or when the write volume makes a synchronous
   call the bottleneck.

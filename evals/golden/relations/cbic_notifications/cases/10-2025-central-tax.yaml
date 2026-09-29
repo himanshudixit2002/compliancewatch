@@ -1,0 +1,19 @@
+case_id: 10-2025-central-tax
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ""
+own_ref: 10/2025-Central Tax
+extraction_case: extraction/cbic_notifications/cases/10-2025-central-tax.yaml
+expected:
+  relations:
+    - relation: amends
+      target:
+        type: notification
+        name: 02/2017-central tax
+      evidence_clause_ref: en.p1
+      evidence_quote: "hereby makes the following further amendments in the notification of the Government of India, in the Ministry of Finance (Department of Revenue), No. 02/2017-Central Tax"
+notes: >-
+  Only what clause en.p1 states in so many words: the Central Government amends notification
+  02/2017-Central Tax (its Table, entries 7, 23, 49, 53, 63, 100 and 102 in en.p2 to en.p12).
+  The note in en.p13 names 27/2024-Central Tax as the last amendment before this one; an analyst
+  decides whether that belongs in the label as refers_to.

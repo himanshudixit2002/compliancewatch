@@ -1,0 +1,65 @@
+case_id: dt-acme-april-2026-and-march
+category: date_threshold
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: mixed
+question: "When is Acme Bengaluru's GSTR-3B for April 2026 due, and till when was the one for March 2026 extended?"
+as_of: 2026-04-22
+business: acme_monthly
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: date
+    value: 2026-05-20
+    support:
+      seed_rule: gstr3b_monthly
+      field: recurrence
+      value:
+        frequency: monthly
+        due_day: 20
+        due_month_offset: 0
+  - kind: date
+    value: 2026-04-21
+    support:
+      document: n01_2026
+      clause_ref: en.p3
+      quote: till the twenty -first day of April, 2026
+  must_not_mention: []
+  citations:
+  - document: n01_2026
+    clause_ref: en.p3
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: gstr3b_monthly
+    - id: s2
+      op: get_obligations
+      source: s1
+      due_from: '2026-05-01'
+      due_to: '2026-05-31'
+    - id: s3
+      op: follow
+      source: s1
+      relations:
+      - extends_deadline
+      direction: in
+      depth: 1
+    - id: s4
+      op: answer
+      sources:
+      - s2
+      - s3
+  answer:
+    covered: true
+    answer: "Acme Bengaluru's GSTR-3B for April 2026 is due on 20 May 2026, and the one for March 2026 was extended till 21 April 2026 by notification No. 01/2026-Central Tax."
+    citations:
+    - document: n01_2026
+      clause_ref: en.p3
+      quote: "hereby extends the due date for furnishing the return in FORM GSTR-3B for the month of March, 2026 till the twenty -first day of April, 2026"
+refusal_reason: null
+notes: "The April date is the seed's due day 20, read from the business's obligation; the March date is en.p3's."

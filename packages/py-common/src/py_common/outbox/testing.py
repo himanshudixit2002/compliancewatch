@@ -81,6 +81,9 @@ class MemoryOutboxStore:
     def batch(self) -> AbstractAsyncContextManager[OutboxBatch]:
         return self._batch()
 
+    async def pending(self) -> int:
+        return sum(1 for row in self.rows.values() if row.status == "pending")
+
     def statuses(self) -> dict[str, int]:
         counts: dict[str, int] = defaultdict(int)
         for row in self.rows.values():

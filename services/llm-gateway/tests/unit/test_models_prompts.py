@@ -48,7 +48,7 @@ def test_extraction_route_carries_the_gateway_filters(client: TestClient) -> Non
 
 
 def test_smoke_route_is_the_fake_without_a_fallback(client: TestClient) -> None:
-    smoke = client.get(MODELS).json()[-1]
+    [smoke] = [route for route in client.get(MODELS).json() if route["feature"] == "smoke"]
     assert smoke == {
         "feature": "smoke",
         "primary": "fake/echo",
@@ -129,6 +129,28 @@ def test_prompts_lists_the_registry_in_file_order(client: TestClient) -> None:
                 "Typed relations from one parsed document to the targets its mention grammar "
                 "found; text in services/pipeline/prompts/extraction.rule_relations.v1.md, "
                 "cases in evals/golden/relations."
+            ),
+        },
+        {
+            "name": "qa.plan",
+            "version": "1",
+            "owner": "ai-platform",
+            "eval_cases": 53,
+            "sha256": "cede3e9618ba5e2b379bd8cc8753ee9ffc969634cf7ec7fff85b71aa171897bd",
+            "description": (
+                "Plan of typed steps for one question, never an answer; text in "
+                "services/qa/prompts/qa.plan.v1.md, cases in evals/golden/qa/kag."
+            ),
+        },
+        {
+            "name": "qa.answer",
+            "version": "1",
+            "owner": "ai-platform",
+            "eval_cases": 53,
+            "sha256": "f95588192eae2ef696919742bbbb5fd01524c51a2fed90ec2b2d86a1e1c82a68",
+            "description": (
+                "Answer from a labelled evidence bundle with verbatim quotes, or not covered; "
+                "text in services/qa/prompts/qa.answer.v1.md, cases in evals/golden/qa/kag."
             ),
         },
     ]

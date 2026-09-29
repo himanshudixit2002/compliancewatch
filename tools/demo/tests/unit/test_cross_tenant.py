@@ -5,7 +5,8 @@ Every route of a tenant-owned service (identity, profile, obligation, notificati
 tenant-owned, and then answers 401 to a request without ``x-tenant-id`` whatever its path and
 body, or exempt with the reason written next to it. A route in neither list fails the suite
 with its name, so whoever adds a route classifies it. The rulebook holds regulatory data every
-tenant reads, so its writes need the write token instead of a tenant. The llm-gateway is shared
+tenant reads, so its writes need the write token (the pipeline) or the review token (analyst
+actions) instead of a tenant. The llm-gateway is shared
 infrastructure and is recorded with its reasons and one open finding.
 
 The probes at the end seed data as tenant A through the API and read it as tenant B. The
@@ -33,6 +34,8 @@ from obligation.main import build_app as build_obligation
 from obligation.settings import ObligationSettings
 from profile_service.main import build_app as build_profile
 from profile_service.settings import ProfileSettings
+from qa.main import build_app as build_qa
+from qa.testing import memory_ports, qa_settings
 from rulebook.main import build_app as build_rulebook
 from rulebook.testing import rulebook_settings
 
@@ -59,6 +62,7 @@ BUILDERS: dict[str, Callable[[], FastAPI]] = {
         ObligationSettings(_env_file=None, service_name="obligation", obligation_store="memory")
     ),
     "notification": lambda: build_notification(notification_settings()),
+    "qa": lambda: build_qa(qa_settings(), ports=memory_ports()),
 }
 TENANT_OWNED_SERVICES = tuple(BUILDERS)
 
@@ -86,9 +90,9 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "POST /v1/profile/financial-year-confirmations",
         }
     ),
-    # No tenant route yet; a new one fails the classification test until it is listed here.
-    "obligation": frozenset(),
+    "obligation": frozenset({"GET /v1/obligation/obligations"}),
     "notification": frozenset({"POST /v1/notification/send"}),
+    "qa": frozenset({"POST /v1/qa/ask"}),
 }
 """Routes that must answer 401 without ``x-tenant-id``."""
 
@@ -118,6 +122,7 @@ EXEMPT_ROUTES: dict[str, dict[str, str]] = {
         "GET /v1/notification/preferences/{channel}/{recipient}": PREFERENCE,
         "GET /v1/notification/templates": "the message templates are the same for every tenant",
     },
+    "qa": {},
 }
 """Routes of tenant-owned services that take no tenant, each with the reason; every service
 also serves the probes and its router's ping."""
@@ -148,6 +153,10 @@ GATEWAY_ROUTES: dict[str, str] = {
     ),
     "GET /v1/llm-gateway/models": "the routing table, the same for every caller",
     "GET /v1/llm-gateway/prompts": "the prompt registry, the same for every caller",
+    "POST /v1/llm-gateway/embeddings": (
+        "shared infrastructure like completions: clause embedding for the search index has no "
+        "tenant, and the tenant header, when sent, only attributes cost"
+    ),
 }
 """The llm-gateway is shared infrastructure: no route is tenant-owned. Each is listed so a new
 one is looked at."""
@@ -243,7 +252,7 @@ def test_an_unclassified_route_fails_with_its_name() -> None:
         check_classified("profile", app)
 
 
-def test_every_rulebook_write_needs_the_write_token() -> None:
+def test_every_rulebook_write_needs_the_write_or_the_review_token() -> None:
     app = build_rulebook(rulebook_settings())
     writes = sorted(
         route
@@ -255,7 +264,9 @@ def test_every_rulebook_write_needs_the_write_token() -> None:
         for route in writes:
             response = request(client, route)
             assert response.status_code == 401, (route, response.text)
-            assert response.json()["type"].endswith(":rulebook-write-token-invalid")
+            assert response.json()["type"].endswith(
+                (":rulebook-write-token-invalid", ":rulebook-review-token-invalid")
+            ), route
 
 
 def gateway_app() -> FastAPI:

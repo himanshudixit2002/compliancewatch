@@ -92,7 +92,7 @@ RULE_VERSION_TRANSITIONS = TransitionTable(
     {
         RuleVersionStatus.DRAFT: {RuleVersionStatus.IN_REVIEW},
         RuleVersionStatus.IN_REVIEW: {RuleVersionStatus.APPROVED, RuleVersionStatus.DRAFT},
-        RuleVersionStatus.APPROVED: {RuleVersionStatus.PUBLISHED},
+        RuleVersionStatus.APPROVED: {RuleVersionStatus.PUBLISHED, RuleVersionStatus.DRAFT},
         RuleVersionStatus.PUBLISHED: {RuleVersionStatus.SUPERSEDED, RuleVersionStatus.WITHDRAWN},
         RuleVersionStatus.SUPERSEDED: set(),
         RuleVersionStatus.WITHDRAWN: set(),

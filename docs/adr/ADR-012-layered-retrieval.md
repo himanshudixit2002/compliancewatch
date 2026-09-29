@@ -1,6 +1,7 @@
 # ADR-012: Layered retrieval: structured, hybrid RAG, SQL entity joins, agentic fallback
 
-- **Status:** Proposed (Accepted when the qa service ships layers 1 and 2 with the evaluation gate)
+- **Status:** Proposed (Accepted when layers 1 and 2 meet the gate on reviewed cases with a real
+  model; the scripted CI gate exists since 2026-09-29)
 - **Date:** 2026-09-28 (full text; recorded in the Architecture Reference v1.0, section 9.2)
 - **Deciders:** AI Platform, Regulatory Intelligence
 
@@ -63,3 +64,56 @@ so the evaluation suite reports the share stopping at each layer.
   refusal rate is watched as closely as the answer rate.
 - OpenSearch (ADR-010) replaces the in-database BM25 when the corpus outgrows it; the layer
   boundary does not move.
+
+## Evaluation (2026-09-29)
+
+The qa service (`POST /v1/qa/ask`) runs the layers in this order: structured, then the KAG layer
+when the flag targets the tenant, then hybrid search. Against the four layers of the Decision:
+
+1. **Structured: shipped.** Two phrasings only, "when is my `<form>` due" and "what is due this
+   (or next) month", answered from the business's obligations of rule versions in force on the
+   question's date, with the rule version's verified citations, each checked again against its
+   clause. No model call. It passes the question on when a version in force extends the chosen
+   obligation's deadline (`extends_deadline`, for its period when the relation names one),
+   because the obligation's own due date may not have moved yet: the obligation service does
+   not consume the rule events. Any other question passes on too; this layer never refuses.
+2. **Hybrid RAG: shipped.** The rulebook's `POST /search`: an English `tsvector` leg (the terms
+   of `plainto_tsquery` joined by OR, ranked by `ts_rank_cd`, so not BM25) and a pgvector HNSW
+   cosine leg over `clause_embedding`, each drawing a pool of 40 for `k=8`, fused by reciprocal
+   rank with k=60, ties by clause id. There is no cross-encoder rerank: the fused order is what
+   the answerer reads.
+3. **Entity joins: shipped as the KAG layer, behind a flag.** Built as the planner and solver of
+   ADR-017, it runs between layers 1 and 2 rather than after layer 2, and only for the tenants
+   `CW_QA_KAG_ENABLED` and `CW_QA_KAG_TENANTS` target. A plan that does not validate, a failed
+   or over-budget step, or no clause to cite falls back to layer 2 with the reason.
+4. **Agentic fallback: not built.** Reciprocal rank fusion gives no score that means "low
+   confidence", so nothing could trigger it yet.
+
+The date filter is on documents first: with `as_of`, the search keeps documents published on or
+before it and leaves undated documents out. Each hit also names the published or superseded
+versions citing its clause and in force on that date (`cited_by`), and says whether the clause
+is out of force (`out_of_force`: published, superseded or withdrawn versions cite it and none of
+them is in force on that date). The hybrid layer drops a clause cited only by versions not in
+force on the question's date and counts the drop on its span; a clause no version cites stays,
+filtered by its document's date alone. It does not follow a dropped hit to the version that
+replaced it, as the Decision describes. In the KAG layer a plan reaches rule versions only
+through the set in force on the date, `retrieve_clauses` drops out-of-force clauses the same
+way, and a `follow` step walks the supersedes links when the plan asks for it.
+
+The query and the clauses are embedded through the llm-gateway (ADR-008). The default model is
+`voyage/voyage-3.5-lite` (ADR-013), asked for 512 dimensions (the kernel's `EMBEDDING_DIMS`) and
+checked against that length on every answer. Whether the Vercel AI Gateway passes the
+`dimensions` parameter through to Voyage is not verified; the first nightly run with a real key
+is the proof, and `CW_LLM_EMBEDDING_DIMENSIONS_PARAM` exists for a model without the parameter.
+CI embeds with the gateway's fake `fake/hash-ngram-512`, which is lexical, not semantic, so CI
+numbers say nothing about vector quality.
+
+The scripted CI run of the KAG golden set (ADR-017, Evaluation; commit `9ee75e9`) gives these
+layer shares: with the KAG layer on, structured 0.05, KAG 0.77, hybrid 0.18; with it off,
+structured 0.05 and hybrid 0.95. The hybrid baseline scores grounded-answer rate 0.804,
+citation correctness 1.000 and refusal accuracy 1.000 on the 56 draft cases. A scripted answer
+now counts for it only when every date the case expects is in the hybrid evidence, so a due date
+that only the business's obligations give no longer counts. The gate for that run is refusal
+accuracy and answer safety at 1.0 for hybrid, which it meets. Context recall and
+precision are not measured yet (the harness does not compute them), and no real model has
+answered these cases.

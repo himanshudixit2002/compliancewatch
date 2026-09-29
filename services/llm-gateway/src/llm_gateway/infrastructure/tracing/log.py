@@ -14,6 +14,7 @@ class LogTracer:
     def record(self, call: CallRecord) -> None:
         entry = call.entry
         fields: dict[str, object] = {
+            "kind": call.kind.value,
             "feature": entry.feature.value,
             "prompt": f"{entry.prompt_name}@{entry.prompt_version}",
             "model_requested": entry.model_requested,

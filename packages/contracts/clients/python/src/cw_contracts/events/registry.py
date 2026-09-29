@@ -17,8 +17,10 @@ from cw_contracts.events.obligation_due_soon_v1 import ObligationDueSoonV1
 from cw_contracts.events.obligation_rescheduled_v1 import ObligationRescheduledV1
 from cw_contracts.events.profile_updated_v1 import ProfileUpdatedV1
 from cw_contracts.events.rule_candidate_created_v1 import RuleCandidateCreatedV1
+from cw_contracts.events.rule_deadline_changed_v1 import RuleDeadlineChangedV1
 from cw_contracts.events.rule_published_v1 import RulePublishedV1
 from cw_contracts.events.rule_superseded_v1 import RuleSupersededV1
+from cw_contracts.events.rule_withdrawn_v1 import RuleWithdrawnV1
 from cw_contracts.events.tenant_deletion_requested_v1 import TenantDeletionRequestedV1
 
 ENVELOPE_VERSION = "1.0.0"
@@ -114,6 +116,13 @@ TOPICS: Mapping[str, TopicSpec] = MappingProxyType(
             tenant_scoped=False,
             schema_file="rule.candidate.created.v1.json",
         ),
+        "rule.deadline_changed": TopicSpec(
+            topic="rule.deadline_changed",
+            version="1.0.0",
+            model=RuleDeadlineChangedV1,
+            tenant_scoped=False,
+            schema_file="rule.deadline_changed.v1.json",
+        ),
         "rule.published": TopicSpec(
             topic="rule.published",
             version="1.0.0",
@@ -127,6 +136,13 @@ TOPICS: Mapping[str, TopicSpec] = MappingProxyType(
             model=RuleSupersededV1,
             tenant_scoped=False,
             schema_file="rule.superseded.v1.json",
+        ),
+        "rule.withdrawn": TopicSpec(
+            topic="rule.withdrawn",
+            version="1.0.0",
+            model=RuleWithdrawnV1,
+            tenant_scoped=False,
+            schema_file="rule.withdrawn.v1.json",
         ),
         "tenant.deletion.requested": TopicSpec(
             topic="tenant.deletion.requested",

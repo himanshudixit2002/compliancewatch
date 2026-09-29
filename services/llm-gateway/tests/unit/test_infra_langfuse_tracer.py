@@ -9,7 +9,7 @@ import pytest
 from structlog.testing import capture_logs
 
 from domain_kernel.ids import TenantId
-from llm_gateway.domain.features import CallStatus, CostSource, Feature
+from llm_gateway.domain.features import CallKind, CallStatus, CostSource, Feature
 from llm_gateway.domain.ledger import LedgerEntry
 from llm_gateway.domain.tracing import CallRecord
 from llm_gateway.infrastructure.tracing import langfuse as module
@@ -204,6 +204,37 @@ def test_regulatory_cached_calls_without_a_system_prompt() -> None:
     }
     [end] = client.trace_client.generation_client.ended
     assert end["usage"]["total_cost"] is None
+
+
+def test_an_embedding_is_traced_with_its_inputs_and_no_sampling_parameters() -> None:
+    client = Client()
+    row = entry(
+        feature=Feature.RETRIEVAL,
+        prompt_name="retrieval.embedding",
+        prompt_version="1",
+        model_requested="voyage/voyage-3.5-lite",
+        model_served="voyage/voyage-3.5-lite",
+        output_tokens=0,
+    )
+    embedding = record(
+        row,
+        system="",
+        user="Section 7.\n\nSection 8.",
+        output="2 vectors of 512 dimensions",
+        max_tokens=None,
+        has_schema=False,
+        kind=CallKind.EMBEDDING,
+    )
+    LangfuseTracer(client).record(embedding)
+
+    assert client.traces[0]["name"] == "llm.retrieval"
+    [generation] = client.trace_client.generations
+    assert generation["name"] == "retrieval.embedding@1"
+    assert generation["model_parameters"] == {"kind": "embedding"}
+    assert generation["input"] == "Section 7.\n\nSection 8."
+    [end] = client.trace_client.generation_client.ended
+    assert end["output"] == "2 vectors of 512 dimensions"
+    assert (end["usage"]["input"], end["usage"]["output"]) == (10, 0)
 
 
 def test_a_failing_client_is_logged_and_swallowed() -> None:

@@ -3,7 +3,9 @@
 A rule is matched by ``rule_key``. Its latest version is updated in place while it is still a
 draft (the analyst has not reviewed it), so re-running the seed after editing the YAML changes
 nothing else; once a version has left draft it is never modified and the seed adds a new draft
-version only when its content differs from the latest one.
+version only when its content differs from the latest one. ``seed_status`` is left out of that
+comparison: review sets it to reviewed while the file still says needs_review, and that alone is
+not a change to the rule.
 """
 
 import uuid
@@ -82,7 +84,7 @@ class SqlAlchemySeedRepository:
                         for key, value in content.items():
                             setattr(latest, key, value)
                         updated.append(f"{rule.rule_key}@{latest.version}")
-                elif _content_of(latest) == content:
+                elif _reviewed(_content_of(latest)) == _reviewed(content):
                     unchanged.append(rule.rule_key)
                 else:
                     session.add(_version(row, rule, latest.version + 1, content, now))
@@ -126,6 +128,11 @@ def _content(rule: SeedRule) -> dict[str, object]:
 
 def _content_of(row: RuleVersionRow) -> dict[str, object]:
     return {key: getattr(row, key) for key in CONTENT_KEYS}
+
+
+def _reviewed(content: dict[str, object]) -> dict[str, object]:
+    """The content a version past draft is compared on: everything but ``seed_status``."""
+    return {key: value for key, value in content.items() if key != "seed_status"}
 
 
 def _version(

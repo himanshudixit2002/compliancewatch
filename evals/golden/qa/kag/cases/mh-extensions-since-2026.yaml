@@ -1,0 +1,74 @@
+case_id: mh-extensions-since-2026
+category: multi_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: Which GSTR-3B due date extensions took effect on or after 1 January 2026?
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: entity
+    type: notification
+    value: 01/2026-Central Tax
+    support:
+      document: n01_2026
+      clause_ref: en.p2
+      quote: NOTIFICATION No. 01/2026 – Central Tax
+  - kind: date
+    value: 2026-04-20
+    support:
+      document: n01_2026
+      clause_ref: en.p4
+      quote: come into effect from 20th day of April, 2026
+  - kind: date
+    value: 2026-04-21
+    support:
+      document: n01_2026
+      clause_ref: en.p3
+      quote: till the twenty -first day of April, 2026
+  must_not_mention:
+  - 17/2025
+  citations:
+  - document: n01_2026
+    clause_ref: en.p4
+  - document: n01_2026
+    clause_ref: en.p3
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: gstr3b_monthly
+    - id: s2
+      op: follow
+      source: s1
+      relations:
+      - extends_deadline
+      direction: in
+      depth: 1
+    - id: s3
+      op: retrieve_clauses
+      source: s2
+      k: 8
+    - id: s4
+      op: answer
+      sources:
+      - s2
+      - s3
+  answer:
+    covered: true
+    answer: "One: notification No. 01/2026-Central Tax, which came into effect from 20 April 2026 and extended the due date for FORM GSTR-3B for March 2026 till 21 April 2026."
+    citations:
+    - document: n01_2026
+      clause_ref: en.p4
+      quote: This notification shall come into effect from 20th day of April, 2026.
+    - document: n01_2026
+      clause_ref: en.p3
+      quote: "hereby extends the due date for furnishing the return in FORM GSTR-3B for the month of March, 2026 till the twenty -first day of April, 2026"
+refusal_reason: null
+notes: 17/2025 starts on 18 October 2025, before the date the question asks from.

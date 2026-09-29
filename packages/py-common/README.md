@@ -118,7 +118,9 @@ change, so the row commits or rolls back with it. `partition_key` is the Kafka k
 default for tenant events; pass the aggregate id for regulatory events). A relay process per
 service schema, `make relay SERVICE=<name>` locally, publishes pending rows, retries with
 exponential backoff and moves a message to `<topic>.dlq` after eight failures
-(`docs/runbooks/outbox-relay.md`).
+(`docs/runbooks/outbox-relay.md`). The relay installs telemetry as `outbox-relay`: with
+`CW_OTEL_ENDPOINT` set it exports its counters by topic and the `outbox_relay_pending` gauge by
+`db_schema` every 15 seconds, which the `OutboxBacklog` alert reads.
 
 Consuming: a migration calls `create_processed_event_table(op)`; the service runs
 `IdempotentConsumer(group_id=..., store=PostgresProcessedStore(engine, group_id=...),

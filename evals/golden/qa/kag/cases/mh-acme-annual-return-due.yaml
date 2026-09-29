@@ -1,0 +1,53 @@
+case_id: mh-acme-annual-return-due
+category: multi_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: seed_calendar
+question: By when must Acme Bengaluru file its annual return for 2026-27?
+as_of: 2026-09-28
+business: acme_monthly
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: date
+    value: 2027-12-31
+    support:
+      seed_rule: gstr9_annual
+      field: recurrence
+      value:
+        frequency: annual
+        due_day: 31
+        due_month_offset: 8
+  must_not_mention: []
+  citations:
+  - document: n15_2025
+    clause_ref: en.p4
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: gstr9_annual
+    - id: s2
+      op: get_obligations
+      source: s1
+    - id: s3
+      op: retrieve_clauses
+      source: s1
+    - id: s4
+      op: answer
+      sources:
+      - s2
+      - s3
+  answer:
+    covered: true
+    answer: Acme Bengaluru's annual return for 2026-27 is due on 31 December 2027.
+    citations:
+    - document: n15_2025
+      clause_ref: en.p4
+      quote: in respect of filing of annual return for the financial year 2024-25 onwards
+refusal_reason: null
+notes: "The due date is the seed's (day 31, eight months after the year), read from the business's obligation; the cited clause only establishes the annual return."

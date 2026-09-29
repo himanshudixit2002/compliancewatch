@@ -1,0 +1,46 @@
+case_id: sh-10-2025-serial-49
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: What entry did notification 10/2025-Central Tax substitute for serial number 49?
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: text
+    value: Beawer
+    support:
+      document: n10_2025
+      clause_ref: en.p5
+      quote: Jaipur Districts of Jaipur, Ajmer, Beawer and Tonk
+  must_not_mention: []
+  citations:
+  - document: n10_2025
+    clause_ref: en.p5
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: retrieve_clauses
+      text: serial number 49 entries substituted
+    - id: s2
+      op: answer
+      sources:
+      - s1
+  answer:
+    covered: true
+    answer: "For serial number 49 it substituted the entry: Jaipur Districts of Jaipur, Ajmer, Beawer and Tonk in the state of Rajasthan."
+    citations:
+    - document: n10_2025
+      clause_ref: en.p5
+      quote: "(iii) for serial number 49 and the entries relating thereto"
+    - document: n10_2025
+      clause_ref: en.p5
+      quote: Jaipur Districts of Jaipur, Ajmer, Beawer and Tonk in the state of Rajasthan
+refusal_reason: null
+notes: ''

@@ -1,0 +1,31 @@
+case_id: 17-2025-central-tax
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ""
+own_ref: 17/2025-Central Tax
+extraction_case: extraction/cbic_notifications/cases/17-2025-central-tax.yaml
+expected:
+  relations:
+    - relation: extends_deadline
+      target:
+        type: form
+        name: GSTR-3B
+      evidence_clause_ref: en.p5
+      evidence_quote: "(i) sub-section (1) of section 39, for the month of September,2025, till twenty-fifth day of October, 2025"
+      period: "2025-09"
+      new_due_date: "2025-10-25"
+    - relation: extends_deadline
+      target:
+        type: form
+        name: GSTR-3B
+      evidence_clause_ref: en.p6
+      evidence_quote: "(ii) proviso to sub-section (1) of section 39, for the quarter of July, 2025 to September, 2025, till twenty-fifth day of October, 2025."
+      period: "2025-26 Q2"
+      new_due_date: "2025-10-25"
+notes: >-
+  Clause en.p4 extends the time limit for FORM GSTR-3B for the persons listed under it; en.p5
+  lists monthly filers under section 39(1) for September 2025 and en.p6 quarterly filers under
+  its proviso for July to September 2025, both till 25 October 2025. The form is named in en.p4,
+  not in the list items, so each candidate carries the validator flag target_not_in_evidence for
+  review; the quotes and dates check. The powers (section 39(6) read with section 168) are left
+  out, as for 01/2026, until an analyst decides whether they belong as refers_to.

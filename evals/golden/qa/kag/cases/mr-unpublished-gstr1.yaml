@@ -1,0 +1,35 @@
+case_id: mr-unpublished-gstr1
+category: must_refuse
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: none
+question: When is FORM GSTR-1 due for a monthly filer?
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: not_covered
+  facts: []
+  must_not_mention: []
+  citations: []
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: retrieve_clauses
+      text: due date for furnishing FORM GSTR-1 by monthly filers
+    - id: s2
+      op: answer
+      sources:
+      - s1
+  answer:
+    covered: true
+    answer: FORM GSTR-1 is due every month.
+    citations:
+    - document: n17_2025
+      clause_ref: en.p4
+      quote: FORM GSTR-1 is due every month
+refusal_reason: unpublished_seed_rule
+notes: "gstr1_monthly is a seed rule that stays unpublished: no recorded clause supports it."

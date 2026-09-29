@@ -91,20 +91,20 @@ class RelationAggregate:
 
 def load_relation_cases(golden: Path) -> list[RelationCase]:
     root = golden / "relations"
-    cases: list[RelationCase] = []
-    for path in sorted(root.rglob("cases/*.yaml")):
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        extraction = load_case(golden / str(data["extraction_case"]))
-        cases.append(
-            RelationCase(
-                case_id=str(data["case_id"]),
-                label_status=str(data["label_status"]),
-                own_ref=str(data["own_ref"]),
-                document=extraction.document,
-                expected=tuple(_expected(item) for item in data["expected"]["relations"]),
-            )
-        )
-    return cases
+    return [load_relation_case(golden, path) for path in sorted(root.rglob("cases/*.yaml"))]
+
+
+def load_relation_case(golden: Path, path: Path) -> RelationCase:
+    """One case file; its extraction case is read relative to ``golden``."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    extraction = load_case(golden / str(data["extraction_case"]))
+    return RelationCase(
+        case_id=str(data["case_id"]),
+        label_status=str(data["label_status"]),
+        own_ref=str(data["own_ref"]),
+        document=extraction.document,
+        expected=tuple(_expected(item) for item in data["expected"]["relations"]),
+    )
 
 
 def _expected(item: Mapping[str, Any]) -> ExpectedRelation:

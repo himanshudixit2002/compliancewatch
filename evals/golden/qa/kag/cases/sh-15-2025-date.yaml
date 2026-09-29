@@ -1,0 +1,43 @@
+case_id: sh-15-2025-date
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: What date does notification 15/2025-Central Tax bear?
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: date
+    value: 2025-09-17
+    support:
+      document: n15_2025
+      clause_ref: en.p4
+      quote: New Delhi, the 17th day of September 2025
+  must_not_mention: []
+  citations:
+  - document: n15_2025
+    clause_ref: en.p4
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: retrieve_clauses
+      text: notification 15/2025-Central Tax exemption from filing annual return
+    - id: s2
+      op: answer
+      sources:
+      - s1
+  answer:
+    covered: true
+    answer: Notification No. 15/2025-Central Tax is dated 17 September 2025.
+    citations:
+    - document: n15_2025
+      clause_ref: en.p4
+      quote: New Delhi, the 17th day of September 2025
+refusal_reason: null
+notes: "The heading clause en.p3 carries the number and en.p4 the date line; the planner searches the text to reach both."

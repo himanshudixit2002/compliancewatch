@@ -85,3 +85,15 @@ class UnknownFeatureError(DomainError, ValueError):
     def __init__(self, feature: str) -> None:
         self.feature = feature
         super().__init__(f"unknown feature {feature!r}")
+
+
+class FeatureMismatchError(DomainError, ValueError):
+    """A feature sent to the wrong route: an embedding feature to completions, or the reverse."""
+
+    type_slug = "llm-feature-mismatch"
+    title = "LLM feature mismatch"
+
+    def __init__(self, feature: str, kind: str) -> None:
+        self.feature = feature
+        self.kind = kind
+        super().__init__(f"feature {feature!r} is not served by {kind} calls")

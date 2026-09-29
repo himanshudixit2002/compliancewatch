@@ -47,19 +47,49 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_OTEL_ENDPOINT` (+ header) | secret | secret | secret | secret | secret | secret | secret | secret | - |
 | `CW_AI_GATEWAY_API_KEY`, `CW_LLM_PROVIDER` | - | - | - | - | - | secret / env | - | - | - |
 | `CW_LANGFUSE_*` | - | - | - | - | - | secret | - | - | - |
+| `CW_LLM_ROUTES__<FEATURE>` (for example `CW_LLM_ROUTES__RETRIEVAL`), `CW_LLM_EMBEDDING_DIMENSIONS_PARAM` | - | - | - | - | - | env (only to override the routing table; the second defaults to `true`) | - | - | - |
 | `CW_WHATSAPP_ENABLED`, `CW_WHATSAPP_PHONE_NUMBER_ID`, `CW_WHATSAPP_ACCESS_TOKEN` | - | - | - | - | env / secret / secret | - | - | - | - |
 | `CW_BILLING_PROVIDER`, `CW_RAZORPAY_*` | env / secret | - | - | - | - | - | - | - | - |
 | `CW_IDENTITY_STORE`, `CW_PROFILE_STORE`, `CW_PROFILE_GSTIN_LOOKUP` | env | env | - | - | - | - | - | - | - |
 | `CW_RULEBOOK_STORE` | - | - | env | - | - | - | - | - | - |
 | `CW_RULEBOOK_WRITE_TOKEN` | - | - | secret | - | - | - | secret | - | - |
-| `CW_PIPELINE_KNOWLEDGE_ENABLED`, `CW_RULEBOOK_URL`, `CW_LLM_GATEWAY_URL` | - | - | - | - | - | - | env | - | - |
+| `CW_RULEBOOK_REVIEW_TOKEN` | - | - | secret (analyst actions; the workbench holds the same value) | - | - | - | - | - | - |
+| `CW_RULEBOOK_PUBLISH_ENABLED` | - | - | env (default `false`; owner regulatory-intelligence; removed once the workbench publishes in production and the obligation consumer of the rule events is live) | - | - | - | - | - | - |
+| `CW_PIPELINE_KNOWLEDGE_ENABLED` | - | - | - | - | - | - | env | - | - |
+| `CW_RULEBOOK_URL`, `CW_LLM_GATEWAY_URL` | - | - | - | - | - | - | env | env (qa) | - |
+| `CW_PROFILE_URL`, `CW_OBLIGATION_URL`, `CW_QA_HTTP_TIMEOUT_SECONDS`, `CW_QA_LLM_TIMEOUT_SECONDS`, `CW_QA_EMBEDDING_TIMEOUT_SECONDS` | - | - | - | - | - | - | - | env (qa; reads time out after 5 s by default, the model calls after 20 s, longer than the gateway's budget for the call) | - |
+| `CW_QA_KAG_ENABLED`, `CW_QA_KAG_TENANTS` | - | - | - | - | - | - | - | env (qa; default `false` and every tenant; owner ai-platform; removed when ADR-017 is Accepted) | - |
+| `CW_QA_PROMPTS_DIR` | - | - | - | - | - | - | - | set by the qa image (`/app/prompts`) | - |
 | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_SEND_ENABLED`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `NOTIFICATION_API_URL` | - | - | - | - | - | - | - | - | secret / secret / env / secret / secret / env |
 | `CW_IDENTITY_CHANNEL_TOKEN` | secret | - | - | - | - | - | - | - | - |
 | `WHATSAPP_CONSENT_RECORDING_ENABLED`, `IDENTITY_API_URL`, `IDENTITY_SERVICE_TOKEN`, `WHATSAPP_NOTICE_VERSION` | - | - | - | - | - | - | - | - | env / env / secret / env |
 
 The pipeline writes regulator documents to the rulebook (ADR-018), so deploy the rulebook before
 the pipeline and give both the same `CW_RULEBOOK_WRITE_TOKEN`; a rulebook without one refuses
-every write.
+every write. The analyst's actions (review decisions, relation approvals, citations, the version
+lifecycle and the sweep route) need a second secret, `CW_RULEBOOK_REVIEW_TOKEN`, with a different
+value: the pipeline never gets it, and a rulebook without it refuses those actions. It is a shared
+secret until the identity service exists, so the approver ids are asserted by the caller.
+
+The rulebook writes its rule events (`rule.published`, `rule.superseded`, `rule.withdrawn`,
+`rule.deadline_changed`) to its own `outbox_event` table, so it needs the outbox relay like the
+profile and obligation services: a process running `python -m py_common.outbox` with the
+rulebook's `CW_DATABASE_URL` and the Kafka secrets. A version replaced by one dated in the future
+moves to superseded or withdrawn, with its event, only when the daily sweep runs: schedule a Fly
+machine from the rulebook image running `rulebook-transitions` once a day (for example
+`fly machine run <rulebook image> rulebook-transitions --schedule daily`, with the rulebook's
+secrets and `CW_RULEBOOK_PUBLISH_ENABLED`). The in-force reads do not wait for it, because
+publication already cut the replaced version's `effective_to`; a late run only delays the status
+and the event. The command is idempotent and, with the flag off, moves nothing. Neither the relay
+nor the machine is needed while `CW_RULEBOOK_PUBLISH_ENABLED` is off.
+
+The rulebook's search index needs pgvector: its migration 0006, run by the release command,
+creates the extension with `CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public`. Check that
+the Postgres provider offers pgvector, and either let the rulebook's database role create
+extensions or have an administrator run that statement once before the first deploy. `public`
+must stay on the search path, as the `CW_DATABASE_URL` options above keep it. Clauses registered
+before the pipeline embedded them are caught up by running `pipeline-embed` once from the
+pipeline image, with the pipeline's secrets.
 
 The WhatsApp bot records keyword opt-ins and opt-outs in identity: give identity
 `CW_IDENTITY_CHANNEL_TOKEN` and the bot the same value as `IDENTITY_SERVICE_TOKEN`, with

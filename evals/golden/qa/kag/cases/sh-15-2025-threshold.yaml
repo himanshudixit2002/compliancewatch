@@ -1,0 +1,46 @@
+case_id: sh-15-2025-threshold
+category: single_hop
+label_status: draft
+labelled_by: Claude (drafted from recorded clause text; not analyst-reviewed)
+reviewed_by: ''
+fact_source: recorded_clause
+question: "Up to what aggregate turnover does notification 15/2025-Central Tax exempt a registered person from filing the annual return?"
+as_of: 2026-09-28
+business: null
+fy: null
+expected:
+  outcome: answered
+  facts:
+  - kind: text
+    value: two crore rupees
+    support:
+      document: n15_2025
+      clause_ref: en.p4
+      quote: up to two crore rupees
+  must_not_mention: []
+  citations:
+  - document: n15_2025
+    clause_ref: en.p4
+scripted:
+  plan:
+    as_of: null
+    steps:
+    - id: s1
+      op: rules_in_force
+      rule_key: gstr9_annual
+    - id: s2
+      op: retrieve_clauses
+      source: s1
+    - id: s3
+      op: answer
+      sources:
+      - s2
+  answer:
+    covered: true
+    answer: "Notification No. 15/2025-Central Tax exempts a registered person whose aggregate turnover in the financial year is up to two crore rupees from filing the annual return for that year."
+    citations:
+    - document: n15_2025
+      clause_ref: en.p4
+      quote: "hereby exempts the registered person whose aggregate turnover in any financial year is up to two crore rupees, from filing annual return that said financial year"
+refusal_reason: null
+notes: gstr9_annual cites en.p4, the exemption its turnover predicate encodes.

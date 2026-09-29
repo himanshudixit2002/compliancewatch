@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 
 from domain_kernel.errors import InvariantViolationError
-from llm_gateway.domain.features import CallStatus, CostSource, Feature
+from llm_gateway.domain.features import CallKind, CallStatus, CostSource, Feature
 from llm_gateway.domain.ledger import LedgerEntry
 from llm_gateway.domain.tracing import CallRecord, Tracer
 
@@ -59,7 +59,13 @@ def test_record_freezes_its_mappings() -> None:
     assert isinstance(record.metadata, MappingProxyType)
     assert record.metadata == {"document_id": "doc-1"}
     assert record.error_detail == ""
+    assert record.kind is CallKind.COMPLETION
     assert _record(error_detail="boom").error_detail == "boom"
+
+
+def test_an_embedding_record_has_no_max_tokens() -> None:
+    record = _record(max_tokens=None, kind=CallKind.EMBEDDING)
+    assert (record.max_tokens, record.kind) == (None, CallKind.EMBEDDING)
 
 
 @pytest.mark.parametrize(
@@ -77,6 +83,7 @@ def test_record_freezes_its_mappings() -> None:
         ({"metadata": {"pages": 3}}, "metadata values must be strings"),
         ({"metadata": "x"}, "metadata must be a mapping"),
         ({"error_detail": None}, "error_detail must be str"),
+        ({"kind": "embedding"}, "kind must be CallKind"),
     ],
 )
 def test_record_invariants(changes: dict[str, object], message: str) -> None:

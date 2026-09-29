@@ -38,3 +38,25 @@ schemas (decisions, notifications) to their own clusters past about 5,000 writes
 - pgvector will fall behind a dedicated engine at some size. The numbers above are the trigger,
   read from database metrics and the eval dashboard, not from a feeling.
 - Revisit at any of the three exit criteria, or if residency or Aurora cost changes the picture.
+
+## Addendum 2026-09-29: embeddings in a side table
+
+The embeddings do not sit in the clause row. `clause` is append-only (a trigger refuses every
+update, so a clause never changes after it is registered), and a vector column on it could never
+be filled after the fact or replaced. Rulebook migration 0006 puts them in a side table instead:
+`clause_embedding(clause_id, model, embedding vector(512), created_at)`, keyed by
+(`clause_id`, `model`), with an HNSW index for cosine distance and a trigger that refuses updates.
+The length is the kernel's `EMBEDDING_DIMS`; the model is the name the gateway served the vector
+under.
+
+- A model change is a re-embed into new rows under the new model's name, not a new column and
+  never an overwrite: the pipeline's `pipeline-embed --model <new>` fills them before the
+  gateway's retrieval route switches, and the old model's rows can be deleted once nothing
+  searches them. A search always compares vectors of one model.
+- A clause and its embedding are two rows rather than one, but in the same schema and joined by
+  a foreign key, so filters and vectors still cannot disagree: the search applies its filters
+  through the join to `clause` and `document`.
+- The keyword leg is a stored generated column on `clause` (`search_vector`,
+  `to_tsvector('english', text)`, GIN index); adding it rewrote the table rather than updating
+  rows, so the append-only trigger was never involved.
+- pgvector is created in the `public` schema, which every service keeps on its search path.

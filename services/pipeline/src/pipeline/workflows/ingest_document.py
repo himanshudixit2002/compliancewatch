@@ -1,13 +1,13 @@
 """Ingest one document: discover, fetch, parse, and with ``knowledge`` register it in the
-rulebook and extract its knowledge in a child workflow. The sample workflow of the pipeline
-worker.
+rulebook, embed its clauses for search and extract its knowledge in a child workflow. The
+sample workflow of the pipeline worker.
 
 The real ingest adds the detector, the extractor, the outbox write of ``document.discovered``
 and ``document.parsed``, and a store for the raw file; this one shows the shape: each step is an
-activity with its own retries and timeouts, the workflow itself does no I/O. The registration
-and extraction steps sit behind ``workflow.patched`` so histories recorded before them replay
-unchanged, and a failed registration or extraction is reported in the result rather than
-failing the ingest.
+activity with its own retries and timeouts, the workflow itself does no I/O. The registration,
+embedding and extraction steps sit behind ``workflow.patched`` so histories recorded before them
+replay unchanged, and a failed registration, embedding or extraction is reported in the result
+rather than failing the ingest.
 """
 
 from typing import Self
@@ -28,7 +28,12 @@ with workflow.unsafe.imports_passed_through():
         ParseRequest,
         document_id_for,
     )
-    from pipeline.application.knowledge_activities import RegisterDocument, RegisterRequest
+    from pipeline.application.knowledge_activities import (
+        EmbedClauses,
+        EmbedRequest,
+        RegisterDocument,
+        RegisterRequest,
+    )
     from pipeline.workflows.extract_knowledge import (
         ExtractKnowledgeWorkflow,
         KnowledgeRequest,
@@ -40,6 +45,7 @@ from uuid import UUID
 
 TASK_QUEUE = "pipeline"
 REGISTER_PATCH = "kag-register-v1"
+EMBED_PATCH = "kag-embed-v1"
 EXTRACT_PATCH = "kag-extract-v1"
 
 
@@ -64,6 +70,8 @@ class IngestResult(Frozen):
     clause_refs: list[str]
     registered: bool = False
     registration_error: str = ""
+    clauses_embedded: int = 0
+    embedding_error: str = ""
     mentions_queued: int = 0
     relations_outcome: str = "disabled"
     relations_staged: int = 0
@@ -95,6 +103,16 @@ class IngestDocumentWorkflow:
             except ActivityError as error:
                 registration_error = str(error.cause or error)[:500]
                 workflow.logger.warning("document registration failed: %s", registration_error)
+        clauses_embedded, embedding_error = 0, ""
+        if registered and workflow.patched(EMBED_PATCH):
+            try:
+                embedded = await EmbedClauses.schedule(
+                    EmbedRequest(document_id=parsed.document_id, regulator=request.regulator)
+                )
+                clauses_embedded = embedded.embedded
+            except ActivityError as error:
+                embedding_error = str(error.cause or error)[:500]
+                workflow.logger.warning("clause embedding failed: %s", embedding_error)
         knowledge, knowledge_error = KnowledgeResult(relations_outcome="disabled"), ""
         if registered and workflow.patched(EXTRACT_PATCH):
             try:
@@ -119,6 +137,8 @@ class IngestDocumentWorkflow:
             clause_refs=parsed.clause_refs,
             registered=registered,
             registration_error=registration_error,
+            clauses_embedded=clauses_embedded,
+            embedding_error=embedding_error,
             mentions_queued=knowledge.mentions_queued,
             relations_outcome=knowledge.relations_outcome,
             relations_staged=knowledge.relations_staged,
