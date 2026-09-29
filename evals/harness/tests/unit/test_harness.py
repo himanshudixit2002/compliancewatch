@@ -3,6 +3,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 
 from cw_evals.cases import load_extraction_set
 from cw_evals.metrics import aggregate, score
@@ -15,11 +16,16 @@ from domain_kernel.documents import ExtractionContext
 from ontology import load
 from pipeline.application.extractor import LlmRuleExtractor
 from pipeline.domain.prompt import PromptText
-from pipeline.infrastructure.prompts import prompt_path
 
 ROOT = Path(__file__).resolve().parents[3]
 GOLDEN = ROOT / "golden"
 REGISTRY = ROOT.parent / "services" / "llm-gateway" / "prompts" / "registry.toml"
+PROMPT_DIRS = {
+    "extraction": ROOT.parent / "services" / "pipeline" / "prompts",
+    "qa": ROOT.parent / "services" / "qa" / "prompts",
+}
+"""Where each prompt area's files are, by the part of the name before the dot."""
+QA_CASES = GOLDEN / "qa" / "kag" / "cases"
 PROMPT = PromptText("extraction.rule_candidate", "1", "regulatory-intelligence", "Extract.")
 CTX = ExtractionContext("cbic_notifications", PROMPT.ref, "test", "0.2.0")
 
@@ -123,21 +129,40 @@ def test_main_needs_labelled_cases(tmp_path: Path) -> None:
     assert main(["--golden", str(tmp_path), "--reports", str(tmp_path / "r")]) == 1
 
 
-PIPELINE_PROMPTS = [
+REGISTERED_PROMPTS = [
     entry
     for entry in tomllib.loads(REGISTRY.read_text())["prompts"]
     if entry.get("sha256") is not None
 ]
+
+
+def scripted_qa_cases(stage: str) -> int:
+    """The KAG golden cases that script a call of ``stage`` (plan or answer)."""
+    found = 0
+    for path in QA_CASES.glob("*.yaml"):
+        scripted = yaml.safe_load(path.read_text(encoding="utf-8")).get("scripted") or {}
+        found += scripted.get(stage) is not None
+    return found
+
+
 LABELLED_CASES = {
     "extraction.rule_candidate": lambda: len(load_extraction_set(GOLDEN).labelled),
     "extraction.rule_relations": lambda: len(load_relation_cases(GOLDEN)),
+    "qa.plan": lambda: scripted_qa_cases("plan"),
+    "qa.answer": lambda: scripted_qa_cases("answer"),
 }
 
 
-@pytest.mark.parametrize("entry", PIPELINE_PROMPTS, ids=lambda e: f"{e['name']}@{e['version']}")
+def prompt_file(name: str, version: str) -> Path:
+    area = name.partition(".")[0]
+    assert area in PROMPT_DIRS, f"no prompt directory for the {area!r} area"
+    return PROMPT_DIRS[area] / f"{name}.v{version}.md"
+
+
+@pytest.mark.parametrize("entry", REGISTERED_PROMPTS, ids=lambda e: f"{e['name']}@{e['version']}")
 def test_registry_digest_matches_the_prompt_file(entry: dict[str, object]) -> None:
     name, version = str(entry["name"]), str(entry["version"])
-    digest = hashlib.sha256(prompt_path(name, version).read_bytes()).hexdigest()
+    digest = hashlib.sha256(prompt_file(name, version).read_bytes()).hexdigest()
     assert entry["sha256"] == digest, "update sha256 in services/llm-gateway/prompts/registry.toml"
     eval_cases = entry["eval_cases"]
     assert isinstance(eval_cases, int)
@@ -146,4 +171,15 @@ def test_registry_digest_matches_the_prompt_file(entry: dict[str, object]) -> No
 
 
 def test_every_prompt_with_a_digest_is_checked() -> None:
-    assert {str(e["name"]) for e in PIPELINE_PROMPTS} == set(LABELLED_CASES)
+    assert {str(e["name"]) for e in REGISTERED_PROMPTS} == set(LABELLED_CASES)
+
+
+def test_the_qa_prompts_count_their_scripted_cases() -> None:
+    counts = {str(e["name"]): e["eval_cases"] for e in REGISTERED_PROMPTS}
+    assert counts["qa.plan"] == LABELLED_CASES["qa.plan"]()
+    assert counts["qa.answer"] == LABELLED_CASES["qa.answer"]()
+
+
+def test_an_unmapped_prompt_area_fails() -> None:
+    with pytest.raises(AssertionError, match="no prompt directory"):
+        prompt_file("billing.invoice", "1")

@@ -111,9 +111,10 @@ service the answer depends on failed, including the gateway while answering). Th
   a `ScriptedProvider` keyed by `(question_id, prompt ref)`, a `RecordingTracer` and
   `memory_ports()`; `build_app(settings, ports=..., ontology=...)` takes them.
 - **Prompts**: `prompts/qa.plan.v1.md` and `prompts/qa.answer.v1.md`, read when the app starts
-  (from `CW_QA_PROMPTS_DIR` in the image) and by the `prompts` readiness check. The gateway
-  refuses a prompt that is not in its registry; registering both, with their digest and golden
-  case count, waits for the golden cases under `evals/golden/qa/kag`.
+  (from `CW_QA_PROMPTS_DIR` in the image) and by the `prompts` readiness check. Both are in the
+  gateway's registry with owner ai-platform, the digest of the file and, as `eval_cases`, the
+  number of golden cases under `evals/golden/qa/kag` that script them; the harness's registry
+  test fails when a file changes without a new version and digest.
 - **Spans**: `qa.ask` (question id, tenant, deciding layer, outcome, reason), `qa.layer` (layer,
   result, reason), `qa.solve.step` (`qa.step.id`, `op`, `items`, `hidden`, `status`) and
   `qa.retrieve` (`k`, hits, `lexical_only`). Attributes carry ids, codes and counts, never

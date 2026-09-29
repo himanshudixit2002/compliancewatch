@@ -34,7 +34,7 @@ def test_gateway_wired_is_logged_as_json_with_the_service_field(
         True,
         False,
     )
-    assert (line["prompts"], line["routes"], line["providers"]) == (3, 6, 2)
+    assert (line["prompts"], line["routes"], line["providers"]) == (5, 6, 2)
 
 
 def test_gateway_wired_reports_a_disabled_cache(
