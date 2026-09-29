@@ -448,13 +448,14 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [],
+    uses: [uses("profile", "GET", "/v1/businesses")],
     awaits: [servicesTrack("WP12", "profile", "GET", "/v1/businesses")],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "6, 10; F12",
     nav: { group: "business", order: 1 },
-    notes: "Where every tenant role lands after signing in; the list waits for the business API.",
+    notes:
+      "Where every tenant role lands after signing in; the business API is on main and the list is built with the owner screens.",
   },
   {
     id: "owner.obligation",

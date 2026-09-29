@@ -159,7 +159,8 @@ kinds. Consequences: every page calls its gate on the first line and every actio
 again; the proxy's public list is the registry (`roles: "public"`), so a new screen is gated
 by its entry; `next` is honoured only as a same-origin path (`safeNext`); the redirect targets
 come from the registry through `signInHref`, `forbiddenHref` and `homeFor` in
-`shared/config/nav.ts`, which is why `/businesses` has a waiting entry today.
+`shared/config/nav.ts`, which is why `/businesses` has a registry entry before its page
+exists (ready: the business API is on `main`, and the list comes with the owner screens).
 
 ## D-016: One sign-in port; the fake adapter exists only in local and test
 
