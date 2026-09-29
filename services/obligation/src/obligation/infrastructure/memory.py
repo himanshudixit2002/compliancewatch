@@ -1,5 +1,12 @@
-"""In-memory repository and unit of work: the fakes for tests and the app before Postgres."""
+"""In-memory repository and unit of work: the fakes for tests and the app before Postgres.
 
+A unit of work works on a copy of the obligations and replaces them when the block exits cleanly.
+Units run one at a time (a store-level lock held from open to commit or rollback), so two
+overlapping requests, of one tenant or of two, cannot both start from the same copy and lose each
+other's writes.
+"""
+
+import threading
 from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import date, datetime
@@ -146,6 +153,7 @@ class MemoryStore:
         self.obligations: dict[ObligationId, Obligation] = {}
         self.events: list[DomainEvent] = []
         self.changes: list[ObligationChange] = []
+        self._lock = threading.Lock()
 
     def ping(self) -> bool:
         return True
@@ -155,7 +163,10 @@ class MemoryStore:
 
     @contextmanager
     def _unit(self, tenant_id: TenantId) -> Iterator[UnitOfWork]:
-        with MemoryUnitOfWork(self.obligations, self.events, tenant_id, self.changes) as uow:
+        with (
+            self._lock,
+            MemoryUnitOfWork(self.obligations, self.events, tenant_id, self.changes) as uow,
+        ):
             yield uow
 
     def of_tenant(self, tenant_id: TenantId) -> list[Obligation]:

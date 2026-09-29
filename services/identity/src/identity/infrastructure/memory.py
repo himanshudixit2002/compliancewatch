@@ -1,12 +1,15 @@
 """In-memory stores: tests, demos and the app before Postgres.
 
 ``MemoryStore`` holds consents, tenants, users, the subject index, service clients and the
-published events. A
-unit of work keeps what it did only when it ends without an error, as a Postgres transaction
-would, and it mirrors row-level security: it sees the rows of its own tenant, none when it has no
-tenant, and refuses to write another tenant's rows.
+published events. A unit of work keeps what it did only when it ends without an error, as a
+Postgres transaction would, and it mirrors row-level security: it sees the rows of its own tenant,
+none when it has no tenant, and refuses to write another tenant's rows. A unit works on a copy of
+the store, so units run one at a time (a store-level lock held from open to commit or rollback):
+two overlapping requests, of one tenant or of two, cannot both start from the same copy and lose
+each other's writes. ``MemoryChannelStore`` does the same for channel consents.
 """
 
+import threading
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 
@@ -73,7 +76,7 @@ class MemoryTenantRepository:
         return self._tenants.get(tenant_id) if tenant_id == self._tenant else None
 
     def lock(self, tenant_id: TenantId) -> Tenant | None:
-        """``get``: memory units of work serve tests and demos, one at a time."""
+        """``get``: memory units of work run one at a time, so the row is already locked."""
         return self.get(tenant_id)
 
 
@@ -174,15 +177,17 @@ class MemoryStore:
         self.subjects: dict[tuple[str, str], SubjectEntry] = {}
         self.service_clients: dict[str, ServiceClient] = {}
         self.events: list[DomainEvent] = []
+        self._lock = threading.Lock()
 
     def __call__(self, tenant_id: TenantId | None) -> AbstractContextManager[UnitOfWork]:
         return self._open(tenant_id)
 
     @contextmanager
     def _open(self, tenant_id: TenantId | None) -> Iterator[UnitOfWork]:
-        uow = MemoryUnitOfWork(self, tenant_id)
-        yield uow
-        uow.commit(self)
+        with self._lock:
+            uow = MemoryUnitOfWork(self, tenant_id)
+            yield uow
+            uow.commit(self)
 
     def ping(self) -> bool:
         return True
@@ -226,16 +231,18 @@ class MemoryChannelUnitOfWork:
 
 class MemoryChannelStore:
     """Channel consents without a tenant. Records are kept only when the unit of work ends
-    without an error, as a Postgres transaction would."""
+    without an error, as a Postgres transaction would, and units run one at a time."""
 
     def __init__(self) -> None:
         self.records: list[ChannelConsentRecord] = []
+        self._lock = threading.Lock()
 
     def __call__(self) -> AbstractContextManager[ChannelUnitOfWork]:
         return self._open()
 
     @contextmanager
     def _open(self) -> Iterator[ChannelUnitOfWork]:
-        pending = list(self.records)
-        yield MemoryChannelUnitOfWork(pending)
-        self.records[:] = pending
+        with self._lock:
+            pending = list(self.records)
+            yield MemoryChannelUnitOfWork(pending)
+            self.records[:] = pending

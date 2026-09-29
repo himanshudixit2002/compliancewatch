@@ -1,3 +1,4 @@
+import threading
 from datetime import date, timedelta
 
 import pytest
@@ -217,6 +218,30 @@ def _close_then_fail(store: MemoryStore, rule_version_id: RuleVersionId) -> None
         record(uow, event, done)
         assert len(uow.history.for_obligation(done.id)) == 2, "the unit sees its own append"
         raise RuntimeError("boom")
+
+
+def test_overlapping_units_of_two_tenants_keep_both_writes() -> None:
+    """The second unit waits for the first to commit instead of starting from the same copy of
+    the store and dropping the other tenant's obligation."""
+    scratch = MemoryStore()
+    MaterialiseObligations(scratch, window=1, clock=clock).run(request(tenant_id=OTHER_TENANT))
+    [theirs] = scratch.of_tenant(OTHER_TENANT)
+    store = MemoryStore()
+    done = threading.Event()
+
+    def materialise_ours() -> None:
+        MaterialiseObligations(store, window=1, clock=clock).run(request())
+        done.set()
+
+    with store(OTHER_TENANT) as uow:
+        uow.obligations.add(theirs)
+        thread = threading.Thread(target=materialise_ours)
+        thread.start()
+        assert not done.wait(0.05), "a second unit of work ran inside the first"
+    thread.join(timeout=5)
+    assert done.is_set()
+    assert store.of_tenant(OTHER_TENANT) == [theirs]
+    assert len(store.of_tenant(TENANT)) == 1
 
 
 # ---- change log (ADR-015: every change writes an audit row) ---------------------------------
