@@ -61,7 +61,7 @@ jobs:
       - name: Eval harness, nightly profile
         if: steps.key.outputs.present == 'true'
         run: make eval EVAL_PROFILE=nightly ARGS="--gateway-url http://localhost:8008"
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: eval-report-nightly
@@ -194,7 +194,7 @@ jobs:
             echo "Runbook: docs/runbooks/rulebook-data-quality.md"
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: data-quality-report
