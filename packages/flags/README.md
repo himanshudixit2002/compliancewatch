@@ -3,17 +3,23 @@
 Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 13 and 17 (flags default off, each with an owner and a removal condition).
 
-- **Owns:** The feature flag registry (`registry.json`) and its JSON Schema
+- **Owns:** The feature flag registry (`registry.json`), its JSON Schema, and the OpenFeature client for TypeScript servers
 - **Owning team:** Platform and Infrastructure (custodian); each flag's owner decides its rollout and removal
 - **Consumes:** n/a
-- **Emits / publishes:** `registry.json`, read by every service through py-common's generated copy
+- **Emits / publishes:** `registry.json`, read by every Python service through py-common's generated copy and by TypeScript through `@compliancewatch/flags`
 
 ## Layout
 
 ```
 registry.json          # every rollout switch, sorted by name
 registry.schema.json   # JSON Schema 2020-12 for the registry
+src/index.ts           # @compliancewatch/flags: FlagDefinition, REGISTRY, UnknownFlagError; no Node API
+src/server.ts          # @compliancewatch/flags/server: configureFlags, isEnabled, flagValue (OpenFeature)
+src/server.test.ts     # vitest: the env provider, tenant targeting, the Unleash provider over a fake client
 ```
+
+The package is consumed from source through `exports`, like `@compliancewatch/ui`; its relative
+imports carry the `.ts` extension, so Node runs it directly.
 
 `packages/py-common/src/py_common/flags_registry.json` is generated from `registry.json` by
 `make flags`; never edit it by hand.
@@ -63,7 +69,10 @@ a settings field are allowed: the WhatsApp bot's switches are read in TypeScript
 
 Python services use `py_common.flags` (packages/py-common/README.md, "Feature flags"): call
 `configure_flags(settings)` at start-up, then `flag_enabled(name, tenant_id)` or
-`flag_value(name)`. `CW_FLAGS_PROVIDER` picks the provider:
+`flag_value(name)`. TypeScript servers use `@compliancewatch/flags/server` the same way:
+`await configureFlags(process.env, { serviceName })` at start-up, then
+`await isEnabled(name, { tenantId })` or `await flagValue(name)`; `unleash-client` is loaded only
+when Unleash is chosen. Both answer the same way. `CW_FLAGS_PROVIDER` picks the provider:
 
 - `env` (the default) reads the entry's `env` variable, else `CW_FLAG_<NAME>` (the name upper
   cased, dots as underscores), else the default. A tenant-targeted flag that is on narrows to its
@@ -73,7 +82,9 @@ Python services use `py_common.flags` (packages/py-common/README.md, "Feature fl
   variant whose payload (or name) is one of its values. The tenant id is Unleash's `userId`.
   `make dev-flags` starts one locally.
 
-A flag Unleash does not hold, or a value that does not parse, answers the default.
+A flag Unleash does not hold, or a value that does not parse, answers the default and is
+logged as `flag_evaluation_failed`. A name the registry does not hold throws (`UnknownFlagError`
+in both languages).
 
 ## Adding a flag
 
@@ -85,3 +96,9 @@ A flag Unleash does not hold, or a value that does not parse, answers the defaul
 
 Removing a flag is the reverse: delete the code path, the setting and the entry, then run
 `make flags`.
+
+## How to run
+
+`make flags-check` (the registry), `pnpm --filter @compliancewatch/flags test` (vitest, 80%
+coverage thresholds), `lint` and `typecheck`. The Unleash provider's integration test against a
+real server is in py-common (`packages/py-common/tests/integration/test_unleash_provider.py`).

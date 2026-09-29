@@ -3,9 +3,22 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The feature flag registry: every rollout switch with its owner, default, expiry date and removal condition. make flags-check validates it; make flags writes py-common's copy.",
+  "description": "The feature flag registry (every rollout switch with its owner, default, expiry date and removal condition) and the OpenFeature client for TypeScript servers. make flags-check validates the registry; make flags writes py-common's copy.",
   "exports": {
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts",
     "./registry.json": "./registry.json",
     "./registry.schema.json": "./registry.schema.json"
+  },
+  "scripts": {
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@openfeature/core": "^1.12.0",
+    "@openfeature/server-sdk": "^1.23.0",
+    "unleash-client": "^6.12.1"
   }
 }
