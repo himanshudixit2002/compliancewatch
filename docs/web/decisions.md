@@ -524,3 +524,28 @@ role still gets the root 404 from the layout's gate, with no admin markup. Conse
 costs four reads and ten probes per visit and is `force-dynamic`, with a Refresh button that renders
 it again; the counts are never asserted as numbers in the e2e suite, since other specs change the
 queues on the same stack.
+
+## D-037: The document viewer opens by id or sha256, and links mark spans in code points
+
+2026-09-29. Analysts need to read a rulebook document beside the review items and relation
+candidates that point into it, and no route lists documents yet (the source manager's document route
+brings one). `/admin/rulebook/documents` opens a document by its id or by the sha256 of its source
+file (the id is the sha256's first 32 hex characters written as a UUID, so it is not a random UUID
+and `isUuid` would refuse it; `isHexUuid` and `documentIdFrom` accept it); the action reads the
+document before it moves to the viewer, so an id the rulebook does not hold is answered on the field
+rather than on a not-found page. The viewer shows the source facts and every clause in reading order
+with its page and an anchor of its own (`#clause-en.p3`, focusable, so a jump lands keyboard and
+screen-reader users on the clause too). A link marks what it points at with `?clause_id=` (a whole
+clause, such as a relation's evidence) or `?clause_id=&start=&end=` (a span, such as a mention). The
+services count offsets in Unicode code points, end exclusive, so the text is split into code points
+before it is cut (`shared/lib/highlight.ts`); a span that runs past its clause marks the whole
+clause and says the span did not match, and a clause the document does not hold, or a malformed
+link, marks nothing and says so. The marked text is a `HighlightMark`: tinted and underlined, with
+the start and the end announced, since most screen readers skip `<mark>`. The rulebook document
+types and their mapper live in `entities/rulebook`, since the relation queue will show evidence
+clauses from the same record. The document read is cached for five minutes under the document's own
+tag (the rulebook never stores other clauses under an id it holds, and only a 200 is cached), and
+neither route has a loading boundary: one above the viewer would stream its not-found answer with
+status 200, and an unknown or malformed id is a real 404. Consequences: a link into a document needs
+only the ids and offsets the services already return; the text is never rewritten, whitespace
+included (`whitespace-pre-wrap`).

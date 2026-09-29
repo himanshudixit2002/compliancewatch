@@ -112,6 +112,9 @@ Skeleton, Toaster (`sonner` with a polite live region; `toast` is re-exported).
   under ten characters; the error shows on blur; `onConfirm` receives the trimmed reason).
 - `CitationCard`: the quote in `<blockquote>`, the clause reference, the document link, and a
   "Verified" chip or a "Not verified" warning; the quote is never paraphrased.
+- `HighlightMark`: a span inside running text (a mention, a quote) in a `<mark>`, tinted and
+  underlined so it does not rely on colour, with visually hidden "Highlight starts" and
+  "Highlight ends" around it, since most screen readers do not announce `<mark>`.
 - `MonthCalendar`: `role="grid"`, weekday headers, one focusable cell at a time (roving
   tabindex), Arrow keys, Home, End, PageUp and PageDown (Shift for a year), Enter or Space to
   select, `aria-selected` and `aria-current="date"`, labelled month buttons, `renderDay` for
