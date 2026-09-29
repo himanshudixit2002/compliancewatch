@@ -1,0 +1,11 @@
+{
+  "name": "@compliancewatch/flags",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The feature flag registry: every rollout switch with its owner, default, expiry date and removal condition. make flags-check validates it; make flags writes py-common's copy.",
+  "exports": {
+    "./registry.json": "./registry.json",
+    "./registry.schema.json": "./registry.schema.json"
+  }
+}

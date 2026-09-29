@@ -69,6 +69,7 @@ jobs:
               - '.github/workflows/ci.yml'
               - 'infra/scripts/**' # the repository checks: ruff, mypy and their unit tests
               - '.trivyignore.yaml' # its unit test holds every entry to a statement and an expiry
+              - 'packages/flags/**' # make flags-check: the registry against the settings modules
             typescript:
               - 'apps/**'
               - 'packages/ui/**'
@@ -85,6 +86,7 @@ jobs:
               - '**/*.yml' # prettier --check . also covers YAML outside the packages
               - '**/*.yaml'
               - '.github/workflows/ci.yml'
+              - 'packages/flags/**'
             contracts:
               - 'packages/contracts/**'
               - 'packages/py-common/**'
@@ -221,6 +223,10 @@ jobs:
       # contract test that pins it; the check imports each app and lists the routes it serves.
       - name: Contract check - every service with API routes has a committed spec
         run: make openapi-check
+      # Every bool *_enabled or provider switch in a settings module has a registry entry with an
+      # owner, a false default and an unexpired removal date; py-common's copy is current.
+      - name: Feature flag registry (owners, defaults, expiry, every switch registered)
+        run: make flags-check
 
   evals:
     name: Evals (golden sets, scripted and fake provider, section 8 gates)

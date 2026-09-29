@@ -380,3 +380,13 @@ data-quality: check-uv ## Rulebook data-quality checks on the local rulebook sch
 	url="$${CW_DQ_DATABASE_URL:-postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}}"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA=rulebook CW_LOG_LEVEL=WARNING \
 	  $(UV) run --package compliancewatch-rulebook rulebook-quality $(ARGS)
+
+# ---- Feature flags (packages/flags/registry.json) -------------------------------------------
+.PHONY: flags flags-check
+CHECKS += flags-check
+
+flags: check-uv ## Write py-common's copy of the flag registry, then run flags-check
+	$(UV) run python infra/scripts/check_flags.py write
+
+flags-check: check-uv ## Flag registry: schema, owners, expiry, bool defaults off, py-common copy current, every switch in settings registered
+	$(UV) run python infra/scripts/check_flags.py check
