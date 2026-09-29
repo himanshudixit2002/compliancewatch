@@ -127,3 +127,28 @@ def test_seed_is_idempotent_updates_drafts_and_respects_reviewed_versions(engine
     fourth = repository.apply(calendar_edited_again)
     assert fourth.updated_drafts == ("gstr3b_monthly@2",)
     assert fourth.created_versions == ()
+
+
+def test_a_rerun_leaves_an_approved_version_alone(engine: Engine) -> None:
+    calendar = load_calendar(ontology_package.load())
+    repository = SqlAlchemySeedRepository(engine)
+    repository.apply(calendar)
+    with Session(engine) as session:
+        gstr1 = session.scalars(
+            select(RuleVersionRow).join(RuleRow).where(RuleRow.rule_key == "gstr1_monthly")
+        ).one()
+        gstr1.status, gstr1.submitted_at = "in_review", datetime(2026, 9, 29, tzinfo=UTC)
+        session.flush()
+        gstr1.status, gstr1.seed_status = "approved", "reviewed"
+        session.commit()
+    again = repository.apply(calendar)
+    assert "gstr1_monthly" in again.unchanged
+    assert not [key for key in again.created_versions if key.startswith("gstr1_monthly@")]
+    with Session(engine) as session:
+        versions = session.scalars(
+            select(RuleVersionRow.status)
+            .join(RuleRow)
+            .where(RuleRow.rule_key == "gstr1_monthly")
+            .order_by(RuleVersionRow.version)
+        ).all()
+    assert versions == ["approved"]

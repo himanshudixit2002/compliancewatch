@@ -217,7 +217,8 @@ make seed SERVICE=rulebook                # write draft versions into rule and r
 
 The command is idempotent: a re-run after editing the file updates the draft version in
 place; a version that has left draft is never modified and a changed rule gets a new draft
-version instead (`rulebook.infrastructure.seed_repository`). `rulebook.application.seed_loader`
+version instead (`rulebook.infrastructure.seed_repository`). The seed status that review sets to
+reviewed is not compared, so re-running the seed after an approval adds nothing. `rulebook.application.seed_loader`
 parses and checks the file; `rulebook.domain.seed` is the value object. Tests replay the
 calendar against sample profiles (a monthly filer, a QRMP filer in each state group, a
 composition taxpayer) and check every due date the recurrences produce.
