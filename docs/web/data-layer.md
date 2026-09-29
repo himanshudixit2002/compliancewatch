@@ -213,6 +213,14 @@ missing precondition). Every action:
 disables its submit button while pending (`aria-busy`), and announces the result in a
 `role="status"` region.
 
+React resets a form's uncontrolled fields once its action returns, a refusal included, and a
+controlled `<select>` keeps its state while the reset moves the element back to its first
+option. A form that must show what was sent after a refusal therefore wraps the server action
+in its `useActionState` reducer, records the submitted values and a submit count next to the
+`ActionState`, and remounts its fields (keyed by the count) with those values as defaults;
+`features/auth/ui/dev-sign-in-form.tsx` is the example. After a refusal it moves focus to the
+error summary, since the disabled submit button has dropped it.
+
 ## Caching and revalidation
 
 Tenant data is never cached; a handful of records every tenant sees the same way are

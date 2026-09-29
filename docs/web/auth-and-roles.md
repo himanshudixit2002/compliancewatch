@@ -150,7 +150,8 @@ constructor refuses again (D-016).
 2. The `signIn` server action (`features/auth/actions.ts`) shape-checks the form
    (`parseFakeSignInForm`), asks the provider for the claims, writes the cookie and redirects to
    `safeNext(next, homeFor(session))`. Every expected failure comes back as an `ActionState`
-   with field errors or the problem.
+   with field errors or the problem; the form then shows every value as it was sent (the kind
+   with its roles, the checked boxes, the name, the tenant id) and moves focus to the errors.
 3. `POST /sign-out` (`app/sign-out/route.ts`) expires the cookie on a 303 to the relative
    `/sign-in`, so the browser stays on whatever host it used. It refuses a request from another
    site with a 403 problem (`web-cross-origin-request`; the check is below), and any other

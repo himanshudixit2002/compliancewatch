@@ -67,6 +67,7 @@
   "signIn.devIntro": "Development sign-in: choose a tenant kind, the roles and a display name.",
   "signIn.devNotice": "Nothing is verified here. This form exists only where CW_WEB_ENV is local or test; the real sign-in arrives with the identity service.",
   "signIn.refused": "Sign-in was refused",
+  "signIn.checkFields": "Check the fields marked below.",
   "signIn.tenantKind": "Tenant kind",
   "signIn.roles": "Roles",
   "signIn.rolesHelp": "Choose at least one of the roles this tenant kind allows.",

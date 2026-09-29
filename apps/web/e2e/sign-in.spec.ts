@@ -29,6 +29,34 @@ test.describe("sign-in", () => {
     await checkA11y();
   });
 
+  test("a refused submit keeps every value, the kind with its roles, and focuses the errors", async ({
+    page,
+  }) => {
+    await page.goto("/sign-in");
+    await page.getByLabel("Tenant kind").selectOption("internal");
+    await page.getByLabel("Display name").fill("Example analyst");
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page.getByText("Choose at least one role.")).toBeVisible();
+    await expect(page.getByLabel("Tenant kind")).toHaveValue("internal");
+    await expect(page.getByLabel("Display name")).toHaveValue("Example analyst");
+    await expect(page.getByRole("checkbox", { name: "Analyst" })).not.toBeChecked();
+    await expect(page.locator("[data-slot='sign-in-errors']")).toBeFocused();
+
+    await page.getByRole("checkbox", { name: "Analyst" }).check();
+    await page.getByLabel("Tenant id").fill("not-a-uuid");
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page.getByText("Enter a UUID, or leave it empty.")).toBeVisible();
+    await expect(page.getByLabel("Tenant kind")).toHaveValue("internal");
+    await expect(page.getByLabel("Display name")).toHaveValue("Example analyst");
+    await expect(page.getByLabel("Tenant id")).toHaveValue("not-a-uuid");
+    await expect(page.getByRole("checkbox", { name: "Analyst" })).toBeChecked();
+    await expect(page.locator("[data-slot='sign-in-errors']")).toBeFocused();
+
+    await page.getByLabel("Tenant id").fill("");
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page).toHaveURL(/\/admin$/);
+  });
+
   test("an owner signs in, returns to the requested page, sees the account menu and signs out", async ({
     page,
   }) => {

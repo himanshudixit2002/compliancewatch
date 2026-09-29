@@ -4,7 +4,7 @@ import { runAxe } from "@compliancewatch/ui/test/axe";
 import { describe, expect, it, vi } from "vitest";
 import type { ActionState } from "@/shared/lib/action-state";
 import { signInFormOptions } from "../model/sign-in";
-import { DevSignInForm } from "./dev-sign-in-form";
+import { DevSignInForm, submittedValues } from "./dev-sign-in-form";
 import type { SignInAction } from "./dev-sign-in-form";
 
 const idle: SignInAction = () => Promise.resolve({ status: "idle" });
@@ -77,6 +77,64 @@ describe("DevSignInForm", () => {
     expect(busy.hasAttribute("disabled")).toBe(true);
     resolve({ status: "idle" });
     await screen.findByRole("button", { name: "Sign in" });
+  });
+
+  it("keeps every value, the kind with its roles, after a refused submit and focuses the errors", async () => {
+    const refuse = vi.fn<SignInAction>(() =>
+      Promise.resolve({
+        status: "error",
+        fieldErrors: { tenantId: ["Enter a UUID, or leave it empty."] },
+      }),
+    );
+    const { container } = render(<DevSignInForm action={refuse} options={options} />);
+    await userEvent.selectOptions(screen.getByLabelText("Tenant kind"), "internal");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Analyst" }));
+    await userEvent.type(screen.getByLabelText("Display name"), "Example analyst");
+    await userEvent.type(screen.getByLabelText("Tenant id"), "not-a-uuid");
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByText("Enter a UUID, or leave it empty.")).toBeDefined();
+
+    expect((screen.getByLabelText("Tenant kind") as HTMLSelectElement).value).toBe("internal");
+    expect(screen.getAllByRole("checkbox").map((box) => box.getAttribute("value"))).toEqual([
+      "analyst",
+      "reviewer",
+      "admin",
+    ]);
+    expect(screen.getByRole("checkbox", { name: "Analyst" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("checkbox", { name: "Admin" }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe(
+      "Example analyst",
+    );
+    expect((screen.getByLabelText("Tenant id") as HTMLInputElement).value).toBe("not-a-uuid");
+    const summary = container.querySelector("[data-slot='sign-in-errors']");
+    expect(summary?.textContent).toContain("Check the fields marked below.");
+    await waitFor(() => expect(document.activeElement).toBe(summary));
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(refuse).toHaveBeenCalledTimes(2));
+    const resent = refuse.mock.calls[1]?.[1] as FormData;
+    expect(resent.get("tenantKind")).toBe("internal");
+    expect(resent.getAll("roles")).toEqual(["analyst"]);
+    expect(resent.get("displayName")).toBe("Example analyst");
+    expect(resent.get("tenantId")).toBe("not-a-uuid");
+  });
+
+  it("reads the submitted values back from the form data", () => {
+    const data = new FormData();
+    data.set("tenantKind", "ca_firm");
+    data.append("roles", "ca_admin");
+    data.append("roles", "ca_staff");
+    data.set("displayName", "Example CA admin");
+    expect(submittedValues(data, options.fields)).toEqual({
+      tenantKind: "ca_firm",
+      roles: ["ca_admin", "ca_staff"],
+      displayName: "Example CA admin",
+      tenantId: "",
+    });
   });
 
   it("shows field errors, form errors and the problem the action returns", async () => {
