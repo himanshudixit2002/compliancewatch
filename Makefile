@@ -248,11 +248,13 @@ migrate: check-uv ## alembic upgrade head for every service, or one: make migrat
 	    $(UV) run --package compliancewatch-$$svc alembic -c services/$$svc/alembic.ini upgrade head || exit 1; \
 	done
 
+# run and worker name the process's service client after the service (CW_SERVICE_CLIENT_ID) unless
+# .env or the environment sets it; no token is sent until CW_SERVICE_CLIENT_SECRET is set too.
 run: check-uv ## Run one service with reload: make run SERVICE=identity [PORT=8001]
 	@[ -n "$(SERVICE)" ] || { echo "usage: make run SERVICE=<identity|profile|...> [PORT=8000]"; exit 1; }
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$(SCHEMA)%2Cpublic"; \
-	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \
+	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" CW_SERVICE_CLIENT_ID="$${CW_SERVICE_CLIENT_ID:-$(SERVICE)}" \
 	  $(UV) run --package compliancewatch-$(SERVICE) uvicorn $(PKG).main:app --reload --port $(PORT) \
 	    --reload-dir services/$(SERVICE)/src --reload-dir packages/py-common/src \
 	    --reload-dir packages/domain-kernel/src --reload-dir packages/ontology/src
@@ -272,7 +274,7 @@ worker: check-uv ## Run a service's worker process, python -m <pkg>.worker (cons
 	@[ -n "$(SERVICE)" ] || { echo "usage: make worker SERVICE=<pipeline|notification|...>"; exit 1; }
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$(SCHEMA)%2Cpublic"; \
-	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \
+	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" CW_SERVICE_CLIENT_ID="$${CW_SERVICE_CLIENT_ID:-$(SERVICE)}" \
 	  $(UV) run --package compliancewatch-$(SERVICE) python -m $(PKG).worker
 
 relay: check-uv ## Run the outbox relay for one service's schema: make relay SERVICE=obligation

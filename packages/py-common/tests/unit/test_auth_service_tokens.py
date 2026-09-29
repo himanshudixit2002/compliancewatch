@@ -1,0 +1,315 @@
+import json
+import threading
+from collections.abc import Callable
+from typing import Any
+
+import httpx2
+import pytest
+from pydantic import SecretStr, ValidationError
+
+from py_common.auth import (
+    BearerAuth,
+    ServiceTokenSource,
+    ServiceTokenUnavailableError,
+    service_auth_from,
+)
+from py_common.auth.service_tokens import SERVICE_TOKENS_PATH
+from py_common.settings import Settings
+
+_IDENTITY = "http://identity.test"
+_TARGET = "http://rulebook.test/v1/rulebook/documents"
+_CLIENT_SECRET = SecretStr("client-" + "c" * 32)
+"""The demo client secret these tests exchange; the fake identity checks it."""
+
+
+class _Identity:
+    """The identity service's token route, for MockTransport: counts exchanges and numbers the
+    tokens it issues."""
+
+    def __init__(self, expires_in: object = 600) -> None:
+        self.expires_in = expires_in
+        self.issued = 0
+        self.requests: list[dict[str, Any]] = []
+        self.answer: Callable[[], httpx2.Response] | None = None
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        assert str(request.url) == _IDENTITY + SERVICE_TOKENS_PATH
+        assert request.method == "POST"
+        self.requests.append(json.loads(request.content))
+        if self.answer is not None:
+            return self.answer()
+        self.issued += 1
+        return httpx2.Response(
+            200,
+            json={
+                "access_token": f"token-{self.issued}",
+                "token_type": "Bearer",
+                "expires_in": self.expires_in,
+                "scopes": ["rulebook:write"],
+            },
+        )
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 50.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _source(identity: _Identity, clock: _Clock | None = None) -> ServiceTokenSource:
+    return ServiceTokenSource(
+        _IDENTITY + "/",
+        "pipeline",
+        _CLIENT_SECRET,
+        client=httpx2.Client(transport=httpx2.MockTransport(identity)),
+        clock=clock or _Clock(),
+    )
+
+
+def test_the_token_is_cached_until_a_minute_before_it_expires() -> None:
+    identity, clock = _Identity(expires_in=600), _Clock()
+    source = _source(identity, clock)
+    assert source.client_id == "pipeline"
+    assert source.token() == "token-1"
+    assert identity.requests == [
+        {"client_id": "pipeline", "client_secret": _CLIENT_SECRET.get_secret_value()}
+    ]
+    clock.now += 539
+    assert source.token() == "token-1"
+    assert identity.issued == 1
+    clock.now += 1
+    assert source.token() == "token-2"
+    assert identity.issued == 2
+
+
+def test_a_short_lived_token_is_refreshed_at_half_its_lifetime() -> None:
+    identity, clock = _Identity(expires_in=60), _Clock()
+    source = _source(identity, clock)
+    assert source.token() == "token-1"
+    clock.now += 29
+    assert source.token() == "token-1"
+    clock.now += 1
+    assert source.token() == "token-2"
+
+
+def test_invalidate_drops_only_the_cached_token() -> None:
+    identity = _Identity()
+    source = _source(identity)
+    first = source.token()
+    source.invalidate("some other token")
+    assert source.token() == first
+    source.invalidate(first)
+    assert source.token() == "token-2"
+
+
+def test_concurrent_callers_share_one_exchange() -> None:
+    identity = _Identity()
+    source = _source(identity)
+    seen: list[str] = []
+    threads = [threading.Thread(target=lambda: seen.append(source.token())) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert seen == ["token-1"] * 8
+    assert identity.issued == 1
+
+
+@pytest.mark.parametrize(
+    ("answer", "message"),
+    [
+        (
+            lambda: httpx2.Response(
+                401, json={"type": "urn:compliancewatch:problem:identity-service-client-invalid"}
+            ),
+            "401 urn:compliancewatch:problem:identity-service-client-invalid",
+        ),
+        (lambda: httpx2.Response(503, content=b"down"), "refused a token for client pipeline: 503"),
+        (lambda: httpx2.Response(200, content=b"<html>"), "not JSON"),
+        (lambda: httpx2.Response(200, json=["token"]), "lacks a bearer access_token"),
+        (lambda: httpx2.Response(200, json={"access_token": "t"}), "lacks a bearer"),
+        (
+            lambda: httpx2.Response(200, json={"access_token": "t", "expires_in": 0}),
+            "lacks a bearer",
+        ),
+        (
+            lambda: httpx2.Response(200, json={"access_token": "t", "expires_in": True}),
+            "lacks a bearer",
+        ),
+        (
+            lambda: httpx2.Response(
+                200, json={"access_token": "t", "expires_in": 600, "token_type": "mac"}
+            ),
+            "lacks a bearer",
+        ),
+    ],
+)
+def test_a_refusal_or_a_bad_answer_is_surfaced_as_an_error(
+    answer: Callable[[], httpx2.Response], message: str
+) -> None:
+    identity = _Identity()
+    identity.answer = answer
+    with pytest.raises(ServiceTokenUnavailableError, match=message) as raised:
+        _source(identity).token()
+    assert _CLIENT_SECRET.get_secret_value() not in str(raised.value)
+
+
+def test_an_unreachable_identity_is_surfaced_as_an_error() -> None:
+    def down(_: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("connection refused")
+
+    source = ServiceTokenSource(
+        _IDENTITY,
+        "pipeline",
+        _CLIENT_SECRET,
+        client=httpx2.Client(transport=httpx2.MockTransport(down)),
+    )
+    with pytest.raises(ServiceTokenUnavailableError, match=r"could not be reached.*ConnectError"):
+        source.token()
+
+
+def test_a_failed_refresh_leaves_the_next_call_to_try_again() -> None:
+    identity, clock = _Identity(), _Clock()
+    source = _source(identity, clock)
+    source.token()
+    clock.now += 600
+    identity.answer = lambda: httpx2.Response(503)
+    with pytest.raises(ServiceTokenUnavailableError):
+        source.token()
+    identity.answer = None
+    assert source.token() == "token-2"
+
+
+def test_a_source_needs_a_client_id() -> None:
+    with pytest.raises(ValueError, match="client id"):
+        ServiceTokenSource(_IDENTITY, " ", _CLIENT_SECRET)
+
+
+# ---------------------------------------------------------------- BearerAuth
+
+
+class _Rulebook:
+    """A called service that records the Authorization header and answers 401 while told to."""
+
+    def __init__(self) -> None:
+        self.seen: list[tuple[str | None, bytes]] = []
+        self.refuse: set[str] = set()
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        authorization = request.headers.get("authorization")
+        self.seen.append((authorization, request.content))
+        if authorization in self.refuse:
+            return httpx2.Response(401, json={"type": "auth-token-invalid"})
+        return httpx2.Response(200, json={"ok": True})
+
+
+def test_bearer_auth_sends_the_token_on_every_request() -> None:
+    identity, rulebook = _Identity(), _Rulebook()
+    auth = BearerAuth(_source(identity))
+    with httpx2.Client(transport=httpx2.MockTransport(rulebook), auth=auth) as client:
+        assert client.put(_TARGET, json={"a": 1}).status_code == 200
+        assert client.get(_TARGET).status_code == 200
+    assert [authorization for authorization, _ in rulebook.seen] == ["Bearer token-1"] * 2
+    assert identity.issued == 1
+
+
+def test_a_401_refreshes_the_token_and_resends_the_request_once() -> None:
+    identity, rulebook = _Identity(), _Rulebook()
+    rulebook.refuse = {"Bearer token-1"}
+    with httpx2.Client(
+        transport=httpx2.MockTransport(rulebook), auth=BearerAuth(_source(identity))
+    ) as client:
+        response = client.put(_TARGET, json={"document": "d1"})
+    assert response.status_code == 200
+    assert [authorization for authorization, _ in rulebook.seen] == [
+        "Bearer token-1",
+        "Bearer token-2",
+    ]
+    assert rulebook.seen[0][1] == rulebook.seen[1][1] == b'{"document":"d1"}'
+
+
+def test_a_second_401_is_returned_to_the_caller() -> None:
+    identity, rulebook = _Identity(), _Rulebook()
+    rulebook.refuse = {"Bearer token-1", "Bearer token-2"}
+    with httpx2.Client(
+        transport=httpx2.MockTransport(rulebook), auth=BearerAuth(_source(identity))
+    ) as client:
+        assert client.get(_TARGET).status_code == 401
+    assert len(rulebook.seen) == 2
+
+
+def test_a_token_failure_surfaces_from_the_call() -> None:
+    identity = _Identity()
+    identity.answer = lambda: httpx2.Response(401)
+    with (
+        httpx2.Client(
+            transport=httpx2.MockTransport(_Rulebook()), auth=BearerAuth(_source(identity))
+        ) as client,
+        pytest.raises(ServiceTokenUnavailableError),
+    ):
+        client.get(_TARGET)
+
+
+async def test_bearer_auth_works_for_async_clients() -> None:
+    identity, rulebook = _Identity(), _Rulebook()
+    rulebook.refuse = {"Bearer token-1"}
+    auth = BearerAuth(_source(identity))
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(rulebook), auth=auth) as client:
+        first = await client.post(_TARGET, json={"x": 1})
+        second = await client.get(_TARGET)
+    assert (first.status_code, second.status_code) == (200, 200)
+    assert [authorization for authorization, _ in rulebook.seen] == [
+        "Bearer token-1",
+        "Bearer token-2",
+        "Bearer token-2",
+    ]
+
+
+# ---------------------------------------------------------------- service_auth_from
+
+
+def _settings(**values: Any) -> Settings:
+    return Settings(_env_file=None, identity_url=_IDENTITY, **values)
+
+
+def test_no_secret_means_no_token_is_sent() -> None:
+    assert service_auth_from(_settings()) is None
+    assert service_auth_from(_settings(service_client_id="qa")) is None
+    assert service_auth_from(_settings(service_client_id="qa", service_client_secret="")) is None
+
+
+def test_a_secret_needs_a_client_id() -> None:
+    with pytest.raises(
+        ValidationError, match="CW_SERVICE_CLIENT_SECRET needs CW_SERVICE_CLIENT_ID"
+    ):
+        _settings(service_client_secret=_CLIENT_SECRET)
+
+
+def test_clients_built_from_the_same_settings_share_one_token_source() -> None:
+    settings = _settings(service_client_id="qa", service_client_secret=_CLIENT_SECRET)
+    first, second = service_auth_from(settings), service_auth_from(settings)
+    assert isinstance(first, BearerAuth)
+    assert isinstance(second, BearerAuth)
+    assert first.source is second.source
+    assert first.source.client_id == "qa"
+    other = service_auth_from(
+        _settings(service_client_id="pipeline", service_client_secret=_CLIENT_SECRET)
+    )
+    assert other is not None
+    assert other.source is not first.source
+
+
+def test_an_injected_client_gets_its_own_source() -> None:
+    identity, rulebook = _Identity(), _Rulebook()
+    settings = _settings(service_client_id="pipeline", service_client_secret=_CLIENT_SECRET)
+    auth = service_auth_from(
+        settings, client=httpx2.Client(transport=httpx2.MockTransport(identity))
+    )
+    assert auth is not None
+    assert auth.source is not service_auth_from(settings).source  # type: ignore[union-attr]
+    with httpx2.Client(transport=httpx2.MockTransport(rulebook), auth=auth) as client:
+        client.get(_TARGET)
+    assert rulebook.seen[0][0] == "Bearer token-1"
+    assert identity.requests[0]["client_id"] == "pipeline"

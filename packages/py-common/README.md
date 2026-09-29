@@ -27,6 +27,7 @@ src/py_common/
     errors.py          # 401 token required, 401 token invalid, 403 forbidden, 403 tenant mismatch, 503 keys unavailable
     context.py         # current_principal, bind_principal: actor and tenant_id in the log context
     fastapi.py         # Authenticator by CW_AUTH_MODE, authenticate, tenant_scope, require_roles, shared_token_or_roles
+    service_tokens.py  # ServiceTokenSource (cached until a minute before expiry), BearerAuth, service_auth_from
     testing.py         # TestIssuer: tokens signed with a key generated at run time; bearer(token)
   telemetry.py         # configure_telemetry (OTLP to CW_OTEL_ENDPOINT), instrument_app, instrument_engine
   temporal/
@@ -120,6 +121,15 @@ A route reads its caller through dependencies in `py_common.auth.fastapi`:
   `dual` and `token` mode; the secret is accepted only in `header` and `dual` mode and fails
   closed when unset. The two errors are the service's own.
 - `Authenticated`: any verified principal; the anonymous one is a 401.
+
+A service calls others with its own token. `CW_SERVICE_CLIENT_ID` and `CW_SERVICE_CLIENT_SECRET`
+name its client at the identity service (`CW_IDENTITY_URL`); `make run` and `make worker` set the
+id to the service's name unless it is set already. Every outgoing `httpx2` client is built with
+`auth=service_auth_from(settings)`, which is None, so no token is sent, until the secret is set.
+The token comes from `POST /v1/identity/service-tokens`, is kept until a minute before it expires
+and is shared by the clients built from the same settings; a 401 from the called service drops it
+and resends the request once with a fresh one. When identity cannot be reached or refuses the
+client, the call fails with `service-token-unavailable` (503).
 
 Tests use `py_common.auth.testing.TestIssuer`, which generates its key at run time:
 `Settings(**issuer.settings_overrides("token"))` makes a service verify its tokens, and

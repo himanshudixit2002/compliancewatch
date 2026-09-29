@@ -20,6 +20,10 @@ Production (``CW_ENV=prod``) refuses anything but ``token``. Tokens are ES256 JW
 inline key set, for tests and static configuration) and otherwise from ``auth_jwks_url``, cached
 for an hour. ``auth_leeway_seconds`` allows for clock skew on the time claims.
 
+``service_client_id`` and ``service_client_secret`` are this process's service client at the
+identity service (``identity_url``). With a secret set, ``py_common.auth.service_tokens`` gets
+access tokens with them and every outgoing HTTP client sends one; without it no token is sent.
+
 ``env_files`` are the ``.env`` files the settings were read from: ``.env`` by default, none when
 they were built with ``_env_file=None`` (tests, the demo, the evals). ``py_common.flags`` reads
 flags from the same files, so settings kept away from a developer's ``.env`` keep their flags
@@ -69,6 +73,9 @@ class Settings(BaseSettings):
     auth_jwks_url: str = "http://localhost:8001/v1/identity/.well-known/jwks.json"
     auth_jwks_json: SecretStr | None = None
     auth_leeway_seconds: int = Field(default=30, ge=0, le=300)
+    identity_url: str = "http://localhost:8001"
+    service_client_id: str = ""
+    service_client_secret: SecretStr | None = None
     _env_files: tuple[Path, ...] = PrivateAttr(default=())
 
     if not TYPE_CHECKING:
@@ -98,6 +105,12 @@ class Settings(BaseSettings):
             raise ValueError(
                 "CW_FLAGS_PROVIDER=unleash needs CW_UNLEASH_URL and CW_UNLEASH_API_TOKEN"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _require_service_client_id(self) -> Self:
+        if self.service_client_secret is not None and not self.service_client_id.strip():
+            raise ValueError("CW_SERVICE_CLIENT_SECRET needs CW_SERVICE_CLIENT_ID")
         return self
 
     @model_validator(mode="after")

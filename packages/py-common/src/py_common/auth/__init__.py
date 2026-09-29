@@ -4,6 +4,8 @@
 - ``tokens``: ``TokenIssuer`` (the identity service's), ``TokenVerifier`` and the key sources
   ``JwksUrlSource`` (cached) and ``StaticKeySource``.
 - ``errors``: the 401, 403 and 503 problems, mapped for every service by py-common.
+- ``service_tokens``: ``ServiceTokenSource`` (this service's own token, cached),
+  ``BearerAuth`` for ``httpx2`` clients and ``service_auth_from(settings)``.
 - ``context``: ``current_principal`` and ``bind_principal``, which names the actor in the logs.
 - ``fastapi``: ``Authenticator`` by ``CW_AUTH_MODE``, the ``authenticate`` dependency,
   ``tenant_scope``, ``require_roles`` and ``shared_token_or_roles``.
@@ -27,6 +29,7 @@ from py_common.auth.errors import (
     AuthTenantMismatchError,
     AuthTokenInvalidError,
     AuthTokenRequiredError,
+    ServiceTokenUnavailableError,
 )
 from py_common.auth.keys import (
     ALGORITHM,
@@ -35,6 +38,7 @@ from py_common.auth.keys import (
     generate_signing_key,
     load_signing_keys,
 )
+from py_common.auth.service_tokens import BearerAuth, ServiceTokenSource, service_auth_from
 from py_common.auth.tokens import (
     IssuedToken,
     JwksUrlSource,
@@ -53,10 +57,13 @@ __all__ = [
     "AuthTenantMismatchError",
     "AuthTokenInvalidError",
     "AuthTokenRequiredError",
+    "BearerAuth",
     "IssuedToken",
     "JwksUrlSource",
     "KeySet",
     "KeySource",
+    "ServiceTokenSource",
+    "ServiceTokenUnavailableError",
     "SigningKey",
     "StaticKeySource",
     "TokenIssuer",
@@ -70,5 +77,6 @@ __all__ = [
     "principal_bound",
     "principal_from_claims",
     "principal_or_anonymous",
+    "service_auth_from",
     "unbind_principal",
 ]

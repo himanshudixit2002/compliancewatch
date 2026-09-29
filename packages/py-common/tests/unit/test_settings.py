@@ -31,6 +31,9 @@ def test_defaults() -> None:
     assert settings.auth_jwks_url == "http://localhost:8001/v1/identity/.well-known/jwks.json"
     assert settings.auth_jwks_json is None
     assert settings.auth_leeway_seconds == 30
+    assert settings.identity_url == "http://localhost:8001"
+    assert settings.service_client_id == ""
+    assert settings.service_client_secret is None
 
 
 def test_env_prefix_and_level_normalisation(monkeypatch: pytest.MonkeyPatch) -> None:

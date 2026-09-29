@@ -1,5 +1,5 @@
 """The problems authentication answers with. py-common maps them for every service
-(``DEFAULT_STATUS_BY_ERROR``): 401, 401, 403, 403 and 503.
+(``DEFAULT_STATUS_BY_ERROR``): 401, 401, 403, 403, 503 and 503.
 
 A 401 carries ``WWW-Authenticate: Bearer`` (RFC 6750), with ``error="invalid_token"`` when a
 token came but failed verification.
@@ -61,3 +61,11 @@ class AuthKeysUnavailableError(DomainError):
 
     type_slug = "auth-keys-unavailable"
     title = "Token signing keys are unavailable"
+
+
+class ServiceTokenUnavailableError(DomainError):
+    """This service could not get its own access token from the identity service, so a call
+    to another service could not be made (503)."""
+
+    type_slug = "service-token-unavailable"
+    title = "Service access token could not be obtained"

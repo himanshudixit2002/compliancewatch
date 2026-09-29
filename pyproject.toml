@@ -210,7 +210,7 @@ name = "py_common.auth imports no web or database framework outside py_common.au
 type = "forbidden"
 source_modules = [
   "py_common.auth.context", "py_common.auth.errors", "py_common.auth.keys",
-  "py_common.auth.tokens", "py_common.auth.testing",
+  "py_common.auth.service_tokens", "py_common.auth.tokens", "py_common.auth.testing",
 ]
 forbidden_modules = [
   "fastapi", "starlette", "sqlalchemy", "alembic", "psycopg",

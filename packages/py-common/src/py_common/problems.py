@@ -32,6 +32,7 @@ from py_common.auth.errors import (
     AuthTenantMismatchError,
     AuthTokenInvalidError,
     AuthTokenRequiredError,
+    ServiceTokenUnavailableError,
 )
 from py_common.flags import UnknownFlagError
 from py_common.idempotency.errors import (
@@ -61,6 +62,7 @@ DEFAULT_STATUS_BY_ERROR: Mapping[type[DomainError], int] = {
     AuthForbiddenError: 403,
     AuthTenantMismatchError: 403,
     AuthKeysUnavailableError: 503,
+    ServiceTokenUnavailableError: 503,
 }
 MISSING_HEADER_ERRORS: Mapping[str, type[DomainError]] = {
     IDEMPOTENCY_KEY_HEADER.lower(): IdempotencyKeyRequiredError,
