@@ -13,6 +13,8 @@ Design reference: Project Foundation guide, sections 13, 14 and 18.
 ```
 src/py_common/
   settings.py          # pydantic-settings, env_prefix CW_, env_file .env
+  flags.py             # configure_flags, flag_enabled, flag_value: OpenFeature over the flag registry (env or Unleash)
+  flags_registry.json  # generated from packages/flags/registry.json by make flags; never edited by hand
   logging.py           # structlog JSON logging bridging stdlib records; correlation_id/tenant_id contextvars
   health.py            # GET /health and GET /ready router with pluggable readiness checks
   request_context.py   # x-request-id middleware; correlation_id_of(request) for handlers and dependencies
@@ -44,7 +46,7 @@ src/py_common/
     errors.py          # 428 key required, 422 key reused, 409 request in flight
     __main__.py        # python -m py_common.idempotency purge
 tests/unit/
-tests/integration/     # the outbox against Postgres and Redpanda, the migration helpers and idempotency keys on Postgres (testcontainers)
+tests/integration/     # the outbox against Postgres and Redpanda, the migration helpers and idempotency keys on Postgres, flags on an Unleash server (testcontainers)
 ```
 
 ## Problem details
@@ -54,8 +56,8 @@ Every error a service returns is `application/problem+json` (RFC 9457) with `typ
 every app. A `DomainError` maps to the status the service passes in `problem_status`, for
 example `{BudgetExceededError: 429}`; the most specific class in the error's MRO wins, the
 defaults (`InvariantViolationError` 422, `UnknownAttributeError` 404, and py-common's own
-`InvalidCursorError` 422 and idempotency errors 428, 422 and 409) apply underneath, and an
-unmapped domain error is a 400. An error class may define `problem_headers` (a mapping) and
+`InvalidCursorError` 422, idempotency errors 428, 422 and 409, and `UnknownFlagError` 500)
+apply underneath, and an unmapped domain error is a 400. An error class may define `problem_headers` (a mapping) and
 those headers are copied onto the response; the gateway's budget error sets `Retry-After` that
 way. Request validation errors are 422 with an `errors` list that does not echo the submitted
 value, `HTTPException` keeps its status with type `about:blank`, and an unhandled exception is
@@ -65,6 +67,22 @@ a generic 500 that is logged with the correlation id. Routers declare the shape 
 a declaration: the 422 of request validation is a `Problem` (FastAPI's default
 `HTTPValidationError` entry is replaced), and every operation that takes a body lists a 400
 for a body that is not UTF-8, which fails before validation runs.
+
+## Feature flags
+
+`py_common.flags` reads the flag registry (`packages/flags/registry.json`, through the copy
+`make flags` writes) with OpenFeature. A service calls `configure_flags(settings)` once at
+start-up; `flag_enabled("qa.kag", tenant_id)` answers a bool flag and `flag_value(name)` a
+string flag, and a name the registry does not hold raises `UnknownFlagError`. With
+`CW_FLAGS_PROVIDER=env` (the default) a flag's value comes from the variable the code already
+reads, else `CW_FLAG_<NAME>` (dots as underscores, so `CW_FLAG_PROFILE_GSTIN_CATEGORY_PREFILL`),
+else the registry default; a tenant-targeted flag that is on narrows to the tenant ids in its
+allow-list (`CW_FLAG_<NAME>__TENANTS`, or the variable the code already reads, such as
+`CW_QA_KAG_TENANTS`). With `CW_FLAGS_PROVIDER=unleash` the flags come from an Unleash server
+at `CW_UNLEASH_URL` with the client token `CW_UNLEASH_API_TOKEN`, under their registry names;
+the tenant id is Unleash's `userId` and the `tenantId` property. That provider needs the
+optional extra `py-common[unleash]`. A malformed value or a flag Unleash does not hold answers
+the registry default, which is off, and logs `flag_evaluation_failed`.
 
 ## Telemetry
 

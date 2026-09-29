@@ -59,9 +59,26 @@ and `Literal` field:
 A field that is neither fails the check, so a new switch cannot ship unregistered. Entries without
 a settings field are allowed: the WhatsApp bot's switches are read in TypeScript.
 
+## Reading a flag
+
+Python services use `py_common.flags` (packages/py-common/README.md, "Feature flags"): call
+`configure_flags(settings)` at start-up, then `flag_enabled(name, tenant_id)` or
+`flag_value(name)`. `CW_FLAGS_PROVIDER` picks the provider:
+
+- `env` (the default) reads the entry's `env` variable, else `CW_FLAG_<NAME>` (the name upper
+  cased, dots as underscores), else the default. A tenant-targeted flag that is on narrows to its
+  allow-list, `tenants_env` or `CW_FLAG_<NAME>__TENANTS`; with no list it is on for every tenant.
+- `unleash` reads an Unleash server at `CW_UNLEASH_URL` with the client token
+  `CW_UNLEASH_API_TOKEN`. Create each flag in Unleash under its registry name; a string flag is a
+  variant whose payload (or name) is one of its values. The tenant id is Unleash's `userId`.
+  `make dev-flags` starts one locally.
+
+A flag Unleash does not hold, or a value that does not parse, answers the default.
+
 ## Adding a flag
 
-1. Add the setting, named `*_enabled` for a bool, defaulting off.
+1. Add the setting, named `*_enabled` for a bool, defaulting off; or, for a flag the code reads
+   through `flag_enabled`, no setting at all.
 2. Add its entry to `registry.json` in name order, with the owner, the removal condition and an
    expiry date.
 3. Run `make flags` and commit `registry.json` with the regenerated copy in the same change.

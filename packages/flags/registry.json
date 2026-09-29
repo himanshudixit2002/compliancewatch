@@ -2,6 +2,19 @@
   "$schema": "./registry.schema.json",
   "flags": [
     {
+      "name": "flags.provider",
+      "type": "string",
+      "default": "env",
+      "values": ["env", "unleash"],
+      "owner": "platform",
+      "description": "Where py_common.flags and @compliancewatch/flags read flags: env from the environment, unleash from an Unleash server at CW_UNLEASH_URL with CW_UNLEASH_API_TOKEN.",
+      "removal": "Becomes plain configuration once a hosted Unleash runs in staging and production.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_FLAGS_PROVIDER",
+      "services": ["py-common", "flags"]
+    },
+    {
       "name": "identity.billing_provider",
       "type": "string",
       "default": "none",

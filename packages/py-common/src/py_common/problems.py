@@ -24,6 +24,7 @@ from domain_kernel.errors import (
     InvariantViolationError,
     UnknownAttributeError,
 )
+from py_common.flags import UnknownFlagError
 from py_common.idempotency.errors import (
     IdempotencyKeyRequiredError,
     IdempotencyKeyReusedError,
@@ -44,6 +45,7 @@ DEFAULT_STATUS_BY_ERROR: Mapping[type[DomainError], int] = {
     IdempotencyKeyRequiredError: 428,
     IdempotencyKeyReusedError: 422,
     IdempotencyRequestInFlightError: 409,
+    UnknownFlagError: 500,
 }
 
 log = get_logger(__name__)

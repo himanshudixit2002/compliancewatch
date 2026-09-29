@@ -382,11 +382,22 @@ data-quality: check-uv ## Rulebook data-quality checks on the local rulebook sch
 	  $(UV) run --package compliancewatch-rulebook rulebook-quality $(ARGS)
 
 # ---- Feature flags (packages/flags/registry.json) -------------------------------------------
-.PHONY: flags flags-check
+.PHONY: flags flags-check dev-flags
 CHECKS += flags-check
+# dev-down and dev-reset stop the Unleash container too.
+PROFILES += --profile flags
 
 flags: check-uv ## Write py-common's copy of the flag registry, then run flags-check
 	$(UV) run python infra/scripts/check_flags.py write
 
 flags-check: check-uv ## Flag registry: schema, owners, expiry, bool defaults off, py-common copy current, every switch in settings registered
 	$(UV) run python infra/scripts/check_flags.py check
+
+dev-flags: check-docker ## Start Unleash for CW_FLAGS_PROVIDER=unleash (compose profile: flags); creates its database when missing
+	@[ -f .env ] || { cp .env.example .env && echo "created .env from .env.example"; }
+	$(COMPOSE) up -d --wait --wait-timeout 180 postgres
+	$(COMPOSE) exec -T postgres sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < infra/dev/postgres/40-unleash.sql
+	$(COMPOSE) --profile flags up -d --wait --wait-timeout 180 unleash
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	echo "  Unleash http://localhost:$${UNLEASH_PORT:-4242} (first login admin / unleash4all)"; \
+	echo "  CW_FLAGS_PROVIDER=unleash CW_UNLEASH_URL=http://localhost:$${UNLEASH_PORT:-4242}/api CW_UNLEASH_API_TOKEN=<the client token in docker-compose.yml>"

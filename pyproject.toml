@@ -24,11 +24,16 @@ dev = [
   "datamodel-code-generator==0.83.0",
   # Property tests of each committed OpenAPI spec against its service (tests/contract/test_api_properties.py)
   "schemathesis>=4.28,<5",
+  # The Unleash flag provider's tests run against the real client (py-common's optional extra)
+  "py-common[unleash]",
 ]
 
 [tool.uv]
 package = false
 required-version = ">=0.8"
+
+[tool.uv.sources]
+py-common = { workspace = true }
 
 [tool.uv.workspace]
 members = ["packages/*", "packages/contracts/clients/python", "services/*", "evals/harness", "tools/demo"]

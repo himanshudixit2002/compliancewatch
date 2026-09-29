@@ -394,6 +394,7 @@ jobs:
           docker compose config -q
           docker compose --profile observability config -q
           docker compose --profile llm config -q
+          docker compose --profile flags config -q
       - name: Start the stack and wait for health
         run: docker compose up -d --wait --wait-timeout 180
       - name: Schemas, pgvector, Redpanda and Temporal are up

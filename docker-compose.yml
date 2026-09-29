@@ -12,6 +12,7 @@
 #   tempo        --profile observability traces, reached through Grafana only
 #   grafana      --profile observability http://localhost:3030 (anonymous admin in dev; dashboard "ComplianceWatch services")
 #   fake-llm     --profile llm           http://localhost:8090 (make dev-llm): llm-gateway image, fake provider
+#   unleash      --profile flags         http://localhost:4242 (make dev-flags): feature flags for CW_FLAGS_PROVIDER=unleash
 #
 # Host ports and credentials come from .env (copy .env.example). Every ${VAR:-default} has a
 # default so `docker compose config` validates without a .env file.
@@ -31,6 +32,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       # Runs once, on an empty volume only. Changed the file? `make dev-reset`.
       - ./infra/dev/postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+      - ./infra/dev/postgres/40-unleash.sql:/docker-entrypoint-initdb.d/40-unleash.sql:ro
     healthcheck:
       # -h forces TCP. The entrypoint's temporary init-time server listens on the unix socket
       # only, so a socket-based pg_isready reports "ready" before init.sql has run and
@@ -265,6 +267,32 @@ services:
       timeout: 5s
       retries: 12
       start_period: 5s
+
+  unleash:
+    # Feature flags for CW_FLAGS_PROVIDER=unleash (profile flags, make dev-flags), with its state in
+    # the unleash database of the shared Postgres (infra/dev/postgres/40-unleash.sql). The tokens
+    # are for local runs only: the admin token opens the admin API, and services send the client
+    # token as CW_UNLEASH_API_TOKEN with CW_UNLEASH_URL=http://localhost:4242/api. The UI's
+    # first login is admin / unleash4all.
+    image: unleashorg/unleash-server:8.2.0
+    profiles: ["flags"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-cw}:${POSTGRES_PASSWORD:-cw}@postgres:5432/unleash
+      DATABASE_SSL: "false"
+      LOG_LEVEL: warn
+      INIT_ADMIN_API_TOKENS: ${UNLEASH_ADMIN_TOKEN:-*:*.dev-only-unleash-admin}
+      INIT_BACKEND_API_TOKENS: ${UNLEASH_CLIENT_TOKEN:-default:development.dev-only-unleash-client}
+    ports:
+      - "${UNLEASH_PORT:-4242}:4242"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4242/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
 
 volumes:
   postgres_data:
