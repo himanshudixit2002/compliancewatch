@@ -7,7 +7,9 @@
 # job and its catalog rules in the dev-stack job), 4 integration tests (testcontainers) for the
 # packages a change affects, an ops job (runbook links, promtool rules, actionlint), a compose
 # dev-stack smoke, secrets scanning, SAST (semgrep) and a dependency and config scan (trivy), both
-# reported to code scanning. Steps 5-7 are listed as TODO at the end.
+# reported to code scanning. The job "CI gate" needs every other job and is the one check branch
+# protection requires; infra/scripts/check_ci_gate.py fails when a job is missing from its needs.
+# Steps 5-7 are listed as TODO at the end.
 name: ci
 
 on:
@@ -357,6 +359,8 @@ jobs:
         run: make runbooks-check
       - name: Migration files (one head per service, names, downgrades, marked contract steps)
         run: make migrations-check
+      - name: Every ci.yml job is in the needs of the required check, CI gate
+        run: make ci-gate-check
       - name: Alert rules pass promtool check and their unit tests (alerts.test.yml)
         run: make alerts-check
       # The same check as `make ci-lint`, from the image so the runner needs no install. The
@@ -542,6 +546,33 @@ jobs:
         with:
           sarif_file: trivy.sarif
           category: trivy
+
+  # The one check branch protection requires. A job that path filters skip counts as passed; any
+  # other result, a failure or a cancellation, fails the gate. New jobs go above this one and into
+  # its needs (make ci-gate-check fails otherwise).
+  gate:
+    name: CI gate
+    needs:
+      - changes
+      - python
+      - evals
+      - typescript
+      - contracts
+      - integration
+      - ops
+      - dev-stack
+      - gitleaks
+      - sast
+      - dependency-scan
+    if: always() # a failed need would otherwise skip the gate, and a skipped check passes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job succeeded or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$RESULTS"
+          jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<< "$RESULTS" > /dev/null
 
 # -----------------------------------------------------------------------------------------------
 # TODO (guide section 17, steps 5-7) - not implemented yet:

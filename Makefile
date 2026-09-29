@@ -358,3 +358,10 @@ sast: check-docker ## Semgrep: registry packs and the rules in .semgrep; an ERRO
 deps-scan: check-docker ## Trivy: fixable HIGH and CRITICAL vulnerabilities and misconfigurations (settings in .trivy.yaml)
 	docker run --rm -v "$(CURDIR):/src:ro" --workdir /src -v compliancewatch-trivy-cache:/root/.cache/trivy \
 	  $(TRIVY_IMAGE) fs --config .trivy.yaml .
+
+# ---- CI gate (the one check branch protection requires) ------------------------------------
+.PHONY: ci-gate-check
+CHECKS += ci-gate-check
+
+ci-gate-check: check-uv ## Every ci.yml job is in the needs of the required "CI gate" job
+	$(UV) run python infra/scripts/check_ci_gate.py
