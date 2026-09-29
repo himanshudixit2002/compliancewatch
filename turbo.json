@@ -1,6 +1,6 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
-  "globalDependencies": ["tsconfig.base.json", "eslint.config.mjs"],
+  "globalDependencies": ["tsconfig.base.json", "eslint.config.mjs", "packages/flags/registry.json"],
   "globalEnv": ["NODE_ENV"],
   "globalPassThroughEnv": ["CI", "PORT", "NEXT_TELEMETRY_DISABLED", "DO_NOT_TRACK"],
   "tasks": {

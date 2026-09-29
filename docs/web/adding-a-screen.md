@@ -53,28 +53,45 @@ under `features/not-available/ui/previews.tsx` and name it in `preview`.
 1. **Route file.** `src/app/<group>/<route>/page.tsx` under the right group: `(public)` for
    pages without a session, `(app)` for tenant screens, `admin/` for internal tools; a handler
    is `route.ts`. The page is thin: `metadata.title` from the registry entry (`screenById`), the
-   gate, the read, and one feature view. `/design` shows the shape today (an environment gate,
-   then the view); a page that reads per-request state exports `dynamic = "force-dynamic"`.
+   gate on the first line, the read, and one feature view. The gate is
+   `requireScreenSession(SCREEN)` for a tenant or account screen and `requireAdmin({ next })`
+   under `/admin` ([auth-and-roles.md](auth-and-roles.md) lists every gate); a page that reads
+   the session or a service exports `dynamic = "force-dynamic"`. `(app)/account/page.tsx` shows
+   the shape (gate, then the view); a page that fetches gets a sibling `loading.tsx` with a
+   `Skeleton`.
 2. **Feature.** `src/features/<name>/` with `ui/` (the view components), `model/` (pure
    view-model helpers) and `index.ts`. A view takes plain props built by the page or a model
    function, uses `packages/ui` components and token classes only, has one h1 (`PageHeader`),
    gives every table a caption, says why an empty list is empty (`EmptyState`) and shows a
    failure with its correlation id (`ErrorState`). A feature that reads data adds `ports.ts`,
-   `gateway.ts`, `queries.ts` and, for writes, `actions.ts`; no feature on `main` has them yet,
-   and the first one sets the shape the rest copy.
-3. **Strings.** Chrome text goes through `t("<feature>.<key>")` from `shared/i18n` with the key
+   `gateway.ts`, `queries.ts` and, for writes, `actions.ts` (the shape is in
+   [data-layer.md](data-layer.md), "A feature that reads data"; `features/auth` has the first
+   `actions.ts` and `queries.ts`).
+3. **Data.** Reads go through `queries.ts` and return a `Result`: the page renders the value,
+   `EmptyState` with the reason for an empty list, or `ErrorState` from the error (title,
+   detail, status, correlation id). A global read (plans, templates, rules, prompts, models)
+   passes `cachedRead([tags.identity.plans()])` or its own tag, a tenant read `uncachedRead()`. A write is a server action
+   in `actions.ts` that parses the form with zod, runs the gate again, calls the gateway, maps
+   the `Result` with `toActionState`, and on success calls `afterMutation({ tags, paths })`
+   before any `redirect`. Add a tag builder to `server/cache.ts` for a new cached record, and
+   list a new creating write's natural key in [data-layer.md](data-layer.md).
+4. **Strings.** Chrome text goes through `t("<feature>.<key>")` from `shared/i18n` with the key
    added to `messages/en.json`; the registry title is data and needs no key; enum values from a
    service go through `humanise()`. No regulatory fact is written into the app: it comes from
    service data, `docs/legal` or the ontology file.
-4. **Unit tests.** `<name>.test.tsx` beside every view with the axe assertion; `model/*.test.ts`
-   for the helpers. The 80% floor holds per package.
-5. **End-to-end spec.** `apps/web/e2e/<name>.spec.ts` using the `test` from `./fixtures`: visit
-   the route, assert what the page shows, call `checkA11y()`. Name the file in the entry's
-   `e2e`; `a11y.spec.ts` already visits every registered page, so the spec covers behaviour, not
-   the sweep. `admin-home.spec.ts` asserts one table per tool group and `sitemap.spec.ts` one
+5. **Unit tests.** `<name>.test.tsx` beside every view with the axe assertion; `model/*.test.ts`
+   for the helpers; gateway and action tests with `fakeFetch` from `src/test/fake-fetch.ts`
+   asserting the method, path, headers and body of each call. The 80% floor holds per package.
+6. **End-to-end spec.** `apps/web/e2e/<name>.spec.ts` using the `test` from `./fixtures`: visit
+   the route (after `await signIn(OWNER)` or another persona from the fixtures for a gated
+   page), assert what the page shows, call `checkA11y()`. A page that reads a service runs
+   against the real services with the seeded demo tenant (`make web-stack`, `make
+   web-stack-wait`, `make web-seed`; the CI job runs them first), never a mock. Name the file
+   in the entry's `e2e`; `a11y.spec.ts` already visits every registered page, so the spec
+   covers behaviour, not the sweep. `admin-home.spec.ts` asserts one table per tool group and `sitemap.spec.ts` one
    per section, so a tool in a new navigation group changes that count.
-6. **Registry.** `status: "live"`, `uses` complete, `e2e` filled, `notes` removed.
-7. **Docs.** `pnpm --filter web screens:gen`; the feature's doc under `docs/web/` when the
+7. **Registry.** `status: "live"`, `uses` complete, `e2e` filled, `notes` removed.
+8. **Docs.** `pnpm --filter web screens:gen`; the feature's doc under `docs/web/` when the
    screen introduces behaviour worth a page; a `D-0NN` entry in `decisions.md` when a choice was
    made that later screens should follow.
 
@@ -85,10 +102,14 @@ When every awaited route and file of a waiting entry is on `main`, `screens.test
 itself. The change that sees the failure (often an unrelated UI change after a merge from
 `main`) only moves the entry:
 
-1. Add every landed awaited route to `uses` as well; keep it under `awaits` so the notice and
+1. `make openapi-ts` if the spec is new or changed on the branch, so the generated types have
+   the routes (`make openapi-ts-check` fails otherwise). A service's first spec also needs its
+   name in `SERVICES_WITH_SPECS` (`shared/config/services.ts`) and a client factory in
+   `server/api/services.ts` ([data-layer.md](data-layer.md)).
+2. Add every landed awaited route to `uses` as well; keep it under `awaits` so the notice and
    `screens.md` still say who delivered it.
-2. Set `status: "ready"`. Keep `preview` and `notes`.
-3. `pnpm --filter web screens:gen`, then `pnpm --filter web test`.
+3. Set `status: "ready"`. Keep `preview` and `notes`.
+4. `pnpm --filter web screens:gen`, then `pnpm --filter web test`.
 
 The screen stays unbuilt in that change: the catch-all now says its backend is on main and it
 has not been built yet. Building it is its own package (D-013 in [decisions.md](decisions.md)).
@@ -100,7 +121,8 @@ has not been built yet. Building it is its own package (D-013 in [decisions.md](
    long as that route is still absent.
 2. Build the page, the feature and the tests as in section 3; add the e2e spec and list it.
 3. Set `status: "live"` and delete `notes`.
-4. `pnpm --filter web screens:gen`, then `pnpm --filter web test` and `make web-e2e`.
+4. `pnpm --filter web screens:gen`, then `pnpm --filter web test` and, with the stack up and
+   seeded, `make web-e2e`.
 
 A screen whose package is already building it when the backend lands may go straight from
 waiting to live in that package's change.
@@ -117,7 +139,10 @@ pnpm turbo run lint typecheck test build   # 80% floors in apps/web and packages
 pnpm format
 env -i PATH="$PATH" HOME="$HOME" pnpm turbo run build --filter=web   # no CW_WEB_* needed
 make check                                  # the gates CI runs, web-screens-check included
+make web-stack && make web-stack-wait       # the services, as the CI e2e job starts them
+make web-seed                               # the demo tenant and the recorded notification
 make web-e2e                                # Playwright with axe against next start
+make web-stack-down
 ```
 
 Every commit is a one-line Conventional Commit subject without scope (`feat: web ...`,

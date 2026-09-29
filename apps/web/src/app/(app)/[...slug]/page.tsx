@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { toNotAvailableView } from "@/entities/screen/mappers";
 import { NotAvailablePage } from "@/features/not-available";
+import { requireScreen } from "@/server/dal";
 import { breadcrumbsFor } from "@/shared/config/nav";
 import { hrefFor, matchScreen, screenById } from "@/shared/config/screens";
 import type { ScreenId, ScreenMatch } from "@/shared/config/screens";
@@ -28,6 +29,7 @@ export async function generateMetadata({ params }: { params: Promise<Params> }):
 export default async function NotAvailableTenantPage({ params }: { params: Promise<Params> }) {
   const match = matchTenantScreen((await params).slug);
   if (match === null) notFound();
+  await requireScreen(match.screen, match.params);
   return (
     <NotAvailablePage
       view={toNotAvailableView(match.screen)}

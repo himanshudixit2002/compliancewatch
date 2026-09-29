@@ -114,6 +114,78 @@
       "services": ["rulebook"]
     },
     {
+      "name": "web.admin_rulebook_writes",
+      "type": "bool",
+      "default": false,
+      "owner": "regulatory-intelligence",
+      "description": "Entity and relation decisions from /admin through the web app's server-side rulebook write token. Off, the admin forms say which flag holds them back.",
+      "removal": "When the rulebook write routes take a bearer token and no shared token remains.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_WEB_FLAG_ADMIN_RULEBOOK_WRITES",
+      "services": ["web"]
+    },
+    {
+      "name": "web.analytics_enabled",
+      "type": "bool",
+      "default": false,
+      "owner": "core-product",
+      "description": "Product events (JSON lines and span events) for web sessions that granted the analytics consent.",
+      "removal": "When counsel has confirmed the analytics consent purpose and events run everywhere.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_WEB_FLAG_ANALYTICS_ENABLED",
+      "services": ["web"]
+    },
+    {
+      "name": "web.otel_enabled",
+      "type": "bool",
+      "default": false,
+      "owner": "platform",
+      "description": "Registers OpenTelemetry in the web app's instrumentation.ts and exports spans over OTLP HTTP.",
+      "removal": "When OTLP export runs in every environment.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_WEB_FLAG_OTEL_ENABLED",
+      "services": ["web"]
+    },
+    {
+      "name": "web.publish_actions",
+      "type": "bool",
+      "default": false,
+      "owner": "regulatory-intelligence",
+      "description": "Submit, return, approve, publish and withdraw on the web app's rule version detail.",
+      "removal": "When the publish workflow has run in staging for a release cycle.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_WEB_FLAG_PUBLISH_ACTIONS",
+      "services": ["web"]
+    },
+    {
+      "name": "web.qa_enabled",
+      "type": "bool",
+      "default": false,
+      "owner": "ai-platform",
+      "description": "The web app's ask screen on the qa ask route.",
+      "removal": "When the qa ask route is on for every tenant.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_WEB_FLAG_QA_ENABLED",
+      "services": ["web"]
+    },
+    {
+      "name": "web.tenant_header_off",
+      "type": "bool",
+      "default": false,
+      "owner": "identity-partner",
+      "description": "Stops the web app sending x-tenant-id once the services take the tenant from the bearer token.",
+      "removal": "When every service runs token mode and the tenant header is gone.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_WEB_FLAG_TENANT_HEADER_OFF",
+      "services": ["web"]
+    },
+    {
       "name": "whatsapp_bot.consent_recording",
       "type": "bool",
       "default": false,

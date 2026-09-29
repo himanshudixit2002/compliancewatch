@@ -1,0 +1,25 @@
+{
+  "extractor": "extraction.rule_relations@1",
+  "model": "scripted/golden",
+  "outcome": "ok",
+  "run_issues": [],
+  "candidates": [
+    {
+      "relation": "extends_deadline",
+      "target_type": "form",
+      "target_name": "GSTR-3B",
+      "target_clause_ref": "en.p3",
+      "target_span_start": 265,
+      "target_span_end": 277,
+      "rule_key": "gstr3b_monthly",
+      "evidence_clause_ref": "en.p3",
+      "evidence_quote": "hereby extends the due  date for furnishing the return in FORM GSTR-3B for the month of March, 2026 till the twenty -first day of April, 2026",
+      "quote_score": 1.0,
+      "period_label": "2026-03",
+      "new_due_on": "2026-04-21",
+      "confidence": 0.9,
+      "issues": [],
+      "needs_review": false
+    }
+  ]
+}

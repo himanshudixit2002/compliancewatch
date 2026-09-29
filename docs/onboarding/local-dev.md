@@ -191,6 +191,24 @@ Rewrite `CW_DATABASE_URL`, `CW_REDIS_URL`, `CW_KAFKA_BOOTSTRAP`, `CW_TEMPORAL_AD
 `CW_*_URL` service URLs to those ports as well. `make web-e2e` needs no container at all: it
 builds the app and runs Playwright against `next start` on `WEB_PORT`.
 
+The services behind the web app come up together with `make web-stack`: every service on
+`SERVICE_PORT_BASE`+1 to +10 in the `SERVICES` order (8001 to 8010 with the example `.env`;
+`SERVICE_PORT_BASE=9200` in a second copy), on memory stores so no container is needed, with
+the profile's static GSTIN lookup, the billing provider `none`, the publish flow and the KAG
+layer off, and the rulebook write token from `.env` or the placeholder `local-write-token`;
+pids and logs land in `var/web-stack`. `make web-stack-wait` waits for every `/health`,
+`make web-stack-logs SERVICE=identity` tails one log, `make web-stack-down` stops them all
+(memory stores forget their rows then; `STORE=postgres` runs the stores on the compose
+Postgres after `make dev` and `make migrate`). The web app reaches the stack through the
+`CW_WEB_*_URL` values in `apps/web/.env.local` (`http://localhost:9201` onward in a second copy).
+`make web-seed` fills the running stack with the demo tenant through the services' HTTP APIs
+(consents, the demo GSTIN's registration, pre-fill and answers, the WhatsApp preference, and one
+recorded CBIC notification with its clauses, mentions and relation candidate for the admin
+review queues), records it in `var/seed/last.json` for the development sign-in, and exits
+non-zero when a step fails; run it again after every `make web-stack`, since memory stores start
+empty. `make web-e2e` after the seed also runs the seeded-tenant sign-in test, which is skipped
+without it; CI's `web-e2e` job starts the stack and seeds it before Playwright in the same order.
+
 ## Not in the stack yet
 
 Seeded fixtures and the 50-document sample rulebook, Keycloak, Terraform, alert rules.

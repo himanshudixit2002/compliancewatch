@@ -28,13 +28,11 @@ test.describe("home", () => {
     await expect(page.locator("main#main")).toBeFocused();
   });
 
-  test("the sign-in link leads to the waiting notice until the session package lands", async ({
-    page,
-  }) => {
+  test("the sign-in link leads to the sign-in form", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("link", { name: "Sign in" }).first().click();
     await expect(page).toHaveURL(/\/sign-in$/);
-    await expect(page.getByText("Not available yet")).toBeVisible();
-    await expect(page.getByText("POST /v1/identity/sessions")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
+    await expect(page.getByLabel("Display name")).toBeVisible();
   });
 });

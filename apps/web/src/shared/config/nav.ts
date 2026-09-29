@@ -1,6 +1,7 @@
 import type { FlagName } from "./flags.ts";
-import type { Role, TenantKind } from "./roles.ts";
-import { isActivePath } from "../lib/url.ts";
+import { isRegulatory } from "./roles.ts";
+import type { Principal, Role, TenantKind } from "./roles.ts";
+import { isActivePath, safeNext, withQuery } from "../lib/url.ts";
 import { SCREENS, hrefFor, isVisibleTo, routeParams, screenById } from "./screens.ts";
 import type { Screen, ScreenId } from "./screens.ts";
 
@@ -93,6 +94,30 @@ export function publicNav(currentPath?: string): NavLink[] {
   const ctx: NavContext = { roles: null };
   if (currentPath !== undefined) ctx.currentPath = currentPath;
   return PUBLIC_NAV_IDS.map((id) => toLink(screenById(id), ctx));
+}
+
+/** Where a session lands after signing in: the internal tools, or the businesses list. */
+export function homeFor(principal: Principal): string {
+  return isRegulatory(principal)
+    ? hrefFor(screenById("admin.home"))
+    : hrefFor(screenById("owner.businesses"));
+}
+
+/**
+ * The sign-in page, with `next` when it is a same-origin path worth returning to (the root
+ * and the sign-in page itself are not).
+ */
+export function signInHref(next?: string): string {
+  const signIn = hrefFor(screenById("system.sign-in"));
+  const safe = safeNext(next, "");
+  if (safe === "" || safe === "/" || safe === signIn || safe.startsWith(`${signIn}?`)) {
+    return signIn;
+  }
+  return withQuery(signIn, { next: safe });
+}
+
+export function forbiddenHref(): string {
+  return hrefFor(screenById("system.forbidden"));
 }
 
 function sectionsFor(

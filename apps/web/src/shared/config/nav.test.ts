@@ -3,10 +3,13 @@ import {
   NAV_GROUPS,
   adminNavFor,
   breadcrumbsFor,
+  forbiddenHref,
+  homeFor,
   isActive,
   isNavGroupKey,
   navFor,
   publicNav,
+  signInHref,
 } from "./nav.ts";
 import { SCREENS, screenById } from "./screens.ts";
 import type { Screen } from "./screens.ts";
@@ -20,12 +23,11 @@ describe("publicNav", () => {
 });
 
 describe("navFor", () => {
-  it("gives an anonymous visitor nothing and an owner the business group once a business is known", () => {
+  it("gives an anonymous visitor nothing and an owner the business links a business is known for", () => {
     expect(navFor({ roles: null })).toEqual([]);
-    expect(navFor({ roles: ["owner"], tenantKind: "business" }).map((s) => s.key)).toEqual([
-      "settings",
-      "account",
-    ]);
+    const withoutBusiness = navFor({ roles: ["owner"], tenantKind: "business" });
+    expect(withoutBusiness.map((s) => s.key)).toEqual(["business", "settings", "account"]);
+    expect(withoutBusiness[0]?.items.map((item) => item.href)).toEqual(["/businesses"]);
     const withBusiness = navFor({
       roles: ["owner"],
       tenantKind: "business",
@@ -34,7 +36,11 @@ describe("navFor", () => {
     });
     const business = withBusiness.find((section) => section.key === "business");
     expect(business?.label).toBe(NAV_GROUPS.business);
-    expect(business?.items.map((item) => item.href)).toEqual(["/b/b1/changes", "/b/b1/reminders"]);
+    expect(business?.items.map((item) => item.href)).toEqual([
+      "/businesses",
+      "/b/b1/changes",
+      "/b/b1/reminders",
+    ]);
     expect(business?.items.find((item) => item.active)?.id).toBe("owner.changes");
   });
 
@@ -118,5 +124,29 @@ describe("breadcrumbsFor", () => {
     expect(breadcrumbsFor("system.home")).toEqual([
       { id: "system.home", href: "/", label: "Home" },
     ]);
+  });
+});
+
+describe("homeFor", () => {
+  it("sends regulatory roles to the internal tools and every tenant role to the businesses", () => {
+    expect(homeFor({ roles: ["analyst"], tenantKind: "internal" })).toBe("/admin");
+    expect(homeFor({ roles: ["reviewer", "admin"] })).toBe("/admin");
+    expect(homeFor({ roles: ["owner"], tenantKind: "business" })).toBe("/businesses");
+    expect(homeFor({ roles: ["ca_staff"], tenantKind: "ca_firm" })).toBe("/businesses");
+    expect(homeFor({ roles: ["compliance_lead"] })).toBe("/businesses");
+  });
+});
+
+describe("signInHref and forbiddenHref", () => {
+  it("carry a same-origin next and drop the root, the sign-in page and foreign URLs", () => {
+    expect(signInHref()).toBe("/sign-in");
+    expect(signInHref("/")).toBe("/sign-in");
+    expect(signInHref("/sign-in")).toBe("/sign-in");
+    expect(signInHref("/sign-in?next=%2Faccount")).toBe("/sign-in");
+    expect(signInHref("/account")).toBe("/sign-in?next=%2Faccount");
+    expect(signInHref("/b/1/changes?tab=2")).toBe("/sign-in?next=%2Fb%2F1%2Fchanges%3Ftab%3D2");
+    expect(signInHref("https://evil.example/")).toBe("/sign-in");
+    expect(signInHref("//evil.example")).toBe("/sign-in");
+    expect(forbiddenHref()).toBe("/forbidden");
   });
 });

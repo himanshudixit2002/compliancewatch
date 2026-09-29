@@ -1,7 +1,7 @@
 # Glossary
 
 The words the web app's code and docs use, with the file that owns each one where there is
-one. Domain terms follow the guide and the services; the last group is the app's own.
+one. Domain terms follow the guide and the services; the last two groups are the app's own.
 
 ## Domain
 
@@ -81,3 +81,28 @@ one. Domain terms follow the guide and the services; the last group is the app's
 - **Message key**: a key of `messages/en.json`, namespaced by feature, read through `t()`.
 - **Date key**: a `YYYY-MM-DD` string in IST; the form dates take between the app and the
   services.
+
+## Data and sessions
+
+- **Server layer**: `src/server`, the only code that calls a service or reads a secret; every
+  file starts with `import "server-only"` (ADR-019, [data-layer.md](data-layer.md)).
+- **Result**: what a service call or a query returns: `{ ok: true, value }` or
+  `{ ok: false, error }` with an `ApiError` (`server/result.ts`).
+- **ApiError**: a failure's `kind` (from the status: `validation`, `conflict`, `network`, ...),
+  the problem, the request id and field errors.
+- **ActionState**: what a server action returns to its form: `idle`, `ok` or `error` with the
+  problem, field errors and form errors (`shared/lib/action-state.ts`).
+- **Cache tag**: the name a cached global read is stored under and a server action expires
+  (`tags.*` in `server/cache.ts`).
+- **Natural key**: the field a service uses to find an existing record on a repeated create
+  (a GSTIN, a PAN, a document's sha256), which makes the write safe to repeat.
+- **Session**: the encrypted `cw_session` cookie and the claims in it
+  ([auth-and-roles.md](auth-and-roles.md)).
+- **Gate**: a function in `server/dal.ts` a page, action or handler calls first:
+  `requireScreen`, `requireRole`, `requireAdmin`, ...
+- **Proxy**: `src/proxy.ts`, the check before a render that sends a visitor without a session
+  cookie to sign-in.
+- **Provider**: the sign-in adapter behind `AuthProvider`; `fake` in local and test today.
+- **Web stack**: every service on memory stores, started by `make web-stack` for the app.
+- **Seed**: `make web-seed`, the demo tenant and one recorded notification written through the
+  services' HTTP APIs; `var/seed/last.json` names the tenant.

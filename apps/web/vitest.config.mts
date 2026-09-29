@@ -10,14 +10,17 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    include: ["src/**/*.test.{ts,tsx}"],
+    // The seed's tests run under node (a file-level directive) over its helpers, its HTTP layer
+    // with a recording fetch, its report and the recorded fixtures; its steps and entry point
+    // talk to the running services and are exercised by make web-seed.
+    include: ["src/**/*.test.{ts,tsx}", "scripts/seed/*.test.mts"],
     setupFiles: ["src/test/setup.ts"],
     // axe runs in jsdom take seconds on hosted CI runners (a month grid took 5.6 s there, over
     // the 5 s default), so tests get a wider ceiling; a real hang still fails.
     testTimeout: 30_000,
     coverage: {
       provider: "v8",
-      include: ["src/**/*.{ts,tsx}"],
+      include: ["src/**/*.{ts,tsx}", "scripts/seed/{lib,http,report}.mts"],
       // Route files are thin (gate, query, render) and are exercised by the Playwright suite;
       // the unit floor applies to features, entities, server and shared code.
       exclude: [

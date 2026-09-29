@@ -8,8 +8,9 @@
 # packages a change affects, an ops job (runbook links, promtool rules, actionlint), a compose
 # dev-stack smoke, secrets scanning, SAST (semgrep) and a dependency and config scan (trivy), both
 # reported to code scanning, and the web e2e job (Playwright with axe against the built Next.js
-# app). The job "CI gate" needs every other job and is the one check branch protection
-# requires; infra/scripts/check_ci_gate.py fails when a job is missing from its needs.
+# app, with every service running on memory stores and seeded with the demo tenant). The job
+# "CI gate" needs every other job and is the one check branch protection requires;
+# infra/scripts/check_ci_gate.py fails when a job is missing from its needs.
 # Steps 5-7 are listed as TODO at the end.
 name: ci
 
@@ -571,11 +572,14 @@ jobs:
           category: trivy
 
   web-e2e:
-    name: Web e2e (Playwright with axe against next start)
+    name: Web e2e (Playwright with axe against next start and the services)
     needs: changes
-    if: needs.changes.outputs.typescript == 'true'
+    # The suite drives the services through the Makefile's web-stack and seeds them, so a change
+    # to a service, the Python packages they share, the lock file or the Makefile (the python
+    # filter) can break it as surely as a change to the app (the typescript filter).
+    if: needs.changes.outputs.typescript == 'true' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6 # pnpm version comes from package.json "packageManager"
@@ -583,9 +587,23 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      # The services the app talks to run from the uv workspace, as `make run` would start them.
+      - uses: astral-sh/setup-uv@v10.2.0 # exact tag: astral publishes no floating v10 tag
+        with:
+          enable-cache: true
+          python-version: "3.12"
       - run: pnpm install --frozen-lockfile
-      - name: Generated screen list is current (docs/web/screens.md)
-        run: make web-screens-check
+      - run: uv sync --all-packages --locked
+      # Generated files no other job compares: the screen list against the registry, and the
+      # TypeScript types under packages/contracts/clients/typescript/openapi against the specs.
+      - name: Generated screen list and OpenAPI types are current
+        run: make web-screens-check openapi-ts-check
+      # Every service on 8001-8010 (SERVICE_PORT_BASE 8000, the app's default URLs), started in
+      # the background with memory stores and the fixed demo settings of the web stack (the
+      # static GSTIN lookup, billing "none", publish and KAG off, the placeholder write token
+      # local-write-token): no container. They start while the app builds.
+      - name: Start the services (memory stores, no container)
+        run: make web-stack
       # The playwright package has no install script (strictDepBuilds stays satisfied); the
       # browser and its system libraries are fetched here, explicitly.
       - name: Chromium for Playwright
@@ -594,21 +612,38 @@ jobs:
       # environment per request, never at build time.
       - name: Build the web app
         run: pnpm --filter web build
+      - name: Wait for every service's /health
+        run: make web-stack-wait WEB_STACK_WAIT_SECONDS=120
+      # The demo tenant over the services' HTTP APIs (consents, the GSTIN registration with its
+      # pre-fill and answers, the WhatsApp preference) and one recorded CBIC notification with
+      # its clauses, mentions and relation candidate; exits non-zero on any failed step and
+      # writes var/seed/last.json, which the sign-in form offers and the seeded-tenant spec uses.
+      - name: Seed the demo tenant and the recorded notification
+        run: make web-seed
       # playwright.config.ts starts `next start` on PORT with CW_WEB_ENV=test (the local-only
-      # pages exist there) and waits for /api/health. The suite visits every registered page
-      # without a service and fails a page on a serious or critical axe finding.
+      # pages exist there), the fake sign-in provider and a fixed session secret, and waits for
+      # /api/health. The suite visits every registered page, signs in through the form, and
+      # fails a page on a serious or critical axe finding.
       - name: Playwright with axe against next start
         env:
           PORT: "3000"
           CW_WEB_ENV: test
         run: pnpm --filter web e2e
-      - uses: actions/upload-artifact@v6
+      - name: Service log tails
+        if: always()
+        run: make web-stack-logs
+      - name: Stop the services
+        if: always()
+        run: make web-stack-down
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
           path: |
             apps/web/playwright-report/
             apps/web/test-results/
+            var/web-stack/*.log
+            var/seed/last.json
           if-no-files-found: ignore
 
   # The one check branch protection requires. A job that path filters skip counts as passed; any

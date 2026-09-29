@@ -1,0 +1,45 @@
+{
+  "extractor": "grammar@1",
+  "mentions": [
+    {
+      "clause_ref": "en.p2",
+      "entity_type": "notification",
+      "text": "NOTIFICATION No. 01/2026 – Central Tax",
+      "span_start": 106,
+      "span_end": 144,
+      "proposed_name": "01/2026-central tax"
+    },
+    {
+      "clause_ref": "en.p3",
+      "entity_type": "section",
+      "text": "sub -section (6) of section 39",
+      "span_start": 53,
+      "span_end": 83,
+      "proposed_name": "39(6)@cgst-act"
+    },
+    {
+      "clause_ref": "en.p3",
+      "entity_type": "form",
+      "text": "FORM GSTR-3B",
+      "span_start": 265,
+      "span_end": 277,
+      "proposed_name": "GSTR-3B"
+    },
+    {
+      "clause_ref": "en.p3",
+      "entity_type": "section",
+      "text": "sub-section (1) of section 39",
+      "span_start": 418,
+      "span_end": 447,
+      "proposed_name": "39(1)@cgst-act"
+    },
+    {
+      "clause_ref": "en.p3",
+      "entity_type": "rule",
+      "text": "clause (i) of sub -rule (1) of  rule 61",
+      "span_start": 458,
+      "span_end": 497,
+      "proposed_name": "61(1)(i)@cgst-rules"
+    }
+  ]
+}

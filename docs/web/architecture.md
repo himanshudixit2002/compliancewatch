@@ -4,11 +4,14 @@
 the server and ships small client components for the pieces that need the browser: the two
 shells (they read the current pathname to mark the active link), the design catalogue and its
 theme control, and the error boundaries. The browser never calls a service. There is no
-`NEXT_PUBLIC_*` variable, no token reaches a client bundle, and no page on `main` calls a
-service from the server either: the only reads today are `docs/legal/*.md` at build time and
-`CW_WEB_ENV` per request. The server-side data layer (typed clients, session, gates) is not on
-`main` yet; the layer rules below already reserve its place so that nothing has to move when it
-lands.
+`NEXT_PUBLIC_*` variable and no token reaches a client bundle. The server-side data layer
+(`server/`: the validated environment, the typed clients, the encrypted session cookie, the
+gates and the sign-in provider port) is where every service call and every session decision
+lives; no page on `main` calls a service yet, and the reads today are `docs/legal/*.md` at
+build time, `CW_WEB_ENV` per request and the session cookie. The rule is a platform decision,
+[ADR-019](../adr/ADR-019-web-server-layer-and-stateless-session.md);
+[data-layer.md](data-layer.md) has the clients, headers, errors, caching and the seed, and
+[auth-and-roles.md](auth-and-roles.md) the session, the gates and the sign-in.
 
 ## Layers
 
@@ -23,7 +26,7 @@ table is enforced, not advisory.
 | `entities/<name>/`          | Pure domain types and DTO-to-view mappers: `types.ts`, `mappers.ts`, `mappers.test.ts`. No React, no `next`, no fetch.          | `shared/lib`, its own directory                                       |
 | `server/`                   | Server-only modules; every file starts with `import "server-only"`.                                                             | `server`, `shared`, `entities`                                        |
 | `shared/`                   | Isomorphic code: `config/` (registry, roles, permissions, flags, navigation), `lib/`, `i18n/`, `ui/` (app-level compositions).  | `shared` only; never `server-only`, `next/headers`, `next/server`, `node:` |
-| root (`instrumentation.ts`) | Framework hooks.                                                                                                                | `server`, `shared`, `entities`                                        |
+| root (`proxy.ts`, `instrumentation.ts`) | Framework hooks: the optimistic check before a render, the error hook.                                              | `server`, `shared`, `entities`                                        |
 
 Three more rules apply across layers. A feature never imports another feature (shared pieces go
 to `shared/ui` or `entities`). A client component (`"use client"`) imports `shared`, `entities`
@@ -36,8 +39,11 @@ alias. That is what lets plain Node 22 load the registry without a bundler: the 
 
 A feature that reads data will add `ports.ts` (the interface it needs), `gateway.ts` (the
 implementation over a typed client, server-only), `queries.ts` (server-only page reads returning
-a `Result`) and `actions.ts` (server actions) next to `model/` and `ui/`. No feature on `main`
-has these files yet; the first one arrives with the data layer.
+a `Result`) and `actions.ts` (server actions) next to `model/` and `ui/`. `features/auth` is the
+first with `actions.ts` (the sign-in action) and `queries.ts` (the seed state); no feature calls
+a service yet. A client component receives a server action as a prop from its page (the sign-in
+form takes `action` and the options the page built), because the layer rule keeps client
+components to `shared`, `entities` and their own directory.
 
 ## Directory map
 
@@ -45,21 +51,30 @@ has these files yet; the first one arrives with the data layer.
 apps/web/
   src/app/
     layout.tsx                 <html lang="en">, globals.css, the Toaster
-    (public)/                  home, /sitemap, /legal/[doc], /forbidden, /design; the visitor shell
-    (app)/                     tenant screens; today only the layout and the catch-all [...slug]
-    admin/                     /admin (the tool list), the admin layout, the catch-all [...slug]
+    (public)/                  home, /sitemap, /legal/[doc], /forbidden, /design, /sign-in; the visitor shell
+    (app)/                     tenant screens under the session-aware shell: /account and the catch-all [...slug]
+    admin/                     /admin (the tool list), the admin layout behind requireAdmin, the catch-all [...slug]
+    sign-out/route.ts          POST: clears the session cookie
     api/health/route.ts        {status, version, commit}
     error.tsx, global-error.tsx, not-found.tsx
-  src/features/                home, sitemap, legal, not-available, admin-home, system-pages, design-catalogue
-  src/entities/screen/         the view shapes of a registry entry and their mappers
-  src/server/                  legal.ts (docs/legal at build time), runtime.ts (CW_WEB_ENV)
+  src/features/                home, sitemap, legal, not-available, admin-home, system-pages, design-catalogue,
+                               auth (sign-in form, action, seed state), account
+  src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims)
+  src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError, webError),
+                               api/ (typed clients, problem parsing, idempotency), cache.ts (tags and revalidation),
+                               session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a
+                               POST handler), auth/ (the provider port and the fake adapter), legal.ts
   src/shared/config/           screens.ts, roles.ts, permissions.ts, flags.ts, nav.ts, services.ts, legal-docs.ts
   src/shared/lib/              dates, financial years, decimal money, humanise, identifiers, pagination, urls, assert
   src/shared/i18n/             messages/en.json and t()
-  src/shared/ui/               TenantShell, InternalShell, RouterLink, Breadcrumbs, ScreenStatusChip
-  src/test/                    vitest setup, the architecture rules and their test, the screens.md drift test
+  src/shared/ui/               TenantShell, InternalShell, RouterLink, Breadcrumbs, ScreenStatusChip, SessionMenu,
+                               SignOutButton
+  src/test/                    vitest setup, the architecture rules and their test, the screens.md drift test,
+                               fake-fetch.ts and fake-cookies.ts
+  src/proxy.ts                 the optimistic redirect to /sign-in for gated screens without a cookie
   src/instrumentation.ts       onRequestError: one JSON line per server error
   scripts/screens-doc.mts      generates docs/web/screens.md; --check and --audit modes
+  scripts/seed/                the demo-tenant seed over the services' HTTP APIs (make web-seed)
   e2e/                         Playwright specs and the axe fixture
 ```
 
@@ -150,11 +165,20 @@ capabilities (`obligations.read`, `admin.publish`, `team.manage`, ...) to role l
 `can(principal, capability)`. The registry's `roles` and these sets decide what the navigation
 shows and what `screens.md`'s matrix says.
 
-No gate function runs on `main` yet: there is no session, so every page renders for every
-visitor. `/admin` renders its tool list for anyone, and the internal shell's banner shows the
-environment name. `/design` is the one page with a gate today, and it is an environment gate:
-`server/runtime.ts` reads `CW_WEB_ENV` and the page answers 404 unless the value is `local` or
-`test` (unset means local; an unknown value counts as prod so a typo never opens it).
+The gates live in `server/dal.ts` and read the session cookie (`server/session.ts`, a JWE the
+server encrypts; `entities/session` holds the claims and the render-safe view). A page calls
+its gate on the first line: `requireScreenSession(SCREEN)` for a tenant screen, `requireAdmin()`
+under `/admin` (a tenant role gets a 404, so it does not learn that a tool exists), and the two
+catch-alls apply the matched entry's roles and tenant kinds with `requireScreen`. An anonymous
+visitor is sent to `/sign-in?next=` (`src/proxy.ts` does this before the render when no cookie
+is present at all; the gate does it authoritatively), a wrong role to `/forbidden`. The sign-in
+page asks the provider port (`server/auth/provider.ts`) for the claims; the only adapter today
+is the fake one, which exists where `CW_WEB_ENV` is `local` or `test`, and `/sign-out` (POST)
+clears the cookie. `/design` keeps its environment gate: 404 unless the value is `local` or
+`test` (unset means local; an unknown value is refused at the first request, so a typo never
+opens it). The shells read `sessionForRender()` for their links and the account menu and never
+decide whether to render. [auth-and-roles.md](auth-and-roles.md) has the claims, the cookie,
+every gate and what the identity work changes.
 
 ## Request flow
 
@@ -162,15 +186,16 @@ environment name. `/design` is the one page with a gate today, and it is an envi
 flowchart TD
   B[Browser] -->|GET /admin/review| N[Next.js server]
   N --> H[next.config.ts static headers]
-  H --> R["app/layout.tsx: html, globals.css, Toaster"]
+  H --> X["src/proxy.ts: gated screen or /admin without cw_session -> /sign-in?next="]
+  X --> R["app/layout.tsx: html, globals.css, Toaster"]
   R --> G{route group}
   G -->|"(public)"| TS["(public)/layout.tsx: TenantShell with publicNav()"]
-  G -->|"(app)"| TA["(app)/layout.tsx: TenantShell with publicNav()"]
-  G -->|admin| AS["admin/layout.tsx: InternalShell with adminNavFor(), CW_WEB_ENV label"]
+  G -->|"(app)"| TA["(app)/layout.tsx: TenantShell with the session's links and menu"]
+  G -->|admin| AS["admin/layout.tsx: requireAdmin(), InternalShell with the session's tools"]
   TS --> P[page.tsx: metadata from the registry, gate, render a feature view]
-  TA --> C1["(app)/[...slug]: matchScreen() then NotAvailablePage or notFound()"]
-  AS --> P2[admin/page.tsx: adminToolGroups from the registry]
-  AS --> C2["admin/[...slug]: matchScreen() then NotAvailablePage or notFound()"]
+  TA --> C1["(app)/[...slug]: matchScreen(), requireScreen() then NotAvailablePage or notFound()"]
+  AS --> P2[admin/page.tsx: requireAdmin(), adminToolGroups from the registry]
+  AS --> C2["admin/[...slug]: matchScreen(), requireScreen() then NotAvailablePage or notFound()"]
   P --> F[features/*/ui view over packages/ui components]
   C1 --> F
   P2 --> F
@@ -178,6 +203,11 @@ flowchart TD
   F --> B
   P -. throws .-> E[error.tsx in the shell; instrumentation.ts writes one JSON line]
 ```
+
+A page that reads a service adds one step after its gate: `features/<name>/queries.ts` calls a
+gateway, the gateway calls a typed client from `server/api`, and the answer comes back as a
+`Result` the page renders or shows as `ErrorState` (the sequence is in
+[data-layer.md](data-layer.md)).
 
 The legal pages read `docs/legal/<doc>.md` at build time (`server/legal.ts`, `marked` with its
 defaults; a test asserts the drafts contain no raw HTML tag), prerender the three listed
@@ -193,12 +223,23 @@ page refers to.
 
 ## Environments, ports and configuration
 
-- `CW_WEB_ENV`: `local`, `test`, `staging` or `prod`; read per request by `server/runtime.ts`.
-  The Playwright config starts `next start` with `test`. Every module works with no `CW_WEB_*`
-  variable set; `pnpm turbo run build` with an empty environment is part of the checklist.
+- `CW_WEB_*`: every variable the app reads, validated by `server/env.ts` (zod). `getEnv()`
+  parses the process environment at its first call from a request, action or route handler,
+  never at import, and keeps the frozen result; a bad value is refused with the variable's
+  name. `CW_WEB_ENV` is `local`, `test`, `staging` or `prod` (unset means local; the Playwright
+  config starts `next start` with `test`); the service URLs default to the canonical ports
+  8001-8010; `CW_WEB_AUTH_PROVIDER` names the sign-in adapter (`fake` in local and test only);
+  the session secret is required only where a session is encrypted or decrypted.
+  `apps/web/.env.example` lists every variable with its default. Every module works with no
+  `CW_WEB_*` variable set; `pnpm turbo run build` with an empty environment is part of the
+  checklist.
 - `PORT`: what `next dev` and `next start` listen on. `make web-dev` and `make web-e2e` pass
   `WEB_PORT` from the root `.env` (3000 unless changed; a second working copy uses 3200, see
   `docs/onboarding/local-dev.md`). `apps/web/.env.example` lists the variables the app reads.
+- `SERVICE_PORT_BASE` (root `.env`, 8000 unless changed): `make web-stack` starts every service
+  on the base plus 1 to 10 in the Makefile's `SERVICES` order with memory stores and fixed demo
+  settings, `make web-stack-wait` waits for their health, `make web-stack-down` stops them. The
+  app's `CW_WEB_*_URL` values name the same ports (their defaults are the 8000 base).
 - `next.config.ts`: `reactStrictMode`, `poweredByHeader: false`, `transpilePackages` for the UI
   kit (consumed from source), `typedRoutes` (registry hrefs go through `hrefFor()` so typed links
   accept them), and the four static security headers (`vercel.json` carries the same set).
@@ -217,10 +258,14 @@ page refers to.
 
 ## Ports and adapters
 
-The one port in use today is the shells' `Link` prop: `packages/ui`'s `AppShell` and
-`AdminShell` take a link component so the kit stays free of `next/link`, and
-`shared/ui/router-link.tsx` supplies `next/link` from the app. The feature files reserved above
-(`ports.ts`, `gateway.ts`) follow the same idea for data: a feature declares what it needs, a
-server-only adapter implements it, tests inject a fake. `features/not-available/ui/previews.tsx`
-is a registry of preview components keyed by the name a registry entry may carry; it is empty
-until a package ships the first preview.
+Two ports are in use. The shells' `Link` prop: `packages/ui`'s `AppShell` and `AdminShell`
+take a link component so the kit stays free of `next/link`, and `shared/ui/router-link.tsx`
+supplies `next/link` from the app. And the sign-in provider: `server/auth/provider.ts` declares
+`AuthProvider` (`startSignIn`, `completeSignIn`, `signOut`, the methods it offers) and
+`providerFor(env)` picks the adapter named by `CW_WEB_AUTH_PROVIDER`; `server/auth/fake.ts` is
+the only adapter today, and the identity work adds the real one without touching the pages.
+The feature files reserved above (`ports.ts`, `gateway.ts`) follow the same idea for data: a
+feature declares what it needs, a server-only adapter implements it over the typed clients, and
+tests inject a fake fetch ([data-layer.md](data-layer.md), "A feature that reads data").
+`features/not-available/ui/previews.tsx` is a registry of preview components keyed by the name
+a registry entry may carry; it is empty until a package ships the first preview.
