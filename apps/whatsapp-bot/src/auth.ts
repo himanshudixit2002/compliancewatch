@@ -9,9 +9,11 @@
  * message. Callers that need a token while one is being fetched wait for that fetch.
  *
  * authorizedFetch puts the token on a request as `authorization: Bearer`. When the called service
- * answers 401 (it no longer trusts the key that signed the token, say) the token is dropped and
- * the request sent once more with a fresh one. Without the secret there is no token source, and
- * every client sends exactly what it sent before service tokens existed.
+ * refuses the token itself (a 401 whose WWW-Authenticate says invalid_token, or whose problem type
+ * is auth-token-invalid: it no longer trusts the key that signed the token, say) the token is
+ * dropped and the request sent once more with a fresh one. Any other 401, such as a wrong shared
+ * token, comes back as it came. Without the secret there is no token source, and every client
+ * sends exactly what it sent before service tokens existed.
  */
 
 type Fetch = typeof fetch;
@@ -141,6 +143,26 @@ export function identityTokenSource(
   );
 }
 
+/** RFC 6750's error code for a bearer token that is expired, revoked or otherwise invalid. */
+const INVALID_TOKEN_CHALLENGE = /\berror\s*=\s*"?invalid_token\b/i;
+const INVALID_TOKEN_PROBLEM = /(^|[:/])auth-token-invalid$/;
+
+/**
+ * Whether `res` refuses the bearer token itself, which a fresh token may cure: a 401 with an
+ * invalid_token challenge or the auth-token-invalid problem type. The body is read from a clone.
+ */
+export async function tokenRefused(res: Response): Promise<boolean> {
+  if (res.status !== 401) return false;
+  if (INVALID_TOKEN_CHALLENGE.test(res.headers.get("www-authenticate") ?? "")) return true;
+  const body: unknown = await res
+    .clone()
+    .json()
+    .catch(() => null);
+  const kind =
+    typeof body === "object" && body !== null ? (body as Record<string, unknown>).type : undefined;
+  return typeof kind === "string" && INVALID_TOKEN_PROBLEM.test(kind);
+}
+
 /** The parts of a request the bot's clients send. */
 export interface RequestParts {
   readonly method?: string;
@@ -153,8 +175,8 @@ function withBearer(init: RequestParts | undefined, token: string): RequestInit 
 }
 
 /**
- * `fetchImpl(url, init)` with the source's bearer token, retried once with a fresh token after a
- * 401. Without a source the request goes out exactly as given.
+ * `fetchImpl(url, init)` with the source's bearer token, retried once with a fresh token when the
+ * answer refuses the token (`tokenRefused`). Without a source the request goes out exactly as given.
  */
 export async function authorizedFetch(
   fetchImpl: Fetch,
@@ -165,7 +187,7 @@ export async function authorizedFetch(
   if (tokens === null) return init === undefined ? fetchImpl(url) : fetchImpl(url, init);
   const first = await tokens.token();
   const res = await fetchImpl(url, withBearer(init, first));
-  if (res.status !== 401) return res;
+  if (!(await tokenRefused(res))) return res;
   tokens.invalidate(first);
   return fetchImpl(url, withBearer(init, await tokens.token()));
 }

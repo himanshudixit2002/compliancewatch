@@ -128,8 +128,10 @@ service name, and `make run` and `make worker` set it to the service's directory
 set already, so a worker is its service's client. Every outgoing `httpx2` client is built with
 `auth=service_auth_from(settings)`, which is None, so no token is sent, until the secret is set.
 The token comes from `POST /v1/identity/service-tokens`, is kept until a minute before it expires
-and is shared by the clients built from the same settings; a 401 from the called service drops it
-and resends the request once with a fresh one. When identity cannot be reached or refuses the
+and is shared by the clients built from the same settings. When the called service refuses the
+token itself (401 with an `invalid_token` challenge or the `auth-token-invalid` problem type) it is
+dropped and the request resent once with a fresh one; any other 401, such as a wrong shared secret
+or a missing tenant, comes back as it came. When identity cannot be reached or refuses the
 client, the cached token stays in use until it expires and the next attempt waits 5 seconds;
 with no valid token the call fails at once with `service-token-unavailable` (503).
 

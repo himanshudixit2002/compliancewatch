@@ -14,7 +14,7 @@ from py_common.auth import (
     ServiceTokenUnavailableError,
     service_auth_from,
 )
-from py_common.auth.service_tokens import SERVICE_TOKENS_PATH, service_client_id
+from py_common.auth.service_tokens import SERVICE_TOKENS_PATH, service_client_id, token_refused
 from py_common.settings import Settings
 
 _IDENTITY = "http://identity.test"
@@ -218,18 +218,31 @@ def test_a_source_needs_a_client_id() -> None:
 # ---------------------------------------------------------------- BearerAuth
 
 
+_TOKEN_INVALID = "urn:compliancewatch:problem:auth-token-invalid"
+_WRITE_TOKEN_INVALID = "urn:compliancewatch:problem:write-token-invalid"
+
+
 class _Rulebook:
-    """A called service that records the Authorization header and answers 401 while told to."""
+    """A called service that records the Authorization header and refuses the tokens it is told
+    to, as ``py_common.auth`` does: 401 ``auth-token-invalid`` with an ``invalid_token``
+    challenge. ``other`` is a 401 about something else that it answers instead."""
 
     def __init__(self) -> None:
         self.seen: list[tuple[str | None, bytes]] = []
         self.refuse: set[str] = set()
+        self.other: httpx2.Response | None = None
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         authorization = request.headers.get("authorization")
         self.seen.append((authorization, request.content))
+        if self.other is not None:
+            return self.other
         if authorization in self.refuse:
-            return httpx2.Response(401, json={"type": "auth-token-invalid"})
+            return httpx2.Response(
+                401,
+                json={"type": _TOKEN_INVALID},
+                headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
+            )
         return httpx2.Response(200, json={"ok": True})
 
 
@@ -256,6 +269,63 @@ def test_a_401_refreshes_the_token_and_resends_the_request_once() -> None:
         "Bearer token-2",
     ]
     assert rulebook.seen[0][1] == rulebook.seen[1][1] == b'{"document":"d1"}'
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        httpx2.Response(401, headers={"WWW-Authenticate": 'Bearer error="invalid_token"'}),
+        httpx2.Response(
+            401, headers={"www-authenticate": 'bearer realm="cw", error=invalid_token'}
+        ),
+        httpx2.Response(401, json={"type": _TOKEN_INVALID}),
+        httpx2.Response(401, json={"type": "auth-token-invalid"}),
+    ],
+)
+def test_token_refusals_are_told_by_their_challenge_or_problem_type(
+    refusal: httpx2.Response,
+) -> None:
+    assert token_refused(refusal)
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        httpx2.Response(401, json={"type": _WRITE_TOKEN_INVALID}),
+        httpx2.Response(
+            401,
+            json={"type": "urn:compliancewatch:problem:auth-token-required"},
+            headers={"WWW-Authenticate": "Bearer"},
+        ),
+        httpx2.Response(401, content=b"no"),
+        httpx2.Response(403, json={"type": _TOKEN_INVALID}),
+    ],
+)
+def test_other_answers_are_not_token_refusals(other: httpx2.Response) -> None:
+    assert not token_refused(other)
+
+
+def test_a_401_about_something_else_is_returned_without_a_new_token() -> None:
+    identity, rulebook = _Identity(), _Rulebook()
+    rulebook.other = httpx2.Response(401, json={"type": _WRITE_TOKEN_INVALID})
+    with httpx2.Client(
+        transport=httpx2.MockTransport(rulebook), auth=BearerAuth(_source(identity))
+    ) as client:
+        response = client.put(_TARGET, json={"document": "d1"})
+    assert response.status_code == 401
+    assert response.json()["type"] == _WRITE_TOKEN_INVALID
+    assert len(rulebook.seen) == 1
+    assert identity.issued == 1
+
+
+async def test_an_async_401_about_something_else_is_returned_as_it_came() -> None:
+    identity, rulebook = _Identity(), _Rulebook()
+    rulebook.other = httpx2.Response(401, json={"type": _WRITE_TOKEN_INVALID})
+    async with httpx2.AsyncClient(
+        transport=httpx2.MockTransport(rulebook), auth=BearerAuth(_source(identity))
+    ) as client:
+        response = await client.get(_TARGET)
+    assert (response.status_code, len(rulebook.seen), identity.issued) == (401, 1, 1)
 
 
 def test_a_second_401_is_returned_to_the_caller() -> None:

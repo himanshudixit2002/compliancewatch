@@ -30,8 +30,10 @@ With `BOT_SERVICE_CLIENT_SECRET` set, the bot exchanges `BOT_SERVICE_CLIENT_ID` 
 `whatsapp-bot`) and the secret at identity's `POST /v1/identity/service-tokens`
 (`IDENTITY_API_URL`) and sends the access token it gets as `Authorization: Bearer` on every call to
 notification (preferences and receipts) and identity (channel consents). The token is kept until
-a minute before it expires, so identity is asked about every nine minutes; when a service answers
-401 the bot fetches a new token and sends the request once more. The client needs the scopes
+a minute before it expires, so identity is asked about every nine minutes; when a service refuses
+the token itself (401 with an `invalid_token` challenge or the `auth-token-invalid` problem type)
+the bot fetches a new token and sends the request once more, and any other 401 comes back as it
+came. The client needs the scopes
 notification:preferences, notification:receipts and identity:channel-consents; locally identity
 creates it from `services/identity/src/identity/identity_dev_clients.toml` when its
 `CW_IDENTITY_DEV_CLIENT_SECRET` is set, and the bot's secret is that same value. Elsewhere it is

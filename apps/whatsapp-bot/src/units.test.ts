@@ -493,7 +493,12 @@ describe("service token", () => {
     const service = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const authorization = (init?.headers as Record<string, string>).authorization ?? "";
       seen.push(authorization);
-      return new Response("{}", { status: authorization === "Bearer bot-token-1" ? 401 : 200 });
+      return authorization === "Bearer bot-token-1"
+        ? new Response("{}", {
+            status: 401,
+            headers: { "www-authenticate": 'Bearer error="invalid_token"' },
+          })
+        : new Response("{}", { status: 200 });
     }) as unknown as typeof fetch;
     const res = await authorizedFetch(service, source, "http://n.test/x", {
       method: "PUT",
@@ -503,10 +508,32 @@ describe("service token", () => {
     expect(res.status).toBe(200);
     expect(seen).toEqual(["Bearer bot-token-1", "Bearer bot-token-2"]);
     const refusing = vi.fn(
-      async () => new Response("", { status: 401 }),
+      async () =>
+        new Response(JSON.stringify({ type: "urn:compliancewatch:problem:auth-token-invalid" }), {
+          status: 401,
+        }),
     ) as unknown as typeof fetch;
     expect((await authorizedFetch(refusing, source, "http://n.test/x")).status).toBe(401);
     expect(refusing).toHaveBeenCalledTimes(2);
+  });
+
+  it("authorized fetch returns a 401 about something else without a new token", async () => {
+    const { fetchImpl: tokenFetch, calls } = identity();
+    const source = new IdentityTokenSource(IDENTITY, "whatsapp-bot", CLIENT_SECRET, tokenFetch);
+    const wrongSecret = JSON.stringify({
+      type: "urn:compliancewatch:problem:receipt-token-invalid",
+    });
+    const service = vi.fn(
+      async () => new Response(wrongSecret, { status: 401 }),
+    ) as unknown as typeof fetch;
+    const res = await authorizedFetch(service, source, "http://n.test/x");
+    expect(res.status).toBe(401);
+    expect(await res.text()).toBe(wrongSecret);
+    expect(service).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
+    const bare = vi.fn(async () => new Response("", { status: 401 })) as unknown as typeof fetch;
+    expect((await authorizedFetch(bare, source, "http://n.test/x")).status).toBe(401);
+    expect(bare).toHaveBeenCalledTimes(1);
   });
 
   it("preferences, receipts and consents carry the bearer when a source is configured", async () => {

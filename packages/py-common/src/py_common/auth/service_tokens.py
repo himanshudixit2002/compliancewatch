@@ -8,8 +8,10 @@ fails, the token keeps being used until it really expires, and the next attempt 
 seconds; calls in between do not wait on identity, and without a valid token they fail at once.
 ``BearerAuth``
 is the ``httpx2.Auth`` that puts the token on every request of a client; when the called
-service answers 401 (the token was signed by a key it no longer trusts, say) the token is
-dropped and the request is sent once more with a fresh one.
+service refuses the token itself (a 401 whose ``WWW-Authenticate`` says ``invalid_token``, or
+whose problem type is ``auth-token-invalid``: the token was signed by a key it no longer trusts,
+say) the token is dropped and the request is sent once more with a fresh one. Any other 401, such
+as a wrong shared secret or a missing tenant, goes back to the caller as it came.
 
 Every outgoing client is built with ``auth=service_auth_from(settings)``, which is None, and so
 sends no token, while no client secret is configured. Clients built from the same settings share
@@ -17,6 +19,7 @@ one token. The client id is ``CW_SERVICE_CLIENT_ID``, or the service's name when
 """
 
 import asyncio
+import re
 import threading
 import time
 from collections.abc import AsyncGenerator, Callable, Generator
@@ -183,9 +186,28 @@ def _parse(response: httpx2.Response) -> tuple[str, float]:
     return token, float(expires_in)
 
 
+_INVALID_TOKEN_CHALLENGE: Final = re.compile(r'\berror\s*=\s*"?invalid_token\b', re.IGNORECASE)
+"""RFC 6750's error code for a bearer token that is expired, revoked or otherwise invalid."""
+_INVALID_TOKEN_PROBLEM: Final = re.compile(r"(^|[:/])auth-token-invalid$")
+
+
+def token_refused(response: httpx2.Response) -> bool:
+    """Whether ``response`` refuses the bearer token itself, which a fresh token may cure: a 401
+    with an RFC 6750 ``invalid_token`` challenge, or with the ``auth-token-invalid`` problem
+    type. A 401 response's body must have been read."""
+    if response.status_code != 401:
+        return False
+    challenges = response.headers.get_list("www-authenticate")
+    if any(_INVALID_TOKEN_CHALLENGE.search(challenge) for challenge in challenges):
+        return True
+    kind = _problem_type(response)
+    return _INVALID_TOKEN_PROBLEM.search(kind) is not None
+
+
 class BearerAuth(httpx2.Auth):
     """Sends the source's token as ``Authorization: Bearer``, and retries once with a fresh
-    token when the answer is 401. The request body is read first so the retry can resend it."""
+    token when the called service refuses the token (``token_refused``). The request body is
+    read first so the retry can resend it; a 401's body is read to learn why."""
 
     requires_request_body = True
 
@@ -200,9 +222,11 @@ class BearerAuth(httpx2.Auth):
         request.headers["Authorization"] = f"Bearer {token}"
         response = yield request
         if response.status_code == 401:
-            self.source.invalidate(token)
-            request.headers["Authorization"] = f"Bearer {self.source.token()}"
-            yield request
+            response.read()
+            if token_refused(response):
+                self.source.invalidate(token)
+                request.headers["Authorization"] = f"Bearer {self.source.token()}"
+                yield request
 
     async def async_auth_flow(
         self, request: httpx2.Request
@@ -213,10 +237,12 @@ class BearerAuth(httpx2.Auth):
         request.headers["Authorization"] = f"Bearer {token}"
         response = yield request
         if response.status_code == 401:
-            self.source.invalidate(token)
-            fresh = await asyncio.to_thread(self.source.token)
-            request.headers["Authorization"] = f"Bearer {fresh}"
-            yield request
+            await response.aread()
+            if token_refused(response):
+                self.source.invalidate(token)
+                fresh = await asyncio.to_thread(self.source.token)
+                request.headers["Authorization"] = f"Bearer {fresh}"
+                yield request
 
 
 _shared: dict[tuple[str, str, str], ServiceTokenSource] = {}
