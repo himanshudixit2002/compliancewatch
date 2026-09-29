@@ -18,7 +18,10 @@ session, the gates and the sign-in. This file is the map and the commands.
 ```
 src/app/            route files only: page.tsx is gate, query, render; layouts, error, global-error, not-found
   (public)/         home, /sitemap, /legal/[doc], /forbidden, /design, /sign-in under the visitor shell
-  (app)/            tenant screens under the session-aware shell: /account (with loading.tsx); [...slug] serves
+  (app)/            tenant screens under the session-aware shell: /account, /onboarding (the consent step),
+                    /onboarding/business (the business step), /onboarding/[businessId]/questions and
+                    /onboarding/[businessId]/done, /businesses and /b/[businessId] with /profile,
+                    /attributes, /snapshot and /review-tasks, each with loading.tsx; [...slug] serves
                     unbuilt tenant screens behind the entry's roles
   admin/            /admin home and layout under AdminShell, behind requireAdmin; [...slug] serves unbuilt
                     tools
@@ -27,10 +30,23 @@ src/app/            route files only: page.tsx is gate, query, render; layouts, 
 src/features/       one directory per screen family: model/, ui/, index.ts (ports, gateway, queries and
                     actions join when a feature reads data); today: home, sitemap, legal, not-available,
                     admin-home, system-pages, design-catalogue, auth (the fake sign-in form, the signIn action,
-                    the seed-state query), account
+                    the seed-state query), account, business (the gateway over the business API and the
+                    profile node routes, the attribute, snapshot, review-task and progress view models,
+                    AttributeControl, AnswerButtons, ValueStateChip, the business step's form, result
+                    panel and createBusiness action, the questions step with its skip-list cookie, the
+                    answer form, the review tasks table and the summary, the businesses list with its
+                    posted search, and the business pages with their tabs, the node and year picker,
+                    the attributes, snapshot and review task views and the location form), consents (the consent step: the
+                    identity consents and reminder preference gateway, the purposes and their documents,
+                    the step's view, the form and the recordConsents action)
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
                     problem/ types the RFC 9457 body every service returns (from the generated contracts);
-                    session/ the session claims, the render-safe view and the time helpers
+                    session/ the session claims, the render-safe view and the time helpers;
+                    ontology/ the attributes with their questions, value labels and operators, from
+                    GET /v1/ontology, and the lookups over them (by key, by level, answerable, labels);
+                    business/ a business, its registrations and nodes, stored values, onboarding, prefill,
+                    review tasks and snapshots, with the mappers both ways; consent/ consent records,
+                    states and purposes; notification/ a channel preference
 src/server/         server-only modules; every file starts with `import "server-only"`
                     env.ts validates every CW_WEB_* variable (zod; parsed at the first request, never at build)
                     session.ts: the encrypted cw_session cookie (jose), its options, set and clear (actions only)
@@ -39,7 +55,8 @@ src/server/         server-only modules; every file starts with `import "server-
                     auth/provider.ts: the AuthProvider port and providerFor(env); auth/fake.ts: the development
                     adapter (CW_WEB_AUTH_PROVIDER=fake, local and test only) minting a session for a chosen
                     tenant, kind, roles and name
-                    result.ts: Result, ApiError and the mapping to a form's ActionState
+                    result.ts: Result, ApiError, mapBody (a success must carry its body) and the mapping to
+                    a form's ActionState
                     api/client.ts: one openapi-fetch client per service (x-request-id, accept, time limit) and call()
                     api/problem.ts: RFC 9457 parsing to ApiError kinds and field errors
                     api/services.ts: the client factories (tenant header from the session; rulebookAdmin() adds
@@ -48,13 +65,20 @@ src/server/         server-only modules; every file starts with `import "server-
                     that require it, the business API's two creating POSTs; the natural keys are listed in the module)
                     cache.ts: the cache tags, cachedRead() for global reads (five minutes under tags), uncachedRead()
                     for tenant reads, afterMutation() for actions (updateTag, revalidatePath)
-                    legal.ts reads docs/legal at build time (marked)
+                    legal.ts reads docs/legal (marked for the pages, readLegalVersions for what a consent
+                    records)
+                    ontology.ts: GET /v1/ontology without a tenant, cached an hour under profile:ontology;
+                    getOntology() reads it once per request
+                    flags.ts: isEnabled(name, { tenantId }) over @compliancewatch/flags/server; the web
+                    override variables (CW_WEB_FLAG_<NAME>) count in local and test only
+                    analytics.ts: track(), a product event as a JSON line and a span event, only while
+                    web.analytics_enabled is on and the person's analytics consent is current
 src/shared/config/  the screen registry (screens.ts), roles and permissions, flags, navigation, the legal doc list
 src/shared/lib/     IST dates, financial years, money and decimal strings, humanise, identifiers, pagination, urls,
                     action-state (what a server action returns to a form)
 src/shared/i18n/    messages/en.json and the typed t(); another locale falls back key by key
 src/shared/ui/      app-level compositions over the UI kit: the two shells over next/link, breadcrumbs, the status chip,
-                    the session menu and the sign-out form
+                    the session menu and the sign-out form, ServiceError (a failed read with its correlation id)
 src/test/           vitest setup, the architecture rules and test, the docs/web/screens.md drift test,
                     fake-fetch.ts (a recording fetch with problem+json answers for client and gateway tests),
                     fake-cookies.ts (the cookie store next/headers resolves to in session and gate tests)
@@ -70,7 +94,7 @@ scripts/seed/       the demo-tenant seed (pnpm --filter web seed, make web-seed)
                     summary and var/seed/last.json; fixtures/rulebook/ the recorded notification (README,
                     record.py)
 e2e/                fixtures.ts (the axe check failing on serious or critical, the personas signed in through
-                    the fake form, the seed-state reader) and one spec per live page, plus a11y.spec.ts over
+                    the fake form, the seed-state reader, the stack's service URLs) and one spec per live page, plus a11y.spec.ts over
                     every registered page; tsconfig.scripts.json type-checks them
 next.config.ts      typed routes, security headers; eslint.config.mjs: Next flat config plus repo rules
 vitest.config.mts   jsdom, Testing Library, 80% coverage floor (route files and proxy.ts are covered by e2e)
@@ -118,8 +142,12 @@ page that fetches. `server/env.ts` validates every `CW_WEB_*` variable with zod:
 the process environment at the first request (never at import or build time), keeps the frozen
 result, and refuses a bad value with the variable's name; unset means the documented default
 (`CW_WEB_ENV` local, the services on their canonical ports 8001-8010). The service clients
-(`server/api`) are typed from the generated contracts and used only on the server; no page calls one
-yet.
+(`server/api`) are typed from the generated contracts and used only on the server; the owner and
+CA-firm screens (onboarding, the businesses and their pages, settings) call identity, profile and
+notification through them, as `docs/web/onboarding-flow.md`, `business-pages.md`, `settings.md`
+and `legal-pages.md` describe. In production, onboarding is closed while the terms or the privacy
+notice in `docs/legal` is a draft; product events are written only with `web.analytics_enabled`
+on and the person's analytics consent current.
 
 Sessions and gates: `/sign-in` renders the fake provider's form (`CW_WEB_AUTH_PROVIDER=fake`,
 local and test only; unset shows "Sign-in is not configured" with the variable's name), the
@@ -136,9 +164,12 @@ render. `/account` shows the session facts; `POST /sign-out` clears the cookie.
 The Playwright suite visits the built app: the public pages, the sign-in, account and admin
 pages after signing in through the fake form, the design catalogue (group by group) and every
 planned, waiting or ready page through the catch-alls as the first persona its roles admit, with
-`AxeBuilder` failing a page on any serious or critical finding. No page calls a service yet;
-the one test that needs the services, the seeded-tenant sign-in, runs after `make web-stack`,
-`make web-stack-wait` and `make web-seed` and is skipped without the seed state. Once per
+`AxeBuilder` failing a page on any serious or critical finding. The specs that need the
+services and the seeded tenant (the seeded-tenant sign-in, the onboarding steps, the business
+and settings pages, and the `journey-*` specs that take an owner, a CA firm and a visitor across
+them) run after `make web-stack`, `make web-stack-wait` and `make web-seed` and are skipped
+without the seed state;
+`make web-e2e` points the app at the stack's ports. Once per
 machine: `make web-e2e-install` (downloads Chromium; the package has no install script). Then
 `make web-e2e` builds the app and runs the suite on `WEB_PORT` from the root `.env` (3000 unless
 changed; the config starts `next start` there with `CW_WEB_ENV=test`, the fake provider and a
@@ -146,7 +177,7 @@ fixed session secret, or reuses a server already on it outside CI). Every live p
 the registry names its spec files under `e2e`, and the registry test checks they exist.
 Playwright reports land in `playwright-report/` and `test-results/`, both git-ignored. On CI the
 `web-e2e` job starts the services, seeds them and runs the same suite, with the seeded-tenant
-test required.
+tests that need them required.
 
 ## How to run
 

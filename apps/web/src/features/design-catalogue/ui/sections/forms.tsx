@@ -1,8 +1,11 @@
 import {
   Checkbox,
+  CheckboxGroup,
+  DateField,
   Field,
   Input,
   Label,
+  NumberField,
   RadioGroup,
   RadioGroupItem,
   Select,
@@ -75,6 +78,44 @@ export function FormsSection() {
             </div>
           ))}
         </RadioGroup>
+      </Example>
+      <Example label="Checkbox group">
+        <CheckboxGroup
+          id="example-group"
+          legend="Example choices"
+          description="Tick every one that applies."
+          name="example-group"
+          options={FIXTURES.options}
+          defaultValue={["a"]}
+        />
+        <CheckboxGroup
+          id="example-group-invalid"
+          legend="Example with an error"
+          name="example-group-invalid"
+          options={FIXTURES.options.slice(0, 2)}
+          error="Example error text explaining what to change."
+          columns={2}
+        />
+      </Example>
+      <Example label="Number field">
+        <NumberField id="example-count" label="Example count" min={0} max={100000} />
+        <NumberField
+          id="example-ratio"
+          label="Example ratio"
+          integer={false}
+          defaultValue="1.5"
+          description="A number with a decimal point."
+        />
+      </Example>
+      <Example label="Date field">
+        <DateField
+          id="example-date"
+          label="Example date"
+          description="Any day in the year 2000."
+          min="2000-01-01"
+          max="2000-12-31"
+          defaultValue="2000-04-01"
+        />
       </Example>
     </CatalogueSection>
   );

@@ -3,11 +3,13 @@ import type { NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME } from "@/entities/session/types";
 import { getEnv } from "@/server/env";
 import { isSameOriginRequest } from "@/server/origin";
+import { RECIPIENT_COOKIE_NAME, recipientCookieOptions } from "@/server/remembered-recipients";
 import { sessionCookieOptions } from "@/server/session";
 import { signInHref } from "@/shared/config/nav";
 
 /**
- * Sign out: expires the session cookie and sends the browser to the sign-in page. POST only
+ * Sign out: expires the session cookie (and the notification recipients this device remembered
+ * for the settings pages) and sends the browser to the sign-in page. POST only
  * (the shells submit a plain form, so it works without JavaScript); Next answers 405 to any
  * other method. A request from another site is refused (server/origin.ts), so a foreign page
  * cannot sign a visitor out. The redirect is relative, so the browser stays on the host it
@@ -29,5 +31,6 @@ export function POST(request: NextRequest): NextResponse {
   }
   const response = new NextResponse(null, { status: 303, headers: { location: signInHref() } });
   response.cookies.set(SESSION_COOKIE_NAME, "", { ...sessionCookieOptions(env), maxAge: 0 });
+  response.cookies.set(RECIPIENT_COOKIE_NAME, "", { ...recipientCookieOptions(env), maxAge: 0 });
   return response;
 }

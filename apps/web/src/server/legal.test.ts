@@ -1,14 +1,18 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LEGAL_DOC_NAMES } from "@/shared/config/legal-docs";
+import { VERSIONS } from "@/test/consent-fixture";
+import { resetEnvCache } from "./env";
 import {
   containsRawHtml,
   extractTitle,
   extractVersion,
   legalDir,
+  onboardingGate,
   readLegalDocument,
   readLegalDocuments,
+  readLegalVersions,
   renderLegalMarkdown,
 } from "./legal";
 
@@ -72,7 +76,69 @@ describe("docs/legal", () => {
     expect(readLegalDocument("privacy-notice", legalDir(REPO_ROOT)).title).toBe("Privacy notice");
   });
 
+  it("reads every published document's heading and version without rendering it", () => {
+    const versions = readLegalVersions(legalDir(REPO_ROOT));
+    const documents = readLegalDocuments(legalDir(REPO_ROOT));
+    expect(Object.keys(versions)).toEqual(LEGAL_DOC_NAMES);
+    for (const doc of documents) {
+      expect(versions[doc.name]).toEqual({
+        name: doc.name,
+        title: doc.title,
+        version: doc.version,
+        isDraft: doc.isDraft,
+      });
+    }
+  });
+
   it("fails on a document that is not there", () => {
     expect(() => readLegalDocument("privacy-notice", resolve(REPO_ROOT, "apps"))).toThrow();
+  });
+});
+
+describe("onboardingGate", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetEnvCache();
+  });
+
+  const approved = {
+    ...VERSIONS,
+    "privacy-notice": { ...VERSIONS["privacy-notice"], version: "9.9", isDraft: false },
+  };
+
+  it("closes production onboarding while a required document is a draft", () => {
+    const gate = onboardingGate({ env: "prod", versions: VERSIONS });
+    expect(gate.closed).toBe(true);
+    expect(gate.drafts.map((document) => document.name)).toEqual(["privacy-notice"]);
+  });
+
+  it("opens production once the terms and the privacy notice are approved, whatever the WhatsApp notice says", () => {
+    expect(onboardingGate({ env: "prod", versions: approved })).toEqual({
+      closed: false,
+      drafts: [],
+    });
+  });
+
+  it("stays open in local, test and staging, naming the drafts", () => {
+    for (const env of ["local", "test", "staging"] as const) {
+      const gate = onboardingGate({ env, versions: VERSIONS });
+      expect(gate.closed, env).toBe(false);
+      expect(gate.drafts.map((document) => `${document.name}@${document.version}`)).toEqual([
+        "privacy-notice@9.9-draft",
+      ]);
+    }
+  });
+
+  it("reads CW_WEB_ENV and docs/legal by default, where every document is still a draft", () => {
+    vi.stubEnv("CW_WEB_ENV", "prod");
+    const gate = onboardingGate();
+    expect(gate.closed).toBe(true);
+    expect(gate.drafts.map((document) => document.name)).toEqual([
+      "privacy-notice",
+      "terms-of-service",
+    ]);
+    vi.stubEnv("CW_WEB_ENV", "test");
+    resetEnvCache();
+    expect(onboardingGate().closed).toBe(false);
   });
 });

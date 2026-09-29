@@ -46,4 +46,30 @@ describe("Table", () => {
     expect(container.querySelector('[data-slot="table-footer"]')).not.toBeNull();
     expect(await runAxe(container)).toHaveNoViolations();
   });
+
+  it("makes the scroll container a named, focusable region on request", async () => {
+    const { container, rerender } = render(
+      <Table scrollLabel="Example rows, scrolls sideways">
+        <TableCaption>Example rows</TableCaption>
+        <TableBody>
+          <TableRow>
+            <TableCell>Example</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>,
+    );
+    const region = screen.getByRole("region", { name: "Example rows, scrolls sideways" });
+    expect(region.dataset.slot).toBe("table-container");
+    expect(region.getAttribute("tabindex")).toBe("0");
+    expect(await runAxe(container)).toHaveNoViolations();
+    rerender(
+      <Table>
+        <TableCaption>Example rows</TableCaption>
+      </Table>,
+    );
+    expect(screen.queryByRole("region")).toBeNull();
+    expect(container.querySelector('[data-slot="table-container"]')?.hasAttribute("tabindex")).toBe(
+      false,
+    );
+  });
 });

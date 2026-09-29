@@ -71,13 +71,25 @@ and ends with `expect(await runAxe(container)).toHaveNoViolations()`.
 native `<select>`: the browser's listbox already gives keyboard and screen-reader support), Dialog
 (focus trap, Escape, `aria-labelledby`), Sheet (a Dialog sliding in from a side; the mobile
 navigation uses it), Tabs (the panel is focusable after the active trigger and shows the focus
-ring), Table (semantic table primitives with a caption slot), Card, Badge,
+ring), Table (semantic table primitives with a caption slot; `scrollLabel` makes the scroll
+container of a table wider than its column a named, focusable region), Card, Badge,
 Skeleton, Toaster (`sonner` with a polite live region; `toast` is re-exported).
 
 **Composites**, each with its accessibility contract:
 
 - `Field`: label, control, description and error; the control receives `id`,
   `aria-describedby`, `aria-invalid` and `aria-required`, and the error id is `<id>-error`.
+- `CheckboxGroup`: a `<fieldset>` with the question as its `<legend>`, one labelled checkbox per
+  option (Tab moves between boxes, Space toggles), an option's hint describing its box, the
+  description and error describing the fieldset; every checked box submits `name=value`, so a
+  server action reads `formData.getAll(name)`, and the value keeps the options' order.
+- `NumberField`: a text input with `inputmode="numeric"` (or `decimal`) and the allowed range as
+  a sentence in its description; a native number input changes its value on a scroll and reads
+  out poorly. `DateField`: the browser's own date input with `min` and `max`; the value is
+  always YYYY-MM-DD.
+- `ProgressBar`: `role="progressbar"` named by its visible label, with `aria-valuenow`, the range
+  and `aria-valuetext`, so a screen reader says "4 of 17 answered" rather than a percentage; the
+  value is clamped and the track has a 3:1 border.
 - `StatusChip`, `Badge`, `Banner`, `Timeline`: the `Tone` vocabulary (`neutral`, `success`,
   `warning`, `danger`, `info`); the text carries the meaning. A danger Banner is `role="alert"`,
   the other tones `role="status"`.

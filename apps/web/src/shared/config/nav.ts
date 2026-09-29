@@ -149,6 +149,39 @@ export function navFor(ctx: NavContext, screens: readonly Screen[] = SCREENS): N
   return sectionsFor(APP_GROUPS, ctx, screens);
 }
 
+/**
+ * The pages of one business, for the tabs above them: the business group's entries whose route
+ * is under /b/[businessId], in their nav order. Empty until the businessId is known.
+ */
+export function businessNavFor(ctx: NavContext, screens: readonly Screen[] = SCREENS): NavLink[] {
+  const section = sectionsFor(["business"], ctx, screens)[0];
+  return (section?.items ?? []).filter((item) => {
+    const screen = screens.find((candidate) => candidate.id === item.id);
+    return screen?.route.startsWith("/b/[businessId]") ?? false;
+  });
+}
+
+/**
+ * The settings pages for the tabs above them: the settings group's entries the session may
+ * open, in their nav order, without the planned ones (the settings index lists those with their
+ * status, and a tab should lead somewhere that exists or is coming).
+ */
+export function settingsNavFor(ctx: NavContext, screens: readonly Screen[] = SCREENS): NavLink[] {
+  const coming = screens.filter((screen) => screen.status !== "planned");
+  return sectionsFor(["settings"], ctx, coming)[0]?.items ?? [];
+}
+
+/** What a settings page's header needs: the breadcrumbs up to Settings and the tabs. */
+export function settingsHeaderLinks(
+  screen: Screen,
+  principal: { roles: readonly Role[]; tenantKind: TenantKind },
+): { crumbs: Crumb[]; tabs: NavLink[] } {
+  return {
+    crumbs: breadcrumbsFor(screen.id as ScreenId),
+    tabs: settingsNavFor({ roles: principal.roles, tenantKind: principal.tenantKind }),
+  };
+}
+
 /** The admin shell's grouped tools; empty for a non-regulatory session. */
 export function adminNavFor(ctx: NavContext, screens: readonly Screen[] = SCREENS): NavSection[] {
   return sectionsFor(ADMIN_GROUPS, ctx, screens);

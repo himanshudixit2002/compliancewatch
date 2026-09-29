@@ -302,3 +302,199 @@ fails when the name list and the registry's web entries differ; adding a web fla
 registry, py-common's generated copy (`make flags`) and `FLAG_NAMES`; the registry is a turbo
 global dependency so a changed entry reruns the web tests; the reader, when a screen needs one,
 reads through `@compliancewatch/flags/server` and honours the override only in local and test.
+
+## D-024: The ontology comes from GET /v1/ontology, not from a generated module
+
+2026-09-29. The screens need each attribute's question, help line, value labels, level, type and
+source, and the operators per type. The first design generated a TypeScript module from
+packages/ontology's YAML files with a drift check; since then the profile service serves exactly
+that, worded, at `GET /v1/ontology` (with an ETag), and it is the source the services and the
+rules use. `server/ontology.ts` reads it without a tenant header, caches it an hour under
+`profile:ontology` (the service's own `max-age`), and `entities/ontology` maps it and holds the
+lookups. Consequences: there is no generated file, no generator and no drift check; a wording
+change reaches the screens within the hour of its release (or at once after
+`updateTag(tags.profile.ontology())`); a page that needs the ontology fails with the service's
+problem when the profile service is down, like any other read; unit tests use a synthetic body
+(`src/test/ontology-fixture.ts`), never a copy of the real wording.
+
+## D-025: The owner and CA screens use the business API; the node routes fill its gaps
+
+2026-09-29. The first design built the owner screens on the profile node routes (register a
+GSTIN, pre-fill, ask each node for its next question, write attributes per node). The business
+API on `main` now does that as one resource: create a business from a GSTIN or a PAN (with the
+pre-fill and the first question in the answer), read it with its registrations, store answers
+across it in one all-or-nothing patch, and read the onboarding checklist with the question's
+wording, options and progress. `features/business` builds on it, and calls the node routes only
+for what it lacks: one node (locations, lineage parents), adding a location, the snapshot per
+financial year and the review tasks. Consequences: the two creating calls need an
+Idempotency-Key, so their forms render `IdempotencyKeyInput`; the checklist counts known and
+not-applicable answers and returns an unsure one as the next question again, so a questions step
+that lets a person move past "Not sure" keeps its own list of what was skipped; the business id is
+the entity node's id, and a registration is addressed by `nodeId` inside an answer. Because a feature may not import
+another, the onboarding steps that create and question a business are views of the business
+feature, next to the business pages, and the attribute controls live there too.
+
+## D-026: A consent's notice version names its document
+
+2026-09-29. `docs/legal/consent-record.md` asks every grant to carry the version of the notice
+the person saw, and the drafts in docs/legal all start at the same `Version:` value, so the bare
+value could not tell the terms from the privacy notice. The web app records
+`<document>@<Version line>` (`terms-of-service@0.1-draft`), read from the files at request time,
+with each purpose mapped to the document it refers to (`PURPOSE_DOCUMENT` in
+`features/consents/model/purposes.ts`). Consequences: a new Version line on a document makes the
+step ask again for the purposes that refer to it and nothing else; the value fits the service's
+40-character limit, which the model checks; the seed writes its demo consents in the same
+format from the same Version lines, keeping its own purpose-to-document map because a plain
+Node script cannot import the model (`src/test/seed-notices.test.ts` holds the two together).
+
+## D-027: The e2e suite reads the services from the consent step on
+
+2026-09-29. D-011 and D-022 kept `make web-e2e` a build plus Playwright because no page called a
+service. The consent step at `/onboarding` reads and writes identity and notification, so its
+spec needs the stack and the seed, like the seeded-tenant sign-in: it is skipped locally without
+`var/seed/last.json` and fails on CI without it. `make web-e2e` now points the app at the stack
+(`CW_WEB_<SERVICE>_URL` from `SERVICE_PORT_BASE` and the Makefile's service order, unless the
+environment already names one), so a second working copy on 9201-9210 runs the suite without an
+`apps/web/.env.local`. Consequences: the local sequence is `make web-stack`, `make
+web-stack-wait`, `make web-seed`, `make web-e2e`, `make web-stack-down`; a page whose read fails
+still renders its h1 and the service's problem (`ServiceError` with a heading), so the page sweep
+reports an unreachable service as a failed read rather than a missing heading.
+
+## D-028: The business step shows what the lookup returned before it moves on
+
+2026-09-29. The first design registered the GSTIN, ran the pre-fill as a second call and
+redirected straight to the questions, with the pre-fill panel on the way. `POST /v1/businesses`
+now does both in one call and answers with the pre-fill and the first question, so the step keeps
+the answer on screen instead: the business (new, or already on file for that PAN), the values the
+GSTIN lookup returned worded by the ontology, the attributes it stored, or the plain note and the
+review task when no lookup provider answered, then a link to the questions. The form carries the
+Idempotency-Key minted for its render; "Add another business" is a document load, so the next
+form has a new key rather than replaying the first answer. The step shows the form only once the
+required consents are on file, because the profile service does not check them, and
+`createBusiness` checks them again before any profile call, because a server action can be
+posted without the page (`server/required-consents.ts`, one check for both). Consequences: a
+reload after adding forgets the panel (the business stays; the list and the business pages show
+it); the page sweep leaves live pages with route parameters (a legal document, a business) to
+their own specs, which visit them with real ids and run axe there.
+
+## D-029: The questions step keeps its own skip list; a missing business is a streamed not-found
+
+2026-09-29. The business API's checklist names an unsure question as the next one again, so a
+step that only followed `next` would ask the same question after every "Not sure". The step keeps
+the items answered "Not sure" in an httpOnly cookie per business (node id and attribute key, a
+day, path `/onboarding`, written only by server actions) and walks the checklist past them; the
+summary lists them and can ask them again. Considered and rejected: the question in the URL
+(the plan keeps answers and questions out of URLs) and a server-side store (none exists for web
+state). The business pages stream behind their `loading.tsx`, so, as Next documents, a business
+that is missing or not the tenant's is the streamed not-found page (status 200, the not-found UI
+and a `noindex` robots tag) rather than a 404 status; the id is checked before any service call.
+A table that can be wider than its column names its scroll container (`scrollLabel` on the kit's
+`Table`) so the region is focusable and axe's scrollable-region rule holds.
+
+## D-030: The businesses search is posted, and a business's pages share one header
+
+2026-09-29. The CA client list searches by name, PAN or GSTIN, and a PAN or a GSTIN in a query
+string would land in the browser history and in access logs, which the web app rules out for
+identifiers. The search box and the pager post to a server action and the client component redraws
+the table from its answer; the cursor travels in the same body. The cost is that a searched page
+is not bookmarkable and the back button leaves the list; the unfiltered first page is rendered on
+the server. A business's pages share a header built from the registry (`businessHeaderLinks`):
+breadcrumbs with the business's name, and a row of tabs from the business group's entries under
+`/b/[businessId]`, including the screens not built yet, which lead to their notices. Nodes are
+named by PAN, GSTIN or label with their name, because the business API names a registration after
+its business unless told otherwise. Found while building the snapshot page: the snapshot route's
+`lineage` holds the ancestors only, so the origin model now treats `business_id` as the node
+itself (the earlier fixture had listed the node in its own lineage). The e2e sign-in waits for the
+form to hydrate before typing the tenant id, a controlled input that hydration would otherwise
+reset, which had sent an occasional spec into a new, empty tenant.
+
+## D-031: Settings change consents as new records and remember recipients per device
+
+2026-09-29. The consents page lets a user withdraw and also give the optional purposes (WhatsApp
+reminders, email reminders, analytics). Giving is there because the notification page (next)
+opts a number in only while the channel's consent is given, and a user who withdrew would
+otherwise have no way back on the web; the required purposes stay with the consent step and
+the data rights request. Every change is a new record, with `web_settings` as the source (the
+identity and notification services added it; the first version sent `web_onboarding`); the evidence says it was confirmed on the
+settings page and quotes the sentence shown. Withdrawing WhatsApp reminders opts the number out
+before the record is written, so a failure leaves reminders stopped rather than a withdrawal on
+file with reminders still going. The service does not return the user's own number or address
+yet, so the number used on the consent step or the settings pages is remembered on the device
+in an encrypted, httpOnly cookie bound to the user id (path `/`, 30 days, expired at
+sign-out). The path is the whole site because the consent step posts to `/onboarding` and a
+browser sends a cookie only under its path: scoped to `/settings`, the step would read nothing
+and replace the cookie with its number alone, dropping a remembered address; not writing it from
+the consent step would lose the number the step opted in. Considered and rejected: asking for
+the number on every visit (a withdrawal would often leave the number opted in) and a hidden form
+field (it would put the number in the page for anyone to change). The settings index is
+registry-driven and sits in the account group so the header links to it; the settings pages
+share a header with breadcrumbs and tabs from the settings group, planned entries left to the
+index.
+
+## D-032: The notifications page opts in only with the channel's consent on file
+
+2026-09-29. The notification service records any opt-in it is sent; it does not look at the
+identity service's consents. The WhatsApp consent notice says the consent is recorded first and
+the preference set after it, so `savePreference` reads the user's consents and refuses to switch
+reminders on while the channel's purpose is not granted, naming the purpose and pointing to the
+consents page; opting out, the language and the quiet hours are never held back. The page
+writes to the recipient this device remembers, not to one named in the form, so a form cannot be
+aimed at another number; choosing another recipient is its own step. The number and address
+forms check their values on the server only (the browser's own email check is off), so the
+messages are the same in every browser. Consequence: a number opted in by writing START on
+WhatsApp shows as opted in here even without the web consent, and the page says the consent is
+not on file.
+
+## D-033: Billing shows the provider's answer, including "not connected"
+
+2026-09-29. The billing page shows the plans exactly as the identity service states them and
+starts a subscription with its provider; the web app decides no price and never takes payment
+details. The stack the e2e suite runs on has no billing provider (`CW_BILLING_PROVIDER=none`), so
+subscribing answers 503 `billing-disabled`; the form shows that as its own honest state ("billing
+is not connected yet", nothing started, nothing charged, the request id) rather than as a
+failure, and the spec asserts it. `make web-stack BILLING=memory` starts identity with the memory
+provider for a manual demo, and `make web-e2e BILLING=memory` tells the spec to expect a started
+subscription instead; the unit tests cover both answers. A form that refuses a submit puts the
+submitted values back (React resets a form after its action), on this page and on the
+notifications page.
+
+## D-034: Product events are log lines behind the flag and a consent read on every event
+
+2026-09-29. The onboarding funnel and the settings changes need product events, third-party
+analytics are ruled out, and `docs/legal` makes analytics an optional purpose the person can
+withdraw. `server/analytics.ts` writes each event as one JSON line on stdout and adds it to the
+active OpenTelemetry span (`@opentelemetry/api`, pinned at 1.9.1, is the API Next's own tracing
+resolves first; with no tracer registered the span event is a no-op). An event goes out only
+while `web.analytics_enabled` is on, read through the new `server/flags.ts` over
+`@compliancewatch/flags/server`, and the person's latest analytics record grants it at the
+privacy notice's current version, read from identity on every event. Considered and rejected:
+the session's `analyticsConsent` claim, which would keep events flowing after a withdrawal until
+the session is refreshed; and running `track` in Next's `after()`, which needs a request scope the
+unit tests do not have, for a cost (one consent read) paid only while the flag is on. The web
+override variables count in local and test only; elsewhere the reader strips them, so Unleash is
+the only way to switch a web flag on in staging or production. Consequences: with the flag off
+nothing is read or written; with it on, each event adds one identity read to the action or page
+that emits it; the events are a closed union, so a new one is a code change reviewed for
+personal data; turning the flag on waits for counsel's view on the analytics purpose.
+
+## D-035: Production onboarding is closed while the terms or the privacy notice is a draft
+
+2026-09-29. Every document in `docs/legal` is still a draft waiting for a lawyer, and a consent
+records the version a person agreed to, so a person agreeing in production would agree to a
+draft. `onboardingGate()` in `server/legal.ts` closes onboarding when `CW_WEB_ENV` is `prod` and
+any required document (`REQUIRED_LEGAL_DOCS`: the terms and the privacy notice, the documents the
+required purposes refer to; a test holds the list to the purpose mapping) has a Version line
+ending in `-draft`. Closed means: the consent step and the business step show the step's heading,
+the draft banner and each draft with its version and link, and no form; `recordConsents` and
+`createBusiness` refuse before any call; the consents settings page refuses to give a consent,
+while a withdrawal is always recorded. Local, test and staging stay open under the draft banner,
+so the flow can be built, tested and reviewed before the wording is approved; the WhatsApp
+consent notice, for an optional purpose, does not close anything. The questions, the summary and
+the business pages stay open, because they change a business that already exists. The legal
+pages show the draft banner only while a document's version ends in `-draft` (a plain version
+line afterwards, where the first build showed the banner whatever the version), and a print
+stylesheet in `globals.css` prints the page without the shell, in black on white whatever the
+screen's scheme, keeps the banner on a printed draft, and adds a line naming the document and its
+version. Consequences: production onboarding opens with the release that carries the reviewed
+Version lines, with no configuration change; the e2e suite runs in `test` and never sees the
+closed state, which the unit tests cover.

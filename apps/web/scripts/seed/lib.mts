@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import type { LegalDocName } from "../../src/shared/config/legal-docs.ts";
 import { financialYearLabel, financialYearOf } from "../../src/shared/lib/financial-year.ts";
 import { isUuid } from "../../src/shared/lib/identifiers.ts";
 
@@ -10,7 +11,8 @@ import { isUuid } from "../../src/shared/lib/identifiers.ts";
  *
  * The demo facts are the ones tools/demo/src/cw_demo/tenant.py uses (made up; the GSTIN is the
  * profile service's static demo lookup value), so `make demo` and `make web-seed` describe the
- * same business. Attribute levels follow packages/ontology attributes.yaml: state, category,
+ * same business; the consents' notice versions follow the web consent step instead (below).
+ * Attribute levels follow packages/ontology attributes.yaml: state, category,
  * turnover, peak turnover and headcount sit on the entity node (turnover per financial year),
  * the filing and supply facts on the registration node.
  */
@@ -46,7 +48,6 @@ export interface AttributeChange {
 
 export const DEMO = {
   ownerPhone: "919876543210",
-  noticeVersion: "0.1-draft",
   gstin: "29ABCDE1234F1Z5",
   entityName: "Acme Traders Private Limited",
   registrationName: "Acme Bengaluru",
@@ -74,6 +75,49 @@ export const DEMO = {
     { key: "generates_eway_bills", value: true },
   ],
 } as const;
+
+export type SeedConsentPurpose = (typeof DEMO.consentPurposes)[number];
+
+/**
+ * The docs/legal document each seeded purpose refers to, as the web consent step maps it
+ * (PURPOSE_DOCUMENT in src/features/consents/model/purposes.ts; src/test/seed-notices.test.ts
+ * keeps the two in step).
+ */
+export const CONSENT_DOCUMENTS = {
+  terms: "terms-of-service",
+  privacy_notice: "privacy-notice",
+  profile_processing: "privacy-notice",
+  whatsapp_reminders: "whatsapp-consent",
+} as const satisfies Readonly<Record<SeedConsentPurpose, LegalDocName>>;
+
+export type ConsentDocument = (typeof CONSENT_DOCUMENTS)[SeedConsentPurpose];
+
+/** The documents the seeded consents refer to, each once. */
+export const CONSENT_DOCUMENT_NAMES: readonly ConsentDocument[] = [
+  ...new Set(Object.values(CONSENT_DOCUMENTS)),
+];
+
+/** A document's `Version:` line, matched as server/legal.ts matches it. */
+const LEGAL_VERSION_LINE = /^Version:[ \t]*(\S+)[ \t]*$/m;
+
+/** The version a docs/legal document's markdown declares, for example "0.1-draft". */
+export function legalVersion(markdown: string): string {
+  const match = LEGAL_VERSION_LINE.exec(markdown);
+  if (match === null) throw new Error("legal document has no Version line");
+  return match[1] as string;
+}
+
+/**
+ * The notice version a seeded consent carries: `<document>@<Version line>`, the value the web
+ * consent step records (docs/web/decisions.md D-026), for example `terms-of-service@0.1-draft`.
+ */
+export function consentNoticeVersion(
+  purpose: SeedConsentPurpose,
+  versions: Readonly<Record<ConsentDocument, string>>,
+): string {
+  const document = CONSENT_DOCUMENTS[purpose];
+  return `${document}@${versions[document]}`;
+}
 
 /** The financial-year label the seed answers for: `2026-27` for 28 September 2026. */
 export function seedFinancialYear(asOf: string = DEMO.asOf): string {
