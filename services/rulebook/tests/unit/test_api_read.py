@@ -148,6 +148,11 @@ def test_an_entity_and_the_clauses_that_mention_it(
     ]
     before = client.get(f"{BASE}/entities/{form}/clauses", params={"as_of": "2026-03-27"})
     assert before.json() == []
+    assert clauses[0]["out_of_force"] is False
+    _, withdrawn = store.add_rule("gstr3b_monthly", status=RuleVersionStatus.WITHDRAWN)
+    store.add_citation(withdrawn, clause_id_for(DOC, "en.p1"), "FORM GSTR-3B")
+    later = client.get(f"{BASE}/entities/{form}/clauses", params={"as_of": "2026-10-01"})
+    assert [c["out_of_force"] for c in later.json()] == [True]
 
 
 @pytest.mark.parametrize("suffix", ["", "/clauses"])

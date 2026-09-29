@@ -74,10 +74,12 @@ class MentionSpan:
 
 @dataclass(frozen=True, slots=True)
 class MentionedClause:
-    """A clause that mentions an entity, with every span that does."""
+    """A clause that mentions an entity, with every span that does, and whether the rule it
+    states is out of force on the reader's date (``rulebook.domain.rule_versions.out_of_force``)."""
 
     detail: ClauseDetail
     mentions: tuple[MentionSpan, ...]
+    out_of_force: bool = False
 
 
 @dataclass(frozen=True, slots=True)

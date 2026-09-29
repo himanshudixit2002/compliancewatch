@@ -98,6 +98,12 @@ class SearchHitOut(BaseModel):
             "in force on as_of when it is given"
         )
     )
+    out_of_force: bool = Field(
+        description=(
+            "The clause is cited with a verified quote by a published, superseded or withdrawn "
+            "version and none of them is in force on as_of; false without as_of or a citation"
+        )
+    )
 
     @classmethod
     def from_hit(cls, hit: SearchHit) -> Self:
@@ -116,4 +122,5 @@ class SearchHitOut(BaseModel):
             lexical_rank=hit.lexical_rank,
             vector_rank=hit.vector_rank,
             cited_by=[version.value for version in hit.cited_by],
+            out_of_force=hit.out_of_force,
         )

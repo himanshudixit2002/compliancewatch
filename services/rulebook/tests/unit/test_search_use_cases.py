@@ -223,3 +223,30 @@ def test_hits_carry_the_versions_that_cite_them(store: MemoryKnowledgeStore) -> 
     assert search.run(june)[0].cited_by == (old,)
     july = SearchQuery("due date", ClauseFilter(as_of=date(2026, 7, 1)))
     assert search.run(july)[0].cited_by == (new,)
+
+
+def test_a_superseded_notifications_clause_is_out_of_force_after_its_replacement(
+    store: MemoryKnowledgeStore,
+) -> None:
+    document = register(store, "old notification", date(2026, 3, 28), EXTENSION, MONTHLY, RATES)
+    extension, monthly = clause_id_for(document, "en.p1"), clause_id_for(document, "en.p2")
+    _, old = store.add_rule(
+        "gstr3b_monthly",
+        status=RuleVersionStatus.SUPERSEDED,
+        effective_from=date(2026, 4, 1),
+        effective_to=date(2026, 7, 1),
+    )
+    _, withdrawn = store.add_rule("gstr3b_extension", status=RuleVersionStatus.WITHDRAWN)
+    _, draft = store.add_rule("gstr3b_draft")
+    store.add_citation(old, monthly, "furnish a return in FORM GSTR-3B")
+    store.add_citation(withdrawn, extension, "The due date for furnishing the return")
+    store.add_citation(draft, clause_id_for(document, "en.p3"), "The rate of tax")
+    search = SearchClauses(store)
+
+    def flags(as_of: date | None) -> dict[str, bool]:
+        query = SearchQuery("return GSTR-3B rate tax", ClauseFilter(as_of=as_of), k=3)
+        return {hit.detail.clause.clause_ref: hit.out_of_force for hit in search.run(query)}
+
+    assert flags(date(2026, 6, 1)) == {"en.p1": True, "en.p2": False, "en.p3": False}
+    assert flags(date(2026, 8, 1)) == {"en.p1": True, "en.p2": True, "en.p3": False}
+    assert flags(None) == {"en.p1": False, "en.p2": False, "en.p3": False}

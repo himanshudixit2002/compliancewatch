@@ -194,6 +194,12 @@ class MentionOut(BaseModel):
 
 class MentionedClauseOut(ClauseDetailOut):
     mentions: list[MentionOut]
+    out_of_force: bool = Field(
+        description=(
+            "The clause is cited with a verified quote by a published, superseded or withdrawn "
+            "version and none of them is in force on as_of; false without as_of or a citation"
+        )
+    )
 
     @classmethod
     def from_mentioned(cls, found: MentionedClause) -> Self:
@@ -203,6 +209,7 @@ class MentionedClauseOut(ClauseDetailOut):
                 MentionOut(text=span.text, span_start=span.span_start, span_end=span.span_end)
                 for span in found.mentions
             ],
+            out_of_force=found.out_of_force,
         )
 
 

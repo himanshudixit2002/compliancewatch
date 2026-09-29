@@ -95,7 +95,12 @@ from rulebook.domain.review import (
     ReviewQueueStats,
     ReviewStatus,
 )
-from rulebook.domain.rule_versions import IN_FORCE_STATUSES, CitationRecord, RuleVersionRecord
+from rulebook.domain.rule_versions import (
+    CITING_STATUSES,
+    IN_FORCE_STATUSES,
+    CitationRecord,
+    RuleVersionRecord,
+)
 from rulebook.domain.runs import ExtractionRun, RuleSummary
 from rulebook.domain.search import CitedClause, ClauseEmbedding
 from rulebook.domain.seed import SeedStatus
@@ -121,6 +126,7 @@ SUPERSESSION_LOCK = 0x72756C6573757073
 PUBLICATION_LOCK = 0x72756C657075626C
 """Advisory lock key held for the rest of a transaction that publishes, withdraws or sweeps."""
 PUBLISHED_STATUSES = sorted(status.value for status in IN_FORCE_STATUSES)
+CITING_STATUS_VALUES = sorted(status.value for status in CITING_STATUSES)
 REPLACING_KINDS = sorted(kind.value for kind in REPLACING)
 ENGLISH: ColumnElement[str] = literal_column("'english'::regconfig")
 HNSW_EF_SEARCH = 100
@@ -322,10 +328,12 @@ class SqlAlchemyMentionRepository:
             .order_by(ClauseEntityRow.clause_id, ClauseEntityRow.span_start)
         ).all():
             spans.setdefault(clause_id, []).append(MentionSpan(mention_text, span_start, span_end))
+        out = _out_of_force(self._session, [clause.id for clause, _ in rows], as_of)
         return [
             MentionedClause(
                 ClauseDetail(_to_clause(clause), _to_document(document)),
                 tuple(spans[clause.id]),
+                clause.id in out,
             )
             for clause, document in rows
         ]
@@ -680,11 +688,7 @@ class SqlAlchemyRuleVersionRepository:
     ) -> Sequence[RuleVersionRecord]:
         statement = (
             _versions()
-            .where(
-                RuleVersionRow.status.in_(PUBLISHED_STATUSES),
-                RuleVersionRow.effective_from <= as_of,
-                or_(RuleVersionRow.effective_to.is_(None), RuleVersionRow.effective_to > as_of),
-            )
+            .where(_in_force_on(as_of))
             .order_by(RuleRow.rule_key, RuleVersionRow.version)
             .limit(limit)
         )
@@ -987,10 +991,7 @@ class SqlAlchemyClauseIndex:
             .order_by(CitationRow.clause_id, CitationRow.rule_version_id)
         )
         if as_of is not None:
-            citing = citing.where(
-                RuleVersionRow.effective_from <= as_of,
-                or_(RuleVersionRow.effective_to.is_(None), RuleVersionRow.effective_to > as_of),
-            )
+            citing = citing.where(_in_force_on(as_of))
         cited_by: dict[UUID, list[RuleVersionId]] = {}
         for clause_id, rule_version_id in self._session.execute(citing).all():
             cited_by.setdefault(clause_id, []).append(RuleVersionId(rule_version_id))
@@ -999,10 +1000,12 @@ class SqlAlchemyClauseIndex:
             .join(DocumentRow, DocumentRow.id == ClauseRow.document_id)
             .where(ClauseRow.id.in_(ids))
         ).all()
+        out = _out_of_force(self._session, ids, as_of)
         return {
             ClauseId(clause.id): CitedClause(
                 ClauseDetail(_to_clause(clause), _to_document(document)),
                 tuple(cited_by.get(clause.id, ())),
+                clause.id in out,
             )
             for clause, document in rows
         }
@@ -1192,6 +1195,35 @@ def _filtered[*Row](statement: Select[*Row], filters: ClauseFilter) -> Select[*R
     if filters.as_of is not None:
         statement = statement.where(DocumentRow.published_at <= filters.as_of)
     return statement
+
+
+def _in_force_on(as_of: date) -> ColumnElement[bool]:
+    """``rule_versions.in_force`` in SQL: published or superseded, and ``as_of`` in the
+    half-open effective period."""
+    return and_(
+        RuleVersionRow.status.in_(PUBLISHED_STATUSES),
+        RuleVersionRow.effective_from <= as_of,
+        or_(RuleVersionRow.effective_to.is_(None), RuleVersionRow.effective_to > as_of),
+    )
+
+
+def _out_of_force(session: Session, clause_ids: Sequence[UUID], as_of: date | None) -> set[UUID]:
+    """``rule_versions.out_of_force`` in SQL: the clauses among ``clause_ids`` cited with a
+    verified quote by a version published at some time, none of them in force on ``as_of``."""
+    if as_of is None or not clause_ids:
+        return set()
+    found = session.scalars(
+        select(CitationRow.clause_id)
+        .join(RuleVersionRow, RuleVersionRow.id == CitationRow.rule_version_id)
+        .where(
+            CitationRow.clause_id.in_(clause_ids),
+            CitationRow.verified.is_(True),
+            RuleVersionRow.status.in_(CITING_STATUS_VALUES),
+        )
+        .group_by(CitationRow.clause_id)
+        .having(func.bool_or(_in_force_on(as_of)).is_(False))
+    )
+    return set(found)
 
 
 def _versions() -> Select[RuleVersionRow, str, str, str]:

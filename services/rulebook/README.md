@@ -78,7 +78,7 @@ literal pairs to the kernel.
 | `GET /v1/rulebook/rule-versions/{id}/citations` | The clauses a version cites, with the quote and its verification |
 | `GET /v1/rulebook/entities/resolve?type=&name=` | Normalise the name and resolve it the way alignment does. Always 200 with `status`: `resolved` (with the entity), `ambiguous` (with the candidates sharing the alias), `not_found`, `unqualified` (a section or rule without its statute) or `empty` |
 | `GET /v1/rulebook/entities/{id}` | An entity with its aliases |
-| `GET /v1/rulebook/entities/{id}/clauses?as_of=&limit=` | Clauses that mention the entity with the spans, newest document first (undated last); `as_of` keeps documents published on or before it |
+| `GET /v1/rulebook/entities/{id}/clauses?as_of=&limit=` | Clauses that mention the entity with the spans, newest document first (undated last); `as_of` keeps documents published on or before it, and `out_of_force` says whether the clause's rule is out of force then (see Search) |
 | `GET /v1/rulebook/relations?from_rule_version_id=&to_rule_version_id=&to_entity_id=&relation=&published_only=&limit=` | Rule relations by either end (at least one id, else 422), with the evidence clause ref and document and, for a deadline extension, the candidate's period and new due date. `published_only` (default true) keeps relations from versions that have been published |
 | `PUT /v1/rulebook/clauses/embeddings` | Store clause vectors from one model: `{model, dims: 512, items: [{clause_id, vector}]}` (1 to 256 items); returns `{stored, unchanged}`. A clause keeps its first embedding per model. A wrong `dims` is 422 `rulebook-embedding-dimension`, an unknown clause 422. Needs the write token |
 | `GET /v1/rulebook/clauses/unembedded?model=&document_id=&limit=&after=` | Clauses with no embedding from `model`, in clause id order, with their document's metadata (for the embedding text) |
@@ -135,9 +135,13 @@ Reciprocal rank fusion (`1 / (60 + rank)` summed over the legs, ties by clause i
 best. The filters apply to both legs: `regulator`, `doc_types`, and `as_of`, which keeps documents
 published on or before it (undated documents are left out then). Each hit carries the clause,
 its document's regulator, type, number (`external_ref`), title and date, `score`, `lexical_rank`
-and `vector_rank` (null when the leg did not find it) and `cited_by`: the published or
+and `vector_rank` (null when the leg did not find it), `cited_by`: the published or
 superseded versions citing the clause with a verified quote, in force on `as_of` when it is
-given. The rulebook never calls a model: the writer of `PUT /clauses/embeddings` and the reader
+given, and `out_of_force`: true when a published, superseded or withdrawn version cites the
+clause with a verified quote and none of them is in force on `as_of` (false without `as_of` or
+without such a citation). A superseded notification's text still matches a question about a
+later date; `out_of_force` tells the reader that the rule it states no longer applies then. The
+rulebook never calls a model: the writer of `PUT /clauses/embeddings` and the reader
 sending a query vector both embed through the LLM gateway.
 
 ## Publish lifecycle

@@ -143,10 +143,11 @@ def test_search_returns_fused_hits(registered: TestClient) -> None:
         "lexical_rank",
         "vector_rank",
         "cited_by",
+        "out_of_force",
     }
     assert hits[0]["external_ref"] == "01/2026-Central Tax"
     assert hits[0]["title"] == "Due date extended"
-    assert hits[0]["cited_by"] == []
+    assert (hits[0]["cited_by"], hits[0]["out_of_force"]) == ([], False)
     lexical_only = registered.post(f"{BASE}/search", json={"text": "due date"})
     assert [hit["clause_ref"] for hit in lexical_only.json()] == ["en.p1"]
     before = registered.post(f"{BASE}/search", json={"text": "due date", "as_of": "2026-03-27"})

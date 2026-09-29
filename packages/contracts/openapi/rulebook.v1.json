@@ -1486,6 +1486,11 @@
             "title": "Ordinal",
             "type": "integer"
           },
+          "out_of_force": {
+            "description": "The clause is cited with a verified quote by a published, superseded or withdrawn version and none of them is in force on as_of; false without as_of or a citation",
+            "title": "Out Of Force",
+            "type": "boolean"
+          },
           "page": {
             "anyOf": [
               {
@@ -1540,7 +1545,8 @@
           "url",
           "language",
           "published_at",
-          "mentions"
+          "mentions",
+          "out_of_force"
         ],
         "title": "MentionedClauseOut",
         "type": "object"
@@ -2676,6 +2682,11 @@
             "description": "1-based rank in the lexical leg, if in it",
             "title": "Lexical Rank"
           },
+          "out_of_force": {
+            "description": "The clause is cited with a verified quote by a published, superseded or withdrawn version and none of them is in force on as_of; false without as_of or a citation",
+            "title": "Out Of Force",
+            "type": "boolean"
+          },
           "published_at": {
             "anyOf": [
               {
@@ -2731,7 +2742,8 @@
           "score",
           "lexical_rank",
           "vector_rank",
-          "cited_by"
+          "cited_by",
+          "out_of_force"
         ],
         "title": "SearchHitOut",
         "type": "object"
@@ -3829,7 +3841,7 @@
             }
           },
           {
-            "description": "Only documents published on or before this date",
+            "description": "Only documents published on or before this date; each clause says whether its rule is out of force then",
             "in": "query",
             "name": "as_of",
             "required": false,
@@ -3843,7 +3855,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Only documents published on or before this date",
+              "description": "Only documents published on or before this date; each clause says whether its rule is out of force then",
               "title": "As Of"
             }
           },

@@ -61,6 +61,7 @@ from rulebook.domain.rule_versions import (
     CitationRecord,
     RuleVersionRecord,
     in_force,
+    out_of_force,
 )
 from rulebook.domain.runs import ExtractionRun, RuleSummary
 from rulebook.domain.search import CitedClause, ClauseEmbedding
@@ -271,7 +272,13 @@ class MemoryMentionRepository:
             ):
                 continue
             ordered = tuple(sorted(mentions, key=lambda span: span.span_start))
-            found.append(MentionedClause(ClauseDetail(clause, document), ordered))
+            found.append(
+                MentionedClause(
+                    ClauseDetail(clause, document),
+                    ordered,
+                    _out_of_force(self._tables, clause_id, as_of),
+                )
+            )
         return sorted(found, key=_newest_first)[:limit]
 
 
@@ -726,6 +733,7 @@ class MemoryClauseIndex:
             found[clause_id] = CitedClause(
                 ClauseDetail(clause, self._tables.documents[clause.document_id]),
                 tuple(sorted(citing, key=str)),
+                _out_of_force(self._tables, clause_id, as_of),
             )
         return found
 
@@ -735,6 +743,22 @@ def _cited_in_force(tables: _Tables, rule_version_id: RuleVersionId, as_of: date
     if version is None or version.status not in IN_FORCE_STATUSES:
         return False
     return as_of is None or in_force(_version_record(tables, rule_version_id, version), as_of)
+
+
+def _out_of_force(tables: _Tables, clause_id: ClauseId, as_of: date | None) -> bool:
+    citing = {
+        citation.rule_version_id
+        for citation in tables.citations.values()
+        if citation.clause_id == clause_id and citation.verified
+    }
+    return out_of_force(
+        (
+            _version_record(tables, version_id, tables.versions[version_id])
+            for version_id in citing
+            if version_id in tables.versions
+        ),
+        as_of,
+    )
 
 
 def _tokens(text: str) -> frozenset[str]:

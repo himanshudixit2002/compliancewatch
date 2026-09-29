@@ -92,7 +92,8 @@ class MentionRepository(Protocol):
         self, entity_id: CanonicalEntityId, as_of: date | None, limit: int
     ) -> Sequence[MentionedClause]:
         """Clauses that mention the entity, newest document first (undated ones last), then by
-        document and clause order. With ``as_of``, only documents published on or before it."""
+        document and clause order. With ``as_of``, only documents published on or before it, and
+        each clause says whether it is out of force on that date."""
         ...
 
 
@@ -301,7 +302,8 @@ class ClauseIndex(Protocol):
     def hits(
         self, clause_ids: Sequence[ClauseId], as_of: date | None
     ) -> Mapping[ClauseId, CitedClause]:
-        """The clauses with their documents and the versions citing them."""
+        """The clauses with their documents, the versions citing them and whether each is out
+        of force on ``as_of``."""
         ...
 
 

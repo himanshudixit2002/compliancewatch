@@ -55,7 +55,13 @@ def list_entity_clauses(
     entity_id: UUID,
     wired: Wired,
     as_of: Annotated[
-        date | None, Query(description="Only documents published on or before this date")
+        date | None,
+        Query(
+            description=(
+                "Only documents published on or before this date; each clause says whether its "
+                "rule is out of force then"
+            )
+        ),
     ] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[MentionedClauseOut]:

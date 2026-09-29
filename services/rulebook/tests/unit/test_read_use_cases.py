@@ -26,7 +26,7 @@ from rulebook.domain.documents import StoredDocument
 from rulebook.domain.errors import ClauseNotStoredError, UnknownEntityError, UnknownRuleVersionError
 from rulebook.domain.graph import RelationQuery, ResolutionStatus
 from rulebook.domain.relations import RelationCandidate
-from rulebook.domain.rule_versions import IN_FORCE_STATUSES, in_force
+from rulebook.domain.rule_versions import IN_FORCE_STATUSES, in_force, out_of_force
 from rulebook.domain.seed import SeedStatus
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 
@@ -279,6 +279,51 @@ def test_clauses_mentioning_an_entity_are_newest_first(store: MemoryKnowledgeSto
     dated = ListEntityClauses(store).run(form, as_of=date(2026, 2, 1))
     assert [c.detail.document.document_id for c in dated] == [older]
     assert len(ListEntityClauses(store).run(form, limit=1)) == 1
+
+
+def test_a_clause_whose_only_rule_is_superseded_is_out_of_force_later(
+    store: MemoryKnowledgeStore,
+) -> None:
+    document = register(store, "notification", date(2026, 3, 28), TEXT)
+    form = store.add_entity(EntityType.FORM, "GSTR-3B")
+    mention(store, document, "en.p1", form, "FORM GSTR-3B", TEXT)
+    _, old = store.add_rule(
+        "gstr3b_monthly",
+        status=RuleVersionStatus.SUPERSEDED,
+        effective_from=APRIL,
+        effective_to=JULY,
+    )
+    store.add_citation(old, clause_id_for(document, "en.p1"), "extends the due date")
+    clauses = ListEntityClauses(store)
+    assert [c.out_of_force for c in clauses.run(form, as_of=date(2026, 6, 1))] == [False]
+    assert [c.out_of_force for c in clauses.run(form, as_of=date(2026, 8, 1))] == [True]
+    assert [c.out_of_force for c in clauses.run(form)] == [False]
+
+
+@pytest.mark.parametrize(
+    ("statuses", "as_of", "expected"),
+    [
+        ((), date(2026, 5, 1), False),
+        ((RuleVersionStatus.DRAFT, RuleVersionStatus.APPROVED), date(2026, 5, 1), False),
+        ((RuleVersionStatus.PUBLISHED,), date(2026, 5, 1), False),
+        ((RuleVersionStatus.PUBLISHED,), date(2026, 3, 1), True),
+        ((RuleVersionStatus.PUBLISHED,), None, False),
+        ((RuleVersionStatus.WITHDRAWN,), date(2026, 5, 1), True),
+        ((RuleVersionStatus.WITHDRAWN, RuleVersionStatus.PUBLISHED), date(2026, 5, 1), False),
+        ((RuleVersionStatus.WITHDRAWN, RuleVersionStatus.DRAFT), date(2026, 5, 1), True),
+    ],
+)
+def test_out_of_force_needs_a_published_citation_and_none_in_force(
+    store: MemoryKnowledgeStore,
+    statuses: tuple[RuleVersionStatus, ...],
+    as_of: date | None,
+    expected: bool,
+) -> None:
+    records = []
+    for number, status in enumerate(statuses):
+        _, version = store.add_rule(f"r{number}", status=status, effective_from=APRIL)
+        records.append(ReadRuleVersion(store).run(version)[0])
+    assert out_of_force(records, as_of) is expected
 
 
 # ---------------------------------------------------------------- relations and clauses

@@ -17,8 +17,10 @@ from testcontainers.community.postgres import PostgresContainer
 
 from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.ids import ClauseId, DocumentId, SourceId
+from domain_kernel.knowledge import EntityType
 from domain_kernel.vectors import EMBEDDING_DIMS, ClauseFilter
 from rulebook.application.documents import RegisterDocument
+from rulebook.application.graph import ListEntityClauses
 from rulebook.application.search import ListUnembeddedClauses, SearchClauses, StoreEmbeddings
 from rulebook.domain.documents import StoredDocument
 from rulebook.domain.search import ClauseEmbedding, SearchQuery
@@ -359,6 +361,69 @@ def test_hits_carry_the_citing_versions_in_force(
     assert [v.value for v in june.cited_by] == [old]
     assert [v.value for v in july.cited_by] == [new]
     assert anytime.detail.clause.text == MONTHLY
+    assert (anytime.out_of_force, june.out_of_force, july.out_of_force) == (False, False, False)
+
+
+def test_a_superseded_notifications_clause_is_out_of_force_after_its_replacement(
+    factory: PostgresKnowledgeUnitOfWorkFactory,
+) -> None:
+    document = register(factory, "superseded", date(2026, 3, 28), MONTHLY, EXTENSION, RATES)
+    monthly, extension, rates = (clause_id_for(document, f"en.p{n}") for n in (1, 2, 3))
+    old, withdrawn, draft = uuid4(), uuid4(), uuid4()
+    with factory.engine.begin() as connection:
+        connection.execute(text(f"ALTER TABLE rule_version DISABLE TRIGGER {INSERT_GUARD}"))
+        for version_id, key, status, end, clause in (
+            (old, "oof_monthly", "superseded", date(2026, 7, 1), monthly),
+            (withdrawn, "oof_extension", "withdrawn", None, extension),
+            (draft, "oof_draft", "draft", None, rates),
+        ):
+            rule_id = uuid4()
+            connection.execute(
+                text(
+                    "INSERT INTO rule (id, rule_key, regulator, level)"
+                    " VALUES (:id, :key, 'CBIC', 'registration')"
+                ),
+                {"id": rule_id, "key": key},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO rule_version (id, rule_id, version, status, title,"
+                    " specification, obligation_template, effective_from, effective_to)"
+                    " VALUES (:id, :rule, 1, :status, 't', '{}', '{}', DATE '2026-04-01', :end)"
+                ),
+                {"id": version_id, "rule": rule_id, "status": status, "end": end},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO citation (id, rule_version_id, clause_id, quote, verified,"
+                    " match_score, verified_at) VALUES (:id, :version, :clause, 'a return',"
+                    " true, 1.0, :now)"
+                ),
+                {"id": uuid4(), "version": version_id, "clause": clause.value, "now": NOW},
+            )
+        connection.execute(text(f"ALTER TABLE rule_version ENABLE TRIGGER {INSERT_GUARD}"))
+    ids = [monthly, extension, rates]
+
+    def flags(as_of: date | None) -> list[bool]:
+        with factory() as uow:
+            found = uow.index.hits(ids, as_of)
+        return [found[clause_id].out_of_force for clause_id in ids]
+
+    assert flags(date(2026, 6, 1)) == [False, True, False]
+    assert flags(date(2026, 8, 1)) == [True, True, False]
+    assert flags(None) == [False, False, False]
+    with factory() as uow:
+        form, _ = uow.entities.create_or_get(EntityType.FORM, "GSTR-3B")
+        start = MONTHLY.index("FORM GSTR-3B")
+        uow.mentions.add(
+            monthly, form, "FORM GSTR-3B", start, start + 12, method="grammar", extractor="g@1"
+        )
+    assert [c.out_of_force for c in ListEntityClauses(factory).run(form, date(2026, 6, 1))] == [
+        False
+    ]
+    assert [c.out_of_force for c in ListEntityClauses(factory).run(form, date(2026, 8, 1))] == [
+        True
+    ]
 
 
 def test_unembedded_clauses_by_model(factory: PostgresKnowledgeUnitOfWorkFactory) -> None:

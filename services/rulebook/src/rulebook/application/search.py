@@ -102,6 +102,7 @@ class SearchClauses:
                 lexical_rank=rank.lexical_rank,
                 vector_rank=rank.vector_rank,
                 cited_by=found[rank.clause_id].cited_by,
+                out_of_force=found[rank.clause_id].out_of_force,
             )
             for rank in fused
         ]

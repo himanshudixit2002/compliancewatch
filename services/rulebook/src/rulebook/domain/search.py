@@ -87,10 +87,12 @@ class FusedRank:
 @dataclass(frozen=True, slots=True)
 class CitedClause:
     """A clause with the published or superseded versions that cite it with a verified quote
-    (in force on the query's ``as_of`` when it has one)."""
+    (in force on the query's ``as_of`` when it has one), and whether the rule it states is out of
+    force on that date (``rulebook.domain.rule_versions.out_of_force``)."""
 
     detail: ClauseDetail
     cited_by: tuple[RuleVersionId, ...]
+    out_of_force: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +102,7 @@ class SearchHit:
     lexical_rank: int | None
     vector_rank: int | None
     cited_by: tuple[RuleVersionId, ...]
+    out_of_force: bool = False
 
 
 def fuse(lexical: Sequence[ClauseId], vector: Sequence[ClauseId], limit: int) -> list[FusedRank]:
