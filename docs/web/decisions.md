@@ -388,3 +388,20 @@ that is missing or not the tenant's is the streamed not-found page (status 200, 
 and a `noindex` robots tag) rather than a 404 status; the id is checked before any service call.
 A table that can be wider than its column names its scroll container (`scrollLabel` on the kit's
 `Table`) so the region is focusable and axe's scrollable-region rule holds.
+
+## D-030: The businesses search is posted, and a business's pages share one header
+
+2026-09-29. The CA client list searches by name, PAN or GSTIN, and a PAN or a GSTIN in a query
+string would land in the browser history and in access logs, which the plan rules out for
+identifiers. The search box and the pager post to a server action and the client component redraws
+the table from its answer; the cursor travels in the same body. The cost is that a searched page
+is not bookmarkable and the back button leaves the list; the unfiltered first page is rendered on
+the server. A business's pages share a header built from the registry (`businessHeaderLinks`):
+breadcrumbs with the business's name, and a row of tabs from the business group's entries under
+`/b/[businessId]`, including the screens not built yet, which lead to their notices. Nodes are
+named by PAN, GSTIN or label with their name, because the business API names a registration after
+its business unless told otherwise. Found while building the snapshot page: the snapshot route's
+`lineage` holds the ancestors only, so the origin model now treats `business_id` as the node
+itself (the earlier fixture had listed the node in its own lineage). The e2e sign-in waits for the
+form to hydrate before typing the tenant id, a controlled input that hydration would otherwise
+reset, which had sent an occasional spec into a new, empty tenant.

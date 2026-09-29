@@ -181,11 +181,12 @@ export interface ReviewTask {
 
 /** What the applicability engine evaluates: a node's values with inheritance applied. */
 export interface Snapshot {
+  /** The node the snapshot is for (the service names it business_id). */
   businessId: string;
   tenantId: string;
   version: number;
   level: string | null;
-  /** Node ids from the entity down to the node asked for. */
+  /** The node's ancestors from the entity down, without the node itself. */
   lineage: readonly string[];
   asOfFy: string | null;
   attributes: Readonly<Record<string, unknown>>;

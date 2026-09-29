@@ -348,6 +348,30 @@ to the first open item that is not. When nothing is left the page redirects to
 the open review tasks and "Answer these now" (`revisitUnsure` clears the cookie). Clearing
 cookies only means the unsure questions are asked again.
 
+## The businesses list and the business pages
+
+`/businesses` lists the tenant's businesses by name, 20 at a time (`GET /v1/businesses` with
+`limit` and the opaque `cursor`). A business tenant with exactly one business is redirected to it;
+a CA firm always sees its client list. The search term matches a name, a PAN or a GSTIN, so the
+search box and the pager post to the `searchBusinesses` server action and the list is redrawn from
+its answer: the term never reaches a URL, the browser history or a server log line of the page's
+path. The first page is rendered on the server.
+
+A business's pages are `/b/[businessId]` (home: identifiers, registrations, onboarding progress,
+a tile per page, the screens not built yet with their status), `/profile` (the entity by its PAN,
+each registration by its GSTIN, and adding a location with `POST /v1/profile/locations` after the
+registration is checked against the business), `/attributes` and `/snapshot` (one node and one
+financial year, chosen with `?node=<id>&fy=<label>`: node ids and year labels are not personal
+data) and `/review-tasks`. The business id is the entity node's id; a node is the entity, one of
+its registrations (`GET /v1/businesses/{id}` lists them), or a location whose parent is one of
+them (`GET /v1/profile/nodes/{id}`); any other node id is the not-found page. The snapshot route's
+`lineage` lists the node's ancestors from the entity down and not the node itself, which is the
+snapshot's `business_id`; the origin of each value is the nearest of those nodes holding a known
+value. Changing an answer on `/attributes` (`?edit=<key>`, roles with `profile.edit`) uses the
+questions step's form and `PATCH /v1/businesses/{id}` with the node's id, and says which profile
+version it made. Nodes are named by their PAN, GSTIN or label with their name, because a
+registration is named after its business unless given a name of its own.
+
 ## Consents
 
 `features/consents/gateway.ts` reads a subject's consent states and history

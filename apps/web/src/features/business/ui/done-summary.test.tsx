@@ -35,7 +35,7 @@ describe("DoneSummary", () => {
     expect(steps.querySelector("[aria-current='step']")?.textContent).toContain("Done");
     expect(screen.getByText("Answered").nextElementSibling?.textContent).toBe("3");
     expect(screen.getByRole("heading", { level: 2, name: "Answered Not sure" })).toBeDefined();
-    expect(screen.getByText("Example count")).toBeDefined();
+    expect(screen.getByText("Example count, on Example business (PAN ABCDE1234F)")).toBeDefined();
     const revisit = screen.getByRole("button", { name: "Answer these now" });
     expect(
       revisit.closest("form")?.querySelector<HTMLInputElement>("input[name='business_id']")?.value,

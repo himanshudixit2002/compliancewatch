@@ -20,9 +20,7 @@ function ItemList({ items }: { items: readonly OpenItem[] }) {
   return (
     <ul className="list-disc pl-5 text-sm text-fg">
       {items.map((item) => (
-        <li key={item.id}>
-          {item.label} <span className="text-fg-muted">({item.about})</span>
-        </li>
+        <li key={item.id}>{t("done.item", { label: item.label, node: item.node })}</li>
       ))}
     </ul>
   );

@@ -12,6 +12,8 @@ import {
   BUSINESS_DTO,
   DEMO_GSTIN,
   ENTITY_ID,
+  LOCATION_DTO,
+  LOCATION_ID,
   REGISTRATION_ID,
   TENANT_ID,
   USER_ID,
@@ -19,7 +21,14 @@ import {
 import { fakeCookies } from "@/test/fake-cookies";
 import { fakeFetch, jsonResponse, problemResponse, type RecordedRequest } from "@/test/fake-fetch";
 import { ONTOLOGY_DTO } from "@/test/ontology-fixture";
-import { answerQuestion, createBusiness, revisitUnsure } from "./actions";
+import {
+  addLocation,
+  answerQuestion,
+  createBusiness,
+  revisitUnsure,
+  saveAttribute,
+  searchBusinesses,
+} from "./actions";
 import { skipCookieName, skipKey } from "./model/questions";
 
 vi.mock("next/headers", async () => (await import("@/test/fake-cookies")).nextHeadersMock());
@@ -64,8 +73,26 @@ const VALID = {
   idempotency_key: IDEMPOTENCY_KEY,
 };
 
-function profile(options: { create?: Response; ontology?: Response; patch?: Response } = {}) {
+function profile(
+  options: {
+    create?: Response;
+    ontology?: Response;
+    patch?: Response;
+    list?: Response;
+    location?: Response;
+    business?: Response;
+  } = {},
+) {
   return fakeFetch((request: RecordedRequest) => {
+    if (request.method === "GET" && request.pathname === "/v1/businesses") {
+      return options.list ?? jsonResponse(200, { items: [], next_cursor: null });
+    }
+    if (request.method === "GET" && request.pathname === `/v1/businesses/${ENTITY_ID}`) {
+      return options.business ?? jsonResponse(200, BUSINESS_DTO);
+    }
+    if (request.method === "POST" && request.pathname === "/v1/profile/locations") {
+      return options.location ?? jsonResponse(201, LOCATION_DTO);
+    }
     if (request.method === "POST" && request.pathname === "/v1/businesses") {
       return options.create ?? jsonResponse(201, BUSINESS_CREATED_DTO);
     }
@@ -277,5 +304,168 @@ describe("revisitUnsure", () => {
     await signedInAs();
     await expect(revisitUnsure(form({ business_id: "x" }))).resolves.toBeUndefined();
     expect(redirect).not.toHaveBeenCalled();
+  });
+});
+
+describe("searchBusinesses", () => {
+  it("reads the page the form asks for, the term in the body", async () => {
+    await signedInAs({ tenantKind: "ca_firm", roles: ["ca_admin"] });
+    const fake = profile();
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await searchBusinesses(
+      { status: "idle" },
+      form({ q: "example", cursor: "c1", page: "2" }),
+    );
+    expect(state).toEqual({
+      status: "ok",
+      value: { q: "example", page: 2, rows: [], nextCursor: null },
+    });
+    expect(fake.requests[0]?.url).toContain("q=example");
+    expect(fake.requests[0]?.url).toContain("cursor=c1");
+  });
+
+  it("refuses a term that is too long and passes on a failed read", async () => {
+    await signedInAs();
+    vi.stubGlobal("fetch", profile({ list: problemResponse(503, { title: "Down" }) }).fetchImpl);
+    const long = await searchBusinesses({ status: "idle" }, form({ q: "x".repeat(101) }));
+    expect(long.status === "error" && long.formErrors?.[0]).toMatch(/at most 100/);
+    const failed = await searchBusinesses({ status: "idle" }, form({ q: "" }));
+    expect(failed.status === "error" && failed.problem?.title).toBe("Down");
+  });
+});
+
+describe("saveAttribute", () => {
+  const CHANGE = { ...ANSWER, key: "example_kind", state: "known", value: "first" };
+
+  it("stores the answer and says which version the node is at", async () => {
+    await signedInAs();
+    const fake = profile();
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await saveAttribute(IDLE, form(CHANGE));
+    expect(state).toEqual({
+      status: "ok",
+      value: undefined,
+      message: "Saved; the profile is now at version 3.",
+    });
+    expect(fake.requests.find((request) => request.method === "PATCH")?.body).toEqual({
+      changes: [{ key: "example_kind", state: "known", value: "first", node_id: REGISTRATION_ID }],
+    });
+    expect(revalidatePath).toHaveBeenCalledWith(`/b/${ENTITY_ID}/attributes`);
+    expect(revalidatePath).toHaveBeenCalledWith(`/b/${ENTITY_ID}/snapshot`);
+    const entity = await saveAttribute(
+      IDLE,
+      form({ ...CHANGE, node_id: ENTITY_ID, key: "example_count", value: "12" }),
+    );
+    expect(entity.status === "ok" && entity.message).toBe(
+      "Saved; the profile is now at version 5.",
+    );
+    const location = await saveAttribute(
+      IDLE,
+      form({ ...CHANGE, node_id: LOCATION_ID, key: "example_note", value: "Example" }),
+    );
+    expect(location.status === "ok" && location.message).toBe("Saved.");
+  });
+
+  it("refuses a reader, a tampered form, an unknown key and a bad value", async () => {
+    await signedInAs({ roles: ["compliance_lead"] });
+    const fake = profile();
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const reader = await saveAttribute(IDLE, form(CHANGE));
+    expect(reader.status === "error" && reader.formErrors?.[0]).toMatch(/not change it/);
+    await signedInAs();
+    const tampered = await saveAttribute(IDLE, form({ ...CHANGE, business_id: "x" }));
+    expect(tampered.status).toBe("error");
+    const unknown = await saveAttribute(IDLE, form({ ...CHANGE, key: "no_such_key" }));
+    expect(unknown.status === "error" && unknown.formErrors?.[0]).toMatch(/not in the ontology/);
+    const bad = await saveAttribute(IDLE, form({ ...CHANGE, value: "nope" }));
+    expect(bad.status === "error" && bad.fieldErrors?.value).toEqual([
+      "Choose one of the options.",
+    ]);
+    expect(fake.requests.some((request) => request.method === "PATCH")).toBe(false);
+  });
+
+  it("passes on the service's refusal and an unreadable ontology", async () => {
+    await signedInAs();
+    vi.stubGlobal("fetch", profile({ patch: problemResponse(404, { title: "Gone" }) }).fetchImpl);
+    const refused = await saveAttribute(IDLE, form({ ...ANSWER, state: "unsure" }));
+    expect(refused.status === "error" && refused.problem?.title).toBe("Gone");
+    vi.stubGlobal(
+      "fetch",
+      profile({ ontology: problemResponse(503, { title: "No ontology" }) }).fetchImpl,
+    );
+    const noOntology = await saveAttribute(IDLE, form({ ...ANSWER, state: "unsure" }));
+    expect(noOntology.status === "error" && noOntology.problem?.title).toBe("No ontology");
+  });
+});
+
+describe("addLocation", () => {
+  const LOCATION_FORM = {
+    business_id: ENTITY_ID,
+    registration_id: REGISTRATION_ID,
+    label: "EX-01",
+    name: "Example location",
+  };
+
+  it("adds the location under the business's registration with links to its pages", async () => {
+    await signedInAs();
+    const fake = profile();
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await addLocation({ status: "idle" }, form(LOCATION_FORM));
+    expect(state).toEqual({
+      status: "ok",
+      value: {
+        id: LOCATION_ID,
+        label: "EX-01",
+        name: "Example location",
+        created: true,
+        attributesHref: `/b/${ENTITY_ID}/attributes?node=${LOCATION_ID}`,
+        snapshotHref: `/b/${ENTITY_ID}/snapshot?node=${LOCATION_ID}`,
+      },
+    });
+    expect(fake.requests.find((request) => request.method === "POST")?.body).toEqual({
+      registration_id: REGISTRATION_ID,
+      label: "EX-01",
+      name: "Example location",
+    });
+  });
+
+  it("refuses a malformed form, a reader and a registration of another business", async () => {
+    await signedInAs();
+    const fake = profile();
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const fields = await addLocation({ status: "idle" }, form({ ...LOCATION_FORM, label: "" }));
+    expect(fields.status === "error" && fields.fieldErrors?.label).toEqual(["Enter a label."]);
+    const tampered = await addLocation(
+      { status: "idle" },
+      form({ ...LOCATION_FORM, business_id: "x" }),
+    );
+    expect(tampered.status === "error" && tampered.formErrors?.[0]).toMatch(/Reload the page/);
+    const foreign = await addLocation(
+      { status: "idle" },
+      form({ ...LOCATION_FORM, registration_id: USER_ID }),
+    );
+    expect(foreign.status === "error" && foreign.formErrors?.[0]).toMatch(
+      /not part of the business/,
+    );
+    await signedInAs({ roles: ["compliance_lead"] });
+    const reader = await addLocation({ status: "idle" }, form(LOCATION_FORM));
+    expect(reader.status === "error" && reader.formErrors?.[0]).toMatch(/not change it/);
+    expect(fake.requests.some((request) => request.method === "POST")).toBe(false);
+  });
+
+  it("passes on a failed read of the business or a refused location", async () => {
+    await signedInAs();
+    vi.stubGlobal(
+      "fetch",
+      profile({ business: problemResponse(404, { title: "No business" }) }).fetchImpl,
+    );
+    const missing = await addLocation({ status: "idle" }, form(LOCATION_FORM));
+    expect(missing.status === "error" && missing.problem?.title).toBe("No business");
+    vi.stubGlobal(
+      "fetch",
+      profile({ location: problemResponse(422, { title: "Hierarchy invalid" }) }).fetchImpl,
+    );
+    const refused = await addLocation({ status: "idle" }, form(LOCATION_FORM));
+    expect(refused.status === "error" && refused.problem?.title).toBe("Hierarchy invalid");
   });
 });

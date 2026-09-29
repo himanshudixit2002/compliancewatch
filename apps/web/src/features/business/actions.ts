@@ -5,6 +5,7 @@ import { attributeOf } from "@/entities/ontology/mappers";
 import { idempotencyHeaders } from "@/server/api/idempotency";
 import { afterMutation } from "@/server/cache";
 import { requireScreenSession } from "@/server/dal";
+import { can } from "@/shared/config/permissions";
 import { getOntology } from "@/server/ontology";
 import { toActionState, type ApiError } from "@/server/result";
 import { hrefFor, screenById } from "@/shared/config/screens";
@@ -20,9 +21,12 @@ import { withQuery } from "@/shared/lib/url";
 import { businessGateway } from "./gateway";
 import { ANSWER_FIELDS, answerFieldErrors, readAnswerForm } from "./model/answer-form";
 import { parseBusinessForm } from "./model/business-form";
+import { readDirectoryQuery, type DirectoryPage } from "./model/directory";
+import { parseLocationForm } from "./model/location-form";
 import { businessStepResult, type BusinessStepResult } from "./model/prefill";
 import { skipKey } from "./model/questions";
 import { parseAnswer } from "./model/values";
+import { getDirectoryPage } from "./queries";
 import { clearSkipList, rememberSkip } from "./skip-list";
 
 /**
@@ -130,4 +134,123 @@ export async function revisitUnsure(formData: FormData): Promise<void> {
   await requireScreenSession(screen, { businessId });
   await clearSkipList(businessId);
   redirect(hrefFor(screen, { businessId }));
+}
+
+/**
+ * One page of the businesses list: the search term (a name, a PAN or a GSTIN, posted rather
+ * than put in a URL), the cursor of the page and its number. Reads only.
+ */
+export async function searchBusinesses(
+  _state: ActionState<DirectoryPage>,
+  formData: FormData,
+): Promise<ActionState<DirectoryPage>> {
+  const session = await requireScreenSession(screenById("owner.businesses"));
+  const query = readDirectoryQuery(formData);
+  if (!query.ok) return actionFailure(query.error);
+  const page = await getDirectoryPage(session, {
+    q: query.q,
+    page: query.page,
+    ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+  });
+  return toActionState(page);
+}
+
+/**
+ * One answer changed on the attributes page: the same parsing as onboarding, stored with
+ * `PATCH /v1/businesses/{id}` on the node shown and for the year shown when the attribute is
+ * stated per year. Only a role that may change the profile gets here; the answer says which
+ * profile version it made, and the business's pages render again with the new value.
+ */
+export async function saveAttribute(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const input = readAnswerForm(formData);
+  if (input === null) return actionFailure(t("question.error.form"));
+  const screen = screenById("owner.business.attributes");
+  const session = await requireScreenSession(screen, { businessId: input.businessId });
+  if (!can(session, "profile.edit")) return actionFailure(t("attributes.error.role"));
+
+  const ontology = await getOntology();
+  if (!ontology.ok) return toActionState(ontology);
+  const attribute = attributeOf(ontology.value, input.key);
+  if (attribute === undefined) return actionFailure(t("question.error.unknown"));
+  const parsed = parseAnswer(
+    attribute,
+    { state: input.state, values: input.values },
+    { asOfFy: input.asOfFy, nodeId: input.nodeId },
+  );
+  if (!parsed.ok) return fieldFailure({ [ANSWER_FIELDS.value]: [parsed.error] });
+
+  const updated = await businessGateway({ session }).update(input.businessId, {
+    changes: [parsed.answer],
+  });
+  if (!updated.ok) return answerRefused(updated.error);
+  const business = updated.value;
+  const node =
+    input.nodeId === business.id
+      ? business
+      : business.registrations.find((registration) => registration.id === input.nodeId);
+  const businessId = input.businessId;
+  afterMutation({
+    paths: [
+      hrefFor(screen, { businessId }),
+      hrefFor(screenById("owner.business"), { businessId }),
+      hrefFor(screenById("owner.business.snapshot"), { businessId }),
+    ],
+  });
+  return actionSuccess(
+    undefined,
+    node === undefined
+      ? t("attributes.saved")
+      : t("attributes.savedVersion", { version: node.version }),
+  );
+}
+
+/** What adding a location returned, for the form's result line. */
+export interface LocationAdded {
+  id: string;
+  label: string;
+  name: string;
+  created: boolean;
+  attributesHref: string;
+  snapshotHref: string;
+}
+
+/**
+ * Adds a location under one of the business's registrations with `POST /v1/profile/locations`
+ * (the label is its natural key: an existing one is returned with created false). The
+ * registration is checked against the business first, so a tampered form cannot add a location
+ * under another business's registration.
+ */
+export async function addLocation(
+  _state: ActionState<LocationAdded>,
+  formData: FormData,
+): Promise<ActionState<LocationAdded>> {
+  const parsed = parseLocationForm(formData);
+  if (!parsed.ok) {
+    return parsed.fieldErrors === undefined
+      ? actionFailure(parsed.formError ?? t("question.error.form"))
+      : fieldFailure(parsed.fieldErrors);
+  }
+  const { businessId, registrationId, label, name } = parsed.value;
+  const screen = screenById("owner.business.profile");
+  const session = await requireScreenSession(screen, { businessId });
+  if (!can(session, "profile.edit")) return actionFailure(t("attributes.error.role"));
+
+  const gateway = businessGateway({ session });
+  const business = await gateway.get(businessId);
+  if (!business.ok) return toActionState(business);
+  if (!business.value.registrations.some((node) => node.id === registrationId)) {
+    return actionFailure(t("location.error.registration"));
+  }
+  const added = await gateway.addLocation({ registrationId, label, name });
+  if (!added.ok) return toActionState(added);
+  const location = added.value;
+  const query = `?${new URLSearchParams({ node: location.id }).toString()}`;
+  return actionSuccess({
+    id: location.id,
+    label: location.key,
+    name: location.name,
+    created: location.created,
+    attributesHref: `${hrefFor(screenById("owner.business.attributes"), { businessId })}${query}`,
+    snapshotHref: `${hrefFor(screenById("owner.business.snapshot"), { businessId })}${query}`,
+  });
 }

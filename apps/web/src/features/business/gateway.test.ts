@@ -294,7 +294,7 @@ describe("profile node routes", () => {
       `${BASE}/v1/profile/nodes/${REGISTRATION_ID}/snapshot?fy=2000-01`,
     );
     expect(fake.requests[1]?.url).toBe(`${BASE}/v1/profile/nodes/${REGISTRATION_ID}/snapshot`);
-    expect(withYear.ok && withYear.value.lineage).toEqual([ENTITY_ID, REGISTRATION_ID]);
+    expect(withYear.ok && withYear.value.lineage).toEqual([ENTITY_ID]);
   });
 
   it("reads the review tasks a node's answers opened", async () => {

@@ -53,7 +53,7 @@ describe("questionStepView", () => {
     });
     expect(view.question?.attribute?.key).toBe("example_flag");
     expect(view.reviewTasks.map((row) => row.id)).toEqual([REVIEW_TASK_DTO.id]);
-    expect(view.reviewTasks[0]?.nodeName).toBe("Example registration");
+    expect(view.reviewTasks[0]?.nodeName).toBe("29ABCDE1234F1Z5 (Example registration)");
     expect(view.saved).toBeNull();
   });
 
@@ -125,7 +125,7 @@ describe("doneSummaryView", () => {
         {
           id: skipKey(ENTITY_ID, "example_count"),
           label: "Example count",
-          about: "About Example business (PAN ABCDE1234F).",
+          node: "Example business (PAN ABCDE1234F)",
         },
       ],
       missing: [{ id: skipKey(REGISTRATION_ID, "example_since"), label: "Example since" }],

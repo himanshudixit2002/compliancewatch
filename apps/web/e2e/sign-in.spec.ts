@@ -81,7 +81,8 @@ test.describe("sign-in", () => {
     await signInThroughForm(page, OWNER);
     await expect(page).toHaveURL(/\/businesses$/);
     await expect(page.getByRole("heading", { level: 1, name: "Businesses" })).toBeVisible();
-    await expect(page.getByText("GET /v1/businesses")).toBeVisible();
+    // A new tenant: the list says why it is empty.
+    await expect(page.getByRole("heading", { level: 2, name: "No business yet" })).toBeVisible();
     await page.goto("/sign-in");
     await expect(page).toHaveURL(/\/businesses$/);
     await page.request.post("/sign-out");

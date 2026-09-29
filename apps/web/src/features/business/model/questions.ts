@@ -229,3 +229,24 @@ export function businessNodes(business: Business): ProfileNode[] {
     ...business.registrations,
   ];
 }
+
+/**
+ * A node as a person tells it apart from the others: the business with its PAN, a registration
+ * by its GSTIN, a location by its label, each with its name. A registration is named after its
+ * business unless given a name of its own, so the name alone is ambiguous.
+ */
+export function nodeDisplayName(node: Pick<ProfileNode, "level" | "key" | "name">): string {
+  switch (node.level) {
+    case "registration":
+      return t("business.node.registration", { key: node.key, name: node.name });
+    case "location":
+      return t("business.node.location", { key: node.key, name: node.name });
+    default:
+      return t("business.node.entity", { key: node.key, name: node.name });
+  }
+}
+
+/** The business's nodes named as `nodeDisplayName` names them, for tables that name a node. */
+export function namedBusinessNodes(business: Business): ProfileNode[] {
+  return businessNodes(business).map((node) => ({ ...node, name: nodeDisplayName(node) }));
+}

@@ -5,9 +5,9 @@ import { attributeLabel } from "./attributes";
 import { onboardingProgress, type OnboardingProgress } from "./progress";
 import {
   attributeForQuestion,
-  businessNodes,
   checklistItems,
   nodeLabel,
+  namedBusinessNodes,
   pickQuestion,
   skipKey,
 } from "./questions";
@@ -68,7 +68,8 @@ export interface QuestionStepView {
 export interface OpenItem {
   id: string;
   label: string;
-  about: string;
+  /** The node the attribute is asked on, named by its PAN, GSTIN or label. */
+  node: string;
 }
 
 export interface DoneSummaryView {
@@ -88,7 +89,7 @@ export interface DoneSummaryView {
 function openTaskRows(state: OnboardingState): ReviewTaskRow[] {
   return reviewTaskRows(
     state.tasks.filter((task) => task.open),
-    businessNodes(state.business),
+    namedBusinessNodes(state.business),
   );
 }
 
@@ -147,13 +148,14 @@ export function doneSummaryView(state: OnboardingState): DoneSummaryView {
     not_applicable: 0,
   };
   for (const item of items) counts[item.state] += 1;
+  const nodes = new Map(namedBusinessNodes(state.business).map((node) => [node.id, node.name]));
   const open = (wanted: QuestionState): OpenItem[] =>
     items
       .filter((item) => item.state === wanted)
       .map((item) => ({
         id: skipKey(item.nodeId, item.key),
         label: attributeLabel(item.key),
-        about: nodeLabel(state.business, item.nodeId),
+        node: nodes.get(item.nodeId) ?? item.nodeId,
       }));
   return {
     businessId: state.business.id,

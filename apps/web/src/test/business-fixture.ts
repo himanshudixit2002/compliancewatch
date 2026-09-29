@@ -146,7 +146,8 @@ export const SNAPSHOT_DTO: SnapshotDto = {
   tenant_id: TENANT_ID,
   version: 8,
   level: "registration",
-  lineage: [ENTITY_ID, REGISTRATION_ID],
+  // The service lists the ancestors only; the node itself is business_id.
+  lineage: [ENTITY_ID],
   as_of_fy: "2000-01",
   attributes: {
     state_codes: ["01", "02"],

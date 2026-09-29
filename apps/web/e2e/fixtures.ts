@@ -155,6 +155,17 @@ const ROLE_LABELS: Readonly<Record<Role, string>> = {
   admin: "Admin",
 };
 
+/**
+ * Resolves once React has hydrated the element: a controlled input filled before hydration is
+ * reset to its state when React takes over, so a spec waits for this before typing into one.
+ */
+export async function waitForHydration(page: Page, selector: string): Promise<void> {
+  await page.waitForFunction((target) => {
+    const element = document.querySelector(target);
+    return element !== null && Object.keys(element).some((key) => key.startsWith("__react"));
+  }, selector);
+}
+
 /** Fills and submits the fake sign-in form on the page; resolves once the redirect landed. */
 export async function signInThroughForm(
   page: Page,
@@ -162,12 +173,19 @@ export async function signInThroughForm(
   next?: string,
 ): Promise<void> {
   await page.goto(next === undefined ? "/sign-in" : `/sign-in?next=${encodeURIComponent(next)}`);
+  // The tenant id is a controlled input: typed before hydration, it would be reset to empty and
+  // the session would get a new tenant.
+  await waitForHydration(page, 'input[name="tenantId"]');
   await page.getByLabel("Tenant kind").selectOption(persona.tenantKind);
   for (const role of persona.roles) {
     await page.getByRole("checkbox", { name: ROLE_LABELS[role] }).check();
   }
   await page.getByLabel("Display name").fill(persona.displayName);
-  if (persona.tenantId !== undefined) await page.getByLabel("Tenant id").fill(persona.tenantId);
+  if (persona.tenantId !== undefined) {
+    const tenant = page.getByLabel("Tenant id");
+    await tenant.fill(persona.tenantId);
+    await expect(tenant).toHaveValue(persona.tenantId);
+  }
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/sign-in"));
 }

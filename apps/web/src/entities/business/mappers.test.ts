@@ -195,7 +195,7 @@ describe("from the wire", () => {
     expect(snapshotFromDto(SNAPSHOT_DTO)).toMatchObject({
       version: 8,
       level: "registration",
-      lineage: [ENTITY_ID, REGISTRATION_ID],
+      lineage: [ENTITY_ID],
       asOfFy: "2000-01",
       attributes: { example_band: "medium" },
     });

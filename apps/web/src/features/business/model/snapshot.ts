@@ -10,9 +10,9 @@ import { formatValue } from "./values";
  * A snapshot as rows, each with where its value comes from. The snapshot is what the
  * applicability engine evaluates: the node's own values and those inherited from its ancestors
  * (entity, registration, location), the nearest one winning. The origin is worked out the same
- * way over the lineage's nodes: the closest node holding a known value for the key (for the
- * snapshot's year when the attribute is stated per year). A value no node holds was worked out
- * by the service.
+ * way over the node and its ancestors: the closest node holding a known value for the key (for
+ * the snapshot's year when the attribute is stated per year). A value no node holds was worked
+ * out by the service.
  */
 export type SnapshotOrigin =
   { kind: "self" } | { kind: "inherited"; nodeId: string; nodeName: string } | { kind: "derived" };
@@ -25,15 +25,20 @@ export interface SnapshotRow {
   originLabel: string;
 }
 
-/** The node that supplies a key's value: the snapshot's own node first, then up the lineage. */
+/**
+ * The node that supplies a key's value: the snapshot's own node first, then up its lineage. The
+ * service's lineage lists the ancestors from the entity down and leaves out the node itself,
+ * which is the snapshot's `businessId`; a lineage that does end with the node is read the same.
+ */
 export function originOf(
   key: string,
   snapshot: Snapshot,
   nodes: readonly ProfileNode[],
 ): SnapshotOrigin {
   const byId = new Map(nodes.map((node) => [node.id, node]));
-  const ownId = snapshot.lineage[snapshot.lineage.length - 1];
-  for (const id of [...snapshot.lineage].reverse()) {
+  const ownId = snapshot.businessId;
+  const chain = [...snapshot.lineage.filter((id) => id !== ownId), ownId];
+  for (const id of chain.reverse()) {
     const node = byId.get(id);
     if (node === undefined) continue;
     const stored = valueOf(node.attributes, key, snapshot.asOfFy);

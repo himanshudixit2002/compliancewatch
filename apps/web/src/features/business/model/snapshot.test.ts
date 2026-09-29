@@ -30,6 +30,16 @@ describe("snapshotRows", () => {
     ]);
   });
 
+  it("reads the node as its own, whether or not the lineage lists it", () => {
+    const listed = { ...snapshot, lineage: [ENTITY_ID, snapshot.businessId] };
+    expect(originOf("example_kind", listed, [entity, registration])).toEqual({ kind: "self" });
+    expect(originOf("state_codes", listed, [entity, registration])).toEqual({
+      kind: "inherited",
+      nodeId: ENTITY_ID,
+      nodeName: "Example business",
+    });
+  });
+
   it("lets the child win when both hold a value", () => {
     const own: ProfileNode = {
       ...registration,

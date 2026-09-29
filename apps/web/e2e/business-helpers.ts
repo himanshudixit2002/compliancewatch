@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, serviceUrl, signInThroughForm, type Persona } from "./fixtures";
 
@@ -86,4 +88,24 @@ export async function reviewTasksOnService(
   });
   expect(response.status).toBe(200);
   return (await response.json()) as { attribute_key: string; reason: string; open: boolean }[];
+}
+
+/** The seeded demo business's id (var/seed/last.json), or null when the seed has not run here. */
+export function seededBusinessId(): string | null {
+  const configured = process.env.CW_WEB_SEED_STATE_PATH?.trim();
+  const path = resolve(__dirname, "..", configured || "../../var/seed/last.json");
+  try {
+    const state: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (typeof state === "object" && state !== null && "entity_node_id" in state) {
+      return typeof state.entity_node_id === "string" ? state.entity_node_id : null;
+    }
+  } catch {
+    // Absent or unreadable: the seed has not run on this machine.
+  }
+  return null;
+}
+
+/** A PAN of the right shape for the n-th synthetic business of a spec. */
+export function examplePan(n: number): string {
+  return `AAAPE${String(n).padStart(4, "0")}Z`;
 }

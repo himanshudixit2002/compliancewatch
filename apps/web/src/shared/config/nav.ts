@@ -149,6 +149,18 @@ export function navFor(ctx: NavContext, screens: readonly Screen[] = SCREENS): N
   return sectionsFor(APP_GROUPS, ctx, screens);
 }
 
+/**
+ * The pages of one business, for the tabs above them: the business group's entries whose route
+ * is under /b/[businessId], in their nav order. Empty until the businessId is known.
+ */
+export function businessNavFor(ctx: NavContext, screens: readonly Screen[] = SCREENS): NavLink[] {
+  const section = sectionsFor(["business"], ctx, screens)[0];
+  return (section?.items ?? []).filter((item) => {
+    const screen = screens.find((candidate) => candidate.id === item.id);
+    return screen?.route.startsWith("/b/[businessId]") ?? false;
+  });
+}
+
 /** The admin shell's grouped tools; empty for a non-regulatory session. */
 export function adminNavFor(ctx: NavContext, screens: readonly Screen[] = SCREENS): NavSection[] {
   return sectionsFor(ADMIN_GROUPS, ctx, screens);

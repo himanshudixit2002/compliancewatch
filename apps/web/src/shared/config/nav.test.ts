@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   NAV_GROUPS,
   adminNavFor,
+  businessNavFor,
   breadcrumbsFor,
   forbiddenHref,
   homeFor,
@@ -38,10 +39,40 @@ describe("navFor", () => {
     expect(business?.label).toBe(NAV_GROUPS.business);
     expect(business?.items.map((item) => item.href)).toEqual([
       "/businesses",
+      "/b/b1",
+      "/b/b1/profile",
+      "/b/b1/attributes",
+      "/b/b1/snapshot",
+      "/b/b1/review-tasks",
       "/b/b1/changes",
       "/b/b1/reminders",
     ]);
-    expect(business?.items.find((item) => item.active)?.id).toBe("owner.changes");
+    // A link is active on its own path and below it; the shells mark the longest one current.
+    expect(business?.items.filter((item) => item.active).map((item) => item.id)).toEqual([
+      "owner.business",
+      "owner.changes",
+    ]);
+  });
+
+  it("gives a business's own pages for its tabs, and none before the business is known", () => {
+    expect(businessNavFor({ roles: ["owner"], tenantKind: "business" })).toEqual([]);
+    const tabs = businessNavFor({
+      roles: ["compliance_lead"],
+      tenantKind: "business",
+      params: { businessId: "b1" },
+    });
+    expect(tabs.map((item) => item.id)).toEqual([
+      "owner.business",
+      "owner.business.profile",
+      "owner.business.attributes",
+      "owner.business.snapshot",
+      "owner.business.review-tasks",
+      "owner.changes",
+      "owner.reminders",
+    ]);
+    expect(
+      businessNavFor({ roles: ["analyst"], tenantKind: "internal", params: { businessId: "b1" } }),
+    ).toEqual([]);
   });
 
   it("shows a flagged screen only when its flag reads on", () => {
