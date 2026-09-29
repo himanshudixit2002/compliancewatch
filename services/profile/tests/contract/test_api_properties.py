@@ -36,6 +36,7 @@ OPERATIONS = frozenset(
         "PATCH /v1/businesses/{business_id}",
         "GET /v1/businesses/{business_id}/onboarding",
         "POST /v1/businesses/{business_id}/registrations",
+        "GET /v1/ontology",
         "POST /v1/profile/entities",
         "POST /v1/profile/financial-year-confirmations",
         "POST /v1/profile/locations",

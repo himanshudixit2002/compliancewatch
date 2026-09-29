@@ -71,6 +71,13 @@ registrations, and its id is the entity's node id.
 - `POST /v1/businesses/{id}/registrations` (needs `Idempotency-Key`) adds a GSTIN with the
   business's PAN and pre-fills it.
 
+`GET /v1/ontology` (tags `public` and `ontology`) is global data and takes no tenant: the
+attribute set's version, the wording's version, language and `review_status` (`needs_review`
+until an analyst has read it), `operators_by_type` from the kernel's `ALLOWED_OPERATORS`, and
+each attribute with its definition, question, help, labelled `values`, `min`, `max` and
+`example`. The answer carries an `ETag` and `Cache-Control: max-age=3600`; `If-None-Match` with
+the current tag gets a 304.
+
 ## Financial year confirmation
 
 On 1 April a new financial year starts, and per-year attributes (the turnover band) have no

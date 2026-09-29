@@ -121,7 +121,12 @@ EXEMPT_ROUTES: dict[str, dict[str, str]] = {
             "against the webhook signature before it is read"
         ),
     },
-    "profile": {},
+    "profile": {
+        "GET /v1/ontology": (
+            "global data: the attributes, their questions, labels and rule operators are the same "
+            "for every tenant, and nothing a tenant stored is in the answer"
+        ),
+    },
     "obligation": {},
     "notification": {
         "PUT /v1/notification/preferences/{channel}/{recipient}": PREFERENCE,

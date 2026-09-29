@@ -14,6 +14,7 @@ from domain_kernel.errors import DomainError, InvalidAttributeValueError, Unknow
 from domain_kernel.ontology import Ontology, OntologyWording
 from profile_service import __version__
 from profile_service.api.businesses import router as businesses_router
+from profile_service.api.ontology import router as ontology_router
 from profile_service.api.router import router
 from profile_service.application.attributes import (
     BuildSnapshot,
@@ -167,7 +168,7 @@ def build_app(
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router, businesses_router],
+        routers=[router, businesses_router, ontology_router],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready), ("ontology", _ontology_ready(wiring))],
         problem_status=PROBLEM_STATUS,
