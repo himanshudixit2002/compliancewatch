@@ -1,11 +1,12 @@
 # CI (guide section 17). Implemented: 1 lint + type-check, 2 unit tests with coverage gate,
-# 3 contract checks (import-linter, the OpenAPI spec per service through its contract test, and
-# the event schemas: metaschema, golden examples, generated clients in sync, backward compatibility
-# against the base branch by example replay and by the Redpanda schema registry; the migration
-# lint's file rules in the ops job and its catalog rules in the dev-stack job), 4 integration tests
-# (testcontainers) for the packages a change affects, an ops job (runbook links, promtool rules,
-# actionlint), a compose dev-stack smoke, and secrets scanning. Steps 5-7 are listed as TODO at
-# the end.
+# 3 contract checks (import-linter; the OpenAPI spec per service through its contract test, a
+# committed spec for every service that serves API routes, and backward compatibility of the specs
+# against the base branch; the event schemas: metaschema, golden examples, generated clients in
+# sync, backward compatibility against the base branch by example replay and by the Redpanda schema
+# registry; the migration lint's file rules in the ops job and its catalog rules in the dev-stack
+# job), 4 integration tests (testcontainers) for the packages a change affects, an ops job
+# (runbook links, promtool rules, actionlint), a compose dev-stack smoke, and secrets scanning.
+# Steps 5-7 are listed as TODO at the end.
 name: ci
 
 on:
@@ -182,6 +183,10 @@ jobs:
         run: make py-test
       - name: Lockfile is current
         run: make lock-check
+      # A service that serves more than health, ready and ping commits its OpenAPI spec and the
+      # contract test that pins it; the check imports each app and lists the routes it serves.
+      - name: Contract check - every service with API routes has a committed spec
+        run: make openapi-check
 
   evals:
     name: Evals (golden sets, scripted and fake provider, section 8 gates)
@@ -228,7 +233,7 @@ jobs:
         run: pnpm turbo run lint typecheck test build
 
   contracts:
-    name: Event contracts (schemas, examples, generated clients, compatibility)
+    name: Contracts (event schemas, generated clients, event and OpenAPI compatibility)
     needs: changes
     if: needs.changes.outputs.contracts == 'true'
     runs-on: ubuntu-latest
@@ -254,6 +259,11 @@ jobs:
       - name: Backward compatible with the base branch (base examples replayed against these schemas)
         if: github.event_name == 'pull_request'
         run: uv run python packages/contracts/scripts/check_compat.py --base-ref "origin/${{ github.base_ref }}"
+      - name: OpenAPI specs break no client of the base branch (deliberate breaks listed in BREAKING.md)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: uv run python packages/contracts/scripts/check_openapi_compat.py --base-ref "origin/$BASE_REF"
 
   integration:
     name: Integration tests (${{ matrix.target }})

@@ -17,6 +17,7 @@ openapi/                 # OpenAPI 3.1 specs, public /v1 and internal service AP
   identity.v1.json         # services/identity
   notification.v1.json     # services/notification
   rulebook.v1.json         # services/rulebook
+  BREAKING.md              # deliberate breaking changes, one row per operation, each with an ADR
 events/
   schemas/               # JSON Schema 2020-12: envelope.v1.json and one <topic>.v1.json per event
   examples/<topic>/      # golden messages (envelope + payload) every check replays
@@ -24,6 +25,8 @@ events/
 scripts/
   generate_events.py     # make contracts: writes both clients below
   check_compat.py        # CI: backward compatibility against the base branch
+  check_openapi_coverage.py  # make openapi-check: a service with API routes commits its spec and test
+  check_openapi_compat.py    # CI: the OpenAPI specs break no client of the base branch
 clients/python/          # compliancewatch-contracts (import cw_contracts): generated pydantic v2 models
 clients/typescript/      # generated .d.ts per topic plus index.ts (EVENT_TOPICS)
 ```
@@ -38,6 +41,17 @@ change cannot pass `make test`.
 ```bash
 make openapi SERVICE=llm-gateway   # writes openapi/llm-gateway.v1.json (indent 2, sorted keys)
 ```
+
+Two gates keep the specs honest. `make openapi-check` (the python job and `make check`) imports
+each service's app and fails when it serves more than `/health`, `/ready`, `/v1/<service>/ping`
+and the docs pages without a committed spec, or has a spec without
+`tests/contract/test_openapi.py`. On a pull request the contracts job runs
+`scripts/check_openapi_compat.py` against the base branch (`make openapi-compat BASE=origin/main`
+locally). After resolving `$ref` it fails on a removed path, operation or 2xx response, a response
+property or media type that went away, a request body, property or parameter that became
+required, a narrowed request enum, or a type change. Specs new on the branch are skipped. A
+deliberate break gets a row in `openapi/BREAKING.md` (spec, operation, reason, ADR) in the same
+pull request.
 
 The files are generated JSON: prettier ignores `openapi/` and nobody edits them by hand. Every
 service shares one error shape, `Problem` (RFC 9457 problem details from py-common), published

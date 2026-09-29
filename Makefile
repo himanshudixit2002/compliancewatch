@@ -323,3 +323,19 @@ PROMTOOL = docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/dev/prometh
 alerts-check: check-docker ## promtool: alert rules parse and their unit tests pass (infra/dev/prometheus/alerts.test.yml)
 	$(PROMTOOL) check rules /rules/alerts.yml
 	$(PROMTOOL) test rules /rules/alerts.test.yml
+
+# ---- OpenAPI gates (guide section 17 step 3: every endpoint has a schema and a contract test)
+.PHONY: openapi-check openapi-compat
+CHECKS += openapi-check
+BASE ?= origin/main
+
+openapi-check: check-uv ## Every service that serves API routes commits its spec and a contract test
+	@status=0; \
+	for svc in $(SERVICES); do \
+	  CW_LOG_LEVEL=WARNING $(UV) run --package compliancewatch-$$svc \
+	    python packages/contracts/scripts/check_openapi_coverage.py services/$$svc || status=1; \
+	done; \
+	exit $$status
+
+openapi-compat: check-uv ## Committed specs break no client of a base ref: make openapi-compat [BASE=origin/main]
+	$(UV) run python packages/contracts/scripts/check_openapi_compat.py --base-ref $(BASE)
