@@ -7,7 +7,9 @@ import type { Persona } from "./fixtures";
  * Every page in the registry: the public ones without a session, every other one signed in
  * as the first persona its roles and tenant kinds admit. Live pages are visited by their
  * route; planned, waiting and ready pages through the catch-all with "example" for each
- * parameter. The legal documents have their own spec (an "example" document is a 404 by design).
+ * parameter. A live page with parameters needs real ones (a legal document, a business of the
+ * signed-in tenant; "example" is a 404 there by design), so its own spec visits it with them and
+ * runs axe on each state it reaches.
  */
 function exampleHref(screen: Screen): string {
   const params = Object.fromEntries(routeParams(screen.route).map((name) => [name, "example"]));
@@ -15,7 +17,10 @@ function exampleHref(screen: Screen): string {
 }
 
 const PAGES = SCREENS.filter(
-  (screen) => screen.kind === "page" && !isCatchAll(screen.route) && screen.id !== "system.legal",
+  (screen) =>
+    screen.kind === "page" &&
+    !isCatchAll(screen.route) &&
+    !(screen.status === "live" && routeParams(screen.route).length > 0),
 );
 
 const GROUPS: readonly { label: string; persona: Persona | null; pages: Screen[] }[] = [

@@ -359,3 +359,18 @@ environment already names one), so a second working copy on 9201-9210 runs the s
 web-stack-wait`, `make web-seed`, `make web-e2e`, `make web-stack-down`; a page whose read fails
 still renders its h1 and the service's problem (`ServiceError` with a heading), so the page sweep
 reports an unreachable service as a failed read rather than a missing heading.
+
+## D-028: The business step shows what the lookup returned before it moves on
+
+2026-09-29. The first design registered the GSTIN, ran the pre-fill as a second call and
+redirected straight to the questions, with the pre-fill panel on the way. `POST /v1/businesses`
+now does both in one call and answers with the pre-fill and the first question, so the step keeps
+the answer on screen instead: the business (new, or already on file for that PAN), the values the
+GSTIN lookup returned worded by the ontology, the attributes it stored, or the plain note and the
+review task when no lookup provider answered, then a link to the questions. The form carries the
+Idempotency-Key minted for its render; "Add another business" is a document load, so the next
+form has a new key rather than replaying the first answer. The step shows the form only once the
+required consents are on file, because the profile service does not check them. Consequences: a
+reload after adding forgets the panel (the business stays; the list and the business pages show
+it); the page sweep leaves live pages with route parameters (a legal document, a business) to
+their own specs, which visit them with real ids and run axe there.

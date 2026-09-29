@@ -18,8 +18,8 @@ session, the gates and the sign-in. This file is the map and the commands.
 ```
 src/app/            route files only: page.tsx is gate, query, render; layouts, error, global-error, not-found
   (public)/         home, /sitemap, /legal/[doc], /forbidden, /design, /sign-in under the visitor shell
-  (app)/            tenant screens under the session-aware shell: /account and /onboarding (the consent step),
-                    each with loading.tsx; [...slug] serves
+  (app)/            tenant screens under the session-aware shell: /account, /onboarding (the consent step)
+                    and /onboarding/business (the business step), each with loading.tsx; [...slug] serves
                     unbuilt tenant screens behind the entry's roles
   admin/            /admin home and layout under AdminShell, behind requireAdmin; [...slug] serves unbuilt
                     tools
@@ -30,7 +30,8 @@ src/features/       one directory per screen family: model/, ui/, index.ts (port
                     admin-home, system-pages, design-catalogue, auth (the fake sign-in form, the signIn action,
                     the seed-state query), account, business (the gateway over the business API and the
                     profile node routes, the attribute, snapshot, review-task and progress view models,
-                    AttributeControl, AnswerButtons, ValueStateChip), consents (the consent step: the
+                    AttributeControl, AnswerButtons, ValueStateChip, the business step's form, result
+                    panel and createBusiness action), consents (the consent step: the
                     identity consents and reminder preference gateway, the purposes and their documents,
                     the step's view, the form and the recordConsents action)
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);

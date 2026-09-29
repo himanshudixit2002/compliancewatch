@@ -312,6 +312,22 @@ each value (this node, inherited from a named ancestor, or worked out by the ser
 `reviewTaskRows` and `onboardingProgress`. `AttributeControl` is the one place a control is
 chosen for an attribute type, and `AnswerButtons` submits the state.
 
+## The business step
+
+`/onboarding/business` adds a business by its GSTIN with `createBusiness` in
+`features/business/actions.ts`: the form's shape is checked first (the GSTIN upper-cased and
+stripped of spaces, then matched against the kernel's pattern; a name of 1 to 200 characters), and
+`POST /v1/businesses` carries the Idempotency-Key the page rendered into the form
+(`IdempotencyKeyInput`, operation `profile.create-business`). A double submit gets the first
+answer back; a refused one (a raised domain error or a 422) releases the key, so the corrected
+retry with the same key runs. The answer replaces the form with what it holds: new or already on
+file (`created`), the PAN and GSTIN, the progress, and what the GSTIN lookup returned, worded by
+the ontology, or, with no lookup answer, the plain note and the `verify_registration` task the
+service opened. "Add another business" loads the page afresh, so the next form has a new key. The
+page asks for the consents first (the consent step's query, read by the page): the profile
+service does not check them, so the web app does not offer the form until the required purposes
+are granted at the current notice versions.
+
 ## Consents
 
 `features/consents/gateway.ts` reads a subject's consent states and history

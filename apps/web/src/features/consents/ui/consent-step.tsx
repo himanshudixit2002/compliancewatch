@@ -1,7 +1,8 @@
 import type { Route } from "next";
 import Link from "next/link";
-import { Banner, Button, DRAFT_BANNER_TEXT, PageHeader, Stepper } from "@compliancewatch/ui";
+import { Banner, Button, DRAFT_BANNER_TEXT, PageHeader } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
+import { OnboardingStepper } from "@/shared/ui/onboarding-stepper";
 import type { ConsentStepView } from "../model/consent-step";
 import { ConsentForm, type ConsentAction } from "./consent-form";
 
@@ -16,13 +17,6 @@ export interface ConsentStepProps {
   /** The form field of the WhatsApp number. */
   whatsappField: string;
 }
-
-const STEPS = [
-  { id: "consent", label: t("onboarding.step.consent") },
-  { id: "business", label: t("onboarding.step.business") },
-  { id: "questions", label: t("onboarding.step.questions") },
-  { id: "done", label: t("onboarding.step.done") },
-];
 
 /**
  * The first onboarding step. With every required purpose already granted at the current
@@ -40,7 +34,7 @@ export function ConsentStep({
 }: ConsentStepProps) {
   return (
     <div data-slot="consent-step" className="flex max-w-3xl flex-col gap-6">
-      <Stepper steps={STEPS} current={0} label={t("onboarding.steps")} />
+      <OnboardingStepper current="consent" />
       <PageHeader title={title} description={t("consent.intro")} />
       {view.drafts.length > 0 ? (
         <Banner tone="warning" title={DRAFT_BANNER_TEXT} data-slot="draft-banner">
