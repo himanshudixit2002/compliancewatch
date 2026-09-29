@@ -91,7 +91,24 @@ the header's `kid` names the signing key. `CW_AUTH_MODE` decides what a service 
 - `header` (the default): no token is read and the tenant comes from `x-tenant-id`, as before;
 - `dual`: a bearer token is verified and enforced when a request carries one, and a request
   without one is served as in `header` mode;
-- `token`: every request needs a bearer token. `CW_ENV=prod` refuses any other mode.
+- `token`: every route that reads the caller (tenant, service-to-service, analyst and admin
+  routes) needs a bearer token. `CW_ENV=prod` refuses any other mode.
+
+A route reads the caller when it depends on one of the dependencies below; one that does not
+stays open in every mode. The routes open in `token` mode, all by design:
+
+- every service's `/health`, `/ready` and `/v1/<service>/ping`;
+- identity's sign-in and keys: `POST /v1/identity/sessions`, `POST /v1/identity/tenants`,
+  `POST /v1/identity/service-tokens`, `GET /v1/identity/.well-known/jwks.json` and
+  `POST /v1/identity/dev/provider-tokens` (fake provider, local and test only); the price list
+  `GET /v1/identity/billing/plans`; and `POST /v1/identity/billing/webhook`, which checks the
+  billing provider's signature instead;
+- profile's `GET /v1/ontology`;
+- notification's `GET /v1/notification/templates`, and `POST /v1/notification/receipts/email`,
+  which checks SNS's basic credentials instead;
+- the rulebook's read API, the same for every tenant: rule versions and their citations, rules,
+  documents, entities, relations, clauses and `POST /v1/rulebook/search`. Its review queues
+  (`GET /v1/rulebook/review/...`) need an analyst, reviewer or admin.
 
 `create_app` puts an `Authenticator` on `app.state`, built from the settings: keys come from
 `CW_AUTH_JWKS_JSON` when it is set and otherwise from `CW_AUTH_JWKS_URL` (identity's

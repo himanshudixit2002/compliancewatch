@@ -220,7 +220,43 @@ def test_token_mode_refuses_the_shared_tokens(token_mode: TestClient) -> None:
     ):
         assert (response.status_code, problem(response)) == (401, "auth-token-required")
         assert response.headers["www-authenticate"] == "Bearer"
-    assert token_mode.get(f"{BASE}/rules").status_code == 200, "reads need no token"
+    assert token_mode.get(f"{BASE}/rules").status_code == 200, "the read API needs no token"
+
+
+REVIEW_QUEUES = (
+    f"{BASE}/review/entities",
+    f"{BASE}/review/entities/items?entity_type=form&proposed_name=GSTR-3B",
+    f"{BASE}/review/relations",
+)
+
+
+def test_token_mode_shows_the_review_queues_to_regulatory_roles_only(
+    token_mode: TestClient,
+) -> None:
+    assert register(token_mode, PIPELINE).status_code in {200, 201}
+    stage_candidate(token_mode, PIPELINE)
+    for queue in REVIEW_QUEUES:
+        anonymous = token_mode.get(queue)
+        assert (anonymous.status_code, problem(anonymous)) == (401, "auth-token-required")
+        for outsider in (OWNER, PIPELINE, QA):
+            refused = token_mode.get(queue, headers=outsider)
+            assert (refused.status_code, problem(refused)) == (403, "auth-forbidden")
+        for regulatory in (ANALYST, REVIEWER, ADMIN):
+            assert token_mode.get(queue, headers=regulatory).status_code == 200, queue
+    (candidate,) = token_mode.get(f"{BASE}/review/relations", headers=ANALYST).json()
+    assert candidate["relation"] == "extends_deadline"
+
+
+def test_the_review_queues_stay_open_without_a_token(
+    header_mode: TestClient, dual_mode: TestClient
+) -> None:
+    for queue in REVIEW_QUEUES:
+        assert header_mode.get(queue).status_code == 200
+        assert header_mode.get(queue, headers=OWNER).status_code == 200, "header reads no token"
+        assert dual_mode.get(queue).status_code == 200
+        assert dual_mode.get(queue, headers=ANALYST).status_code == 200
+        refused = dual_mode.get(queue, headers=OWNER)
+        assert (refused.status_code, problem(refused)) == (403, "auth-forbidden")
 
 
 def test_token_mode_records_the_signed_in_actors_of_the_flow(token_mode: TestClient) -> None:

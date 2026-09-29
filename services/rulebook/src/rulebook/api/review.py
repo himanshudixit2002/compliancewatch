@@ -1,6 +1,7 @@
 """Knowledge written by the pipeline (mentions, relation candidates; ``PipelineWrite``) and the
-analyst's review of it (entity groups, candidate approvals; ``AnalystWrite``, which records a
-signed-in user as the one who decided), plus the rule list the pipeline offers the model."""
+analyst's review of it (the queues, ``ReviewRead``; entity groups and candidate approvals,
+``AnalystWrite``, which records a signed-in user as the one who decided), plus the rule list the
+pipeline offers the model."""
 
 from typing import Annotated
 from uuid import UUID
@@ -10,7 +11,7 @@ from fastapi import APIRouter, Query
 from domain_kernel.ids import CanonicalEntityId, DocumentId, RuleVersionId
 from domain_kernel.knowledge import EntityType
 from py_common.problems import problem_responses
-from rulebook.api.deps import AnalystWrite, PipelineAccess, Wired, decided_by
+from rulebook.api.deps import AnalystWrite, PipelineAccess, ReviewRead, Wired, decided_by
 from rulebook.api.schemas import (
     AlignmentOut,
     ApprovalOut,
@@ -63,6 +64,8 @@ def submit_relations(document_id: UUID, body: RelationsIn, wired: Wired) -> Stag
     "/review/entities",
     summary="Open entity review groups: one per (entity type, proposed name)",
     tags=["review"],
+    dependencies=[ReviewRead],
+    responses=problem_responses(401, 403),
 )
 def list_entity_groups(
     wired: Wired,
@@ -80,6 +83,8 @@ def list_entity_groups(
     "/review/entities/items",
     summary="Every open mention of one group, with the review ids a decision can name",
     tags=["review"],
+    dependencies=[ReviewRead],
+    responses=problem_responses(401, 403),
 )
 def list_group_items(
     wired: Wired, entity_type: EntityType, proposed_name: str = ""
@@ -112,6 +117,8 @@ def decide_entity_group(body: DecisionIn, analyst: AnalystWrite, wired: Wired) -
     "/review/relations",
     summary="Relation candidates, open ones by default, in id order",
     tags=["review"],
+    dependencies=[ReviewRead],
+    responses=problem_responses(401, 403),
 )
 def list_relation_candidates(
     wired: Wired,

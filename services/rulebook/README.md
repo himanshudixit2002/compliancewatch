@@ -147,7 +147,10 @@ A caller a token names but who lacks the role or scope is a 403 `auth-forbidden`
 token it also sends. A signed-in user is recorded as who decided a review (`decided_by`, their
 user id) or took a step on a version (`actor_id`), and the body's value is ignored, so the two
 approvals of a high-impact version come from two people; a service, which is no person, still
-names the actor in the body. The read routes need no token in any mode. Sessions of regulatory
+names the actor in the body. The review queues (`GET /v1/rulebook/review/entities`, `.../items`
+and `GET /v1/rulebook/review/relations`) need an `analyst`, `reviewer` or `admin` token in token
+mode, and such a token when a bearer is sent in dual mode; without a token they stay open. The
+rest of the read API needs no token in any mode. Sessions of regulatory
 roles carry a second factor, which identity enforces when it issues them.
 `tests/unit/test_auth_mode.py` covers the three modes.
 

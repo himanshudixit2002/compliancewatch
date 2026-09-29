@@ -8,6 +8,10 @@
   401), and the anonymous principal otherwise;
 - ``token``: a bearer token is required (401 ``auth-token-required`` without one).
 
+Only routes that depend on it read the caller. A route that does not (the probes, sign-in, the
+reads that are the same for everyone) stays open in every mode, so a route that must be guarded
+in ``token`` mode declares one of the dependencies below.
+
 The principal is bound for the request (``py_common.auth.context``): ``actor`` and, for a user,
 ``tenant_id`` appear on every log line. The dependency is ``async`` so the binding happens in the
 request task and reaches the threadpool that runs ``def`` endpoints; verification itself, which

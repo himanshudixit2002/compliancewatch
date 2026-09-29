@@ -103,8 +103,9 @@ verifies. How it does so:
   seconds. The steps are in `docs/runbooks/secret-rotation.md`.
 - **The switch is gradual.** `CW_AUTH_MODE` is `header` by default (the tenant from `x-tenant-id`,
   as before), `dual` (a bearer token is verified and enforced when a request carries one) or
-  `token` (every request needs one, and shared secrets such as the rulebook's write and review
-  tokens stop opening routes). `CW_ENV=prod` refuses any mode but `token` and refuses
+  `token` (every route that reads the caller needs one, and shared secrets such as the
+  rulebook's write and review tokens stop opening routes; probes, sign-in and the reads that are
+  the same for everyone stay open, as listed in `packages/py-common/README.md`). `CW_ENV=prod` refuses any mode but `token` and refuses
   `CW_AUTH_PROVIDER=fake`, so staging runs `dual` and then `token` before production does.
 
 The Supabase project is still a manual step (the list is in `services/identity/README.md`). The

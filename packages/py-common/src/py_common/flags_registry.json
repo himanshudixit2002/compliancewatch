@@ -11,7 +11,7 @@
         "token"
       ],
       "owner": "platform",
-      "description": "How a Python service reads its caller (CW_AUTH_MODE): header takes the tenant from x-tenant-id as before tokens existed, dual verifies a bearer token from the identity service when a request carries one and otherwise behaves as header, token requires a bearer token on every request. Production refuses anything but token.",
+      "description": "How a Python service reads its caller (CW_AUTH_MODE): header takes the tenant from x-tenant-id as before tokens existed, dual verifies a bearer token from the identity service when a request carries one and otherwise behaves as header, token requires a bearer token on every route that reads the caller (probes, sign-in and reads that are the same for everyone stay open). Production refuses anything but token.",
       "removal": "Delete header and dual once staging and production run token, after web sign-in (G68) and the bot and pipeline service credentials are live; production already refuses anything but token.",
       "expires": "2027-03-31",
       "targeting": "none",

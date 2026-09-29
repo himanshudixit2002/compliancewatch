@@ -21,7 +21,8 @@ shows as missing data rather than as an empty queue.
    (rulebook_entity_review_open_items)`. One type growing points at one extractor or one kind of
    document; every type growing points at a batch of new documents.
 2. Which groups: `GET /v1/rulebook/review/entities?entity_type=<type>` lists the open groups,
-   one per (entity type, proposed name), with the open count and five examples each. A few
+   one per (entity type, proposed name), with the open count and five examples each (in token
+   mode with an analyst's, reviewer's or admin's access token). A few
    groups holding most of the items usually means one name recurs across many clauses; one
    decision closes all of them.
 3. Why they were queued, in the database (`make dev-psql` locally, schema `rulebook`):

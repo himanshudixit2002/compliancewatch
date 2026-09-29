@@ -13,7 +13,9 @@ a hosted Unleash runs in staging and production).
 - ``header`` (the default): no token is read; the tenant comes from ``x-tenant-id`` as before;
 - ``dual``: a bearer token from the identity service is verified and enforced when a request
   carries one, and a request without one is served as in ``header`` mode;
-- ``token``: every request needs a bearer token.
+- ``token``: every route that reads the caller (tenant, service-to-service, analyst and admin
+  routes) needs a bearer token. Probes, sign-in and the reads that are the same for every caller
+  stay open; ``packages/py-common/README.md`` lists them.
 
 Production (``CW_ENV=prod``) refuses anything but ``token``. Tokens are ES256 JWTs issued by
 ``auth_issuer`` for ``auth_audience``; their keys come from ``auth_jwks_json`` when it is set (an
