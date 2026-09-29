@@ -24,6 +24,7 @@ src/py_common/
     activity.py        # ActivityBase: validate/run/record, retry policy and timeouts on the class, schedule()
     worker.py          # WorkerConfig, build_worker, run_worker (stops on SIGTERM/SIGINT)
   events.py            # EventMessage (the envelope), to_message/encode/decode, payload_of(event)
+  migrations.py        # alembic helpers: enable_tenant_rls, create_append_only_guard and their drop twins
   outbox/
     schema.py          # outbox_event and processed_event tables; create_*/drop_* helpers for alembic
     writer.py          # OutboxWriter.write(connection, event): the row commits with the state change
@@ -33,7 +34,7 @@ src/py_common/
     consumer.py        # IdempotentConsumer: once per event id and consumer group, consumer dead-letter topic
     testing.py         # FakeProducer, MemoryOutboxStore, MemoryProcessedStore for service tests
 tests/unit/
-tests/integration/     # the outbox against Postgres and Redpanda (testcontainers)
+tests/integration/     # the outbox against Postgres and Redpanda, the migration helpers on Postgres (testcontainers)
 ```
 
 ## Problem details
