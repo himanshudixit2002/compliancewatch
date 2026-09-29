@@ -6,7 +6,7 @@ Design reference: Project Foundation guide, sections 7, 12 and 14.
 - **Owns:** Webhook receiver and conversation state for the WhatsApp Business Cloud API (TypeScript)
 - **Owning team:** Core Product (guide section 14)
 - **Consumes:** WhatsApp Business Cloud API webhooks; qa API; public REST API v1
-- **Emits / publishes:** n/a (calls product APIs)
+- **Emits / publishes:** n/a (calls product APIs: notification's preferences and receipts, identity's channel consents)
 
 ## Layout
 
@@ -47,7 +47,8 @@ notification's `CW_NOTIFICATION_BOT_TOKEN`), before any message is handled. The 
 notification what became of the reminders it sent; the inbound times open WhatsApp's 24-hour
 window, inside which it may send free text instead of an approved template. When the forward
 fails the delivery is answered with a 500 and no reply goes out, so Meta delivers it again.
-Without the token nothing is forwarded and the bot warns once at start.
+Without the token nothing is forwarded and the bot warns once at start. What each forwarding
+failure means is in `docs/runbooks/whatsapp.md` (delivery statuses and the 24-hour window).
 
 The calls the bot makes to notification and identity are recorded in
 `packages/contracts/consumers/whatsapp-bot/`: `contracts.test.ts` checks the clients send

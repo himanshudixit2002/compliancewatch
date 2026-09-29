@@ -38,7 +38,7 @@
 > question-answering suite (56 draft cases asked with the KAG layer on and against the hybrid
 > baseline), the WhatsApp bot with
 > signature checks, keyword opt-in and opt-out and Hindi replies, the notification service's
-> preferences, quiet hours, template drafts and Cloud API channel behind a flag, consent records
+> recipients per business, Postgres store under row-level security and worker (obligation events to change cards, reminders and closures with batching, quiet hours, retries, a fallback channel, daily digests for owners and CA firms and a retention sweep), delivery receipts with WhatsApp's 24-hour window, template drafts, and the Cloud API and SMTP email channels behind flags, consent records
 > and WhatsApp keyword consents in the identity service with the legal drafts in `docs/legal`, the GSTIN lookup protocol with
 > the manual fallback and an HTTP provider behind a flag (state codes derived from the GSTIN, the business category behind a second flag), the billing protocol with a Razorpay skeleton behind a flag, OpenTelemetry tracing
 > and metrics with a dev observability stack (collector, Prometheus, Tempo, Grafana dashboard),
@@ -299,8 +299,8 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - Terraform staging cluster and Keycloak (the gateway trusts an `x-tenant-id` header until then)
 - Accounts the maintainer opens: the Meta WhatsApp business account (bot and channel stay in logging mode), Razorpay (billing answers 503), a GSTIN lookup provider (every registration gets a verify task until the HTTP provider's field mapping is checked against its sandbox), Supabase Auth, a hosted Unleash (flags come from the environment until then); the legal drafts need a lawyer before onboarding shows them
 - Analyst review of the draft ontology wording and of the GSTIN nature-of-business to category mapping; enforcement of the public routes' `x-roles` (the identity service); the daily purge of expired idempotency keys (`python -m py_common.idempotency purge`, for the deploy to schedule); TypeScript types for the REST APIs (the web UI track will generate them from the committed specs)
-- Postgres tables for notification preferences and the sent log (in memory now); the email channel (SES)
-- Alert rules for source freshness, decision-flip rate, notification failures and LLM budget (their metrics do not exist yet; the API SLO, outbox, worker and entity review queue alerts do, with runbooks)
+- For notifications: Meta's approval of the templates (all drafts, so WhatsApp reaches only numbers that wrote in the last 24 hours and anyone else falls back to email), the analyst review of their Hindi copy, the in-region SES sending domain with its SNS feedback subscription (email stays off until then), the web pages the messages link to (`/obligations`), and service auth on the rulebook reader
+- Alert rules for source freshness, decision-flip rate and LLM budget (their metrics do not exist yet; the API SLO, outbox, worker, entity review queue and notification delivery alerts do, with runbooks)
 - The EKS path of the guide (Terraform, Helm, Argo CD canaries); the MVP profile in `infra/deploy` targets Fly.io and Vercel and has not been applied
 - The ingest workflow wired to the real adapters and the outbox (the adapters, parsers and detector exist and run from `make backfill`; the workflow still runs on the in-memory fakes); OCR for scanned PDFs
 - The 50-document sample rulebook (the seed calendar of standing obligations exists, pending analyst review)
