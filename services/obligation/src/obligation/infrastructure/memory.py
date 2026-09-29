@@ -5,6 +5,7 @@ from contextlib import AbstractContextManager, contextmanager
 
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId, TenantId
+from obligation.domain.history import ObligationChange
 from obligation.domain.model import Obligation, period_matches
 from obligation.domain.repository import UnitOfWork
 
@@ -67,12 +68,17 @@ class MemoryEventSink:
 
 class MemoryUnitOfWork:
     def __init__(
-        self, store: dict[ObligationId, Obligation], events: list[DomainEvent], tenant_id: TenantId
+        self,
+        store: dict[ObligationId, Obligation],
+        events: list[DomainEvent],
+        tenant_id: TenantId,
+        changes: list[ObligationChange] | None = None,
     ) -> None:
         self._committed = store
         self._working: dict[ObligationId, Obligation] = {}
         self.obligations = MemoryObligationRepository(self._working, tenant_id)
         self.events = MemoryEventSink(events)
+        self.history = MemoryChangeLog([] if changes is None else changes, tenant_id)
 
     def __enter__(self) -> "MemoryUnitOfWork":
         self._working.clear()
@@ -84,6 +90,7 @@ class MemoryUnitOfWork:
             self._committed.clear()
             self._committed.update(self._working)
             self.events.commit()
+            self.history.commit()
 
 
 class MemoryStore:
@@ -92,6 +99,7 @@ class MemoryStore:
     def __init__(self) -> None:
         self.obligations: dict[ObligationId, Obligation] = {}
         self.events: list[DomainEvent] = []
+        self.changes: list[ObligationChange] = []
 
     def ping(self) -> bool:
         return True
@@ -101,8 +109,37 @@ class MemoryStore:
 
     @contextmanager
     def _unit(self, tenant_id: TenantId) -> Iterator[UnitOfWork]:
-        with MemoryUnitOfWork(self.obligations, self.events, tenant_id) as uow:
+        with MemoryUnitOfWork(self.obligations, self.events, tenant_id, self.changes) as uow:
             yield uow
 
     def of_tenant(self, tenant_id: TenantId) -> list[Obligation]:
         return [o for o in self.obligations.values() if o.tenant_id == tenant_id]
+
+
+class MemoryChangeLog:
+    """Appends wait in ``pending`` until the unit of work commits, like the event sink; reads
+    see the committed log of the tenant and this unit's own appends."""
+
+    def __init__(self, committed: list[ObligationChange], tenant_id: TenantId) -> None:
+        self._committed = committed
+        self._tenant_id = tenant_id
+        self.pending: list[ObligationChange] = []
+
+    def append(self, change: ObligationChange) -> None:
+        if change.tenant_id != self._tenant_id:
+            raise ValueError(f"change {change.id} belongs to another tenant")
+        if any(c.id == change.id for c in (*self._committed, *self.pending)):
+            raise ValueError(f"duplicate change {change.id}")
+        self.pending.append(change)
+
+    def for_obligation(self, obligation_id: ObligationId) -> Sequence[ObligationChange]:
+        found = [
+            change
+            for change in (*self._committed, *self.pending)
+            if change.tenant_id == self._tenant_id and change.obligation_id == obligation_id
+        ]
+        return sorted(found, key=lambda change: change.occurred_at)
+
+    def commit(self) -> None:
+        self._committed.extend(self.pending)
+        self.pending.clear()

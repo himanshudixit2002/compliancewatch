@@ -1,5 +1,6 @@
 """The Postgres unit of work: one transaction with the tenant setting for row-level security,
-the obligation repository on it, and the outbox writer as the event sink."""
+the obligation repository on it, the outbox writer as the event sink, and the change log on the
+same session, so a change row commits or rolls back with its outbox row."""
 
 from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
@@ -13,7 +14,9 @@ from sqlalchemy.pool import NullPool
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import (
     BusinessId,
+    CorrelationId,
     DecisionId,
+    EventId,
     ObligationId,
     RuleVersionId,
     TenantId,
@@ -21,9 +24,10 @@ from domain_kernel.ids import (
 )
 from domain_kernel.recurrence import Period
 from domain_kernel.status import ClosureReason, ObligationStatus
+from obligation.domain.history import ChangeKind, ObligationChange
 from obligation.domain.model import Obligation
 from obligation.domain.repository import UnitOfWork
-from obligation.infrastructure.models import TENANT_SETTING, ObligationRow
+from obligation.infrastructure.models import TENANT_SETTING, ObligationChangeRow, ObligationRow
 from py_common.outbox import OutboxWriter
 
 
@@ -94,6 +98,7 @@ class SqlAlchemyUnitOfWork:
         )
         self.obligations = SqlAlchemyObligationRepository(session, tenant_id)
         self.events = OutboxSink(connection, writer)
+        self.history = SqlAlchemyChangeLog(session)
 
 
 class PostgresUnitOfWorkFactory:
@@ -172,4 +177,72 @@ def _to_obligation(row: ObligationRow) -> Obligation:
         closed_at=None if row.closed_at is None else row.closed_at.astimezone(UTC),
         closed_reason=None if row.closed_reason is None else ClosureReason(row.closed_reason),
         closed_by=None if row.closed_by is None else UserId(row.closed_by),
+    )
+
+
+class SqlAlchemyChangeLog:
+    """The change log on the unit of work's session; row-level security scopes it to the
+    tenant, and the table's trigger refuses UPDATE and DELETE."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def append(self, change: ObligationChange) -> None:
+        self._session.add(_to_change_row(change))
+        self._session.flush()
+
+    def for_obligation(self, obligation_id: ObligationId) -> Sequence[ObligationChange]:
+        statement = (
+            select(ObligationChangeRow)
+            .where(ObligationChangeRow.obligation_id == obligation_id.value)
+            .order_by(
+                ObligationChangeRow.occurred_at,
+                ObligationChangeRow.created_at,
+                ObligationChangeRow.id,
+            )
+        )
+        return [_to_change(row) for row in self._session.scalars(statement).all()]
+
+
+def _to_change_row(change: ObligationChange) -> ObligationChangeRow:
+    return ObligationChangeRow(
+        id=change.id.value,
+        tenant_id=change.tenant_id.value,
+        obligation_id=change.obligation_id.value,
+        business_id=change.business_id.value,
+        rule_version_id=change.rule_version_id.value,
+        kind=change.kind.value,
+        occurred_at=change.occurred_at,
+        previous_due_at=change.previous_due_at,
+        new_due_at=change.new_due_at,
+        status_after=change.status_after.value,
+        reason=change.reason,
+        caused_by_rule_version_id=None
+        if change.caused_by_rule_version_id is None
+        else change.caused_by_rule_version_id.value,
+        actor=None if change.actor is None else change.actor.value,
+        correlation_id=change.correlation_id.value,
+    )
+
+
+def _to_change(row: ObligationChangeRow) -> ObligationChange:
+    return ObligationChange(
+        id=EventId(row.id),
+        tenant_id=TenantId(row.tenant_id),
+        obligation_id=ObligationId(row.obligation_id),
+        business_id=BusinessId(row.business_id),
+        rule_version_id=RuleVersionId(row.rule_version_id),
+        kind=ChangeKind(row.kind),
+        occurred_at=row.occurred_at.astimezone(UTC),
+        previous_due_at=None
+        if row.previous_due_at is None
+        else row.previous_due_at.astimezone(UTC),
+        new_due_at=None if row.new_due_at is None else row.new_due_at.astimezone(UTC),
+        status_after=ObligationStatus(row.status_after),
+        reason=row.reason,
+        caused_by_rule_version_id=None
+        if row.caused_by_rule_version_id is None
+        else RuleVersionId(row.caused_by_rule_version_id),
+        actor=None if row.actor is None else UserId(row.actor),
+        correlation_id=CorrelationId(row.correlation_id),
     )

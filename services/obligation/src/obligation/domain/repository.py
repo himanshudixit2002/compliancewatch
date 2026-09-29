@@ -6,6 +6,7 @@ from typing import Protocol
 
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId, TenantId
+from obligation.domain.history import ObligationChange
 from obligation.domain.model import Obligation
 
 
@@ -33,15 +34,28 @@ class EventSink(Protocol):
     def publish(self, event: DomainEvent) -> None: ...
 
 
+class ChangeLog(Protocol):
+    """The append-only change log of the tenant's obligations: one record per change event."""
+
+    def append(self, change: ObligationChange) -> None: ...
+
+    def for_obligation(self, obligation_id: ObligationId) -> Sequence[ObligationChange]:
+        """The obligation's changes, oldest first."""
+        ...
+
+
 class UnitOfWork(Protocol):
-    """One transaction: the repository and the event sink commit or roll back together. The
-    factory returns it as a context manager; leaving the block cleanly commits."""
+    """One transaction: the repository, the event sink and the change log commit or roll back
+    together. The factory returns it as a context manager; leaving the block cleanly commits."""
 
     @property
     def obligations(self) -> ObligationRepository: ...
 
     @property
     def events(self) -> EventSink: ...
+
+    @property
+    def history(self) -> ChangeLog: ...
 
 
 class UnitOfWorkFactory(Protocol):

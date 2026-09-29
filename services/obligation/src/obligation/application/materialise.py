@@ -4,7 +4,8 @@ A recurring rule gets one obligation per period inside a rolling window (the per
 contains ``as_of`` and the ones after it, ``window`` in total), idempotent on (business, rule
 version, period): running it again creates nothing new. A one-off rule gets one obligation due
 ``due_in_days`` after ``as_of``. Periods that end before the rule version is in force are
-skipped. Every created obligation is written together with its ``obligation.created`` event.
+skipped. Every created obligation is written together with its ``obligation.created`` event
+and the change log row that records it.
 """
 
 from collections.abc import Callable
@@ -17,6 +18,7 @@ from domain_kernel.ids import BusinessId, DecisionId, ObligationId, TenantId
 from domain_kernel.recurrence import Period
 from domain_kernel.rules import RuleVersionSnapshot
 from domain_kernel.status import ObligationStatus
+from obligation.application.audit import record
 from obligation.domain.model import Obligation, due_at_end_of_day
 from obligation.domain.repository import UnitOfWorkFactory
 
@@ -83,7 +85,7 @@ class MaterialiseObligations:
                     updated_at=now,
                 )
                 uow.obligations.add(obligation)
-                uow.events.publish(obligation.created_event())
+                record(uow, obligation.created_event(), obligation)
                 created.append(obligation.id)
         return MaterialiseResult(tuple(created), existing, skipped)
 
