@@ -792,7 +792,11 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [uses("rulebook", "GET", "/v1/rulebook/documents/{document_id}"), RULE_VERSION],
+    uses: [
+      uses("rulebook", "GET", "/v1/rulebook/documents/{document_id}"),
+      RULE_VERSION,
+      uses("profile", "GET", "/v1/ontology"),
+    ],
     awaits: [
       servicesTrack("WP21", "rulebook", "GET", "/v1/rulebook/review/tasks/{task_id}"),
       servicesTrack("WP21", "rulebook", "POST", "/v1/rulebook/review/tasks/{task_id}/draft"),
@@ -1069,7 +1073,7 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [RULE_VERSIONS],
+    uses: [RULE_VERSIONS, uses("profile", "GET", "/v1/ontology")],
     awaits: [
       ONTOLOGY,
       servicesTrack("WP30", "profile", "GET", "/v1/profile/admin/attribute-usage"),
@@ -1172,7 +1176,7 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [uses("profile", "GET", "/v1/ontology")],
     awaits: [
       servicesTrack("WP26", "applicability-engine", "POST", "/v1/applicability-engine/dry-runs"),
       ONTOLOGY,

@@ -32,7 +32,8 @@ export interface RouteRef {
  * Services whose OpenAPI spec is committed under packages/contracts/openapi. This module has no
  * file access, so the list is written out; screens.test.ts fails when it and the directory's
  * `*.v1.json` files differ, so a newly committed spec is added here before the registry rules
- * see its routes.
+ * see its routes. public.v1.json is not a service: it merges the operations the services tag
+ * public, and each of those is also in its own service's spec.
  */
 export const SERVICES_WITH_SPECS: readonly ServiceName[] = [
   "identity",

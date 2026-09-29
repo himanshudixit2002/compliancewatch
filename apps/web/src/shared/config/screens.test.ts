@@ -117,6 +117,8 @@ describe("screen registry", () => {
   it("names exactly the services whose spec is committed", () => {
     const stems = readdirSync(SPEC_DIR)
       .filter((name) => name.endsWith(".v1.json"))
+      // public.v1.json is the merged public facade; its operations belong to the services.
+      .filter((name) => name !== "public.v1.json")
       .map((name) => name.slice(0, -".v1.json".length))
       .sort();
     expect(
