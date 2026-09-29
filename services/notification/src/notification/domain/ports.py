@@ -6,7 +6,8 @@ rule version, and a place to count deliveries.
   cites); None when the rulebook has no such version. A rulebook that cannot answer raises
   ``DependencyUnavailableError``, and the dispatcher tries again later without spending an
   attempt.
-- ``DeliveryMetrics``: the counters and the lag the alerts read. ``NO_METRICS`` counts nothing.
+- ``DeliveryMetrics``: the counters and the lag the alerts read, and the provider reports.
+  ``NO_METRICS`` counts nothing.
 """
 
 from collections.abc import Sequence
@@ -18,6 +19,7 @@ from typing import Protocol
 from domain_kernel._validation import require_date, require_instance, require_text
 from domain_kernel.channels import Channel
 from domain_kernel.ids import RuleVersionId
+from notification.domain.receipts import ReceiptKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +64,17 @@ class QueueResult(StrEnum):
     """The occasion already has its notification; nothing was queued."""
 
 
+class ReceiptResult(StrEnum):
+    """What a provider's report made of the notifications it names."""
+
+    APPLIED = "applied"
+    """It moved a notification on: delivered, read, or failed."""
+    UNCHANGED = "unchanged"
+    """A late or repeated report, or one for a notification in no state to take it."""
+    UNKNOWN = "unknown"
+    """No notification carries the provider's message id, such as a reply the bot sent."""
+
+
 class DeliveryMetrics(Protocol):
     def enqueued(self, channel: Channel, result: QueueResult) -> None: ...
 
@@ -76,6 +89,10 @@ class DeliveryMetrics(Protocol):
         dispatcher's lease ran out while it was still sending."""
         ...
 
+    def receipt(self, channel: Channel, kind: ReceiptKind, result: ReceiptResult) -> None:
+        """One provider report and what it made of its notifications."""
+        ...
+
 
 class NoMetrics:
     def enqueued(self, channel: Channel, result: QueueResult) -> None:
@@ -88,6 +105,9 @@ class NoMetrics:
         return None
 
     def duplicate_sent(self, channel: Channel) -> None:
+        return None
+
+    def receipt(self, channel: Channel, kind: ReceiptKind, result: ReceiptResult) -> None:
         return None
 
 

@@ -1,5 +1,7 @@
-"""Request-scoped dependencies: the tenant from the header (required for sends) and the wiring."""
+"""Request-scoped dependencies: the tenant from the header (required for tenant data), the
+wiring, and the shared secret of the bot's receipts."""
 
+import hmac
 from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import UUID
@@ -8,7 +10,11 @@ import structlog
 from fastapi import Depends, Header, Request
 
 from domain_kernel.ids import TenantId
-from notification.domain.errors import TenantRequiredError
+from notification.domain.errors import (
+    ReceiptsDisabledError,
+    ReceiptTokenInvalidError,
+    TenantRequiredError,
+)
 from notification.wiring import Wiring
 
 
@@ -37,3 +43,24 @@ def wiring(request: Request) -> Wiring:
 
 Tenant = Annotated[TenantId, Depends(tenant_id_from_header)]
 Wired = Annotated[Wiring, Depends(wiring)]
+
+
+def require_bot_token(
+    wired: Wired,
+    x_cw_bot_token: Annotated[
+        str | None,
+        Header(description="Shared secret of the WhatsApp bot (CW_NOTIFICATION_BOT_TOKEN)"),
+    ] = None,
+) -> None:
+    """Receipts name no tenant and change delivery records of every tenant, so the route fails
+    closed: no configured token is a 503, a missing or wrong one a 401. The comparison takes the
+    same time for any wrong token."""
+    configured = wired.settings.notification_bot_token
+    if configured is None or not configured.get_secret_value():
+        raise ReceiptsDisabledError("CW_NOTIFICATION_BOT_TOKEN")
+    given = (x_cw_bot_token or "").encode("utf-8")
+    if not hmac.compare_digest(given, configured.get_secret_value().encode("utf-8")):
+        raise ReceiptTokenInvalidError()
+
+
+BotAccess = Depends(require_bot_token)

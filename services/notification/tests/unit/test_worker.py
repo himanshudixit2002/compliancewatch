@@ -198,6 +198,8 @@ def test_the_dispatch_job_sends_what_is_due() -> None:
     SetOptIn(store, clock=clock).run(
         Channel.WHATSAPP, PHONE, opted_in=True, source=ConsentSource.API
     )
+    with store.shared() as unit:
+        unit.preferences.record_inbound(Channel.WHATSAPP, PHONE, clock.now)
     dispatch = DispatchDue(
         store,
         store.work_index,

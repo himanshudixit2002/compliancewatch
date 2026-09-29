@@ -65,3 +65,39 @@ class DependencyUnavailableError(DomainError):
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
+
+
+class NotificationNotFoundError(DomainError):
+    type_slug: ClassVar[str] = "notification-not-found"
+    title: ClassVar[str] = "Notification not found"
+
+    def __init__(self, notification_id: str) -> None:
+        super().__init__(f"no notification {notification_id} in this tenant")
+
+
+class ResendNotAllowedError(DomainError):
+    """Only a notification that failed for good can be sent again."""
+
+    type_slug: ClassVar[str] = "notification-resend-not-allowed"
+    title: ClassVar[str] = "Notification cannot be sent again"
+
+    def __init__(self, notification_id: str, state: str) -> None:
+        super().__init__(f"notification {notification_id} is {state}; only a failed one is resent")
+
+
+class ReceiptsDisabledError(DomainError):
+    """The receipt routes fail closed: without a configured token nothing is accepted."""
+
+    type_slug: ClassVar[str] = "notification-receipts-disabled"
+    title: ClassVar[str] = "Notification receipts disabled"
+
+    def __init__(self, setting: str) -> None:
+        super().__init__(f"delivery receipts are refused until {setting} is set")
+
+
+class ReceiptTokenInvalidError(DomainError):
+    type_slug: ClassVar[str] = "notification-receipt-token-invalid"
+    title: ClassVar[str] = "Notification receipt token invalid"
+
+    def __init__(self) -> None:
+        super().__init__("missing or wrong receipt token")

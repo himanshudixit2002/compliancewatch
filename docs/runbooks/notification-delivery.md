@@ -35,6 +35,11 @@ Exported when `CW_OTEL_ENDPOINT` is set (`notification.infrastructure.metrics`):
   sent.
 - `notification_enqueued_total{channel, outcome}`: `queued`, and `duplicate` for an occasion that
   already had its notification (a redelivered event), which is expected.
+- `notification_receipts_total{channel, kind, outcome}`: the provider's reports after it took a
+  message (`delivered`, `read`, `failed`, ...), forwarded by the WhatsApp bot to
+  `POST /v1/notification/receipts/whatsapp`. `applied` moved a notification on; `unchanged` was
+  late or repeated; `unknown` names a message no notification carries, which the bot's own
+  replies always do. A `failed` receipt fails a sent notification and queues its fallback.
 
 ## NotificationDeliveryFailures
 
@@ -57,11 +62,20 @@ another channel reaches them.
      with `select template_key, count(*) from notification where error like 'not rendered%'
      group by 1`.
    - `no channel adapter for ...`: the composition root wired no adapter for the channel.
+   - `whatsapp: outside the 24-hour customer service window and template ... is draft, not
+     approved`: the person has not written to the business number in the last day, and WhatsApp
+     then takes only a template Meta approved. The dispatcher does not retry it and the fallback
+     goes at once. Submit the template (see [whatsapp.md](whatsapp.md)) and move its status in
+     `notification/domain/templates.py` once Meta approves it.
+   - `whatsapp <code>: ...`: Meta reported the failure after it took the message (a receipt).
 3. Did the fallback go: `select channel, state, count(*) from notification where fallback_of is
    not null and created_at > now() - interval '1 hour' group by 1, 2`.
 
 Fix the cause first: a token, a flag, a template. Nothing sends a failed notification again on
-its own. If a change card or a reminder was lost for a business, support tells its owner.
+its own: once the cause is fixed, `POST /v1/notification/notifications/{id}/resend` (with the
+tenant's `x-tenant-id`) queues one again, and `GET /v1/notification/notifications?business_id=`
+lists a business's notifications with their state. If a change card or a reminder was lost for
+a business, support tells its owner.
 
 ## NotificationDuplicateSent
 

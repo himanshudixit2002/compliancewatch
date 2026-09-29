@@ -11,16 +11,22 @@ from fastapi import FastAPI
 
 from domain_kernel.channels import Channel
 from domain_kernel.errors import DomainError
-from domain_kernel.protocols import NotificationChannel
 from notification import __version__
+from notification.api.notifications import router as notifications_router
+from notification.api.receipts import router as receipts_router
 from notification.api.recipients import router as recipients_router
 from notification.api.router import router
 from notification.composition import wire
+from notification.domain.channels import ChannelAdapter
 from notification.domain.errors import (
     DependencyUnavailableError,
     InvalidAddressError,
     MissingPlaceholderError,
+    NotificationNotFoundError,
+    ReceiptsDisabledError,
+    ReceiptTokenInvalidError,
     RecipientNotFoundError,
+    ResendNotAllowedError,
     TenantRequiredError,
     UnknownChannelError,
     UnknownTemplateError,
@@ -38,13 +44,17 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     RecipientNotFoundError: 404,
     UnknownChannelError: 503,
     DependencyUnavailableError: 503,
+    NotificationNotFoundError: 404,
+    ResendNotAllowedError: 409,
+    ReceiptsDisabledError: 503,
+    ReceiptTokenInvalidError: 401,
 }
 
 
 def build_app(
     settings: NotificationSettings | None = None,
     *,
-    channels: Mapping[Channel, NotificationChannel] | None = None,
+    channels: Mapping[Channel, ChannelAdapter] | None = None,
     rules: RuleVersionReader | None = None,
 ) -> FastAPI:
     settings = settings or NotificationSettings(service_name=SERVICE_NAME)
@@ -52,7 +62,7 @@ def build_app(
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router, recipients_router],
+        routers=[router, recipients_router, notifications_router, receipts_router],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         problem_status=PROBLEM_STATUS,

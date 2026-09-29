@@ -17,13 +17,16 @@ from collections.abc import Callable, Mapping
 from starlette.concurrency import run_in_threadpool
 
 from domain_kernel.channels import Channel
-from domain_kernel.protocols import NotificationChannel
 from notification.application.dispatch import DispatchDue
 from notification.application.enqueue import EnqueueNotifications
+from notification.application.history import GetNotification, ListNotifications
 from notification.application.preferences import GetPreference, SetOptIn
+from notification.application.receipts import ReconcileReceipts
 from notification.application.recipients import GetRecipient, RegisterRecipient, RemoveRecipient
+from notification.application.resend import ResendNotification
 from notification.application.retention import PurgeExpired
 from notification.application.send import SendNow
+from notification.domain.channels import ChannelAdapter
 from notification.domain.policy import BatchPolicy, DigestPolicy
 from notification.domain.ports import RuleVersionReader
 from notification.domain.preferences import QuietHours
@@ -40,9 +43,9 @@ WHATSAPP_DISABLED = "whatsapp channel disabled: set CW_WHATSAPP_ENABLED and the 
 EMAIL_DISABLED = "email channel not wired yet (SES arrives with deploy)"
 
 
-def default_channels(settings: NotificationSettings) -> dict[Channel, NotificationChannel]:
+def default_channels(settings: NotificationSettings) -> dict[Channel, ChannelAdapter]:
     """The channels the settings enable; a disabled one fails every send with the reason."""
-    whatsapp: NotificationChannel
+    whatsapp: ChannelAdapter
     if (
         settings.whatsapp_enabled
         and settings.whatsapp_phone_number_id
@@ -61,7 +64,7 @@ def default_channels(settings: NotificationSettings) -> dict[Channel, Notificati
 def wire(
     settings: NotificationSettings,
     *,
-    channels: Mapping[Channel, NotificationChannel] | None = None,
+    channels: Mapping[Channel, ChannelAdapter] | None = None,
     rules: RuleVersionReader | None = None,
 ) -> Wiring:
     unit_of_work: UnitOfWorkFactory
@@ -111,5 +114,9 @@ def wire(
         get_recipient=GetRecipient(unit_of_work),
         remove_recipient=RemoveRecipient(unit_of_work),
         purge=PurgeExpired(unit_of_work, work_index),
+        get_notification=GetNotification(unit_of_work),
+        list_notifications=ListNotifications(unit_of_work),
+        resend=ResendNotification(unit_of_work),
+        reconcile=ReconcileReceipts(unit_of_work, work_index, metrics=metrics),
         store_ready=store_ready,
     )

@@ -11,7 +11,11 @@
   been sent, which only a dispatcher whose lease ran out mid-send can cause, and which should
   never happen;
 - ``notification_enqueued_total{channel, outcome}``: notifications queued, and ``duplicate`` for
-  an occasion that already had its notification (a redelivered event), which is expected.
+  an occasion that already had its notification (a redelivered event), which is expected;
+- ``notification_receipts_total{channel, kind, outcome}``: provider reports after a message was
+  taken (``delivered``, ``read``, ``failed`` and so on) by what they made of it: ``applied``,
+  ``unchanged`` (late or repeated) or ``unknown`` (no notification carries the message id, such
+  as the bot's own replies).
 
 The names carry no unit, since the collector's Prometheus exporter would add one; counters end in
 ``_total`` as Prometheus names them. Without telemetry configured the global meter provider
@@ -22,12 +26,14 @@ from opentelemetry import metrics
 from opentelemetry.metrics import Meter
 
 from domain_kernel.channels import Channel
-from notification.domain.ports import AttemptResult, QueueResult
+from notification.domain.ports import AttemptResult, QueueResult, ReceiptResult
+from notification.domain.receipts import ReceiptKind
 
 SENDS = "notification_sends_total"
 DELIVERY_LAG = "notification_delivery_lag_seconds"
 DUPLICATE_SENT = "notification_duplicate_sent_total"
 ENQUEUED = "notification_enqueued_total"
+RECEIPTS = "notification_receipts_total"
 LAG_BUCKETS = (1.0, 5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 900.0, 1800.0, 3600.0, 21600.0)
 """Seconds; 900 is the 15-minute delivery objective."""
 
@@ -49,6 +55,9 @@ class OtelDeliveryMetrics:
         self._enqueued = meter.create_counter(
             ENQUEUED, description="Notifications queued, and duplicates the dedupe key caught"
         )
+        self._receipts = meter.create_counter(
+            RECEIPTS, description="Provider reports by kind and what they made of the notification"
+        )
 
     def enqueued(self, channel: Channel, result: QueueResult) -> None:
         self._enqueued.add(1, {"channel": channel.value, "outcome": result.value})
@@ -61,3 +70,8 @@ class OtelDeliveryMetrics:
 
     def duplicate_sent(self, channel: Channel) -> None:
         self._duplicate_sent.add(1, {"channel": channel.value})
+
+    def receipt(self, channel: Channel, kind: ReceiptKind, result: ReceiptResult) -> None:
+        self._receipts.add(
+            1, {"channel": channel.value, "kind": kind.value, "outcome": result.value}
+        )

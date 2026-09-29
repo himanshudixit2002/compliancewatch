@@ -1,7 +1,8 @@
 """Property tests of the notification API against its spec (schemathesis).
 
 Schemathesis generates valid and invalid requests from the served schema, which
-``test_openapi.py`` pins to the committed spec, and sends them in process with a tenant header.
+``test_openapi.py`` pins to the committed spec, and sends them in process with a tenant header
+and the bot token of the test settings, so the receipt route gets past its token check.
 Each response must not be a server error, and its status code, content type and body must be
 the ones the spec documents.
 
@@ -23,7 +24,7 @@ from schemathesis.specs.openapi.checks import (
 )
 
 from notification.main import build_app
-from notification.testing import notification_settings
+from notification.testing import BOT_TOKEN, notification_settings
 
 TENANT_ID = "7d0f4d56-2a8e-4c1b-9f3e-5b6a1c2d3e4f"
 OPERATIONS = frozenset(
@@ -38,6 +39,10 @@ OPERATIONS = frozenset(
         "PUT /v1/notification/recipients/{recipient_id}",
         "GET /v1/notification/recipients/{recipient_id}",
         "DELETE /v1/notification/recipients/{recipient_id}",
+        "GET /v1/notification/notifications",
+        "GET /v1/notification/notifications/{notification_id}",
+        "POST /v1/notification/notifications/{notification_id}/resend",
+        "POST /v1/notification/receipts/whatsapp",
     }
 )
 EXCLUDED: dict[str, str] = {}
@@ -52,7 +57,7 @@ CHECKS = cast(
 )
 EXAMPLES = 200 if os.environ.get("HYPOTHESIS_PROFILE") == "nightly" else 25
 
-app = build_app(notification_settings())
+app = build_app(notification_settings(notification_bot_token=BOT_TOKEN))
 schema = schemathesis.openapi.from_asgi("/openapi.json", app).include(
     func=lambda ctx: ctx.operation.label in OPERATIONS and ctx.operation.label not in EXCLUDED
 )
@@ -72,4 +77,6 @@ def test_every_listed_operation_is_served() -> None:
     suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow],
 )
 def test_responses_conform_to_the_spec(case: schemathesis.Case[Any]) -> None:
-    case.call_and_validate(headers={"x-tenant-id": TENANT_ID}, checks=CHECKS)
+    case.call_and_validate(
+        headers={"x-tenant-id": TENANT_ID, "x-cw-bot-token": BOT_TOKEN}, checks=CHECKS
+    )

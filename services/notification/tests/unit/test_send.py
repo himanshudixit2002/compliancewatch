@@ -1,15 +1,15 @@
 from datetime import UTC, datetime, timedelta
 
-import httpx2
 import pytest
 
 from domain_kernel.channels import Channel
 from domain_kernel.dedupe import DedupeKey
 from domain_kernel.ids import BusinessId, NotificationId, ObligationId, TenantId
-from domain_kernel.notifications import DeliveryReceipt, DeliveryStatus, RenderedMessage
+from domain_kernel.notifications import DeliveryReceipt
 from notification.application.dispatch import DispatchDue
 from notification.application.preferences import SetOptIn
 from notification.application.send import SendNow
+from notification.domain.channels import OutboundMessage
 from notification.domain.errors import (
     InvalidAddressError,
     MissingPlaceholderError,
@@ -23,11 +23,6 @@ from notification.domain.occasions import OccasionKind
 from notification.domain.preferences import ConsentSource, Suppression, SuppressionReason
 from notification.domain.repository import WorkEntry
 from notification.infrastructure.memory import MemoryStore
-from notification.infrastructure.whatsapp import (
-    DisabledChannel,
-    WhatsAppCloudChannel,
-    template_payload,
-)
 from notification.testing import (
     NIGHT_IST,
     NOON_IST,
@@ -74,9 +69,12 @@ class Setup:
         self.use_case = SendNow(self.store, self.dispatch, clock=self.clock)
 
     def opt_in(self, language: str = "en", recipient: str = PHONE) -> None:
-        SetOptIn(self.store, clock=lambda: NOON_IST).run(
+        """The number opts in by writing to us at noon, which opens the 24-hour window."""
+        preference = SetOptIn(self.store, clock=lambda: NOON_IST).run(
             Channel.WHATSAPP, recipient, opted_in=True, source=ConsentSource.API, language=language
         )
+        with self.store.shared() as unit:
+            unit.preferences.record_inbound(Channel.WHATSAPP, preference.address, NOON_IST)
 
 
 def test_sends_once_records_the_notification_and_publishes_sent() -> None:
@@ -203,9 +201,9 @@ class ClaimingChannel(FakeChannel):
         self._store = store
         self.claimed: list[WorkEntry] = []
 
-    def send(self, message: RenderedMessage) -> DeliveryReceipt:
+    def deliver(self, message: OutboundMessage) -> DeliveryReceipt:
         self.claimed.extend(self._store.work_index.claim(limit=10, now=NOON_IST))
-        return super().send(message)
+        return super().deliver(message)
 
 
 def test_the_send_is_leased_so_the_dispatcher_loop_leaves_it_alone() -> None:
@@ -239,50 +237,3 @@ def test_nothing_is_stored_for_an_unknown_channel_template_or_value() -> None:
     with pytest.raises(MissingPlaceholderError):
         setup.use_case.run(request(params={"title": "x"}))
     assert len(setup.store.notifications_of(TENANT)) == 1
-
-
-def test_disabled_channel_fails_with_its_reason() -> None:
-    message = RenderedMessage(Channel.WHATSAPP, PHONE, "hi", DedupeKey("c" * 64))
-    receipt = DisabledChannel("off", clock=lambda: NOON_IST).send(message)
-    assert (receipt.status, receipt.error) == (DeliveryStatus.FAILED, "off")
-
-
-def test_whatsapp_cloud_channel_posts_and_reads_the_message_id() -> None:
-    calls: list[httpx2.Request] = []
-
-    def handler(req: httpx2.Request) -> httpx2.Response:
-        calls.append(req)
-        if req.headers["authorization"] != "Bearer tok":
-            return httpx2.Response(401, json={"error": {"message": "bad token"}})
-        return httpx2.Response(200, json={"messages": [{"id": "wamid.X"}]})
-
-    client = httpx2.Client(transport=httpx2.MockTransport(handler))
-    channel = WhatsAppCloudChannel("42", "tok", client=client, clock=lambda: NOON_IST)
-    message = RenderedMessage(Channel.WHATSAPP, PHONE, "hello", DedupeKey("d" * 64))
-    receipt = channel.send(message)
-    assert (receipt.status, receipt.provider_message_id) == (DeliveryStatus.SENT, "wamid.X")
-    assert calls[0].url.path == "/v21.0/42/messages"
-    bad = WhatsAppCloudChannel("42", "nope", client=client, clock=lambda: NOON_IST).send(message)
-    assert bad.status is DeliveryStatus.FAILED
-    assert bad.error.startswith("401")
-    channel.close()
-
-
-def test_whatsapp_cloud_channel_transport_errors_are_failed_receipts() -> None:
-    def handler(req: httpx2.Request) -> httpx2.Response:
-        raise httpx2.ConnectError("down")
-
-    client = httpx2.Client(transport=httpx2.MockTransport(handler))
-    receipt = WhatsAppCloudChannel("42", "tok", client=client).send(
-        RenderedMessage(Channel.WHATSAPP, PHONE, "x", DedupeKey("e" * 64))
-    )
-    assert receipt.status is DeliveryStatus.FAILED
-    assert "transport" in receipt.error
-
-
-def test_template_payload_shape() -> None:
-    payload = template_payload(PHONE, "cw_obligation_due_soon_en", "en", ["Acme", "GSTR-3B"])
-    template = payload["template"]
-    assert isinstance(template, dict)
-    assert template["name"] == "cw_obligation_due_soon_en"
-    assert template["components"][0]["parameters"][1] == {"type": "text", "text": "GSTR-3B"}

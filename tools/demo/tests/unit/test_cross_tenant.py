@@ -17,7 +17,7 @@ integration tests.
 from collections.abc import Callable, Iterator
 from decimal import Decimal
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -103,6 +103,9 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "PUT /v1/notification/recipients/{recipient_id}",
             "GET /v1/notification/recipients/{recipient_id}",
             "DELETE /v1/notification/recipients/{recipient_id}",
+            "GET /v1/notification/notifications",
+            "GET /v1/notification/notifications/{notification_id}",
+            "POST /v1/notification/notifications/{notification_id}/resend",
         }
     ),
     "qa": frozenset({"POST /v1/qa/ask"}),
@@ -139,6 +142,12 @@ EXEMPT_ROUTES: dict[str, dict[str, str]] = {
         "PUT /v1/notification/preferences/{channel}/{recipient}": PREFERENCE,
         "GET /v1/notification/preferences/{channel}/{recipient}": PREFERENCE,
         "GET /v1/notification/templates": "the message templates are the same for every tenant",
+        "POST /v1/notification/receipts/whatsapp": (
+            "delivery statuses and inbound times forwarded by the WhatsApp bot, which knows only "
+            "Meta's message ids and numbers; the service finds each tenant by the message id, and "
+            "the bot's shared token (x-cw-bot-token) guards the route: 503 until it is set, 401 "
+            "without it"
+        ),
     },
     "qa": {},
 }
@@ -149,6 +158,7 @@ GUARDED_EXEMPT_ROUTES = {
     "POST /v1/identity/channel-consents": 401,
     "GET /v1/identity/channel-consents/{channel}/{subject}": 401,
     "POST /v1/identity/billing/webhook": 401,
+    "POST /v1/notification/receipts/whatsapp": 503,
 }
 """Exempt routes whose own guard refuses an anonymous request."""
 
@@ -349,6 +359,41 @@ def test_tenant_b_cannot_reach_a_recipient_of_tenant_a(clients: dict[str, TestCl
     assert taken_over.status_code == 200, "tenant B registers its own recipient under the id"
     as_a = notification.get(path, headers=AS_A).json()
     assert (as_a["role"], as_a["businesses"][0]["label"]) == ("owner", "Tenant A Traders")
+
+
+def test_tenant_b_cannot_read_or_resend_a_notification_of_tenant_a(
+    clients: dict[str, TestClient],
+) -> None:
+    notification = clients["notification"]
+    phone = "+919800000123"
+    opted = notification.put(
+        f"/v1/notification/preferences/whatsapp/{phone}", json={"opted_in": True, "source": "api"}
+    )
+    assert opted.status_code == 200, opted.text
+    notification_id, business_id = str(uuid4()), str(uuid4())
+    sent = notification.post(
+        "/v1/notification/send",
+        json={
+            "notification_id": notification_id,
+            "obligation_id": str(uuid4()),
+            "business_id": business_id,
+            "channel": "whatsapp",
+            "recipient": phone,
+            "template_key": "obligation_due_soon",
+            "params": {"business_name": "A", "title": "T", "due_date": "D", "steps": "S"},
+        },
+        headers=AS_A,
+    )
+    assert sent.status_code == 200, sent.text
+    path = f"/v1/notification/notifications/{notification_id}"
+    assert notification.get(path, headers=AS_A).status_code == 200
+    assert notification.get(path, headers=AS_B).status_code == 404
+    assert notification.post(f"{path}/resend", headers=AS_B).status_code == 404
+    listed = notification.get(
+        "/v1/notification/notifications", params={"business_id": business_id}, headers=AS_B
+    )
+    assert listed.status_code == 200
+    assert listed.json()["items"] == []
 
 
 def test_tenant_b_cannot_read_the_consents_of_tenant_a(clients: dict[str, TestClient]) -> None:

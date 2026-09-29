@@ -3,12 +3,13 @@ from datetime import UTC, date, datetime, timedelta
 
 from domain_kernel.channels import Channel
 from domain_kernel.ids import BusinessId, NotificationId, ObligationId, RuleVersionId, TenantId
-from domain_kernel.notifications import DeliveryReceipt, RenderedMessage
+from domain_kernel.notifications import DeliveryReceipt
 from notification.application.dispatch import Delivery, DeliveryOutcome, DispatchDue
 from notification.application.enqueue import EnqueueNotifications
 from notification.application.preferences import SetOptIn
 from notification.application.recipients import RecipientRegistration, RegisterRecipient
 from notification.application.send import SendNow
+from notification.domain.channels import OutboundMessage
 from notification.domain.events import NotificationFailed, NotificationSent
 from notification.domain.ids import RecipientId
 from notification.domain.model import NotificationRequest, Outcome
@@ -54,11 +55,11 @@ class RacingChannel(FakeChannel):
         super().__init__(clock=clock)
         self.race: Callable[[], object] | None = None
 
-    def send(self, message: RenderedMessage) -> DeliveryReceipt:
+    def deliver(self, message: OutboundMessage) -> DeliveryReceipt:
         race, self.race = self.race, None
         if race is not None:
             race()
-        return super().send(message)
+        return super().deliver(message)
 
 
 class World:
@@ -135,9 +136,18 @@ class World:
         return recipient_id
 
     def consent(self, channel: Channel, address: str, opted_in: bool) -> None:
+        """Record the consent; an opt-in on WhatsApp is a message the person sent us, so it
+        opens the 24-hour window too."""
         SetOptIn(self.store, clock=self.clock).run(
             channel, address, opted_in=opted_in, source=ConsentSource.API
         )
+        if opted_in and channel is WA:
+            self.wrote(address)
+
+    def wrote(self, address: str = PHONE) -> None:
+        """The WhatsApp number wrote to us now."""
+        with self.store.shared() as unit:
+            unit.preferences.record_inbound(WA, address, self.clock.now)
 
     def notifications(self, tenant: TenantId = TENANT) -> list[Notification]:
         return self.store.notifications_of(tenant)
@@ -550,6 +560,7 @@ def test_a_notification_after_the_digest_went_waits_for_the_next_one() -> None:
     world.enqueue.run(created(title="File GSTR-1", rule=RuleVersionId.new()))
     assert world.dispatch.run() == ()
     world.clock.now = NINE_IST + timedelta(days=1)
+    world.wrote()
     assert outcomes(world.dispatch.run()) == [DeliveryOutcome.SENT]
     assert world.whatsapp.sent[1].body.startswith(
         "Client digest for your firm. Updates: 1. Clients: 1. Acme Traders: New - File GSTR-1."
@@ -603,3 +614,38 @@ def test_a_failed_digest_falls_back_to_a_digest_on_email() -> None:
     lines = email.body.split("\n")
     assert "Acme Traders: New - File GSTR-3B" in lines
     assert "Beta Foods: New - File FSSAI returns" in lines
+
+
+def test_inside_the_window_whatsapp_takes_the_text_under_the_dispatch_id() -> None:
+    world = World(window=0)
+    world.owner()
+    world.enqueue.run(created())
+    world.dispatch.run()
+    (message,) = world.whatsapp.delivered
+    assert message.session_open
+    assert message.template.meta_name == "cw_change_card_en"
+    assert message.ordered_params[0] == "Acme Traders"
+    (sent,) = world.notifications()
+    assert sent.dispatch_id == message.dispatch_id
+
+
+def test_outside_the_window_a_draft_template_falls_back_to_email_at_once() -> None:
+    world = World(window=0)
+    world.owner()
+    world.clock.advance(25 * 3600)
+    world.enqueue.run(created())
+    (delivery,) = world.dispatch.run()
+    assert delivery.outcome is DeliveryOutcome.FAILED, "no retries: each would fail the same way"
+    assert world.whatsapp.sent == []
+    failed, fallback = world.notifications()
+    assert (failed.state, failed.attempts) == (DeliveryState.FAILED, 1)
+    assert failed.error == (
+        "whatsapp: outside the 24-hour customer service window and template cw_change_card_en "
+        "is draft, not approved"
+    )
+    (event,) = world.events(NotificationFailed)
+    assert isinstance(event, NotificationFailed)
+    assert event.will_retry
+    assert (fallback.channel, fallback.available_at) == (EMAIL, world.clock.now)
+    assert outcomes(world.dispatch.run()) == [DeliveryOutcome.SENT]
+    assert len(world.email.sent) == 1

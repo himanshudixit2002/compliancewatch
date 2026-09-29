@@ -38,15 +38,17 @@ from notification import worker
 from notification.application.dispatch import DeliveryOutcome, DispatchDue
 from notification.application.enqueue import Enqueued, EnqueueNotifications
 from notification.application.preferences import SetOptIn
+from notification.application.receipts import InboundTime, ReconcileReceipts
 from notification.application.recipients import (
     GetRecipient,
     RecipientRegistration,
     RegisterRecipient,
     RemoveRecipient,
 )
+from notification.application.resend import ResendNotification
 from notification.application.retention import PurgeExpired
 from notification.application.send import SendNow
-from notification.domain.errors import RecipientNotFoundError
+from notification.domain.errors import RecipientNotFoundError, ResendNotAllowedError
 from notification.domain.ids import DispatchId, RecipientId
 from notification.domain.model import NotificationRequest, Outcome
 from notification.domain.notification import DeliveryState, Notification
@@ -60,6 +62,7 @@ from notification.domain.preferences import (
     Suppression,
     SuppressionReason,
 )
+from notification.domain.receipts import Receipt, ReceiptKind
 from notification.domain.recipients import BusinessLink, DigestMode, RecipientRole
 from notification.domain.repository import DirectoryEntry, PageAfter, WorkEntry
 from notification.domain.routing import ObligationNotice
@@ -181,6 +184,12 @@ def enqueue(factory: PostgresUnitOfWorkFactory, *items: Notification) -> None:
 def purge(factory: PostgresUnitOfWorkFactory, tenant: TenantId) -> None:
     with factory(tenant) as unit:
         unit.notifications.purge(datetime(2100, 1, 1, tzinfo=UTC))
+
+
+def wrote(factory: PostgresUnitOfWorkFactory, phone: str, at: datetime) -> None:
+    """The number wrote to us at ``at``: WhatsApp's 24-hour window is open from then."""
+    reconcile = ReconcileReceipts(factory, factory.work_index)
+    assert reconcile.run(Channel.WHATSAPP, inbound=[InboundTime(phone, at)]).inbound == 1
 
 
 def test_migration_creates_the_tables_with_row_level_security_where_it_belongs(
@@ -721,6 +730,7 @@ def test_sends_write_their_outbox_rows_for_sent_and_failed(
     SetOptIn(factory, clock=lambda: NOON_IST).run(
         Channel.WHATSAPP, "+91 98765 00001", opted_in=True, source=ConsentSource.API
     )
+    wrote(factory, "+919876500001", NOON_IST)
 
     def request(**changes: object) -> NotificationRequest:
         values: dict[str, object] = {
@@ -787,6 +797,7 @@ def test_queued_notifications_go_out_as_one_batch(
     SetOptIn(factory, clock=lambda: base).run(
         Channel.WHATSAPP, "+919876500003", opted_in=True, source=ConsentSource.API
     )
+    wrote(factory, "+919876500003", base)
     enqueue = EnqueueNotifications(
         factory, batch=BatchPolicy(window_seconds=300), clock=lambda: clock[0]
     )
@@ -865,6 +876,7 @@ def test_a_ca_firms_notifications_wait_for_one_digest(
     SetOptIn(factory, clock=lambda: noon).run(
         Channel.WHATSAPP, "+919876500007", opted_in=True, source=ConsentSource.API
     )
+    wrote(factory, "+919876500007", noon)
     enqueue = EnqueueNotifications(factory, clock=lambda: noon)
     for business, title in ((acme, "File GSTR-3B"), (beta, "File FSSAI returns")):
         rule = RuleVersionId.new()
@@ -905,6 +917,95 @@ def test_a_ca_firms_notifications_wait_for_one_digest(
         sent = [*unit.notifications.page(acme, limit=5), *unit.notifications.page(beta, limit=5)]
     assert {n.state for n in sent} == {DeliveryState.SENT}
     assert len({n.dispatch_id for n in sent}) == 1
+    purge(factory, tenant)
+
+
+def test_receipts_move_notifications_on_and_a_failed_one_is_resent(
+    factory: PostgresUnitOfWorkFactory, app_engine: Engine, engine: Engine
+) -> None:
+    tenant, business = TenantId.new(), BusinessId.new()
+    now = datetime(2009, 9, 9, 6, 30, tzinfo=UTC)
+    later = now + timedelta(minutes=5)
+    RegisterRecipient(factory, clock=lambda: now).run(
+        RecipientRegistration(
+            tenant_id=tenant,
+            recipient_id=RecipientId.new(),
+            role=RecipientRole.OWNER,
+            addresses=[(Channel.WHATSAPP, "+91 98765 00009"), (Channel.EMAIL, "nine@example.com")],
+            businesses=[BusinessLink(business, "Acme Traders")],
+        )
+    )
+    for channel, address in (
+        (Channel.WHATSAPP, "+919876500009"),
+        (Channel.EMAIL, "nine@example.com"),
+    ):
+        SetOptIn(factory, clock=lambda: now).run(
+            channel, address, opted_in=True, source=ConsentSource.API
+        )
+    wrote(factory, "+919876500009", now)
+    whatsapp, email = FakeChannel(clock=lambda: now), FakeChannel(clock=lambda: later)
+    dispatch = DispatchDue(
+        factory,
+        PostgresWorkIndex(app_engine),
+        {Channel.WHATSAPP: whatsapp, Channel.EMAIL: email},
+        rules=FakeRuleVersionReader(),
+        web_base_url="https://app.example",
+        clock=lambda: now,
+    )
+    enqueue = EnqueueNotifications(factory, batch=BatchPolicy(window_seconds=0), clock=lambda: now)
+
+    def card(title: str) -> NotificationId:
+        rule = RuleVersionId.new()
+        obligation = ObligationId.new()
+        enqueue.run(
+            ObligationNotice(
+                tenant_id=tenant,
+                business_id=business,
+                occasion=Occasion.change_card(obligation, rule),
+                template_key="change_card",
+                params={"title": title, "rule_version_id": str(rule)},
+            )
+        )
+        (delivery,) = dispatch.run()
+        assert delivery.outcome is DeliveryOutcome.SENT
+        return delivery.notification_ids[0]
+
+    read_one, failed_one = card("File GSTR-3B"), card("File GSTR-1")
+    reconcile = ReconcileReceipts(factory, PostgresWorkIndex(app_engine), clock=lambda: later)
+    reconciled = reconcile.run(
+        Channel.WHATSAPP,
+        [
+            Receipt("fake-1", ReceiptKind.READ, later),
+            Receipt("fake-2", ReceiptKind.FAILED, later, error="whatsapp 131026: Undeliverable"),
+            Receipt("wamid.not-ours", ReceiptKind.DELIVERED, later),
+        ],
+    )
+    assert (reconciled.applied, reconciled.unknown) == (2, 1)
+    with factory(tenant) as unit:
+        read = unit.notifications.get(read_one)
+        failed = unit.notifications.get(failed_one)
+        (fallback,) = unit.notifications.page(business, state=DeliveryState.QUEUED, limit=5)
+    assert read is not None
+    assert (read.state, read.read_at) == (DeliveryState.READ, later)
+    assert failed is not None
+    assert (failed.state, failed.error) == (DeliveryState.FAILED, "whatsapp 131026: Undeliverable")
+    assert (fallback.channel, fallback.fallback_of) == (Channel.EMAIL, failed_one)
+    assert outbox_topics(engine, tenant) == [
+        "notification.failed",
+        "notification.sent",
+        "notification.sent",
+    ]
+
+    resent = ResendNotification(factory, clock=lambda: later).run(tenant, failed_one)
+    assert (resent.state, resent.attempts) == (DeliveryState.QUEUED, 0)
+    with engine.connect() as connection:
+        work = connection.execute(
+            text("SELECT status, available_at FROM work_index WHERE id = :id"),
+            {"id": failed_one.value},
+        ).one()
+    assert (work.status, work.available_at) == ("pending", later), "due again with it"
+    with pytest.raises(ResendNotAllowedError):
+        ResendNotification(factory, clock=lambda: later).run(tenant, read_one)
     purge(factory, tenant)
 
 
@@ -967,6 +1068,7 @@ async def test_the_worker_queues_an_obligation_event_in_its_inbox_transaction(
     SetOptIn(factory, clock=lambda: now).run(
         Channel.WHATSAPP, "+919876500005", opted_in=True, source=ConsentSource.API
     )
+    wrote(factory, "+919876500005", now)
     data = json.loads(
         (EXAMPLES / "obligation.created" / "filing-with-due-date.json").read_text(encoding="utf-8")
     )

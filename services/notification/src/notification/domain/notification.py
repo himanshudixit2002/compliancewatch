@@ -11,6 +11,12 @@ the events the change publishes, and the caller saves both in one unit of work.
   will be tried: a retry, or on the last attempt a fallback to the recipient's next address.
 - ``defer`` moves ``available_at`` (quiet hours); ``suppress`` ends a notification that may not
   go out any more (an opt-out or a suppressed address between queueing and sending).
+- ``apply_receipt`` records what the provider reported after it took the message. Delivered and
+  read only move forward (sent, then delivered, then read), so a late or repeated report changes
+  nothing. A failure, a bounce or a complaint fails a notification that was sent and not yet
+  delivered, and publishes ``notification.failed``, whose ``will_retry`` says whether a fallback
+  follows.
+- ``resend`` queues a failed notification again, due at once, with a new round of attempts.
 """
 
 import math
@@ -33,10 +39,12 @@ from domain_kernel.dedupe import DedupeKey
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, NotificationId, ObligationId, TenantId
+from notification.domain.errors import ResendNotAllowedError
 from notification.domain.events import NotificationFailed, NotificationSent
 from notification.domain.ids import DispatchId, RecipientId
 from notification.domain.occasions import OccasionKind
 from notification.domain.policy import RetryPolicy
+from notification.domain.receipts import FAILURE_KINDS, ReceiptKind
 
 
 class DeliveryState(StrEnum):
@@ -259,6 +267,80 @@ class Notification:
         self._require_pending("suppressed")
         require_text(reason, "reason")
         return replace(self, state=DeliveryState.SUPPRESSED, error=reason, updated_at=at), ()
+
+    def apply_receipt(
+        self, kind: ReceiptKind, at: datetime, *, error: str = "", fallback: bool = False
+    ) -> Transition:
+        """What the provider reported at ``at``. Unchanged (and no event) when the report does
+        not move the notification forward: a pending one, a repeated or late report, or a
+        failure after delivery. ``fallback`` says whether a failure is followed by a fallback
+        on another address."""
+        require_instance(kind, ReceiptKind, "kind")
+        require_aware(at, "at")
+        require_bool(fallback, "fallback")
+        updated_at = max(self.updated_at, at)
+        match kind:
+            case ReceiptKind.DELIVERED if self.state is DeliveryState.SENT:
+                return replace(
+                    self, state=DeliveryState.DELIVERED, delivered_at=at, updated_at=updated_at
+                ), ()
+            case ReceiptKind.READ if self.state in (DeliveryState.SENT, DeliveryState.DELIVERED):
+                return replace(
+                    self,
+                    state=DeliveryState.READ,
+                    delivered_at=self.delivered_at or at,
+                    read_at=at,
+                    updated_at=updated_at,
+                ), ()
+            case _ if kind in FAILURE_KINDS and self.state is DeliveryState.SENT:
+                reason = error.strip() or f"{kind.value} after it was sent"
+                failed = replace(
+                    self,
+                    state=DeliveryState.FAILED,
+                    error=reason,
+                    failed_at=at,
+                    updated_at=updated_at,
+                )
+                event = NotificationFailed(
+                    tenant_id=self.tenant_id,
+                    notification_id=self.id,
+                    obligation_id=self.obligation_id,
+                    business_id=self.business_id,
+                    channel=self.channel,
+                    dedupe_key=self.dedupe_key.value,
+                    error=reason,
+                    attempts=max(self.attempts, 1),
+                    will_retry=fallback,
+                    failed_at=at,
+                )
+                return failed, (event,)
+        return self, ()
+
+    @property
+    def accepts_failure(self) -> bool:
+        """A failure report would fail the notification: it was sent and not yet delivered."""
+        return self.state is DeliveryState.SENT
+
+    def resend(self, at: datetime) -> Transition:
+        """Queue a failed notification again, due at ``at``, with a new round of attempts.
+        Any other state raises ``ResendNotAllowedError``."""
+        require_aware(at, "at")
+        if self.state is not DeliveryState.FAILED:
+            raise ResendNotAllowedError(str(self.id), self.state.value)
+        return replace(
+            self,
+            state=DeliveryState.QUEUED,
+            available_at=at,
+            attempts=0,
+            dispatch_id=None,
+            provider_message_id="",
+            error="",
+            sent_at=None,
+            delivered_at=None,
+            read_at=None,
+            failed_at=None,
+            updated_at=at,
+        ), ()
 
     def _require_pending(self, what: str) -> None:
         if not self.is_pending:

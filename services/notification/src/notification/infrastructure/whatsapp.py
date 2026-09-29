@@ -1,10 +1,13 @@
-"""The WhatsApp Business Cloud API as a ``NotificationChannel``.
+"""The WhatsApp Business Cloud API as a ``ChannelAdapter``.
 
 ``POST https://graph.facebook.com/<version>/<phone_number_id>/messages`` with a bearer token.
-A rendered message is sent as free text; a template send (needed outside the 24-hour customer
-service window) is the same call with a ``template`` object and is prepared here but only
-used when the template's ``meta_name`` is set and approved. The adapter is behind
-``CW_WHATSAPP_ENABLED``; with the flag off the composition root wires ``DisabledChannel``.
+Inside the 24-hour customer service window (the person wrote to us within the last day) the
+rendered message goes as free text (``text_payload``). Outside it WhatsApp accepts only a
+template Meta has approved: the same call with a ``template`` object naming its ``meta_name``
+and language and listing its values in order (``template_payload``). A message outside the
+window whose template is not approved gets a failed receipt without an HTTP call, since Meta
+would refuse it. The adapter is behind ``CW_WHATSAPP_ENABLED``; with the flag off the
+composition root wires ``DisabledChannel``.
 """
 
 from collections.abc import Callable
@@ -13,7 +16,8 @@ from datetime import datetime
 import httpx2
 
 from domain_kernel.events import utc_now
-from domain_kernel.notifications import DeliveryReceipt, DeliveryStatus, RenderedMessage
+from domain_kernel.notifications import DeliveryReceipt, DeliveryStatus
+from notification.domain.channels import OutboundMessage
 
 GRAPH_URL = "https://graph.facebook.com"
 
@@ -33,8 +37,21 @@ class WhatsAppCloudChannel:
         self._headers = {"authorization": f"Bearer {access_token}"}
         self._clock = clock
 
-    def send(self, message: RenderedMessage) -> DeliveryReceipt:
-        body = text_payload(message.recipient, message.body)
+    def deliver(self, message: OutboundMessage) -> DeliveryReceipt:
+        if not message.deliverable:
+            return DeliveryReceipt(
+                DeliveryStatus.FAILED, self._clock(), error=message.undeliverable_reason()
+            )
+        rendered = message.rendered
+        if message.session_open:
+            body = text_payload(rendered.recipient, rendered.body)
+        else:
+            body = template_payload(
+                rendered.recipient,
+                message.template.meta_name,
+                message.template.language,
+                list(message.ordered_params),
+            )
         try:
             response = self._client.post(self._url, json=body, headers=self._headers)
         except httpx2.TransportError as exc:
@@ -93,5 +110,5 @@ class DisabledChannel:
         self._reason = reason
         self._clock = clock
 
-    def send(self, message: RenderedMessage) -> DeliveryReceipt:
+    def deliver(self, message: OutboundMessage) -> DeliveryReceipt:
         return DeliveryReceipt(DeliveryStatus.FAILED, self._clock(), error=self._reason)

@@ -29,6 +29,7 @@ from identity.main import build_app as build_identity
 from identity.testing import identity_settings
 from notification.application.dispatch import DispatchDue
 from notification.application.preferences import SetOptIn
+from notification.application.receipts import InboundTime, ReconcileReceipts
 from notification.application.send import SendNow
 from notification.domain.model import NotificationRequest
 from notification.domain.preferences import ConsentSource as PreferenceSource
@@ -191,6 +192,11 @@ def run_demo(*, now: datetime | None = None) -> DemoReport:
         opted_in=True,
         source=PreferenceSource.WEB_ONBOARDING,
         language="hi",
+    )
+    # The owner messaged the business number (the bot forwards the time), which opens WhatsApp's
+    # 24-hour window: until Meta approves the templates, free text goes only inside it.
+    ReconcileReceipts(notifications, notifications.work_index, clock=lambda: now).run(
+        Channel.WHATSAPP, inbound=[InboundTime(demo.OWNER_PHONE, now)]
     )
     channel = FakeChannel(clock=lambda: now)
     dispatch = DispatchDue(

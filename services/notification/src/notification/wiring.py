@@ -5,13 +5,16 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from domain_kernel.channels import Channel
-from domain_kernel.protocols import NotificationChannel
 from notification.application.dispatch import DispatchDue
 from notification.application.enqueue import EnqueueNotifications
+from notification.application.history import GetNotification, ListNotifications
 from notification.application.preferences import GetPreference, SetOptIn
+from notification.application.receipts import ReconcileReceipts
 from notification.application.recipients import GetRecipient, RegisterRecipient, RemoveRecipient
+from notification.application.resend import ResendNotification
 from notification.application.retention import PurgeExpired
 from notification.application.send import SendNow
+from notification.domain.channels import ChannelAdapter
 from notification.domain.preferences import QuietHours
 from notification.domain.repository import UnitOfWorkFactory, WorkIndex
 from notification.settings import NotificationSettings
@@ -22,7 +25,7 @@ class Wiring:
     settings: NotificationSettings
     unit_of_work: UnitOfWorkFactory
     work_index: WorkIndex
-    channels: Mapping[Channel, NotificationChannel]
+    channels: Mapping[Channel, ChannelAdapter]
     quiet_hours: QuietHours
     send: SendNow
     enqueue: EnqueueNotifications
@@ -33,4 +36,8 @@ class Wiring:
     get_recipient: GetRecipient
     remove_recipient: RemoveRecipient
     purge: PurgeExpired
+    get_notification: GetNotification
+    list_notifications: ListNotifications
+    resend: ResendNotification
+    reconcile: ReconcileReceipts
     store_ready: Callable[[], Awaitable[bool]]

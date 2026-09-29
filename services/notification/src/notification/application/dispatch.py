@@ -18,16 +18,22 @@ dispatchers never take one entry) and handles them tenant by tenant:
    version's facts, which the ``RuleVersionReader`` reads from the rulebook and caches, and with
    links into the web app (``CW_WEB_BASE_URL``). When the rulebook cannot answer, the
    notifications are due again a minute later and no attempt is spent.
-4. The channel delivers the message.
+4. The channel adapter delivers the message (``ChannelAdapter.deliver``) under a new dispatch
+   id. It carries the rendered text and its template with the values in order, and whether the
+   address wrote to us within the last 24 hours (the WhatsApp customer service window, from
+   ``PreferenceRepository.last_inbound_at``): WhatsApp takes free text inside the window and
+   only an approved template outside it.
 5. In a second unit, a sent message marks each notification sent, completes its entry under
    the provider's message id (receipts find the tenant through it) and publishes
    ``notification.sent``. A failed one spends an attempt: the notification is due again after
    the retry policy's backoff (60 s, then 300 s), and the last attempt fails it and queues a
-   fallback to the recipient's next open address on another channel (``fallback_of``); a
-   fallback does not fall back again. Every failed attempt publishes ``notification.failed``,
-   whose ``will_retry`` says whether a retry or a fallback follows. A message that cannot be
-   rendered (a missing value, a template the channel does not have, a value that is not what
-   its template expects) fails without retries.
+   fallback to the recipient's next open address on another channel (``fallback_of``,
+   ``application.fallback``); a fallback does not fall back again. Every failed attempt
+   publishes ``notification.failed``, whose ``will_retry`` says whether a retry or a fallback
+   follows. A message that cannot be rendered (a missing value, a template the channel does not
+   have, a value that is not what its template expects), and a WhatsApp message outside the
+   window whose template Meta has not approved, fail without retries: another attempt would
+   fail the same way, so the fallback goes at once.
 
 A notification that another dispatcher sent meanwhile, because this one's lease ran out while
 it was sending, is left as it is and counted (``notification_duplicate_sent_total``).
@@ -48,9 +54,10 @@ from domain_kernel.dedupe import DedupeKey
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.events import utc_now
 from domain_kernel.ids import BusinessId, NotificationId, ObligationId, RuleVersionId, TenantId
-from domain_kernel.notifications import DeliveryReceipt, DeliveryStatus, RenderedMessage
-from domain_kernel.protocols import NotificationChannel
-from notification.application.consent import closed_reason, open_in, quiet_hours_for
+from domain_kernel.notifications import DeliveryReceipt, DeliveryStatus
+from notification.application.consent import closed_reason, quiet_hours_for
+from notification.application.fallback import queue_fallback
+from notification.domain.channels import ChannelAdapter, OutboundMessage, outbound, session_open
 from notification.domain.digest import SummaryItem, compose
 from notification.domain.errors import (
     DependencyUnavailableError,
@@ -59,7 +66,7 @@ from notification.domain.errors import (
 )
 from notification.domain.ids import DispatchId, RecipientId
 from notification.domain.notification import SENT_STATES, DeliveryState, Notification
-from notification.domain.occasions import OccasionKind, fallback_key
+from notification.domain.occasions import OccasionKind
 from notification.domain.policy import (
     DEFAULT_BATCH_POLICY,
     DEFAULT_RETRY_POLICY,
@@ -77,7 +84,6 @@ from notification.domain.ports import (
 from notification.domain.preferences import DEFAULT_QUIET_HOURS, QuietHours
 from notification.domain.recipients import Recipient
 from notification.domain.repository import UnitOfWork, UnitOfWorkFactory, WorkEntry, WorkIndex
-from notification.domain.templates import render
 from notification.domain.values import message_values
 
 DEPENDENCY_BACKOFF = timedelta(seconds=60)
@@ -136,6 +142,8 @@ class _Batch:
     recipient: Recipient | None
     digest: bool = False
     """The notifications were held for the recipient's digest."""
+    session_open: bool = False
+    """The address wrote to us within the last 24 hours."""
     entries: list[WorkEntry] = field(default_factory=list)
     members: list[Notification] = field(default_factory=list)
 
@@ -162,7 +170,7 @@ class _Batch:
 
 @dataclass(frozen=True, slots=True)
 class _Rendered:
-    message: RenderedMessage
+    message: OutboundMessage
     values: Mapping[NotificationId, Mapping[str, object]]
 
 
@@ -171,7 +179,7 @@ class DispatchDue:
         self,
         unit_of_work: UnitOfWorkFactory,
         work_index: WorkIndex,
-        channels: Mapping[Channel, NotificationChannel],
+        channels: Mapping[Channel, ChannelAdapter],
         *,
         rules: RuleVersionReader,
         web_base_url: str,
@@ -261,12 +269,15 @@ class DispatchDue:
                 _put_back(unit, batch.members, until, now)
                 deliveries.append(Delivery(batch.ids, DeliveryOutcome.DEFERRED, available_at=until))
                 continue
+            batch.session_open = session_open(
+                unit.preferences.last_inbound_at(channel, address), now
+            )
             ready.append(batch)
         return ready
 
     def _send(self, tenant_id: TenantId, batch: _Batch, now: datetime) -> Delivery:
         try:
-            rendered = self._render(batch)
+            rendered = self._render(batch, DispatchId.new())
         except DependencyUnavailableError:
             later = now + DEPENDENCY_BACKOFF
             with self._unit_of_work(tenant_id) as unit:
@@ -275,29 +286,35 @@ class DispatchDue:
             return Delivery(batch.ids, DeliveryOutcome.RESCHEDULED, available_at=later)
         except (MissingPlaceholderError, UnknownTemplateError, InvariantViolationError) as exc:
             receipt = DeliveryReceipt(DeliveryStatus.FAILED, now, error=f"not rendered: {exc}")
-            return self._record(tenant_id, batch, receipt, {}, now, NO_RETRIES)
-        adapter = self._channels.get(batch.first.channel)
+            return self._record(tenant_id, batch, receipt, {}, now, NO_RETRIES, None)
+        message = rendered.message
+        adapter = self._channels.get(message.channel)
         if adapter is None:
-            error = f"no channel adapter for {batch.first.channel.value}"
+            error = f"no channel adapter for {message.channel.value}"
             receipt = DeliveryReceipt(DeliveryStatus.FAILED, now, error=error)
         else:
-            receipt = adapter.send(rendered.message)
-        return self._record(tenant_id, batch, receipt, rendered.values, now, self._retry)
+            receipt = adapter.deliver(message)
+        policy = self._retry if message.deliverable else NO_RETRIES
+        return self._record(
+            tenant_id, batch, receipt, rendered.values, now, policy, message.dispatch_id
+        )
 
-    def _render(self, batch: _Batch) -> _Rendered:
+    def _render(self, batch: _Batch, dispatch_id: DispatchId) -> _Rendered:
         first = batch.first
         filled = {
             notification.id: self._values(notification, batch) for notification in batch.members
         }
         if len(batch.members) == 1 and not batch.digest:
             key, values = filled[first.id]
-            message = render(
+            message = outbound(
                 key,
                 first.channel,
                 first.language,
                 values,
                 recipient=first.address,
                 dedupe_key=first.dedupe_key,
+                session_open=batch.session_open,
+                dispatch_id=dispatch_id,
             )
             return _Rendered(message, {first.id: values})
         assert batch.recipient is not None, "only a recipient's notifications are gathered"
@@ -313,13 +330,15 @@ class DispatchDue:
             policy=self._batch,
         )
         link = summary_link(self._web_base_url, [n.business_id for n in batch.members])
-        message = render(
+        message = outbound(
             composition.template_key,
             first.channel,
             first.language,
             {**composition.params, "link": link},
             recipient=first.address,
             dedupe_key=_batch_key(batch.members),
+            session_open=batch.session_open,
+            dispatch_id=dispatch_id,
         )
         return _Rendered(message, {id_: values for id_, (_, values) in filled.items()})
 
@@ -357,10 +376,12 @@ class DispatchDue:
         values: Mapping[NotificationId, Mapping[str, object]],
         now: datetime,
         policy: RetryPolicy,
+        dispatch_id: DispatchId | None,
     ) -> Delivery:
         with self._unit_of_work(tenant_id) as unit:
             if receipt.status is DeliveryStatus.SENT:
-                return self._record_sent(unit, batch, receipt, values)
+                assert dispatch_id is not None, "a delivered message has its dispatch id"
+                return self._record_sent(unit, batch, receipt, values, dispatch_id)
             return self._record_failed(unit, batch, receipt, now, policy)
 
     def _record_sent(
@@ -369,8 +390,8 @@ class DispatchDue:
         batch: _Batch,
         receipt: DeliveryReceipt,
         values: Mapping[NotificationId, Mapping[str, object]],
+        dispatch_id: DispatchId,
     ) -> Delivery:
-        dispatch_id = DispatchId.new()
         for entry, queued in batch.pairs():
             current = unit.notifications.get(queued.id)
             if current is None:
@@ -409,7 +430,7 @@ class DispatchDue:
                 continue
             fallback = None
             if policy.is_final(current.attempts + 1):
-                fallback = self._fallback(unit, current, batch.recipient, now)
+                fallback = queue_fallback(unit, current, batch.recipient, now)
             failed, events, retry_at = current.attempt_failed(
                 receipt.error, now, policy, fallback=fallback is not None
             )
@@ -424,41 +445,6 @@ class DispatchDue:
             self._metrics.attempted(failed.channel, result)
         outcome = DeliveryOutcome.FAILED if retry_at is None else DeliveryOutcome.RETRY
         return Delivery(batch.ids, outcome, receipt, available_at=retry_at)
-
-    def _fallback(
-        self,
-        unit: UnitOfWork,
-        failed: Notification,
-        recipient: Recipient | None,
-        now: datetime,
-    ) -> Notification | None:
-        """Queue the notification again on the recipient's next open address, due now; one held
-        for the digest goes in the digest on that address."""
-        if recipient is None or failed.fallback_of is not None:
-            return None
-        address = recipient.fallback_after(failed.channel, open_in(unit))
-        if address is None:
-            return None
-        fallback = Notification.queue(
-            tenant_id=failed.tenant_id,
-            business_id=failed.business_id,
-            obligation_id=failed.obligation_id,
-            recipient_id=failed.recipient_id,
-            channel=address.channel,
-            address=address.address,
-            occasion=failed.occasion,
-            template_key=failed.template_key,
-            language=failed.language,
-            params=failed.params,
-            dedupe_key=fallback_key(failed.dedupe_key, address.channel),
-            now=now,
-            digest=failed.state is DeliveryState.DIGEST_PENDING,
-            fallback_of=failed.id,
-        )
-        if not unit.notifications.add_if_absent(fallback):
-            return None
-        unit.work.add(WorkEntry.of(fallback))
-        return fallback
 
 
 def _put_back(

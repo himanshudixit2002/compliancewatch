@@ -32,12 +32,12 @@ from sqlalchemy import Connection
 
 from domain_kernel.channels import Channel
 from domain_kernel.ids import TenantId
-from domain_kernel.protocols import NotificationChannel
 from notification import __version__
 from notification.application.dispatch import DispatchDue
 from notification.application.enqueue import EnqueueNotifications
 from notification.application.retention import PurgeExpired
 from notification.composition import wire
+from notification.domain.channels import ChannelAdapter
 from notification.domain.ports import RuleVersionReader
 from notification.domain.preferences import IST
 from notification.domain.repository import UnitOfWork
@@ -128,7 +128,7 @@ def retention_job(purge: PurgeExpired) -> Callable[[], None]:
 def components(
     settings: NotificationSettings,
     *,
-    channels: Mapping[Channel, NotificationChannel] | None = None,
+    channels: Mapping[Channel, ChannelAdapter] | None = None,
     rules: RuleVersionReader | None = None,
 ) -> WorkerComponents:
     """The consumer, the dispatcher loop and the retention sweep; ``channels`` and ``rules``

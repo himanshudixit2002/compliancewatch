@@ -14,6 +14,7 @@ from notification.domain.ids import DispatchId, RecipientId
 from notification.domain.notification import DeliveryState, Notification
 from notification.domain.occasions import OccasionKind
 from notification.domain.policy import DEFAULT_RETRY_POLICY, RetryPolicy
+from notification.domain.receipts import ReceiptKind
 from notification.domain.repository import WorkEntry, WorkKind
 from notification.testing import NOON_IST
 
@@ -195,3 +196,78 @@ def test_every_error_has_its_own_slug_and_title() -> None:
     assert len({error.type_slug for error in found}) == len(found)
     assert len({error.title for error in found}) == len(found)
     assert all(error.type_slug.startswith("notification-") for error in found)
+
+
+def sent_one() -> Notification:
+    sent, _ = queued().sent(DispatchId.new(), "wamid.1", NOON_IST)
+    return sent
+
+
+def test_receipts_only_move_forward() -> None:
+    sent = sent_one()
+    delivered, events = sent.apply_receipt(ReceiptKind.DELIVERED, LATER)
+    assert (delivered.state, delivered.delivered_at, events) == (
+        DeliveryState.DELIVERED,
+        LATER,
+        (),
+    )
+    read, _ = delivered.apply_receipt(ReceiptKind.READ, LATER + timedelta(minutes=1))
+    assert (read.state, read.delivered_at, read.read_at) == (
+        DeliveryState.READ,
+        LATER,
+        LATER + timedelta(minutes=1),
+    )
+    for late in (ReceiptKind.SENT, ReceiptKind.DELIVERED, ReceiptKind.READ, ReceiptKind.FAILED):
+        unchanged, events = read.apply_receipt(late, LATER + timedelta(minutes=2))
+        assert unchanged is read
+        assert events == ()
+    straight_to_read, _ = sent.apply_receipt(ReceiptKind.READ, LATER)
+    assert (straight_to_read.delivered_at, straight_to_read.read_at) == (LATER, LATER)
+    assert sent.apply_receipt(ReceiptKind.SENT, LATER)[0] is sent
+
+
+def test_a_failure_is_accepted_only_from_sent() -> None:
+    sent = sent_one()
+    assert sent.accepts_failure
+    failed, (event,) = sent.apply_receipt(
+        ReceiptKind.FAILED, LATER, error="whatsapp 131026: Message undeliverable", fallback=True
+    )
+    assert (failed.state, failed.failed_at, failed.error) == (
+        DeliveryState.FAILED,
+        LATER,
+        "whatsapp 131026: Message undeliverable",
+    )
+    assert isinstance(event, NotificationFailed)
+    assert (event.attempts, event.will_retry, event.failed_at) == (1, True, LATER)
+    bounced, (bounce,) = sent.apply_receipt(ReceiptKind.BOUNCED, LATER)
+    assert bounced.error == "bounced after it was sent"
+    assert isinstance(bounce, NotificationFailed)
+    assert not bounce.will_retry
+    pending = queued()
+    assert not pending.accepts_failure
+    assert pending.apply_receipt(ReceiptKind.FAILED, LATER)[0] is pending
+    delivered, _ = sent.apply_receipt(ReceiptKind.DELIVERED, LATER)
+    assert delivered.apply_receipt(ReceiptKind.COMPLAINED, LATER)[0] is delivered
+    with pytest.raises(InvariantViolationError):
+        sent.apply_receipt(ReceiptKind.DELIVERED, datetime(2026, 9, 29))
+
+
+def test_resend_is_allowed_only_from_failed() -> None:
+    failed, _ = sent_one().apply_receipt(ReceiptKind.FAILED, LATER, error="gone")
+    resent, events = failed.resend(LATER + timedelta(hours=1))
+    assert events == ()
+    assert (resent.state, resent.attempts, resent.available_at, resent.error) == (
+        DeliveryState.QUEUED,
+        0,
+        LATER + timedelta(hours=1),
+        "",
+    )
+    assert (resent.sent_at, resent.failed_at, resent.provider_message_id, resent.dispatch_id) == (
+        None,
+        None,
+        "",
+        None,
+    )
+    for state in (queued(), sent_one(), resent):
+        with pytest.raises(errors.ResendNotAllowedError):
+            state.resend(LATER)

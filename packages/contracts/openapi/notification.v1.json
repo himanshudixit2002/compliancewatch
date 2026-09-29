@@ -62,6 +62,19 @@
         "title": "ConsentSource",
         "type": "string"
       },
+      "DeliveryState": {
+        "enum": [
+          "queued",
+          "digest_pending",
+          "sent",
+          "delivered",
+          "read",
+          "failed",
+          "suppressed"
+        ],
+        "title": "DeliveryState",
+        "type": "string"
+      },
       "DigestMode": {
         "enum": [
           "off",
@@ -93,6 +106,230 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InboundIn": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "description": "The number that wrote to the business",
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Address",
+            "type": "string"
+          },
+          "at": {
+            "description": "When its message was sent, with its offset",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "at"
+        ],
+        "title": "InboundIn",
+        "type": "object"
+      },
+      "NotificationOut": {
+        "description": "One notification: to whom, about what, and how far it got.",
+        "properties": {
+          "address": {
+            "description": "Normalised: +<digits> for WhatsApp, lower case for email",
+            "title": "Address",
+            "type": "string"
+          },
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "available_at": {
+            "description": "When it may go out, or when it is tried again",
+            "format": "date-time",
+            "title": "Available At",
+            "type": "string"
+          },
+          "business_id": {
+            "format": "uuid",
+            "title": "Business Id",
+            "type": "string"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered At"
+          },
+          "dispatch_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatch Id"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "failed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed At"
+          },
+          "fallback_of": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The notification this one falls back from",
+            "title": "Fallback Of"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "obligation_id": {
+            "format": "uuid",
+            "title": "Obligation Id",
+            "type": "string"
+          },
+          "occasion": {
+            "$ref": "#/components/schemas/OccasionKind"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "The values the message was filled with; emptied 30 days after it ended",
+            "title": "Params",
+            "type": "object"
+          },
+          "provider_message_id": {
+            "title": "Provider Message Id",
+            "type": "string"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "recipient_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "None for a send addressed straight to a number",
+            "title": "Recipient Id"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DeliveryState"
+          },
+          "template_key": {
+            "title": "Template Key",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "business_id",
+          "obligation_id",
+          "recipient_id",
+          "channel",
+          "address",
+          "occasion",
+          "template_key",
+          "language",
+          "params",
+          "state",
+          "attempts",
+          "available_at",
+          "dispatch_id",
+          "provider_message_id",
+          "error",
+          "fallback_of",
+          "created_at",
+          "updated_at",
+          "sent_at",
+          "delivered_at",
+          "read_at",
+          "failed_at"
+        ],
+        "title": "NotificationOut",
+        "type": "object"
+      },
+      "OccasionKind": {
+        "enum": [
+          "change_card",
+          "reminder",
+          "closure",
+          "reschedule",
+          "manual"
+        ],
+        "title": "OccasionKind",
+        "type": "string"
+      },
       "Outcome": {
         "enum": [
           "sent",
@@ -103,6 +340,35 @@
         ],
         "title": "Outcome",
         "type": "string"
+      },
+      "Page_NotificationOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Send as cursor to read the next page; null on the last page",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[NotificationOut]",
+        "type": "object"
       },
       "PreferenceIn": {
         "additionalProperties": false,
@@ -306,6 +572,44 @@
           "checks"
         ],
         "title": "ReadyResponse",
+        "type": "object"
+      },
+      "ReceiptsOut": {
+        "properties": {
+          "applied": {
+            "description": "Receipts that moved a notification on",
+            "title": "Applied",
+            "type": "integer"
+          },
+          "ignored": {
+            "description": "Statuses the service does not act on",
+            "title": "Ignored",
+            "type": "integer"
+          },
+          "inbound": {
+            "description": "Inbound times recorded",
+            "title": "Inbound",
+            "type": "integer"
+          },
+          "unchanged": {
+            "description": "Late or repeated receipts that changed nothing",
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "unknown": {
+            "description": "Receipts for messages no notification carries",
+            "title": "Unknown",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "applied",
+          "unchanged",
+          "unknown",
+          "ignored",
+          "inbound"
+        ],
+        "title": "ReceiptsOut",
         "type": "object"
       },
       "RecipientAddressIn": {
@@ -699,6 +1003,79 @@
         ],
         "title": "ValidationIssue",
         "type": "object"
+      },
+      "WhatsAppReceiptsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "inbound": {
+            "items": {
+              "$ref": "#/components/schemas/InboundIn"
+            },
+            "maxItems": 1000,
+            "title": "Inbound",
+            "type": "array"
+          },
+          "statuses": {
+            "items": {
+              "$ref": "#/components/schemas/WhatsAppStatusIn"
+            },
+            "maxItems": 1000,
+            "title": "Statuses",
+            "type": "array"
+          }
+        },
+        "title": "WhatsAppReceiptsIn",
+        "type": "object"
+      },
+      "WhatsAppStatusIn": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "description": "When Meta says it happened, with its offset",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Meta's error code of a failure",
+            "title": "Error Code"
+          },
+          "error_title": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Error Title",
+            "type": "string"
+          },
+          "provider_message_id": {
+            "description": "Meta's wamid",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Provider Message Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "sent, delivered, read or failed; any other status is ignored",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_message_id",
+          "status",
+          "at"
+        ],
+        "title": "WhatsAppStatusIn",
+        "type": "object"
       }
     }
   },
@@ -757,6 +1134,306 @@
         "summary": "Ready",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/v1/notification/notifications": {
+      "get": {
+        "operationId": "list_notifications_v1_notification_notifications_get",
+        "parameters": [
+          {
+            "description": "The business the notifications are about",
+            "in": "query",
+            "name": "business_id",
+            "required": true,
+            "schema": {
+              "description": "The business the notifications are about",
+              "format": "uuid",
+              "title": "Business Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Keep only this state",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DeliveryState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep only this state",
+              "title": "State"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 200",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Items per page, 1 to 200",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page; absent for the first page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_cursor of the previous page; absent for the first page",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Tenant UUID; required until identity issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; required until identity issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_NotificationOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "A business's notifications, newest first, a page at a time",
+        "tags": [
+          "notification"
+        ]
+      }
+    },
+    "/v1/notification/notifications/{notification_id}": {
+      "get": {
+        "operationId": "get_notification_v1_notification_notifications__notification_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Notification Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID; required until identity issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; required until identity issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "One notification of the tenant, 404 when it has none by that id",
+        "tags": [
+          "notification"
+        ]
+      }
+    },
+    "/v1/notification/notifications/{notification_id}/resend": {
+      "post": {
+        "operationId": "resend_notification_v1_notification_notifications__notification_id__resend_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Notification Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID; required until identity issues tokens",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID; required until identity issues tokens",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Queue a notification that failed for good again; 409 in any other state",
+        "tags": [
+          "notification"
         ]
       }
     },
@@ -908,6 +1585,97 @@
           }
         },
         "summary": "Record an opt-in or opt-out for a channel and recipient",
+        "tags": [
+          "notification"
+        ]
+      }
+    },
+    "/v1/notification/receipts/whatsapp": {
+      "post": {
+        "operationId": "whatsapp_receipts_v1_notification_receipts_whatsapp_post",
+        "parameters": [
+          {
+            "description": "Shared secret of the WhatsApp bot (CW_NOTIFICATION_BOT_TOKEN)",
+            "in": "header",
+            "name": "x-cw-bot-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret of the WhatsApp bot (CW_NOTIFICATION_BOT_TOKEN)",
+              "title": "X-Cw-Bot-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WhatsAppReceiptsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Record the WhatsApp statuses and inbound times the bot forwards",
         "tags": [
           "notification"
         ]
