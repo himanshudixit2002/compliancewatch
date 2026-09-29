@@ -1,4 +1,4 @@
-import { ANALYST, expect, test } from "./fixtures";
+import { ANALYST, IS_CI, expect, seededTenantId, test } from "./fixtures";
 
 test.describe("admin home", () => {
   test.beforeEach(async ({ signIn }) => {
@@ -19,6 +19,42 @@ test.describe("admin home", () => {
     await expect(page.locator("[data-tool='admin.flags']")).toContainText("Ready to build");
     await expect(page.getByRole("navigation", { name: "Internal tools" }).first()).toBeVisible();
     await checkA11y();
+  });
+
+  test("counts the queues and registries and says how many services answer", async ({
+    page,
+    checkA11y,
+  }) => {
+    test.skip(
+      !IS_CI && seededTenantId() === null,
+      "needs the services: make web-stack, make web-stack-wait and make web-seed",
+    );
+    await page.goto("/admin");
+    await expect(
+      page.getByRole("heading", { level: 2, name: "Queues and registries" }),
+    ).toBeVisible();
+    // Counts are not compared with numbers: other specs change the queues on the same stack.
+    for (const key of ["entityGroups", "relationCandidates", "rules", "prompts"]) {
+      const tile = page.locator(`[data-tile='${key}']`);
+      await expect(tile.locator("[data-slot='tile-value']")).toHaveText(/^\d+\+?$/);
+      await expect(tile.getByRole("alert")).toHaveCount(0);
+    }
+    await expect(page.locator("[data-tile='entityGroups']")).toContainText(
+      "open mentions in these groups",
+    );
+    await expect(page.getByRole("heading", { level: 2, name: "Services" })).toBeVisible();
+    await expect(page.locator("[data-slot='services-summary']")).toContainText(
+      "All 10 services answer their health check.",
+    );
+    await checkA11y();
+  });
+
+  test("the sidebar says which tools are not built yet", async ({ page }) => {
+    await page.goto("/admin");
+    const sidebar = page.locator("aside");
+    const sources = sidebar.getByRole("link", { name: "Sources", exact: true });
+    await expect(sources).toHaveAccessibleDescription("Waiting");
+    await expect(sources).toHaveText("Sources");
   });
 
   test("the sidebar opens a tool and marks it current", async ({ page }) => {

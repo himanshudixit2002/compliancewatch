@@ -100,8 +100,10 @@ Skeleton, Toaster (`sonner` with a polite live region; `toast` is re-exported).
   (`role="status"` with a screen-reader "Loading", announced once per group).
 - `AppShell` and `AdminShell`: a skip link to `<main id="main" tabIndex={-1}>`, the primary
   navigation (a Sheet under the `md` breakpoint), `aria-current="page"` on the active link, a
-  user-menu slot, and a `Link` prop for the app's router link. `AdminShell` adds the grouped tool
-  sidebar and an internal banner that names the environment.
+  user-menu slot, and a `Link` prop for the app's router link. A nav item's optional `hint` (the
+  internal shell's "Waiting", "Not built" or "Not scheduled") sits after its link, outside the
+  link's name, and is the link's `aria-describedby` description. `AdminShell` adds the grouped
+  tool sidebar and an internal banner that names the environment.
 - `KeyValue` (`<dl>` pairs, optional copy), `Timeline` (`<ol>` with `<time>`), `JsonView`
   (`<pre>` with a `<details>` per object or array), `Stepper` (`<ol>` with `aria-current="step"`
   and the text "Step 2 of 5").

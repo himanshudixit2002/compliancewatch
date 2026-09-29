@@ -84,8 +84,9 @@ Built on the primitives and the tokens; each has its accessibility contract in t
   one h1), `Skeleton` inside `SkeletonGroup` (`role="status"` with a screen-reader "Loading").
 - `AppShell` and `AdminShell`: skip link to `<main id="main">`, primary navigation (a Sheet
   under the md breakpoint), `aria-current="page"` on the active link, a `Link` prop for the
-  app's router link. AdminShell adds the grouped tool sidebar and an internal banner naming
-  the environment.
+  app's router link; a nav item's optional `hint` ("Waiting") sits after its link, outside the
+  link's name, as its `aria-describedby` description. AdminShell adds the grouped tool sidebar
+  and an internal banner naming the environment.
 - `KeyValue` (`<dl>`), `Timeline` (`<ol>` with `<time>`), `JsonView` (`<pre>` with `<details>`
   per object or array), `Stepper` (`aria-current="step"`, "Step 2 of 5").
 - `ConfirmDialog` (says what the action records; danger button when destructive; buttons

@@ -16,7 +16,10 @@ export interface InternalShellProps {
   children: ReactNode;
 }
 
-/** The /admin shell: AdminShell over next/link with the grouped tools and the active link. */
+/**
+ * The /admin shell: AdminShell over next/link with the grouped tools and the active link. A tool
+ * that is not built yet says so after its link ("Waiting", "Not built", "Not scheduled").
+ */
 export function InternalShell({ groups, environment, userMenu, children }: InternalShellProps) {
   const current = activeHref(
     groups.flatMap((group) => group.items.map((item) => item.href)),
@@ -28,6 +31,7 @@ export function InternalShell({ groups, environment, userMenu, children }: Inter
       href: item.href,
       label: item.label,
       active: item.href === current,
+      ...(item.status === undefined ? {} : { hint: t(`nav.status.${item.status}`) }),
     })),
   }));
   return (

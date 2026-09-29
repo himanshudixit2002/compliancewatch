@@ -7,6 +7,7 @@ import {
   SCREENS,
   hrefFor,
   isCatchAll,
+  livePageHref,
   isScreenId,
   isVisibleTo,
   matchScreen,
@@ -280,6 +281,13 @@ describe("routes", () => {
     );
     expect(hrefFor(screenById("admin.home"))).toBe("/admin");
     expect(() => hrefFor(obligation, { businessId: "b1" })).toThrow(/obligationId/);
+  });
+
+  it("links a static route only once its page is live", () => {
+    expect(livePageHref("/admin")).toBe("/admin");
+    expect(livePageHref("/admin/sources")).toBeNull();
+    expect(livePageHref("/admin/nowhere")).toBeNull();
+    expect(livePageHref("/legal/[doc]")).toBeNull();
   });
 
   it("filters screens by roles and tenant kind", () => {

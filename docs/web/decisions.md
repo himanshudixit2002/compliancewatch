@@ -498,3 +498,29 @@ screen's scheme, keeps the banner on a printed draft, and adds a line naming the
 version. Consequences: production onboarding opens with the release that carries the reviewed
 Version lines, with no configuration change; the e2e suite runs in `test` and never sees the
 closed state, which the unit tests cover.
+
+## D-036: The admin home counts one page of each list and probes every service itself
+
+2026-09-29. The admin home is where an analyst starts: it should say how much is waiting in the
+review queues and whether the services are up, without a counting route (none exists) and without
+failing when one service is away. The home reads one page of each list at the largest size the route
+serves: the open entity groups (with the mentions in them) and the open relation candidates, fresh
+on every visit because the pipeline fills them outside this app, and the rules and the prompts
+through their cached global reads. A full page is shown as "200+". Each count is its own tile with
+its own error state (the problem and the correlation id), and a tile links to the tool that lists
+its records only once that tool's page is live in the registry (`livePageHref`), so no link leads to
+a "not available yet" notice from a number. The services summary probes `GET /health` on every
+service in parallel (`server/health.ts`, two seconds each, no tenant header, no token) and names
+each one that does not answer with the address probed and the reason; the system page is meant to
+reuse the same probe. The health route is py-common's liveness contract, outside the API specs, so
+the registry entry notes it instead of listing it in `uses`. The shell also says which tools are not
+built: a link to a waiting, ready or unscheduled tool carries a short hint ("Waiting", "Not built",
+"Not scheduled") outside the link's name, announced as its description. Unexpected errors and
+not-found answers in a tool render inside the admin shell (`app/admin/error.tsx`,
+`app/admin/not-found.tsx`), and the home's loading skeleton sits in a route group,
+`app/admin/(home)/`, so it wraps the home alone: a loading boundary above the other tools would
+stream their not-found answers with status 200 instead of a real 404. A session without a regulatory
+role still gets the root 404 from the layout's gate, with no admin markup. Consequences: the home
+costs four reads and ten probes per visit and is `force-dynamic`, with a Refresh button that renders
+it again; the counts are never asserted as numbers in the e2e suite, since other specs change the
+queues on the same stack.
