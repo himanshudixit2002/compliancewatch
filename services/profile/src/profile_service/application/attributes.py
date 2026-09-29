@@ -2,10 +2,12 @@
 
 ``SetAttributes`` applies a batch of changes to one node: the ontology decides what is valid,
 the node bumps its version, ``profile.updated`` goes to the outbox, a ``not_applicable`` answer
-opens a review task and records an eval case. ``NextQuestion`` returns one attribute to ask.
-``BuildSnapshot`` merges the lineage for the applicability engine. ``ConfirmFinancialYear``
-opens a confirmation task for every entity whose per-year values are missing for the new year
-(the April task of ADR-016); ``financial_year_in_india`` names the year a moment falls in.
+opens a review task and records an eval case. ``apply_changes`` does the same inside a unit of
+work the caller holds, for use cases that write several nodes at once. ``NextQuestion``
+returns one attribute to ask. ``BuildSnapshot`` merges the lineage for the applicability
+engine. ``ConfirmFinancialYear`` opens a confirmation task for every entity whose per-year
+values are missing for the new year (the April task of ADR-016); ``financial_year_in_india``
+names the year a moment falls in.
 """
 
 from collections.abc import Callable, Sequence
@@ -67,15 +69,45 @@ class SetAttributes:
             node = uow.profiles.get(node_id)
             if node is None:
                 raise ProfileNodeNotFoundError(str(node_id))
-            outcome = node.apply(changes, ontology=self._ontology, source=source, at=now, by=by)
-            if outcome.event is None:
-                return SetResult(node, (), ())
-            uow.profiles.save(outcome.node)
-            uow.events.publish(outcome.event)
-            tasks = tuple(open_review(uow, tenant_id, request, now) for request in outcome.reviews)
-            for request in outcome.reviews:
-                uow.eval_cases.record(_eval_case(outcome.node, request, now))
-            return SetResult(outcome.node, outcome.event.changed_attributes, tasks)
+            return apply_changes(
+                uow,
+                tenant_id,
+                node,
+                changes,
+                ontology=self._ontology,
+                source=source,
+                by=by,
+                now=now,
+            )
+
+
+def apply_changes(
+    uow: UnitOfWork,
+    tenant_id: TenantId,
+    node: ProfileNode,
+    changes: Sequence[AttributeChange],
+    *,
+    ontology: Ontology,
+    source: ChangeSource,
+    by: UserId | None,
+    now: datetime,
+) -> SetResult:
+    """Apply ``changes`` to ``node`` inside the caller's unit of work.
+
+    The node is saved and ``profile.updated`` goes to the outbox; each ``not_applicable`` answer
+    opens a review task and records an eval case. A batch that changes nothing stores nothing.
+    Every use case that writes attributes goes through here, so a rejected value anywhere in a
+    unit of work rolls the whole unit back.
+    """
+    outcome = node.apply(changes, ontology=ontology, source=source, at=now, by=by)
+    if outcome.event is None:
+        return SetResult(node, (), ())
+    uow.profiles.save(outcome.node)
+    uow.events.publish(outcome.event)
+    tasks = tuple(open_review(uow, tenant_id, request, now) for request in outcome.reviews)
+    for request in outcome.reviews:
+        uow.eval_cases.record(_eval_case(outcome.node, request, now))
+    return SetResult(outcome.node, outcome.event.changed_attributes, tasks)
 
 
 class NextQuestion:

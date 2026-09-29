@@ -29,8 +29,10 @@ from profile_service.domain.errors import (
     ProfileNodeNotFoundError,
     TenantRequiredError,
 )
+from profile_service.domain.flags import FeatureFlags
 from profile_service.domain.lookup import GstinLookupProvider
 from profile_service.domain.repository import UnitOfWorkFactory
+from profile_service.infrastructure.flags import OpenFeatureFlags
 from profile_service.infrastructure.lookup import (
     DEMO_LOOKUPS,
     ManualLookupProvider,
@@ -44,6 +46,7 @@ from profile_service.infrastructure.repository import (
 from profile_service.settings import ProfileSettings
 from profile_service.wiring import Wiring
 from py_common.app import create_app
+from py_common.flags import configure_flags
 
 SERVICE_NAME = "profile"
 PROBLEM_STATUS: dict[type[DomainError], int] = {
@@ -58,8 +61,18 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
 }
 
 
-def wire(settings: ProfileSettings, ontology: Ontology | None = None) -> Wiring:
+def wire(
+    settings: ProfileSettings,
+    ontology: Ontology | None = None,
+    *,
+    flags: FeatureFlags | None = None,
+) -> Wiring:
+    """Build the use cases on the store the settings name. Without ``flags`` the process-wide
+    OpenFeature provider is configured from the settings and answers them."""
     loaded = ontology or ontology_package.load()
+    if flags is None:
+        configure_flags(settings)
+        flags = OpenFeatureFlags()
     unit_of_work: UnitOfWorkFactory
     ping: Callable[[], bool]
     if settings.profile_store == "memory":
@@ -93,7 +106,7 @@ def wire(settings: ProfileSettings, ontology: Ontology | None = None) -> Wiring:
         next_question=NextQuestion(unit_of_work, loaded),
         build_snapshot=BuildSnapshot(unit_of_work),
         confirm_financial_year=ConfirmFinancialYear(unit_of_work, loaded),
-        prefill=PrefillFromGstin(unit_of_work, lookup, set_attributes, loaded),
+        prefill=PrefillFromGstin(unit_of_work, lookup, loaded, flags),
     )
 
 
@@ -104,9 +117,12 @@ def _ontology_ready(wiring: Wiring) -> Callable[[], Awaitable[bool]]:
     return check
 
 
-def build_app(settings: ProfileSettings | None = None) -> FastAPI:
+def build_app(
+    settings: ProfileSettings | None = None, *, flags: FeatureFlags | None = None
+) -> FastAPI:
+    """``flags`` replaces the OpenFeature flags (tests)."""
     settings = settings or ProfileSettings(service_name=SERVICE_NAME)
-    wiring = wire(settings)
+    wiring = wire(settings, flags=flags)
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,

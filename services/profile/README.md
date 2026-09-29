@@ -72,6 +72,13 @@ provider (`CW_PROFILE_GSTIN_LOOKUP=manual`, the default) the person proceeds man
 demo table. A real provider (GSTN through a GSP, or an aggregator) is an account the
 maintainer opens; it plugs in behind the protocol in `domain/lookup.py`.
 
+Whatever the lookup answers, the GSTIN's first two digits are its state code, so the entity's
+`state_codes` gains that code, joined to the codes it already has, with source `derived`. A
+code the ontology does not list (97, 99) is skipped. `business_category` is written from the
+registry's nature of business only while the flag `profile.gstin_category_prefill` is on for
+the tenant (off by default) and the activities map to exactly one category; the mapping is
+reviewed by an analyst before the flag goes on.
+
 ## Layout
 
 ```

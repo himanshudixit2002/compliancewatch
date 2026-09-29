@@ -263,6 +263,12 @@
       },
       "LookupResultOut": {
         "properties": {
+          "business_category": {
+            "default": "",
+            "description": "The category the activities map to, empty when none or several do; stored only while profile.gstin_category_prefill is on",
+            "title": "Business Category",
+            "type": "string"
+          },
           "constitution": {
             "title": "Constitution",
             "type": "string"
@@ -278,6 +284,14 @@
           "legal_name": {
             "title": "Legal Name",
             "type": "string"
+          },
+          "nature_of_business": {
+            "description": "The registry's activities, as it words them",
+            "items": {
+              "type": "string"
+            },
+            "title": "Nature Of Business",
+            "type": "array"
           },
           "registered_since": {
             "anyOf": [
@@ -1817,7 +1831,7 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "Pre-fill a registration from the GSTIN lookup, or open a verify_registration task",
+        "summary": "Pre-fill a registration from its GSTIN and the GSTIN lookup, or open a verify_registration task",
         "tags": [
           "profile"
         ]
