@@ -4,12 +4,14 @@ It reads ``evals/golden/qa/kag``: the world file and every case. It checks the k
 closed values, the label status rules (a draft has ``labelled_by`` and no ``reviewed_by``; an
 approved case has a ``reviewed_by`` other than ``labelled_by``), that every key names something
 in the world and a notification version carries its CBIC listing title, that every quote is in
-its clause word for word (whitespace aside), that every
-seed-calendar support matches the seed file, that the scripted plans pass qa's plan rules
-against the rules the world has in force on the case's date and the scripted answers qa's
-answer shape, that an answerable case's scripted citations are among its expected ones, and
-that a must-refuse case's scripted answer is bad on purpose without stating a date or an
-amount. It prints the count per category and per status, and exits 1 on any problem.
+its clause word for word (whitespace aside), that a fact holds in its own support (a date is
+among the dates its quote writes, ordinal words included, and a text is in its quote, casefolded
+and dashes folded), that every seed-calendar support matches the seed file, that the scripted
+plans pass qa's plan rules against the rules the world has in force on the case's date and the
+scripted answers qa's answer shape, that an answerable case's scripted citations are among its
+expected ones, and that a must-refuse case's scripted answer is bad on purpose: covered, with
+at least one citation the check must reject, and without stating a date or an amount. It prints
+the count per category and per status, and exits 1 on any problem.
 """
 
 import argparse
@@ -39,7 +41,7 @@ from cw_evals.qa.cases import (
     planner_json,
     scripted_answer,
 )
-from cw_evals.qa.score import dates_in, has_amount
+from cw_evals.qa.score import dates_in, folded, has_amount
 from cw_evals.qa.world import ClauseQuote, WorldError, WorldSpec, load_world
 from domain_kernel.predicates import specification_to_mapping
 from qa.domain.answer import AnswerInvalidError, parse_answer
@@ -134,9 +136,10 @@ def _facts(case: QaCase, spec: WorldSpec) -> list[str]:
     for fact in case.expected.facts:
         if fact.kind not in FACT_KINDS:
             problems.append(f"{where}: fact kind {fact.kind!r} is not one of {FACT_KINDS}")
+        day: date | None = None
         if fact.kind == "date":
             try:
-                date.fromisoformat(fact.value)
+                day = date.fromisoformat(fact.value)
             except ValueError:
                 problems.append(f"{where}: fact {fact.value!r} is not an ISO date")
         support = fact.support
@@ -153,6 +156,10 @@ def _facts(case: QaCase, spec: WorldSpec) -> list[str]:
                 )
         else:
             problems += _quote(where, support, spec)
+            if day is not None and day not in dates_in(support.quote):
+                problems.append(f"{where}: date {fact.value} is not in its quote {support.quote!r}")
+            if fact.kind == "text" and folded(fact.value) not in folded(support.quote):
+                problems.append(f"{where}: {fact.value!r} is not in its quote {support.quote!r}")
     return problems
 
 
@@ -205,9 +212,10 @@ def _scripted(case: QaCase, spec: WorldSpec) -> list[str]:
 
 
 def _refusal(case: QaCase, spec: WorldSpec) -> list[str]:
-    """A must-refuse answer is bad on purpose: each citation names a label, a quote its clause
-    lacks, or a clause of a document not yet published on the question's date; and it states
-    no date and no amount."""
+    """A must-refuse answer is bad on purpose: it claims to cover the question with at least one
+    citation, so the citation check (not the model declining) is what refuses it; each citation
+    names a label, a quote its clause lacks, or a clause of a document not yet published on the
+    question's date; and it states no date and no amount."""
     where = case.path.name
     problems: list[str] = []
     if case.expected.facts or case.expected.citations:
@@ -215,6 +223,12 @@ def _refusal(case: QaCase, spec: WorldSpec) -> list[str]:
     if not case.refusal_reason:
         problems.append(f"{where}: a must-refuse case names its refusal_reason")
     answer = case.scripted.answer or {}
+    if case.scripted.answer is not None and (
+        answer.get("covered") is not True or not answer.get("citations")
+    ):
+        problems.append(
+            f"{where}: a must-refuse case scripts covered: true with at least one citation"
+        )
     texts = [str(answer.get("answer", ""))]
     for item in answer.get("citations") or []:
         texts.append(str(item.get("quote", "")))

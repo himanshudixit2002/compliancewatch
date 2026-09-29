@@ -106,6 +106,37 @@ def test_main_prints_the_counts_and_exits_on_problems(
             "is not an expected citation",
         ),
         (
+            "sh-01-2026-effect.yaml",
+            "value: 2026-04-20",
+            "value: 2026-04-21",
+            "date 2026-04-21 is not in its quote 'come into effect from 20th day",
+        ),
+        (
+            "dt-acme-april-2026-and-march.yaml",
+            "value: 2026-04-21",
+            "value: 2026-04-22",
+            "date 2026-04-22 is not in its quote 'till the twenty -first day of April, 2026'",
+        ),
+        (
+            "sh-15-2025-threshold.yaml",
+            "value: two crore rupees",
+            "value: three crore rupees",
+            "'three crore rupees' is not in its quote 'up to two crore rupees'",
+        ),
+        (
+            "mr-listing-08-2025.yaml",
+            "covered: true",
+            "covered: false",
+            "a must-refuse case scripts covered: true with at least one citation",
+        ),
+        (
+            "mr-listing-12-2025.yaml",
+            "    citations:\n    - clause: C13\n"
+            "      quote: extended the due date for the return\n",
+            "    citations: []\n",
+            "a must-refuse case scripts covered: true with at least one citation",
+        ),
+        (
             "mr-listing-08-2025.yaml",
             "quote: the late fee is waived in full",
             "quote: section 3 read with section 5",

@@ -60,10 +60,14 @@ notes: ...
   An answer cites a clause by document and clause ref; the harness writes the label the
   evidence gives that clause (`C1`, `C2`, ...), because the labels follow the order the
   solver met the clauses. A case the structured layer answers has no `scripted` block.
-- A must-refuse case's scripted answer is wrong on purpose: it cites a label that is not in the
-  evidence, a quote its clause does not have, or a clause not yet published on the question's
-  date. It never states a date or an amount. The qa citation check must turn it into
-  `not_covered`.
+- A must-refuse case's scripted answer is wrong on purpose: it claims to cover the question
+  (`covered: true`) and cites at least one clause, by a label that is not in the evidence, a
+  quote its clause does not have, or a clause not yet published on the question's date. It
+  never states a date or an amount. The qa citation check, not the model declining, must turn
+  it into `not_covered`.
+- `make eval-check` also ties each fact to its own support: a date must be among the dates its
+  quote writes (ordinal words such as "twenty-first day of April" included) and a text must be
+  in its quote, casefolded.
 - The scripted answer is served only when every date the case expects is written in the
   evidence the answering layer gathered (a clause, or a fact such as an obligation's due date);
   otherwise the harness declines for the model, which could not have stated that date, and

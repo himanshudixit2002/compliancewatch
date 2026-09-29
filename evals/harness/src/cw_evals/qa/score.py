@@ -7,8 +7,8 @@ citation is valid, at least one expected citation is among them, every expected 
 answer and nothing in ``must_not_mention`` is. Facts are read from the answer text: dates in
 ISO, "21 April 2026", "21st April, 2026", "April 21, 2026" or ordinal-word form ("the
 twenty-first day of April, 2026"), every expected date among them; text casefolded, dashes
-folded and whitespace collapsed; entities by the canonical names the mention grammar finds in
-the answer.
+folded, the spaces around a hyphen dropped (the recorded text has "sub -section") and
+whitespace collapsed; entities by the canonical names the mention grammar finds in the answer.
 
 With the KAG layer on, a case the labels send through it (answerable, with a scripted plan that
 has steps) is grounded only when the KAG layer decided it: a hybrid answer after the KAG layer
@@ -113,6 +113,7 @@ _MONTH_WORD_DAY_YEAR = re.compile(
 )
 _AMOUNT = re.compile(r"(?:\u20b9|\brs\.?|\binr)\s*[0-9]|\b(?:crore|lakh|rupees?)\b", re.IGNORECASE)
 _FOLD = str.maketrans(dict.fromkeys(DASHES, "-"))
+_HYPHEN = re.compile(r"\s*-\s*")
 
 
 def dates_in(text: str) -> set[date]:
@@ -150,7 +151,7 @@ def has_amount(text: str) -> bool:
 
 
 def folded(text: str) -> str:
-    return " ".join(text.translate(_FOLD).casefold().split())
+    return _HYPHEN.sub("-", " ".join(text.translate(_FOLD).casefold().split()))
 
 
 def entities_in(text: str) -> set[tuple[EntityType, str]]:

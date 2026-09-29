@@ -74,6 +74,7 @@ def test_amounts_and_folding() -> None:
     assert has_amount("\u20b9 50")
     assert not has_amount("notification 12/2025-Central Tax")
     assert folded("Sub\u2013section  (6)\nof") == "sub-section (6) of"
+    assert folded("sub -rule (4B) and 2024 - 25") == "sub-rule (4b) and 2024-25"
 
 
 def test_the_grammar_reads_entities_out_of_an_answer() -> None:
