@@ -70,8 +70,6 @@ def get_preference(channel: Channel, recipient: str, wired: Wired) -> Preference
     responses=problem_responses(401, 422, 503),
 )
 def send(body: SendIn, tenant: Tenant, wired: Wired) -> SendOut:
-    if tenant is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "x-tenant-id header required")
     request = NotificationRequest(
         notification_id=NotificationId(body.notification_id),
         tenant_id=tenant,

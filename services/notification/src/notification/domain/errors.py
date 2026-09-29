@@ -5,6 +5,14 @@ from typing import ClassVar
 from domain_kernel.errors import DomainError
 
 
+class TenantRequiredError(DomainError):
+    type_slug: ClassVar[str] = "notification-tenant-required"
+    title: ClassVar[str] = "Tenant required for notification"
+
+    def __init__(self) -> None:
+        super().__init__("x-tenant-id header required")
+
+
 class UnknownTemplateError(DomainError):
     type_slug: ClassVar[str] = "notification-template-unknown"
     title: ClassVar[str] = "Notification template not found"
