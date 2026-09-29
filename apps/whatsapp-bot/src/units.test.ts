@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_BOT_CLIENT_ID,
+  IdentityTokenSource,
+  SERVICE_TOKENS_PATH,
+  authorizedFetch,
+  identityTokenSource,
+} from "./auth.ts";
+import {
   CloudApiSender,
   DEFAULT_NOTICE_VERSION,
   HttpConsentLedger,
@@ -10,6 +17,7 @@ import {
   NoReceiptsForwarding,
   NotConnectedQa,
   consentLedger,
+  receiptsClient,
 } from "./clients.ts";
 import { detectIntent, detectLanguage, normaliseKeyword } from "./consent.ts";
 import { handleInbound, maskNumber } from "./conversation.ts";
@@ -341,5 +349,220 @@ describe("conversation", () => {
     } finally {
       error.mockRestore();
     }
+  });
+});
+
+describe("service token", () => {
+  const IDENTITY = "http://i.test";
+  /** The dev client secret these tests exchange; the fake identity checks it. */
+  const CLIENT_SECRET = "s".repeat(32);
+
+  type Call = { url: string; init?: RequestInit };
+
+  /** Identity's token route: numbers the tokens it issues, each valid for `expiresIn` seconds. */
+  function identity(expiresIn: unknown = 600) {
+    const calls: Call[] = [];
+    let issued = 0;
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      issued += 1;
+      return new Response(
+        JSON.stringify({
+          access_token: `bot-token-${issued}`,
+          token_type: "Bearer",
+          expires_in: expiresIn,
+          scopes: ["notification:preferences"],
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+    return { calls, fetchImpl };
+  }
+
+  function clock(start = 1_000_000) {
+    const time = { now: start };
+    return { time, now: () => time.now };
+  }
+
+  it("exchanges the client credentials and keeps the token until a minute before it expires", async () => {
+    const { calls, fetchImpl } = identity(600);
+    const { time, now } = clock();
+    const source = new IdentityTokenSource(
+      `${IDENTITY}/`,
+      "whatsapp-bot",
+      CLIENT_SECRET,
+      fetchImpl,
+      now,
+    );
+    expect(await source.token()).toBe("bot-token-1");
+    expect(calls[0]?.url).toBe(`${IDENTITY}${SERVICE_TOKENS_PATH}`);
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      client_id: "whatsapp-bot",
+      client_secret: CLIENT_SECRET,
+    });
+    time.now += 539_000;
+    expect(await source.token()).toBe("bot-token-1");
+    time.now += 1_000;
+    expect(await source.token()).toBe("bot-token-2");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("refreshes a short-lived token at half its lifetime", async () => {
+    const { fetchImpl } = identity(60);
+    const { time, now } = clock();
+    const source = new IdentityTokenSource(IDENTITY, "whatsapp-bot", CLIENT_SECRET, fetchImpl, now);
+    expect(await source.token()).toBe("bot-token-1");
+    time.now += 29_999;
+    expect(await source.token()).toBe("bot-token-1");
+    time.now += 1;
+    expect(await source.token()).toBe("bot-token-2");
+  });
+
+  it("callers waiting on a fetch share it, and an invalidated token is fetched again", async () => {
+    const { calls, fetchImpl } = identity();
+    const source = new IdentityTokenSource(IDENTITY, "whatsapp-bot", CLIENT_SECRET, fetchImpl);
+    const tokens = await Promise.all([source.token(), source.token(), source.token()]);
+    expect(tokens).toEqual(["bot-token-1", "bot-token-1", "bot-token-1"]);
+    expect(calls).toHaveLength(1);
+    source.invalidate("some-other-token");
+    expect(await source.token()).toBe("bot-token-1");
+    source.invalidate("bot-token-1");
+    expect(await source.token()).toBe("bot-token-2");
+  });
+
+  it("a refusal, an outage or an answer without a token is an error, and nothing is cached", async () => {
+    const refusing = vi.fn(
+      async () => new Response(JSON.stringify({ type: "x" }), { status: 401 }),
+    ) as unknown as typeof fetch;
+    await expect(
+      new IdentityTokenSource(IDENTITY, "whatsapp-bot", "wrong", refusing).token(),
+    ).rejects.toThrow("identity token: 401 for client whatsapp-bot");
+    const down = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+    await expect(
+      new IdentityTokenSource(IDENTITY, "whatsapp-bot", CLIENT_SECRET, down).token(),
+    ).rejects.toThrow("identity unreachable for client whatsapp-bot");
+    for (const body of ["not json", "[]", JSON.stringify({ access_token: "t", expires_in: 0 })]) {
+      const odd = vi.fn(async () => new Response(body, { status: 200 })) as unknown as typeof fetch;
+      await expect(
+        new IdentityTokenSource(IDENTITY, "whatsapp-bot", CLIENT_SECRET, odd).token(),
+      ).rejects.toThrow("lacks a bearer access_token and expires_in");
+    }
+    const mac = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ access_token: "t", expires_in: 60, token_type: "mac" })),
+    ) as unknown as typeof fetch;
+    await expect(
+      new IdentityTokenSource(IDENTITY, "whatsapp-bot", CLIENT_SECRET, mac).token(),
+    ).rejects.toThrow("lacks a bearer");
+    const { fetchImpl } = identity();
+    let outage = true;
+    const flaky = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (!outage) return fetchImpl(url, init);
+      outage = false;
+      return new Response("", { status: 503 });
+    }) as unknown as typeof fetch;
+    const source = new IdentityTokenSource(IDENTITY, "whatsapp-bot", CLIENT_SECRET, flaky);
+    await expect(source.token()).rejects.toThrow("identity token: 503");
+    expect(await source.token()).toBe("bot-token-1");
+  });
+
+  it("needs a client id and a secret", () => {
+    expect(() => new IdentityTokenSource(IDENTITY, " ", CLIENT_SECRET)).toThrow("client id");
+    expect(() => new IdentityTokenSource(IDENTITY, "whatsapp-bot", "")).toThrow("client secret");
+  });
+
+  it("the environment configures a source only with a client secret", () => {
+    expect(identityTokenSource({})).toBeNull();
+    expect(identityTokenSource({ BOT_SERVICE_CLIENT_SECRET: "" })).toBeNull();
+    const source = identityTokenSource({ BOT_SERVICE_CLIENT_SECRET: CLIENT_SECRET });
+    expect(source?.clientId).toBe(DEFAULT_BOT_CLIENT_ID);
+    const named = identityTokenSource({
+      BOT_SERVICE_CLIENT_SECRET: CLIENT_SECRET,
+      BOT_SERVICE_CLIENT_ID: "bot-staging",
+    });
+    expect(named?.clientId).toBe("bot-staging");
+  });
+
+  it("authorized fetch sends the bearer and retries once with a fresh token after a 401", async () => {
+    const { fetchImpl: tokenFetch } = identity();
+    const source = new IdentityTokenSource(IDENTITY, "whatsapp-bot", CLIENT_SECRET, tokenFetch);
+    const seen: string[] = [];
+    const service = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const authorization = (init?.headers as Record<string, string>).authorization ?? "";
+      seen.push(authorization);
+      return new Response("{}", { status: authorization === "Bearer bot-token-1" ? 401 : 200 });
+    }) as unknown as typeof fetch;
+    const res = await authorizedFetch(service, source, "http://n.test/x", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(200);
+    expect(seen).toEqual(["Bearer bot-token-1", "Bearer bot-token-2"]);
+    const refusing = vi.fn(
+      async () => new Response("", { status: 401 }),
+    ) as unknown as typeof fetch;
+    expect((await authorizedFetch(refusing, source, "http://n.test/x")).status).toBe(401);
+    expect(refusing).toHaveBeenCalledTimes(2);
+  });
+
+  it("preferences, receipts and consents carry the bearer when a source is configured", async () => {
+    const { fetchImpl: tokenFetch } = identity();
+    const source = new IdentityTokenSource(IDENTITY, "whatsapp-bot", CLIENT_SECRET, tokenFetch);
+    const calls: Call[] = [];
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      if (init?.method === undefined) return new Response(JSON.stringify({ opted_in: true }));
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const preferences = new HttpPreferencesClient("http://n.test", fetchImpl, source);
+    await preferences.setOptIn("919876543210", true, "en");
+    expect(await preferences.isOptedIn("919876543210")).toBe(true);
+    await new HttpReceiptsClient("http://n.test", "", fetchImpl, source).forward({
+      statuses: [],
+      inbound: [],
+    });
+    await new HttpReceiptsClient("http://n.test", "bot", fetchImpl, source).forward({
+      statuses: [],
+      inbound: [],
+    });
+    const at = () => new Date("2026-09-29T06:30:00Z");
+    await new HttpConsentLedger("http://i.test", "", undefined, fetchImpl, at, source).record(
+      "919876543210",
+      true,
+      "START",
+      "wamid.1",
+      "en",
+    );
+    const headers = calls.map((call) => call.init?.headers);
+    expect(headers).toEqual([
+      { "content-type": "application/json", authorization: "Bearer bot-token-1" },
+      { authorization: "Bearer bot-token-1" },
+      { "content-type": "application/json", authorization: "Bearer bot-token-1" },
+      {
+        "content-type": "application/json",
+        "x-cw-bot-token": "bot",
+        authorization: "Bearer bot-token-1",
+      },
+      { "content-type": "application/json", authorization: "Bearer bot-token-1" },
+    ]);
+  });
+
+  it("the environment's clients accept the service token in place of the shared tokens", () => {
+    const source = identityTokenSource({ BOT_SERVICE_CLIENT_SECRET: CLIENT_SECRET });
+    const warnings: string[] = [];
+    expect(receiptsClient({}, fetch, (line) => warnings.push(line), source)).toBeInstanceOf(
+      HttpReceiptsClient,
+    );
+    expect(warnings).toEqual([]);
+    expect(
+      consentLedger({ WHATSAPP_CONSENT_RECORDING_ENABLED: "true" }, fetch, console.log, source),
+    ).toBeInstanceOf(HttpConsentLedger);
+    expect(() => consentLedger({ WHATSAPP_CONSENT_RECORDING_ENABLED: "true" })).toThrow(
+      "needs IDENTITY_SERVICE_TOKEN or BOT_SERVICE_CLIENT_SECRET",
+    );
   });
 });

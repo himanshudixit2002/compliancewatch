@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
+import { identityTokenSource } from "./auth.ts";
 import {
   CloudApiSender,
   DEFAULT_NOTIFICATION_API_URL,
@@ -21,13 +22,18 @@ const sender =
         env.WHATSAPP_API_VERSION ?? "v21.0",
       )
     : new LoggingSender();
+// The bot's own access token: with BOT_SERVICE_CLIENT_SECRET set, BOT_SERVICE_CLIENT_ID (default
+// whatsapp-bot) gets one from identity at IDENTITY_API_URL, and every call to notification and
+// identity carries it. Without the secret no token is sent and the shared tokens alone apply.
+const tokens = identityTokenSource(env);
 // Keyword opt-ins and opt-outs are recorded with identity only when
-// WHATSAPP_CONSENT_RECORDING_ENABLED=true; on, it needs IDENTITY_API_URL and IDENTITY_SERVICE_TOKEN.
+// WHATSAPP_CONSENT_RECORDING_ENABLED=true; on, it needs IDENTITY_API_URL and
+// IDENTITY_SERVICE_TOKEN or the service token.
 const consentRecording = env.WHATSAPP_CONSENT_RECORDING_ENABLED === "true";
-const consents = consentLedger(env);
-// Delivery statuses and inbound times go to notification with NOTIFICATION_BOT_TOKEN; without it
-// they are not forwarded, and the bot says so once at start.
-const receipts = receiptsClient(env);
+const consents = consentLedger(env, fetch, console.log, tokens);
+// Delivery statuses and inbound times go to notification with NOTIFICATION_BOT_TOKEN or the
+// service token; without either they are not forwarded, and the bot says so once at start.
+const receipts = receiptsClient(env, fetch, console.warn, tokens);
 
 const app = createApp(
   {
@@ -38,6 +44,8 @@ const app = createApp(
   {
     preferences: new HttpPreferencesClient(
       env.NOTIFICATION_API_URL || DEFAULT_NOTIFICATION_API_URL,
+      fetch,
+      tokens,
     ),
     consents,
     sender,
@@ -48,7 +56,7 @@ const app = createApp(
 
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(
-    `whatsapp-bot listening on http://localhost:${info.port} (send ${sendEnabled ? "enabled" : "disabled"}, consent recording ${consentRecording ? "enabled" : "disabled"})`,
+    `whatsapp-bot listening on http://localhost:${info.port} (send ${sendEnabled ? "enabled" : "disabled"}, consent recording ${consentRecording ? "enabled" : "disabled"}, service token ${tokens === null ? "off" : `for client ${tokens.clientId}`})`,
   );
 });
 
