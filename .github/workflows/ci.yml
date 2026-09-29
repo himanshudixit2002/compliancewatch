@@ -260,7 +260,9 @@ jobs:
         run: uv run pytest packages/contracts -q
       - name: Backward compatible with the base branch (base examples replayed against these schemas)
         if: github.event_name == 'pull_request'
-        run: uv run python packages/contracts/scripts/check_compat.py --base-ref "origin/${{ github.base_ref }}"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: uv run python packages/contracts/scripts/check_compat.py --base-ref "origin/$BASE_REF"
       - name: OpenAPI specs break no client of the base branch (deliberate breaks listed in BREAKING.md)
         if: github.event_name == 'pull_request'
         env:
