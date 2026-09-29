@@ -183,6 +183,20 @@ type = "layers"
 layers = ["py_common", "ontology", "domain_kernel"]
 
 [[tool.importlinter.contracts]]
+# Workflow and activity modules, application layers among them, import py_common.temporal, and
+# import-linter follows indirect imports: one import of py_common.telemetry (FastAPI, SQLAlchemy)
+# from here would break the application-layer contract above for every such module. Metrics in
+# py_common.temporal use opentelemetry.metrics.get_meter directly.
+name = "py_common.temporal imports no web or database framework and no py_common runtime module"
+type = "forbidden"
+source_modules = ["py_common.temporal"]
+forbidden_modules = [
+  "fastapi", "starlette", "sqlalchemy", "alembic", "psycopg",
+  "py_common.telemetry", "py_common.outbox", "py_common.runtime", "py_common.app",
+  "py_common.health", "py_common.problems", "py_common.request_context", "py_common.migrations",
+]
+
+[[tool.importlinter.contracts]]
 name = "Generated event contracts depend on pydantic only, never on our packages"
 type = "forbidden"
 source_modules = ["cw_contracts"]

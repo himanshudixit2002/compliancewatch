@@ -7,6 +7,11 @@
   workflows.
 - ``worker.run_worker(...)``: builds the worker from activity instances and workflow classes and
   runs it until SIGTERM, SIGINT or a stop event.
+- ``liveness.running(task_queue)``: reports ``temporal_worker_up{task_queue}`` while a worker
+  serves the queue; ``run_worker`` uses it, and so does any process that builds workers itself.
+
+Nothing here imports ``py_common.telemetry``, the outbox or a web or database framework, since
+workflow and activity modules import this package (an import-linter contract holds it).
 """
 
 from py_common.temporal.activity import ActivityBase, sleep_with_heartbeat
