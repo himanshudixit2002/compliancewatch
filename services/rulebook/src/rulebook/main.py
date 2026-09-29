@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 from domain_kernel.errors import DomainError, InvalidRelationError, InvalidTransitionError
 from domain_kernel.events import utc_now
 from py_common.app import create_app, module_app
+from py_common.auth.fastapi import Authenticator
 from py_common.telemetry import Telemetry
 from rulebook import __version__
 from rulebook.api.router import router
@@ -199,7 +200,11 @@ def install_review_metrics(app: FastAPI, wiring: Wiring) -> bool:
     return True
 
 
-def build_app(settings: RulebookSettings | None = None) -> FastAPI:
+def build_app(
+    settings: RulebookSettings | None = None, *, authenticator: Authenticator | None = None
+) -> FastAPI:
+    """``authenticator`` replaces the one ``CW_AUTH_MODE`` describes; a process that hosts
+    identity passes identity's own."""
     settings = settings or RulebookSettings(service_name=SERVICE_NAME)
     wiring = build_wiring(settings)
     app = create_app(
@@ -209,6 +214,7 @@ def build_app(settings: RulebookSettings | None = None) -> FastAPI:
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         problem_status=PROBLEM_STATUS,
+        authenticator=authenticator,
     )
     app.state.wiring = wiring
     install_review_metrics(app, wiring)

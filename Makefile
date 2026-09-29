@@ -19,7 +19,7 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE ?= /var/run/docker.sock
 # ---- Inventory -------------------------------------------------------------------------------
 SERVICES := identity profile rulebook applicability-engine obligation notification qa llm-gateway eval pipeline
 PY_PACKAGES := py-common domain-kernel ontology
-PY_DIRS := $(addprefix packages/,$(PY_PACKAGES)) packages/contracts/clients/python $(addprefix services/,$(SERVICES)) evals/harness tools/demo
+PY_DIRS := $(addprefix packages/,$(PY_PACKAGES)) packages/contracts/clients/python $(addprefix services/,$(SERVICES)) evals/harness tools/demo composition/mvp
 
 # Service directory -> import package (two exceptions avoid shadowing stdlib/builtins).
 PKG_profile := profile_service

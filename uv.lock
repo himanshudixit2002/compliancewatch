@@ -12,6 +12,7 @@ members = [
     "compliancewatch-evals",
     "compliancewatch-identity",
     "compliancewatch-llm-gateway",
+    "compliancewatch-mvp",
     "compliancewatch-notification",
     "compliancewatch-obligation",
     "compliancewatch-pipeline",
@@ -575,6 +576,69 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pydantic-settings", specifier = ">=2.10" },
     { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.35" },
+]
+
+[[package]]
+name = "compliancewatch-mvp"
+version = "0.1.0"
+source = { editable = "composition/mvp" }
+dependencies = [
+    { name = "anyio" },
+    { name = "compliancewatch-applicability-engine" },
+    { name = "compliancewatch-contracts" },
+    { name = "compliancewatch-eval" },
+    { name = "compliancewatch-identity" },
+    { name = "compliancewatch-llm-gateway" },
+    { name = "compliancewatch-notification" },
+    { name = "compliancewatch-obligation" },
+    { name = "compliancewatch-pipeline" },
+    { name = "compliancewatch-profile" },
+    { name = "compliancewatch-qa" },
+    { name = "compliancewatch-rulebook" },
+    { name = "domain-kernel" },
+    { name = "fastapi" },
+    { name = "httpx2" },
+    { name = "ontology" },
+    { name = "opentelemetry-api" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "py-common" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "sqlalchemy" },
+    { name = "starlette" },
+    { name = "structlog" },
+    { name = "temporalio" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anyio", specifier = ">=4.9" },
+    { name = "compliancewatch-applicability-engine", editable = "services/applicability-engine" },
+    { name = "compliancewatch-contracts", editable = "packages/contracts/clients/python" },
+    { name = "compliancewatch-eval", editable = "services/eval" },
+    { name = "compliancewatch-identity", editable = "services/identity" },
+    { name = "compliancewatch-llm-gateway", editable = "services/llm-gateway" },
+    { name = "compliancewatch-notification", editable = "services/notification" },
+    { name = "compliancewatch-obligation", editable = "services/obligation" },
+    { name = "compliancewatch-pipeline", editable = "services/pipeline" },
+    { name = "compliancewatch-profile", editable = "services/profile" },
+    { name = "compliancewatch-qa", editable = "services/qa" },
+    { name = "compliancewatch-rulebook", editable = "services/rulebook" },
+    { name = "domain-kernel", editable = "packages/domain-kernel" },
+    { name = "fastapi", specifier = ">=0.120" },
+    { name = "httpx2", specifier = ">=2.13" },
+    { name = "ontology", editable = "packages/ontology" },
+    { name = "opentelemetry-api", specifier = "==1.45.0" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "py-common", editable = "packages/py-common" },
+    { name = "pydantic", specifier = ">=2.11" },
+    { name = "pydantic-settings", specifier = ">=2.10" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "starlette", specifier = ">=0.47" },
+    { name = "structlog", specifier = ">=25.4" },
+    { name = "temporalio", specifier = ">=1.33,<1.34" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35" },
 ]
 

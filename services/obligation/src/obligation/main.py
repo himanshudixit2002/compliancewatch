@@ -30,6 +30,7 @@ from obligation.infrastructure.repository import PostgresUnitOfWorkFactory
 from obligation.settings import ObligationSettings
 from obligation.wiring import Wiring
 from py_common.app import create_app, module_app
+from py_common.auth.fastapi import Authenticator
 
 SERVICE_NAME = "obligation"
 PROBLEM_STATUS: dict[type[DomainError], int] = {
@@ -65,7 +66,11 @@ def wire(settings: ObligationSettings) -> Wiring:
     )
 
 
-def build_app(settings: ObligationSettings | None = None) -> FastAPI:
+def build_app(
+    settings: ObligationSettings | None = None, *, authenticator: Authenticator | None = None
+) -> FastAPI:
+    """``authenticator`` replaces the one ``CW_AUTH_MODE`` describes; a process that hosts
+    identity passes identity's own."""
     settings = settings or ObligationSettings(service_name=SERVICE_NAME)
     wiring = wire(settings)
     app = create_app(
@@ -75,6 +80,7 @@ def build_app(settings: ObligationSettings | None = None) -> FastAPI:
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         problem_status=PROBLEM_STATUS,
+        authenticator=authenticator,
     )
     app.state.wiring = wiring
     return app

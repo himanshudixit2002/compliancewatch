@@ -10,6 +10,7 @@ next-env.d.ts
 
 # Python side is formatted by ruff; docs and infra are not prettier's business
 services/
+composition/
 packages/domain-kernel/
 packages/ontology/
 packages/py-common/
