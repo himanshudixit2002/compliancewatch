@@ -7,8 +7,9 @@
 # job and its catalog rules in the dev-stack job), 4 integration tests (testcontainers) for the
 # packages a change affects, an ops job (runbook links, promtool rules, actionlint), a compose
 # dev-stack smoke, secrets scanning, SAST (semgrep) and a dependency and config scan (trivy), both
-# reported to code scanning. The job "CI gate" needs every other job and is the one check branch
-# protection requires; infra/scripts/check_ci_gate.py fails when a job is missing from its needs.
+# reported to code scanning, and the web e2e job (Playwright with axe against the built Next.js
+# app). The job "CI gate" needs every other job and is the one check branch protection
+# requires; infra/scripts/check_ci_gate.py fails when a job is missing from its needs.
 # Steps 5-7 are listed as TODO at the end.
 name: ci
 
@@ -560,6 +561,45 @@ jobs:
           sarif_file: trivy.sarif
           category: trivy
 
+  web-e2e:
+    name: Web e2e (Playwright with axe against next start)
+    needs: changes
+    if: needs.changes.outputs.typescript == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # pnpm version comes from package.json "packageManager"
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The playwright package has no install script (strictDepBuilds stays satisfied); the
+      # browser and its system libraries are fetched here, explicitly.
+      - name: Chromium for Playwright
+        run: pnpm --filter web e2e:install
+      # Built with no CW_WEB_* variable, like the typescript job: the pages read the
+      # environment per request, never at build time.
+      - name: Build the web app
+        run: pnpm --filter web build
+      # playwright.config.ts starts `next start` on PORT with CW_WEB_ENV=test (the local-only
+      # pages exist there) and waits for /api/health. The suite visits every registered page
+      # without a service and fails a page on a serious or critical axe finding.
+      - name: Playwright with axe against next start
+        env:
+          PORT: "3000"
+          CW_WEB_ENV: test
+        run: pnpm --filter web e2e
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          if-no-files-found: ignore
+
   # The one check branch protection requires. A job that path filters skip counts as passed; any
   # other result, a failure or a cancellation, fails the gate. New jobs go above this one and into
   # its needs (make ci-gate-check fails otherwise).
@@ -577,6 +617,7 @@ jobs:
       - gitleaks
       - sast
       - dependency-scan
+      - web-e2e
     if: always() # a failed need would otherwise skip the gate, and a skipped check passes
     runs-on: ubuntu-latest
     steps:
