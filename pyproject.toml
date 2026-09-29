@@ -22,6 +22,8 @@ dev = [
   "types-jsonschema>=4.26",
   "check-jsonschema==0.38.2",
   "datamodel-code-generator==0.83.0",
+  # Property tests of each committed OpenAPI spec against its service (tests/contract/test_api_properties.py)
+  "schemathesis>=4.28,<5",
 ]
 
 [tool.uv]
