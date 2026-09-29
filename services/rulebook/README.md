@@ -200,6 +200,14 @@ CW_RULEBOOK_PUBLISH_ENABLED=true CW_DATABASE_URL=... uv run --package compliance
 prints that nothing moved and exits 0. Seed rules are never published by a migration or the seed
 command; only this flow publishes.
 
+## Known limitations
+
+- A withdrawn version is hidden from every date, including the dates before it was withdrawn:
+  `GET /v1/rulebook/rule-versions?as_of=` never returns it, search leaves it out of `cited_by`,
+  and a clause only it cites is `out_of_force` on every date. A question about a day when the
+  version still applied is answered as if it never had. `GET /v1/rulebook/rule-versions/{id}`
+  still reads it, with its dates, in any status.
+
 ## Seed calendar
 
 `seed/gst_calendar.yaml` holds the standing GST obligations as draft rule versions: thirteen
