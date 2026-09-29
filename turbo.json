@@ -1,12 +1,13 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
-  "globalDependencies": ["tsconfig.base.json", "eslint.config.mjs"],
+  "globalDependencies": ["tsconfig.base.json", "eslint.config.mjs", "packages/flags/registry.json"],
   "globalEnv": ["NODE_ENV"],
   "globalPassThroughEnv": ["CI", "PORT", "NEXT_TELEMETRY_DISABLED", "DO_NOT_TRACK"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "env": ["CW_WEB_*"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*", "$TURBO_ROOT$/docs/legal/*.md"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
     "lint": {},
@@ -15,7 +16,13 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/packages/contracts/consumers/**"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/contracts/consumers/**",
+        "$TURBO_ROOT$/docs/legal/*.md",
+        "$TURBO_ROOT$/docs/web/screens.md",
+        "$TURBO_ROOT$/packages/contracts/openapi/*.json"
+      ],
       "outputs": ["coverage/**"]
     },
     "dev": {

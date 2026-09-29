@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    // Playwright specs and the plain-Node generators import shared/config through its explicit
+    // ".ts" relative imports; nothing here is emitted. A generator is an .mts file: the package
+    // is not "type": "module", so a plain .ts file counts as CommonJS here and may not use
+    // import.meta.
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "noEmit": true,
+    "jsx": "preserve"
+  },
+  "include": ["playwright.config.ts", "e2e/**/*.ts", "scripts/**/*.ts", "scripts/**/*.mts"]
+}

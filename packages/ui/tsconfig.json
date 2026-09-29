@@ -6,7 +6,8 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "noEmit": true
+    "noEmit": true,
+    "paths": { "@compliancewatch/ui/*": ["./src/*"] }
   },
   "include": ["src", "vitest.config.ts"]
 }

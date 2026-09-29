@@ -12,8 +12,8 @@ paths = [
 ]
 
 [[allowlists]]
-description = "Seed calendar rule keys: identifiers such as gstr3b_monthly, not credentials"
+description = "Rule keys: identifiers such as gstr3b_monthly, not credentials (YAML, Python and JSON keys)"
 regexTarget = "line"
 regexes = [
-  '''rule_key\s*(?:==|:|=)\s*"?[a-z][a-z0-9_]*"?''',
+  '''rule_key"?\s*(?:==|:|=)\s*"?[a-z][a-z0-9_]*"?''',
 ]

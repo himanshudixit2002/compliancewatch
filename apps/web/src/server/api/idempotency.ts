@@ -1,0 +1,98 @@
+import "server-only";
+
+import { randomUUID } from "node:crypto";
+import { createElement, type ReactElement } from "react";
+import type { RouteRef } from "@/shared/config/services";
+import { isUuid } from "@/shared/lib/identifiers";
+
+/**
+ * The Idempotency-Key a creating write may carry, so a form submitted twice (a retry after a
+ * lost response, a double click the pending state did not catch) records one thing.
+ *
+ * The key is minted once per render: a page puts `<IdempotencyKeyInput />` inside the form,
+ * the browser sends the same hidden value on every submit of that render, and the server action
+ * turns it into the header with `idempotencyHeaders(formData, operation)`. The header is sent
+ * only for an operation in `IDEMPOTENT_OPERATIONS`: the routes that read it, which answer 428
+ * without it and replay the first response for 24 hours (py-common's idempotency module). On
+ * `main` those are the business API's two creating POSTs. The other creating writes are safe to
+ * repeat without it because each has a natural key on the service:
+ *
+ *   profile registration     the GSTIN: a second POST returns the existing node, created false
+ *   profile entity           the PAN, the same way
+ *   profile location         the label under its registration
+ *   identity consents        append-only: a repeat adds a row and the state stays the same
+ *   rulebook documents       the sha256: 201 created, 200 unchanged, 409 when the metadata
+ *                            differs
+ *   rulebook mentions and    the document and the extractor: a repeat reports `unchanged`
+ *   relation candidates
+ *   notification preference  PUT by channel and recipient: a replacement, not an addition
+ *
+ * When another route starts reading the header, its operation joins `IDEMPOTENT_ROUTES` and
+ * nothing else changes; idempotency.test.ts fails until it does. A key that is not a UUID is
+ * ignored: the form value cannot inject an arbitrary header.
+ */
+export const IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
+
+/** The hidden input's name; the action reads it from the FormData under this key. */
+export const IDEMPOTENCY_KEY_FIELD = "idempotency_key";
+
+/**
+ * The operations whose route requires Idempotency-Key, named `<service>.<verb>`, with that
+ * route. idempotency.test.ts holds the list to the committed specs both ways: every route here
+ * declares the header, and every route that requires it is here.
+ */
+export const IDEMPOTENT_ROUTES = {
+  "profile.create-business": { service: "profile", method: "POST", path: "/v1/businesses" },
+  "profile.add-registration": {
+    service: "profile",
+    method: "POST",
+    path: "/v1/businesses/{business_id}/registrations",
+  },
+} as const satisfies Readonly<Record<string, RouteRef>>;
+
+export type IdempotentOperation = keyof typeof IDEMPOTENT_ROUTES;
+
+/** The names in `IDEMPOTENT_ROUTES`, the operations `idempotencyHeaders` sends a key for. */
+export const IDEMPOTENT_OPERATIONS: ReadonlySet<string> = new Set<string>(
+  Object.keys(IDEMPOTENT_ROUTES),
+);
+
+export function newIdempotencyKey(): string {
+  return randomUUID();
+}
+
+export function isIdempotentOperation(
+  operation: string,
+  operations: ReadonlySet<string> = IDEMPOTENT_OPERATIONS,
+): boolean {
+  return operations.has(operation);
+}
+
+/** The key the form carried, or undefined when absent or not a UUID. */
+export function idempotencyKeyOf(formData: FormData): string | undefined {
+  const value = formData.get(IDEMPOTENCY_KEY_FIELD);
+  return typeof value === "string" && isUuid(value) ? value : undefined;
+}
+
+/**
+ * `{ "Idempotency-Key": key }` when the operation is allow-listed and the form carried a valid
+ * key; `{}` otherwise. Spread into the call's headers: `headers: { ...idempotencyHeaders(...) }`.
+ */
+export function idempotencyHeaders(
+  formData: FormData,
+  operation: string,
+  operations: ReadonlySet<string> = IDEMPOTENT_OPERATIONS,
+): Readonly<Record<string, string>> {
+  if (!isIdempotentOperation(operation, operations)) return {};
+  const key = idempotencyKeyOf(formData);
+  return key === undefined ? {} : { [IDEMPOTENCY_KEY_HEADER]: key };
+}
+
+/** A hidden input holding one key for this render of the form; a server component. */
+export function IdempotencyKeyInput(): ReactElement {
+  return createElement("input", {
+    type: "hidden",
+    name: IDEMPOTENCY_KEY_FIELD,
+    value: newIdempotencyKey(),
+  });
+}
