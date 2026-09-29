@@ -1,4 +1,4 @@
-"""The citation, review and publish routes over HTTP: the write token, the publish flag, the
+"""The citation, review and publish routes over HTTP: the review token, the publish flag, the
 problem types, and a version taken from draft to published."""
 
 from collections.abc import Iterator
@@ -16,7 +16,7 @@ from domain_kernel.knowledge import RelationKind, RuleRelation
 from domain_kernel.status import RuleVersionStatus
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 from rulebook.main import build_app
-from rulebook.testing import WRITE_TOKEN, rulebook_settings
+from rulebook.testing import REVIEW_TOKEN, WRITE_TOKEN, rulebook_settings
 
 DIGEST = "51f5dbee1615f0ec47256abddb11061a348e81b883051e89733a06b062bcebed"
 DOC = document_id_for(DIGEST)
@@ -24,7 +24,8 @@ CLAUSE = clause_id_for(DOC, "en.p1")
 BASE = "/v1/rulebook"
 TEXT = "hereby extends the due date for furnishing the return in FORM GSTR-3B for March, 2026"
 QUOTE = "extends the due date for furnishing the return in FORM GSTR-3B for March, 2026"
-HEADERS = {"x-cw-write-token": WRITE_TOKEN}
+WRITE = {"x-cw-write-token": WRITE_TOKEN}
+REVIEW = {"x-cw-review-token": REVIEW_TOKEN}
 ANALYST = str(UUID(int=11))
 REVIEWER = str(UUID(int=12))
 PROBLEM = "urn:compliancewatch:problem:"
@@ -55,7 +56,7 @@ def store_of(app: FastAPI, client: TestClient) -> MemoryKnowledgeStore:
         "fetched_at": "2026-09-28T06:00:00Z",
         "clauses": [{"clause_ref": "en.p1", "text": TEXT, "page": 1}],
     }
-    assert client.put(f"{BASE}/documents/{DOC}", json=body, headers=HEADERS).status_code == 201
+    assert client.put(f"{BASE}/documents/{DOC}", json=body, headers=WRITE).status_code == 201
     memory: MemoryKnowledgeStore = app.state.wiring.unit_of_work
     return memory
 
@@ -64,7 +65,7 @@ def cite(client: TestClient, version: RuleVersionId, quote: str = QUOTE) -> Any:
     return client.put(
         f"{BASE}/rule-versions/{version}/citations",
         json={"citations": [{"clause_id": str(CLAUSE), "quote": quote}]},
-        headers=HEADERS,
+        headers=REVIEW,
     )
 
 
@@ -72,7 +73,7 @@ def step(client: TestClient, version: RuleVersionId, action: str, **body: object
     return client.post(
         f"{BASE}/rule-versions/{version}/{action}",
         json={"actor_id": ANALYST, **body},
-        headers=HEADERS,
+        headers=REVIEW,
     )
 
 
@@ -92,25 +93,40 @@ ROUTES = [
 
 
 @pytest.mark.parametrize(("method", "path", "body"), ROUTES)
-def test_every_route_needs_the_write_token(
+def test_every_route_needs_the_review_token(
     client: TestClient, method: str, path: str, body: dict[str, object]
 ) -> None:
     url = BASE + path.format(id=UUID(int=1))
-    response = client.request(method, url, json=body)
-    assert response.status_code == 401
-    assert response.json()["type"] == PROBLEM + "rulebook-write-token-invalid"
-    wrong = client.request(method, url, json=body, headers={"x-cw-write-token": "wrong"})
-    assert wrong.status_code == 401
+    for headers in ({}, {"x-cw-review-token": "wrong"}, WRITE, {"x-cw-review-token": WRITE_TOKEN}):
+        response = client.request(method, url, json=body, headers=headers)
+        assert (response.status_code, response.json()["type"]) == (
+            401,
+            PROBLEM + "rulebook-review-token-invalid",
+        )
+
+
+@pytest.mark.parametrize(("method", "path", "body"), ROUTES)
+def test_every_route_is_closed_without_a_review_token(
+    method: str, path: str, body: dict[str, object]
+) -> None:
+    with TestClient(build_app(rulebook_settings(rulebook_review_token=None))) as closed:
+        response = closed.request(
+            method, BASE + path.format(id=UUID(int=1)), json=body, headers={**WRITE, **REVIEW}
+        )
+    assert (response.status_code, response.json()["type"]) == (
+        503,
+        PROBLEM + "rulebook-reviews-disabled",
+    )
 
 
 @pytest.mark.parametrize("path", ["/rule-versions/{id}/publish", "/rule-versions/{id}/withdraw"])
 def test_publishing_answers_503_while_the_flag_is_off(client: TestClient, path: str) -> None:
     response = client.post(
-        BASE + path.format(id=UUID(int=1)), json={"actor_id": ANALYST}, headers=HEADERS
+        BASE + path.format(id=UUID(int=1)), json={"actor_id": ANALYST}, headers=REVIEW
     )
     assert response.status_code == 503
     assert response.json()["type"] == PROBLEM + "rulebook-publishing-disabled"
-    sweep = client.post(f"{BASE}/maintenance/transitions", json={}, headers=HEADERS)
+    sweep = client.post(f"{BASE}/maintenance/transitions", json={}, headers=REVIEW)
     assert (sweep.status_code, sweep.json()["type"]) == (
         503,
         PROBLEM + "rulebook-publishing-disabled",
@@ -151,7 +167,7 @@ def test_a_version_goes_from_draft_to_published(
         PROBLEM + "rulebook-duplicate-approver",
     )
     second = publishing.post(
-        f"{BASE}/rule-versions/{version}/approve", json={"actor_id": REVIEWER}, headers=HEADERS
+        f"{BASE}/rule-versions/{version}/approve", json={"actor_id": REVIEWER}, headers=REVIEW
     )
     assert second.json()["status"] == "approved"
     assert second.json()["seed_status"] == "reviewed"
@@ -177,7 +193,7 @@ def test_a_version_goes_from_draft_to_published(
     withdrawn = step(publishing, version, "withdraw", note="rescinded")
     assert withdrawn.json()["status"] == "withdrawn"
     assert [e["topic"] for e in withdrawn.json()["events"]] == ["rule.withdrawn"]
-    sweep = publishing.post(f"{BASE}/maintenance/transitions", json={}, headers=HEADERS)
+    sweep = publishing.post(f"{BASE}/maintenance/transitions", json={}, headers=REVIEW)
     assert sweep.status_code == 200
     assert sweep.json()["transitions"] == []
 
@@ -205,7 +221,7 @@ def test_problem_types_of_the_flow(publishing_app: FastAPI, publishing: TestClie
         PROBLEM + "rulebook-citations-missing",
     )
     ahead = publishing.post(
-        f"{BASE}/maintenance/transitions", json={"as_of": "2999-01-01"}, headers=HEADERS
+        f"{BASE}/maintenance/transitions", json={"as_of": "2999-01-01"}, headers=REVIEW
     )
     assert (ahead.status_code, ahead.json()["type"]) == (422, PROBLEM + "invariant-violation")
     _, live = store.add_rule("gstr1_monthly", status=RuleVersionStatus.PUBLISHED)
@@ -215,7 +231,7 @@ def test_problem_types_of_the_flow(publishing_app: FastAPI, publishing: TestClie
         PROBLEM + "rulebook-rule-version-not-editable",
     )
     empty = publishing.put(
-        f"{BASE}/rule-versions/{version}/citations", json={"citations": []}, headers=HEADERS
+        f"{BASE}/rule-versions/{version}/citations", json={"citations": []}, headers=REVIEW
     )
     assert empty.status_code == 422
 

@@ -76,13 +76,13 @@ from qa.wiring import Ports
 from rulebook.application.seed_loader import load_calendar
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 from rulebook.main import build_app as build_rulebook
-from rulebook.testing import WRITE_TOKEN, rulebook_settings
+from rulebook.testing import REVIEW_TOKEN, WRITE_TOKEN, rulebook_settings
 
 FIXTURES = Path(__file__).resolve().parents[4] / "services" / "pipeline" / "tests" / "fixtures"
 RULEBOOK: Final = "/v1/rulebook"
 PROFILE: Final = "/v1/profile"
 ASK: Final = "/v1/qa/ask"
-AUTH: Final = {"x-cw-write-token": WRITE_TOKEN}
+REVIEW: Final = {"x-cw-review-token": REVIEW_TOKEN}
 OWN_REF: Final = "01/2026-Central Tax"
 PUBLISHED_ON: Final = date(2026, 4, 21)
 """The date the notification bears (en.p2: "dated the 21st April, 2026")."""
@@ -230,7 +230,7 @@ def question_flow(*, publish: Sequence[str]) -> Iterator[Flow]:
                 rulebook.put(
                     f"{RULEBOOK}/rule-versions/{versions[rule_key]}/citations",
                     json={"citations": citations},
-                    headers=AUTH,
+                    headers=REVIEW,
                 )
             )
         changes: list[dict[str, Any]] = []
@@ -240,7 +240,7 @@ def question_flow(*, publish: Sequence[str]) -> Iterator[Flow]:
                     rulebook.post(
                         f"{RULEBOOK}/rule-versions/{versions[rule_key]}/{step}",
                         json=ANALYST,
-                        headers=AUTH,
+                        headers=REVIEW,
                     )
                 )
             changes.extend(answer["deadline_changes"])
@@ -356,7 +356,7 @@ def _stage_and_approve(
                 "decision": "create_entity",
                 "decided_by": "analyst",
             },
-            headers=AUTH,
+            headers=REVIEW,
         )
     )
     (candidate,) = _ok(rulebook.get(f"{RULEBOOK}/review/relations"))
@@ -368,7 +368,7 @@ def _stage_and_approve(
                 "target_rule_version_id": str(versions[MONTHLY]),
                 "decided_by": "analyst",
             },
-            headers=AUTH,
+            headers=REVIEW,
         )
     )
 

@@ -53,6 +53,7 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_IDENTITY_STORE`, `CW_PROFILE_STORE`, `CW_PROFILE_GSTIN_LOOKUP` | env | env | - | - | - | - | - | - | - |
 | `CW_RULEBOOK_STORE` | - | - | env | - | - | - | - | - | - |
 | `CW_RULEBOOK_WRITE_TOKEN` | - | - | secret | - | - | - | secret | - | - |
+| `CW_RULEBOOK_REVIEW_TOKEN` | - | - | secret (analyst actions; the workbench holds the same value) | - | - | - | - | - | - |
 | `CW_RULEBOOK_PUBLISH_ENABLED` | - | - | env (default `false`; owner regulatory-intelligence; removed once the workbench publishes in production and the obligation consumer of the rule events is live) | - | - | - | - | - | - |
 | `CW_PIPELINE_KNOWLEDGE_ENABLED` | - | - | - | - | - | - | env | - | - |
 | `CW_RULEBOOK_URL`, `CW_LLM_GATEWAY_URL` | - | - | - | - | - | - | env | env (qa) | - |
@@ -63,7 +64,10 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 
 The pipeline writes regulator documents to the rulebook (ADR-018), so deploy the rulebook before
 the pipeline and give both the same `CW_RULEBOOK_WRITE_TOKEN`; a rulebook without one refuses
-every write.
+every write. The analyst's actions (review decisions, relation approvals, citations, the version
+lifecycle and the sweep route) need a second secret, `CW_RULEBOOK_REVIEW_TOKEN`, with a different
+value: the pipeline never gets it, and a rulebook without it refuses those actions. It is a shared
+secret until the identity service exists, so the approver ids are asserted by the caller.
 
 The rulebook writes its rule events (`rule.published`, `rule.superseded`, `rule.withdrawn`,
 `rule.deadline_changed`) to its own `outbox_event` table, so it needs the outbox relay like the

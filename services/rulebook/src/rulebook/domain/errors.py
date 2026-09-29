@@ -43,6 +43,24 @@ class WritesDisabledError(DomainError, PermissionError):
         super().__init__("set CW_RULEBOOK_WRITE_TOKEN to accept writes")
 
 
+class ReviewTokenInvalidError(DomainError, PermissionError):
+    type_slug = "rulebook-review-token-invalid"
+    title = "Review token missing or wrong"
+
+    def __init__(self) -> None:
+        super().__init__("analyst actions need the x-cw-review-token header with the right token")
+
+
+class ReviewsDisabledError(DomainError, PermissionError):
+    """No review token is configured, so analyst actions are refused: the rulebook fails closed."""
+
+    type_slug = "rulebook-reviews-disabled"
+    title = "Rulebook analyst actions are not configured"
+
+    def __init__(self) -> None:
+        super().__init__("set CW_RULEBOOK_REVIEW_TOKEN to accept analyst actions")
+
+
 class UnknownClauseError(DomainError, ValueError):
     type_slug = "rulebook-clause-not-found"
     title = "Clause not in this document"

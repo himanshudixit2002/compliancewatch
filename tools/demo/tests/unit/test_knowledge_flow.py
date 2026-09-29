@@ -37,11 +37,11 @@ from pipeline.infrastructure.rulebook_client import HttpRulebook
 from pipeline.testing import ScriptedProvider
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 from rulebook.main import build_app
-from rulebook.testing import WRITE_TOKEN, rulebook_settings
+from rulebook.testing import REVIEW_TOKEN, WRITE_TOKEN, rulebook_settings
 
 FIXTURES = Path(__file__).resolve().parents[4] / "services" / "pipeline" / "tests" / "fixtures"
 BASE = "/v1/rulebook"
-AUTH = {"x-cw-write-token": WRITE_TOKEN}
+REVIEW = {"x-cw-review-token": REVIEW_TOKEN}
 MONTHLY = "gstr3b_monthly"
 ANSWER = json.dumps(
     {
@@ -138,7 +138,7 @@ async def test_mentions_relations_review_and_approval(app: FastAPI, client: Test
             "decision": "create_entity",
             "decided_by": "analyst",
         },
-        headers=AUTH,
+        headers=REVIEW,
     ).json()
     assert decided["relation_targets_updated"] == 1
     (candidate,) = client.get(f"{BASE}/review/relations").json()
@@ -151,7 +151,7 @@ async def test_mentions_relations_review_and_approval(app: FastAPI, client: Test
             "target_rule_version_id": str(monthly),
             "decided_by": "analyst",
         },
-        headers=AUTH,
+        headers=REVIEW,
     )
     assert approval.status_code == 200
     ((relation, candidate_id),) = store.rule_relations()

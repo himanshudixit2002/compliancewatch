@@ -3908,9 +3908,9 @@
         "operationId": "apply_transitions_v1_rulebook_maintenance_transitions_post",
         "parameters": [
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
             "in": "header",
-            "name": "x-cw-write-token",
+            "name": "x-cw-review-token",
             "required": false,
             "schema": {
               "anyOf": [
@@ -3921,8 +3921,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
-              "title": "X-Cw-Write-Token"
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "title": "X-Cw-Review-Token"
             }
           }
         ],
@@ -4242,9 +4242,9 @@
         "operationId": "decide_entity_group_v1_rulebook_review_entities_decisions_post",
         "parameters": [
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
             "in": "header",
-            "name": "x-cw-write-token",
+            "name": "x-cw-review-token",
             "required": false,
             "schema": {
               "anyOf": [
@@ -4255,8 +4255,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
-              "title": "X-Cw-Write-Token"
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "title": "X-Cw-Review-Token"
             }
           }
         ],
@@ -4511,9 +4511,9 @@
             }
           },
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
             "in": "header",
-            "name": "x-cw-write-token",
+            "name": "x-cw-review-token",
             "required": false,
             "schema": {
               "anyOf": [
@@ -4524,8 +4524,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
-              "title": "X-Cw-Write-Token"
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "title": "X-Cw-Review-Token"
             }
           }
         ],
@@ -4623,9 +4623,9 @@
             }
           },
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
             "in": "header",
-            "name": "x-cw-write-token",
+            "name": "x-cw-review-token",
             "required": false,
             "schema": {
               "anyOf": [
@@ -4636,8 +4636,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
-              "title": "X-Cw-Write-Token"
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "title": "X-Cw-Review-Token"
             }
           }
         ],
@@ -4902,9 +4902,9 @@
             }
           },
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
             "in": "header",
-            "name": "x-cw-write-token",
+            "name": "x-cw-review-token",
             "required": false,
             "schema": {
               "anyOf": [
@@ -4915,8 +4915,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
-              "title": "X-Cw-Write-Token"
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "title": "X-Cw-Review-Token"
             }
           }
         ],
@@ -5070,9 +5070,9 @@
             }
           },
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
             "in": "header",
-            "name": "x-cw-write-token",
+            "name": "x-cw-review-token",
             "required": false,
             "schema": {
               "anyOf": [
@@ -5083,8 +5083,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
-              "title": "X-Cw-Write-Token"
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "title": "X-Cw-Review-Token"
             }
           }
         ],
@@ -5182,9 +5182,9 @@
             }
           },
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
             "in": "header",
-            "name": "x-cw-write-token",
+            "name": "x-cw-review-token",
             "required": false,
             "schema": {
               "anyOf": [
@@ -5195,8 +5195,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
-              "title": "X-Cw-Write-Token"
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "title": "X-Cw-Review-Token"
             }
           }
         ],
@@ -5294,9 +5294,9 @@
             }
           },
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
             "in": "header",
-            "name": "x-cw-write-token",
+            "name": "x-cw-review-token",
             "required": false,
             "schema": {
               "anyOf": [
@@ -5307,8 +5307,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
-              "title": "X-Cw-Write-Token"
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "title": "X-Cw-Review-Token"
             }
           }
         ],
@@ -5406,9 +5406,9 @@
             }
           },
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
             "in": "header",
-            "name": "x-cw-write-token",
+            "name": "x-cw-review-token",
             "required": false,
             "schema": {
               "anyOf": [
@@ -5419,8 +5419,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
-              "title": "X-Cw-Write-Token"
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "title": "X-Cw-Review-Token"
             }
           }
         ],
@@ -5518,9 +5518,9 @@
             }
           },
           {
-            "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
             "in": "header",
-            "name": "x-cw-write-token",
+            "name": "x-cw-review-token",
             "required": false,
             "schema": {
               "anyOf": [
@@ -5531,8 +5531,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Shared secret for writes (CW_RULEBOOK_WRITE_TOKEN)",
-              "title": "X-Cw-Write-Token"
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN)",
+              "title": "X-Cw-Review-Token"
             }
           }
         ],

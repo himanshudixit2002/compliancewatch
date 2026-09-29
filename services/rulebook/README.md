@@ -64,14 +64,14 @@ literal pairs to the kernel.
 | --- | --- |
 | `PUT /v1/rulebook/documents/{document_id}` | Store a parsed document and its clauses. Needs `x-cw-write-token`. 201 when stored now, 200 when the same parse was stored already (with `metadata_differs` naming fields that differ; the stored row wins), 409 for a different parse of stored bytes, 422 when the id is not the digest's first half |
 | `GET /v1/rulebook/documents/{document_id}` | The document with its clauses in order and their ids |
-| `PUT /v1/rulebook/documents/{document_id}/mentions` | Align the mentions an extractor found: each is checked against the stored clause text at its span and must carry a canonical name; resolved ones go to `clause_entity`, the rest to `entity_review`. Needs the token |
-| `PUT /v1/rulebook/documents/{document_id}/relation-candidates` | Stage the relations a run proposed, with the run's issues; idempotent per proposal. Needs the token |
+| `PUT /v1/rulebook/documents/{document_id}/mentions` | Align the mentions an extractor found: each is checked against the stored clause text at its span and must carry a canonical name; resolved ones go to `clause_entity`, the rest to `entity_review`. Needs the write token |
+| `PUT /v1/rulebook/documents/{document_id}/relation-candidates` | Stage the relations a run proposed, with the run's issues; idempotent per proposal. Needs the write token |
 | `GET /v1/rulebook/review/entities` | Open review groups, one per (entity type, proposed name), with up to five examples |
 | `GET /v1/rulebook/review/entities/items` | Every open mention of one group with its review id |
-| `POST /v1/rulebook/review/entities/decisions` | Create the entity, add the name to an existing one, or reject the group; resolves every open mention of the group and points open candidates at the entity. A name that does not name one entity across documents (empty, or a section or rule without its statute) is decided mention by mention: the decision lists the `review_ids` it covers and adds no alias. Needs the token |
+| `POST /v1/rulebook/review/entities/decisions` | Create the entity, add the name to an existing one, or reject the group; resolves every open mention of the group and points open candidates at the entity. A name that does not name one entity across documents (empty, or a section or rule without its statute) is decided mention by mention: the decision lists the `review_ids` it covers and adds no alias. Needs the review token |
 | `GET /v1/rulebook/review/relations` | Relation candidates, open ones by default |
-| `POST /v1/rulebook/review/relations/{id}/approve` | Approve into a `rule_relation` from a draft rule version (and to the target version for supersedes, extends_deadline, corrects, withdraws); 409 `rulebook-rule-version-not-editable` when the version is not a draft; refuses supersession cycles. Needs the token |
-| `POST /v1/rulebook/review/relations/{id}/reject` | Reject with a reason. Needs the token |
+| `POST /v1/rulebook/review/relations/{id}/approve` | Approve into a `rule_relation` from a draft rule version (and to the target version for supersedes, extends_deadline, corrects, withdraws); 409 `rulebook-rule-version-not-editable` when the version is not a draft; refuses supersession cycles. Needs the review token |
+| `POST /v1/rulebook/review/relations/{id}/reject` | Reject with a reason. Needs the review token |
 | `GET /v1/rulebook/rules` | Rule keys with their latest title, the list the relation prompt may choose a rule from |
 | `GET /v1/rulebook/rule-versions?as_of=&rule_key=&regulator=&limit=&after=` | Versions in force on `as_of`: published or superseded, with `effective_from <= as_of < effective_to`; ordered by rule key, paged with `after` (a rule key) |
 | `GET /v1/rulebook/rule-versions/{id}` | One version in any status, with its citations |
@@ -80,17 +80,17 @@ literal pairs to the kernel.
 | `GET /v1/rulebook/entities/{id}` | An entity with its aliases |
 | `GET /v1/rulebook/entities/{id}/clauses?as_of=&limit=` | Clauses that mention the entity with the spans, newest document first (undated last); `as_of` keeps documents published on or before it |
 | `GET /v1/rulebook/relations?from_rule_version_id=&to_rule_version_id=&to_entity_id=&relation=&published_only=&limit=` | Rule relations by either end (at least one id, else 422), with the evidence clause ref and document and, for a deadline extension, the candidate's period and new due date. `published_only` (default true) keeps relations from versions that have been published |
-| `PUT /v1/rulebook/clauses/embeddings` | Store clause vectors from one model: `{model, dims: 512, items: [{clause_id, vector}]}` (1 to 256 items); returns `{stored, unchanged}`. A clause keeps its first embedding per model. A wrong `dims` is 422 `rulebook-embedding-dimension`, an unknown clause 422. Needs the token |
+| `PUT /v1/rulebook/clauses/embeddings` | Store clause vectors from one model: `{model, dims: 512, items: [{clause_id, vector}]}` (1 to 256 items); returns `{stored, unchanged}`. A clause keeps its first embedding per model. A wrong `dims` is 422 `rulebook-embedding-dimension`, an unknown clause 422. Needs the write token |
 | `GET /v1/rulebook/clauses/unembedded?model=&document_id=&limit=&after=` | Clauses with no embedding from `model`, in clause id order, with their document's metadata (for the embedding text) |
 | `POST /v1/rulebook/search` | Hybrid search, see below |
 | `GET /v1/rulebook/clauses/{id}` | A clause with its document's regulator, type, reference, title, URL, language and date; 404 `rulebook-clause-unknown` when no clause has the id |
-| `PUT /v1/rulebook/rule-versions/{id}/citations` | Cite clauses for a draft version (409 `rulebook-rule-version-not-editable` otherwise): `{citations: [{clause_id, quote}]}` (1 to 50). Every quote must match its clause (`quote_match_ratio >= 0.85`) and carry no number, form code or month name the clause lacks, else 422 `rulebook-citation-not-verified` and nothing is stored. Returns `{added, unchanged, citations}`; a citation's id derives from version, clause and quote. Needs the token |
-| `POST /v1/rulebook/rule-versions/{id}/submit` | Draft to in_review: `{actor_id, high_impact?, note?}`. Starts a new approval round; a high-impact tag, once set, stays. Needs the token |
-| `POST /v1/rulebook/rule-versions/{id}/return` | In_review or approved back to draft: `{actor_id, note?}`. The round's approvals no longer count and the seed status is needs_review again; the next submission starts a new round. Needs the token |
-| `POST /v1/rulebook/rule-versions/{id}/approve` | One approval: `{actor_id, note?}`. The one that completes the round (one approver, two different ones when high impact) moves the version to approved and its seed status to reviewed; the same approver twice is 409 `rulebook-duplicate-approver`. Needs the token |
-| `POST /v1/rulebook/rule-versions/{id}/publish` | Approved to published, applying the version's relations and writing the rule events; see below. `{actor_id, note?}`. Needs the token and the flag |
-| `POST /v1/rulebook/rule-versions/{id}/withdraw` | Published to withdrawn with `rule.withdrawn` (no withdrawing version, effective today); 409 `rulebook-replacements-pending` while a version it replaces has not moved yet. Needs the token and the flag |
-| `POST /v1/rulebook/maintenance/transitions` | The daily sweep, `{as_of?}` (today in India when empty, never later); returns the versions it moved and the events. Needs the token and the flag |
+| `PUT /v1/rulebook/rule-versions/{id}/citations` | Cite clauses for a draft version (409 `rulebook-rule-version-not-editable` otherwise): `{citations: [{clause_id, quote}]}` (1 to 50). Every quote must match its clause (`quote_match_ratio >= 0.85`) and carry no number, form code or month name the clause lacks, else 422 `rulebook-citation-not-verified` and nothing is stored. Returns `{added, unchanged, citations}`; a citation's id derives from version, clause and quote. Needs the review token |
+| `POST /v1/rulebook/rule-versions/{id}/submit` | Draft to in_review: `{actor_id, high_impact?, note?}`. Starts a new approval round; a high-impact tag, once set, stays. Needs the review token |
+| `POST /v1/rulebook/rule-versions/{id}/return` | In_review or approved back to draft: `{actor_id, note?}`. The round's approvals no longer count and the seed status is needs_review again; the next submission starts a new round. Needs the review token |
+| `POST /v1/rulebook/rule-versions/{id}/approve` | One approval: `{actor_id, note?}`. The one that completes the round (one approver, two different ones when high impact) moves the version to approved and its seed status to reviewed; the same approver twice is 409 `rulebook-duplicate-approver`. Needs the review token |
+| `POST /v1/rulebook/rule-versions/{id}/publish` | Approved to published, applying the version's relations and writing the rule events; see below. `{actor_id, note?}`. Needs the review token and the flag |
+| `POST /v1/rulebook/rule-versions/{id}/withdraw` | Published to withdrawn with `rule.withdrawn` (no withdrawing version, effective today); 409 `rulebook-replacements-pending` while a version it replaces has not moved yet. Needs the review token and the flag |
+| `POST /v1/rulebook/maintenance/transitions` | The daily sweep, `{as_of?}` (today in India when empty, never later); returns the versions it moved and the events. Needs the review token and the flag |
 
 Nothing is aligned by fuzzy matching and nothing is created without an analyst (ADR-017). With
 telemetry on, the service reports the gauges `rulebook_entity_review_open_items{entity_type}` and
@@ -103,9 +103,19 @@ The read routes need no token. A superseded version stays in force for the dates
 replacement took effect, so a question about a past date is answered from the version in force
 then.
 
-Writes fail closed: without `CW_RULEBOOK_WRITE_TOKEN` every write is a 503, and a missing or wrong
-token is a 401. Publishing, withdrawing and the sweep also need `CW_RULEBOOK_PUBLISH_ENABLED=true`
-(default off, 503 `rulebook-publishing-disabled`); citing and review work without it. The spec is committed at `packages/contracts/openapi/rulebook.v1.json`
+Two shared secrets guard the writes, and each fails closed. The pipeline's writes (documents,
+mentions, relation candidates, clause embeddings) need `CW_RULEBOOK_WRITE_TOKEN` in
+`x-cw-write-token`: without it configured they are a 503 `rulebook-writes-disabled`, and a missing
+or wrong token is a 401 `rulebook-write-token-invalid`. An analyst's actions (entity review
+decisions, relation approvals and rejections, citations, submit, return, approve, publish,
+withdraw and the sweep) need `CW_RULEBOOK_REVIEW_TOKEN` in `x-cw-review-token` instead: 503
+`rulebook-reviews-disabled` without it, 401 `rulebook-review-token-invalid` for a missing or wrong
+one. The write token does not open the analyst's routes, so a leaked pipeline secret cannot
+approve or publish a rule; give the two different values. The review token is still a shared
+secret, not an identity: the `actor_id` and `decided_by` in the bodies are asserted by the caller
+until the identity service issues them. Publishing, withdrawing and the sweep also need
+`CW_RULEBOOK_PUBLISH_ENABLED=true` (default off, 503 `rulebook-publishing-disabled`); citing and
+review work without it. The spec is committed at `packages/contracts/openapi/rulebook.v1.json`
 (`make openapi SERVICE=rulebook`) and pinned by `tests/contract/test_openapi.py`.
 `CW_RULEBOOK_STORE=memory` runs the service without a database (tests and demos).
 
@@ -212,12 +222,12 @@ composition taxpayer) and check every due date the recurrences produce.
 
 ```
 src/rulebook/
-  api/             # routers (documents, review, rule_versions, publication, graph, search), request/response schemas, the write-token dependency
+  api/             # routers (documents, review, rule_versions, publication, graph, search), request/response schemas, the write-token and review-token dependencies
   application/     # use cases: documents.py, alignment.py, review.py, relations.py, rule_versions.py, publication.py, graph.py, search.py; seed_loader.py
   domain/          # documents.py, alignment.py, review.py, relations.py, rule_versions.py, publication.py (the planner), events.py, graph.py, search.py, runs.py, ids.py, errors.py, repository.py, seed.py
   infrastructure/  # models.py (with the Vector column type), knowledge_repository.py (Postgres unit of work and outbox sink), memory.py, seed_repository.py, review_metrics.py (the review queue gauges)
-  settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN, CW_RULEBOOK_PUBLISH_ENABLED
-  testing.py       # rulebook_settings() for tests and demos: memory store, known token
+  settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN, CW_RULEBOOK_REVIEW_TOKEN, CW_RULEBOOK_PUBLISH_ENABLED
+  testing.py       # rulebook_settings() for tests and demos: memory store, known tokens (WRITE_TOKEN, REVIEW_TOKEN)
   wiring.py        # what the api layer gets from the composition root
   seed.py          # rulebook-seed command
   transitions.py   # rulebook-transitions command (the daily sweep)

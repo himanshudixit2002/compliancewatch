@@ -13,8 +13,15 @@ class RulebookSettings(Settings):
     """``rulebook_store`` picks the store: memory for tests and demos, postgres otherwise.
 
     ``rulebook_write_token`` is the shared secret the pipeline sends in ``x-cw-write-token`` to
-    write regulator documents. Unset, every write is refused (503): the rulebook fails closed,
-    because its tables are shared by every tenant.
+    write regulator documents, mentions, relation candidates and clause embeddings. Unset, every
+    such write is refused (503): the rulebook fails closed, because its tables are shared by every
+    tenant.
+
+    ``rulebook_review_token`` is the shared secret the analyst workbench sends in
+    ``x-cw-review-token`` for review decisions, relation approvals, citations, the version
+    lifecycle and the sweep. The write token does not open those routes; unset, they are refused
+    (503). It is a shared secret, not an identity: the approver ids in the bodies are asserted by
+    the caller until the identity service exists.
 
     ``rulebook_publish_enabled`` turns on publishing and withdrawing rule versions and the daily
     transition sweep (``CW_RULEBOOK_PUBLISH_ENABLED``, default off; owner
@@ -26,4 +33,5 @@ class RulebookSettings(Settings):
 
     rulebook_store: Store = "postgres"
     rulebook_write_token: SecretStr | None = None
+    rulebook_review_token: SecretStr | None = None
     rulebook_publish_enabled: bool = False

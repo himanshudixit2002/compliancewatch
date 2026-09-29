@@ -92,12 +92,12 @@ from rulebook.application.seed_loader import load_calendar
 from rulebook.domain.seed import SeedRule
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 from rulebook.main import build_app as build_rulebook
-from rulebook.testing import WRITE_TOKEN, rulebook_settings
+from rulebook.testing import REVIEW_TOKEN, WRITE_TOKEN, rulebook_settings
 
 WORLD_FILE: Final = Path("qa") / "kag" / "world.yaml"
 RULEBOOK: Final = "/v1/rulebook"
 PROFILE: Final = "/v1/profile"
-AUTH: Final = {"x-cw-write-token": WRITE_TOKEN}
+REVIEW: Final = {"x-cw-review-token": REVIEW_TOKEN}
 REGULATOR: Final = "CBIC"
 RULE_REGULATOR: Final = "cbic"
 MEDIA_TYPE: Final = "application/pdf"
@@ -487,7 +487,7 @@ class _Builder:
                         "decision": "create_entity",
                         "decided_by": DECIDED_BY,
                     },
-                    headers=AUTH,
+                    headers=REVIEW,
                 ),
                 f"create entity {entity.entity_type.value} {entity.name}",
             )
@@ -507,7 +507,7 @@ class _Builder:
                 self.rulebook.put(
                     f"{RULEBOOK}/rule-versions/{self.versions[rule.rule_key]}/citations",
                     json={"citations": citations},
-                    headers=AUTH,
+                    headers=REVIEW,
                 ),
                 f"cite {rule.rule_key}",
             )
@@ -518,7 +518,7 @@ class _Builder:
             for step in ("submit", "approve", "publish"):
                 answer = _ok(
                     self.rulebook.post(
-                        f"{RULEBOOK}/rule-versions/{version}/{step}", json=actor, headers=AUTH
+                        f"{RULEBOOK}/rule-versions/{version}/{step}", json=actor, headers=REVIEW
                     ),
                     f"{step} {rule.rule_key}",
                 )
@@ -589,7 +589,7 @@ class _Builder:
                 self.rulebook.post(
                     f"{RULEBOOK}/review/relations/{found[0]['candidate_id']}/approve",
                     json=body,
-                    headers=AUTH,
+                    headers=REVIEW,
                 ),
                 f"approve {relation.relation_case} {relation.evidence_clause_ref}",
             )

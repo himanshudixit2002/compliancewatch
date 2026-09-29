@@ -1,6 +1,6 @@
 """Citations, review and publication of rule versions, and the daily transition sweep. Every
-route writes, so every route needs the write token; publishing, withdrawing and the sweep also
-need ``CW_RULEBOOK_PUBLISH_ENABLED``."""
+route is an analyst's action, so every route needs the review token; publishing, withdrawing and
+the sweep also need ``CW_RULEBOOK_PUBLISH_ENABLED``."""
 
 from uuid import UUID
 
@@ -8,7 +8,7 @@ from fastapi import APIRouter
 
 from domain_kernel.ids import RuleVersionId, UserId
 from py_common.problems import problem_responses
-from rulebook.api.deps import Wired, WriteAccess
+from rulebook.api.deps import ReviewAccess, Wired
 from rulebook.api.publication_schemas import (
     ActorIn,
     CitationsIn,
@@ -20,7 +20,7 @@ from rulebook.api.publication_schemas import (
     TransitionsOut,
 )
 
-router = APIRouter(tags=["publication"], dependencies=[WriteAccess])
+router = APIRouter(tags=["publication"], dependencies=[ReviewAccess])
 
 
 @router.put(

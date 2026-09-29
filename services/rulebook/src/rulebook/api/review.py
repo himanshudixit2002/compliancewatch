@@ -1,5 +1,6 @@
-"""Knowledge written by the pipeline (mentions, relation candidates) and the analyst's review of
-it (entity groups, candidate approvals), plus the rule list the pipeline offers the model."""
+"""Knowledge written by the pipeline (mentions, relation candidates; the write token) and the
+analyst's review of it (entity groups, candidate approvals; the review token), plus the rule list
+the pipeline offers the model."""
 
 from typing import Annotated
 from uuid import UUID
@@ -9,7 +10,7 @@ from fastapi import APIRouter, Query
 from domain_kernel.ids import CanonicalEntityId, DocumentId, RuleVersionId
 from domain_kernel.knowledge import EntityType
 from py_common.problems import problem_responses
-from rulebook.api.deps import Wired, WriteAccess
+from rulebook.api.deps import ReviewAccess, Wired, WriteAccess
 from rulebook.api.schemas import (
     AlignmentOut,
     ApprovalOut,
@@ -91,7 +92,7 @@ def list_group_items(
     "/review/entities/decisions",
     summary="Create the entity, add the name to one, or reject every open mention of a group",
     tags=["review"],
-    dependencies=[WriteAccess],
+    dependencies=[ReviewAccess],
     responses=problem_responses(401, 404, 409, 422, 503),
 )
 def decide_entity_group(body: DecisionIn, wired: Wired) -> GroupDecisionOut:
@@ -130,7 +131,7 @@ def list_relation_candidates(
     "/review/relations/{candidate_id}/approve",
     summary="Approve a candidate into a rule relation from a draft rule version",
     tags=["review"],
-    dependencies=[WriteAccess],
+    dependencies=[ReviewAccess],
     responses=problem_responses(401, 404, 409, 422, 503),
 )
 def approve_relation(candidate_id: UUID, body: ApproveIn, wired: Wired) -> ApprovalOut:
@@ -150,7 +151,7 @@ def approve_relation(candidate_id: UUID, body: ApproveIn, wired: Wired) -> Appro
     "/review/relations/{candidate_id}/reject",
     summary="Reject a candidate with a reason",
     tags=["review"],
-    dependencies=[WriteAccess],
+    dependencies=[ReviewAccess],
     responses=problem_responses(401, 404, 409, 422, 503),
 )
 def reject_relation(candidate_id: UUID, body: RejectIn, wired: Wired) -> RelationCandidateOut:

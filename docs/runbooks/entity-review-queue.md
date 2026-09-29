@@ -36,7 +36,8 @@ shows as missing data rather than as an empty queue.
 
 - Decide the largest groups first: `POST /v1/rulebook/review/entities/decisions` creates the
   entity, adds the name as an alias of an existing one, or rejects the group, and resolves every
-  open mention of it in one transaction. It needs `x-cw-write-token`.
+  open mention of it in one transaction. It needs `x-cw-review-token` (`CW_RULEBOOK_REVIEW_TOKEN`);
+  the pipeline's write token is refused.
 - `unqualified` and `empty_name` groups are decided mention by mention:
   `GET /v1/rulebook/review/entities/items?entity_type=<type>&proposed_name=<name>` returns the
   review ids, and the decision lists the ones it covers in `review_ids`.
