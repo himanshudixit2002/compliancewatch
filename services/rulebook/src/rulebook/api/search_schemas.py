@@ -86,6 +86,8 @@ class SearchHitOut(BaseModel):
     text: str
     regulator: str
     doc_type: DocumentType
+    external_ref: str = Field(description="The document's number, such as 01/2026-Central Tax")
+    title: str
     published_at: date | None
     score: float = Field(description="Reciprocal rank fusion over the two legs")
     lexical_rank: int | None = Field(description="1-based rank in the lexical leg, if in it")
@@ -107,6 +109,8 @@ class SearchHitOut(BaseModel):
             text=clause.text,
             regulator=document.regulator,
             doc_type=document.doc_type,
+            external_ref=document.external_ref,
+            title=document.title,
             published_at=document.published_at,
             score=hit.score,
             lexical_rank=hit.lexical_rank,

@@ -2659,6 +2659,11 @@
             "title": "Document Id",
             "type": "string"
           },
+          "external_ref": {
+            "description": "The document's number, such as 01/2026-Central Tax",
+            "title": "External Ref",
+            "type": "string"
+          },
           "lexical_rank": {
             "anyOf": [
               {
@@ -2696,6 +2701,10 @@
             "title": "Text",
             "type": "string"
           },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
           "vector_rank": {
             "anyOf": [
               {
@@ -2716,6 +2725,8 @@
           "text",
           "regulator",
           "doc_type",
+          "external_ref",
+          "title",
           "published_at",
           "score",
           "lexical_rank",

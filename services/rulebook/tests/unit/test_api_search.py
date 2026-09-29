@@ -43,6 +43,8 @@ def registered(client: TestClient) -> TestClient:
         "sha256": DIGEST,
         "regulator": "CBIC",
         "doc_type": "notification",
+        "external_ref": "01/2026-Central Tax",
+        "title": "Due date extended",
         "url": "https://example.invalid/n.pdf",
         "language": "en",
         "media_type": "application/pdf",
@@ -134,12 +136,16 @@ def test_search_returns_fused_hits(registered: TestClient) -> None:
         "text",
         "regulator",
         "doc_type",
+        "external_ref",
+        "title",
         "published_at",
         "score",
         "lexical_rank",
         "vector_rank",
         "cited_by",
     }
+    assert hits[0]["external_ref"] == "01/2026-Central Tax"
+    assert hits[0]["title"] == "Due date extended"
     assert hits[0]["cited_by"] == []
     lexical_only = registered.post(f"{BASE}/search", json={"text": "due date"})
     assert [hit["clause_ref"] for hit in lexical_only.json()] == ["en.p1"]

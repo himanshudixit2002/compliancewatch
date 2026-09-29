@@ -121,11 +121,11 @@ draw a pool of `min(200, max(40, 4k))` clauses:
 Reciprocal rank fusion (`1 / (60 + rank)` summed over the legs, ties by clause id) keeps the `k`
 best. The filters apply to both legs: `regulator`, `doc_types`, and `as_of`, which keeps documents
 published on or before it (undated documents are left out then). Each hit carries the clause,
-its document's regulator, type and date, `score`, `lexical_rank` and `vector_rank` (null when the
-leg did not find it) and `cited_by`: the published or superseded versions citing the clause with
-a verified quote, in force on `as_of` when it is given. The rulebook never calls a model: the
-writer of `PUT /clauses/embeddings` and the reader sending a query vector both embed through the
-LLM gateway.
+its document's regulator, type, number (`external_ref`), title and date, `score`, `lexical_rank`
+and `vector_rank` (null when the leg did not find it) and `cited_by`: the published or
+superseded versions citing the clause with a verified quote, in force on `as_of` when it is
+given. The rulebook never calls a model: the writer of `PUT /clauses/embeddings` and the reader
+sending a query vector both embed through the LLM gateway.
 
 ## Publish lifecycle
 
