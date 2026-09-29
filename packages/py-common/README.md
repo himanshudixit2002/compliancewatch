@@ -98,9 +98,9 @@ the header's `kid` names the signing key. `CW_AUTH_MODE` decides what a service 
 `/v1/identity/.well-known/jwks.json`), cached for an hour; a token naming a key the cache lacks
 fetches once more, at most every 30 seconds, and cached keys stay in use while identity is
 unreachable. With nothing cached and identity unreachable, a token cannot be checked:
-`auth-keys-unavailable` (503). `CW_AUTH_ISSUER`, `CW_AUTH_AUDIENCE` and
-`CW_AUTH_LEEWAY_SECONDS` (30) complete the checks. Only ES256 is accepted, so `none` and HS256
-tokens are refused whatever key they name.
+`auth-keys-unavailable` (503), answered at once without another fetch for the next 5 seconds.
+`CW_AUTH_ISSUER`, `CW_AUTH_AUDIENCE` and `CW_AUTH_LEEWAY_SECONDS` (30) complete the checks. Only
+ES256 is accepted, so `none` and HS256 tokens are refused whatever key they name.
 
 A route reads its caller through dependencies in `py_common.auth.fastapi`:
 

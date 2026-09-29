@@ -49,6 +49,9 @@ UNKNOWN_KID_REFETCH_SECONDS: Final = 30.0
 key ids cannot turn every request into a fetch."""
 FAILED_FETCH_RETRY_SECONDS: Final = 30.0
 """After a failed fetch, cached keys are used this long before the next attempt."""
+UNAVAILABLE_RETRY_SECONDS: Final = 5.0
+"""After a failed fetch with no keys cached, requests fail at once this long before the next
+attempt, so an identity outage costs one fetch per interval rather than one per request."""
 
 log = get_logger(__name__)
 
@@ -214,10 +217,11 @@ class JwksUrlSource:
 
     A token naming a key the cache does not hold causes one more fetch, at most once every
     ``refetch_seconds``. When a fetch fails and keys are cached, the cached keys stay in use (so
-    sessions survive an identity outage) and the next attempt waits ``retry_seconds``; with
-    nothing cached the failure is ``AuthKeysUnavailableError``. Verification runs in worker
-    threads, so the cache is guarded by a lock. ``client`` lets tests pass an
-    ``httpx2.MockTransport``.
+    sessions survive an identity outage) and the next attempt waits ``retry_seconds``. With
+    nothing cached the failure is ``AuthKeysUnavailableError``, and every request in the next
+    ``unavailable_retry_seconds`` gets it at once, without a fetch: requests do not queue on the
+    lock behind fetches that time out. Verification runs in worker threads, so the cache is
+    guarded by a lock. ``client`` lets tests pass an ``httpx2.MockTransport``.
     """
 
     def __init__(
@@ -228,6 +232,7 @@ class JwksUrlSource:
         cache_seconds: float = JWKS_CACHE_SECONDS,
         refetch_seconds: float = UNKNOWN_KID_REFETCH_SECONDS,
         retry_seconds: float = FAILED_FETCH_RETRY_SECONDS,
+        unavailable_retry_seconds: float = UNAVAILABLE_RETRY_SECONDS,
         timeout_seconds: float = 5.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -236,6 +241,7 @@ class JwksUrlSource:
         self._cache_seconds = cache_seconds
         self._refetch_seconds = refetch_seconds
         self._retry_seconds = retry_seconds
+        self._unavailable_retry_seconds = unavailable_retry_seconds
         self._timeout_seconds = timeout_seconds
         self._clock = clock
         self._lock = threading.Lock()
@@ -250,6 +256,11 @@ class JwksUrlSource:
     def key_for(self, kid: str) -> PyJWK | None:
         with self._lock:
             now = self._clock()
+            if self._keys is None and now < self._next_fetch:
+                raise AuthKeysUnavailableError(
+                    f"the signing keys at {self._url} could not be fetched; the next attempt is "
+                    f"in {self._next_fetch - now:.0f} s"
+                )
             if self._keys is None or now >= self._next_fetch:
                 self._refresh(now)
             keys = self._keys or {}
@@ -266,11 +277,13 @@ class JwksUrlSource:
         try:
             keys = self._fetch()
         except (httpx2.HTTPError, ValueError) as exc:
+            log.warning("jwks_fetch_failed", url=self._url, error=type(exc).__name__)
             if self._keys is None:
+                # Counted from the failure: a fetch that timed out took its time already.
+                self._next_fetch = self._clock() + self._unavailable_retry_seconds
                 raise AuthKeysUnavailableError(
                     f"the signing keys at {self._url} could not be fetched"
                 ) from exc
-            log.warning("jwks_fetch_failed", url=self._url, error=type(exc).__name__)
             self._next_fetch = now + self._retry_seconds
             return
         self._keys = keys

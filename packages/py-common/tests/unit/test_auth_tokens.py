@@ -491,6 +491,31 @@ def test_an_unreachable_key_source_raises_keys_unavailable(
         verifier.verify(token)
 
 
+def test_with_nothing_cached_a_failed_fetch_is_not_repeated_for_every_request(
+    keys: KeySet,
+) -> None:
+    endpoint, clock = _Jwks(keys), _Clock()
+    endpoint.failure = httpx2.ConnectError("identity is down")
+    verifier = _url_verifier(endpoint, clock)
+    token = _issuer(keys).issue(_owner(), timedelta(minutes=10)).token
+    with pytest.raises(AuthKeysUnavailableError, match="could not be fetched"):
+        verifier.verify(token)
+    assert endpoint.fetches == 1
+    clock.now += 4
+    for _ in range(3):
+        with pytest.raises(AuthKeysUnavailableError, match="next attempt is in 1 s"):
+            verifier.verify(token)
+    assert endpoint.fetches == 1, "requests fail at once until the next attempt is due"
+    clock.now += 1
+    with pytest.raises(AuthKeysUnavailableError):
+        verifier.verify(token)
+    assert endpoint.fetches == 2
+    clock.now += 5
+    endpoint.failure = None
+    assert verifier.verify(token) == _owner()
+    assert endpoint.fetches == 3
+
+
 def test_a_malformed_key_set_document_is_unavailable(keys: KeySet) -> None:
     client = httpx2.Client(
         transport=httpx2.MockTransport(lambda _: httpx2.Response(200, content=b"<html>"))
