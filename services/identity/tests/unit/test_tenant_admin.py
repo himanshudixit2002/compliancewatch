@@ -2,6 +2,7 @@
 the routes, in header and token mode."""
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -30,8 +31,9 @@ from identity.domain.errors import (
     UserNotFoundError,
 )
 from identity.domain.events import RoleChangeReason, UserRoleChanged
-from identity.domain.tenancy import Contact, TenantKind
-from identity.infrastructure.memory import MemoryStore
+from identity.domain.repository import UnitOfWork
+from identity.domain.tenancy import Contact, TenantKind, User
+from identity.infrastructure.memory import MemoryStore, MemoryUnitOfWork, MemoryUserRepository
 from identity.infrastructure.minter import IssuerMinter
 from identity.infrastructure.providers.fake import FakeIdentityProvider
 from identity.main import build_app
@@ -213,6 +215,46 @@ def test_an_unknown_user_is_not_found(team: Team) -> None:
         team.change.run(team.tenant.id, team.as_owner, UserId.new(), [Role.STAFF])
     with pytest.raises(UserNotFoundError):
         team.disable.run(team.tenant.id, team.as_owner, UserId.new())
+
+
+class EveryTenantsUsers(MemoryUserRepository):
+    """User reads that ignore the tenant, as a database role that bypasses row-level security
+    would see them without the queries' own filter."""
+
+    def get(self, user_id: UserId) -> User | None:
+        return self._users.get(user_id)
+
+    def list(self) -> list[User]:
+        return sorted(self._users.values(), key=lambda user: (user.created_at, user.id.value))
+
+
+class BypassingStore(MemoryStore):
+    @contextmanager
+    def _open(self, tenant_id: TenantId | None) -> Iterator[UnitOfWork]:
+        uow = MemoryUnitOfWork(self, tenant_id)
+        uow.users = EveryTenantsUsers(uow._users, tenant_id)
+        yield uow
+        uow.commit(self)
+
+
+def test_admins_reach_only_their_own_tenants_users_whatever_the_store_returns() -> None:
+    store = BypassingStore()
+    provider = FakeIdentityProvider()
+    issuer = TestIssuer()
+    minter = IssuerMinter(
+        TokenIssuer(issuer.keys, issuer=issuer.issuer_name, audience=issuer.audience)
+    )
+    create = CreateTenant(store, provider, minter, ttl=timedelta(minutes=10), clock=lambda: NOW)
+    acme = create.run(provider.issue(phone=OWNER_PHONE), TenantKind.BUSINESS, "Acme Traders")
+    other = create.run(provider.issue(phone=STAFF_PHONE), TenantKind.BUSINESS, "Other Traders")
+    as_acme = acme.session.principal
+    listed = ListUsers(store).run(acme.tenant.id, as_acme)
+    assert [user.id for user in listed] == [acme.user.id]
+    with pytest.raises(UserNotFoundError):
+        ChangeRoles(store).run(acme.tenant.id, as_acme, other.user.id, [Role.STAFF])
+    with pytest.raises(UserNotFoundError):
+        DisableUser(store).run(acme.tenant.id, as_acme, other.user.id)
+    assert store.users[other.user.id] == other.user
 
 
 # ---------------------------------------------------------------- the routes

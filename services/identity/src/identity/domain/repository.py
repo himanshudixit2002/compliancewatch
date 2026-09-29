@@ -21,7 +21,9 @@ from identity.domain.tenancy import SubjectEntry, Tenant, User
 class TenantRepository(Protocol):
     def add(self, tenant: Tenant) -> None: ...
 
-    def get(self, tenant_id: TenantId) -> Tenant | None: ...
+    def get(self, tenant_id: TenantId) -> Tenant | None:
+        """The unit of work's own tenant when it has this id; None for any other."""
+        ...
 
 
 class UserRepository(Protocol):
@@ -31,7 +33,9 @@ class UserRepository(Protocol):
         """Store the changed roles, status, display name and session version of ``user``."""
         ...
 
-    def get(self, user_id: UserId) -> User | None: ...
+    def get(self, user_id: UserId) -> User | None:
+        """The user with this id in the unit of work's tenant; None for another tenant's."""
+        ...
 
     def list(self) -> list[User]:
         """The tenant's users, oldest first."""

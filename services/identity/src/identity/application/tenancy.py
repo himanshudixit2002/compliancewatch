@@ -177,6 +177,16 @@ def _changed_by(admin: User | None) -> UserId | None:
     return None if admin is None else admin.id
 
 
+def member(uow: UnitOfWork, tenant: Tenant, user_id: UserId) -> User:
+    """The user of ``tenant`` with this id. A user of another tenant is not found either: the
+    store scopes its reads to the tenant, and this check keeps holding where row-level security
+    does not apply (a database role that bypasses it)."""
+    user = uow.users.get(user_id)
+    if user is None or user.tenant_id != tenant.id:
+        raise UserNotFoundError(str(user_id))
+    return user
+
+
 def check_grant(actor: Principal, granted: Iterable[Role]) -> None:
     """Refuse an anonymous ``actor`` granting any of ``SIGNED_IN_GRANTS``."""
     refused = sorted(role.value for role in SIGNED_IN_GRANTS.intersection(granted))
@@ -194,7 +204,7 @@ class ListUsers:
     def run(self, tenant_id: TenantId, actor: Principal) -> list[User]:
         with self._unit_of_work(tenant_id) as uow:
             admin_context(uow, tenant_id, actor)
-            return uow.users.list()
+            return [user for user in uow.users.list() if user.tenant_id == tenant_id]
 
 
 class InviteUser:
@@ -284,9 +294,7 @@ class ChangeRoles:
         wanted = frozenset(roles)
         with self._unit_of_work(tenant_id) as uow:
             tenant, admin = admin_context(uow, tenant_id, actor)
-            user = uow.users.get(user_id)
-            if user is None:
-                raise UserNotFoundError(str(user_id))
+            user = member(uow, tenant, user_id)
             check_grant(actor, wanted - user.roles)
             changed = user.with_roles(wanted, tenant, colleagues=uow.users.list(), at=self._clock())
             if changed is user:
@@ -317,9 +325,7 @@ class DisableUser:
         """The user, disabled; a disabled user stays as it is and publishes nothing."""
         with self._unit_of_work(tenant_id) as uow:
             tenant, admin = admin_context(uow, tenant_id, actor)
-            user = uow.users.get(user_id)
-            if user is None:
-                raise UserNotFoundError(str(user_id))
+            user = member(uow, tenant, user_id)
             disabled = user.disabled(tenant, colleagues=uow.users.list(), at=self._clock())
             if disabled is user:
                 return user

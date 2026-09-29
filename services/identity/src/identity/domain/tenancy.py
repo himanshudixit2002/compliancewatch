@@ -237,8 +237,9 @@ class User:
         self, roles: Iterable[Role], tenant: Tenant, *, colleagues: Iterable["User"], at: datetime
     ) -> Self:
         """This user holding ``roles`` instead, with the session version bumped. The same roles
-        again change nothing. ``colleagues`` are the tenant's other users: the last active admin
-        cannot give up the admin role."""
+        again change nothing. ``tenant`` is the user's own; ``colleagues`` are the tenant's other
+        users: the last active admin cannot give up the admin role."""
+        self._require_own(tenant)
         wanted = allowed_roles(tenant.kind, roles)
         if not self.is_active:
             raise UserDisabledError()
@@ -249,8 +250,9 @@ class User:
         return replace(self, roles=wanted, session_version=self.session_version + 1, updated_at=at)
 
     def disabled(self, tenant: Tenant, *, colleagues: Iterable["User"], at: datetime) -> Self:
-        """This user disabled, with the session version bumped; the last active admin cannot be
-        disabled. A disabled user stays disabled."""
+        """This user disabled, with the session version bumped; the last active admin of
+        ``tenant``, the user's own, cannot be disabled. A disabled user stays disabled."""
+        self._require_own(tenant)
         if not self.is_active:
             return self
         self._check_not_last_admin(tenant, colleagues)
@@ -260,6 +262,13 @@ class User:
             session_version=self.session_version + 1,
             updated_at=at,
         )
+
+    def _require_own(self, tenant: Tenant) -> None:
+        """Only the user's own tenant changes the user; any other would skip its admin checks."""
+        if tenant.id != self.tenant_id:
+            raise InvariantViolationError(
+                f"user {self.id} belongs to tenant {self.tenant_id}, not {tenant.id}"
+            )
 
     def _check_not_last_admin(self, tenant: Tenant, colleagues: Iterable["User"]) -> None:
         if not self.is_admin_of(tenant):

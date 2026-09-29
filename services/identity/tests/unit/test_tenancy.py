@@ -233,6 +233,15 @@ def test_an_admin_of_another_tenant_does_not_count() -> None:
         owner.disabled(acme, colleagues=[user(other, subject="subject-9")], at=LATER)
 
 
+def test_only_the_users_own_tenant_changes_them() -> None:
+    acme, other = tenant(), tenant(name="Other")
+    owner = user(acme)
+    with pytest.raises(InvariantViolationError, match="belongs to tenant"):
+        owner.with_roles([Role.STAFF], other, colleagues=[], at=LATER)
+    with pytest.raises(InvariantViolationError, match="belongs to tenant"):
+        owner.disabled(other, colleagues=[], at=LATER)
+
+
 def test_disabling_bumps_the_session_version_once_and_freezes_the_roles() -> None:
     acme = tenant()
     owner, staff = user(acme), user(acme, Role.STAFF, subject="subject-2")

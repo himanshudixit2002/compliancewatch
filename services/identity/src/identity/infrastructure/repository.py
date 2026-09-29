@@ -1,6 +1,11 @@
 """The Postgres units of work: one transaction with the tenant setting for row-level security
 (or none, for the subject index), with the outbox writer as the event sink, and one without a
-tenant for channel consents."""
+tenant for channel consents.
+
+Tenant and user reads also name the unit of work's tenant in the query. Row-level security
+applies only to a role that does not bypass it, and the dev stack connects as the database's
+owner, so the filter keeps tenants apart there too; with no tenant they find nothing, as row-level
+security would."""
 
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
@@ -79,8 +84,9 @@ class SqlAlchemyConsentRepository:
 
 
 class SqlAlchemyTenantRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, tenant_id: TenantId | None) -> None:
         self._session = session
+        self._tenant = tenant_id
 
     def add(self, tenant: Tenant) -> None:
         """Insert ``tenant``; a second internal tenant is ``InternalTenantExistsError``."""
@@ -102,6 +108,8 @@ class SqlAlchemyTenantRepository:
             raise
 
     def get(self, tenant_id: TenantId) -> Tenant | None:
+        if tenant_id != self._tenant:
+            return None
         row = self._session.get(TenantRow, tenant_id.value)
         if row is None:
             return None
@@ -116,8 +124,9 @@ class SqlAlchemyTenantRepository:
 
 
 class SqlAlchemyUserRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, tenant_id: TenantId | None) -> None:
         self._session = session
+        self._tenant = tenant_id
 
     def add(self, user: User) -> None:
         self._session.add(_user_row(user))
@@ -128,11 +137,23 @@ class SqlAlchemyUserRepository:
         self._session.flush()
 
     def get(self, user_id: UserId) -> User | None:
-        row = self._session.get(UserRow, user_id.value)
+        if self._tenant is None:
+            return None
+        row = self._session.scalars(
+            select(UserRow).where(
+                UserRow.id == user_id.value, UserRow.tenant_id == self._tenant.value
+            )
+        ).one_or_none()
         return None if row is None else _to_user(row)
 
     def list(self) -> list[User]:
-        rows = self._session.scalars(select(UserRow).order_by(UserRow.created_at, UserRow.id))
+        if self._tenant is None:
+            return []
+        rows = self._session.scalars(
+            select(UserRow)
+            .where(UserRow.tenant_id == self._tenant.value)
+            .order_by(UserRow.created_at, UserRow.id)
+        )
         return [_to_user(row) for row in rows]
 
 
@@ -208,8 +229,8 @@ class SqlAlchemyUnitOfWork:
                 {"name": TENANT_SETTING, "value": str(tenant_id)},
             )
         self.consents = SqlAlchemyConsentRepository(session)
-        self.tenants = SqlAlchemyTenantRepository(session)
-        self.users = SqlAlchemyUserRepository(session)
+        self.tenants = SqlAlchemyTenantRepository(session, tenant_id)
+        self.users = SqlAlchemyUserRepository(session, tenant_id)
         self.subjects = SqlAlchemySubjectIndex(session)
         self.service_clients = SqlAlchemyServiceClientRepository(session)
         self.events = OutboxSink(connection, writer)

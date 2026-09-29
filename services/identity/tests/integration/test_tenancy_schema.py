@@ -26,7 +26,7 @@ from identity.application.bootstrap import (
     ListServiceClients,
     RevokeServiceClient,
 )
-from identity.application.sessions import ExchangeSession, IssueServiceToken
+from identity.application.sessions import ExchangeSession, IssueServiceToken, user_principal
 from identity.application.tenancy import (
     ChangeRoles,
     CreateTenant,
@@ -34,7 +34,11 @@ from identity.application.tenancy import (
     InviteUser,
     ListUsers,
 )
-from identity.domain.errors import InternalTenantExistsError, SubjectRegisteredError
+from identity.domain.errors import (
+    InternalTenantExistsError,
+    SubjectRegisteredError,
+    UserNotFoundError,
+)
 from identity.domain.events import RoleChangeReason, TenantCreated, UserRoleChanged, sorted_roles
 from identity.domain.tenancy import Contact, SubjectEntry, Tenant, TenantKind, User
 from identity.infrastructure.minter import IssuerMinter
@@ -224,6 +228,33 @@ def test_row_level_security_isolates_tenants_and_users(app_engine: Engine) -> No
             assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar_one() == 0
     with pytest.raises(DBAPIError, match="row-level security"), factory(acme.id) as uow:
         uow.tenants.add(new_tenant(name="Smuggled"))
+
+
+def test_reads_name_the_tenant_where_row_level_security_is_bypassed(engine: Engine) -> None:
+    """The test database's user owns the tables and is a superuser, so row-level security does
+    not apply to it, as for the dev stack's role: the queries' own tenant filter keeps tenants
+    apart."""
+    factory = PostgresUnitOfWorkFactory(engine)
+    acme, other = new_tenant(), new_tenant(name="Other Traders")
+    owner, other_owner = first_user(acme, "bypass-acme"), first_user(other, "bypass-other")
+    sign_up(factory, acme, owner)
+    sign_up(factory, other, other_owner)
+    with factory(acme.id) as uow:
+        assert uow.tenants.get(other.id) is None
+        assert uow.users.get(other_owner.id) is None
+        assert [user.id for user in uow.users.list()] == [owner.id]
+    with factory(None) as uow:
+        assert uow.tenants.get(acme.id) is None
+        assert uow.users.get(owner.id) is None
+        assert uow.users.list() == []
+    as_acme = user_principal(owner, mfa=False)
+    with pytest.raises(UserNotFoundError):
+        ChangeRoles(factory).run(acme.id, as_acme, other_owner.id, [Role.STAFF])
+    with pytest.raises(UserNotFoundError):
+        DisableUser(factory).run(acme.id, as_acme, other_owner.id)
+    assert [user.id for user in ListUsers(factory).run(acme.id, as_acme)] == [owner.id]
+    with factory(other.id) as uow:
+        assert uow.users.get(other_owner.id) == other_owner
 
 
 def test_role_changes_are_saved_under_the_tenant(app_engine: Engine) -> None:
