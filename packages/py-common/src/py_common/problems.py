@@ -24,6 +24,11 @@ from domain_kernel.errors import (
     InvariantViolationError,
     UnknownAttributeError,
 )
+from py_common.idempotency.errors import (
+    IdempotencyKeyRequiredError,
+    IdempotencyKeyReusedError,
+    IdempotencyRequestInFlightError,
+)
 from py_common.logging import get_logger
 from py_common.pagination import InvalidCursorError
 from py_common.request_context import REQUEST_ID_HEADER, correlation_id_of
@@ -36,6 +41,9 @@ DEFAULT_STATUS_BY_ERROR: Mapping[type[DomainError], int] = {
     InvariantViolationError: 422,
     UnknownAttributeError: 404,
     InvalidCursorError: 422,
+    IdempotencyKeyRequiredError: 428,
+    IdempotencyKeyReusedError: 422,
+    IdempotencyRequestInFlightError: 409,
 }
 
 log = get_logger(__name__)

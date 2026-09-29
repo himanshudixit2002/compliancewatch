@@ -35,8 +35,16 @@ src/py_common/
     relay.py           # OutboxRelay: publish, retry with backoff, dead-letter; python -m py_common.outbox
     consumer.py        # IdempotentConsumer: once per event id and consumer group, consumer dead-letter topic
     testing.py         # FakeProducer, MemoryOutboxStore, MemoryProcessedStore for service tests
+  idempotency/         # Idempotency-Key with 24 hour replay; the package itself loads no FastAPI or SQLAlchemy
+    store.py           # fingerprint, the begin outcomes, IdempotencyStore and IdempotencyRecorder protocols
+    memory.py          # MemoryIdempotencyStore
+    sqlalchemy.py      # SqlAlchemyIdempotencyStore (own transactions); SqlAlchemyIdempotencyRecorder (the caller's)
+    schema.py          # idempotency_key: create/drop_idempotency_table(op), forced tenant policy, purge policy
+    fastapi.py         # IdempotencyKey dependency, run_idempotent, IDEMPOTENCY_RESPONSES
+    errors.py          # 428 key required, 422 key reused, 409 request in flight
+    __main__.py        # python -m py_common.idempotency purge
 tests/unit/
-tests/integration/     # the outbox against Postgres and Redpanda, the migration helpers on Postgres (testcontainers)
+tests/integration/     # the outbox against Postgres and Redpanda, the migration helpers and idempotency keys on Postgres (testcontainers)
 ```
 
 ## Problem details
@@ -46,12 +54,12 @@ Every error a service returns is `application/problem+json` (RFC 9457) with `typ
 every app. A `DomainError` maps to the status the service passes in `problem_status`, for
 example `{BudgetExceededError: 429}`; the most specific class in the error's MRO wins, the
 defaults (`InvariantViolationError` 422, `UnknownAttributeError` 404, and py-common's own
-`InvalidCursorError` 422) apply underneath, and an unmapped domain error is a 400. An error
-class may define `problem_headers` (a mapping) and those headers are copied onto the response;
-the gateway's budget error sets `Retry-After` that way. Request validation errors are 422 with
-an `errors` list that does not echo the submitted value, `HTTPException` keeps its status with
-type `about:blank`, and an unhandled exception is a generic 500 that is logged with the
-correlation id. Routers declare the shape in OpenAPI with
+`InvalidCursorError` 422 and idempotency errors 428, 422 and 409) apply underneath, and an
+unmapped domain error is a 400. An error class may define `problem_headers` (a mapping) and
+those headers are copied onto the response; the gateway's budget error sets `Retry-After` that
+way. Request validation errors are 422 with an `errors` list that does not echo the submitted
+value, `HTTPException` keeps its status with type `about:blank`, and an unhandled exception is
+a generic 500 that is logged with the correlation id. Routers declare the shape in OpenAPI with
 `responses=problem_responses(422, 429)`; the `Problem` schema is published under
 `components.schemas` automatically. Two responses every route can give are documented without
 a declaration: the 422 of request validation is a `Problem` (FastAPI's default

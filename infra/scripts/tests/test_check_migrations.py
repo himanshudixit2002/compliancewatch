@@ -19,6 +19,7 @@ from check_migrations import (
     load_config,
     parse_config,
     parse_migration,
+    purges_expired_rows,
     static_problems,
     tenant_checked,
 )
@@ -408,6 +409,38 @@ def test_an_extra_open_policy_on_a_tenant_table_fails(config: LintConfig) -> Non
     problems = catalog_problems([*baseline(), tenant_table(policies=(ISOLATION, extra))], config)
     assert len(problems) == 1
     assert "policy thing_read_all (FOR SELECT) admits rows without the tenant check" in problems[0]
+
+
+# The purge policy of py_common.idempotency, as Postgres 16 deparses it.
+PURGE = Policy("thing_purge_expired", "DELETE", True, "(expires_at < now())", None)
+
+
+def test_a_purge_policy_for_expired_rows_is_allowed(config: LintConfig) -> None:
+    assert purges_expired_rows(PURGE)
+    tables = [*baseline(), tenant_table(policies=(ISOLATION, PURGE))]
+    assert catalog_problems(tables, config) == []
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        Policy("thing_purge", "ALL", True, "(expires_at < now())", None),
+        Policy("thing_purge", "SELECT", True, "(expires_at < now())", None),
+        Policy("thing_purge", "DELETE", True, "(expires_at > now())", None),
+        Policy("thing_purge", "DELETE", True, "((expires_at < now()) OR true)", None),
+        Policy("thing_purge", "DELETE", True, OPEN, None),
+    ],
+)
+def test_anything_wider_than_the_purge_policy_fails(config: LintConfig, policy: Policy) -> None:
+    assert not purges_expired_rows(policy)
+    problems = catalog_problems([*baseline(), tenant_table(policies=(ISOLATION, policy))], config)
+    assert len(problems) == 1
+    assert "admits rows without the tenant check" in problems[0]
+
+
+def test_a_purge_policy_does_not_replace_the_tenant_policy(config: LintConfig) -> None:
+    problems = catalog_problems([*baseline(), tenant_table(policies=(PURGE,))], config)
+    assert problems == ["identity.thing: R1: no policy for ALL commands"]
 
 
 def test_a_restrictive_policy_is_not_a_leak(config: LintConfig) -> None:
