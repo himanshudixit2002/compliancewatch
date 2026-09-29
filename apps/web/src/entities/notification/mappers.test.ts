@@ -18,6 +18,7 @@ describe("notification preference mappers", () => {
       preferenceFromDto({
         channel: "whatsapp",
         recipient: "+910000000000",
+        address: "+910000000000",
         opted_in: true,
         source: "web_onboarding",
         language: "en",

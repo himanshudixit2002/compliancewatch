@@ -8,9 +8,13 @@ export const WHATSAPP_KEY = "910000000000";
 export const EMAIL_KEY = "owner@example.com";
 
 export function preferenceDto(overrides: Partial<PreferenceDto> = {}): PreferenceDto {
+  const channel = overrides.channel ?? "whatsapp";
+  const recipient = overrides.recipient ?? WHATSAPP_KEY;
   return {
-    channel: "whatsapp",
-    recipient: WHATSAPP_KEY,
+    channel,
+    recipient,
+    // The address as the service stores it: "+<digits>" on WhatsApp, lower case for email.
+    address: channel === "email" ? recipient.toLowerCase() : `+${recipient.replace(/\D/g, "")}`,
     opted_in: true,
     source: "web_onboarding",
     language: "en",
