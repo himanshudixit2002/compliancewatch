@@ -1,6 +1,6 @@
 # profile service
 
-Part of the ComplianceWatch monorepo. **The business hierarchy, attribute values per node and financial year, snapshots, one-question onboarding and review tasks exist behind a first API; the GSTIN lookup adapter and the identity token are not built yet.**
+Part of the ComplianceWatch monorepo. **The business hierarchy, attribute values per node and financial year, snapshots, one-question onboarding and review tasks exist behind a first API, with the public business API and `GET /v1/ontology` on top; the GSTIN provider account and the identity token do not exist yet, so the HTTP lookup stays off and the tenant comes from a header.**
 Design reference: Project Foundation guide, sections 6, 7 and 14.
 
 - **Owns:** BusinessProfiles and the Ontology attribute store; validates attributes against the Ontology; versions each change; GSTIN pre-fill. Python package: `profile_service` (the stdlib ships a `profile` module)
@@ -71,6 +71,24 @@ registrations, and its id is the entity's node id.
 - `POST /v1/businesses/{id}/registrations` (needs `Idempotency-Key`) adds a GSTIN with the
   business's PAN and pre-fills it.
 
+These routes and `GET /v1/ontology` are the profile's part of the public API spec,
+`packages/contracts/openapi/public.v1.json` (`make openapi-public` after
+`make openapi SERVICE=profile`), and of the generated Python models in
+`cw_contracts.rest.public_v1`, which `tests/contract/test_public_client.py` sends and reads.
+`x-roles` names `owner`, `staff`, `ca_admin`, `ca_staff` and `compliance_lead`; it is metadata
+until the identity service enforces it, and the tenant is the `x-tenant-id` header until then.
+
+The idempotency keys live in the `idempotency_key` table for 24 hours after the response is
+recorded; a request that dies before recording frees its key after 5 minutes. Keys are stored
+in their own short transactions (py-common's store mode), because the use cases open their own
+units of work. So when the process stops between the business write and recording the
+response, a retry after those 5 minutes finds the business or registration and answers 201 with
+`created` false rather than the first body. Expired rows are deleted by
+`python -m py_common.idempotency purge` run against the profile schema, once a day on a
+schedule the deploy wires; nothing runs it yet, and until it does the expired rows only take
+space. The list pages on `(name, id)` with the index from migration 0003, and its cursor holds
+the id of the last business only, so any name fits the 512-character cursor limit.
+
 `GET /v1/ontology` (tags `public` and `ontology`) is global data and takes no tenant: the
 attribute set's version, the wording's version, language and `review_status` (`needs_review`
 until an analyst has read it), `operators_by_type` from the kernel's `ALLOWED_OPERATORS`, and
@@ -119,6 +137,16 @@ code the ontology does not list (97, 99) is skipped. `business_category` is writ
 registry's nature of business only while the flag `profile.gstin_category_prefill` is on for
 the tenant (off by default) and the activities map to exactly one category; the mapping is
 reviewed by an analyst before the flag goes on.
+
+Both are registry flags (`packages/flags/registry.json`, owner core-product). The service calls
+`configure_flags(settings)` when it starts, so with `CW_FLAGS_PROVIDER=env` (the default) the
+category pre-fill reads `CW_FLAG_PROFILE_GSTIN_CATEGORY_PREFILL` (`true` or `false`) and
+`CW_FLAG_PROFILE_GSTIN_CATEGORY_PREFILL__TENANTS` (tenant ids, comma separated; empty means every
+tenant), and with `unleash` the Unleash feature `profile.gstin_category_prefill`, targeted by
+tenant id. `CW_PROFILE_GSTIN_LOOKUP` stays a setting read at start-up. Turning the HTTP
+lookup on for real needs, in order: the provider account, a check of the field names and label
+tables against the provider's sandbox (then `MAPPING_REVIEW_STATUS` becomes `reviewed`), and
+`CW_PROFILE_GSTIN_LOOKUP=http` with the URL and the key (a secret).
 
 ## Layout
 

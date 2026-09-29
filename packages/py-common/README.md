@@ -3,7 +3,7 @@
 Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 13, 14 and 18.
 
-- **Owns:** Logging, tracing and metrics (OpenTelemetry), config, auth middleware, problem details, outbox, Temporal worker scaffold, testing fakes
+- **Owns:** Logging, tracing and metrics (OpenTelemetry), config, auth middleware, problem details, cursor pagination, idempotency keys, feature flags, outbox, Temporal worker scaffold, testing fakes
 - **Owning team:** Platform and Infrastructure
 - **Consumes:** n/a
 - **Emits / publishes:** Golden-path library consumed by every Python service
@@ -67,6 +67,45 @@ a generic 500 that is logged with the correlation id. Routers declare the shape 
 a declaration: the 422 of request validation is a `Problem` (FastAPI's default
 `HTTPValidationError` entry is replaced), and every operation that takes a body lists a 400
 for a body that is not UTF-8, which fails before validation runs.
+
+## Pagination
+
+A list route declares `page: Pagination`, which reads `limit` (1 to 200, default 50) and
+`cursor` (at most 512 characters) from the query, and answers a `Page[T]`: `items` and
+`next_cursor`, null on the last page. The repository reads `limit + 1` rows in the order of a
+unique key, starting after the keyset `page.after(scope, KeysetModel)` decodes, and
+`page_of(rows, limit, scope, keyset)` keeps `limit` of them and makes the next cursor from the
+last one when the extra row came back. A cursor is base64url JSON naming its format version, its
+list (`scope`, such as `profile.businesses`) and the keyset; a cursor that is not one of these,
+belongs to another list or does not fit the keyset model is `InvalidCursorError`
+(`pagination-cursor-invalid`, 422). Cursors are opaque but not signed: a crafted one only moves
+where a page starts inside rows the caller may read anyway. `encode_cursor` refuses a cursor
+longer than 512 characters, so key a list on short values (the profile's business list keeps
+only the last id in its cursor and reads the name again).
+
+## Idempotency keys
+
+A route that creates something declares `key: IdempotencyKey` and returns
+`run_idempotent(store, tenant, key, 201, produce)`. The header `Idempotency-Key` holds 8 to 128
+printable characters, such as a UUID; without it the route answers 428
+(`idempotency-key-required`). The first request with a key claims it and runs `produce`; the 2xx
+or 4xx it returns is recorded and replayed, with `Idempotent-Replayed: true`, to every retry with
+the same key, method, path and body for 24 hours after it was recorded. The same key with another
+request is a 422 (`idempotency-key-reused`), and a retry while the first request still runs is a
+409 (`idempotency-request-in-flight`, with `Retry-After: 1`). A 5xx is never recorded, and an
+exception from `produce` releases the key, so the retry runs again; a request that dies without
+recording anything frees its key after 5 minutes. Keys belong to a tenant. The route adds
+`responses=IDEMPOTENCY_RESPONSES` so the spec lists the 409, 422 and 428.
+
+The service's migration calls `create_idempotency_table(op)`: the `idempotency_key` table with
+the forced tenant policy and a second, permissive policy that lets anyone delete rows whose
+`expires_at` has passed, which the migration lint accepts. `SqlAlchemyIdempotencyStore(engine)`
+runs each key statement in its own short transaction; `store.recorder(connection)` runs them in
+the caller's transaction instead, so the key row commits with the business write or rolls back
+with it. `MemoryIdempotencyStore` serves tests and memory mode. `python -m py_common.idempotency
+purge`, with the service's `CW_DATABASE_URL`, deletes the expired keys of every tenant and is
+meant to run once a day; it exits 1 when the schema has no `idempotency_key` table. The package's
+`__init__` imports neither FastAPI nor SQLAlchemy, so `py_common.problems` can map its errors.
 
 ## Feature flags
 

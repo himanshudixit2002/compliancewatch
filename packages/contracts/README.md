@@ -3,7 +3,7 @@
 Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 7 (event contract rules), 10, 13 and 14.
 
-- **Owns:** OpenAPI specs, event schemas (JSON Schema), generated clients (py + ts), and the event changelog
+- **Owns:** OpenAPI specs (per service, and the merged public API spec with its changelog), event schemas (JSON Schema), generated clients (Python event and REST models, TypeScript event types), and the event changelog
 - **Owning team:** Platform and Infrastructure (custodian); every consuming team reviews a contract change
 - **Consumes:** n/a
 - **Emits / publishes:** Versioned contracts (semver); services pin the versions they consume
@@ -19,6 +19,10 @@ openapi/                 # OpenAPI 3.1 specs, public /v1 and internal service AP
   rulebook.v1.json         # services/rulebook
   obligation.v1.json       # services/obligation
   qa.v1.json               # services/qa
+  public.v1.json           # the public API: every operation tagged public, merged (make openapi-public)
+  public.meta.json         # the public spec's info: title, description and version
+  CHANGELOG.md             # one section per version of the public API
+  clients.json             # the specs that get generated Python REST models (today: public)
   BREAKING.md              # deliberate breaking changes, one row per break of an operation, each with an ADR
 consumers/               # consumer contracts: <consumer>/<provider>.json, recorded HTTP calls both sides replay (consumers/README.md)
 events/
@@ -26,12 +30,15 @@ events/
   examples/<topic>/      # golden messages (envelope + payload) every check replays
   CHANGELOG.md           # one line per topic per version
 scripts/
-  generate_events.py     # make contracts: writes both clients below
+  generate_events.py     # make contracts: writes both event clients below
+  generate_rest.py       # make contracts: the Python REST models of the specs in openapi/clients.json
+  build_public_openapi.py    # make openapi-public: public.v1.json from the service specs, with the API rules
   check_compat.py        # CI: backward compatibility against the base branch
   check_openapi_coverage.py  # make openapi-check: a service with API routes commits its spec and test
   check_openapi_compat.py    # CI: the OpenAPI specs break no client of the base branch
   check_topics.py        # make contracts-check: every event topic in code has its schema
-clients/python/          # compliancewatch-contracts (import cw_contracts): generated pydantic v2 models
+clients/python/          # compliancewatch-contracts (import cw_contracts): generated pydantic v2 models,
+                         # events/ per topic and rest/public_v1.py for the public API
 clients/typescript/      # generated .d.ts per topic plus index.ts (EVENT_TOPICS)
 ```
 
@@ -72,6 +79,44 @@ service shares one error shape, `Problem` (RFC 9457 problem details from py-comm
 under `components.schemas` and referenced by each route's error responses. The description of
 each problem response is the interpreter's `http.HTTPStatus` phrase, so a Python minor bump that
 rewords a phrase may require regenerating the specs.
+
+## The public API spec
+
+`public.v1.json` is the API that clients outside the platform call (guide section 10): the web
+app, the WhatsApp bot, partners. Nobody writes it by hand. A service puts an operation in it by
+tagging the route `public` (FastAPI `tags=["public", ...]`), and `make openapi-public` merges
+those operations from the committed service specs. Each operation keeps what its service
+documents and gains `x-service`, the service that serves it, which the gateway and the combined
+app route by. Only the components the operations reach are copied; identical ones are shared, and
+a name two services use for different schemas gets each service's name as a prefix
+(`ProfileProblem`), with every reference following the rename. The same path and method in two
+services, or an `operationId` used twice, fails the build. The spec's `info` comes from
+`public.meta.json`, and every operation requires the `bearerAuth` scheme, the identity
+service's access token; until identity issues tokens the services read the tenant from the
+`x-tenant-id` header.
+
+The build also holds each public operation to the API rules and fails with one line per
+operation that breaks one:
+
+- `x-roles` lists the tenant roles that may call it: `owner`, `staff`, `ca_admin`, `ca_staff`
+  or `compliance_lead` (the identity service will enforce them; until then they are metadata);
+- every documented 4xx and 5xx response is a problem document (`application/problem+json`), and
+  there is at least one;
+- a POST that answers 201 declares the `Idempotency-Key` header (`py_common.idempotency`);
+- a GET that answers a page (`items` and `next_cursor`) declares the `limit` and `cursor` query
+  parameters (`py_common.pagination`).
+
+The version in `public.meta.json` follows semver: a new operation or optional field is a minor
+bump, wording a patch, and a break a major bump with a new `public.v2.json`. The change that
+bumps it adds a section to `openapi/CHANGELOG.md`, and the build fails while the current version
+has none. `make contracts-check` fails when the committed `public.v1.json` differs from the
+build, and `check_openapi_compat.py` compares it with the base branch like every other spec, so a
+break of a public operation needs its row in `BREAKING.md` too.
+
+Adding a public route: tag it `public`, give it `openapi_extra={"x-roles": [...]}` and its
+problem responses, run `make openapi SERVICE=<name>` and then `make openapi-public`, bump the
+version with a changelog section, and commit the service spec, `public.v1.json` and the
+regenerated REST models together.
 
 ## Events
 
@@ -127,3 +172,15 @@ consumer side.
 only, and import-linter keeps it that way. `clients/typescript/events` exports one interface per
 topic, `EventEnvelope` and the `EVENT_TOPICS` constant; the package's `typecheck` script runs
 `tsc` over them. Both are regenerated by `make contracts`.
+
+`cw_contracts.rest` holds the REST models. `generate_rest.py` runs `datamodel-codegen` over each
+spec that `openapi/clients.json` lists (today the public spec alone) and writes one module per
+spec, `cw_contracts/rest/public_v1.py`, with a pydantic model for every schema: the request
+bodies (`BusinessIn`, `BusinessPatchIn`, `RegistrationAddIn`), the responses and `Problem`. The
+module's docstring names the spec version it came from. Response models ignore fields they do
+not know, so a client keeps working when a minor version adds one; request models refuse
+unknown fields, as the services do. `make contracts` and `make openapi-public` regenerate them,
+and `make contracts-check` fails when the committed module differs. The profile service's
+`tests/contract/test_public_client.py` sends requests built from these models and reads every
+answer with them. TypeScript types for the REST APIs are not generated here: the web app's
+track generates them from the committed specs.

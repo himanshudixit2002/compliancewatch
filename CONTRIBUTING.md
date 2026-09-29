@@ -127,6 +127,24 @@ must still hold the tenant check.
    derandomized examples in CI and 200 random ones nightly (`HYPOTHESIS_PROFILE=nightly uv run
    pytest -m contract`). A finding is fixed in the service; an operation that needs a redesign
    first goes into `EXCLUDED` with the reason.
+4. A route for clients outside the platform is public: tag it `public`, list the roles that may
+   call it in `openapi_extra={"x-roles": [...]}` and declare its problem responses. A POST that
+   creates takes `IdempotencyKey` and `run_idempotent` (`py_common.idempotency`); a list takes
+   `Pagination` and answers `Page[T]` (`py_common.pagination`). `make openapi-public` rebuilds
+   `packages/contracts/openapi/public.v1.json` and the Python REST models, and fails on a public
+   route that breaks one of these rules. Bump the version in `public.meta.json` with a section
+   in `openapi/CHANGELOG.md`; `make contracts-check` fails while the committed files are stale.
+
+## Adding a feature flag
+
+A setting that switches behaviour is a flag: a bool named `*_enabled`, a name ending in
+`_provider`, `_mode` or `_backend`, or a field listed in `SWITCH_FIELDS` in
+`infra/scripts/check_flags.py`. Register it in `packages/flags/registry.json` in the same pull
+request, with its owner, a default that is off, a removal condition and an expiry date, then run
+`make flags`, which rewrites py-common's copy. `make flags-check`, part of `make check`, fails on
+a switch without an entry, a bool default of true, a date that has passed or a stale copy. Any
+other bool or `Literal` setting is configuration and goes in `NOT_FLAGS` with the reason.
+`packages/flags/README.md` has the fields and the env and Unleash providers.
 
 ## Adding a source adapter
 

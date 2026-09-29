@@ -52,6 +52,9 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_BILLING_PROVIDER`, `CW_RAZORPAY_*` | env / secret | - | - | - | - | - | - | - | - |
 | `CW_IDENTITY_STORE`, `CW_PROFILE_STORE`, `CW_PROFILE_GSTIN_LOOKUP` | env | env | - | - | - | - | - | - | - |
 | `CW_RULEBOOK_STORE` | - | - | env | - | - | - | - | - | - |
+| `CW_PROFILE_GSTIN_LOOKUP_URL`, `CW_PROFILE_GSTIN_LOOKUP_API_KEY`, `CW_PROFILE_GSTIN_LOOKUP_TIMEOUT_SECONDS` | - | env / secret / env (read with `CW_PROFILE_GSTIN_LOOKUP=http`, which waits for the provider account and a check of the field mapping against the provider's sandbox; until then `manual`) | - | - | - | - | - | - | - |
+| `CW_FLAG_PROFILE_GSTIN_CATEGORY_PREFILL`, `CW_FLAG_PROFILE_GSTIN_CATEGORY_PREFILL__TENANTS` | - | env (default `false`, every tenant when the list is empty; owner core-product; on only after an analyst reviews the nature-of-business mapping, a few tenants first; removed once it has been on for every tenant for 30 days) | - | - | - | - | - | - | - |
+| `CW_FLAGS_PROVIDER`, `CW_UNLEASH_URL`, `CW_UNLEASH_API_TOKEN` | - | env / env / secret (default `env`, flags from the variables in this table; `unleash` once a hosted Unleash runs, self-hosted on the MVP platform or an Unleash account, with a client token; owner platform) | - | - | - | - | - | - | - |
 | `CW_RULEBOOK_WRITE_TOKEN` | - | - | secret | - | - | - | secret | - | - |
 | `CW_RULEBOOK_REVIEW_TOKEN` | - | - | secret (analyst actions; the workbench holds the same value) | - | - | - | - | - | - |
 | `CW_RULEBOOK_PUBLISH_ENABLED` | - | - | env (default `false`; owner regulatory-intelligence; removed once the workbench publishes in production and the obligation consumer of the rule events is live) | - | - | - | - | - | - |
