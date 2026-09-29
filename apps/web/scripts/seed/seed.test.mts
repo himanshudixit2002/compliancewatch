@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
+  CONSENT_DOCUMENT_NAMES,
   DEFAULT_PORT_BASE,
   DEFAULT_STATE_PATH,
   DEMO,
@@ -9,8 +10,10 @@ import {
   UsageError,
   VERSION_PATTERN,
   attributeChanges,
+  consentNoticeVersion,
   documentIdFor,
   fixtureProblems,
+  legalVersion,
   parseArgs,
   portBase,
   seedFinancialYear,
@@ -22,6 +25,7 @@ import {
   writeToken,
   type RulebookFixtures,
 } from "./lib.mts";
+import { readConsentDocumentVersions } from "./steps/consents.mts";
 import { FIXTURE_NAME, loadFixtures, recordedPdfBytes } from "./steps/rulebook.mts";
 
 const TENANT = "2a6f0c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b";
@@ -58,13 +62,45 @@ describe("the demo facts", () => {
   it("uses the demo tenant's values", () => {
     expect(DEMO.gstin).toBe("29ABCDE1234F1Z5");
     expect(DEMO.ownerPhone).toBe("919876543210");
-    expect(DEMO.noticeVersion).toBe("0.1-draft");
     expect(DEMO.consentPurposes).toEqual([
       "terms",
       "privacy_notice",
       "profile_processing",
       "whatsapp_reminders",
     ]);
+  });
+});
+
+describe("the consents' notice versions", () => {
+  const VERSIONS = {
+    "terms-of-service": "0.2",
+    "privacy-notice": "0.3-draft",
+    "whatsapp-consent": "1.0",
+  } as const;
+
+  it("name the document each purpose refers to with its Version line", () => {
+    expect(DEMO.consentPurposes.map((purpose) => consentNoticeVersion(purpose, VERSIONS))).toEqual([
+      "terms-of-service@0.2",
+      "privacy-notice@0.3-draft",
+      "privacy-notice@0.3-draft",
+      "whatsapp-consent@1.0",
+    ]);
+    expect(CONSENT_DOCUMENT_NAMES).toEqual([
+      "terms-of-service",
+      "privacy-notice",
+      "whatsapp-consent",
+    ]);
+  });
+
+  it("read the Version line and refuse a document without one", () => {
+    expect(legalVersion("# Example notice\n\nVersion: 0.1-draft\n\nText.")).toBe("0.1-draft");
+    expect(() => legalVersion("# Example notice\n\nNo version here.")).toThrow("no Version line");
+  });
+
+  it("come from the documents in docs/legal", async () => {
+    const versions = await readConsentDocumentVersions();
+    expect(Object.keys(versions)).toEqual([...CONSENT_DOCUMENT_NAMES]);
+    for (const version of Object.values(versions)) expect(version).toMatch(/^\S+$/);
   });
 });
 

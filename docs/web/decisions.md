@@ -343,9 +343,9 @@ value could not tell the terms from the privacy notice. The web app records
 with each purpose mapped to the document it refers to (`PURPOSE_DOCUMENT` in
 `features/consents/model/purposes.ts`). Consequences: a new Version line on a document makes the
 step ask again for the purposes that refer to it and nothing else; the value fits the service's
-40-character limit, which the model checks; the seed's demo consents, written with the bare
-version, do not count as current for a user of the web app, which is harmless because the
-seed's owner is not a user the fake sign-in can mint.
+40-character limit, which the model checks; the seed writes its demo consents in the same
+format from the same Version lines, keeping its own purpose-to-document map because a plain
+Node script cannot import the model (`src/test/seed-notices.test.ts` holds the two together).
 
 ## D-027: The e2e suite reads the services from the consent step on
 
