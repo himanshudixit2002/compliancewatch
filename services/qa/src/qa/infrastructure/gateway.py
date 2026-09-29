@@ -32,7 +32,7 @@ class GatewayProvider:
         base_url: str = "http://localhost:8008",
         *,
         client: httpx2.Client | None = None,
-        timeout_seconds: float = 10.0,
+        timeout_seconds: float = 20.0,
     ) -> None:
         self._client = http_client(base_url, timeout_seconds, client)
 
@@ -82,7 +82,7 @@ class HttpEmbedder:
         base_url: str = "http://localhost:8008",
         *,
         client: httpx2.Client | None = None,
-        timeout_seconds: float = 10.0,
+        timeout_seconds: float = 20.0,
     ) -> None:
         self._http = JsonHttp(http_client(base_url, timeout_seconds, client), SERVICE)
 

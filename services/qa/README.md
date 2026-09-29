@@ -108,7 +108,7 @@ service the answer depends on failed, including the gateway while answering). Th
 - **Ports** (`domain/ports.py`): `RulebookReader` and `ClauseSearch` (`HttpRulebook`),
   `ProfileReader` (`HttpProfiles`), `ObligationReader` (`HttpObligations`), `Embedder`
   (`HttpEmbedder`, which checks for 512 dimensions), the kernel's `LLMProvider`
-  (`GatewayProvider`, the tenant per request, 10 s) and `Tracer` (`OtelTracer`). A transport error
+  (`GatewayProvider`, the tenant per request) and `Tracer` (`OtelTracer`). A transport error
   or a 5xx is `DependencyUnavailableError`; a 404 is nothing. `testing.py` has the memory fakes,
   a `ScriptedProvider` keyed by `(question_id, prompt ref)`, a `RecordingTracer` and
   `memory_ports()`; `build_app(settings, ports=..., ontology=...)` takes them.
@@ -138,6 +138,10 @@ docker build -f services/qa/Dockerfile -t compliancewatch-qa .
 ```
 
 The service reads the rulebook (`CW_RULEBOOK_URL`, 8003), profile (`CW_PROFILE_URL`, 8002),
-obligation (`CW_OBLIGATION_URL`, 8005) and gateway (`CW_LLM_GATEWAY_URL`, 8008) services. Package
-`qa`, dev port 8007, Postgres schema `qa` (no tables yet). Details:
+obligation (`CW_OBLIGATION_URL`, 8005) and gateway (`CW_LLM_GATEWAY_URL`, 8008) services. Reads
+time out after `CW_QA_HTTP_TIMEOUT_SECONDS` (5); completions after `CW_QA_LLM_TIMEOUT_SECONDS` and
+the question's embedding after `CW_QA_EMBEDDING_TIMEOUT_SECONDS` (20 each), longer than the
+gateway's own budget for the call (the qa route gives its primary and its fallback 8 s each, the
+retrieval route 15 s), so a fallback model has time to answer. Package `qa`, dev port 8007,
+Postgres schema `qa` (no tables yet). Details:
 [docs/onboarding/local-dev.md](../../docs/onboarding/local-dev.md).

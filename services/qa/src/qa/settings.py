@@ -19,7 +19,10 @@ class QaSettings(Settings):
 
     ``rulebook_url``, ``profile_url``, ``obligation_url`` and ``llm_gateway_url`` are the
     services the answers are built from; every model call goes through the gateway. Reads time
-    out after ``qa_http_timeout_seconds``, model calls after ``qa_llm_timeout_seconds``.
+    out after ``qa_http_timeout_seconds``, completions after ``qa_llm_timeout_seconds`` and the
+    question's embedding after ``qa_embedding_timeout_seconds``. The model timeouts outlast the
+    gateway's own budget for the call, so the gateway's fallback model has time to answer: the
+    qa route gives the primary and the fallback 8 s each, the retrieval route 15 s.
     ``qa_prompts_dir`` is where the prompt files are when the package is installed away from
     the source tree (the image sets ``CW_QA_PROMPTS_DIR=/app/prompts``).
     """
@@ -32,7 +35,8 @@ class QaSettings(Settings):
     llm_gateway_url: str = "http://localhost:8008"
     qa_prompts_dir: Path | None = None
     qa_http_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
-    qa_llm_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    qa_llm_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
+    qa_embedding_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
 
     @field_validator("qa_kag_tenants", mode="before")
     @classmethod

@@ -57,15 +57,16 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
 
 def http_ports(settings: QaSettings) -> Ports:
     reads = settings.qa_http_timeout_seconds
-    models = settings.qa_llm_timeout_seconds
+    completions = settings.qa_llm_timeout_seconds
+    embeddings = settings.qa_embedding_timeout_seconds
     rulebook = HttpRulebook(settings.rulebook_url, timeout_seconds=reads)
     return Ports(
         rulebook=rulebook,
         search=rulebook,
         profiles=HttpProfiles(settings.profile_url, timeout_seconds=reads),
         obligations=HttpObligations(settings.obligation_url, timeout_seconds=reads),
-        embedder=HttpEmbedder(settings.llm_gateway_url, timeout_seconds=models),
-        provider=GatewayProvider(settings.llm_gateway_url, timeout_seconds=models),
+        embedder=HttpEmbedder(settings.llm_gateway_url, timeout_seconds=embeddings),
+        provider=GatewayProvider(settings.llm_gateway_url, timeout_seconds=completions),
         tracer=OtelTracer(),
     )
 

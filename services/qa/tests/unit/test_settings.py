@@ -6,6 +6,8 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
+from qa.infrastructure.gateway import GatewayProvider, HttpEmbedder
+from qa.main import http_ports
 from qa.settings import QaSettings
 
 TENANT_A = UUID("00000000-0000-0000-0000-00000000000a")
@@ -21,7 +23,8 @@ def test_the_flag_is_off_by_default_and_targets_every_tenant() -> None:
     assert loaded.qa_kag_enabled is False
     assert loaded.qa_kag_tenants == frozenset()
     assert loaded.qa_prompts_dir is None
-    assert (loaded.qa_http_timeout_seconds, loaded.qa_llm_timeout_seconds) == (5.0, 10.0)
+    assert loaded.qa_http_timeout_seconds == 5.0
+    assert (loaded.qa_llm_timeout_seconds, loaded.qa_embedding_timeout_seconds) == (20.0, 20.0)
     assert loaded.rulebook_url == "http://localhost:8003"
     assert loaded.profile_url == "http://localhost:8002"
     assert loaded.obligation_url == "http://localhost:8005"
@@ -49,6 +52,29 @@ def test_a_tenant_that_is_not_a_uuid_is_refused(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("CW_QA_KAG_TENANTS", "acme")
     with pytest.raises(ValidationError):
         settings()
+
+
+def test_model_calls_outlast_the_gateways_budget_for_them() -> None:
+    """The gateway's qa route gives the primary and the fallback 8 s each and its retrieval
+    route 15 s; a shorter client timeout would cut the fallback off."""
+    loaded = settings()
+    assert loaded.qa_llm_timeout_seconds > 8.0 + 8.0
+    assert loaded.qa_embedding_timeout_seconds > 15.0
+    ports = http_ports(loaded)
+    assert isinstance(ports.provider, GatewayProvider)
+    assert isinstance(ports.embedder, HttpEmbedder)
+    assert ports.provider._client.timeout.read == loaded.qa_llm_timeout_seconds
+    assert ports.embedder._http._client.timeout.read == loaded.qa_embedding_timeout_seconds
+
+
+def test_each_model_timeout_reads_its_own_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CW_QA_LLM_TIMEOUT_SECONDS", "30")
+    monkeypatch.setenv("CW_QA_EMBEDDING_TIMEOUT_SECONDS", "25")
+    ports = http_ports(settings())
+    assert isinstance(ports.provider, GatewayProvider)
+    assert isinstance(ports.embedder, HttpEmbedder)
+    assert ports.provider._client.timeout.read == 30.0
+    assert ports.embedder._http._client.timeout.read == 25.0
 
 
 def test_timeouts_must_be_positive() -> None:
