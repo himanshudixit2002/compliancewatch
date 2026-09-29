@@ -410,6 +410,22 @@ const SCREEN_LIST = [
   },
   // ---- owner ------------------------------------------------------------------------------
   {
+    id: "owner.businesses",
+    kind: "page",
+    route: "/businesses",
+    title: "Businesses",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [],
+    awaits: [servicesTrack("WP12", "profile", "GET", "/v1/businesses")],
+    status: "waiting",
+    e2e: [],
+    guideRef: "6, 10; F12",
+    nav: { group: "business", order: 1 },
+    notes: "Where every tenant role lands after signing in; the list waits for the business API.",
+  },
+  {
     id: "owner.obligation",
     kind: "page",
     route: "/b/[businessId]/obligations/[obligationId]",

@@ -19,6 +19,7 @@
   "dependencies": {
     "@compliancewatch/contracts": "workspace:*",
     "@compliancewatch/ui": "workspace:*",
+    "jose": "6.2.12",
     "marked": "18.0.14",
     "next": "16.3.6",
     "openapi-fetch": "0.17.0",

@@ -23,9 +23,12 @@ src/features/       one directory per screen family: model/, ui/, index.ts (port
                     actions join when a feature reads data); today: home, sitemap, legal, not-available,
                     admin-home, system-pages, design-catalogue
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
-                    problem/ types the RFC 9457 body every service returns (from the generated contracts)
+                    problem/ types the RFC 9457 body every service returns (from the generated contracts);
+                    session/ the session claims, the render-safe view and the time helpers
 src/server/         server-only modules; every file starts with `import "server-only"`
                     env.ts validates every CW_WEB_* variable (zod; parsed at the first request, never at build)
+                    session.ts: the encrypted cw_session cookie (jose), its options, set and clear (actions only)
+                    dal.ts: verifySession, requireRole, requireAdmin, requireScreen, sessionForRender (the gates)
                     result.ts: Result, ApiError and the mapping to a form's ActionState
                     api/client.ts: one openapi-fetch client per service (x-request-id, accept, time limit) and call()
                     api/problem.ts: RFC 9457 parsing to ApiError kinds and field errors
@@ -38,9 +41,12 @@ src/shared/lib/     IST dates, financial years, money and decimal strings, human
 src/shared/i18n/    messages/en.json and the typed t(); another locale falls back key by key
 src/shared/ui/      app-level compositions over the UI kit: the two shells over next/link, breadcrumbs, the status chip
 src/test/           vitest setup, the architecture rules and test, the docs/web/screens.md drift test,
-                    fake-fetch.ts (a recording fetch with problem+json answers for client and gateway tests)
+                    fake-fetch.ts (a recording fetch with problem+json answers for client and gateway tests),
+                    fake-cookies.ts (the cookie store next/headers resolves to in session and gate tests)
 src/app/globals.css Tailwind v4 plus the UI kit's token file (@compliancewatch/ui/styles/tokens.css)
 src/instrumentation.ts  onRequestError writes one JSON line (digest, route, x-request-id) to stderr
+src/proxy.ts        the optimistic check before a render: no cw_session cookie on a gated screen or under
+                    /admin means a redirect to /sign-in?next=; the gates in server/dal.ts decide
 scripts/screens-doc.mts generates docs/web/screens.md from the registry (screens:gen, screens:check, screens:audit)
 e2e/                fixtures.ts (the axe check failing on serious or critical) and one spec per live page,
                     plus a11y.spec.ts over every registered page; tsconfig.scripts.json type-checks them

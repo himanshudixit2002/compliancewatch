@@ -129,3 +129,33 @@ is on main and the screen has not been built. Consequences: the failure now read
 the entry to `ready` and regenerates `screens.md`; the screen is built, and set `live`, in the
 package that owns it; `screens:audit` lists the ready entries; the status chip shows ready as
 "Ready to build" in the `info` tone.
+
+## D-014: A stateless, encrypted session cookie; no session table
+
+2026-09-29. The app needs to know who is asking on every request, and the services will
+verify a bearer token themselves once identity issues one. `cw_session` is a JWE
+(`server/session.ts`: `dir` key management, A256GCM, the 32-byte `CW_WEB_SESSION_SECRET`)
+holding `SessionClaims` (`entities/session/types.ts`: user, tenant, tenant kind, roles, display
+name, second factor, session version, provider, issue and expiry, and the token fields the
+identity work fills); httpOnly, SameSite=Lax, Secure outside local, path `/`, eight hours by
+default. The browser holds ciphertext it cannot read; the server keeps no table.
+Consequences: revocation is by expiry and by the session version identity keeps per user
+(re-read in the proxy when `/me` exists); the secret is required only where a session is
+encrypted or decrypted, so a build and the public pages need none; a cookie is written only in
+a server action or a route handler, never during a render; the claims carry no personal data
+beyond the display name.
+
+## D-015: The proxy checks presence; the data access layer decides
+
+2026-09-29. Next 16 runs `proxy.ts` before a route renders, on the Node runtime, but it is not
+on the path of a server action and it must stay cheap. `src/proxy.ts` only sends a request for
+a role-gated screen or for anything under `/admin` to `/sign-in?next=` when no `cw_session`
+cookie exists; it does not decrypt. `server/dal.ts` is the authoritative gate: `verifySession`
+decrypts once per request (React `cache`), `requireRole` redirects an anonymous visitor to
+sign-in and a wrong role to `/forbidden`, `requireAdmin` answers 404 so a tenant role does not
+learn that a tool exists, and `requireScreen` applies a registry entry's roles and tenant
+kinds. Consequences: every page calls its gate on the first line and every action calls it
+again; the proxy's public list is the registry (`roles: "public"`), so a new screen is gated
+by its entry; `next` is honoured only as a same-origin path (`safeNext`); the redirect targets
+come from the registry through `signInHref`, `forbiddenHref` and `homeFor` in
+`shared/config/nav.ts`, which is why `/businesses` has a waiting entry today.
