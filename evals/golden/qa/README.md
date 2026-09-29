@@ -20,7 +20,7 @@ it against the clauses it quotes.
 - **Rule versions:** four seed rules a recorded clause supports (`gstr3b_monthly`, the two
   quarterly GSTR-3B rules, `gstr9_annual`), with every field but the citation taken from the
   seed calendar, and one version per notification for the relations and the questions about
-  it. The other eight seed rules stay unpublished (ADR-006).
+  it. The other nine of the seed calendar's thirteen rules stay unpublished (ADR-006).
 - **Businesses:** two fictional test businesses, one tenant each: `acme_monthly` (the demo
   tenant) and `qrmp_delhi` (the profile service's test GSTIN).
 - **Obligations:** the published recurring rules that apply to each business, materialised

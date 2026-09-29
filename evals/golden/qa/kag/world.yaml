@@ -76,7 +76,11 @@ rules:
         quote: "for the registered persons who are required to furnish return under sub-section (1) of section 39 read with clause (i) of sub -rule (1) of  rule 61 of the Central Goods and Services Tax Rules, 2017"
     note: >-
       The clause names the monthly return in FORM GSTR-3B of registered persons under section
-      39(1) read with rule 61(1)(i). The due day (20) and the predicates stay the seed's.
+      39(1) read with rule 61(1)(i). The due day (20) and the predicates stay the seed's. The
+      version is effective from 1 April 2026 (the seed's date) but its only citation is a clause of
+      01/2026-Central Tax, dated 21 April 2026, so an answer given between 1 and 20 April 2026
+      would cite a clause that did not exist yet. No answerable case asks in that window; the one
+      case dated in it (mr-before-source, 10 April 2026) must be refused.
   - rule_key: gstr3b_quarterly_group_a
     seed: true
     citations:
