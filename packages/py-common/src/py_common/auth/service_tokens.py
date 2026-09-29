@@ -19,6 +19,7 @@ one token. The client id is ``CW_SERVICE_CLIENT_ID``, or the service's name when
 """
 
 import asyncio
+import hmac
 import re
 import threading
 import time
@@ -124,7 +125,7 @@ class ServiceTokenSource:
     def invalidate(self, token: str) -> None:
         """Drop ``token`` if it is the cached one, so the next call fetches a new token."""
         with self._lock:
-            if self._cached is not None and self._cached.token == token:
+            if self._cached is not None and hmac.compare_digest(self._cached.token, token):
                 self._cached = None
 
     def _fetch(self) -> _Cached:
