@@ -48,7 +48,12 @@ export function TabsContent({ className, ...props }: ComponentProps<typeof TabsP
   return (
     <TabsPrimitive.Content
       data-slot="tabs-content"
-      className={cn("flex-1 outline-none", className)}
+      // Radix renders the panel with tabIndex 0, so it takes focus after the active trigger;
+      // the ring replaces the base outline the way the trigger does.
+      className={cn(
+        "flex-1 rounded-md focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+        className,
+      )}
       {...props}
     />
   );

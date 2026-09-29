@@ -31,6 +31,29 @@ describe("Tabs", () => {
     expect(await runAxe(container)).toHaveNoViolations();
   });
 
+  it("moves focus from the active trigger into the panel, which shows the focus ring", async () => {
+    render(
+      <Tabs defaultValue="one">
+        <TabsList aria-label="Example sections">
+          <TabsTrigger value="one">One</TabsTrigger>
+          <TabsTrigger value="two">Two</TabsTrigger>
+        </TabsList>
+        <TabsContent value="one">Panel one</TabsContent>
+        <TabsContent value="two">Panel two</TabsContent>
+      </Tabs>,
+    );
+    await userEvent.tab();
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: "One" }));
+    await userEvent.tab();
+    const panel = screen.getByRole("tabpanel");
+    expect(document.activeElement).toBe(panel);
+    expect(panel.getAttribute("tabindex")).toBe("0");
+    const classes = panel.className.split(/\s+/);
+    expect(classes).toContain("focus-visible:ring-2");
+    expect(classes).toContain("focus-visible:ring-focus");
+    expect(classes).not.toContain("outline-none");
+  });
+
   it("supports a vertical orientation", () => {
     render(
       <Tabs defaultValue="a" orientation="vertical">

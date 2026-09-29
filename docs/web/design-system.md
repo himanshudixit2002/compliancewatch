@@ -70,7 +70,8 @@ and ends with `expect(await runAxe(container)).toHaveNoViolations()`.
 `asChild` through the Radix Slot), Input, Label, Textarea, Checkbox, RadioGroup, Select (a styled
 native `<select>`: the browser's listbox already gives keyboard and screen-reader support), Dialog
 (focus trap, Escape, `aria-labelledby`), Sheet (a Dialog sliding in from a side; the mobile
-navigation uses it), Tabs, Table (semantic table primitives with a caption slot), Card, Badge,
+navigation uses it), Tabs (the panel is focusable after the active trigger and shows the focus
+ring), Table (semantic table primitives with a caption slot), Card, Badge,
 Skeleton, Toaster (`sonner` with a polite live region; `toast` is re-exported).
 
 **Composites**, each with its accessibility contract:
