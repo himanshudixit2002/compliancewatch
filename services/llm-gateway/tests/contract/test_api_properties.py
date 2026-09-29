@@ -37,9 +37,7 @@ OPERATIONS = frozenset(
         "GET /v1/llm-gateway/usage",
     }
 )
-EXCLUDED: dict[str, str] = {
-    "GET /v1/llm-gateway/usage": "months 0000-01 and 9999-12 match the pattern and end in a 500",
-}
+EXCLUDED: dict[str, str] = {}
 CHECKS = cast(
     list[CheckFunction],
     [

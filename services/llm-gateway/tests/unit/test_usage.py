@@ -111,7 +111,7 @@ def test_december_resets_in_january(client: TestClient) -> None:
 
 
 def test_bad_month_is_a_422_problem(client: TestClient) -> None:
-    for month in ("2026-13", "2026-1", "202609", "2026-09-01"):
+    for month in ("2026-13", "2026-1", "202609", "2026-09-01", "0000-01", "9999-12"):
         response = client.get(USAGE, params={"feature": "smoke", "month": month})
         assert response.status_code == 422, month
         assert response.headers["content-type"].startswith(PROBLEM)
