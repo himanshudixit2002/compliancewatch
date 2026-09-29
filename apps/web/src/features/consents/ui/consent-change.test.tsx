@@ -98,7 +98,8 @@ describe("ConsentChange", () => {
     await user.click(await screen.findByRole("button", { name: "Withdraw" }));
     await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
     const dialog = screen.getByRole("dialog");
-    expect(dialog.textContent).toContain("Example problem");
+    // The refusal renders after the action resolves, which can lag the call on a slow runner.
+    await waitFor(() => expect(dialog.textContent).toContain("Example problem"));
     expect(dialog.textContent).toContain("req-1");
     expect(dialog.textContent).toContain("Example field error.");
     expect(dialog.textContent).toContain("Example form error.");

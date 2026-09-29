@@ -133,7 +133,8 @@ describe("AnswerForm", () => {
     ).toBe("true");
     expect(screen.queryByRole("button", { name: "Not sure" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Save" }));
-    expect((await screen.findByRole("status")).textContent).toBe("Example saved.");
+    // The status line is mounted empty from the start, so wait for its text, not for the node.
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Example saved."));
   });
 
   it("has its status line in place before the action runs and puts the message in that node", async () => {
