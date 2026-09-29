@@ -23,6 +23,10 @@ Flat; one markdown file per alert or operational procedure.
 
 `infra/dev/prometheus/alerts.yml` holds the paging rules; each carries a `runbook_url` into this
 directory and `make runbooks-check` (part of `make check`) fails when a link is missing or dead.
+`make alerts-check` (the ops job in CI) runs promtool over the rules and their unit tests in
+`infra/dev/prometheus/alerts.test.yml`, which pin when `ApiErrorBurnRate` and
+`ApiLatencyBurnRate` fire; a new alert group, or a change to a tested rule, comes with its cases
+there.
 Wired now: `ApiErrorBurnRate`, `ApiLatencyBurnRate`, `OutboxDeadLetters`, `OutboxBacklog`,
 `PipelineWorkerSilent`, `EntityReviewQueueStale`, `EntityReviewQueueBacklog`. Pending their metrics: source freshness (two missed cadences),
 decision-flip rate after a deploy, notification failure rate and duplicates, LLM spend past

@@ -12,6 +12,8 @@ from notification.domain.preferences import ChannelPreference, ConsentSource
 from notification.domain.templates import MessageTemplate
 
 E164 = r"^\+?[1-9][0-9]{7,14}$"
+CLOCK_TIME_PATTERN = r"^([01][0-9]|2[0-3]):[0-5][0-9]$"
+"""``HH:MM`` on a 24-hour clock, 00:00 to 23:59."""
 
 
 class Strict(BaseModel):
@@ -22,8 +24,8 @@ class PreferenceIn(Strict):
     opted_in: bool
     source: ConsentSource
     language: str | None = Field(default=None, pattern=r"^[a-z]{2}$")
-    quiet_hours_start: str | None = Field(default=None, pattern=r"^[0-2][0-9]:[0-5][0-9]$")
-    quiet_hours_end: str | None = Field(default=None, pattern=r"^[0-2][0-9]:[0-5][0-9]$")
+    quiet_hours_start: str | None = Field(default=None, pattern=CLOCK_TIME_PATTERN)
+    quiet_hours_end: str | None = Field(default=None, pattern=CLOCK_TIME_PATTERN)
 
 
 class PreferenceOut(BaseModel):

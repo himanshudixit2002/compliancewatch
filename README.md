@@ -43,7 +43,7 @@
 > the manual fallback, the billing protocol with a Razorpay skeleton behind a flag, OpenTelemetry tracing
 > and metrics with a dev observability stack (collector, Prometheus, Tempo, Grafana dashboard),
 > pnpm + Turborepo workspace with the Next.js web app and
-> the WhatsApp bot, paging alert rules with runbooks and a CI link check, dev backup and restore, the MVP deploy profile (Fly.io templates, Vercel config, env matrix) and the one-process demo tenant (`make demo`), Docker Compose dev stack, GitHub Actions CI, pre-commit hooks and ADRs 001 to 008
+> the WhatsApp bot, paging alert rules with runbooks and a CI link check, dev backup and restore, the MVP deploy profile (Fly.io templates, Vercel config, env matrix) and the one-process demo tenant (`make demo`), Docker Compose dev stack, GitHub Actions CI behind one required check (integration tests for the packages a change touches, a migration lint for tenant tables, OpenAPI coverage, compatibility and property tests, Semgrep and Trivy scans, a nightly rescan and fuzz run) with Dependabot, pre-commit hooks and ADRs 001 to 008
 > and 012 to 018 (009 to 011 as stubs). No product features yet. Start at [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
 >
 > Source of truth: *ComplianceWatch - Project Foundation (HLD, LLD & Build Guide)*. Section numbers below refer to that guide.
@@ -114,7 +114,7 @@ make migrate                  # alembic upgrade head for every service, one sche
 make run SERVICE=identity     # http://localhost:8001/health (ports 8001-8010, table below)
 make run SERVICE=llm-gateway  # http://localhost:8008/v1/llm-gateway/completions with the fake provider
 make test                     # pytest with the coverage gate + vitest
-make check                    # the CI gates: lint, typecheck (incl. tests), test, import-linter, lock check
+make check                    # the CI gates that need no Docker (CONTRIBUTING.md lists every gate)
 ```
 
 Prerequisites: Node 22.18+ (type stripping for the bot's dev script), Docker (Docker Desktop or `brew install colima docker docker-compose docker-buildx && colima start --cpu 4 --memory 8 --disk 60`), `uv`, `pnpm` and Node 22+. Details and troubleshooting in [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
@@ -155,7 +155,8 @@ compliancewatch/
       workflows/             # pointer to src/pipeline/workflows
   packages/
     contracts/               # OpenAPI specs, event schemas (JSON Schema), generated clients (py + ts)
-      openapi/               # llm-gateway, profile, identity, rulebook, obligation and qa (<svc>.v1.json)
+      openapi/               # <service>.v1.json for identity, profile, rulebook, notification, llm-gateway,
+                             # obligation and qa; BREAKING.md
       events/                # schemas/<topic>.v1.json, examples/, CHANGELOG.md (sixteen topics + envelope)
       clients/python/        # cw_contracts: generated pydantic models (make contracts)
       clients/typescript/    # generated .d.ts per topic and index.ts
@@ -169,7 +170,7 @@ compliancewatch/
     argocd/                  # Application definitions
     dev/                     # Docker Compose dev-stack assets (init SQL, Temporal dynamic config, collector, Prometheus + alerts, Tempo, Grafana)
     deploy/                  # MVP deploy profile: Fly.io app templates per service, Vercel for the web app, the env matrix
-    scripts/                 # check_alert_runbooks.py: every alert links a runbook (make runbooks-check)
+    scripts/                 # repository checks: alert runbooks, migration lint (migration_lint.toml), the CI gate's needs
   docs/legal/                # Draft privacy notice, terms, WhatsApp consent, data map, consent record (to be reviewed by a lawyer)
   tools/
     demo/                    # Workspace package cw_demo: the demo tenant end to end (make demo); in-process flow tests across services
@@ -180,7 +181,7 @@ compliancewatch/
     adr/                     # Architecture decision records (001 to 008 and 012 to 018 written; 009 to 011 stubs)
     runbooks/
     onboarding/              # local-dev.md
-  .github/workflows/         # ci.yml (lint, typecheck, tests, dev-stack smoke, gitleaks), pr-checks.yml
+  .github/workflows/         # ci.yml (every gate, behind the required "CI gate" job), nightly.yml, pr-checks.yml; dependabot.yml
   docker-compose.yml         # Postgres 16 + pgvector, Redis 7, Redpanda, Temporal, Langfuse and fake-llm (profiles)
   .env.example               # every variable the stack and the services read
   pyproject.toml, uv.lock    # uv workspace root: dev dependency group and all Python tool config
@@ -246,7 +247,8 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | `make seed SERVICE=rulebook [ARGS=--check]` | Validate the seed calendar, or load it as draft rule versions into the rulebook schema |
 | `make test` | pytest (unit + contract, coverage gate on domain and application) and vitest |
 | `make lint` / `typecheck` / `format` | ruff + eslint + prettier; mypy --strict + tsc --strict |
-| `make check` | lint, typecheck, test, import-linter, uv lock check, contracts check (the same gates CI runs) |
+| `make check` | lint, typecheck, test, import-linter, uv lock check, contracts check, runbook links, migration files, OpenAPI coverage, the CI gate's needs (every CI gate that needs no Docker) |
+| `make migrations-catalog` / `openapi-compat` / `alerts-check` / `sast` / `deps-scan` | Tenant tables under forced row-level security after `make migrate`; OpenAPI compatibility with `BASE=origin/main`; promtool rule tests; Semgrep; Trivy (Docker for the last three) |
 | `make eval` | Eval harness against `evals/golden`: `EVAL_PROFILE=ci` (default, no tokens) or `nightly` (a real model behind the gateway) |
 | `make eval-check` | The KAG question-answering golden set and its world are well formed: verbatim quotes, seed supports, scripted plans and answers against qa's schemas |
 | `make label` | Labelling tool for the extraction golden set: `ARGS="check"`, `"index ..."`, `"prepare ..."` |
@@ -262,11 +264,11 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | --- | --- | --- |
 | No import from another service's package | import-linter contract in CI | wired |
 | Domain layer imports nothing from infrastructure or third-party I/O | import-linter | wired |
-| Every public endpoint has an OpenAPI schema and a contract test | CI job fails on undocumented routes | partly: the llm-gateway, profile, identity, rulebook, obligation and qa specs are committed under `packages/contracts/openapi` and a contract test per service fails when the served schema drifts (`make openapi`); the other services still have only ping routes |
-| Every event has a JSON Schema in packages/contracts and a changelog entry | Schema registry compatibility check in CI | wired: metaschema, golden examples, generated clients in sync, base-branch examples replayed against the new schemas, and `rpk registry schema check-compatibility` in the dev-stack job (the gateway's two log-only events get schemas with their first consumer) |
+| Every public endpoint has an OpenAPI schema and a contract test | CI job fails on undocumented routes | wired: `make openapi-check` fails when a service serves routes without a committed spec and contract test, the contracts job fails on a breaking change against the base branch (deliberate ones in `BREAKING.md`), and schemathesis tests each opted-in operation against its spec |
+| Every event has a JSON Schema in packages/contracts and a changelog entry | Schema registry compatibility check in CI | wired: metaschema, a schema for every event class in code (`check_topics.py`), golden examples, generated clients in sync, base-branch examples replayed against the new schemas, and `rpk registry schema check-compatibility` in the dev-stack job (the gateway's two log-only events get schemas with their first consumer) |
 | Every prompt file has a version, an owner and at least one eval case | Eval harness refuses to run an unregistered prompt | wired: the gateway refuses a prompt that is not in `services/llm-gateway/prompts/registry.toml`, and the harness's registry test fails when a registered prompt's file no longer matches its sha256 or has fewer labelled golden cases than its `eval_cases` |
-| Every table with tenant data has tenant_id and an RLS policy | Migration lint script | partly: the obligation and profile tables carry forced policies proven by integration tests through a non-superuser role; the lint script is not written (`llm_gateway.cost_ledger` is cross-tenant metering and has no RLS on purpose) |
-| Conventional commits; squash merge; PR template with risk and rollback sections | pre-commit commit-msg hook, PR title check, PR template | wired (branch protection is a repo setting) |
+| Every table with tenant data has tenant_id and an RLS policy | Migration lint script | wired: `make migrations-catalog` in the dev-stack job fails when a tenant table lacks tenant_id or forced row-level security with the tenant policy; exemptions carry a reason in `infra/scripts/migration_lint.toml` (`llm_gateway.cost_ledger` is cross-tenant metering and has no RLS on purpose) |
+| Conventional commits; squash merge; PR template with risk and rollback sections | pre-commit commit-msg hook, PR title check, PR template | wired; branch protection and title-only squash merges are repository settings ([docs/onboarding/repository-settings.md](docs/onboarding/repository-settings.md)) |
 | Type checking is strict on both sides | mypy --strict, tsc --strict | wired |
 | Test coverage floor 80% on domain and application layers | pytest-cov gate | wired |
 | Secrets never in the repo | gitleaks pre-commit and CI | wired |
@@ -293,6 +295,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 
 ## Not in this repository yet
 
+- The repository settings in [docs/onboarding/repository-settings.md](docs/onboarding/repository-settings.md) (the required `CI gate` check, title-only squash merges, Dependabot security updates, secret scanning, private vulnerability reporting) until the owner applies them; an API scan (DAST) of the running services, which arrives with the deployable stack
 - Terraform staging cluster and Keycloak (the gateway trusts an `x-tenant-id` header until then)
 - Accounts the maintainer opens: the Meta WhatsApp business account (bot and channel stay in logging mode), Razorpay (billing answers 503), a GSTIN lookup provider (every registration gets a verify task), Supabase Auth; the legal drafts need a lawyer before onboarding shows them
 - Postgres tables for notification preferences and the sent log (in memory now); the email channel (SES)

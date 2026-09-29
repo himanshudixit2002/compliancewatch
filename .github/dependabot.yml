@@ -1,0 +1,69 @@
+# Dependabot version updates: every Monday, with the minor and patch releases of each ecosystem
+# grouped into one pull request, at most five open per ecosystem. A major release gets a pull
+# request of its own. Security updates are a repository setting
+# (docs/onboarding/repository-settings.md) and arrive when an advisory is published. Titles follow
+# the Conventional Commits rules that the pr-checks workflow enforces: build(deps): ... and
+# ci(deps): ....
+version: 2
+updates:
+  - package-ecosystem: uv # the workspace: uv.lock and every member's pyproject.toml
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: npm # the pnpm workspace: pnpm-lock.yaml and every package.json
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: github-actions # .github/workflows
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: ci
+      include: scope
+
+  - package-ecosystem: docker # base images of the service and bot Dockerfiles
+    directories:
+      - /services/*
+      - /apps/whatsapp-bot
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: build
+      include: scope

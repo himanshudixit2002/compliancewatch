@@ -22,6 +22,8 @@ dev = [
   "types-jsonschema>=4.26",
   "check-jsonschema==0.38.2",
   "datamodel-code-generator==0.83.0",
+  # Property tests of each committed OpenAPI spec against its service (tests/contract/test_api_properties.py)
+  "schemathesis>=4.28,<5",
 ]
 
 [tool.uv]
@@ -36,7 +38,9 @@ exclude = ["packages/ui", "packages/contracts"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["packages/*/src", "packages/contracts/clients/python/src", "services/*/src", "evals/harness/src", "tools/demo/src"]
+src = ["packages/*/src", "packages/contracts/clients/python/src", "services/*/src", "evals/harness/src", "tools/demo/src", "infra/scripts"]
+# The cases for the Semgrep rules hold insecure code on purpose (.semgrep/cw.py).
+extend-exclude = [".semgrep"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "N", "RUF", "PT", "T20", "ASYNC"]
@@ -76,7 +80,9 @@ warn_required_dynamic_aliases = true
 # ---------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
 minversion = "8.4"
-testpaths = ["packages", "services", "evals", "tools"]
+testpaths = ["packages", "services", "evals", "tools", "infra"]
+# The repository checks in infra/scripts are plain scripts, not packages; their tests import them.
+pythonpath = ["infra/scripts"]
 addopts = "-ra -q --strict-markers --strict-config --import-mode=importlib"
 markers = [
   "integration: needs Docker (testcontainers); lives under tests/integration",

@@ -50,7 +50,10 @@ list that does not echo the submitted value, `HTTPException` keeps its status wi
 `about:blank`, and an unhandled exception is a generic 500 that is logged with the
 correlation id. Routers declare the shape in OpenAPI with
 `responses=problem_responses(422, 429)`; the `Problem` schema is published under
-`components.schemas` automatically.
+`components.schemas` automatically. Two responses every route can give are documented without
+a declaration: the 422 of request validation is a `Problem` (FastAPI's default
+`HTTPValidationError` entry is replaced), and every operation that takes a body lists a 400
+for a body that is not UTF-8, which fails before validation runs.
 
 ## Telemetry
 

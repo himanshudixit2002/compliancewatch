@@ -39,6 +39,12 @@ def test_a_daytime_window_and_an_empty_one() -> None:
     assert not QuietHours(time(9), time(9)).is_quiet(NIGHT_IST)
 
 
+@pytest.mark.parametrize(("start", "end"), [("24:00", "08:00"), ("21:00", "8am"), ("", "08:00")])
+def test_quiet_hours_that_are_not_clock_times_are_refused(start: str, end: str) -> None:
+    with pytest.raises(InvariantViolationError):
+        QuietHours.parse(start, end)
+
+
 def test_naive_times_are_refused() -> None:
     with pytest.raises(InvariantViolationError):
         DEFAULT_QUIET_HOURS.is_quiet(datetime(2026, 9, 28, 1, 0))

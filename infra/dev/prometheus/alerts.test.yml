@@ -1,0 +1,65 @@
+# promtool unit tests for alerts.yml (`make alerts-check`, the ops job in ci.yml). Only the
+# api-slo group has cases so far; each package appends the cases for the alert group it owns.
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # 5xx share: identity 3 in 1000 (0.3%), profile 1 in 1000 (0.1%); the threshold is 0.2%.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{service_name="identity", http_response_status_code="200"}'
+        values: "0+997x40"
+      - series: 'http_server_request_duration_seconds_count{service_name="identity", http_response_status_code="503"}'
+        values: "0+3x40"
+      - series: 'http_server_request_duration_seconds_count{service_name="profile", http_response_status_code="200"}'
+        values: "0+999x40"
+      - series: 'http_server_request_duration_seconds_count{service_name="profile", http_response_status_code="500"}'
+        values: "0+1x40"
+    alert_rule_test:
+      # Above the threshold but not yet for 15 minutes: pending, not firing.
+      - eval_time: 10m
+        alertname: ApiErrorBurnRate
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: ApiErrorBurnRate
+        exp_alerts:
+          - exp_labels:
+              service_name: identity
+              severity: page
+              team: platform
+            exp_annotations:
+              summary: "identity burns its availability SLO (5xx share above 0.2% over 1h; 2x the 99.9% budget)"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/api-slo-burn.md
+
+  # p95 latency: identity 0.8 s (190th of 200 per minute falls 60% into the 0.5-1 s bucket),
+  # profile 0.475 s (all 200 in the first bucket); the threshold is 0.6 s.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_bucket{service_name="identity", le="0.5"}'
+        values: "0+175x40"
+      - series: 'http_server_request_duration_seconds_bucket{service_name="identity", le="1"}'
+        values: "0+200x40"
+      - series: 'http_server_request_duration_seconds_bucket{service_name="identity", le="+Inf"}'
+        values: "0+200x40"
+      - series: 'http_server_request_duration_seconds_bucket{service_name="profile", le="0.5"}'
+        values: "0+200x40"
+      - series: 'http_server_request_duration_seconds_bucket{service_name="profile", le="1"}'
+        values: "0+200x40"
+      - series: 'http_server_request_duration_seconds_bucket{service_name="profile", le="+Inf"}'
+        values: "0+200x40"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ApiLatencyBurnRate
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: ApiLatencyBurnRate
+        exp_alerts:
+          - exp_labels:
+              service_name: identity
+              severity: page
+              team: platform
+            exp_annotations:
+              summary: "identity p95 read latency above 600 ms over 1h (2x the 300 ms objective)"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/api-slo-burn.md

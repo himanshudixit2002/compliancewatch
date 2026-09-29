@@ -3,7 +3,7 @@
 Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 13, 14 and 17.
 
-- **Owns:** Engineer onboarding: local dev stack (Docker Compose), golden paths, team contacts
+- **Owns:** Engineer onboarding: local dev stack (Docker Compose), golden paths, team contacts, and the repository settings the owner applies by hand
 - **Owning team:** Platform and Infrastructure (guide section 14)
 - **Consumes:** n/a
 - **Emits / publishes:** n/a
@@ -12,6 +12,12 @@ Design reference: Project Foundation guide, sections 13, 14 and 17.
 
 Flat; markdown guides.
 
+- [local-dev.md](local-dev.md): tools, the Docker Compose stack, ports, running a service, troubleshooting.
+- [demo.md](demo.md): the demo tenant end to end in one process (`make demo`).
+- [repository-settings.md](repository-settings.md): the `gh` commands for branch protection (the required `CI gate` check), squash merges, Dependabot, secret scanning and private vulnerability reporting, and the secrets CI needs.
+
 ## How to run
 
-Start with [local-dev.md](local-dev.md).
+Start with [local-dev.md](local-dev.md). Before a pull request, `make check` runs the gates CI
+runs without Docker; [CONTRIBUTING.md](../../CONTRIBUTING.md) lists them with the Docker-based
+ones (`make py-test-integration`, `make alerts-check`, `make sast`, `make deps-scan`).

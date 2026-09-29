@@ -26,7 +26,9 @@ PROMPT_REF_PATTERN = f"^{PROMPT_NAME.pattern}@{PROMPT_VERSION.pattern}$"
 """``name@version`` exactly as the domain accepts it, so the API refuses what it would refuse."""
 MODEL_ID_PATTERN = f"^{MODEL_ID.pattern}$"
 """``creator/model`` as the routing table accepts it; the length bound is the ledger column's."""
-MONTH_PATTERN = r"^[0-9]{4}-(0[1-9]|1[0-2])$"
+MONTH_PATTERN = r"^2[0-9]{3}-(0[1-9]|1[0-2])$"
+"""``YYYY-MM`` from 2000-01 to 2999-12. The year 0000 has no calendar date and 9999-12 has no
+next month to reset in, so any wider range ends in a 500."""
 RATIO_PLACES = Decimal("0.000001")
 
 
