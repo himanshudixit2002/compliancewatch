@@ -32,9 +32,10 @@ clients/typescript/      # generated .d.ts per topic plus index.ts (EVENT_TOPICS
 ## OpenAPI specs
 
 A spec is generated from the running service, committed here, and reviewed like code: the diff in
-the pull request is the contract change. `services/llm-gateway/tests/contract/test_openapi.py`
-fails when the served schema and the committed file differ, so an API change without a spec
-change cannot pass `make test`.
+the pull request is the contract change. Six services have one (llm-gateway, profile, identity,
+rulebook, obligation and qa), and each has a `tests/contract/test_openapi.py` that fails when the
+served schema and the committed file differ, so an API change without a spec change cannot pass
+`make test`.
 
 ```bash
 make openapi SERVICE=llm-gateway   # writes openapi/llm-gateway.v1.json (indent 2, sorted keys)

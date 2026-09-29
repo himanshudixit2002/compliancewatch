@@ -31,7 +31,10 @@ Design reference: Project Foundation guide, sections 7 and 14.
   security enabled and forced, the outbox and the consumer inbox tables (py-common helpers).
 
 The caller of the write use cases is the applicability engine's decision consumer, which lands
-with the profile and engine work; until then they are exercised by the tests and by hand.
+with the profile and engine work; until then they are exercised by the tests and by hand. The
+rulebook now publishes `rule.deadline_changed`, `rule.withdrawn` and `rule.superseded`; the
+consumer that turns them into `ApplyDeadlineChange` and `WithdrawRule` for every tenant's open
+obligations is not built yet, because it needs a cross-tenant design under row-level security.
 
 ## API
 

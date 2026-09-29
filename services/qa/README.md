@@ -1,7 +1,7 @@
 # qa service
 
 Part of the ComplianceWatch monorepo. **Grounded answers to GST questions: an answer cites
-published clauses in force on the question's date, each quote checked against its clause, or
+regulator clauses published by the question's date, each quote checked against its clause, or
 the answer is "not covered".**
 Design reference: Project Foundation guide, sections 7, 8 and 14; ADR-012 (layered retrieval) and
 ADR-017 (KAG-style reasoning).
@@ -30,7 +30,9 @@ Every layer that ran is in the response as `{layer, result, reason}`.
    is final.
 3. **Hybrid** (`application/retrieval.py`). The question is embedded through the gateway and the
    rulebook's `/search` fuses full text and vectors by reciprocal rank, `k=8`. If embedding
-   fails, the search runs on full text alone. No hit is "not covered" (`no_evidence`).
+   fails, the search runs on full text alone. No hit is "not covered" (`no_evidence`). The
+   search keeps documents published on or before the question's date; a hit is not yet
+   followed to the rule version in force (ADR-012, Evaluation).
 
 Not built: the fourth, agentic layer of ADR-012 (reciprocal rank fusion gives no meaningful low
 score to trigger it), the cross-encoder rerank (hybrid keeps the fused order), and a router that

@@ -1,7 +1,7 @@
 # Relation golden set
 
-Expected relations per document for the relation stage (`extraction.rule_relations`, KAG
-phase 2, ADR-017). A case names the extraction case that holds the document's clauses, the
+Expected relations per document for the relation stage (`extraction.rule_relations`,
+ADR-017). A case names the extraction case that holds the document's clauses, the
 document's own number, and the relations an analyst expects:
 
 ```yaml

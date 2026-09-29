@@ -47,6 +47,7 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_OTEL_ENDPOINT` (+ header) | secret | secret | secret | secret | secret | secret | secret | secret | - |
 | `CW_AI_GATEWAY_API_KEY`, `CW_LLM_PROVIDER` | - | - | - | - | - | secret / env | - | - | - |
 | `CW_LANGFUSE_*` | - | - | - | - | - | secret | - | - | - |
+| `CW_LLM_ROUTES__<FEATURE>` (for example `CW_LLM_ROUTES__RETRIEVAL`), `CW_LLM_EMBEDDING_DIMENSIONS_PARAM` | - | - | - | - | - | env (only to override the routing table; the second defaults to `true`) | - | - | - |
 | `CW_WHATSAPP_ENABLED`, `CW_WHATSAPP_PHONE_NUMBER_ID`, `CW_WHATSAPP_ACCESS_TOKEN` | - | - | - | - | env / secret / secret | - | - | - | - |
 | `CW_BILLING_PROVIDER`, `CW_RAZORPAY_*` | env / secret | - | - | - | - | - | - | - | - |
 | `CW_IDENTITY_STORE`, `CW_PROFILE_STORE`, `CW_PROFILE_GSTIN_LOOKUP` | env | env | - | - | - | - | - | - | - |
@@ -75,6 +76,14 @@ secrets and `CW_RULEBOOK_PUBLISH_ENABLED`). The in-force reads do not wait for i
 publication already cut the replaced version's `effective_to`; a late run only delays the status
 and the event. The command is idempotent and, with the flag off, moves nothing. Neither the relay
 nor the machine is needed while `CW_RULEBOOK_PUBLISH_ENABLED` is off.
+
+The rulebook's search index needs pgvector: its migration 0006, run by the release command,
+creates the extension with `CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public`. Check that
+the Postgres provider offers pgvector, and either let the rulebook's database role create
+extensions or have an administrator run that statement once before the first deploy. `public`
+must stay on the search path, as the `CW_DATABASE_URL` options above keep it. Clauses registered
+before the pipeline embedded them are caught up by running `pipeline-embed` once from the
+pipeline image, with the pipeline's secrets.
 
 Every service also reads `CW_ENV`, `CW_LOG_LEVEL` and `CW_LOG_JSON` (env). The tenant comes from
 the `x-tenant-id` header until Supabase Auth issues tokens (ADR-014): the MVP must sit behind

@@ -86,7 +86,7 @@ mentions and citations point into them. Bump the parser's `PARSER_VERSION` with 
 can alter clause text, so the refusal names both versions; what to do with stored documents
 after such a change is an open decision (ADR-018). Deploy the rulebook before the pipeline.
 
-## Knowledge extraction (KAG phase 2, ADR-017)
+## Knowledge extraction (ADR-017)
 
 Once a document is registered, the ingest runs the child workflow `pipeline.extract_knowledge`
 (behind `workflow.patched("kag-extract-v1")`, same flag). It has three activities:

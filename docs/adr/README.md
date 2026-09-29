@@ -6,8 +6,12 @@ Reference v1.0, section 9.2 (decision log). ADR-001 to ADR-008 and ADR-012 to AD
 full text; ADR-009 to ADR-011 are stubs that keep the decision log's one-line rationale until
 they are written. ADR-014 (identity for the MVP), ADR-015 (recurring obligations and deadline
 changes) and ADR-016 (business hierarchy) record decisions of 2026-09-28; ADR-017 the KAG-style
-reasoning decision of the same day, and ADR-018 how the pipeline hands records to the rulebook. A new ADR is required for every architectural decision and
-for every breaking contract change (guide sections 4 and 14).
+reasoning decision of the same day, and ADR-018 how the pipeline hands records to the rulebook.
+Dated addenda of 2026-09-29 record what the question-answering work built against four of them:
+ADR-003 (embeddings in a side table), ADR-008 (embeddings through the gateway), ADR-012 and
+ADR-017 (what shipped, the first evaluation numbers and what each needs to be Accepted). A new
+ADR is required for every architectural decision and for every breaking contract change (guide
+sections 4 and 14).
 
 - [ADR-001: Monorepo with one directory per service and a shared contracts package](ADR-001-monorepo-one-directory-per-service.md) (Accepted)
 - [ADR-002: Python and FastAPI for services; Next.js and TypeScript for apps](ADR-002-python-fastapi-services-nextjs-apps.md) (Accepted)

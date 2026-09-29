@@ -270,10 +270,14 @@ callers still keep personal data out of prompts where they can. Phone numbers ar
 `prompts/registry.toml` lists every prompt the gateway accepts, one `[[prompts]]` table each
 with `name` (dotted, lower case), `version`, `owner`, `eval_cases` (at least one), an optional
 `sha256` of the prompt text and a `description`. A completion names a prompt as `name@version`
-and an entry that is not there is a 422. Two entries exist today: `smoke.echo@1`, served by the
-fake provider, and `extraction.rule_candidate@0`, a placeholder until the extraction pipeline
-brings its prompt text. Prompt wording changes are reviewed by a Regulatory Analyst and merged
-with a green eval run; the eval harness that enforces the registry is not built yet.
+and an entry that is not there is a 422. Five entries exist today: `smoke.echo@1`, served by the
+fake provider; `extraction.rule_candidate@1` and `extraction.rule_relations@1` (owner
+regulatory-intelligence, text in `services/pipeline/prompts`); `qa.plan@1` and `qa.answer@1`
+(owner ai-platform, text in `services/qa/prompts`). Prompt wording changes are reviewed by a
+Regulatory Analyst and merged with a green eval run. The eval harness's registry test
+(`evals/harness/tests/unit/test_harness.py`) fails when a registered prompt's file no longer
+matches its `sha256` or has fewer labelled golden cases than its `eval_cases`, so a wording
+change needs a new version and digest.
 
 ## Cache and breaker
 

@@ -1,6 +1,7 @@
 # ADR-017: KAG-style reasoning over the rulebook in PostgreSQL
 
-- **Status:** Proposed
+- **Status:** Proposed (Accepted when an analyst has reviewed the KAG golden set and a nightly
+  real-model run meets the thresholds under Evaluation)
 - **Date:** 2026-09-28
 - **Deciders:** AI Platform, Regulatory Intelligence, Core Product
 
@@ -106,12 +107,33 @@ targets of X's supersedes rows, `rule.superseded` is emitted for Y when X takes 
 candidate's period and due date, `corrects` likewise with reason corrected, and `withdraws`
 withdraws Y.
 
-Rollout. The planner and solver sit behind the `qa.kag_enabled` flag, default off, with
-per-tenant targeting. The tables and the extraction stage ship first and are additive. The
-kernel vocabulary (`domain_kernel.knowledge`) and the knowledge tables exist (rulebook migrations
-0001 to 0005), parsed documents reach the rulebook through its API (ADR-018), and the extraction
-stage (mention grammar, alignment, relation proposals, review and approval) runs in the pipeline
-worker behind `CW_PIPELINE_KNOWLEDGE_ENABLED`, default off. The planner and the solver follow.
+Rollout. The planner and solver sit behind `CW_QA_KAG_ENABLED`, default off, with per-tenant
+targeting through `CW_QA_KAG_TENANTS` (a comma list of tenant ids; empty means every tenant). The
+flag is owned by AI Platform and is removed when this record is Accepted. The tables and the
+extraction stage shipped first and are additive: the kernel vocabulary
+(`domain_kernel.knowledge`) and the knowledge tables (rulebook migrations 0001 to 0005), parsed
+documents reaching the rulebook through its API (ADR-018), and the extraction stage (mention
+grammar, alignment, relation proposals, review and approval) in the pipeline worker behind
+`CW_PIPELINE_KNOWLEDGE_ENABLED`, default off. Since 2026-09-29 the qa service has the planner
+(`qa.plan@1`), the solver and the answerer (`qa.answer@1`) between the structured layer and
+hybrid search (ADR-012). While the flag is on for a tenant, the planner runs for every question
+the structured layer does not answer, single-hop or not; a cheap router that sends single-hop
+questions straight to hybrid search is a follow-up.
+
+Publication as built (2026-09-29). The rulebook publishes a version behind
+`CW_RULEBOOK_PUBLISH_ENABLED` (default off, owned by Regulatory Intelligence) once its citations
+are verified and it has one approver, two when it is high impact (ADR-006). The relation effects
+follow the direction described above. A `supersedes`, `corrects` or `withdraws` relation cuts
+Y's `effective_to` to X's `effective_from` at publication, so a read for a later date sees X at
+once; Y's status moves (to superseded, or withdrawn) and `rule.superseded` or `rule.withdrawn`
+goes out when X takes effect: at publication when that day has come, otherwise on X's first day
+through the daily sweep (`rulebook-transitions`). An `extends_deadline` relation emits
+`rule.deadline_changed` (reason `deadline_extended`) at publication, with the candidate's period
+and new due date. `corrects` is treated as a replacement until a candidate can carry the
+corrected date, so it does not emit a deadline change with reason corrected yet. Every event is
+written to the rulebook's outbox in the transaction of the change it records. The obligation
+service does not consume them yet: its consumer needs a cross-tenant design under row-level
+security.
 
 ## Alternatives considered
 
@@ -140,10 +162,19 @@ date or threshold questions either go to the agentic fallback or get refused.
   planned, and one more extraction stage per document. Extraction cost grows by one model call
   per document for relations; entity mentions are found by a grammar first and the model is
   asked only for what the grammar cannot see.
-- The planner adds one model call, for multi-hop questions only. Single-hop questions still stop
-  at the structured layer or hybrid RAG with no extra tokens.
-- Alignment shifts work to analysts: unresolved mentions land in the review queue. The queue must
-  be watched, and the alias table needs an owner.
+- The planner adds one model call (two when the first plan fails validation) for every question
+  the structured layer does not answer, while the flag is on for the tenant: nothing tells a
+  single-hop question from a multi-hop one before the plan exists. Questions the structured
+  layer answers, and every question of a tenant the flag does not target, cost no planner call.
+  A cheap router in front of the planner is a follow-up.
+- Alignment shifts work to analysts: unresolved mentions land in the review queue. The queue is
+  watched: the rulebook reports its open items and the age of the oldest, and two ticket alerts
+  (`EntityReviewQueueStale` past 48 hours, `EntityReviewQueueBacklog` past 500 open items for 6
+  hours) lead to `docs/runbooks/entity-review-queue.md`. The alias table still needs an owner.
+- A published deadline extension, withdrawal or supersession reaches the rule events, not yet
+  the obligations: until the obligation service consumes `rule.deadline_changed`,
+  `rule.withdrawn` and `rule.superseded`, a business's open obligations keep their dates, and so
+  do the structured layer's answers built from them.
 - The kernel and the database both enforce the vocabulary, so adding an entity type or a relation
   kind is a kernel change plus a migration, not a config edit. That is intended.
 - Revisit if the relation graph needs traversals deeper than three hops at interactive latency,
@@ -151,4 +182,55 @@ date or threshold questions either go to the agentic fallback or get refused.
   gain in grounded-answer rate over hybrid RAG. This ADR moves to Accepted only with the eval
   numbers: plan validity, solver success, citation correctness, grounded-answer rate and refusal
   accuracy against the golden set, and no drop in grounded-answer rate against the hybrid RAG
-  baseline.
+  baseline. The Evaluation section below has the first numbers and the proposed thresholds.
+
+## Evaluation (2026-09-29)
+
+The golden set is `evals/golden/qa/kag`: 56 cases, all `label_status: draft`, none reviewed by an
+analyst. By category: 20 single-hop, 16 multi-hop, 10 date or threshold, 10 must-refuse. They are
+asked against a world built in memory from the five recorded CBIC notifications, the relation
+golden cases and the four seed rules a recorded clause supports (`evals/golden/qa/README.md`).
+The target was 60; the recorded text supports no more without inventing facts, and the four
+missing multi-hop cases wait for more recorded notifications.
+
+`make eval EVAL_PROFILE=ci` on commit `614df20`, scripted provider, KAG layer on against the
+hybrid baseline (layer off), pasted from the report:
+
+| Metric | KAG | Hybrid | Delta |
+| --- | --- | --- | --- |
+| plan_validity | 1.000 | n/a | n/a |
+| plan_first_try_validity | 1.000 | n/a | n/a |
+| solver_success | 1.000 | n/a | n/a |
+| citation_correctness | 1.000 | 1.000 | +0.000 |
+| grounded_answer_rate | 1.000 | 0.870 | +0.130 |
+| refusal_accuracy | 1.000 | 1.000 | +0.000 |
+| false_refusal_rate | 0.000 | 0.130 | -0.130 |
+| answer_safety | 1.000 | 1.000 | +0.000 |
+| response_rate | 1.000 | 1.000 | +0.000 |
+| grounded, category date_threshold | 1.000 | 0.800 | |
+| grounded, category multi_hop | 1.000 | 0.875 | |
+| grounded, category single_hop | 1.000 | 0.900 | |
+| grounded, fact source mixed | 1.000 | 1.000 | |
+| grounded, fact source recorded_clause | 1.000 | 0.850 | |
+| grounded, fact source seed_calendar | 1.000 | 1.000 | |
+
+Layer shares with the KAG layer on: structured 0.05, KAG 0.77, hybrid 0.18. The CI gates for
+`qa_kag` (plan validity, solver success, citation correctness, grounded-answer rate, refusal
+accuracy and answer safety at 1.0, and grounded-answer rate at least `qa_hybrid`'s) and for
+`qa_hybrid` (refusal accuracy and answer safety at 1.0) pass. With the gateway's fake provider,
+response rate and answer safety are 1.000 in both modes.
+
+What these numbers do not say:
+
+- The scripted answers are the labels. A score of 1.0 proves that the harness, the qa service
+  and the labels agree, not that a model plans or answers well.
+- The hybrid number is an upper bound. The baseline is served the same scripted answer, which
+  counts as grounded when the search found the clauses it cites, even where its text states what
+  only the KAG layer's facts gave (a due date from the obligations).
+- There are no real-model numbers yet. The nightly run reports the qa suites without gating
+  them, and needs the `CW_AI_GATEWAY_API_KEY` secret to run at all.
+
+Proposed to the deciders as the nightly gate that moves this record to Accepted, once an analyst
+has reviewed the cases: plan validity at least 0.95, solver success at least 0.98, citation
+correctness at least 0.95, grounded-answer rate at least 0.97, refusal accuracy at least 0.95,
+and no drop in grounded-answer rate against the hybrid baseline of the same run.
