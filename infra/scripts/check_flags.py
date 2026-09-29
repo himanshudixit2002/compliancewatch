@@ -86,6 +86,10 @@ NOT_FLAGS: Mapping[str, str] = {
         "an escape hatch from the prompt registry for local experiments, never set in a shared "
         "environment"
     ),
+    "CW_KAFKA_SECURITY_PROTOCOL": "how the Kafka cluster of an environment takes connections",
+    "CW_KAFKA_SASL_MECHANISM": "the SASL mechanism the Kafka cluster of an environment offers",
+    "CW_TEMPORAL_TLS": "whether the Temporal server of an environment takes TLS connections",
+    "CW_OTEL_PROTOCOL": "the OTLP transport the collector of an environment takes",
 }
 
 

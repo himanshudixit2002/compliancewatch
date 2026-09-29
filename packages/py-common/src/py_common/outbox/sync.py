@@ -32,6 +32,7 @@ from uuid import UUID
 from sqlalchemy import Connection, Engine, create_engine, insert, select
 
 from py_common.events import EventMessage
+from py_common.kafka import KafkaClientConfig
 from py_common.logging import get_logger
 from py_common.outbox.consumer import DEFAULT_CONFIG, ConsumerConfig, Handler, IdempotentConsumer
 from py_common.outbox.producer import AiokafkaProducer
@@ -150,14 +151,13 @@ async def run_consumer(
     """Consume ``topics`` as ``group_id`` until ``stop`` is set; returns the records handled.
 
     The engine reads ``CW_DATABASE_URL`` (its ``search_path`` picks the service schema, where
-    the migration created ``processed_event``); dead letters are produced to
-    ``CW_KAFKA_BOOTSTRAP``.
+    the migration created ``processed_event``); records come from and dead letters go to the
+    cluster at ``CW_KAFKA_BOOTSTRAP``, with the ``CW_KAFKA_*`` credentials.
     """
+    kafka = KafkaClientConfig.from_settings(settings)
     engine = create_engine(settings.database_url, pool_pre_ping=True)
     try:
-        async with AiokafkaProducer(
-            settings.kafka_bootstrap, client_id=f"cw-consumer-{group_id}"
-        ) as producer:
+        async with AiokafkaProducer(kafka, client_id=f"cw-consumer-{group_id}") as producer:
             consumer = IdempotentConsumer(
                 group_id=group_id,
                 store=SyncProcessedStore(engine, group_id=group_id),
@@ -166,9 +166,7 @@ async def run_consumer(
                 config=config,
             )
             log.info("consumer.started", group=group_id, topics=list(topics))
-            handled = await consumer.run(
-                bootstrap_servers=settings.kafka_bootstrap, topics=topics, stop=stop
-            )
+            handled = await consumer.run(kafka=kafka, topics=topics, stop=stop)
             log.info("consumer.stopped", group=group_id, handled=handled)
             return handled
     finally:

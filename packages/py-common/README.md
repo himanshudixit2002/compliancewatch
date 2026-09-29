@@ -12,7 +12,8 @@ Design reference: Project Foundation guide, sections 13, 14 and 18.
 
 ```
 src/py_common/
-  settings.py          # pydantic-settings, env_prefix CW_, env_file .env
+  settings.py          # pydantic-settings, env_prefix CW_, env_file .env; with_search_path(url, schema)
+  kafka.py             # KafkaClientConfig: bootstrap servers, SASL/SCRAM and TLS for every Kafka client
   flags.py             # configure_flags, flag_enabled, flag_value: OpenFeature over the flag registry (env or Unleash)
   flags_registry.json  # generated from packages/flags/registry.json by make flags; never edited by hand
   logging.py           # structlog JSON logging bridging stdlib records; correlation_id/tenant_id/actor contextvars
@@ -29,9 +30,9 @@ src/py_common/
     fastapi.py         # Authenticator by CW_AUTH_MODE, authenticate, tenant_scope, require_roles, shared_token_or_roles
     service_tokens.py  # ServiceTokenSource (cached until a minute before expiry), BearerAuth, service_auth_from
     testing.py         # TestIssuer: tokens signed with a key generated at run time; bearer(token)
-  telemetry.py         # configure_telemetry (OTLP to CW_OTEL_ENDPOINT), instrument_app, instrument_engine
+  telemetry.py         # configure_telemetry (OTLP gRPC or HTTP to CW_OTEL_ENDPOINT, with CW_OTEL_HEADERS), instrument_app, instrument_engine
   temporal/
-    client.py          # connect(settings): pydantic converter + tracing interceptor
+    client.py          # connect(settings): pydantic converter + tracing interceptor; API key or mTLS for Temporal Cloud
     activity.py        # ActivityBase: validate/run/record, retry policy and timeouts on the class, schedule()
     worker.py          # WorkerConfig, build_worker, run_worker (stops on SIGTERM/SIGINT)
     liveness.py        # running(task_queue): the temporal_worker_up{task_queue} gauge while a worker runs
@@ -239,10 +240,23 @@ Log lines inside a recording span carry `trace_id` and `span_id`. The HTTP instr
 emits the stable semantic conventions (`http.server.request.duration` in seconds,
 `http.route`, `http.response.status_code`), which the Grafana dashboard queries.
 
+A managed collector is reached the way it asks: `CW_OTEL_PROTOCOL=http/protobuf` sends traces to
+`<endpoint>/v1/traces` and metrics to `<endpoint>/v1/metrics` (Grafana Cloud's OTLP gateway, for
+example), and `CW_OTEL_HEADERS` holds the headers every export carries, in the
+`OTEL_EXPORTER_OTLP_HEADERS` form `Authorization=Basic%20<token>,key2=value2` (URL-encoded
+values). The default is gRPC to the endpoint itself with no headers, the dev stack's collector.
+`Telemetry.shutdown()` flushes once; later calls do nothing, so every app of a process that
+hosts several can call it from its lifespan.
+
 ## Temporal
 
 `py_common.temporal.connect(settings)` returns a client with the pydantic data converter and
 the OpenTelemetry tracing interceptor (spans are created even when the starter carried none).
+It connects in plain text to the dev stack's server. For Temporal Cloud it sends
+`CW_TEMPORAL_API_KEY` over TLS, or presents the client certificate `CW_TEMPORAL_TLS_CERT` with
+its key `CW_TEMPORAL_TLS_KEY` (PEM text, so they fit a secret store) for mutual TLS; the settings
+refuse both at once and a certificate without its key. `CW_TEMPORAL_TLS` turns TLS on or off
+explicitly; left empty it is on whenever a credential is set.
 An activity is a class:
 
 ```python
@@ -290,6 +304,17 @@ exponential backoff and moves a message to `<topic>.dlq` after eight failures
 (`docs/runbooks/outbox-relay.md`). The relay installs telemetry as `outbox-relay`: with
 `CW_OTEL_ENDPOINT` set it exports its counters by topic and the `outbox_relay_pending` gauge by
 `db_schema` every 15 seconds, which the `OutboxBacklog` alert reads.
+
+Every Kafka client (the relay's producer, consumers, their dead-letter producers and the topic
+tooling) connects through `py_common.kafka.KafkaClientConfig.from_settings(settings)`, whose
+`aiokafka_kwargs()` carry `CW_KAFKA_BOOTSTRAP` and the security settings: the dev stack's
+`PLAINTEXT` by default, or `CW_KAFKA_SECURITY_PROTOCOL=SASL_SSL` with
+`CW_KAFKA_SASL_MECHANISM` (`SCRAM-SHA-256` or `SCRAM-SHA-512`), `CW_KAFKA_SASL_USERNAME` and
+`CW_KAFKA_SASL_PASSWORD` for a managed cluster, verified against `CW_KAFKA_SSL_CAFILE` or the
+system's certificate authorities. The settings refuse a SASL protocol without all three.
+`AiokafkaProducer` takes the config or a bare bootstrap string, `IdempotentConsumer.run` takes
+`kafka=`, and `relay.run(settings, stop=...)` leaves signal handling to a caller that passes its
+own stop event.
 
 Consuming: a migration calls `create_processed_event_table(op)`; the service runs
 `IdempotentConsumer(group_id=..., store=PostgresProcessedStore(engine, group_id=...),

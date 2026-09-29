@@ -7,7 +7,8 @@ is marked dead only when that send succeeds, so nothing is lost while the broker
 Delivery is at least once: a crash between the send and the commit republishes the row.
 
 ``python -m py_common.outbox`` runs it against ``CW_DATABASE_URL`` (whose ``search_path``
-picks the service schema) and ``CW_KAFKA_BOOTSTRAP`` until SIGTERM or SIGINT. With
+picks the service schema) and ``CW_KAFKA_BOOTSTRAP``, with the ``CW_KAFKA_*`` credentials of a
+managed cluster, until SIGTERM or SIGINT. With
 ``CW_OTEL_ENDPOINT`` set it exports the published, retried and dead counters by topic and the
 ``outbox_relay_pending`` gauge by ``db_schema`` (``CW_DB_SCHEMA``), which ``OutboxBacklog``
 alerts on.
@@ -28,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from domain_kernel.events import utc_now
 from py_common import __version__
 from py_common.events import CONTENT_TYPE
+from py_common.kafka import KafkaClientConfig
 from py_common.logging import configure_logging, get_logger
 from py_common.outbox.producer import AiokafkaProducer, MessageProducer
 from py_common.outbox.schema import OUTBOX_TABLE
@@ -256,12 +258,20 @@ async def outbox_table_exists(engine: AsyncEngine) -> bool:
         return await connection.run_sync(has_table)
 
 
-async def run(settings: Settings, *, config: RelayConfig = DEFAULT_CONFIG) -> bool:
-    """Run until a signal arrives. Returns False without starting when the table is missing."""
-    stop = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for signum in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(signum, stop.set)
+async def run(
+    settings: Settings,
+    *,
+    config: RelayConfig = DEFAULT_CONFIG,
+    stop: asyncio.Event | None = None,
+) -> bool:
+    """Run until ``stop`` is set. Without a ``stop`` event of the caller's, SIGTERM and SIGINT
+    set one; a process that runs the relay next to other work passes its own and keeps its
+    signal handling. Returns False without starting when the table is missing."""
+    if stop is None:
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(signum, stop.set)
     return await run_relay(settings, stop, config=config)
 
 
@@ -282,7 +292,7 @@ async def run_relay(
             )
             return False
         async with AiokafkaProducer(
-            settings.kafka_bootstrap, client_id="cw-outbox-relay"
+            KafkaClientConfig.from_settings(settings), client_id="cw-outbox-relay"
         ) as producer:
             relay = OutboxRelay(
                 store=PostgresOutboxStore(engine),

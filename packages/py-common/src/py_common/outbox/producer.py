@@ -5,6 +5,8 @@ from typing import Protocol, Self
 
 from aiokafka import AIOKafkaProducer
 
+from py_common.kafka import KafkaClientConfig
+
 
 class MessageProducer(Protocol):
     async def send(
@@ -13,16 +15,19 @@ class MessageProducer(Protocol):
 
 
 class AiokafkaProducer:
-    """Idempotent, acks-all producer. Construct and start inside a running event loop."""
+    """Idempotent, acks-all producer. Construct and start inside a running event loop.
+
+    ``kafka`` is the cluster and its credentials (``KafkaClientConfig.from_settings``), or bare
+    bootstrap servers for a plain connection."""
 
     def __init__(
         self,
-        bootstrap_servers: str,
+        kafka: KafkaClientConfig | str,
         *,
         client_id: str = "cw-outbox",
         request_timeout_ms: int = 10_000,
     ) -> None:
-        self._bootstrap_servers = bootstrap_servers
+        self._kafka = KafkaClientConfig.of(kafka)
         self._client_id = client_id
         self._request_timeout_ms = request_timeout_ms
         self._producer: AIOKafkaProducer | None = None
@@ -30,7 +35,7 @@ class AiokafkaProducer:
     async def start(self) -> None:
         if self._producer is None:
             self._producer = AIOKafkaProducer(
-                bootstrap_servers=self._bootstrap_servers,
+                **self._kafka.aiokafka_kwargs(),
                 client_id=self._client_id,
                 enable_idempotence=True,
                 acks="all",

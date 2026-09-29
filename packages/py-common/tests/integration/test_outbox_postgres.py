@@ -38,6 +38,7 @@ from testcontainers.community.postgres import PostgresContainer
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import ObligationId, TenantId
 from py_common.events import EventMessage, decode
+from py_common.kafka import KafkaClientConfig
 from py_common.outbox import (
     AiokafkaProducer,
     ConsumerConfig,
@@ -379,7 +380,8 @@ async def test_consumer_run_reads_from_the_broker_and_commits_offsets(
             producer=producer,
         )
         handled_count = await asyncio.wait_for(
-            consumer.run(bootstrap_servers=bootstrap, topics=[run_topic], stop=stop), timeout=60
+            consumer.run(kafka=KafkaClientConfig(bootstrap), topics=[run_topic], stop=stop),
+            timeout=60,
         )
         assert handled_count == 2
         assert seen == ["a", "b"]
@@ -387,7 +389,7 @@ async def test_consumer_run_reads_from_the_broker_and_commits_offsets(
         stop_again = asyncio.Event()
         asyncio.get_running_loop().call_later(3, stop_again.set)
         again = await asyncio.wait_for(
-            consumer.run(bootstrap_servers=bootstrap, topics=[run_topic], stop=stop_again),
+            consumer.run(kafka=KafkaClientConfig(bootstrap), topics=[run_topic], stop=stop_again),
             timeout=60,
         )
         assert again == 0, "committed offsets mean nothing is redelivered"

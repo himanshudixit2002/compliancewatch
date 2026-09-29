@@ -1,11 +1,14 @@
+import asyncio
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import TenantId
 from py_common.events import EventMessage, encode, kafka_headers, to_message
+from py_common.kafka import KafkaClientConfig
+from py_common.outbox import consumer as consumer_module
 from py_common.outbox.consumer import ConsumerConfig, IdempotentConsumer, InboundRecord, Outcome
 from py_common.outbox.store import UnitOfWork
 from py_common.outbox.testing import FakeProducer, MemoryProcessedStore, MemoryUnit
@@ -149,3 +152,77 @@ def test_config_and_group_are_checked() -> None:
         IdempotentConsumer(
             group_id=" ", store=MemoryProcessedStore(), handler=Handler(), producer=FakeProducer()
         )
+
+
+class FakeKafkaConsumer:
+    """Stands in for AIOKafkaConsumer: records how it was built and delivers the batches
+    queued in ``pending``."""
+
+    built: ClassVar[list["FakeKafkaConsumer"]] = []
+    pending: ClassVar[list[dict[Any, list[Any]]]] = []
+
+    def __init__(self, *topics: str, **kwargs: Any) -> None:
+        self.topics = topics
+        self.kwargs = kwargs
+        self.committed: list[dict[Any, int]] = []
+        self.stopped = False
+        FakeKafkaConsumer.built.append(self)
+
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        self.stopped = True
+
+    async def getmany(self, *, timeout_ms: int) -> dict[Any, list[Any]]:
+        return FakeKafkaConsumer.pending.pop(0) if FakeKafkaConsumer.pending else {}
+
+    async def commit(self, offsets: dict[Any, int]) -> None:
+        self.committed.append(offsets)
+
+
+@dataclass(frozen=True, slots=True)
+class Raw:
+    topic: str
+    partition: int
+    offset: int
+    key: bytes | None
+    value: bytes
+    headers: tuple[tuple[str, bytes], ...] = ()
+
+
+async def test_run_connects_with_the_kafka_config_and_commits_each_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    message = sample()
+    FakeKafkaConsumer.built.clear()
+    FakeKafkaConsumer.pending[:] = [
+        {"partition": [Raw(message.topic, 0, 41, b"k", encode(message))]}
+    ]
+    monkeypatch.setattr(consumer_module, "AIOKafkaConsumer", FakeKafkaConsumer)
+    stop = asyncio.Event()
+    handler = Handler()
+
+    async def handle_then_stop(event: EventMessage, unit: UnitOfWork) -> None:
+        await handler(event, unit)
+        stop.set()
+
+    store, producer = MemoryProcessedStore(), FakeProducer()
+    consumer = IdempotentConsumer(
+        group_id="obligation", store=store, handler=handle_then_stop, producer=producer
+    )
+    kafka = KafkaClientConfig("broker:9092", security_protocol="SSL")
+    handled = await asyncio.wait_for(
+        consumer.run(kafka=kafka, topics=["obligation.created"], stop=stop), timeout=5
+    )
+    assert handled == 1
+    assert store.processed == {message.event_id}
+    (built,) = FakeKafkaConsumer.built
+    assert built.topics == ("obligation.created",)
+    assert built.kwargs["bootstrap_servers"] == "broker:9092"
+    assert built.kwargs["security_protocol"] == "SSL"
+    assert "ssl_context" in built.kwargs
+    assert built.kwargs["group_id"] == "obligation"
+    assert built.kwargs["enable_auto_commit"] is False
+    assert [list(offsets.values()) for offsets in built.committed] == [[42]]
+    assert built.stopped

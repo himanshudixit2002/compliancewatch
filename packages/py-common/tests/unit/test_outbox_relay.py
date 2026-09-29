@@ -1,5 +1,6 @@
 import asyncio
 import json
+import signal
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
@@ -11,6 +12,7 @@ from opentelemetry.sdk.metrics.export import InMemoryMetricReader, NumberDataPoi
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import TenantId
 from py_common.events import decode, to_message
+from py_common.kafka import KafkaClientConfig
 from py_common.outbox import relay as relay_module
 from py_common.outbox.relay import (
     PENDING_GAUGE,
@@ -323,3 +325,90 @@ def test_main_installs_telemetry_as_the_outbox_relay(monkeypatch: pytest.MonkeyP
         relay_module.main()
     assert installed == ["outbox-relay", "outbox-relay"]
     assert shut_down == [True, True]
+
+
+class StubProducer:
+    """Stands in for AiokafkaProducer: records what it was built from."""
+
+    built: ClassVar[list["StubProducer"]] = []
+
+    def __init__(self, kafka: KafkaClientConfig | str, *, client_id: str) -> None:
+        self.kafka = kafka
+        self.client_id = client_id
+        StubProducer.built.append(self)
+
+    async def __aenter__(self) -> "StubProducer":
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
+
+    async def send(self, topic: str, *, key: bytes, value: bytes, headers: object) -> None:
+        raise AssertionError("nothing is pending")
+
+
+async def test_run_with_a_stop_event_installs_no_signal_handlers_and_builds_the_producer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    installed: list[object] = []
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(loop, "add_signal_handler", lambda *args: installed.append(args))
+
+    async def table_exists(engine: object) -> bool:
+        return True
+
+    StubProducer.built.clear()
+    monkeypatch.setattr(relay_module, "outbox_table_exists", table_exists)
+    monkeypatch.setattr(relay_module, "AiokafkaProducer", StubProducer)
+    settings = Settings(
+        _env_file=None,
+        kafka_bootstrap="broker:9092",
+        kafka_security_protocol="SASL_SSL",
+        kafka_sasl_mechanism="SCRAM-SHA-512",
+        kafka_sasl_username="relay",
+        kafka_sasl_password="relay-test-value",  # type: ignore[arg-type]
+        db_schema="profile",
+    )
+    stop = asyncio.Event()
+    stop.set()
+    assert await relay_module.run(settings, stop=stop) is True
+    assert installed == [], "the caller's stop event keeps its own signal handling"
+    (producer,) = StubProducer.built
+    assert producer.kafka == KafkaClientConfig.from_settings(settings)
+    assert producer.client_id == "cw-outbox-relay"
+
+
+async def test_run_without_a_stop_event_stops_on_a_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    installed: dict[int, object] = {}
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(
+        loop, "add_signal_handler", lambda signum, callback: installed.update({signum: callback})
+    )
+    seen: list[asyncio.Event] = []
+
+    async def run_relay(settings: Settings, stop: asyncio.Event, *, config: RelayConfig) -> bool:
+        seen.append(stop)
+        return False
+
+    monkeypatch.setattr(relay_module, "run_relay", run_relay)
+    assert await relay_module.run(Settings(_env_file=None)) is False
+    assert sorted(installed) == sorted([signal.SIGTERM, signal.SIGINT])
+    (stop,) = seen
+    installed[signal.SIGTERM]()  # type: ignore[operator]
+    assert stop.is_set()
+
+
+async def test_the_relay_refuses_to_start_without_the_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def table_exists(engine: object) -> bool:
+        return False
+
+    StubProducer.built.clear()
+    monkeypatch.setattr(relay_module, "outbox_table_exists", table_exists)
+    monkeypatch.setattr(relay_module, "AiokafkaProducer", StubProducer)
+    stop = asyncio.Event()
+    assert await relay_module.run_relay(Settings(_env_file=None), stop) is False
+    assert StubProducer.built == []
