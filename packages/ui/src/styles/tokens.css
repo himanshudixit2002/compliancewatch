@@ -1,0 +1,169 @@
+/*
+  Design tokens for the ComplianceWatch web app (guide section 12).
+
+  This file is imported by apps/web/src/app/globals.css AFTER `@import "tailwindcss"`; it never
+  imports Tailwind itself. It has three parts:
+
+  1. Colour roles as plain CSS custom properties in hex, once for the light scheme (:root) and
+     once for the dark scheme (.dark, and prefers-color-scheme unless .light is set). The two dark
+     blocks must stay identical; src/tokens.test.ts checks that, and src/contrast.test.ts checks
+     WCAG AA contrast (4.5:1 for text pairs, 3:1 for UI pairs) in both schemes.
+  2. An `@theme inline` block that maps the roles onto Tailwind namespaces, so the utilities are
+     bg-bg, bg-surface, text-fg, text-fg-muted, border-line, ring-focus, bg-danger and so on. The
+     default Tailwind palette is removed: colours are only reachable through these roles.
+  3. The type scale, radii, spacing base and font stacks as a normal `@theme` block (Tailwind
+     emits them as CSS variables and utilities), plus focus and reduced-motion base styles.
+
+  Token names used by components are mirrored in src/tokens.ts.
+*/
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #f4f6f9;
+  --surface-raised: #ffffff;
+  --fg: #101828;
+  --fg-muted: #4a5568;
+  --line: #d9dee7;
+  --line-strong: #6b7a90;
+  --primary: #1d4ed8;
+  --primary-fg: #ffffff;
+  --accent: #0f766e;
+  --accent-fg: #ffffff;
+  --success: #166534;
+  --success-fg: #ffffff;
+  --warning: #92400e;
+  --warning-fg: #ffffff;
+  --danger: #b91c1c;
+  --danger-fg: #ffffff;
+  --info: #0369a1;
+  --info-fg: #ffffff;
+  --focus: #2563eb;
+}
+
+.dark {
+  color-scheme: dark;
+  --bg: #0b1220;
+  --surface: #111a2b;
+  --surface-raised: #182338;
+  --fg: #e6edf7;
+  --fg-muted: #a3b1c6;
+  --line: #263145;
+  --line-strong: #66768f;
+  --primary: #8ab4ff;
+  --primary-fg: #0b1220;
+  --accent: #2dd4bf;
+  --accent-fg: #0b1220;
+  --success: #4ade80;
+  --success-fg: #052e16;
+  --warning: #fbbf24;
+  --warning-fg: #1c1400;
+  --danger: #f87171;
+  --danger-fg: #2a0a0a;
+  --info: #38bdf8;
+  --info-fg: #041b2b;
+  --focus: #93c5fd;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    color-scheme: dark;
+    --bg: #0b1220;
+    --surface: #111a2b;
+    --surface-raised: #182338;
+    --fg: #e6edf7;
+    --fg-muted: #a3b1c6;
+    --line: #263145;
+    --line-strong: #66768f;
+    --primary: #8ab4ff;
+    --primary-fg: #0b1220;
+    --accent: #2dd4bf;
+    --accent-fg: #0b1220;
+    --success: #4ade80;
+    --success-fg: #052e16;
+    --warning: #fbbf24;
+    --warning-fg: #1c1400;
+    --danger: #f87171;
+    --danger-fg: #2a0a0a;
+    --info: #38bdf8;
+    --info-fg: #041b2b;
+    --focus: #93c5fd;
+  }
+}
+
+@theme inline {
+  --color-*: initial;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-primary: var(--primary);
+  --color-primary-fg: var(--primary-fg);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-success: var(--success);
+  --color-success-fg: var(--success-fg);
+  --color-warning: var(--warning);
+  --color-warning-fg: var(--warning-fg);
+  --color-danger: var(--danger);
+  --color-danger-fg: var(--danger-fg);
+  --color-info: var(--info);
+  --color-info-fg: var(--info-fg);
+  --color-focus: var(--focus);
+}
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --default-font-family: var(--font-sans);
+  --default-mono-font-family: var(--font-mono);
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+
+  --spacing: 0.25rem;
+
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 2rem;
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: 2.25rem;
+}
+
+@layer base {
+  body {
+    background-color: var(--bg);
+    color: var(--fg);
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

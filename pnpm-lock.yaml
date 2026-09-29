@@ -108,6 +108,9 @@ importers:
 
   packages/ui:
     devDependencies:
+      '@tailwindcss/node':
+        specifier: 4.3.3
+        version: 4.3.3
       '@testing-library/dom':
         specifier: ^10.4.0
         version: 10.4.2
@@ -126,6 +129,9 @@ importers:
       react-dom:
         specifier: ^19.2.0
         version: 19.3.0(react@19.3.0)
+      tailwindcss:
+        specifier: 4.3.3
+        version: 4.3.3
 
 packages:
 
