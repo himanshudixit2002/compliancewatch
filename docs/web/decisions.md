@@ -159,3 +159,20 @@ again; the proxy's public list is the registry (`roles: "public"`), so a new scr
 by its entry; `next` is honoured only as a same-origin path (`safeNext`); the redirect targets
 come from the registry through `signInHref`, `forbiddenHref` and `homeFor` in
 `shared/config/nav.ts`, which is why `/businesses` has a waiting entry today.
+
+## D-015: One sign-in port; the fake adapter exists only in local and test
+
+2026-09-29. The identity provider (ADR-014) and its routes are not on `main`, but every page
+behind a role needs a session to be built and tested against. `server/auth/provider.ts`
+declares the port (`startSignIn`, `completeSignIn`, `signOut`, the methods a provider offers)
+and `providerFor(env)` picks the adapter named by `CW_WEB_AUTH_PROVIDER`; `server/auth/fake.ts`
+is the only adapter today and mints a session for a chosen tenant (an existing id or a new
+one), tenant kind, roles the kind allows and a display name, with the user id derived from the
+tenant and the name so a returning name is the same user. The environment module refuses
+`fake` unless `CW_WEB_ENV` is `local` or `test`, and the adapter's constructor refuses again;
+`supabase` is a reserved value that answers "not available yet" until its adapter exists.
+Consequences: the sign-in page, the action and the session module never name an adapter, so
+the real one is a drop-in; the second factor a fake session asserts is documented as asserted,
+not verified; the fake adapter keeps its name and file when the identity work replaces its body
+with the dev provider tokens and the session exchange; failures are `Result` errors with
+web-local problems, mapped to a form's `ActionState` like a service failure.

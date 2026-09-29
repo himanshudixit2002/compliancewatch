@@ -29,6 +29,9 @@ src/server/         server-only modules; every file starts with `import "server-
                     env.ts validates every CW_WEB_* variable (zod; parsed at the first request, never at build)
                     session.ts: the encrypted cw_session cookie (jose), its options, set and clear (actions only)
                     dal.ts: verifySession, requireRole, requireAdmin, requireScreen, sessionForRender (the gates)
+                    auth/provider.ts: the AuthProvider port and providerFor(env); auth/fake.ts: the development
+                    adapter (CW_WEB_AUTH_PROVIDER=fake, local and test only) minting a session for a chosen
+                    tenant, kind, roles and name
                     result.ts: Result, ApiError and the mapping to a form's ActionState
                     api/client.ts: one openapi-fetch client per service (x-request-id, accept, time limit) and call()
                     api/problem.ts: RFC 9457 parsing to ApiError kinds and field errors

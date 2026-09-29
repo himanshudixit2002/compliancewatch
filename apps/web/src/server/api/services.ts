@@ -10,11 +10,10 @@ import type {
   rulebook,
 } from "@compliancewatch/contracts/openapi";
 import type { Client } from "openapi-fetch";
-import { PROBLEM_TYPE_PREFIX } from "@/entities/problem/mappers";
 import { isRegulatory, type Principal } from "@/shared/config/roles";
 import type { ServiceName } from "@/shared/config/services";
 import { getEnv, serviceUrl } from "../env";
-import { err, ok, type ApiError, type Result } from "../result";
+import { err, ok, webError, type Result } from "../result";
 import {
   TENANT_HEADER,
   WRITE_TOKEN_HEADER,
@@ -116,18 +115,6 @@ export function rulebookClient(ctx: Pick<ClientContext, "fetchImpl"> = {}): Rule
   return createServiceClient<rulebook.paths>(optionsFor("rulebook", ctx, {}));
 }
 
-/** An ApiError for a failure decided here, before any request: no request id, a web-local problem. */
-function localError(kind: ApiError["kind"], slug: string, title: string, detail: string): ApiError {
-  const status = kind === "forbidden" ? 403 : 503;
-  return {
-    kind,
-    status,
-    requestId: "",
-    problem: { type: `${PROBLEM_TYPE_PREFIX}${slug}`, title, status, detail },
-    message: title,
-  };
-}
-
 /**
  * The rulebook client that may write. It exists only for a session with a regulatory role and
  * only while the write token is configured; each write route still answers 401 when the token
@@ -136,7 +123,7 @@ function localError(kind: ApiError["kind"], slug: string, title: string, detail:
 export function rulebookAdmin(ctx: ClientContext): Result<RulebookClient> {
   if (!isRegulatory(ctx.session)) {
     return err(
-      localError(
+      webError(
         "forbidden",
         "web-regulatory-role-required",
         "Regulatory role required",
@@ -147,7 +134,7 @@ export function rulebookAdmin(ctx: ClientContext): Result<RulebookClient> {
   const token = getEnv().CW_WEB_RULEBOOK_WRITE_TOKEN;
   if (token === undefined) {
     return err(
-      localError(
+      webError(
         "unavailable",
         "web-write-token-missing",
         "Rulebook writes are not configured",

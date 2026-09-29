@@ -104,6 +104,48 @@ export function defaultMessageFor(kind: ApiErrorKind): string {
   return DEFAULT_MESSAGES[kind];
 }
 
+const STATUS_BY_KIND: Readonly<Record<Exclude<ApiErrorKind, "network">, number>> = {
+  unauthenticated: 401,
+  payment_required: 402,
+  forbidden: 403,
+  not_found: 404,
+  conflict: 409,
+  too_large: 413,
+  unsupported_media: 415,
+  validation: 422,
+  rate_limited: 429,
+  unavailable: 503,
+  server: 500,
+  bad_request: 400,
+};
+
+/** The status a kind stands for; none for a failure without a response. */
+export function statusForKind(kind: ApiErrorKind): number | undefined {
+  return kind === "network" ? undefined : STATUS_BY_KIND[kind];
+}
+
+/**
+ * An ApiError decided in the web layer before any request: a missing configuration, a refused
+ * role, a form that fails a check the server layer owns. It carries a web-local problem
+ * (`urn:compliancewatch:problem:web-<slug>`) and no request id, since no service was called.
+ */
+export function webError(
+  kind: Exclude<ApiErrorKind, "network">,
+  slug: string,
+  title: string,
+  detail?: string,
+  fieldErrors?: FieldErrors,
+): ApiError {
+  const status = STATUS_BY_KIND[kind];
+  const problem: Problem = { type: `${PROBLEM_TYPE_PREFIX}${slug}`, title, status };
+  if (detail !== undefined) problem.detail = detail;
+  const error: ApiError = { kind, status, requestId: "", problem, message: title };
+  if (fieldErrors !== undefined && Object.keys(fieldErrors).length > 0) {
+    error.fieldErrors = fieldErrors;
+  }
+  return error;
+}
+
 /** The problem a form shows: the service's, or a web-local one for a failure without a body. */
 export function toActionProblem(error: ApiError): ActionProblem {
   const { problem } = error;

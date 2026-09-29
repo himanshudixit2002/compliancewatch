@@ -7,9 +7,11 @@ import {
   isProblem,
   mapResult,
   ok,
+  statusForKind,
   toActionProblem,
   toActionState,
   unwrapOr,
+  webError,
   type ApiError,
   type ApiErrorKind,
 } from "./result";
@@ -165,5 +167,69 @@ describe("toActionState", () => {
         correlationId: REQUEST_ID,
       },
     });
+  });
+});
+
+describe("webError", () => {
+  it("builds a web-local problem with the status of its kind and no request id", () => {
+    const error = webError(
+      "unavailable",
+      "web-auth-provider-missing",
+      "Sign-in is not configured",
+      "Set CW_WEB_AUTH_PROVIDER.",
+    );
+    expect(error).toEqual({
+      kind: "unavailable",
+      status: 503,
+      requestId: "",
+      message: "Sign-in is not configured",
+      problem: {
+        type: `${PROBLEM_TYPE_PREFIX}web-auth-provider-missing`,
+        title: "Sign-in is not configured",
+        status: 503,
+        detail: "Set CW_WEB_AUTH_PROVIDER.",
+      },
+    });
+    expect(isProblem(error, "web-auth-provider-missing")).toBe(true);
+  });
+
+  it("carries field errors for a validation failure and drops an empty map", () => {
+    const invalid = webError("validation", "web-form-invalid", "Check the form", undefined, {
+      roles: ["Choose at least one role."],
+    });
+    expect(invalid.status).toBe(422);
+    expect(invalid.fieldErrors).toEqual({ roles: ["Choose at least one role."] });
+    expect(invalid.problem).not.toHaveProperty("detail");
+    expect(webError("forbidden", "web-x", "No", undefined, {})).not.toHaveProperty("fieldErrors");
+    expect(toActionState(err(invalid))).toEqual({
+      status: "error",
+      problem: {
+        type: `${PROBLEM_TYPE_PREFIX}web-form-invalid`,
+        title: "Check the form",
+        correlationId: "",
+      },
+      fieldErrors: { roles: ["Choose at least one role."] },
+    });
+  });
+
+  it("maps every kind to its status, and network to none", () => {
+    const expected: Record<ApiErrorKind, number | undefined> = {
+      unauthenticated: 401,
+      payment_required: 402,
+      forbidden: 403,
+      not_found: 404,
+      conflict: 409,
+      too_large: 413,
+      unsupported_media: 415,
+      validation: 422,
+      rate_limited: 429,
+      unavailable: 503,
+      server: 500,
+      bad_request: 400,
+      network: undefined,
+    };
+    for (const [kind, status] of Object.entries(expected)) {
+      expect(statusForKind(kind as ApiErrorKind), kind).toBe(status);
+    }
   });
 });
