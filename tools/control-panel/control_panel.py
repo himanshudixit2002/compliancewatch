@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import os
 import queue
+import shlex
 import signal
 import subprocess
 import threading
@@ -411,7 +412,7 @@ class Panel:
 
     # running steps
     def run(self, steps: list[tuple[str, object]], title: str | None = None) -> None:
-        """Run steps in order; a step is a shell command string or a callable(log) -> bool."""
+        """Run steps in order; a step is a command line string or a callable(log) -> bool."""
         if self.busy:
             return
         title = title or steps[0][0]
@@ -433,16 +434,21 @@ class Panel:
         threading.Thread(target=work, daemon=True).start()
 
     def _shell(self, cmd: str) -> bool:
-        proc = subprocess.Popen(
-            cmd,
-            shell=True,
-            cwd=REPO,
-            env=ENV,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
+        # Split the line as a shell would but run it without one (no pipes, && or globs): every
+        # step is a plain make or colima call. A missing program raises here rather than exit 127.
+        try:
+            proc = subprocess.Popen(
+                shlex.split(cmd),
+                cwd=REPO,
+                env=ENV,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        except OSError as exc:
+            self.log(f"error: {exc}", "err")
+            return False
         assert proc.stdout
         for line in proc.stdout:
             line = line.rstrip()
