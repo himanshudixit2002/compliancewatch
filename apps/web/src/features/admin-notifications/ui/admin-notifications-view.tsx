@@ -1,145 +1,233 @@
-"use client";
-
-import { useState } from "react";
 import type { Route } from "next";
 import Link from "next/link";
 import {
   Badge,
-  Button,
   Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  EmptyState,
   PageHeader,
-  SearchInput,
-  StatCard,
+  ProgressBar,
   Table,
-  Tabs,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from "@compliancewatch/ui";
-import type { AdminNotificationsView } from "../model/admin-notifications";
-import { channelLabel } from "../model/admin-notifications";
+import type { Channel } from "@/entities/notification/types";
+import { t } from "@/shared/i18n";
+import { formatDateTime } from "@/shared/lib/dates";
+import { StatCard } from "@/shared/ui/stat-card";
+import {
+  activeDigestCount,
+  channelLabelKey,
+  connectedCount,
+  digestModeKey,
+  dispatchSummary,
+  occasionLabelKey,
+  stateBucket,
+  stateLabelKey,
+  stateTone,
+} from "../model/admin-notifications";
+import type {
+  AdminNotificationsData,
+  ChannelHealth,
+  DigestSchedule,
+  DispatchEntry,
+} from "../model/admin-notifications";
+import { DispatchLogTable } from "./dispatch-log-table";
+import type { DispatchRow } from "./dispatch-rows";
 
 export interface AdminNotificationsViewProps {
-  view: AdminNotificationsView;
+  data: AdminNotificationsData;
+  /** A channel's settings screen; without it the channel cards show no configure link. */
+  configureHref?: (channel: Channel) => Route;
 }
 
-const TABS = [
-  { value: "overview", label: "Overview" },
-  { value: "digests", label: "Digests" },
-  { value: "dispatch", label: "Dispatch log" },
-  { value: "broadcasts", label: "Broadcasts" },
-];
+function lastSent(instant: string | null): string {
+  return instant === null ? t("adminNotifications.neverSent") : formatDateTime(instant);
+}
 
-/** The admin notifications config: channel health, digest schedules, dispatch log and broadcasts. */
-export function AdminNotificationsView({ view }: AdminNotificationsViewProps) {
-  const [tab, setTab] = useState("overview");
-  const [search, setSearch] = useState("");
+function ChannelCard({
+  health,
+  configureHref,
+}: {
+  health: ChannelHealth;
+  configureHref?: (channel: Channel) => Route;
+}) {
+  const name = t(channelLabelKey(health.channel));
+  return (
+    <Card data-channel={health.channel} className="gap-3">
+      <CardHeader className="flex flex-row items-center justify-between gap-2 px-4">
+        <CardTitle className="text-base font-semibold text-fg">
+          <h2>{name}</h2>
+        </CardTitle>
+        <Badge tone={health.connected ? "success" : "warning"}>
+          {t(health.connected ? "adminNotifications.connected" : "adminNotifications.notConnected")}
+        </Badge>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3 px-4 text-sm text-fg-muted">
+        {health.dailyQuota === null ? (
+          <p>{t("adminNotifications.sentTodayNoQuota", { count: health.sentToday })}</p>
+        ) : (
+          <ProgressBar
+            label={t("adminNotifications.quotaLabel", { channel: name })}
+            value={health.sentToday}
+            max={health.dailyQuota}
+            valueText={t("adminNotifications.quotaValue", {
+              used: health.sentToday,
+              limit: health.dailyQuota,
+            })}
+          />
+        )}
+        <p>{t("adminNotifications.lastSent", { when: lastSent(health.lastSentAt) })}</p>
+        {configureHref === undefined ? null : (
+          <Link
+            href={configureHref(health.channel)}
+            className="w-fit text-primary underline-offset-2 hover:underline"
+          >
+            {t("adminNotifications.configure", { channel: name })}
+          </Link>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
-  const overviewStats = [
-    { label: "Total notifications", value: view.totalNotifications, tone: "info" as const },
-    { label: "Delivery rate", value: `${view.deliveryRate}%`, tone: "success" as const },
-    {
-      label: "Channels active",
-      value: view.channels.filter((c) => c.enabled).length,
-      tone: "warning" as const,
-    },
-    { label: "Digests scheduled", value: view.digests.length, tone: "neutral" as const },
-  ];
+function DigestTable({ digests }: { digests: readonly DigestSchedule[] }) {
+  if (digests.length === 0) {
+    return (
+      <EmptyState
+        title={t("adminNotifications.digests.emptyTitle")}
+        body={t("adminNotifications.digests.emptyBody")}
+      />
+    );
+  }
+  return (
+    <Table data-slot="digest-table">
+      <TableCaption className="text-left text-sm text-fg-muted">
+        {t("adminNotifications.digests.caption")}
+      </TableCaption>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">{t("adminNotifications.column.digest")}</TableHead>
+          <TableHead scope="col">{t("adminNotifications.column.mode")}</TableHead>
+          <TableHead scope="col">{t("adminNotifications.column.recipients")}</TableHead>
+          <TableHead scope="col">{t("adminNotifications.column.lastSent")}</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {digests.map((digest) => (
+          <TableRow key={digest.id} data-digest={digest.id}>
+            <TableCell>{digest.label}</TableCell>
+            <TableCell>
+              <Badge tone={digest.mode === "off" ? "neutral" : "info"}>
+                {t(digestModeKey(digest.mode))}
+              </Badge>
+            </TableCell>
+            <TableCell>{digest.recipientCount}</TableCell>
+            <TableCell className="whitespace-nowrap text-fg-muted">
+              {lastSent(digest.lastSentAt)}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
 
+function toDispatchRow(entry: DispatchEntry): DispatchRow {
+  return {
+    id: entry.id,
+    occasionLabel: t(occasionLabelKey(entry.occasion)),
+    channelLabel: t(channelLabelKey(entry.channel)),
+    recipient: entry.recipient,
+    state: entry.state,
+    stateLabel: t(stateLabelKey(entry.state)),
+    tone: stateTone(entry.state),
+    bucket: stateBucket(entry.state),
+    createdLabel: formatDateTime(entry.createdAt),
+  };
+}
+
+/** The notifications console: channel health, digest schedules and the latest dispatches. */
+export function AdminNotificationsView({ data, configureHref }: AdminNotificationsViewProps) {
+  const summary = dispatchSummary(data.dispatchLog);
   return (
     <div data-slot="admin-notifications" className="flex flex-col gap-6">
       <PageHeader
-        title="Notification management"
-        description="Configure channels, digests and dispatch"
+        title={t("adminNotifications.title")}
+        description={t("adminNotifications.intro")}
       />
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {overviewStats.map((stat) => (
-          <StatCard key={stat.label} {...stat} />
-        ))}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label={t("adminNotifications.stat.dispatched")} value={summary.total} />
+        <StatCard
+          label={t("adminNotifications.stat.deliveryRate")}
+          value={
+            summary.deliveryRate === null
+              ? t("adminNotifications.noRate")
+              : t("adminNotifications.rate", { rate: summary.deliveryRate })
+          }
+          tone={summary.failed > 0 ? "warning" : "success"}
+          hint={t("adminNotifications.stat.deliveryRateHint", {
+            delivered: summary.delivered,
+            failed: summary.failed,
+          })}
+        />
+        <StatCard
+          label={t("adminNotifications.stat.channels")}
+          value={t("adminNotifications.ofTotal", {
+            count: connectedCount(data.channels),
+            total: data.channels.length,
+          })}
+          tone="info"
+        />
+        <StatCard
+          label={t("adminNotifications.stat.digests")}
+          value={activeDigestCount(data.digests)}
+        />
       </div>
-
-      <Tabs tabs={TABS} value={tab} onChange={setTab} />
-
-      {tab === "overview" && (
-        <div className="flex flex-col gap-4">
-          <h2 className="text-base font-semibold text-fg">Channels</h2>
-          <div className="grid gap-4 sm:grid-cols-3">
-            {view.channels.map((channel) => (
-              <Card key={channel.kind} className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-fg">{channelLabel(channel.kind)}</span>
-                  <Badge tone={channel.enabled ? "success" : "neutral"}>
-                    {channel.enabled ? "Active" : "Inactive"}
-                  </Badge>
-                </div>
-                <div className="flex flex-col gap-1 text-sm text-fg-muted">
-                  <span>
-                    Quota: {channel.quotaUsed} / {channel.quotaLimit}
-                  </span>
-                  <span>Last used: {new Date(channel.lastUsed).toLocaleDateString()}</span>
-                </div>
-                <Button variant="ghost" size="sm" asChild>
-                  <Link href={`/admin/notifications/${channel.kind}`}>Configure</Link>
-                </Button>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {tab === "dispatch" && (
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <SearchInput
-              placeholder="Search by recipient or ID..."
-              value={search}
-              onChange={setSearch}
-              className="flex-1"
+      <Tabs defaultValue="channels">
+        <TabsList aria-label={t("adminNotifications.tabsLabel")}>
+          <TabsTrigger value="channels">{t("adminNotifications.tab.channels")}</TabsTrigger>
+          <TabsTrigger value="digests">{t("adminNotifications.tab.digests")}</TabsTrigger>
+          <TabsTrigger value="dispatch">{t("adminNotifications.tab.dispatch")}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="channels" className="pt-2">
+          {data.channels.length === 0 ? (
+            <EmptyState
+              title={t("adminNotifications.channels.emptyTitle")}
+              body={t("adminNotifications.channels.emptyBody")}
             />
-          </div>
-          <div className="overflow-hidden rounded-md border border-line">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Channel</TableHead>
-                  <TableHead>Recipient</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Sent</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {view.dispatchLog.map((entry) => (
-                  <TableRow key={entry.id}>
-                    <TableCell className="font-mono text-xs">{entry.id.slice(0, 8)}</TableCell>
-                    <TableCell>{entry.kind}</TableCell>
-                    <TableCell>{channelLabel(entry.channel)}</TableCell>
-                    <TableCell>{entry.recipient}</TableCell>
-                    <TableCell>
-                      <Badge
-                        tone={
-                          entry.status === "delivered" || entry.status === "opened"
-                            ? "success"
-                            : entry.status === "failed" || entry.status === "bounced"
-                              ? "danger"
-                              : "info"
-                        }
-                      >
-                        {entry.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{new Date(entry.sentAt).toLocaleString()}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      )}
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {data.channels.map((health) => (
+                <ChannelCard key={health.channel} health={health} configureHref={configureHref} />
+              ))}
+            </div>
+          )}
+        </TabsContent>
+        <TabsContent value="digests" className="pt-2">
+          <DigestTable digests={data.digests} />
+        </TabsContent>
+        <TabsContent value="dispatch" className="pt-2">
+          {data.dispatchLog.length === 0 ? (
+            <EmptyState
+              title={t("adminNotifications.dispatch.emptyTitle")}
+              body={t("adminNotifications.dispatch.emptyBody")}
+            />
+          ) : (
+            <DispatchLogTable rows={data.dispatchLog.map(toDispatchRow)} />
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -1,47 +1,69 @@
-"use client";
-
-import { Badge, EmptyState, PageHeader, StatusChip, Timeline } from "@compliancewatch/ui";
+import type { Route } from "next";
+import Link from "next/link";
+import { Badge, Banner, EmptyState, PageHeader, StatusChip, Timeline } from "@compliancewatch/ui";
+import type { TimelineEvent } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
-import type { Tone } from "@compliancewatch/ui";
-import type { ReminderView } from "../model/reminders";
+import { formatDateTime } from "@/shared/lib/dates";
+import {
+  byDueDate,
+  overdueCount,
+  reminderChannelKey,
+  reminderStatusKey,
+  reminderTone,
+} from "../model/reminders";
+import type { Reminder } from "../model/reminders";
 
 export interface RemindersViewProps {
-  title: string;
-  items: readonly ReminderView[];
+  items: readonly Reminder[];
+  /** The obligation a reminder is for; without it the timeline shows no obligation links. */
+  obligationHref?: (obligationId: string) => Route;
 }
 
-const STATUS_TONE: Record<ReminderView["status"], Tone> = {
-  upcoming: "info",
-  sent: "neutral",
-  acknowledged: "success",
-  overdue: "danger",
-};
+function toEvent(item: Reminder, obligationHref?: (id: string) => Route): TimelineEvent {
+  const tone = reminderTone(item.status);
+  return {
+    id: item.id,
+    label: formatDateTime(item.dueAt),
+    dateTime: item.dueAt,
+    title: item.title,
+    tone,
+    body: (
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusChip status={item.status} tone={tone} label={t(reminderStatusKey(item.status))} />
+          <Badge tone="neutral">{t(reminderChannelKey(item.channel))}</Badge>
+          {item.obligationId !== null && obligationHref !== undefined ? (
+            <Link
+              href={obligationHref(item.obligationId)}
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              {t("reminders.toObligation")}
+            </Link>
+          ) : null}
+        </div>
+        {item.description ? <p>{item.description}</p> : null}
+      </div>
+    ),
+  };
+}
 
-/** Timeline-style reminders: upcoming, sent, acknowledged or overdue. */
-export function RemindersView({ title, items }: RemindersViewProps) {
+/** A business's reminders on a timeline, earliest due first, with overdue ones called out. */
+export function RemindersView({ items, obligationHref }: RemindersViewProps) {
+  const overdue = overdueCount(items);
   return (
     <div data-slot="reminders" className="flex flex-col gap-6">
-      <PageHeader title={title} description={t("reminders.intro")} />
+      <PageHeader title={t("reminders.title")} description={t("reminders.intro")} />
+      {overdue > 0 ? (
+        <Banner tone="warning" title={t("reminders.overdueTitle", { count: overdue })}>
+          {t("reminders.overdueBody")}
+        </Banner>
+      ) : null}
       {items.length === 0 ? (
-        <EmptyState title={t("reminders.emptyTitle")} description={t("reminders.emptyBody")} />
+        <EmptyState title={t("reminders.emptyTitle")} body={t("reminders.emptyBody")} />
       ) : (
         <Timeline
-          events={items.map((item) => ({
-            id: item.id,
-            label: item.dueAt,
-            dateTime: new Date(item.dueAt).toISOString(),
-            title: item.title,
-            body: (
-              <div className="flex flex-wrap items-center gap-2">
-                <StatusChip status={item.status} tone={STATUS_TONE[item.status]} />
-                <Badge tone="neutral">{t(`notifications.channel.${item.channel}`)}</Badge>
-                {item.description ? (
-                  <span className="text-fg-muted">{item.description}</span>
-                ) : null}
-              </div>
-            ),
-            tone: STATUS_TONE[item.status],
-          }))}
+          aria-label={t("reminders.timelineLabel")}
+          events={byDueDate(items).map((item) => toEvent(item, obligationHref))}
         />
       )}
     </div>
