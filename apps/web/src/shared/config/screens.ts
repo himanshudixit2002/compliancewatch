@@ -1198,7 +1198,7 @@ const SCREEN_LIST = [
       servicesTrack("WP21", "rulebook", "POST", "/v1/rulebook/review/tasks/seed"),
       REVIEW_STATS,
     ],
-    status: "waiting",
+    status: "live",
     e2e: [],
     guideRef: "15; F4; ADR-006",
     nav: { group: "review", order: 1 },
