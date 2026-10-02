@@ -4,10 +4,6 @@
 the time-skipping test server is x86-only and needs Rosetta, so it is not used).
 """
 
-import pytest
-
-pytestmark = pytest.mark.integration
-
 import asyncio
 import uuid
 from collections.abc import AsyncIterator
@@ -26,6 +22,8 @@ from py_common.runtime import ComponentRegistry, TemporalComponent, WorkerCompon
 from py_common.temporal.client import default_interceptors
 from py_common.temporal.liveness import running_queues
 from py_common.temporal.worker import WorkerConfig
+
+pytestmark = pytest.mark.integration
 
 REQUEST = IngestRequest(source_id=uuid.UUID(int=1), since=datetime(2026, 9, 1, tzinfo=UTC))
 

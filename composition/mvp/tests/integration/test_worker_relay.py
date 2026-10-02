@@ -5,16 +5,13 @@ an ``obligation`` schema that has not been migrated. The worker finds the table 
 starts one relay for it, and the row it publishes arrives on the topic.
 """
 
-import pytest
-
-pytestmark = pytest.mark.integration
-
 import asyncio
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import ClassVar
 
+import pytest
 from aiokafka import AIOKafkaConsumer
 from aiokafka.structs import ConsumerRecord
 from alembic.migration import MigrationContext
@@ -33,6 +30,8 @@ from py_common.events import EventMessage
 from py_common.outbox import OutboxWriter, create_outbox_table
 from py_common.outbox.schema import OUTBOX_TABLE
 from py_common.settings import with_search_path
+
+pytestmark = pytest.mark.integration
 
 POSTGRES_IMAGE = "pgvector/pgvector:0.8.6-pg16"
 REDPANDA_IMAGE = "docker.redpanda.com/redpandadata/redpanda:v26.2.3"
