@@ -1,176 +1,206 @@
-"use client";
-
-import { useState } from "react";
+import type { Route } from "next";
 import Link from "next/link";
 import {
-  Badge,
   Button,
-  Card,
-  Icon,
+  EmptyState,
+  Field,
+  Input,
   PageHeader,
-  SearchInput,
   Select,
-  StatCard,
+  StatusChip,
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
-  Tabs,
 } from "@compliancewatch/ui";
+import { t, type MessageKey } from "@/shared/i18n";
+import { formatDate } from "@/shared/lib/dates";
+import { StatCard } from "@/shared/ui/stat-card";
+import {
+  ENGAGEMENT_STATUSES,
+  engagementTone,
+  filterClients,
+  isFiltered,
+  summarizeClients,
+  type CaClient,
+  type ClientFilter,
+  type EngagementStatus,
+} from "../model/clients";
 
-export interface CaDashboardView {
-  clients: CaClient[];
-  totalClients: number;
-  activeEngagements: number;
-  pendingReviews: number;
-  totalRevenue: number;
-  completionRate: number;
-  filter: string;
-  sort: string;
+export interface CaDashboardViewProps {
+  clients: readonly CaClient[];
+  filter: ClientFilter;
+  /** The page itself, without a query: the filter form submits to it with GET. */
+  action: string;
+  /** The page without any filter. */
+  clearHref: Route;
+  clientHref: (clientId: string) => Route;
 }
 
-export interface CaClient {
-  id: string;
-  name: string;
-  type: string;
-  industry: string;
-  engagementStatus: "active" | "inactive" | "pending";
-  complianceScore: number;
-  obligationsDue: number;
-  obligationsOverdue: number;
-  lastUpdated: string;
-  assignedTo: string;
-}
+const STATUS_LABEL: Readonly<Record<EngagementStatus, MessageKey>> = {
+  active: "caDashboard.status.active",
+  pending: "caDashboard.status.pending",
+  inactive: "caDashboard.status.inactive",
+};
 
-function StatCards({ view }: { view: CaDashboardView }) {
+function FilterForm({ filter, action }: { filter: ClientFilter; action: string }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-      <StatCard label="Total clients" value={view.totalClients} tone="info" />
-      <StatCard label="Active engagements" value={view.activeEngagements} tone="success" />
-      <StatCard label="Pending reviews" value={view.pendingReviews} tone="warning" />
-      <StatCard label="Completion rate" value={`${view.completionRate}%`} tone="info" />
-      <StatCard label="Compliance score" value={`${Math.round(view.clients.reduce((a, c) => a + c.complianceScore, 0) / Math.max(view.clients.length, 1))}%`} tone="neutral" />
-    </div>
-  );
-}
-
-function ClientsTable({ clients }: { clients: CaClient[] }) {
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-
-  const filtered = clients.filter((c) => {
-    if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
-    if (statusFilter !== "all" && c.engagementStatus !== statusFilter) return false;
-    return true;
-  });
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <SearchInput
-          placeholder="Search clients..."
-          value={search}
-          onChange={setSearch}
-          className="flex-1"
-        />
+    <form
+      method="get"
+      action={action}
+      role="search"
+      aria-label={t("caDashboard.filterLabel")}
+      className="flex flex-wrap items-end gap-3"
+    >
+      <Field id="ca-client-search" label={t("caDashboard.search")} className="min-w-56 flex-1">
+        <Input name="q" type="search" defaultValue={filter.query} />
+      </Field>
+      <Field id="ca-client-status" label={t("caDashboard.statusFilter")} className="w-48">
         <Select
-          value={statusFilter}
-          onChange={setStatusFilter}
+          name="status"
+          defaultValue={filter.status}
           options={[
-            { value: "all", label: "All statuses" },
-            { value: "active", label: "Active" },
-            { value: "inactive", label: "Inactive" },
-            { value: "pending", label: "Pending" },
+            { value: "all", label: t("caDashboard.status.all") },
+            ...ENGAGEMENT_STATUSES.map((status) => ({
+              value: status,
+              label: t(STATUS_LABEL[status]),
+            })),
           ]}
-          className="w-full sm:w-48"
         />
-      </div>
-
-      {filtered.length === 0 ? (
-        <Card>
-          <div className="py-12 text-center">
-            <Icon name="users" className="mx-auto h-8 w-8 text-fg-muted mb-2" />
-            <p className="text-sm text-fg-muted">No clients found matching your filters.</p>
-          </div>
-        </Card>
-      ) : (
-        <div className="overflow-hidden rounded-md border border-line">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Client</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Industry</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Score</TableHead>
-                <TableHead>Overdue</TableHead>
-                <TableHead>Last updated</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((client) => (
-                <TableRow key={client.id}>
-                  <TableCell className="font-medium text-fg">{client.name}</TableCell>
-                  <TableCell>{client.type}</TableCell>
-                  <TableCell>{client.industry}</TableCell>
-                  <TableCell>
-                    <Badge tone={client.engagementStatus === "active" ? "success" : client.engagementStatus === "pending" ? "warning" : "neutral"}>
-                      {client.engagementStatus}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <div className="h-2 w-16 rounded-full bg-muted">
-                        <div
-                          className="h-2 rounded-full bg-success"
-                          style={{ width: `${client.complianceScore}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-fg-muted">{client.complianceScore}%</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge tone={client.obligationsOverdue > 0 ? "danger" : "success"}>
-                      {client.obligationsOverdue}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-fg-muted">{new Date(client.lastUpdated).toLocaleDateString()}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-    </div>
+      </Field>
+      <Button type="submit" variant="secondary">
+        {t("caDashboard.apply")}
+      </Button>
+    </form>
   );
 }
 
-export function CaDashboardViewComponent({ view }: { view: CaDashboardView }) {
-  const [tab, setTab] = useState("all");
+function ClientsTable({
+  clients,
+  clientHref,
+}: {
+  clients: readonly CaClient[];
+  clientHref: CaDashboardViewProps["clientHref"];
+}) {
+  return (
+    <Table>
+      <TableCaption className="sr-only">{t("caDashboard.tableCaption")}</TableCaption>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t("caDashboard.column.client")}</TableHead>
+          <TableHead>{t("caDashboard.column.status")}</TableHead>
+          <TableHead>{t("caDashboard.column.score")}</TableHead>
+          <TableHead>{t("caDashboard.column.due")}</TableHead>
+          <TableHead>{t("caDashboard.column.overdue")}</TableHead>
+          <TableHead>{t("caDashboard.column.assignedTo")}</TableHead>
+          <TableHead>{t("caDashboard.column.updated")}</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {clients.map((client) => (
+          <TableRow key={client.id} data-client={client.id}>
+            <TableCell>
+              <Link
+                href={clientHref(client.id)}
+                className="font-medium text-primary hover:underline"
+              >
+                {client.name}
+              </Link>
+            </TableCell>
+            <TableCell>
+              <StatusChip
+                status={client.engagementStatus}
+                tone={engagementTone(client.engagementStatus)}
+                label={t(STATUS_LABEL[client.engagementStatus])}
+              />
+            </TableCell>
+            <TableCell>
+              {client.complianceScore === null
+                ? t("common.none")
+                : t("caDashboard.percent", { value: client.complianceScore })}
+            </TableCell>
+            <TableCell>{client.obligationsDue}</TableCell>
+            <TableCell
+              className={client.obligationsOverdue > 0 ? "font-semibold text-danger" : undefined}
+            >
+              {client.obligationsOverdue}
+            </TableCell>
+            <TableCell className="text-fg-muted">
+              {client.assignedTo ?? t("caDashboard.unassigned")}
+            </TableCell>
+            <TableCell className="text-fg-muted">{formatDate(client.updatedAt)}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
 
+/**
+ * A CA firm's clients: totals across them, then the list filtered by name and engagement status.
+ * The filter is a GET form, so it lives in the URL and works without JavaScript.
+ */
+export function CaDashboardView({
+  clients,
+  filter,
+  action,
+  clearHref,
+  clientHref,
+}: CaDashboardViewProps) {
+  const summary = summarizeClients(clients);
+  const shown = filterClients(clients, filter);
   return (
     <div data-slot="ca-dashboard" className="flex flex-col gap-6">
-      <PageHeader
-        title="CA Dashboard"
-        description="Manage your client engagements and compliance oversight"
-      />
-
-      <StatCards view={view} />
-
-      <Tabs
-        tabs={[
-          { value: "all", label: "All clients" },
-          { value: "active", label: "Active" },
-          { value: "inactive", label: "Inactive" },
-          { value: "pending", label: "Pending" },
-        ]}
-        value={tab}
-        onChange={setTab}
-      />
-
-      <ClientsTable clients={tab === "all" ? view.clients : view.clients.filter((c) => c.engagementStatus === tab)} />
+      <PageHeader title={t("caDashboard.title")} description={t("caDashboard.intro")} />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <StatCard label={t("caDashboard.totalClients")} value={summary.total} />
+        <StatCard label={t("caDashboard.activeClients")} value={summary.active} tone="success" />
+        <StatCard label={t("caDashboard.obligationsDue")} value={summary.due} tone="warning" />
+        <StatCard
+          label={t("caDashboard.obligationsOverdue")}
+          value={summary.overdue}
+          tone={summary.overdue > 0 ? "danger" : "neutral"}
+        />
+        <StatCard
+          label={t("caDashboard.averageScore")}
+          value={
+            summary.averageScore === null
+              ? t("common.none")
+              : t("caDashboard.percent", { value: summary.averageScore })
+          }
+          tone="info"
+        />
+      </div>
+      {clients.length === 0 ? (
+        <EmptyState title={t("caDashboard.emptyTitle")} body={t("caDashboard.emptyBody")} />
+      ) : (
+        <>
+          <FilterForm filter={filter} action={action} />
+          {shown.length === 0 ? (
+            <EmptyState
+              title={t("caDashboard.noMatchTitle")}
+              body={t("caDashboard.noMatchBody")}
+              action={
+                <Button asChild variant="secondary">
+                  <Link href={clearHref}>{t("caDashboard.clear")}</Link>
+                </Button>
+              }
+            />
+          ) : (
+            <>
+              <p className="text-sm text-fg-muted" aria-live="polite">
+                {isFiltered(filter)
+                  ? t("caDashboard.showingFiltered", { shown: shown.length, total: clients.length })
+                  : t("caDashboard.showingAll", { total: clients.length })}
+              </p>
+              <ClientsTable clients={shown} clientHref={clientHref} />
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }

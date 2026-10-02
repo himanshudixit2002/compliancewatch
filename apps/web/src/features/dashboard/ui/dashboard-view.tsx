@@ -1,150 +1,189 @@
-"use client";
-
+import type { ReactNode } from "react";
 import type { Route } from "next";
 import Link from "next/link";
+import { EmptyState, PageHeader, StatusChip, Timeline } from "@compliancewatch/ui";
+import { t } from "@/shared/i18n";
+import { formatDateTime, formatDueDate } from "@/shared/lib/dates";
+import { StatCard } from "@/shared/ui/stat-card";
 import {
-  Badge,
-  Button,
-  Card,
-  Icon,
-  PageHeader,
-  StatCard,
-  Table,
-  Tabs,
-  EmptyState,
-  SearchInput,
-} from "@compliancewatch/ui";
-import type { DashboardView } from "../model/dashboard";
+  businessTone,
+  completionRate,
+  completionTone,
+  urgentTone,
+  type DashboardBusiness,
+  type DashboardSummary,
+  type UrgentAction,
+} from "../model/dashboard";
 
 export interface DashboardViewProps {
-  view: DashboardView;
-  businessHref: (id: string) => string;
-  obligationHref: (id: string) => Route;
-  href: (id: string) => Route;
+  view: DashboardSummary;
+  businessHref: (businessId: string) => Route;
+  obligationHref: (businessId: string, obligationId: string) => Route;
+  /** Today, for the due dates; tests pass a fixed instant. */
+  now?: Date;
 }
 
-function ComplianceScoreCard({ score }: { score: number }) {
-  return (
-    <Card className="p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-sm text-fg-muted">Compliance score</div>
-          <div className="text-4xl font-bold text-fg mt-1">{score}%</div>
-        </div>
-        <div className="h-16 w-16 rounded-full flex items-center justify-center bg-success/10">
-          <Icon name="shield-check" className="h-8 w-8 text-success" />
-        </div>
-      </div>
-    </Card>
+function dueText(dueDate: string, now: Date | undefined): string {
+  return formatDueDate(
+    dueDate,
+    {
+      today: t("date.today"),
+      tomorrow: t("date.tomorrow"),
+      inDays: (count) => t("date.inDays", { count }),
+      overdue: (count) => t("date.overdueBy", { count }),
+    },
+    now,
   );
 }
 
-function ObligationsSummary({ view }: { view: DashboardView }) {
+function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-3">
-      <Card className="p-4 border-l-4 border-l-danger">
-        <div className="text-sm text-fg-muted">Overdue</div>
-        <div className="text-2xl font-bold text-danger">{view.overdueObligations}</div>
-      </Card>
-      <Card className="p-4 border-l-4 border-l-warning">
-        <div className="text-sm text-fg-muted">Due this week</div>
-        <div className="text-2xl font-bold text-warning">{view.dueThisWeek}</div>
-      </Card>
-      <Card className="p-4 border-l-4 border-l-success">
-        <div className="text-sm text-fg-muted">Completed</div>
-        <div className="text-2xl font-bold text-success">{view.completedObligations}</div>
-      </Card>
-    </div>
+    <section aria-labelledby={id} className="flex flex-col gap-3">
+      <h2 id={id} className="text-lg font-semibold text-fg">
+        {title}
+      </h2>
+      {children}
+    </section>
   );
 }
 
-function RecentActivity({ activities }: { activities: any[] }) {
+function UrgentActions({
+  actions,
+  obligationHref,
+  now,
+}: {
+  actions: readonly UrgentAction[];
+  obligationHref: DashboardViewProps["obligationHref"];
+  now: Date | undefined;
+}) {
+  if (actions.length === 0) {
+    return (
+      <EmptyState
+        heading="h3"
+        title={t("dashboard.urgentEmptyTitle")}
+        body={t("dashboard.urgentEmptyBody")}
+      />
+    );
+  }
   return (
-    <Card>
-      <h3 className="text-sm font-medium text-fg mb-4">Recent activity</h3>
-      <div className="flex flex-col gap-3">
-        {activities.length === 0 ? (
-          <EmptyState title="No recent activity" description="Activity will appear here as you use the platform." />
-        ) : (
-          activities.map((activity) => (
-            <div key={activity.id} className="flex items-start gap-3 py-2 border-b border-line last:border-0">
-              <div className="mt-1">
-                <Icon name={activity.icon || "activity"} className="h-4 w-4 text-fg-muted" />
-              </div>
-              <div className="flex-1">
-                <p className="text-sm text-fg">{activity.description}</p>
-                <p className="text-xs text-fg-muted">{new Date(activity.timestamp).toLocaleString()}</p>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function UrgentActions({ actions }: { actions: any[] }) {
-  return (
-    <Card>
-      <h3 className="text-sm font-medium text-fg mb-4">Urgent actions</h3>
-      {actions.length === 0 ? (
-        <EmptyState title="No urgent actions" description="Everything looks good!" />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {actions.map((action) => (
-            <Link key={action.id} href={action.href}>
-              <div className="flex items-center justify-between rounded-md border border-line p-3 hover:bg-muted">
-                <div>
-                  <p className="text-sm font-medium text-fg">{action.title}</p>
-                  <p className="text-xs text-fg-muted">{action.description}</p>
-                </div>
-                <Badge tone="danger">{action.dueLabel}</Badge>
-              </div>
+    <ul className="flex flex-col gap-2">
+      {actions.map((action) => {
+        const tone = urgentTone(action, now);
+        return (
+          <li
+            key={`${action.businessId}/${action.obligationId}`}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-line p-3"
+          >
+            <Link
+              href={obligationHref(action.businessId, action.obligationId)}
+              className="font-medium text-primary hover:underline"
+            >
+              {action.title}
             </Link>
-          ))}
-        </div>
-      )}
-    </Card>
+            <StatusChip
+              status={tone === "danger" ? "overdue" : "due"}
+              tone={tone}
+              label={dueText(action.dueDate, now)}
+            />
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
-export function DashboardViewComponent({ view, businessHref, obligationHref, href }: DashboardViewProps) {
+function Businesses({
+  businesses,
+  businessHref,
+}: {
+  businesses: readonly DashboardBusiness[];
+  businessHref: DashboardViewProps["businessHref"];
+}) {
   return (
-    <div data-slot="dashboard" className="flex flex-col gap-6">
-      <PageHeader title="Dashboard" description="Compliance overview and status" />
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <ObligationsSummary view={view} />
-        </div>
-        <div>
-          <ComplianceScoreCard score={view.complianceScore} />
-        </div>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <RecentActivity activities={view.recentActivities} />
-        <UrgentActions actions={view.urgentActions} />
-      </div>
-
-      {view.businesses.length > 0 && (
-        <Card>
-          <h3 className="text-sm font-medium text-fg mb-4">Your businesses</h3>
-          <div className="flex flex-col gap-3">
-            {view.businesses.map((business) => (
-              <Link key={business.id} href={businessHref(business.id)}>
-                <div className="flex items-center justify-between rounded-md border border-line p-4 hover:bg-muted">
-                  <div>
-                    <p className="font-medium text-fg">{business.name}</p>
-                    <p className="text-xs text-fg-muted">{business.type} · {business.complianceScore}% score</p>
-                  </div>
-                  <Badge tone={business.status === "active" ? "success" : "warning"}>{business.status}</Badge>
-                </div>
+    <ul className="flex flex-col gap-2">
+      {businesses.map((business) => {
+        const tone = businessTone(business);
+        return (
+          <li
+            key={business.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-line p-3"
+          >
+            <div className="flex flex-col gap-0.5">
+              <Link
+                href={businessHref(business.id)}
+                className="font-medium text-primary hover:underline"
+              >
+                {business.name}
               </Link>
-            ))}
-          </div>
-        </Card>
-      )}
+              <span className="text-xs text-fg-muted">
+                {t("dashboard.businessOpen", { count: business.openObligations })}
+              </span>
+            </div>
+            <StatusChip
+              status={tone === "danger" ? "overdue" : "up_to_date"}
+              tone={tone}
+              label={
+                tone === "danger"
+                  ? t("dashboard.businessOverdue", { count: business.overdueObligations })
+                  : t("dashboard.businessUpToDate")
+              }
+            />
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** The owner's compliance overview: obligation counts, urgent actions, activity and businesses. */
+export function DashboardView({ view, businessHref, obligationHref, now }: DashboardViewProps) {
+  const rate = completionRate(view);
+  return (
+    <div data-slot="dashboard" className="flex flex-col gap-8">
+      <PageHeader title={t("dashboard.title")} description={t("dashboard.intro")} />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label={t("dashboard.overdue")}
+          value={view.overdue}
+          tone={view.overdue > 0 ? "danger" : "neutral"}
+        />
+        <StatCard label={t("dashboard.dueThisWeek")} value={view.dueThisWeek} tone="warning" />
+        <StatCard label={t("dashboard.completed")} value={view.completed} tone="success" />
+        <StatCard
+          label={t("dashboard.completionRate")}
+          value={rate === null ? t("common.none") : t("dashboard.percent", { value: rate })}
+          tone={completionTone(rate)}
+          hint={t("dashboard.completionRateHint")}
+        />
+      </div>
+      <div className="grid gap-8 lg:grid-cols-2">
+        <Section id="dashboard-urgent" title={t("dashboard.urgentTitle")}>
+          <UrgentActions actions={view.urgentActions} obligationHref={obligationHref} now={now} />
+        </Section>
+        <Section id="dashboard-activity" title={t("dashboard.activityTitle")}>
+          {view.activities.length === 0 ? (
+            <EmptyState
+              heading="h3"
+              title={t("dashboard.activityEmptyTitle")}
+              body={t("dashboard.activityEmptyBody")}
+            />
+          ) : (
+            <Timeline
+              events={view.activities.map((activity) => ({
+                id: activity.id,
+                label: formatDateTime(activity.at),
+                dateTime: activity.at,
+                title: activity.description,
+              }))}
+            />
+          )}
+        </Section>
+      </div>
+      {view.businesses.length > 0 ? (
+        <Section id="dashboard-businesses" title={t("dashboard.businessesTitle")}>
+          <Businesses businesses={view.businesses} businessHref={businessHref} />
+        </Section>
+      ) : null}
     </div>
   );
 }
