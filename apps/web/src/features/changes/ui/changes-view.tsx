@@ -43,9 +43,31 @@ const REVIEW_OPTIONS = [
   { value: "rejected", label: "Rejected" },
 ];
 
-function ChangeCard({ change, businessId, href }: { change: any; businessId: string; href: (id: string) => Route }) {
-  const applicabilityTone = change.applicability === "applies" ? "success" : change.applicability === "does_not_apply" ? "neutral" : change.applicability === "pending" ? "warning" : "info";
-  const reviewTone = change.reviewStatus === "published" ? "success" : change.reviewStatus === "in_review" ? "warning" : change.reviewStatus === "rejected" ? "danger" : "neutral";
+function ChangeCard({
+  change,
+  businessId,
+  href,
+}: {
+  change: any;
+  businessId: string;
+  href: (id: string) => Route;
+}) {
+  const applicabilityTone =
+    change.applicability === "applies"
+      ? "success"
+      : change.applicability === "does_not_apply"
+        ? "neutral"
+        : change.applicability === "pending"
+          ? "warning"
+          : "info";
+  const reviewTone =
+    change.reviewStatus === "published"
+      ? "success"
+      : change.reviewStatus === "in_review"
+        ? "warning"
+        : change.reviewStatus === "rejected"
+          ? "danger"
+          : "neutral";
 
   return (
     <Card className="flex flex-col gap-3">
@@ -54,9 +76,7 @@ function ChangeCard({ change, businessId, href }: { change: any; businessId: str
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-fg">{change.title}</span>
             <Badge tone={reviewTone}>{changeReviewLabel(change.reviewStatus)}</Badge>
-            <Badge tone={applicabilityTone}>
-              {changeApplicabilityLabel(change.applicability)}
-            </Badge>
+            <Badge tone={applicabilityTone}>{changeApplicabilityLabel(change.applicability)}</Badge>
           </div>
           <p className="max-w-2xl text-sm text-fg-muted">{changeSummary(change.summary)}</p>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-muted">
@@ -91,7 +111,11 @@ export function ChangesView({ view, businessId, href }: ChangesViewProps) {
   const [reviewFilter, setReviewFilter] = useState("all");
 
   const filtered = view.changes.filter((change) => {
-    if (search && !change.title.toLowerCase().includes(search.toLowerCase()) && !change.regulator.toLowerCase().includes(search.toLowerCase())) {
+    if (
+      search &&
+      !change.title.toLowerCase().includes(search.toLowerCase()) &&
+      !change.regulator.toLowerCase().includes(search.toLowerCase())
+    ) {
       return false;
     }
     if (applicabilityFilter !== "all" && change.applicability !== applicabilityFilter) {

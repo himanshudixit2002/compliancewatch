@@ -64,16 +64,24 @@ function RecentActivity({ activities }: { activities: any[] }) {
       <h3 className="text-sm font-medium text-fg mb-4">Recent activity</h3>
       <div className="flex flex-col gap-3">
         {activities.length === 0 ? (
-          <EmptyState title="No recent activity" description="Activity will appear here as you use the platform." />
+          <EmptyState
+            title="No recent activity"
+            description="Activity will appear here as you use the platform."
+          />
         ) : (
           activities.map((activity) => (
-            <div key={activity.id} className="flex items-start gap-3 py-2 border-b border-line last:border-0">
+            <div
+              key={activity.id}
+              className="flex items-start gap-3 py-2 border-b border-line last:border-0"
+            >
               <div className="mt-1">
                 <Icon name={activity.icon || "activity"} className="h-4 w-4 text-fg-muted" />
               </div>
               <div className="flex-1">
                 <p className="text-sm text-fg">{activity.description}</p>
-                <p className="text-xs text-fg-muted">{new Date(activity.timestamp).toLocaleString()}</p>
+                <p className="text-xs text-fg-muted">
+                  {new Date(activity.timestamp).toLocaleString()}
+                </p>
               </div>
             </div>
           ))
@@ -108,7 +116,12 @@ function UrgentActions({ actions }: { actions: any[] }) {
   );
 }
 
-export function DashboardViewComponent({ view, businessHref, obligationHref, href }: DashboardViewProps) {
+export function DashboardViewComponent({
+  view,
+  businessHref,
+  obligationHref,
+  href,
+}: DashboardViewProps) {
   return (
     <div data-slot="dashboard" className="flex flex-col gap-6">
       <PageHeader title="Dashboard" description="Compliance overview and status" />
@@ -136,9 +149,13 @@ export function DashboardViewComponent({ view, businessHref, obligationHref, hre
                 <div className="flex items-center justify-between rounded-md border border-line p-4 hover:bg-muted">
                   <div>
                     <p className="font-medium text-fg">{business.name}</p>
-                    <p className="text-xs text-fg-muted">{business.type} · {business.complianceScore}% score</p>
+                    <p className="text-xs text-fg-muted">
+                      {business.type} · {business.complianceScore}% score
+                    </p>
                   </div>
-                  <Badge tone={business.status === "active" ? "success" : "warning"}>{business.status}</Badge>
+                  <Badge tone={business.status === "active" ? "success" : "warning"}>
+                    {business.status}
+                  </Badge>
                 </div>
               </Link>
             ))}

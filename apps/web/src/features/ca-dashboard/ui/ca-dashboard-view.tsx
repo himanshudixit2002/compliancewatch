@@ -51,7 +51,11 @@ function StatCards({ view }: { view: CaDashboardView }) {
       <StatCard label="Active engagements" value={view.activeEngagements} tone="success" />
       <StatCard label="Pending reviews" value={view.pendingReviews} tone="warning" />
       <StatCard label="Completion rate" value={`${view.completionRate}%`} tone="info" />
-      <StatCard label="Compliance score" value={`${Math.round(view.clients.reduce((a, c) => a + c.complianceScore, 0) / Math.max(view.clients.length, 1))}%`} tone="neutral" />
+      <StatCard
+        label="Compliance score"
+        value={`${Math.round(view.clients.reduce((a, c) => a + c.complianceScore, 0) / Math.max(view.clients.length, 1))}%`}
+        tone="neutral"
+      />
     </div>
   );
 }
@@ -116,7 +120,15 @@ function ClientsTable({ clients }: { clients: CaClient[] }) {
                   <TableCell>{client.type}</TableCell>
                   <TableCell>{client.industry}</TableCell>
                   <TableCell>
-                    <Badge tone={client.engagementStatus === "active" ? "success" : client.engagementStatus === "pending" ? "warning" : "neutral"}>
+                    <Badge
+                      tone={
+                        client.engagementStatus === "active"
+                          ? "success"
+                          : client.engagementStatus === "pending"
+                            ? "warning"
+                            : "neutral"
+                      }
+                    >
                       {client.engagementStatus}
                     </Badge>
                   </TableCell>
@@ -136,7 +148,9 @@ function ClientsTable({ clients }: { clients: CaClient[] }) {
                       {client.obligationsOverdue}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-fg-muted">{new Date(client.lastUpdated).toLocaleDateString()}</TableCell>
+                  <TableCell className="text-fg-muted">
+                    {new Date(client.lastUpdated).toLocaleDateString()}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -170,7 +184,11 @@ export function CaDashboardViewComponent({ view }: { view: CaDashboardView }) {
         onChange={setTab}
       />
 
-      <ClientsTable clients={tab === "all" ? view.clients : view.clients.filter((c) => c.engagementStatus === tab)} />
+      <ClientsTable
+        clients={
+          tab === "all" ? view.clients : view.clients.filter((c) => c.engagementStatus === tab)
+        }
+      />
     </div>
   );
 }

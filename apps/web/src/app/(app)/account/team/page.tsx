@@ -22,12 +22,5 @@ export default async function TeamPage() {
     roles: session.roles,
     tenantKind: session.tenantKind,
   });
-  return (
-    <TeamView
-      title={SCREEN.title}
-      items={result.value}
-      crumbs={crumbs}
-      tabs={tabs}
-    />
-  );
+  return <TeamView title={SCREEN.title} items={result.value} crumbs={crumbs} tabs={tabs} />;
 }

@@ -1,7 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Banner, Button, Card, PageHeader, SearchInput, Tabs, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, EmptyState, Icon } from "@compliancewatch/ui";
+import {
+  Badge,
+  Banner,
+  Button,
+  Card,
+  PageHeader,
+  SearchInput,
+  Tabs,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  EmptyState,
+  Icon,
+} from "@compliancewatch/ui";
 import type { RiskView } from "../model/risk";
 import { riskLevelLabel, formatRiskDate } from "../model/risk";
 
@@ -58,7 +74,11 @@ function RisksTable({ risks, href }: { risks: any[]; href: (riskId: string) => s
         className="w-full sm:max-w-sm"
       />
       {filtered.length === 0 ? (
-        <EmptyState icon={<Icon name="shield-check" className="h-8 w-8 text-fg-muted" />} title="No risks found" description="Your compliance posture looks good." />
+        <EmptyState
+          icon={<Icon name="shield-check" className="h-8 w-8 text-fg-muted" />}
+          title="No risks found"
+          description="Your compliance posture looks good."
+        />
       ) : (
         <div className="overflow-hidden rounded-md border border-line">
           <Table>
@@ -76,15 +96,33 @@ function RisksTable({ risks, href }: { risks: any[]; href: (riskId: string) => s
               {filtered.map((risk) => (
                 <TableRow key={risk.id}>
                   <TableCell className="font-medium text-fg">
-                    <a href={href(risk.id)} className="hover:underline">{risk.title}</a>
+                    <a href={href(risk.id)} className="hover:underline">
+                      {risk.title}
+                    </a>
                   </TableCell>
                   <TableCell>
-                    <Badge tone={risk.severity === "high" ? "danger" : risk.severity === "medium" ? "warning" : "info"}>
+                    <Badge
+                      tone={
+                        risk.severity === "high"
+                          ? "danger"
+                          : risk.severity === "medium"
+                            ? "warning"
+                            : "info"
+                      }
+                    >
                       {risk.severity}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge tone={risk.status === "active" ? "danger" : risk.status === "mitigated" ? "success" : "neutral"}>
+                    <Badge
+                      tone={
+                        risk.status === "active"
+                          ? "danger"
+                          : risk.status === "mitigated"
+                            ? "success"
+                            : "neutral"
+                      }
+                    >
                       {risk.status}
                     </Badge>
                   </TableCell>

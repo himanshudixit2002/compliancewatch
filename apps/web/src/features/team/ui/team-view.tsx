@@ -1,4 +1,13 @@
-import { Badge, StatusChip, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@compliancewatch/ui";
+import {
+  Badge,
+  StatusChip,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@compliancewatch/ui";
 import type { Crumb, NavLink } from "@/shared/config/nav";
 import { t } from "@/shared/i18n";
 import { EmptyState } from "@/shared/ui/components/empty-state-view";
@@ -46,7 +55,12 @@ function StatCards({ items }: { items: readonly TeamMemberView[] }) {
 
 function MemberStatus({ status }: { status: TeamMemberView["status"] }) {
   const tone = status === "active" ? "success" : status === "invited" ? "warning" : "danger";
-  const label = status === "active" ? t("team.status.active") : status === "invited" ? t("team.status.invited") : t("team.status.disabled");
+  const label =
+    status === "active"
+      ? t("team.status.active")
+      : status === "invited"
+        ? t("team.status.invited")
+        : t("team.status.disabled");
   return <StatusChip status={status} tone={tone} label={label} />;
 }
 

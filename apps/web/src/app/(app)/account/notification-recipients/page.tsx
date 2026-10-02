@@ -22,12 +22,5 @@ export default async function NotificationRecipientsPage() {
     roles: session.roles,
     tenantKind: session.tenantKind,
   });
-  return (
-    <RecipientsView
-      title={SCREEN.title}
-      items={result.value}
-      crumbs={crumbs}
-      tabs={tabs}
-    />
-  );
+  return <RecipientsView title={SCREEN.title} items={result.value} crumbs={crumbs} tabs={tabs} />;
 }

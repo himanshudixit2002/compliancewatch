@@ -39,7 +39,9 @@ function StatCards({ counts }: { counts: NotificationsListProps["view"]["counts"
     <div className="grid gap-3 sm:grid-cols-4">
       <Card data-slot="stat-card">
         <CardHeader className="px-4 pb-2 pt-4">
-          <CardTitle className="text-sm font-medium text-fg-muted">{t("notifications.stat.total")}</CardTitle>
+          <CardTitle className="text-sm font-medium text-fg-muted">
+            {t("notifications.stat.total")}
+          </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <p className="text-2xl font-semibold text-fg">{counts.total}</p>
@@ -47,7 +49,9 @@ function StatCards({ counts }: { counts: NotificationsListProps["view"]["counts"
       </Card>
       <Card data-slot="stat-card">
         <CardHeader className="px-4 pb-2 pt-4">
-          <CardTitle className="text-sm font-medium text-fg-muted">{t("notifications.stat.sent")}</CardTitle>
+          <CardTitle className="text-sm font-medium text-fg-muted">
+            {t("notifications.stat.sent")}
+          </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <p className="text-2xl font-semibold text-fg">{counts.sent}</p>
@@ -55,7 +59,9 @@ function StatCards({ counts }: { counts: NotificationsListProps["view"]["counts"
       </Card>
       <Card data-slot="stat-card">
         <CardHeader className="px-4 pb-2 pt-4">
-          <CardTitle className="text-sm font-medium text-fg-muted">{t("notifications.stat.delivered")}</CardTitle>
+          <CardTitle className="text-sm font-medium text-fg-muted">
+            {t("notifications.stat.delivered")}
+          </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <p className="text-2xl font-semibold text-fg">{counts.delivered}</p>
@@ -63,7 +69,9 @@ function StatCards({ counts }: { counts: NotificationsListProps["view"]["counts"
       </Card>
       <Card data-slot="stat-card">
         <CardHeader className="px-4 pb-2 pt-4">
-          <CardTitle className="text-sm font-medium text-fg-muted">{t("notifications.stat.failed")}</CardTitle>
+          <CardTitle className="text-sm font-medium text-fg-muted">
+            {t("notifications.stat.failed")}
+          </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <p className="text-2xl font-semibold text-fg">{counts.failed}</p>

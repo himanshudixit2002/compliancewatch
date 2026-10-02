@@ -20,18 +20,26 @@ const VIEW = {
 
 describe("NotificationDetail", () => {
   it("renders the subject heading and key-value fields", async () => {
-    const { container } = render(<NotificationDetail view={VIEW} backHref="/account/notifications" />);
-    expect(screen.getByRole("heading", { level: 1, name: "GST return filed successfully" })).toBeDefined();
+    const { container } = render(
+      <NotificationDetail view={VIEW} backHref="/account/notifications" />,
+    );
+    expect(
+      screen.getByRole("heading", { level: 1, name: "GST return filed successfully" }),
+    ).toBeDefined();
     expect(screen.getByText("owner@example.com")).toBeDefined();
     expect(screen.getByText("Acme Pvt Ltd")).toBeDefined();
     expect(screen.getByText("gst_filed")).toBeDefined();
-    expect(screen.getByText("Your GST return has been filed successfully for the period.")).toBeDefined();
+    expect(
+      screen.getByText("Your GST return has been filed successfully for the period."),
+    ).toBeDefined();
     expect(await runAxe(container)).toHaveNoViolations();
   });
 
   it("shows a delivery error card when present", async () => {
     const withError = { ...VIEW, errorMessage: "SMTP connection timeout" };
-    const { container } = render(<NotificationDetail view={withError} backHref="/account/notifications" />);
+    const { container } = render(
+      <NotificationDetail view={withError} backHref="/account/notifications" />,
+    );
     expect(screen.getByText("SMTP connection timeout")).toBeDefined();
     expect(screen.getByText("Delivery error")).toBeDefined();
     expect(await runAxe(container)).toHaveNoViolations();

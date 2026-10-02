@@ -11,15 +11,7 @@ export interface OwnerHomeViewProps {
   onboardingHref: Route;
 }
 
-function StatCard({
-  label,
-  value,
-  href,
-}: {
-  label: string;
-  value: number | string;
-  href: Route;
-}) {
+function StatCard({ label, value, href }: { label: string; value: number | string; href: Route }) {
   return (
     <Card className="flex flex-col gap-1">
       <span className="text-sm font-medium text-fg-muted">{label}</span>

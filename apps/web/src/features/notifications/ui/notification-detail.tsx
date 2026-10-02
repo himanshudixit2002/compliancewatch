@@ -85,18 +85,40 @@ function ErrorCard({ message }: { message: string | null }) {
 
 /** The notification detail: subject, key facts, body and any delivery error. */
 export function NotificationDetail({ view, backHref }: NotificationDetailProps) {
-  const channelNode: ReactNode = <Badge tone="neutral">{t(`notifications.channel.${view.channel}`)}</Badge>;
+  const channelNode: ReactNode = (
+    <Badge tone="neutral">{t(`notifications.channel.${view.channel}`)}</Badge>
+  );
   const statusNode: ReactNode = <StatusChip status={view.status} />;
   const items: KeyValueItem[] = [
-    { key: "id", label: t("notifications.field.id"), value: <code className="font-mono text-xs">{view.id}</code> },
+    {
+      key: "id",
+      label: t("notifications.field.id"),
+      value: <code className="font-mono text-xs">{view.id}</code>,
+    },
     { key: "channel", label: t("notifications.field.channel"), value: channelNode },
     { key: "status", label: t("notifications.field.status"), value: statusNode },
     { key: "recipient", label: t("notifications.field.recipient"), value: view.recipient },
-    { key: "template", label: t("notifications.field.template"), value: <code className="font-mono text-xs">{view.templateKey}</code> },
-    { key: "tenant", label: t("notifications.field.tenant"), value: view.tenantName ?? t("common.none") },
+    {
+      key: "template",
+      label: t("notifications.field.template"),
+      value: <code className="font-mono text-xs">{view.templateKey}</code>,
+    },
+    {
+      key: "tenant",
+      label: t("notifications.field.tenant"),
+      value: view.tenantName ?? t("common.none"),
+    },
     { key: "sentAt", label: t("notifications.field.sentAt"), value: view.sentAt },
-    { key: "readAt", label: t("notifications.field.readAt"), value: view.readAt ?? t("common.none") },
-    { key: "attempts", label: t("notifications.field.attempts"), value: String(view.deliveryAttempts) },
+    {
+      key: "readAt",
+      label: t("notifications.field.readAt"),
+      value: view.readAt ?? t("common.none"),
+    },
+    {
+      key: "attempts",
+      label: t("notifications.field.attempts"),
+      value: String(view.deliveryAttempts),
+    },
   ];
   return (
     <div data-slot="notification-detail" className="flex flex-col gap-6">

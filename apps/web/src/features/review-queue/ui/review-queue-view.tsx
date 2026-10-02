@@ -46,7 +46,17 @@ const TYPES = [
   { value: "consent_change", label: "Consent" },
 ];
 
-function ReviewItemRow({ item, href, onApprove, onReject }: { item: ReviewItem; href: (id: string) => Route; onApprove?: (id: string) => void; onReject?: (id: string) => void }) {
+function ReviewItemRow({
+  item,
+  href,
+  onApprove,
+  onReject,
+}: {
+  item: ReviewItem;
+  href: (id: string) => Route;
+  onApprove?: (id: string) => void;
+  onReject?: (id: string) => void;
+}) {
   return (
     <TableRow key={item.id}>
       <TableCell>
@@ -59,15 +69,29 @@ function ReviewItemRow({ item, href, onApprove, onReject }: { item: ReviewItem; 
         <Badge tone="info">{item.type}</Badge>
       </TableCell>
       <TableCell>
-        <Badge tone={item.priority === "high" ? "danger" : item.priority === "medium" ? "warning" : "neutral"}>
+        <Badge
+          tone={
+            item.priority === "high" ? "danger" : item.priority === "medium" ? "warning" : "neutral"
+          }
+        >
           {item.priority}
         </Badge>
       </TableCell>
       <TableCell>{item.businessName}</TableCell>
       <TableCell className="text-sm">{item.submittedBy}</TableCell>
-      <TableCell className="text-sm text-fg-muted">{new Date(item.submittedAt).toLocaleDateString()}</TableCell>
+      <TableCell className="text-sm text-fg-muted">
+        {new Date(item.submittedAt).toLocaleDateString()}
+      </TableCell>
       <TableCell>
-        <Badge tone={item.status === "approved" ? "success" : item.status === "rejected" ? "danger" : "warning"}>
+        <Badge
+          tone={
+            item.status === "approved"
+              ? "success"
+              : item.status === "rejected"
+                ? "danger"
+                : "warning"
+          }
+        >
           {reviewStatusLabel(item.status)}
         </Badge>
       </TableCell>
@@ -87,7 +111,12 @@ function ReviewItemRow({ item, href, onApprove, onReject }: { item: ReviewItem; 
   );
 }
 
-export function ReviewQueueViewComponent({ view, detailHref, onApprove, onReject }: ReviewQueueViewProps) {
+export function ReviewQueueViewComponent({
+  view,
+  detailHref,
+  onApprove,
+  onReject,
+}: ReviewQueueViewProps) {
   const [filter, setFilter] = useState(view.filter);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -95,7 +124,11 @@ export function ReviewQueueViewComponent({ view, detailHref, onApprove, onReject
   const filtered = view.items.filter((item) => {
     if (filter !== "all" && item.status !== filter) return false;
     if (typeFilter !== "all" && item.type !== typeFilter) return false;
-    if (search && !item.title.toLowerCase().includes(search.toLowerCase()) && !item.businessName.toLowerCase().includes(search.toLowerCase())) {
+    if (
+      search &&
+      !item.title.toLowerCase().includes(search.toLowerCase()) &&
+      !item.businessName.toLowerCase().includes(search.toLowerCase())
+    ) {
       return false;
     }
     return true;
@@ -103,7 +136,10 @@ export function ReviewQueueViewComponent({ view, detailHref, onApprove, onReject
 
   return (
     <div data-slot="review-queue" className="flex flex-col gap-6">
-      <PageHeader title="Review queue" description="Review pending changes, attributes and obligations" />
+      <PageHeader
+        title="Review queue"
+        description="Review pending changes, attributes and obligations"
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Total items" value={view.totalCount} tone="info" />
@@ -121,7 +157,12 @@ export function ReviewQueueViewComponent({ view, detailHref, onApprove, onReject
             onChange={setSearch}
             className="flex-1"
           />
-          <Select value={typeFilter} onChange={setTypeFilter} options={TYPES} className="w-full sm:w-48" />
+          <Select
+            value={typeFilter}
+            onChange={setTypeFilter}
+            options={TYPES}
+            className="w-full sm:w-48"
+          />
         </div>
       </div>
 
@@ -150,7 +191,13 @@ export function ReviewQueueViewComponent({ view, detailHref, onApprove, onReject
             </TableHeader>
             <TableBody>
               {filtered.map((item) => (
-                <ReviewItemRow key={item.id} item={item} href={detailHref} onApprove={onApprove} onReject={onReject} />
+                <ReviewItemRow
+                  key={item.id}
+                  item={item}
+                  href={detailHref}
+                  onApprove={onApprove}
+                  onReject={onReject}
+                />
               ))}
             </TableBody>
           </Table>

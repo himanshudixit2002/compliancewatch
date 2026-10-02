@@ -40,7 +40,11 @@ export function AdminNotificationsView({ view }: AdminNotificationsViewProps) {
   const overviewStats = [
     { label: "Total notifications", value: view.totalNotifications, tone: "info" as const },
     { label: "Delivery rate", value: `${view.deliveryRate}%`, tone: "success" as const },
-    { label: "Channels active", value: view.channels.filter((c) => c.enabled).length, tone: "warning" as const },
+    {
+      label: "Channels active",
+      value: view.channels.filter((c) => c.enabled).length,
+      tone: "warning" as const,
+    },
     { label: "Digests scheduled", value: view.digests.length, tone: "neutral" as const },
   ];
 
@@ -72,7 +76,9 @@ export function AdminNotificationsView({ view }: AdminNotificationsViewProps) {
                   </Badge>
                 </div>
                 <div className="flex flex-col gap-1 text-sm text-fg-muted">
-                  <span>Quota: {channel.quotaUsed} / {channel.quotaLimit}</span>
+                  <span>
+                    Quota: {channel.quotaUsed} / {channel.quotaLimit}
+                  </span>
                   <span>Last used: {new Date(channel.lastUsed).toLocaleDateString()}</span>
                 </div>
                 <Button variant="ghost" size="sm" asChild>
@@ -114,7 +120,15 @@ export function AdminNotificationsView({ view }: AdminNotificationsViewProps) {
                     <TableCell>{channelLabel(entry.channel)}</TableCell>
                     <TableCell>{entry.recipient}</TableCell>
                     <TableCell>
-                      <Badge tone={entry.status === "delivered" || entry.status === "opened" ? "success" : entry.status === "failed" || entry.status === "bounced" ? "danger" : "info"}>
+                      <Badge
+                        tone={
+                          entry.status === "delivered" || entry.status === "opened"
+                            ? "success"
+                            : entry.status === "failed" || entry.status === "bounced"
+                              ? "danger"
+                              : "info"
+                        }
+                      >
                         {entry.status}
                       </Badge>
                     </TableCell>

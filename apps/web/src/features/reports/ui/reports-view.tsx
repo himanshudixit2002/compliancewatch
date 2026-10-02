@@ -1,7 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Button, Card, Icon, PageHeader, SearchInput, Select, StatCard, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, EmptyState } from "@compliancewatch/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Icon,
+  PageHeader,
+  SearchInput,
+  Select,
+  StatCard,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  EmptyState,
+} from "@compliancewatch/ui";
 import type { ReportView } from "../model/reports";
 import { reportFormatLabel, reportStatusLabel } from "../model/reports";
 
@@ -63,11 +79,15 @@ export function ReportViewComponent({ view }: ReportViewProps) {
             </Card>
             <Card className="p-4">
               <div className="text-sm text-fg-muted">Ready</div>
-              <div className="text-2xl font-bold text-success">{view.reports.filter((r) => r.status === "ready").length}</div>
+              <div className="text-2xl font-bold text-success">
+                {view.reports.filter((r) => r.status === "ready").length}
+              </div>
             </Card>
             <Card className="p-4">
               <div className="text-sm text-fg-muted">Generating</div>
-              <div className="text-2xl font-bold text-warning">{view.reports.filter((r) => r.status === "generating").length}</div>
+              <div className="text-2xl font-bold text-warning">
+                {view.reports.filter((r) => r.status === "generating").length}
+              </div>
             </Card>
           </div>
 
@@ -79,8 +99,18 @@ export function ReportViewComponent({ view }: ReportViewProps) {
                 onChange={setSearch}
                 className="flex-1"
               />
-              <Select value={formatFilter} onChange={setFormatFilter} options={FORMATS} className="w-full sm:w-40" />
-              <Select value={statusFilter} onChange={setStatusFilter} options={STATUSES} className="w-full sm:w-40" />
+              <Select
+                value={formatFilter}
+                onChange={setFormatFilter}
+                options={FORMATS}
+                className="w-full sm:w-40"
+              />
+              <Select
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={STATUSES}
+                className="w-full sm:w-40"
+              />
             </div>
 
             {filtered.length === 0 ? (
@@ -106,7 +136,15 @@ export function ReportViewComponent({ view }: ReportViewProps) {
                         <TableCell className="font-medium text-fg">{report.name}</TableCell>
                         <TableCell>{reportFormatLabel(report.format)}</TableCell>
                         <TableCell>
-                          <Badge tone={report.status === "ready" ? "success" : report.status === "generating" ? "warning" : "danger"}>
+                          <Badge
+                            tone={
+                              report.status === "ready"
+                                ? "success"
+                                : report.status === "generating"
+                                  ? "warning"
+                                  : "danger"
+                            }
+                          >
                             {reportStatusLabel(report.status)}
                           </Badge>
                         </TableCell>
@@ -115,7 +153,9 @@ export function ReportViewComponent({ view }: ReportViewProps) {
                         <TableCell>
                           {report.url && report.status === "ready" ? (
                             <Button variant="ghost" size="sm" asChild>
-                              <a href={report.url} download>Download</a>
+                              <a href={report.url} download>
+                                Download
+                              </a>
                             </Button>
                           ) : (
                             <span className="text-sm text-fg-muted">—</span>

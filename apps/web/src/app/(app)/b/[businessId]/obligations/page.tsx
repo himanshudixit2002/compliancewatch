@@ -13,7 +13,15 @@ export default async function ObligationsPage({ params }: { params: { businessId
   const session = await requireScreenSession(SCREEN);
   return (
     <ObligationView
-      view={{ obligations: [], totalCount: 0, dueSoonCount: 0, overdueCount: 0, completionRate: 0, filter: "all", sort: "due_date" }}
+      view={{
+        obligations: [],
+        totalCount: 0,
+        dueSoonCount: 0,
+        overdueCount: 0,
+        completionRate: 0,
+        filter: "all",
+        sort: "due_date",
+      }}
       businessId={params.businessId}
       href={() => ""}
     />

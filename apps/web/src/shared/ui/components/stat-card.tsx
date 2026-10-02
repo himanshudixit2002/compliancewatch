@@ -27,7 +27,14 @@ const TONE_ICON: Record<NonNullable<StatCardProps["tone"]>, string> = {
   info: "text-sky-600 dark:text-sky-400",
 };
 
-export function StatCard({ label, value, icon, tone = "default", href, loading = false }: StatCardProps) {
+export function StatCard({
+  label,
+  value,
+  icon,
+  tone = "default",
+  href,
+  loading = false,
+}: StatCardProps) {
   const inner = (
     <Card className={cn("gap-3 transition-shadow hover:shadow-md", TONE_CLASSES[tone])}>
       <CardHeader className="flex flex-row items-center justify-between px-4 pb-2 pt-4">

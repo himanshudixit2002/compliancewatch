@@ -24,10 +24,5 @@ export default async function NotificationDetailPage({ params }: Props) {
     if (result.error.kind === "not_found") notFound();
     return <ServiceError heading={SCREEN.title} error={result.error} />;
   }
-  return (
-    <NotificationDetail
-      view={result.value}
-      backHref={hrefFor(LIST_SCREEN)}
-    />
-  );
+  return <NotificationDetail view={result.value} backHref={hrefFor(LIST_SCREEN)} />;
 }

@@ -9,11 +9,22 @@ export const metadata: Metadata = { title: SCREEN.title };
 
 export const dynamic = "force-dynamic";
 
-export default async function EvidencePage({ params }: { params: { businessId: string; obligationId: string } }) {
+export default async function EvidencePage({
+  params,
+}: {
+  params: { businessId: string; obligationId: string };
+}) {
   const session = await requireScreenSession(SCREEN);
   return (
     <EvidenceView
-      view={{ obligationId: params.obligationId, obligationName: "Obligation", dueDate: "", items: [], canUpload: false, allowedTypes: ["pdf", "jpg", "png", "docx", "xlsx"] }}
+      view={{
+        obligationId: params.obligationId,
+        obligationName: "Obligation",
+        dueDate: "",
+        items: [],
+        canUpload: false,
+        allowedTypes: ["pdf", "jpg", "png", "docx", "xlsx"],
+      }}
       businessId={params.businessId}
     />
   );

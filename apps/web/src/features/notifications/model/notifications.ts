@@ -31,7 +31,8 @@ export async function notifications(): Promise<
 export async function notificationById(
   id: string,
 ): Promise<
-  { ok: true; value: NotificationDetailView } | { ok: false; error: { kind: string; message: string } }
+  | { ok: true; value: NotificationDetailView }
+  | { ok: false; error: { kind: string; message: string } }
 > {
   // TODO: call notification service GET /v1/notification/notifications/{id}
   return { ok: false, error: { kind: "not_found", message: "Notification not found" } };

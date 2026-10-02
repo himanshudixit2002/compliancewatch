@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  Badge,
-  EmptyState,
-  PageHeader,
-  StatusChip,
-  Timeline,
-} from "@compliancewatch/ui";
+import { Badge, EmptyState, PageHeader, StatusChip, Timeline } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
 import type { Tone } from "@compliancewatch/ui";
 import type { ReminderView } from "../model/reminders";

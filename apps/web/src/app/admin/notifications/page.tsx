@@ -11,5 +11,16 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminNotificationsPage() {
   const session = await requireScreenSession(SCREEN);
-  return <AdminNotificationsView view={{ channels: [], digests: [], dispatchLog: [], recentBroadcasts: [], totalNotifications: 0, deliveryRate: 0 }} />;
+  return (
+    <AdminNotificationsView
+      view={{
+        channels: [],
+        digests: [],
+        dispatchLog: [],
+        recentBroadcasts: [],
+        totalNotifications: 0,
+        deliveryRate: 0,
+      }}
+    />
+  );
 }

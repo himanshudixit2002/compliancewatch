@@ -35,7 +35,11 @@ function MembersTable({ members }: { members: AdminMember[] }) {
   const [roleFilter, setRoleFilter] = useState("all");
 
   const filtered = members.filter((m) => {
-    if (search && !m.name.toLowerCase().includes(search.toLowerCase()) && !m.email.toLowerCase().includes(search.toLowerCase())) {
+    if (
+      search &&
+      !m.name.toLowerCase().includes(search.toLowerCase()) &&
+      !m.email.toLowerCase().includes(search.toLowerCase())
+    ) {
       return false;
     }
     if (roleFilter !== "all" && m.role !== roleFilter) return false;
@@ -92,17 +96,35 @@ function MembersTable({ members }: { members: AdminMember[] }) {
                   <TableCell className="font-medium text-fg">{member.name}</TableCell>
                   <TableCell>{member.email}</TableCell>
                   <TableCell>
-                    <Badge tone={member.role === "admin" ? "warning" : member.role === "compliance_lead" ? "info" : "neutral"}>
+                    <Badge
+                      tone={
+                        member.role === "admin"
+                          ? "warning"
+                          : member.role === "compliance_lead"
+                            ? "info"
+                            : "neutral"
+                      }
+                    >
                       {memberRoleBadge(member.role)}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge tone={member.status === "active" ? "success" : member.status === "invited" ? "warning" : "neutral"}>
+                    <Badge
+                      tone={
+                        member.status === "active"
+                          ? "success"
+                          : member.status === "invited"
+                            ? "warning"
+                            : "neutral"
+                      }
+                    >
                       {memberStatusBadge(member.status)}
                     </Badge>
                   </TableCell>
                   <TableCell>{new Date(member.joinedAt).toLocaleDateString()}</TableCell>
-                  <TableCell className="text-fg-muted">{member.lastActiveAt ? new Date(member.lastActiveAt).toLocaleString() : "—"}</TableCell>
+                  <TableCell className="text-fg-muted">
+                    {member.lastActiveAt ? new Date(member.lastActiveAt).toLocaleString() : "—"}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -145,7 +167,9 @@ function InvitationsTable({ invitations }: { invitations: AdminInvitation[] }) {
               </TableCell>
               <TableCell>{inv.invitedBy}</TableCell>
               <TableCell>{new Date(inv.invitedAt).toLocaleDateString()}</TableCell>
-              <TableCell className="text-fg-muted">{new Date(inv.expiresAt).toLocaleDateString()}</TableCell>
+              <TableCell className="text-fg-muted">
+                {new Date(inv.expiresAt).toLocaleDateString()}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -168,7 +192,10 @@ export function AdminTeamView({ view }: AdminTeamViewProps) {
   return (
     <div data-slot="admin-team" className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <PageHeader title="Team management" description="Manage team members, roles and invitations" />
+        <PageHeader
+          title="Team management"
+          description="Manage team members, roles and invitations"
+        />
         <div className="grid gap-4 sm:grid-cols-3">
           {statCards.map((stat) => (
             <StatCard key={stat.label} {...stat} />

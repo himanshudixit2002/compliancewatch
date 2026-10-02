@@ -26,7 +26,12 @@ export interface RecipientsViewProps {
 export function RecipientsView({ title, items, crumbs, tabs }: RecipientsViewProps) {
   return (
     <div data-slot="recipients" className="flex flex-col gap-6">
-      <SettingsHeader title={title} description={t("recipients.intro")} crumbs={crumbs} tabs={tabs} />
+      <SettingsHeader
+        title={title}
+        description={t("recipients.intro")}
+        crumbs={crumbs}
+        tabs={tabs}
+      />
       {items.length === 0 ? (
         <EmptyState title={t("recipients.emptyTitle")} description={t("recipients.emptyBody")} />
       ) : (
@@ -55,7 +60,11 @@ export function RecipientsView({ title, items, crumbs, tabs }: RecipientsViewPro
                   <StatusChip
                     status={item.optedIn ? "opted_in" : "opted_out"}
                     tone={item.optedIn ? "success" : "danger"}
-                    label={item.optedIn ? t("recipients.status.optedIn") : t("recipients.status.optedOut")}
+                    label={
+                      item.optedIn
+                        ? t("recipients.status.optedIn")
+                        : t("recipients.status.optedOut")
+                    }
                   />
                 </TableCell>
                 <TableCell>{item.language.toUpperCase()}</TableCell>
