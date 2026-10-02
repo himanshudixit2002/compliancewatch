@@ -417,7 +417,7 @@ openapi-public: check-uv ## Merge the operations the services tag public into pa
 	$(UV) run python packages/contracts/scripts/generate_rest.py
 
 # ---- Web app (apps/web, packages/ui) ---------------------------------------------------------
-.PHONY: web-dev web-stack web-stack-wait web-stack-down web-stack-logs web-seed web-e2e-install web-e2e web-screens web-screens-check openapi-ts openapi-ts-check
+.PHONY: control-panel control-panel-app web-dev web-stack web-stack-wait web-stack-down web-stack-logs web-seed web-e2e-install web-e2e web-screens web-screens-check openapi-ts openapi-ts-check
 CHECKS += web-screens-check openapi-ts-check
 # The port comes from WEB_PORT in .env (3000 unless the file says otherwise); a value already in
 # the environment wins, as for every variable the recipes source.
@@ -496,6 +496,12 @@ web-stack-down: ## Stop the web-stack services and remove their pid files (logs 
 	  else echo "  $$svc was not running"; fi; \
 	  rm -f "$$pidfile"; \
 	done; true
+
+control-panel: ## Open the click-to-run control panel window (tools/control-panel)
+	@.venv/bin/python tools/control-panel/control_panel.py
+
+control-panel-app: ## Build ComplianceWatch.app on the Desktop: make control-panel-app [DEST=~/Applications]
+	@tools/control-panel/install-app.sh $(DEST)
 
 web-stack-logs: ## Tail a web-stack service's log: make web-stack-logs SERVICE=identity (every log without SERVICE)
 	@if [ -n "$(SERVICE)" ]; then tail -n 100 -f $(WEB_STACK_DIR)/$(SERVICE).log; \
