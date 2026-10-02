@@ -1,41 +1,57 @@
-/**
- * Feature flags model: types and server query stub for the admin flags screen.
- */
-
-import { FLAG_NAMES } from "@/shared/config/flags";
+import { REGISTRY } from "@compliancewatch/flags";
+import type { FlagOwner } from "@compliancewatch/flags";
+import { FLAG_NAMES, envVarFor } from "@/shared/config/flags";
 import type { FlagName } from "@/shared/config/flags";
 
+/**
+ * One web flag as the admin flags screen shows it: its entry in packages/flags/registry.json
+ * (the one source of its description, owner, removal condition and expiry) and whether the
+ * server's flag reader has it on for this request.
+ */
 export interface FlagView {
   name: FlagName;
   description: string;
+  owner: FlagOwner;
+  removal: string;
+  /** The registry's expiry date, YYYY-MM-DD. */
+  expires: string;
+  /** The override variable honoured in local and test. */
+  env: string;
   enabled: boolean;
-  changedAt: string;
-  changedBy: string;
 }
 
-export async function flags(): Promise<
-  { ok: true; value: FlagView[] } | { ok: false; error: { kind: string; message: string } }
-> {
-  // TODO: read packages/flags/registry.json
-  return { ok: true, value: [] };
+export interface FlagSummary {
+  total: number;
+  enabled: number;
+  expired: number;
 }
 
-export const FLAG_DESCRIPTIONS: Readonly<Record<FlagName, string>> = {
-  "web.admin_rulebook_writes": "Allow the admin shell to write to the rulebook.",
-  "web.analytics_enabled": "Record product analytics events.",
-  "web.otel_enabled": "Emit OpenTelemetry traces and metrics.",
-  "web.publish_actions": "Surface the publish action on the rulebook screen.",
-  "web.qa_enabled": "Show the Q&A triage tools to reviewers.",
-  "web.tenant_header_off": "Hide the tenant header on small screens.",
-};
+/** Every web flag in registry order, with its state as the server's flag reader answered. */
+export function flagViews(enabled: Readonly<Record<FlagName, boolean>>): FlagView[] {
+  return FLAG_NAMES.map((name) => {
+    const entry = REGISTRY.get(name);
+    return {
+      name,
+      description: entry.description,
+      owner: entry.owner,
+      removal: entry.removal,
+      expires: entry.expires,
+      env: envVarFor(name),
+      enabled: enabled[name],
+    };
+  });
+}
 
-/** Every flag known to the registry, with its default of disabled. */
-export function defaultFlags(): FlagView[] {
-  return FLAG_NAMES.map((name) => ({
-    name,
-    description: FLAG_DESCRIPTIONS[name],
-    enabled: false,
-    changedAt: "—",
-    changedBy: "—",
-  }));
+/** True once the flag's expiry date has passed; `today` is a YYYY-MM-DD key. */
+export function isExpired(flag: Pick<FlagView, "expires">, today: string): boolean {
+  return flag.expires < today;
+}
+
+/** The counts for the summary row: flags, flags on, flags past their expiry date. */
+export function flagSummary(flags: readonly FlagView[], today: string): FlagSummary {
+  return {
+    total: flags.length,
+    enabled: flags.filter((flag) => flag.enabled).length,
+    expired: flags.filter((flag) => isExpired(flag, today)).length,
+  };
 }

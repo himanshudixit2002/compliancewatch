@@ -1,100 +1,108 @@
-import { Badge, StatusChip, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@compliancewatch/ui";
+import {
+  Badge,
+  EmptyState,
+  StatusChip,
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@compliancewatch/ui";
 import type { Crumb, NavLink } from "@/shared/config/nav";
 import { t } from "@/shared/i18n";
-import { EmptyState } from "@/shared/ui/components/empty-state-view";
+import { formatDate } from "@/shared/lib/dates";
 import { SettingsHeader } from "@/shared/ui/settings-header";
-import { StatCard } from "@/shared/ui/components/stat-card";
-import type { TeamMemberView } from "../model/team";
+import { StatCard } from "@/shared/ui/stat-card";
+import {
+  ROLE_LABEL,
+  ROLE_TONE,
+  STATUS_LABEL,
+  STATUS_TONE,
+  sortMembers,
+  teamSummary,
+} from "../model/team";
+import type { TeamMember } from "../model/team";
 
 export interface TeamViewProps {
   title: string;
-  items: readonly TeamMemberView[];
+  members: readonly TeamMember[];
   crumbs: readonly Crumb[];
   tabs: readonly NavLink[];
 }
 
-const ROLE_TONE: Record<string, "info" | "warning" | "neutral" | "success" | "danger"> = {
-  owner: "info",
-  ca_admin: "warning",
-  admin: "warning",
-  staff: "neutral",
-  ca_staff: "neutral",
-  compliance_lead: "info",
-  analyst: "neutral",
-  reviewer: "neutral",
-};
-
-function RoleBadge({ role }: { role: string }) {
-  return <Badge tone={ROLE_TONE[role] ?? "neutral"}>{t(`role.${role}`, role)}</Badge>;
-}
-
-function StatCards({ items }: { items: readonly TeamMemberView[] }) {
-  const total = items.length;
-  const active = items.filter((m) => m.status === "active").length;
-  const invited = items.filter((m) => m.status === "invited").length;
-  const disabled = items.filter((m) => m.status === "disabled").length;
-
+function MemberRow({ member }: { member: TeamMember }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <StatCard label={t("team.stat.total")} value={total} tone="info" />
-      <StatCard label={t("team.stat.active")} value={active} tone="success" />
-      <StatCard label={t("team.stat.invited")} value={invited} tone="warning" />
-      <StatCard label={t("team.stat.disabled")} value={disabled} tone="danger" />
-    </div>
+    <TableRow data-member={member.id}>
+      <TableCell className="font-medium text-fg">{member.name}</TableCell>
+      <TableCell>{member.email}</TableCell>
+      <TableCell>
+        {member.roles.length === 0 ? (
+          <span className="text-fg-muted">{t("common.none")}</span>
+        ) : (
+          <ul className="flex flex-wrap gap-1">
+            {member.roles.map((role) => (
+              <li key={role}>
+                <Badge tone={ROLE_TONE[role]}>{t(ROLE_LABEL[role])}</Badge>
+              </li>
+            ))}
+          </ul>
+        )}
+      </TableCell>
+      <TableCell>
+        <StatusChip
+          status={member.status}
+          tone={STATUS_TONE[member.status]}
+          label={t(STATUS_LABEL[member.status])}
+        />
+      </TableCell>
+      <TableCell className="text-fg-muted">{formatDate(member.joinedAt)}</TableCell>
+    </TableRow>
   );
 }
 
-function MemberStatus({ status }: { status: TeamMemberView["status"] }) {
-  const tone = status === "active" ? "success" : status === "invited" ? "warning" : "danger";
-  const label = status === "active" ? t("team.status.active") : status === "invited" ? t("team.status.invited") : t("team.status.disabled");
-  return <StatusChip status={status} tone={tone} label={label} />;
-}
-
 /**
- * The team members page: the settings header (breadcrumbs, title and tabs), a summary row
- * of stat cards, and, when members exist, a table of their name, email, role, status and
- * activity. The role column uses badges so the colour makes the table scannable; the
- * status column uses a dot-and-label chip.
+ * The team settings page: the settings header, a summary row (members, active, disabled) and a
+ * table of each member's name, email, roles, status and the date they joined, active first.
  */
-export function TeamView({ title, items, crumbs, tabs }: TeamViewProps) {
+export function TeamView({ title, members, crumbs, tabs }: TeamViewProps) {
+  const summary = teamSummary(members);
   return (
-    <div data-slot="team" className="flex max-w-4xl flex-col gap-6">
+    <div data-slot="team" className="flex flex-col gap-6">
       <SettingsHeader title={title} description={t("team.intro")} crumbs={crumbs} tabs={tabs} />
-      {items.length === 0 ? (
-        <EmptyState title={t("team.emptyTitle")} description={t("team.emptyDescription")} />
+      {members.length === 0 ? (
+        <EmptyState title={t("team.emptyTitle")} body={t("team.emptyBody")} />
       ) : (
         <>
-          <StatCards items={items} />
-          <div className="overflow-hidden rounded-md border border-line">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("team.column.name")}</TableHead>
-                  <TableHead>{t("team.column.email")}</TableHead>
-                  <TableHead>{t("team.column.role")}</TableHead>
-                  <TableHead>{t("team.column.status")}</TableHead>
-                  <TableHead>{t("team.column.joined")}</TableHead>
-                  <TableHead>{t("team.column.lastActive")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((member) => (
-                  <TableRow key={member.id}>
-                    <TableCell className="font-medium text-fg">{member.name}</TableCell>
-                    <TableCell>{member.email}</TableCell>
-                    <TableCell>
-                      <RoleBadge role={member.role} />
-                    </TableCell>
-                    <TableCell>
-                      <MemberStatus status={member.status} />
-                    </TableCell>
-                    <TableCell>{member.joinedAt}</TableCell>
-                    <TableCell className="text-fg-muted">{member.lastActiveAt ?? "—"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatCard label={t("team.stat.total")} value={summary.total} tone="info" />
+            <StatCard label={t("team.stat.active")} value={summary.active} tone="success" />
+            <StatCard
+              label={t("team.stat.disabled")}
+              value={summary.disabled}
+              tone={summary.disabled > 0 ? "danger" : "neutral"}
+            />
           </div>
+          <Table>
+            <TableCaption className="text-left text-sm text-fg-muted">
+              {t("team.caption", { count: members.length })}
+            </TableCaption>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("team.column.name")}</TableHead>
+                <TableHead>{t("team.column.email")}</TableHead>
+                <TableHead>{t("team.column.roles")}</TableHead>
+                <TableHead>{t("team.column.status")}</TableHead>
+                <TableHead>{t("team.column.joined")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sortMembers(members).map((member) => (
+                <MemberRow key={member.id} member={member} />
+              ))}
+            </TableBody>
+          </Table>
         </>
       )}
     </div>
