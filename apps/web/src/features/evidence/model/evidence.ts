@@ -1,34 +1,47 @@
-import type { EvidenceItem } from "@/entities/evidence/types";
-import { t } from "@/shared/i18n";
+import type { Tone } from "@compliancewatch/ui";
 
-export interface EvidenceView {
-  obligationId: string;
+export const EVIDENCE_STATUSES = ["submitted", "accepted", "rejected"] as const;
+
+export type EvidenceStatus = (typeof EVIDENCE_STATUSES)[number];
+
+/** One file attached to an obligation as proof it was met. */
+export interface EvidenceItem {
+  id: string;
+  fileName: string;
+  sizeBytes: number;
+  uploadedBy: string;
+  /** The instant it was uploaded (ISO 8601). */
+  uploadedAt: string;
+  status: EvidenceStatus;
+}
+
+/** An obligation's evidence: what it is for and the files attached so far. */
+export interface EvidenceList {
   obligationName: string;
-  dueDate: string;
-  items: EvidenceItem[];
-  canUpload: boolean;
-  allowedTypes: readonly string[];
+  /** The due date as a date key; null when the obligation has none. */
+  dueDate: string | null;
+  items: readonly EvidenceItem[];
 }
 
-export function emptyEvidence(obligationId: string, obligationName: string): EvidenceView {
-  return {
-    obligationId,
-    obligationName,
-    dueDate: "",
-    items: [],
-    canUpload: false,
-    allowedTypes: ["pdf", "jpg", "png", "docx", "xlsx"],
-  };
-}
+const UNITS = ["B", "KB", "MB", "GB"] as const;
 
-export function evidenceStatusLabel(status: string): string {
-  return t(`evidence.status.${status}`);
-}
-
+/** "512 B", "1.5 KB", "2 MB": binary multiples, at most one decimal, capped at GB. */
 export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+  let value = Math.max(bytes, 0);
+  let unit = 0;
+  while (value >= 1024 && unit < UNITS.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${Number(value.toFixed(1))} ${UNITS[unit]}`;
+}
+
+const STATUS_TONE: Readonly<Record<EvidenceStatus, Tone>> = {
+  submitted: "info",
+  accepted: "success",
+  rejected: "danger",
+};
+
+export function evidenceTone(status: EvidenceStatus): Tone {
+  return STATUS_TONE[status];
 }
