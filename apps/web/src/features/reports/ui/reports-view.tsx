@@ -1,173 +1,84 @@
-"use client";
-
-import { useState } from "react";
+import type { Route } from "next";
+import Link from "next/link";
+import { Button, EmptyState, PageHeader } from "@compliancewatch/ui";
+import { t } from "@/shared/i18n";
+import { formatDateTime } from "@/shared/lib/dates";
+import { StatCard } from "@/shared/ui/stat-card";
 import {
-  Badge,
-  Button,
-  Card,
-  Icon,
-  PageHeader,
-  SearchInput,
-  Select,
-  StatCard,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-  EmptyState,
-} from "@compliancewatch/ui";
-import type { ReportView } from "../model/reports";
-import { reportFormatLabel, reportStatusLabel } from "../model/reports";
+  downloadUrl,
+  reportCounts,
+  reportFormatLabel,
+  reportFormatOptions,
+  reportStatusLabel,
+  reportStatusOptions,
+  reportStatusTone,
+  type ReportItem,
+} from "../model/reports";
+import type { ReportRow } from "./report-filters";
+import { ReportsTable } from "./reports-table";
 
-export interface ReportViewProps {
-  view: ReportView;
+export interface ReportsViewProps {
+  reports: readonly ReportItem[];
+  /** The page that starts a new report, or null while generating is not offered. */
+  generateHref: Route | null;
 }
 
-const FORMATS = [
-  { value: "all", label: "All formats" },
-  { value: "pdf", label: "PDF" },
-  { value: "xlsx", label: "Excel" },
-  { value: "csv", label: "CSV" },
-];
+function reportRow(report: ReportItem): ReportRow {
+  return {
+    id: report.id,
+    name: report.name,
+    format: report.format,
+    formatLabel: reportFormatLabel(report.format),
+    status: report.status,
+    statusLabel: reportStatusLabel(report.status),
+    statusTone: reportStatusTone(report.status),
+    generatedAt: formatDateTime(report.generatedAt),
+    size: report.size,
+    downloadUrl: downloadUrl(report),
+  };
+}
 
-const STATUSES = [
-  { value: "all", label: "All statuses" },
-  { value: "ready", label: "Ready" },
-  { value: "generating", label: "Generating" },
-  { value: "failed", label: "Failed" },
-];
-
-/** The reports page for owners and CA firms. */
-export function ReportViewComponent({ view }: ReportViewProps) {
-  const [search, setSearch] = useState("");
-  const [formatFilter, setFormatFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-
-  const filtered = view.reports.filter((report) => {
-    if (search && !report.name.toLowerCase().includes(search.toLowerCase())) return false;
-    if (formatFilter !== "all" && report.format !== formatFilter) return false;
-    if (statusFilter !== "all" && report.status !== statusFilter) return false;
-    return true;
-  });
-
+/**
+ * The compliance reports of an owner or a CA firm: how many exist, are ready and are still
+ * generating, then the filterable table, or an empty state before the first report.
+ */
+export function ReportsView({ reports, generateHref }: ReportsViewProps) {
+  const counts = reportCounts(reports);
+  const generate =
+    generateHref === null ? null : (
+      <Button asChild>
+        <Link href={generateHref}>{t("reports.generate")}</Link>
+      </Button>
+    );
   return (
     <div data-slot="reports" className="flex flex-col gap-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <PageHeader title="Reports" description="Generate and download compliance reports" />
-        <Button>
-          <Icon name="plus" className="mr-2 h-4 w-4" />
-          Generate report
-        </Button>
-      </div>
-
-      {view.totalCount === 0 ? (
-        <Card>
-          <EmptyState
-            icon={<Icon name="file-text" className="h-8 w-8 text-fg-muted" />}
-            title="No reports yet"
-            description="Generate your first compliance report to see it here."
-          />
-        </Card>
+      <PageHeader
+        title={t("reports.title")}
+        description={t("reports.description")}
+        actions={generate}
+      />
+      {reports.length === 0 ? (
+        <EmptyState
+          title={t("reports.empty.title")}
+          body={t("reports.empty.body")}
+          action={generate}
+        />
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-3">
-            <Card className="p-4">
-              <div className="text-sm text-fg-muted">Total reports</div>
-              <div className="text-2xl font-bold text-fg">{view.totalCount}</div>
-            </Card>
-            <Card className="p-4">
-              <div className="text-sm text-fg-muted">Ready</div>
-              <div className="text-2xl font-bold text-success">
-                {view.reports.filter((r) => r.status === "ready").length}
-              </div>
-            </Card>
-            <Card className="p-4">
-              <div className="text-sm text-fg-muted">Generating</div>
-              <div className="text-2xl font-bold text-warning">
-                {view.reports.filter((r) => r.status === "generating").length}
-              </div>
-            </Card>
+            <StatCard label={t("reports.stat.total")} value={counts.total} />
+            <StatCard label={t("reports.stat.ready")} value={counts.ready} tone="success" />
+            <StatCard
+              label={t("reports.stat.generating")}
+              value={counts.generating}
+              tone="warning"
+            />
           </div>
-
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <SearchInput
-                placeholder="Search reports..."
-                value={search}
-                onChange={setSearch}
-                className="flex-1"
-              />
-              <Select
-                value={formatFilter}
-                onChange={setFormatFilter}
-                options={FORMATS}
-                className="w-full sm:w-40"
-              />
-              <Select
-                value={statusFilter}
-                onChange={setStatusFilter}
-                options={STATUSES}
-                className="w-full sm:w-40"
-              />
-            </div>
-
-            {filtered.length === 0 ? (
-              <Card>
-                <EmptyState title="No reports match" description="Try adjusting your filters." />
-              </Card>
-            ) : (
-              <div className="overflow-hidden rounded-md border border-line">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Format</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Generated</TableHead>
-                      <TableHead>Size</TableHead>
-                      <TableHead>Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.map((report) => (
-                      <TableRow key={report.id}>
-                        <TableCell className="font-medium text-fg">{report.name}</TableCell>
-                        <TableCell>{reportFormatLabel(report.format)}</TableCell>
-                        <TableCell>
-                          <Badge
-                            tone={
-                              report.status === "ready"
-                                ? "success"
-                                : report.status === "generating"
-                                  ? "warning"
-                                  : "danger"
-                            }
-                          >
-                            {reportStatusLabel(report.status)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{new Date(report.generatedAt).toLocaleDateString()}</TableCell>
-                        <TableCell>{report.size}</TableCell>
-                        <TableCell>
-                          {report.url && report.status === "ready" ? (
-                            <Button variant="ghost" size="sm" asChild>
-                              <a href={report.url} download>
-                                Download
-                              </a>
-                            </Button>
-                          ) : (
-                            <span className="text-sm text-fg-muted">—</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </div>
+          <ReportsTable
+            rows={reports.map(reportRow)}
+            formatOptions={reportFormatOptions()}
+            statusOptions={reportStatusOptions()}
+          />
         </>
       )}
     </div>
