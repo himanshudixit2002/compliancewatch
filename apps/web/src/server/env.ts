@@ -78,7 +78,10 @@ const schema = z
     CW_WEB_SESSION_SECRET: sessionSecret.optional(),
     CW_WEB_SESSION_TTL_SECONDS: positiveInt.max(86_400).default(28_800),
     CW_WEB_REQUEST_TIMEOUT_MS: positiveInt.max(120_000).default(10_000),
+    // The rulebook's two shared secrets, sent only by server/api/rulebook-write.ts: the write
+    // token opens the pipeline's writes, the review token the analyst's decisions (ADR-018).
     CW_WEB_RULEBOOK_WRITE_TOKEN: z.string().min(1).optional(),
+    CW_WEB_RULEBOOK_REVIEW_TOKEN: z.string().min(1).optional(),
     CW_WEB_ADMIN_IP_ALLOWLIST: cidrList,
     // Trust the reverse proxy's forwarded headers: the client IP (x-real-ip, x-forwarded-for)
     // and, for the sign-out origin check, the host (x-forwarded-host).
