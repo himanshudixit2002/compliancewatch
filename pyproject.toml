@@ -15,7 +15,7 @@ dev = [
   "hypothesis>=6.140",
   "import-linter>=2.5",
   "types-pyyaml>=6.0.12",
-  "testcontainers[postgres]>=4.15",
+  "testcontainers[postgres,community]>=4.15",
   "httpx2>=2.13",  # Starlette >= 1.7 TestClient transport; httpx 0.x is deprecated there
   # Event contracts (packages/contracts/events): schema checks and the generators behind `make contracts`
   "jsonschema[format-nongpl]>=4.26",

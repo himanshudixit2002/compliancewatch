@@ -41,6 +41,7 @@ from obligation.main import build_app as build_obligation
 from obligation.settings import ObligationSettings
 from pipeline.main import build_app as build_pipeline
 from pipeline.settings import PipelineSettings
+from pipeline.worker import components as pipeline_components
 from profile_service.main import build_app as build_profile
 from profile_service.settings import ProfileSettings
 from py_common.runtime import WorkerComponents
@@ -49,6 +50,7 @@ from qa.main import build_app as build_qa
 from qa.settings import QaSettings
 from rulebook.main import build_app as build_rulebook
 from rulebook.settings import RulebookSettings
+from rulebook.worker import components as rulebook_components
 
 JWKS_PATH: Final = "/v1/identity/.well-known/jwks.json"
 URL_SUFFIX: Final = "_url"
@@ -90,7 +92,9 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         "identity", "identity", IdentitySettings, build_identity, takes_authenticator=False
     ),
     ServiceEntry("profile", "profile", ProfileSettings, build_profile),
-    ServiceEntry("rulebook", "rulebook", RulebookSettings, build_rulebook),
+    ServiceEntry(
+        "rulebook", "rulebook", RulebookSettings, build_rulebook, components=rulebook_components
+    ),
     ServiceEntry("applicability-engine", "applicability", Settings, build_applicability_engine),
     ServiceEntry("obligation", "obligation", ObligationSettings, build_obligation),
     ServiceEntry(
@@ -118,6 +122,7 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         "pipeline",
         PipelineSettings,
         build_pipeline,
+        components=pipeline_components,
         url_fields=("rulebook_url", "llm_gateway_url"),
     ),
 )

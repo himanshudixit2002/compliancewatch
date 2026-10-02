@@ -45,6 +45,26 @@ from cw_mvp.testing import MEMORY_SERVICES, mvp_settings
 app = build_app(mvp_settings(), service_overrides=MEMORY_SERVICES)
 ```
 
+## The worker process: `cw-mvp worker [--internal-url URL]`
+
+One event loop runs every service's background work (`cw_mvp.worker`), each with that
+service's settings:
+
+| What | When |
+| --- | --- |
+| each service's worker components (`<pkg>.worker.components`): notification's consumer, dispatcher and retention sweep, the rulebook's daily transitions sweep, the pipeline's Temporal worker | consumers with `CW_WORKER_KAFKA_ENABLED`, Temporal workers with `CW_WORKER_TEMPORAL_ENABLED` (one client for all), periodic jobs always |
+| one outbox relay per schema that has an `outbox_event` table | `CW_WORKER_KAFKA_ENABLED` |
+| the daily idempotency purge of every schema that has an `idempotency_key` table | always |
+
+Both switches are off by default. The services call each other at `URL`, the app process's
+internal listener (`CW_MVP_INTERNAL_URL` by default), as the `worker` service client
+(`CW_SERVICE_CLIENT_ID` and `CW_SERVICE_CLIENT_SECRET`), whose tokens identity issues.
+
+`/health` on `CW_MVP_WORKER_HEALTH_PORT` (8001) answers 200 while every hosted loop and task
+queue runs and the heartbeat is fresh, 503 otherwise; `/loops` gives the detail. The health app
+runs on its own thread, so it still answers while the worker's event loop is blocked. When one
+loop fails it is logged, the others stop and the process exits 1, so the platform restarts it.
+
 ## Adding to a service
 
 A change that adds a route, `build_app` argument, worker component or URL of another service

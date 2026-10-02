@@ -95,6 +95,34 @@
       ]
     },
     {
+      "name": "mvp.worker_kafka",
+      "type": "bool",
+      "default": false,
+      "owner": "platform",
+      "description": "Runs the outbox relays of every schema with an outbox_event table and every service's Kafka consumers in the combined worker process (cw-mvp worker).",
+      "removal": "When managed Kafka serves staging and production.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_WORKER_KAFKA_ENABLED",
+      "services": [
+        "mvp"
+      ]
+    },
+    {
+      "name": "mvp.worker_temporal",
+      "type": "bool",
+      "default": false,
+      "owner": "platform",
+      "description": "Runs every service's Temporal workers on one client in the combined worker process (cw-mvp worker).",
+      "removal": "When Temporal Cloud serves staging and production.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_WORKER_TEMPORAL_ENABLED",
+      "services": [
+        "mvp"
+      ]
+    },
+    {
       "name": "notification.email",
       "type": "bool",
       "default": false,

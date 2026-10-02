@@ -19,6 +19,21 @@ other services over the internal listener run at once, so the calls they make al
 thread. ``mvp_service_scopes`` are the scopes of the service tokens the hosted services send each
 other, minted in the process by identity's issuer, as ``client=scope+scope,client=scope``; empty,
 the committed ``identity_dev_clients.toml`` gives them.
+
+The worker process (``cw-mvp worker``) answers ``/health`` and ``/loops`` on
+``mvp_worker_health_port`` (8001). Every ``mvp_worker_heartbeat_seconds`` it records which loops
+and Temporal task queues are running; ``/health`` turns 503 when one it hosts is not, or when no
+heartbeat came for ``mvp_worker_stale_seconds``, as when the event loop is blocked. Two switches
+pick what it runs, both off by default (owner platform; each is removed once managed Kafka, or
+Temporal Cloud, serves staging and production):
+
+- ``worker_kafka_enabled`` (``CW_WORKER_KAFKA_ENABLED``): the outbox relays of every schema with
+  an ``outbox_event`` table and every service's Kafka consumers;
+- ``worker_temporal_enabled`` (``CW_WORKER_TEMPORAL_ENABLED``): every service's Temporal workers,
+  on one client.
+
+Periodic jobs (notification dispatch and retention, the rulebook's transitions, the idempotency
+purge of every schema with the table) run with either switch off.
 """
 
 from typing import Self
@@ -30,6 +45,8 @@ from py_common.settings import Settings
 APP_SERVICE_NAME = "compliancewatch-api"
 """The service name of the app process: its telemetry resource and its log lines outside a
 request."""
+WORKER_SERVICE_NAME = "compliancewatch-worker"
+"""The service name of the worker process."""
 
 
 class MvpSettings(Settings):
@@ -41,6 +58,11 @@ class MvpSettings(Settings):
     mvp_thread_tokens: int = Field(default=200, ge=40, le=1000)
     mvp_loopback_limit: int = Field(default=32, ge=1, le=500)
     mvp_service_scopes: str = ""
+    mvp_worker_health_port: int = Field(default=8001, ge=1, le=65535)
+    mvp_worker_heartbeat_seconds: float = Field(default=5.0, gt=0, le=60)
+    mvp_worker_stale_seconds: float = Field(default=30.0, gt=0, le=600)
+    worker_kafka_enabled: bool = False
+    worker_temporal_enabled: bool = False
 
     @model_validator(mode="after")
     def _two_listeners(self) -> Self:
@@ -48,5 +70,13 @@ class MvpSettings(Settings):
             raise ValueError(
                 "CW_MVP_PUBLIC_PORT and CW_MVP_INTERNAL_PORT must differ: the port a request "
                 "comes in on decides which routes it reaches"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _fresh_heartbeats(self) -> Self:
+        if self.mvp_worker_stale_seconds <= self.mvp_worker_heartbeat_seconds:
+            raise ValueError(
+                "CW_MVP_WORKER_STALE_SECONDS must be longer than CW_MVP_WORKER_HEARTBEAT_SECONDS"
             )
         return self

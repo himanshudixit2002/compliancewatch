@@ -6,6 +6,7 @@ from uuid import UUID
 
 import pytest
 
+from pipeline import worker
 from pipeline.application.knowledge_activities import (
     EmbedClauses,
     EmbedRequest,
@@ -13,7 +14,8 @@ from pipeline.application.knowledge_activities import (
 )
 from pipeline.settings import PipelineSettings
 from pipeline.testing import MemoryRulebook, ScriptedEmbedder
-from pipeline.worker import activities
+from pipeline.worker import WORKFLOWS, activities, components
+from pipeline.workflows import TASK_QUEUE, ExtractKnowledgeWorkflow, IngestDocumentWorkflow
 
 
 def settings(**overrides: object) -> PipelineSettings:
@@ -53,3 +55,21 @@ async def test_the_embedding_activity_uses_the_embedder_it_is_given() -> None:
     (skipping,) = [a for a in off if isinstance(a, EmbedClauses)]
     assert (await skipping.run(EmbedRequest(document_id=UUID(int=1)))).skipped is True
     assert len(embedder.requests) == 1
+
+
+def test_the_worker_serves_every_workflow_and_activity_on_the_pipeline_queue() -> None:
+    (temporal,) = components(settings()).temporal
+    assert temporal.task_queue == TASK_QUEUE
+    assert temporal.workflows == WORKFLOWS == (IngestDocumentWorkflow, ExtractKnowledgeWorkflow)
+    assert [a.name for a in temporal.activities] == [a.name for a in activities(settings())]
+    assert not components(settings()).loops()
+
+
+def test_python_m_pipeline_worker_runs_the_components(monkeypatch: pytest.MonkeyPatch) -> None:
+    ran: list[tuple[object, object]] = []
+    monkeypatch.setattr(worker, "run_worker_process", lambda s, c, *, version: ran.append((s, c)))
+    worker.main()
+    ((ran_settings, ran_components),) = ran
+    assert isinstance(ran_settings, PipelineSettings)
+    assert ran_settings.service_name == "pipeline-worker"
+    assert ran_components is components

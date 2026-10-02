@@ -7,10 +7,13 @@ Registration with the rulebook, clause embedding and knowledge extraction are wi
 ``CW_PIPELINE_KNOWLEDGE_ENABLED`` is on. Both clients carry the worker's own access token once
 ``CW_SERVICE_CLIENT_SECRET`` is set (client ``CW_SERVICE_CLIENT_ID``, which needs rulebook:write
 and llm:call), and the rulebook's writes also carry ``CW_RULEBOOK_WRITE_TOKEN`` while it is set.
+
+``components(settings)`` is what the worker runs (``py_common.runtime.WorkerComponents``): one
+Temporal worker on the ``pipeline`` task queue with ``WORKFLOWS`` and ``activities(settings)``.
+A process that hosts several services adds it to its own.
 """
 
-import asyncio
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 from pipeline import __version__
 from pipeline.application.activities import DiscoverDocument, FetchDocument, ParseDocument
@@ -31,11 +34,11 @@ from pipeline.infrastructure.rulebook_client import HttpRulebook
 from pipeline.settings import PipelineSettings
 from pipeline.workflows import TASK_QUEUE, ExtractKnowledgeWorkflow, IngestDocumentWorkflow
 from py_common.auth import service_auth_from
-from py_common.logging import configure_logging
-from py_common.telemetry import configure_telemetry
-from py_common.temporal import ActivityBase, WorkerConfig, run_worker
+from py_common.runtime import TemporalComponent, WorkerComponents, run_worker_process
+from py_common.temporal import ActivityBase, WorkerConfig
 
 SERVICE_NAME = "pipeline-worker"
+WORKFLOWS: Final[tuple[type[Any], ...]] = (IngestDocumentWorkflow, ExtractKnowledgeWorkflow)
 
 
 class Rulebook(KnowledgeSink, RulebookReader, ClauseIndexSink, Protocol):
@@ -87,27 +90,17 @@ def activities(
     ]
 
 
-async def serve(settings: PipelineSettings) -> None:
-    telemetry = configure_telemetry(
-        service_name=SERVICE_NAME, version=__version__, settings=settings
-    )
-    try:
-        await run_worker(
-            settings,
-            WorkerConfig(task_queue=TASK_QUEUE),
-            workflows=[IngestDocumentWorkflow, ExtractKnowledgeWorkflow],
-            activities=activities(settings),
+def components(settings: PipelineSettings) -> WorkerComponents:
+    """The Temporal worker of the ``pipeline`` task queue: every workflow and activity."""
+    return WorkerComponents(
+        temporal=(
+            TemporalComponent(WorkerConfig(task_queue=TASK_QUEUE), WORKFLOWS, activities(settings)),
         )
-    finally:
-        telemetry.shutdown()
+    )
 
 
 def main() -> None:
-    settings = PipelineSettings(service_name=SERVICE_NAME)
-    configure_logging(
-        service_name=SERVICE_NAME, log_level=settings.log_level, json_output=settings.log_json
-    )
-    asyncio.run(serve(settings))
+    run_worker_process(PipelineSettings(service_name=SERVICE_NAME), components, version=__version__)
 
 
 if __name__ == "__main__":

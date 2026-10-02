@@ -314,3 +314,16 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - In qa: the fourth, agentic layer of ADR-012 and a reranker; a router so single-hop questions skip the planner (with the KAG flag on, every question past the structured layer costs a planner call)
 - The applicability engine's API (qa's solver evaluates rule predicates with the kernel until it exists)
 - Full text for ADR-009 to ADR-011; the Supabase project (ADR-014 decides Supabase Auth for the MVP; nothing is created until the maintainer opens it). Until an environment runs `CW_AUTH_MODE=token` the rulebook's review token is a shared secret and the approver ids in review and publish requests are asserted by the caller (ADR-018); the web app does not sign in with tokens yet
+
+## The MVP deployable (`composition/mvp`, ADR-013)
+
+`composition/mvp` is the one-process deploy profile: every service's FastAPI app behind one ASGI dispatcher on two listeners (`cw-mvp serve`), and one worker process (`cw-mvp worker`) that runs every service's background work in a single event loop. Read the full design in [composition/mvp/README.md](composition/mvp/README.md).
+
+```bash
+cw-mvp serve   # public listener on 8000, internal on 8080
+cw-mvp worker  # background work: consumers, periodic jobs, Temporal workers; health on 8001
+```
+
+Both switches are off by default; enable them with `CW_WORKER_KAFKA_ENABLED=1` (outbox relays and consumers) and `CW_WORKER_TEMPORAL_ENABLED=1` (Temporal workers on one client). The worker calls the app process's internal listener as the `worker` service client; its scopes are in `services/identity/src/identity/identity_dev_clients.toml`.
+
+`make demo` runs the same composition in-memory, without Postgres, for demos and tests.
