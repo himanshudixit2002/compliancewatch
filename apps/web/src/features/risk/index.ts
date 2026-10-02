@@ -1,5 +1,12 @@
-export { RiskViewComponent } from "./ui/risk-view";
+export {
+  RISK_STATUSES,
+  likelihoodText,
+  riskCounts,
+  riskSeverityLabel,
+  riskSeverityTone,
+  riskStatusLabel,
+  riskStatusTone,
+} from "./model/risk";
+export type { RiskCounts, RiskItem, RiskSeverity, RiskStatus } from "./model/risk";
+export { RiskView } from "./ui/risk-view";
 export type { RiskViewProps } from "./ui/risk-view";
-export { emptyRiskView } from "./model/risk";
-export type { RiskView, RiskItem } from "./model/risk";
-export { riskSeverityLabel, riskStatusLabel, formatRiskDate } from "./model/risk";

@@ -1,23 +1,38 @@
-import type { OnboardingProgress } from "@/entities/business/types";
-import { t } from "@/shared/i18n";
+/** Onboarding questions answered so far for the business still being set up. */
+export interface OnboardingStatus {
+  businessName: string;
+  answered: number;
+  total: number;
+}
 
-export interface OwnerHomeView {
-  hasBusinesses: boolean;
+/** The owner's home: counts across their businesses and any onboarding still open. */
+export interface OwnerHomeSummary {
+  businessesCount: number;
   pendingReview: number;
   openObligations: number;
   upcomingDeadlines: number;
   recentChanges: number;
-  onboardingProgress?: OnboardingProgress;
-  businessesCount: number;
+  /** Set while a business's onboarding is incomplete. */
+  onboarding: OnboardingStatus | null;
 }
 
-export function emptyOwnerHome(): OwnerHomeView {
+export function emptyOwnerHome(): OwnerHomeSummary {
   return {
-    hasBusinesses: false,
+    businessesCount: 0,
     pendingReview: 0,
     openObligations: 0,
     upcomingDeadlines: 0,
     recentChanges: 0,
-    businessesCount: 0,
+    onboarding: null,
   };
+}
+
+export function hasBusinesses(summary: OwnerHomeSummary): boolean {
+  return summary.businessesCount > 0;
+}
+
+/** True when there is onboarding left to finish (answered below total). */
+export function onboardingOpen(summary: OwnerHomeSummary): boolean {
+  const onboarding = summary.onboarding;
+  return onboarding !== null && onboarding.answered < onboarding.total;
 }

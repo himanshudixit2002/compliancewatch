@@ -1,116 +1,69 @@
-"use client";
-
-import { useState } from "react";
-import { Badge, Banner, Button, Card, PageHeader, SearchInput, Tabs, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, EmptyState, Icon } from "@compliancewatch/ui";
-import type { RiskView } from "../model/risk";
-import { riskLevelLabel, formatRiskDate } from "../model/risk";
+import type { Route } from "next";
+import { EmptyState, PageHeader } from "@compliancewatch/ui";
+import { t } from "@/shared/i18n";
+import { formatDate } from "@/shared/lib/dates";
+import { StatCard } from "@/shared/ui/stat-card";
+import {
+  likelihoodText,
+  riskCounts,
+  riskSeverityLabel,
+  riskSeverityTone,
+  riskStatusLabel,
+  riskStatusTabs,
+  riskStatusTone,
+  type RiskItem,
+} from "../model/risk";
+import type { RiskRow } from "./risk-filters";
+import { RiskTable } from "./risk-table";
 
 export interface RiskViewProps {
-  view: RiskView;
-  businessId: string;
-  href: (riskId: string) => string;
+  risks: readonly RiskItem[];
+  /** The page of one risk. */
+  hrefFor: (riskId: string) => Route;
 }
 
-const TABS = [
-  { value: "all", label: "All risks" },
-  { value: "active", label: "Active" },
-  { value: "mitigated", label: "Mitigated" },
-  { value: "closed", label: "Closed" },
-];
-
-function StatCards({ view }: { view: RiskView }) {
-  return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <Card className="p-4">
-        <div className="text-sm text-fg-muted">Total risks</div>
-        <div className="text-2xl font-bold text-fg">{view.totalCount}</div>
-      </Card>
-      <Card className="p-4 border-l-4 border-l-danger">
-        <div className="text-sm text-fg-muted">High severity</div>
-        <div className="text-2xl font-bold text-danger">{view.highCount}</div>
-      </Card>
-      <Card className="p-4 border-l-4 border-l-warning">
-        <div className="text-sm text-fg-muted">Medium severity</div>
-        <div className="text-2xl font-bold text-warning">{view.mediumCount}</div>
-      </Card>
-      <Card className="p-4 border-l-4 border-l-success">
-        <div className="text-sm text-fg-muted">Mitigated</div>
-        <div className="text-2xl font-bold text-success">{view.mitigatedCount}</div>
-      </Card>
-    </div>
-  );
+function riskRow(risk: RiskItem, hrefFor: (riskId: string) => Route): RiskRow {
+  return {
+    id: risk.id,
+    title: risk.title,
+    description: risk.description,
+    href: hrefFor(risk.id),
+    severityLabel: riskSeverityLabel(risk.severity),
+    severityTone: riskSeverityTone(risk.severity),
+    status: risk.status,
+    statusLabel: riskStatusLabel(risk.status),
+    statusTone: riskStatusTone(risk.status),
+    likelihood: likelihoodText(risk.likelihood),
+    identifiedAt: formatDate(risk.identifiedAt),
+    owner: risk.owner,
+  };
 }
 
-function RisksTable({ risks, href }: { risks: any[]; href: (riskId: string) => string }) {
-  const [search, setSearch] = useState("");
-
-  const filtered = risks.filter((r) => {
-    if (search && !r.title.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
-
-  return (
-    <div className="flex flex-col gap-4">
-      <SearchInput
-        placeholder="Search risks..."
-        value={search}
-        onChange={setSearch}
-        className="w-full sm:max-w-sm"
-      />
-      {filtered.length === 0 ? (
-        <EmptyState icon={<Icon name="shield-check" className="h-8 w-8 text-fg-muted" />} title="No risks found" description="Your compliance posture looks good." />
-      ) : (
-        <div className="overflow-hidden rounded-md border border-line">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Risk</TableHead>
-                <TableHead>Severity</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Likelihood</TableHead>
-                <TableHead>Identified</TableHead>
-                <TableHead>Owner</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((risk) => (
-                <TableRow key={risk.id}>
-                  <TableCell className="font-medium text-fg">
-                    <a href={href(risk.id)} className="hover:underline">{risk.title}</a>
-                  </TableCell>
-                  <TableCell>
-                    <Badge tone={risk.severity === "high" ? "danger" : risk.severity === "medium" ? "warning" : "info"}>
-                      {risk.severity}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge tone={risk.status === "active" ? "danger" : risk.status === "mitigated" ? "success" : "neutral"}>
-                      {risk.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{risk.likelihood}%</TableCell>
-                  <TableCell>{formatRiskDate(risk.identifiedAt)}</TableCell>
-                  <TableCell>{risk.owner}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function RiskViewComponent({ view, businessId, href }: RiskViewProps) {
-  const [tab, setTab] = useState("all");
-  const filtered = tab === "all" ? view.risks : view.risks.filter((r) => r.status === tab);
-
+/**
+ * A business's risk register: how many risks there are, how many are high or medium severity
+ * and how many are mitigated, then the register under status tabs, or an empty state.
+ */
+export function RiskView({ risks, hrefFor }: RiskViewProps) {
+  const counts = riskCounts(risks);
   return (
     <div data-slot="risk" className="flex flex-col gap-6">
-      <PageHeader title="Risk register" description="Track and manage regulatory risks" />
-      <StatCards view={view} />
-      <Tabs tabs={TABS} value={tab} onChange={setTab} />
-      <RisksTable risks={filtered} href={href} />
+      <PageHeader title={t("risk.title")} description={t("risk.description")} />
+      {risks.length === 0 ? (
+        <EmptyState title={t("risk.empty.title")} body={t("risk.empty.body")} />
+      ) : (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard label={t("risk.stat.total")} value={counts.total} />
+            <StatCard label={t("risk.stat.high")} value={counts.high} tone="danger" />
+            <StatCard label={t("risk.stat.medium")} value={counts.medium} tone="warning" />
+            <StatCard label={t("risk.stat.mitigated")} value={counts.mitigated} tone="success" />
+          </div>
+          <RiskTable
+            rows={risks.map((risk) => riskRow(risk, hrefFor))}
+            statusTabs={riskStatusTabs()}
+          />
+        </>
+      )}
     </div>
   );
 }
