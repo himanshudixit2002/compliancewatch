@@ -1,9 +1,7 @@
-"use client";
-
-import type { ReactNode } from "react";
+import type { Route } from "next";
 import Link from "next/link";
 import {
-  Badge,
+  Banner,
   Card,
   CardContent,
   CardHeader,
@@ -13,131 +11,100 @@ import {
   StatusChip,
 } from "@compliancewatch/ui";
 import type { KeyValueItem } from "@compliancewatch/ui";
-import type { Route } from "next";
 import { t } from "@/shared/i18n";
-import { hrefFor, screenById } from "@/shared/config/screens";
-
-export interface NotificationDetailView {
-  id: string;
-  subject: string;
-  channel: "email" | "whatsapp";
-  status: "sent" | "delivered" | "read" | "failed";
-  recipient: string;
-  sentAt: string;
-  readAt: string | null;
-  templateKey: string;
-  body: string;
-  tenantName: string | null;
-  deliveryAttempts: number;
-  errorMessage: string | null;
-}
+import { formatDateTime } from "@/shared/lib/dates";
+import { channelLabelKey, deliveryLabelKey, deliveryTone } from "../model/notifications";
+import type { NotificationRecord } from "../model/notifications";
 
 export interface NotificationDetailProps {
-  view: NotificationDetailView;
-  backHref: string;
+  notification: NotificationRecord;
+  /** The notifications list this one was opened from. */
+  listHref: Route;
 }
 
-const LIST_SCREEN = screenById("owner.notifications");
-
-function BackLink({ href }: { href: string }) {
-  return (
-    <Link
-      href={href as Route}
-      className="inline-flex items-center gap-1 text-sm text-fg-muted hover:text-fg"
-    >
-      <span aria-hidden="true">←</span>
-      <span>{t("common.back")}</span>
-    </Link>
-  );
+function when(instant: string | null): string {
+  return instant === null ? t("common.none") : formatDateTime(instant);
 }
 
-function BodyCard({ subject, body }: { subject: string; body: string }) {
-  return (
-    <Card data-slot="notification-body" className="gap-3">
-      <CardHeader className="px-4">
-        <CardTitle className="text-base font-semibold text-fg">{subject}</CardTitle>
-      </CardHeader>
-      <CardContent className="px-4">
-        <p className="whitespace-pre-wrap text-sm text-fg">{body}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ErrorCard({ message }: { message: string | null }) {
-  if (message === null) return null;
-  return (
-    <Card
-      data-slot="notification-error"
-      className="gap-3 border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
-    >
-      <CardHeader className="px-4">
-        <CardTitle className="text-base font-semibold text-red-700 dark:text-red-300">
-          {t("notifications.deliveryErrorTitle")}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="px-4">
-        <p className="text-sm text-red-700 dark:text-red-300">{message}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
-/** The notification detail: subject, key facts, body and any delivery error. */
-export function NotificationDetail({ view, backHref }: NotificationDetailProps) {
-  const channelNode: ReactNode = (
-    <Badge tone="neutral">{t(`notifications.channel.${view.channel}`)}</Badge>
-  );
-  const statusNode: ReactNode = <StatusChip status={view.status} />;
+/** One notification: its delivery facts, the message as sent and any delivery error. */
+export function NotificationDetail({ notification, listHref }: NotificationDetailProps) {
   const items: KeyValueItem[] = [
     {
-      key: "id",
-      label: t("notifications.field.id"),
-      value: <code className="font-mono text-xs">{view.id}</code>,
+      key: "state",
+      label: t("notificationLog.field.state"),
+      value: (
+        <StatusChip
+          status={notification.state}
+          tone={deliveryTone(notification.state)}
+          label={t(deliveryLabelKey(notification.state))}
+        />
+      ),
     },
-    { key: "channel", label: t("notifications.field.channel"), value: channelNode },
-    { key: "status", label: t("notifications.field.status"), value: statusNode },
-    { key: "recipient", label: t("notifications.field.recipient"), value: view.recipient },
+    {
+      key: "channel",
+      label: t("notificationLog.field.channel"),
+      value: t(channelLabelKey(notification.channel)),
+    },
+    {
+      key: "recipient",
+      label: t("notificationLog.field.recipient"),
+      value: notification.recipient,
+    },
+    {
+      key: "business",
+      label: t("notificationLog.field.business"),
+      value: notification.businessName ?? t("common.none"),
+    },
     {
       key: "template",
-      label: t("notifications.field.template"),
-      value: <code className="font-mono text-xs">{view.templateKey}</code>,
+      label: t("notificationLog.field.template"),
+      value: <code className="font-mono text-xs">{notification.templateKey}</code>,
     },
+    { key: "sentAt", label: t("notificationLog.field.sentAt"), value: when(notification.sentAt) },
     {
-      key: "tenant",
-      label: t("notifications.field.tenant"),
-      value: view.tenantName ?? t("common.none"),
+      key: "deliveredAt",
+      label: t("notificationLog.field.deliveredAt"),
+      value: when(notification.deliveredAt),
     },
-    { key: "sentAt", label: t("notifications.field.sentAt"), value: view.sentAt },
-    {
-      key: "readAt",
-      label: t("notifications.field.readAt"),
-      value: view.readAt ?? t("common.none"),
-    },
+    { key: "readAt", label: t("notificationLog.field.readAt"), value: when(notification.readAt) },
     {
       key: "attempts",
-      label: t("notifications.field.attempts"),
-      value: String(view.deliveryAttempts),
+      label: t("notificationLog.field.attempts"),
+      value: String(notification.attempts),
+    },
+    {
+      key: "id",
+      label: t("notificationLog.field.id"),
+      value: <code className="font-mono text-xs">{notification.id}</code>,
+      copy: notification.id,
     },
   ];
   return (
     <div data-slot="notification-detail" className="flex flex-col gap-6">
-      <BackLink href={backHref} />
-      <PageHeader
-        title={view.subject}
-        description={t("notifications.detailIntro")}
-        actions={
-          <Link
-            href={hrefFor(LIST_SCREEN) as Route}
-            className="text-sm text-fg-muted underline-offset-2 hover:text-fg hover:underline"
-          >
-            {t("notifications.backToList")}
-          </Link>
-        }
-      />
-      <KeyValue items={items} aria-label={t("notifications.field.section")} />
-      <BodyCard subject={view.subject} body={view.body} />
-      <ErrorCard message={view.errorMessage} />
+      <Link
+        href={listHref}
+        className="inline-flex w-fit items-center gap-1 text-sm text-fg-muted hover:text-fg"
+      >
+        <span aria-hidden="true">←</span>
+        <span>{t("notificationLog.backToList")}</span>
+      </Link>
+      <PageHeader title={notification.subject} description={t("notificationLog.detailIntro")} />
+      {notification.error === null ? null : (
+        <Banner tone="danger" title={t("notificationLog.errorTitle")}>
+          {notification.error}
+        </Banner>
+      )}
+      <KeyValue items={items} aria-label={t("notificationLog.field.section")} />
+      <Card data-slot="notification-body" className="gap-3">
+        <CardHeader className="px-4">
+          <CardTitle className="text-base font-semibold text-fg">
+            {t("notificationLog.bodyTitle")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4">
+          <p className="text-sm whitespace-pre-wrap text-fg">{notification.body}</p>
+        </CardContent>
+      </Card>
     </div>
   );
 }

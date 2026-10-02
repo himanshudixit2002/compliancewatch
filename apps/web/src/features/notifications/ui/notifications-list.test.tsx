@@ -1,63 +1,105 @@
-import { render, screen } from "@testing-library/react";
+import type { Route } from "next";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { runAxe } from "@compliancewatch/ui/test/axe";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { formatDateTime } from "@/shared/lib/dates";
+import type { NotificationSummary } from "../model/notifications";
 import { NotificationsList } from "./notifications-list";
 
-const VIEW = {
-  items: [
-    {
-      id: "ntf-1",
-      subject: "GST return filed",
-      channel: "email" as const,
-      status: "delivered" as const,
-      recipient: "owner@example.com",
-      sentAt: "2024-01-15 10:30",
-      readAt: "2024-01-15 11:00",
-      templateKey: "gst_filed",
-    },
-    {
-      id: "ntf-2",
-      subject: "Reminder: GSTR-3B due",
-      channel: "whatsapp" as const,
-      status: "sent" as const,
-      recipient: "+91 98765 43210",
-      sentAt: "2024-01-14 09:00",
-      readAt: null,
-      templateKey: "gstr3b_reminder",
-    },
-  ],
-  counts: { total: 12, sent: 8, delivered: 3, failed: 1 },
-};
+const ITEMS: NotificationSummary[] = [
+  {
+    id: "ntf-1",
+    subject: "GST return filed",
+    channel: "email",
+    state: "delivered",
+    recipient: "owner@example.com",
+    templateKey: "gst_filed",
+    sentAt: "2026-10-01T05:00:00Z",
+  },
+  {
+    id: "ntf-2",
+    subject: "Reminder: GSTR-3B due",
+    channel: "whatsapp",
+    state: "queued",
+    recipient: "+919876543210",
+    templateKey: "gstr3b_reminder",
+    sentAt: null,
+  },
+  {
+    id: "ntf-3",
+    subject: "TDS payment overdue",
+    channel: "whatsapp",
+    state: "failed",
+    recipient: "+919812345678",
+    templateKey: "tds_overdue",
+    sentAt: "2026-09-30T05:00:00Z",
+  },
+];
+
+const hrefFor = (id: string) => `/account/notifications/${id}` as Route;
+
+function figures(container: HTMLElement): Record<string, string | null> {
+  const cards = [...container.querySelectorAll<HTMLElement>("[data-slot='stat-card']")];
+  return Object.fromEntries(
+    cards.map((card) => [card.querySelector("dt")?.textContent, card.getAttribute("data-tone")]),
+  );
+}
 
 describe("NotificationsList", () => {
-  it("renders the heading, stat cards and a table row per item", async () => {
-    const { container } = render(
-      <NotificationsList
-        view={VIEW}
-        search={{ value: "", onChange: vi.fn() }}
-        baseHref="/account/notifications"
-      />,
-    );
+  it("shows the figures and a row per notification linking to its detail", async () => {
+    const { container } = render(<NotificationsList items={ITEMS} hrefFor={hrefFor} />);
     expect(screen.getByRole("heading", { level: 1, name: "Notifications" })).toBeDefined();
-    const table = container.querySelector("[data-slot='notifications-table']") as HTMLElement;
-    expect(table.textContent).toContain("GST return filed");
-    expect(table.textContent).toContain("owner@example.com");
-    expect(table.textContent).toContain("+91 98765 43210");
-    const cells = container.querySelectorAll("[data-slot='stat-card']");
-    expect(cells).toHaveLength(4);
+    const values = [...container.querySelectorAll("[data-slot='stat-card'] dd")].map(
+      (node) => node.textContent,
+    );
+    expect(values).toEqual(["3", "1", "1", "1"]);
+    expect(figures(container)["Not delivered"]).toBe("danger");
+
+    const table = screen.getByRole("table");
+    expect(within(table).getAllByRole("row")).toHaveLength(4);
+    expect(screen.getByRole("link", { name: "GST return filed" }).getAttribute("href")).toBe(
+      "/account/notifications/ntf-1",
+    );
+    const queued = container.querySelector("[data-notification='ntf-2']") as HTMLElement;
+    expect(queued.textContent).toContain("Not sent yet");
+    expect(queued.textContent).toContain("Queued");
+    expect(queued.querySelector("[data-slot='status-chip']")?.getAttribute("data-tone")).toBe(
+      "neutral",
+    );
+    const sent = container.querySelector("[data-notification='ntf-1']") as HTMLElement;
+    expect(sent.textContent).toContain(formatDateTime("2026-10-01T05:00:00Z"));
+    expect(sent.textContent).toContain("Email");
+    expect(screen.getByText("Showing 3 of 3 notifications.")).toBeDefined();
     expect(await runAxe(container)).toHaveNoViolations();
   });
 
-  it("shows an empty state when the list is empty", async () => {
-    const { container } = render(
-      <NotificationsList
-        view={{ items: [], counts: { total: 0, sent: 0, delivered: 0, failed: 0 } }}
-        search={{ value: "", onChange: vi.fn() }}
-        baseHref="/account/notifications"
-      />,
-    );
-    expect(container.querySelector("[data-slot='notifications-table']")).toBeNull();
-    expect(screen.getByText("No notifications yet")).toBeDefined();
+  it("narrows the table as you search and says when nothing matches", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<NotificationsList items={ITEMS} hrefFor={hrefFor} />);
+    const search = screen.getByRole("searchbox", { name: "Search notifications" });
+
+    await user.type(search, "whatsapp");
+    expect(screen.getByText("Showing 2 of 3 notifications.")).toBeDefined();
+    expect(screen.queryByRole("link", { name: "GST return filed" })).toBeNull();
+
+    await user.clear(search);
+    await user.type(search, "  income tax ");
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByRole("heading", { name: "No notification matches" })).toBeDefined();
+    expect(screen.getByText('Nothing matches "income tax". Try a shorter search.')).toBeDefined();
+    expect(await runAxe(container)).toHaveNoViolations();
+
+    await user.clear(search);
+    expect(screen.getByText("Showing 3 of 3 notifications.")).toBeDefined();
+  });
+
+  it("shows an empty state and no search box when nothing was sent", async () => {
+    const { container } = render(<NotificationsList items={[]} hrefFor={hrefFor} />);
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: "No notifications yet" })).toBeDefined();
+    expect(figures(container)["Not delivered"]).toBe("neutral");
     expect(await runAxe(container)).toHaveNoViolations();
   });
 });
