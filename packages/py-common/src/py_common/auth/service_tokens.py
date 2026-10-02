@@ -223,7 +223,7 @@ class IssuerTokenSource:
 
     def invalidate(self, token: str) -> None:
         with self._lock:
-            if self._cached is not None and self._cached.token == token:
+            if self._cached is not None and hmac.compare_digest(self._cached.token, token):
                 self._cached = None
 
 
