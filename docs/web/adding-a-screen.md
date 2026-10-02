@@ -78,7 +78,8 @@ under `features/not-available/ui/previews.tsx` and name it in `preview`.
 4. **Strings.** Chrome text goes through `t("<feature>.<key>")` from `shared/i18n` with the key
    added to `messages/en.json`; the registry title is data and needs no key; enum values from a
    service go through `humanise()`. No regulatory fact is written into the app: it comes from
-   service data, `docs/legal` or the ontology file.
+   service data, `docs/legal` or the ontology (`getOntology()`: questions, help lines and value
+   labels from `GET /v1/ontology`).
 5. **Unit tests.** `<name>.test.tsx` beside every view with the axe assertion; `model/*.test.ts`
    for the helpers; gateway and action tests with `fakeFetch` from `src/test/fake-fetch.ts`
    asserting the method, path, headers and body of each call. The 80% floor holds per package.

@@ -4,11 +4,9 @@ The web app's flags are declared in the repository's flag registry,
 [`packages/flags/registry.json`](../../packages/flags/registry.json), next to every other
 rollout switch; [packages/flags/README.md](../../packages/flags/README.md) describes the entry
 format, the check and the two SDKs. `apps/web/src/shared/config/flags.ts` keeps only the typed
-list of the web flag names. Nothing on `main` reads a web flag yet: there is no server-side
-reader, no page or action is gated, and the navigation hides a flagged registry entry because no
-reader says otherwise. A flag therefore changes nothing today; the entries exist so the screen
-registry can name the flag a screen will be gated by, and so the reader, when it arrives, reads
-declared flags only.
+list of the web flag names, and `apps/web/src/server/flags.ts` is the reader. One flag is read
+on `main`: `web.analytics_enabled`, by the product events (`server/analytics.ts`). The navigation
+still hides a flagged registry entry, because no flagged screen is built yet.
 
 ## An entry
 
@@ -61,13 +59,56 @@ files together.
 | `web.qa_enabled`            | ai-platform             | The ask screen                                                                |
 | `web.tenant_header_off`     | identity-partner        | Stops sending `x-tenant-id` once services take the tenant from a token        |
 
-None of the six is read anywhere on `main`.
+`web.analytics_enabled` is read by `server/analytics.ts`; the other five are not read yet.
 
-## Rules for the reader, when it exists
+## The reader
 
-These are the rules the entries are built for, so a reader that arrives later has nothing to
-renegotiate: it reads through `@compliancewatch/flags/server` (`isEnabled(name, { tenantId })`),
-on the server only, and a flag never reaches the browser; the `CW_WEB_FLAG_<NAME>=true` override
-is honoured only when `CW_WEB_ENV` is `local` or `test`; a gated form renders a `Banner` naming
-the flag, and a gated action refuses with a message naming the flag, rather than either
-disappearing silently.
+`server/flags.ts` exports `isEnabled(name, { tenantId })`, typed with `FlagName`, for pages,
+actions and server modules. It answers through `@compliancewatch/flags/server`, which it
+configures once per server process on the first question, with the provider `CW_FLAGS_PROVIDER`
+names (`env` by default, or `unleash`; see the package README):
+
+- The env provider reads the entry's `env` variable, `CW_WEB_FLAG_<NAME>`, then the SDK's generic
+  `CW_FLAG_WEB_<NAME>`. The reader passes those variables (and their `__TENANTS` lists) through
+  only when `CW_WEB_ENV` is `local` or `test`; in `staging` and `prod` it removes them from what
+  the provider sees, so a stray variable cannot switch a flag on there, and a flag is turned on
+  through Unleash.
+- A provider that cannot be configured (`unleash` without `CW_UNLEASH_URL`, say) answers off for
+  every flag, logs one `flag_configuration_failed` JSON line, and is tried again on the next
+  question.
+- A flag is read on the server only and never reaches the browser.
+
+A gated form renders a `Banner` naming the flag, and a gated action refuses with a message
+naming the flag, rather than either disappearing silently. `flags.test.ts` in `server/` covers
+the default, the override in local and in prod, and the failed configuration.
+
+## Product analytics
+
+`server/analytics.ts` exports `track(principal, event)`. An event is one JSON line on stdout
+(`"event": "product_event"`, the name, the time, the tenant and user ids, the properties) and an
+event named `product.<name>` on the active OpenTelemetry span, which records only once tracing is
+registered. It is emitted only when both hold, checked in this order on every call:
+
+1. `web.analytics_enabled` is on for the tenant. With it off (the default) nothing else happens:
+   no read, no line.
+2. The person's analytics consent is current: the latest `analytics` record from
+   `GET /v1/identity/consents?subject=<user id>`, read on every event, grants it with the privacy
+   notice's version this build ships (`privacy-notice@<Version line>`). A withdrawal stops the
+   next event, and a new privacy notice stops them until the person agrees again. The session's
+   `analyticsConsent` claim is not read, because nothing refreshes it when a person withdraws.
+
+The events are a closed union in the module; a property is a count, a boolean, or a value from
+a fixed list, never text a person typed, an answer's value, a GSTIN, a phone number or an
+address:
+
+| Event                           | Emitted by                                          | Properties                                                |
+| ------------------------------- | --------------------------------------------------- | --------------------------------------------------------- |
+| `onboarding_step_completed`     | the consent step, the business step, each answer    | `step`; `created` and `looked_up`; `attribute` and `state` |
+| `onboarding_summary_viewed`     | each view of the onboarding summary                 | `complete`, `answered`, `total`, `unsure`, `open_review_tasks` |
+| `consent_changed`               | a recorded change on the consents page              | `purpose`, `change`                                       |
+| `notification_preference_saved` | a saved preference                                  | `channel`, `opted_in`                                     |
+| `subscription_started`          | a started subscription                              | `plan_key`                                                |
+
+`track` never throws and never fails the request it runs in: a failure is logged as one
+`product_event_failed` warning and the event is dropped. Nothing is sent to a third party.
+Turning the flag on anywhere waits for counsel's view on the analytics consent purpose.

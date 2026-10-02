@@ -85,6 +85,8 @@ const MEMBERS = TENANT_MEMBER_ROLES;
 const REGULATORY = REGULATORY_ROLES;
 const TENANT_ADMINS: readonly Role[] = ["owner", "ca_admin"];
 const CA: readonly Role[] = ["ca_admin", "ca_staff"];
+/** Who onboards a business: its owner and staff, or a CA firm's people for a client. */
+const ONBOARDING_ROLES: readonly Role[] = ["owner", "staff", "ca_admin", "ca_staff"];
 const BUSINESS_TENANTS: readonly TenantKind[] = ["business", "ca_firm"];
 
 const uses = (service: ServiceName, method: HttpMethod, path: string): RouteRef => ({
@@ -118,6 +120,8 @@ const unscheduled = (
   ref = "indicative path; no design exists",
 ): AwaitedRoute => ({ service, method, path, owner: "unplanned", ref });
 
+const BUSINESS = uses("profile", "GET", "/v1/businesses/{business_id}");
+const NODE_REVIEW_TASKS = uses("profile", "GET", "/v1/profile/nodes/{node_id}/review-tasks");
 const RULE_VERSIONS = uses("rulebook", "GET", "/v1/rulebook/rule-versions");
 const RULE_VERSION = uses("rulebook", "GET", "/v1/rulebook/rule-versions/{rule_version_id}");
 const RELATIONS = uses("rulebook", "GET", "/v1/rulebook/relations");
@@ -179,7 +183,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [],
     status: "live",
-    e2e: ["home.spec.ts", "a11y.spec.ts"],
+    e2e: ["home.spec.ts", "a11y.spec.ts", "journey-visitor.spec.ts"],
     guideRef: "10, 15",
   },
   {
@@ -192,7 +196,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [SESSION_EXCHANGE, DEV_PROVIDER_TOKENS],
     status: "live",
-    e2e: ["sign-in.spec.ts", "a11y.spec.ts"],
+    e2e: ["sign-in.spec.ts", "a11y.spec.ts", "journey-visitor.spec.ts"],
     guideRef: "10, 12, 16; ADR-014",
     notes:
       "The development sign-in on the fake provider (local and test); the identity routes it awaits bring the real one.",
@@ -207,7 +211,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [],
     status: "live",
-    e2e: ["sign-in.spec.ts"],
+    e2e: ["sign-in.spec.ts", "journey-owner.spec.ts"],
     guideRef: "16",
     notes: "POST only; clears the session cookie and returns to the sign-in page.",
   },
@@ -248,7 +252,7 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [],
     status: "live",
-    e2e: ["legal.spec.ts"],
+    e2e: ["legal.spec.ts", "journey-owner.spec.ts", "journey-visitor.spec.ts"],
     guideRef: "16",
     notes: "Rendered from docs/legal under the draft banner; an unknown name is a 404.",
   },
@@ -446,7 +450,7 @@ const SCREEN_LIST = [
     status: "ready",
     e2e: [],
     guideRef: "16, 17",
-    nav: { group: "account", order: 2 },
+    nav: { group: "account", order: 3 },
   },
   // ---- owner ------------------------------------------------------------------------------
   {
@@ -458,13 +462,219 @@ const SCREEN_LIST = [
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
     uses: [uses("profile", "GET", "/v1/businesses")],
-    awaits: [servicesTrack("WP12", "profile", "GET", "/v1/businesses")],
-    status: "ready",
-    e2e: [],
+    awaits: [],
+    status: "live",
+    e2e: ["businesses.spec.ts", "a11y.spec.ts", "journey-owner.spec.ts", "journey-ca-firm.spec.ts"],
     guideRef: "6, 10; F12",
     nav: { group: "business", order: 1 },
     notes:
-      "Where every tenant role lands after signing in; the business API is on main and the list is built with the owner screens.",
+      "Where every tenant role lands after signing in: an owner with one business goes straight to it (whose home links to adding another); a CA firm's client list with search and paging.",
+  },
+  {
+    id: "owner.onboarding",
+    kind: "page",
+    route: "/onboarding",
+    title: "Get started",
+    section: "owner",
+    roles: ONBOARDING_ROLES,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      uses("identity", "GET", "/v1/identity/consents"),
+      uses("identity", "POST", "/v1/identity/consents"),
+      uses("notification", "PUT", "/v1/notification/preferences/{channel}/{recipient}"),
+    ],
+    awaits: [],
+    status: "live",
+    e2e: [
+      "owner-onboarding.spec.ts",
+      "a11y.spec.ts",
+      "journey-owner.spec.ts",
+      "journey-ca-firm.spec.ts",
+      "journey-visitor.spec.ts",
+    ],
+    guideRef: "10, 12, 16; docs/legal/consent-record.md",
+    notes:
+      "The consent step: terms, privacy notice and profile processing required, reminders and analytics optional, each recorded with the notice version from docs/legal.",
+  },
+  {
+    id: "owner.onboarding.business",
+    kind: "page",
+    route: "/onboarding/business",
+    title: "Add a business",
+    section: "owner",
+    roles: ONBOARDING_ROLES,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      uses("identity", "GET", "/v1/identity/consents"),
+      uses("profile", "POST", "/v1/businesses"),
+      uses("profile", "GET", "/v1/ontology"),
+    ],
+    awaits: [],
+    status: "live",
+    e2e: [
+      "owner-onboarding-business.spec.ts",
+      "a11y.spec.ts",
+      "journey-owner.spec.ts",
+      "journey-ca-firm.spec.ts",
+    ],
+    guideRef: "2 uc1, F6, 7; ADR-016",
+    parent: "owner.onboarding",
+    notes:
+      "Creates the business from its GSTIN with an Idempotency-Key and shows what the GSTIN lookup returned; asks for the consents first.",
+  },
+  {
+    id: "owner.onboarding.questions",
+    kind: "page",
+    route: "/onboarding/[businessId]/questions",
+    title: "Questions",
+    section: "owner",
+    roles: ONBOARDING_ROLES,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      uses("profile", "GET", "/v1/businesses/{business_id}/onboarding"),
+      uses("profile", "GET", "/v1/businesses/{business_id}"),
+      uses("profile", "PATCH", "/v1/businesses/{business_id}"),
+      uses("profile", "GET", "/v1/profile/nodes/{node_id}/review-tasks"),
+      uses("profile", "GET", "/v1/ontology"),
+    ],
+    awaits: [],
+    status: "live",
+    e2e: ["owner-onboarding-questions.spec.ts", "journey-owner.spec.ts"],
+    guideRef: "F6; PDF 3.4",
+    parent: "owner.onboarding",
+    notes:
+      "One question at a time from the onboarding checklist, with Not sure and Does not apply, the progress and the review tasks the answers open.",
+  },
+  {
+    id: "owner.onboarding.done",
+    kind: "page",
+    route: "/onboarding/[businessId]/done",
+    title: "Onboarding summary",
+    section: "owner",
+    roles: ONBOARDING_ROLES,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      uses("profile", "GET", "/v1/businesses/{business_id}"),
+      uses("profile", "GET", "/v1/businesses/{business_id}/onboarding"),
+      uses("profile", "GET", "/v1/profile/nodes/{node_id}/review-tasks"),
+      uses("profile", "GET", "/v1/ontology"),
+    ],
+    awaits: [],
+    status: "live",
+    e2e: ["owner-onboarding-questions.spec.ts", "journey-owner.spec.ts"],
+    guideRef: "1 metric; F6",
+    parent: "owner.onboarding",
+    notes:
+      "What the profile holds after onboarding: the checklist's counts, the questions left unsure (asked again on request) and the open review tasks.",
+  },
+  {
+    id: "owner.business",
+    kind: "page",
+    route: "/b/[businessId]",
+    title: "Business",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      BUSINESS,
+      uses("profile", "GET", "/v1/businesses/{business_id}/onboarding"),
+      NODE_REVIEW_TASKS,
+    ],
+    awaits: [],
+    status: "live",
+    e2e: ["business-pages.spec.ts", "journey-owner.spec.ts", "journey-ca-firm.spec.ts"],
+    guideRef: "2 uc4; ADR-016",
+    nav: { group: "business", order: 2 },
+    parent: "owner.businesses",
+    notes:
+      "The business, its registrations, onboarding progress and tiles for the profile pages; obligations and changes arrive with their own screens.",
+  },
+  {
+    id: "owner.business.profile",
+    kind: "page",
+    route: "/b/[businessId]/profile",
+    title: "Profile",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      BUSINESS,
+      uses("profile", "POST", "/v1/profile/locations"),
+      uses("profile", "POST", "/v1/businesses/{business_id}/registrations"),
+      uses("identity", "GET", "/v1/identity/consents"),
+    ],
+    awaits: [],
+    status: "live",
+    e2e: ["business-pages.spec.ts", "journey-owner.spec.ts"],
+    guideRef: "ADR-016",
+    nav: { group: "business", order: 3 },
+    parent: "owner.business",
+    notes:
+      "The hierarchy (the entity by its PAN, each registration by its GSTIN), adding a location under a registration, and adding another GSTIN of the business with an Idempotency-Key once the required consents are on file; no route lists a registration's locations yet.",
+  },
+  {
+    id: "owner.business.attributes",
+    kind: "page",
+    route: "/b/[businessId]/attributes",
+    title: "Attributes",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      BUSINESS,
+      uses("profile", "PATCH", "/v1/businesses/{business_id}"),
+      uses("profile", "GET", "/v1/profile/nodes/{node_id}"),
+      uses("profile", "GET", "/v1/ontology"),
+    ],
+    awaits: [],
+    status: "live",
+    e2e: ["business-pages.spec.ts", "journey-owner.spec.ts"],
+    guideRef: "5 flow 2",
+    nav: { group: "business", order: 4 },
+    parent: "owner.business",
+    notes:
+      "A node's own and inherited values for a financial year, what is not answered yet, and changing an answer.",
+  },
+  {
+    id: "owner.business.snapshot",
+    kind: "page",
+    route: "/b/[businessId]/snapshot",
+    title: "Snapshot",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      BUSINESS,
+      uses("profile", "GET", "/v1/profile/nodes/{node_id}/snapshot"),
+      uses("profile", "GET", "/v1/profile/nodes/{node_id}"),
+      uses("profile", "GET", "/v1/ontology"),
+    ],
+    awaits: [],
+    status: "live",
+    e2e: ["business-pages.spec.ts", "journey-owner.spec.ts"],
+    guideRef: "ADR-016",
+    nav: { group: "business", order: 5 },
+    parent: "owner.business",
+    notes:
+      "What the applicability engine evaluates for a node and a financial year, with where each value comes from.",
+  },
+  {
+    id: "owner.business.review-tasks",
+    kind: "page",
+    route: "/b/[businessId]/review-tasks",
+    title: "Review tasks",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [BUSINESS, NODE_REVIEW_TASKS],
+    awaits: [unscheduled("profile", "POST", "/v1/profile/review-tasks/{task_id}/resolve")],
+    status: "live",
+    e2e: ["business-pages.spec.ts", "journey-owner.spec.ts", "journey-ca-firm.spec.ts"],
+    guideRef: "8",
+    nav: { group: "business", order: 6 },
+    parent: "owner.business",
+    notes:
+      "Lists the tasks the answers opened; resolving one waits for a route nobody has designed.",
   },
   {
     id: "owner.obligation",
@@ -539,7 +749,7 @@ const SCREEN_LIST = [
     status: "waiting",
     e2e: [],
     guideRef: "2 uc2, 10",
-    nav: { group: "business", order: 3 },
+    nav: { group: "business", order: 7 },
   },
   {
     id: "owner.reminders",
@@ -554,7 +764,7 @@ const SCREEN_LIST = [
     status: "ready",
     e2e: [],
     guideRef: "9, F9",
-    nav: { group: "business", order: 5 },
+    nav: { group: "business", order: 8 },
   },
   {
     id: "owner.report-error",
@@ -601,6 +811,104 @@ const SCREEN_LIST = [
     guideRef: "8",
   },
   {
+    id: "owner.settings",
+    kind: "page",
+    route: "/settings",
+    title: "Settings",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [],
+    awaits: [],
+    status: "live",
+    e2e: [
+      "owner-settings.spec.ts",
+      "a11y.spec.ts",
+      "journey-owner.spec.ts",
+      "journey-ca-firm.spec.ts",
+    ],
+    guideRef: "16",
+    nav: { group: "account", order: 2 },
+    notes:
+      "Every settings and account page the session may open, with its status; the pages still waiting say which route they need.",
+  },
+  {
+    id: "owner.settings.consents",
+    kind: "page",
+    route: "/settings/consents",
+    title: "Consents",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      uses("identity", "GET", "/v1/identity/consents"),
+      uses("identity", "POST", "/v1/identity/consents"),
+      uses("notification", "PUT", "/v1/notification/preferences/{channel}/{recipient}"),
+    ],
+    awaits: [],
+    status: "live",
+    e2e: [
+      "owner-settings-consents.spec.ts",
+      "a11y.spec.ts",
+      "journey-owner.spec.ts",
+      "journey-ca-firm.spec.ts",
+    ],
+    guideRef: "16; docs/legal/consent-record.md",
+    nav: { group: "settings", order: 1 },
+    parent: "owner.settings",
+    notes:
+      "The latest record per purpose and every record, oldest first; the optional purposes are given or withdrawn here as new records, and withdrawing WhatsApp reminders also opts the number out.",
+  },
+  {
+    id: "owner.settings.notifications",
+    kind: "page",
+    route: "/settings/notifications",
+    title: "Notifications",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      uses("notification", "GET", "/v1/notification/preferences/{channel}/{recipient}"),
+      uses("notification", "PUT", "/v1/notification/preferences/{channel}/{recipient}"),
+      uses("notification", "GET", "/v1/notification/templates"),
+      uses("identity", "GET", "/v1/identity/consents"),
+    ],
+    awaits: [servicesTrack("WP14", "identity", "GET", "/v1/identity/me")],
+    status: "live",
+    e2e: ["owner-settings-notifications.spec.ts", "a11y.spec.ts", "journey-owner.spec.ts"],
+    guideRef: "9, F9; docs/legal/whatsapp-consent.md",
+    nav: { group: "settings", order: 2 },
+    parent: "owner.settings",
+    notes:
+      "Per channel, a recipient's preference on the notification service: reminders on or off, the language and the quiet hours; opting in needs the channel's consent. The user's own number and address arrive with the identity route it awaits; until then the page asks and remembers them on the device.",
+  },
+  {
+    id: "owner.settings.billing",
+    kind: "page",
+    route: "/settings/billing",
+    title: "Billing",
+    section: "owner",
+    roles: TENANT_ADMINS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [
+      uses("identity", "GET", "/v1/identity/billing/plans"),
+      uses("identity", "POST", "/v1/identity/billing/subscriptions"),
+    ],
+    awaits: [servicesTrack("WP25", "identity", "GET", "/v1/identity/entitlements")],
+    status: "live",
+    e2e: [
+      "owner-settings-billing.spec.ts",
+      "a11y.spec.ts",
+      "journey-owner.spec.ts",
+      "journey-ca-firm.spec.ts",
+    ],
+    guideRef: "6; G32, G33",
+    nav: { group: "settings", order: 3 },
+    parent: "owner.settings",
+    notes:
+      "The plans as the identity service states them and starting a subscription with its billing provider; with no provider connected the page says billing is not connected. Plan usage and entitlement limits arrive with the route it awaits.",
+  },
+  {
     id: "owner.settings.notification-recipients",
     kind: "page",
     route: "/settings/notifications/recipients",
@@ -623,6 +931,7 @@ const SCREEN_LIST = [
     status: "ready",
     e2e: [],
     guideRef: "9, F9",
+    parent: "owner.settings.notifications",
   },
   {
     id: "owner.settings.data-rights",
@@ -644,6 +953,7 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "16 DPDP; G37",
     nav: { group: "settings", order: 5 },
+    parent: "owner.settings",
   },
   {
     id: "owner.settings.team",
@@ -659,6 +969,7 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "5, 6, 16",
     nav: { group: "settings", order: 6 },
+    parent: "owner.settings",
   },
   {
     id: "owner.settings.activity",
@@ -674,6 +985,7 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "10 GET /v1/audit; F11",
     nav: { group: "settings", order: 7 },
+    parent: "owner.settings",
   },
   // ---- ca ---------------------------------------------------------------------------------
   {
@@ -728,6 +1040,7 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "10; F13; G35",
     nav: { group: "settings", order: 8 },
+    parent: "owner.settings",
   },
   {
     id: "ca.settings.api-keys",
@@ -747,6 +1060,7 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "10, 15; G32, G35",
     nav: { group: "settings", order: 9 },
+    parent: "owner.settings",
   },
   {
     id: "ca.settings.digests",
@@ -764,6 +1078,7 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "F12",
     nav: { group: "settings", order: 10 },
+    parent: "owner.settings",
   },
   // ---- admin ------------------------------------------------------------------------------
   {

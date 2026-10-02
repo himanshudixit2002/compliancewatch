@@ -5,10 +5,10 @@ without a request scope: components, view models, mappers, config, helpers, serv
 called directly. The Playwright suite covers what unit tests cannot: the route files (a
 `page.tsx` is an async server component that needs a request), the shells with real
 navigation, the built app's headers and status codes, and page-level accessibility. Both levels
-run axe. No test uses a mock service, and no e2e test uses a mock of anything: no page on
-`main` calls a service, the suite signs in through the real sign-in form on the fake provider
-where a page needs a session, and the one test that needs the services (the seeded-tenant
-sign-in) runs against the real ones, started and seeded before the suite.
+run axe. No test uses a mock service, and no e2e test uses a mock of anything: the suite signs
+in through the real sign-in form on the fake provider where a page needs a session, and the
+pages that read a service read the real ones, started by `make web-stack` and seeded by `make
+web-seed` before the suite (`make web-e2e` points the app at the stack's ports).
 
 ## Unit tests
 
@@ -52,7 +52,8 @@ outside `src` and outside the floor.
 | `shared/config` (roles, flags)   | set membership, `can()`, the flag declaration shape                                                                                        |
 | `shared/i18n`                    | every `t("...")` literal in `src` exists in `en.json`; interpolation; the key-by-key fallback                                               |
 | `shared/lib`                     | IST rendering, financial-year labels, decimal money, identifiers, `safeNext`                                                               |
-| `server/legal.ts`                | version and title extraction, and that no file in `docs/legal` contains a raw HTML tag (marked does not sanitise)                          |
+| `server/legal.ts`                | version and title extraction, that no file in `docs/legal` contains a raw HTML tag (marked does not sanitise), and the onboarding gate: closed in prod while the terms or the privacy notice is a draft, open in local, test and staging |
+| `server/required-consents.ts`    | the required purposes granted at the current versions (missing, withdrawn and older grants refused), the read's subject, tenant header and no-store, a problem passed on; `createBusiness` makes no profile call without them |
 | `server/session.ts`, `dal.ts`    | the cookie round trip (tamper, expiry, wrong key, wrong shape), the cookie attributes per environment, each gate's redirect or 404 (the cookie store from `src/test/fake-cookies.ts`) |
 | `server/auth/*`                  | `providerFor` per variable value; the fake adapter's validation, stable user id, second-factor assertion and refusal outside local and test |
 | `features/auth`                  | the form (roles per kind, the busy state, the errors it shows) with a fake action; the action's cookie and redirect; the seed-state reader |
@@ -81,21 +82,35 @@ The specs on `main`:
 
 | Spec                     | Covers                                                                                                                                                    |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `a11y.spec.ts`           | every page in the registry except the catch-alls and the legal route, grouped by the first persona its roles and tenant kinds admit (public pages without a session): live pages by their route, planned, waiting and ready pages through the catch-all with `example` for each parameter; one h1, status 200, the notice on non-live pages, axe |
+| `a11y.spec.ts`           | every page in the registry except the catch-alls and the live pages with route parameters (a legal document, a business: `example` is a 404 there, so their own specs visit them with real ones and run axe), grouped by the first persona its roles and tenant kinds admit (public pages without a session): live pages by their route, planned, waiting and ready pages through the catch-all with `example` for each parameter; one h1, status 200, the notice on non-live pages, axe |
 | `home.spec.ts`           | the landing links, the skip link moving focus to `main`, the sign-in link leading to the form                                                              |
 | `sign-in.spec.ts`        | the redirect with `next` from a gated page, the server's field errors, a refused submit keeping every value and focusing the errors, an owner signing in, returning to `/account`, the account menu and signing out, the role homes (`/businesses`, `/admin`), a signed-in visit to `/sign-in`, the last seeded tenant offered by the form and signed into (needs the seed), the roles following the tenant kind, `/sign-out` as POST only with the origin check, signing in and out through `127.0.0.1` (a host other than the one `next start` binds) |
 | `account.spec.ts`        | the session facts in IST, the copy controls, the note on `/me`, the header name linking to `/account`                                                     |
 | `admin-gate.spec.ts`     | anonymous `/admin` to sign-in with `next`, a 404 for a tenant role on every admin path, an analyst opening the tools without the admin-only entries and a 404 on one of them |
 | `sitemap.spec.ts`        | one table per section, a waiting tool's awaited route and owner, a ready tool's chip, the link to its notice                                              |
-| `legal.spec.ts`          | each listed document under the draft banner with its `-draft` version; an unlisted document is a 404                                                        |
+| `legal.spec.ts`          | each listed document under the draft banner with its `-draft` version; an unlisted document is a 404; printed (print media, light and dark schemes): no shell, the banner kept, the paper line, black text on white |
 | `design.spec.ts`         | every catalogue section with axe, the theme control, dialogs (focus, Escape, the ten-character reason), the calendar keys                                   |
 | `admin-home.spec.ts`     | as an analyst: the tool list with status (waiting and ready) and service READMEs, the environment banner, sidebar navigation marking the current tool     |
 | `not-available.spec.ts`  | an admin tool's awaited routes and breadcrumbs, a parameterised tenant route through the catch-all, `/forbidden` for the wrong tenant kind, a planned tool's sentence and note, a ready tool's sentence and what it will use, real 404s with and without a session |
 | `forbidden.spec.ts`      | the page and its two links                                                                                                                                |
 | `health.spec.ts`         | the health JSON, the static security headers, no `x-powered-by`                                                                                            |
+| `owner-onboarding.spec.ts` | the consent step against identity and notification (needs the seed): a new owner of the seeded tenant sees the draft banner with the versions and the unticked boxes, is refused without the required boxes and with a malformed WhatsApp number (values kept, errors focused), agrees with a number of its own, lands on the business step, finds each record with its `<document>@<version>` on the step, and the number opted in on the notification service; a CA admin has no WhatsApp box; a compliance lead is sent to `/forbidden` |
+| `owner-onboarding-business.spec.ts` | the business step against identity and profile, each test in a new tenant: without consents only the way back to the consent step; with them, the empty form's field errors (focused), the demo GSTIN typed in lower case with a space pre-filling from the static lookup (the returned values, what was stored, the progress, the link to the questions), the same GSTIN from a fresh form answered as already on file with the same link; a GSTIN the lookup does not know shows the plain note and the review task, and the service holds the named registration with its open `verify_registration` task |
+| `owner-onboarding-questions.spec.ts` | the questions step and the summary against profile, in a new tenant with the demo business: the progress from the pre-fill, Not sure stored but not counted and not asked again (the saved note, focus on the new h1), a per-year question naming its year, Save counting, Does not apply counting and listing its review task, a malformed whole number refused under the control (errors focused) then stored, the rest answered Not sure with no question asked twice, the summary's unsure list, the task read back from the service, and "Answer these now" starting again from the first unsure question; an unknown or malformed business id is the streamed not-found page (noindex), and a compliance lead is sent to `/forbidden` |
+| `businesses.spec.ts` | the list against profile: the seeded owner with one business goes straight to it; a new owner sees why the list is empty with the way to start; a CA firm with 23 clients made on the service pages through 20 and 3 (status line focused, first page back), searches by name, PAN (any case) and GSTIN with the term in the POST body and the URL unchanged, sees the no-match state and opens a client; a compliance lead reads the list without the add link |
+| `owner-settings.spec.ts` | the settings index from the header link: each settings and account page with its status (a live one, a waiting one), the link on to the consents page with its breadcrumbs; a staff member without billing; an analyst sent to `/forbidden` |
+| `owner-settings-consents.spec.ts` | the consents page against identity and notification (needs the seed), each test a new user of the seeded tenant with a number of its own: an owner who agreed with a WhatsApp number on the consent step sees each purpose's latest record and the four records, withdraws WhatsApp reminders in the dialog (what is recorded, the remembered number, axe), finds the new record with its evidence and the number opted out on the service, then gives analytics; a staff member gives WhatsApp reminders, is asked for the number, and the number is opted in; a CA admin has no WhatsApp row; a compliance lead has no consent step to go to |
+| `owner-settings-notifications.spec.ts` | the notifications page against identity and notification (needs the seed), each test a new user of the seeded tenant with a number or address of its own: an owner whose number the consent step opted in finds it remembered with its recorded preference, saves Hindi and 22:00 to 07:00 (the status line, the service's record, the values after a reload), then opts out; a staff member without the email consent is refused a malformed address on the field, looks up an address typed in capitals (lowercased), cannot switch reminders on (the refusal names the consent), opts out and finds the record on the service, then asks for another address |
+| `owner-settings-billing.spec.ts` | the billing page against identity, each test in a new tenant: an owner sees each plan the service states (name and description read back from the service, axe), is refused an empty form on its fields, then starts a subscription and sees the state the stack is in: "billing is not connected yet" with the request id, focus on the answer and the values kept (the default, `CW_BILLING_PROVIDER=none`), or the started in-memory subscription without a checkout page (`BILLING=memory`, passed to the spec as `WEB_STACK_BILLING`); a CA admin sees the same plans; a staff member is sent to `/forbidden` |
+| `business-pages.spec.ts` | a business made on the service from the demo GSTIN, in a new tenant: the home (the tabs, the registration, the progress, the link to the questions, the screens not built yet), the hierarchy with a location added (field errors, added, already there) and its snapshot all inherited; the attributes for this year (own values from the lookup, an unanswered per-year attribute answered with the version it made, gone in the year before and asked again), the registration inheriting the business's values, the snapshot naming each value's origin in both years, a compliance lead offered no change; the review tasks of a GSTIN no lookup knows; another tenant's business, an unknown id, a malformed id and another tenant's node as the not-found page |
+| `journey-owner.spec.ts` | one owner of a new tenant screen after screen against the stack, axe on each: the empty list, the privacy notice read from the consent step and back, the consents with a WhatsApp number and analytics, the demo business with its lookup values, one Not sure, one value and one Does not apply, the summary, the business's five pages by their tabs (the not-applicable task read back from the service), the list now opening the one business, whose home links to adding another and whose profile adds a second GSTIN of the same PAN (no lookup answer, a review task opened), analytics withdrawn on the consents page, the quiet hours of the number opted in at onboarding, a subscribe in the stack's billing state, and signing out |
+| `journey-ca-firm.spec.ts` | one CA admin of a new firm against the stack, axe on each screen: the empty client list, the consents without a WhatsApp box, two clients added through onboarding (the demo GSTIN, and one the lookup does not know), both on the list and the second found by a posted search, its `verify_registration` task, the firm's consents and billing |
+| `journey-visitor.spec.ts` | a visitor without a session: each legal document from the home page under its draft banner and on paper, `/onboarding` sending them to sign in and back, and the consent step naming the documents at the versions their pages showed (needs the seed for the consent step's read) |
 
 Every live page entry in the registry names its spec files in `e2e`, and `screens.test.ts`
 checks they exist. A spec is named after what it covers, not after the registry id. The
+`journey-*` specs take one person through several screens in the order they would use them;
+each screen they reach lists them too, next to its own spec, which covers the screen's states. The
 `web-e2e` CI job runs the same command; the fake provider and the fixed secret come from the
 Playwright config, so the job needs no extra variable for them.
 
@@ -104,7 +119,11 @@ The seeded-tenant test in `sign-in.spec.ts` reads the file the seed writes
 `var/seed/last.json` at the repository root, the same default the app uses), picks "Use the
 last seeded tenant" on the form, signs in as an owner and finds that tenant id on `/account`.
 Without the file it is skipped, except on CI (`CI` set), where the job seeds first and a
-missing file fails the test instead.
+missing file fails the test instead. `owner-onboarding.spec.ts` follows the same rule, signs in
+as a new user of the seeded tenant (a fresh display name is a fresh user id, so no earlier
+run's consents are on file), and reads back what the page wrote with `serviceUrl(service)` in
+`fixtures.ts` (`CW_WEB_<SERVICE>_URL`, else `SERVICE_PORT_BASE` plus the service's position,
+as `make web-stack` assigns them).
 
 ## Running things
 
@@ -133,9 +152,10 @@ adding a route, run one of them before relying on `tsc` for link errors.
 
 `make web-stack` is the services the app talks to, started as `make run` would start each one
 but all at once and on memory stores: pids and logs under `var/web-stack`, the profile's static
-GSTIN lookup, the billing provider `none`, the publish flow and the KAG layer off, and the
-rulebook write token from `.env` or the placeholder `local-write-token`, so a fresh clone and CI
-see the same states (`docs/onboarding/local-dev.md`, "Running a second clone", has the ports).
+GSTIN lookup, the billing provider `none` (`BILLING=memory` starts subscriptions in memory for
+a manual demo; give `make web-e2e` the same `BILLING` and the billing spec expects that state),
+the publish flow and the KAG layer off, and the rulebook write token from `.env` or the
+placeholder `local-write-token`, so a fresh clone and CI see the same states (`docs/onboarding/local-dev.md`, "Running a second clone", has the ports).
 No page on `main` calls a service yet, so the suite passes without the stack apart from the
 seeded-tenant test, which is skipped; with `make web-stack && make web-stack-wait && make
 web-seed` first, `make web-e2e` runs everything, as the CI job does. A spec for a page that
@@ -144,14 +164,16 @@ reads a service later relies on the same order.
 `make web-seed` is the seed for that stack (`apps/web/scripts/seed`, run by Node's type
 stripping on the openapi-fetch clients typed from the contracts): real HTTP calls only, no mock
 and no invented data. Its pure parts run in the unit suite under the node environment:
-`seed.test.mts` (the demo facts, the service URLs, the arguments, the document id rule, and the
-recorded rulebook fixtures: they parse, the recorded PDF hashes to the fixture's digest, every
-mention is the exact slice of its clause, every candidate targets a recorded mention and quotes
-its clause), `http.test.mts` (a recording fetch shows the tenant header on identity, profile and
-notification only and the write token on the rulebook admin client only; problem bodies and
-connection failures become the printed failure) and `report.test.mts` (the state file and the
-summary). The steps themselves are proved by running `make web-stack && make web-stack-wait &&
-make web-seed` against the real services.
+`seed.test.mts` (the demo facts, the consents' `<document>@<version>` notice versions read from
+docs/legal, the service URLs, the arguments, the document id rule, and the recorded rulebook
+fixtures: they parse, the recorded PDF hashes to the fixture's digest, every mention is the
+exact slice of its clause, every candidate targets a recorded mention and quotes its clause),
+`src/test/seed-notices.test.ts` (each seeded consent carries the notice version the web consent
+step would record), `http.test.mts` (a recording fetch shows the tenant header on identity,
+profile and notification only and the write token on the rulebook admin client only; problem
+bodies and connection failures become the printed failure) and `report.test.mts` (the state
+file and the summary). The steps themselves are proved by running `make web-stack && make
+web-stack-wait && make web-seed` against the real services.
 
 `make check` runs every gate CI runs without Docker, including `web-screens-check`
 (`docs/web/screens.md` matches the registry) and `openapi-ts-check` (the TypeScript types under

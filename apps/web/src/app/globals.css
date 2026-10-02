@@ -5,3 +5,69 @@
 /* The shared UI kit is reached through a node_modules symlink, which Tailwind's automatic
    source detection skips; register it explicitly (path is relative to this file). */
 @source "../../../../packages/ui/src";
+
+/*
+  Print: the page's content on white paper, written first for the legal documents.
+
+  - The shell's header (product name, navigation, user menu) and the skip link are left out;
+    the main column takes the page's width.
+  - Every colour role falls back to the paper's system colours, whatever scheme the screen
+    uses, because browsers drop backgrounds when printing: a dark scheme's light text would
+    otherwise print white on white. The selectors match the token file's light, dark and
+    prefers-color-scheme blocks at the same specificity and win by coming later.
+  - The draft banner stays, with a border: a printed draft must still say it is a draft.
+  - Inside a legal document, a link to another site is followed by its address, a table row is
+    not split across pages, and a heading stays with the text after it.
+*/
+@media print {
+  :root,
+  :root:not(.light),
+  :root.dark,
+  .dark {
+    color-scheme: light;
+    --bg: Canvas;
+    --surface: Canvas;
+    --surface-raised: Canvas;
+    --fg: CanvasText;
+    --fg-muted: CanvasText;
+    --line: GrayText;
+    --line-strong: CanvasText;
+    --primary: LinkText;
+    --primary-fg: Canvas;
+    --accent: CanvasText;
+    --success: CanvasText;
+    --warning: CanvasText;
+    --danger: CanvasText;
+    --info: CanvasText;
+    --focus: CanvasText;
+  }
+
+  [data-slot="app-shell"] > header,
+  [data-slot="skip-link"] {
+    display: none !important;
+  }
+
+  #main {
+    max-width: none;
+    padding: 0;
+  }
+
+  [data-slot="draft-banner"] {
+    border: 1px solid CanvasText;
+    break-inside: avoid;
+  }
+
+  [data-slot="legal-document"] article a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    word-break: break-all;
+  }
+
+  [data-slot="legal-document"] tr {
+    break-inside: avoid;
+  }
+
+  [data-slot="legal-document"] h2,
+  [data-slot="legal-document"] h3 {
+    break-after: avoid;
+  }
+}

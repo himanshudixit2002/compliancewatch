@@ -2,6 +2,7 @@ import {
   Badge,
   Banner,
   Button,
+  ProgressBar,
   Skeleton,
   SkeletonGroup,
   StatusChip,
@@ -15,7 +16,7 @@ export function FeedbackSection() {
   return (
     <CatalogueSection
       id="feedback"
-      title="Badges, chips, banners, toasts and skeletons"
+      title="Badges, chips, banners, progress, toasts and skeletons"
       description="Tone colours reinforce the text; the text alone carries the meaning."
     >
       <Example label="Badge">
@@ -47,6 +48,15 @@ export function FeedbackSection() {
             </Banner>
           ))}
         </div>
+      </Example>
+      <Example label="Progress bar">
+        <ProgressBar
+          className="w-full max-w-md"
+          label="Example progress"
+          value={4}
+          max={17}
+          valueText="4 of 17 done"
+        />
       </Example>
       <Example label="Toast">
         <Button variant="secondary" onClick={() => toast(FIXTURES.text)}>

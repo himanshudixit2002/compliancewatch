@@ -25,5 +25,12 @@ export default async function LegalPage({ params }: { params: Promise<Params> })
   const { doc } = await params;
   if (!isLegalDoc(doc)) notFound();
   const document = readLegalDocument(doc);
-  return <LegalDocument version={document.version} html={document.html} />;
+  return (
+    <LegalDocument
+      title={document.title}
+      version={document.version}
+      isDraft={document.isDraft}
+      html={document.html}
+    />
+  );
 }

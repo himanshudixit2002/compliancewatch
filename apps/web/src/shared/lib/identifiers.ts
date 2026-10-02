@@ -9,6 +9,9 @@ const PAN = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const GSTIN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const E164 = /^\+[1-9][0-9]{7,14}$/;
 const HEX_ID = /^[0-9a-f]{32}$/;
+/** Something@domain.tld, no spaces; the mail provider is the real check. */
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const EMAIL_MAX_LENGTH = 254;
 
 export function isUuid(value: string): boolean {
   return UUID.test(value);
@@ -25,6 +28,16 @@ export function isGstin(value: string): boolean {
 /** An international phone number as the notification service stores it. */
 export function isE164(value: string): boolean {
   return E164.test(value);
+}
+
+/** An email address's shape, at most 254 characters (RFC 5321's limit). */
+export function isEmailAddress(value: string): boolean {
+  return value.length <= EMAIL_MAX_LENGTH && EMAIL.test(value);
+}
+
+/** Drops the spaces, dashes, dots and brackets people type in a phone number. */
+export function normalisePhone(value: string): string {
+  return value.replace(/[\s\-().]/g, "");
 }
 
 /** Rulebook document ids are 32 hex characters. */

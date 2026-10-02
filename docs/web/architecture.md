@@ -7,8 +7,9 @@ theme control, and the error boundaries. The browser never calls a service. Ther
 `NEXT_PUBLIC_*` variable and no token reaches a client bundle. The server-side data layer
 (`server/`: the validated environment, the typed clients, the encrypted session cookie, the
 gates and the sign-in provider port) is where every service call and every session decision
-lives; no page on `main` calls a service yet, and the reads today are `docs/legal/*.md` at
-build time, `CW_WEB_ENV` per request and the session cookie. The rule is a platform decision,
+lives. The owner and CA screens read the identity, profile and notification services through
+it (the consent step at `/onboarding` is the first); the other reads are `docs/legal/*.md`,
+`CW_WEB_ENV` per request and the session cookie. The rule is a platform decision,
 [ADR-019](../adr/ADR-019-web-server-layer-and-stateless-session.md);
 [data-layer.md](data-layer.md) has the clients, headers, errors, caching and the seed, and
 [auth-and-roles.md](auth-and-roles.md) the session, the gates and the sign-in.
@@ -52,23 +53,31 @@ apps/web/
   src/app/
     layout.tsx                 <html lang="en">, globals.css, the Toaster
     (public)/                  home, /sitemap, /legal/[doc], /forbidden, /design, /sign-in; the visitor shell
-    (app)/                     tenant screens under the session-aware shell: /account and the catch-all [...slug]
+    (app)/                     tenant screens under the session-aware shell: /account, /onboarding and the
+                               catch-all [...slug]
     admin/                     /admin (the tool list), the admin layout behind requireAdmin, the catch-all [...slug]
     sign-out/route.ts          POST: clears the session cookie
     api/health/route.ts        {status, version, commit}
     error.tsx, global-error.tsx, not-found.tsx
   src/features/                home, sitemap, legal, not-available, admin-home, system-pages, design-catalogue,
-                               auth (sign-in form, action, seed state), account
-  src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims)
+                               auth (sign-in form, action, seed state), account, business (the business API and
+                               profile node gateway, the attribute view models and controls), consents (the
+                               consent step)
+  src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims),
+                               ontology/ (the attributes and their wording from GET /v1/ontology),
+                               business/ (a business, its nodes and values, onboarding, review tasks, snapshots),
+                               consent/ (consent records), notification/ (a channel preference)
   src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError, webError),
                                api/ (typed clients, problem parsing, idempotency), cache.ts (tags and revalidation),
                                session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a
-                               POST handler), auth/ (the provider port and the fake adapter), legal.ts
+                               POST handler), auth/ (the provider port and the fake adapter), legal.ts,
+                               ontology.ts (the ontology read, cached an hour by tag), flags.ts (the flag
+                               reader), analytics.ts (product events behind the flag and the consent)
   src/shared/config/           screens.ts, roles.ts, permissions.ts, flags.ts, nav.ts, services.ts, legal-docs.ts
   src/shared/lib/              dates, financial years, decimal money, humanise, identifiers, pagination, urls, assert
   src/shared/i18n/             messages/en.json and t()
   src/shared/ui/               TenantShell, InternalShell, RouterLink, Breadcrumbs, ScreenStatusChip, SessionMenu,
-                               SignOutButton
+                               SignOutButton, ServiceError
   src/test/                    vitest setup, the architecture rules and their test, the screens.md drift test,
                                fake-fetch.ts and fake-cookies.ts
   src/proxy.ts                 the optimistic redirect to /sign-in for gated screens without a cookie
@@ -212,8 +221,12 @@ gateway, the gateway calls a typed client from `server/api`, and the answer come
 The legal pages read `docs/legal/<doc>.md` at build time (`server/legal.ts`, `marked` with its
 defaults; a test asserts the drafts contain no raw HTML tag), prerender the three listed
 documents and render each under the fixed "Draft - to be reviewed by a lawyer" banner with its
-`Version:` line. `/design` and the admin layout are `force-dynamic` so the environment answer is
-never baked into the build.
+`Version:` line while that line ends in `-draft` (a plain version line afterwards); the print
+stylesheet in `globals.css` leaves the shell out and keeps the banner. In production the consent
+and business steps are closed while the terms or the privacy notice is a draft
+(`onboardingGate()` in `server/legal.ts`; [legal-pages.md](legal-pages.md), D-035). `/design`
+and the admin layout are `force-dynamic` so the environment answer is never baked into the
+build.
 
 Errors: `error.tsx` renders `ErrorState` inside the segment's shell with the error digest as the
 reference to quote, `global-error.tsx` does the same with its own `<html>`, and

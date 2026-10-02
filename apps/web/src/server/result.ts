@@ -81,6 +81,23 @@ export function unwrapOr<T, E>(result: Result<T, E>, fallback: T): T {
   return result.ok ? result.value : fallback;
 }
 
+/**
+ * Maps the body of a success that must have one. openapi-fetch types a body as possibly absent
+ * (a 204, a HEAD, a Content-Length of 0, a bodiless 304); a route documented with a body that
+ * sends none has broken its contract, which is reported as a server error with the request id
+ * instead of being mapped as if it were empty.
+ */
+export function mapBody<T, U>(result: Result<T | undefined>, fn: (value: T) => U): Result<U> {
+  if (!result.ok) return result;
+  if (result.value === undefined) {
+    return err({
+      ...webError("server", "web-empty-body", "The service answered without a body"),
+      requestId: result.requestId ?? "",
+    });
+  }
+  return { ...result, value: fn(result.value) };
+}
+
 /** True when the error carries the named problem (`isProblem(error, "identity-mfa-required")`). */
 export function isProblem(error: ApiError, slug: string): boolean {
   return isProblemOf(error.problem, slug);

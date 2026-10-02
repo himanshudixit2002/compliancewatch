@@ -430,21 +430,24 @@ web-dev: check-pnpm ## next dev on WEB_PORT from .env; /admin lists the internal
 # (8001-8010 unless .env moves the base; a second clone sets 9200), started with nohup, pids and
 # logs under var/web-stack. The stack is defined here rather than inherited from .env so a fresh
 # clone and CI see the same states: memory stores (no container), the profile's built-in static
-# GSTIN lookup (the demo GSTIN pre-fills), the billing provider "none" (subscribe answers 503),
-# the publish flow and the KAG layer off, the inter-service URLs on the same base, and the
+# GSTIN lookup (the demo GSTIN pre-fills), the billing provider "none" (subscribe answers 503;
+# BILLING=memory starts subscriptions in memory for a manual demo, and make web-e2e takes the
+# same BILLING so the billing spec expects that state), the publish flow and the KAG layer off, the inter-service URLs on the same base, and the
 # rulebook write token from .env or the placeholder local-write-token (not a secret). Memory
 # stores lose their rows when the stack stops; STORE=postgres runs every store on the compose
 # Postgres instead (make dev and make migrate first), with the schema search path make run uses.
 WEB_STACK_DIR := var/web-stack
 WEB_STACK_WAIT_SECONDS ?= 60
 STORE ?= memory
+BILLING ?= none
 
-web-stack: check-uv ## Start every service on SERVICE_PORT_BASE+1..10 with memory stores (pids and logs in var/web-stack): make web-stack [STORE=postgres]
+web-stack: check-uv ## Start every service on SERVICE_PORT_BASE+1..10 with memory stores (pids and logs in var/web-stack): make web-stack [STORE=postgres] [BILLING=memory]
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	[ "$(STORE)" = "memory" ] || [ "$(STORE)" = "postgres" ] || { echo "usage: make web-stack [STORE=memory|postgres]"; exit 1; }; \
+	[ "$(BILLING)" = "none" ] || [ "$(BILLING)" = "memory" ] || { echo "usage: make web-stack [BILLING=none|memory]"; exit 1; }; \
 	mkdir -p $(WEB_STACK_DIR); base=$${SERVICE_PORT_BASE:-8000}; i=0; \
 	token="$${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}"; \
-	echo "web stack: services on $$((base+1))-$$((base+10)), $(STORE) stores"; \
+	echo "web stack: services on $$((base+1))-$$((base+10)), $(STORE) stores, billing provider $(BILLING)"; \
 	for svc in $(SERVICES); do \
 	  i=$$((i+1)); port=$$((base+i)); pidfile=$(WEB_STACK_DIR)/$$svc.pid; \
 	  if [ -f "$$pidfile" ] && kill -0 "$$(cat "$$pidfile")" 2>/dev/null; then \
@@ -457,7 +460,7 @@ web-stack: check-uv ## Start every service on SERVICE_PORT_BASE+1..10 with memor
 	  fi; \
 	  CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$$schema" \
 	  CW_IDENTITY_STORE=$(STORE) CW_PROFILE_STORE=$(STORE) CW_RULEBOOK_STORE=$(STORE) CW_OBLIGATION_STORE=$(STORE) CW_NOTIFICATION_STORE=$(STORE) CW_LLM_LEDGER=$(STORE) \
-	  CW_PROFILE_GSTIN_LOOKUP=static CW_BILLING_PROVIDER=none CW_RULEBOOK_PUBLISH_ENABLED=false CW_QA_KAG_ENABLED=false \
+	  CW_PROFILE_GSTIN_LOOKUP=static CW_BILLING_PROVIDER=$(BILLING) CW_RULEBOOK_PUBLISH_ENABLED=false CW_QA_KAG_ENABLED=false \
 	  CW_RULEBOOK_WRITE_TOKEN="$$token" \
 	  CW_PROFILE_URL="http://localhost:$$((base+2))" CW_RULEBOOK_URL="http://localhost:$$((base+3))" \
 	  CW_OBLIGATION_URL="http://localhost:$$((base+5))" CW_LLM_GATEWAY_URL="http://localhost:$$((base+8))" \
@@ -513,12 +516,20 @@ web-seed: check-pnpm ## Seed the web-stack services with the demo tenant and a r
 web-e2e-install: check-pnpm ## Download Chromium for Playwright, once per machine (the package has no install script)
 	$(PNPM) --filter web e2e:install
 
-# No page on main calls a service, so the suite runs without the stack; the seeded-tenant sign-in
-# test is skipped until make web-stack, web-stack-wait and web-seed have run (CI runs all three).
-web-e2e: check-pnpm ## Build the web app and run Playwright with axe against next start on WEB_PORT (after make web-seed for the seeded-tenant test)
+# The suite runs against the services make web-stack starts (then make web-stack-wait and make
+# web-seed; CI runs all three first): the app is pointed at SERVICE_PORT_BASE+1..10, the stack's
+# ports, unless a CW_WEB_<SERVICE>_URL is already in the environment. Without the stack and the
+# seed, the specs that need them are skipped locally (and fail on CI). BILLING names the billing
+# provider the stack was started with (none unless make web-stack had BILLING=memory).
+web-e2e: check-pnpm ## Build the web app and run Playwright with axe against next start on WEB_PORT and the web-stack services (after make web-stack-wait and make web-seed)
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	base=$${SERVICE_PORT_BASE:-8000}; i=0; \
+	for svc in $(SERVICES); do \
+	  i=$$((i+1)); var=CW_WEB_$$(echo "$$svc" | tr 'a-z-' 'A-Z_')_URL; \
+	  eval "[ -n \"\$${$$var:-}\" ] || export $$var=http://localhost:$$((base+i))"; \
+	done; \
 	$(PNPM) --filter web build && \
-	PORT=$${WEB_PORT:-3000} CW_WEB_ENV=test $(PNPM) --filter web e2e
+	PORT=$${WEB_PORT:-3000} CW_WEB_ENV=test WEB_STACK_BILLING=$(BILLING) $(PNPM) --filter web e2e
 
 web-screens: check-pnpm ## Regenerate docs/web/screens.md from the screen registry
 	$(PNPM) --filter web screens:gen

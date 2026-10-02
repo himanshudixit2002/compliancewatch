@@ -36,6 +36,31 @@ export function seededTenantId(): string | null {
   return null;
 }
 
+const SERVICE_ORDER = [
+  "identity",
+  "profile",
+  "rulebook",
+  "applicability-engine",
+  "obligation",
+  "notification",
+  "qa",
+  "llm-gateway",
+  "eval",
+  "pipeline",
+] as const;
+
+/**
+ * Where a service of the running stack listens, for a spec that reads back what a page wrote:
+ * CW_WEB_<SERVICE>_URL when set, else SERVICE_PORT_BASE + its position in the Makefile's
+ * SERVICES order (8001-8010 by default), the same rule make web-stack and make web-e2e use.
+ */
+export function serviceUrl(service: (typeof SERVICE_ORDER)[number]): string {
+  const configured = process.env[`CW_WEB_${service.toUpperCase().replace(/-/g, "_")}_URL`]?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  const base = Number(process.env.SERVICE_PORT_BASE ?? 8000);
+  return `http://localhost:${base + SERVICE_ORDER.indexOf(service) + 1}`;
+}
+
 export interface ViolationSummary {
   id: string;
   impact: string;
@@ -130,6 +155,17 @@ const ROLE_LABELS: Readonly<Record<Role, string>> = {
   admin: "Admin",
 };
 
+/**
+ * Resolves once React has hydrated the element: a controlled input filled before hydration is
+ * reset to its state when React takes over, so a spec waits for this before typing into one.
+ */
+export async function waitForHydration(page: Page, selector: string): Promise<void> {
+  await page.waitForFunction((target) => {
+    const element = document.querySelector(target);
+    return element !== null && Object.keys(element).some((key) => key.startsWith("__react"));
+  }, selector);
+}
+
 /** Fills and submits the fake sign-in form on the page; resolves once the redirect landed. */
 export async function signInThroughForm(
   page: Page,
@@ -137,12 +173,19 @@ export async function signInThroughForm(
   next?: string,
 ): Promise<void> {
   await page.goto(next === undefined ? "/sign-in" : `/sign-in?next=${encodeURIComponent(next)}`);
+  // The tenant id is a controlled input: typed before hydration, it would be reset to empty and
+  // the session would get a new tenant.
+  await waitForHydration(page, 'input[name="tenantId"]');
   await page.getByLabel("Tenant kind").selectOption(persona.tenantKind);
   for (const role of persona.roles) {
     await page.getByRole("checkbox", { name: ROLE_LABELS[role] }).check();
   }
   await page.getByLabel("Display name").fill(persona.displayName);
-  if (persona.tenantId !== undefined) await page.getByLabel("Tenant id").fill(persona.tenantId);
+  if (persona.tenantId !== undefined) {
+    const tenant = page.getByLabel("Tenant id");
+    await tenant.fill(persona.tenantId);
+    await expect(tenant).toHaveValue(persona.tenantId);
+  }
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/sign-in"));
 }

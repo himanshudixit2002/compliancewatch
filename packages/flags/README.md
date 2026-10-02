@@ -87,7 +87,8 @@ logged as `flag_evaluation_failed`. A name the registry does not hold throws (`U
 in both languages).
 
 Only a flag the code reads through `py_common.flags` or `@compliancewatch/flags` follows
-`CW_FLAGS_PROVIDER`, and today that is `profile.gstin_category_prefill` alone. Every other entry
+`CW_FLAGS_PROVIDER`, and today that is `profile.gstin_category_prefill` and
+`web.analytics_enabled` (the web app's other `web.*` flags are not read yet). Every other entry
 (`rulebook.publish`, `qa.kag`, `notification.whatsapp`, `pipeline.knowledge`,
 `identity.billing_provider`, `llm_gateway.provider`, `profile.gstin_lookup`, `flags.provider` and
 the WhatsApp bot's two switches) is a setting or an environment variable that its service reads

@@ -13,8 +13,10 @@ one. Domain terms follow the guide and the services; the last two groups are the
 - **Registration**: one GSTIN of a business; the node most obligations attach to.
 - **Node**: any level of the business hierarchy (entity, registration, location); attributes and
   snapshots are read per node and financial year.
-- **Attribute**: one fact about a node from the ontology (a YAML file of GST attributes);
-  answered during onboarding, inherited down the hierarchy.
+- **Attribute**: one fact about a node from the ontology (the profile service's attribute set,
+  served worded at `GET /v1/ontology`); answered during onboarding, inherited down the hierarchy.
+- **Ontology**: the attributes a profile holds, with their type, level, source, question, help
+  line and value labels, and the operators a rule may use per type; versioned (`0.2.0`).
 - **Financial year**: 1 April to 31 March, labelled `2026-27` (`shared/lib/financial-year.ts`).
 - **Obligation**: a dated thing a business must do, materialised per period from a published
   rule version (ADR-015).
@@ -78,6 +80,15 @@ one. Domain terms follow the guide and the services; the last two groups are the
   from, kept on every registry entry.
 - **Draft banner**: the fixed "Draft - to be reviewed by a lawyer" line every legal page shows
   while the document's `Version:` ends in `-draft`.
+- **Closed onboarding**: the consent and business steps in production while the terms or the
+  privacy notice is a draft: no form, and their actions record nothing (`onboardingGate()` in
+  `server/legal.ts`; [legal-pages.md](legal-pages.md)).
+- **Notice version**: what a consent record says was agreed to, `<document>@<Version line>`,
+  such as `privacy-notice@0.1-draft`.
+- **Skip list**: the questions a person answered Not sure in onboarding, kept per business in an
+  httpOnly cookie so the step moves past them ([onboarding-flow.md](onboarding-flow.md)).
+- **Product event**: one JSON line and span event from `server/analytics.ts`, emitted only with
+  `web.analytics_enabled` on and the person's analytics consent current.
 - **Message key**: a key of `messages/en.json`, namespaced by feature, read through `t()`.
 - **Date key**: a `YYYY-MM-DD` string in IST; the form dates take between the app and the
   services.
