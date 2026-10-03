@@ -45,7 +45,7 @@ describe("keyHint", () => {
   });
 
   it("never shows more of a key than the hint allows, whatever the list carried", () => {
-    const secret = "cw_live_9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e";
+    const secret = "cw_live_test0000000000000000000000000000wxyz";
     const hint = keyHint({ prefix: secret, lastFour: secret });
     expect(hint).toBe(`${secret.slice(0, KEY_PREFIX_SHOWN)}…${secret.slice(-4)}`);
     expect(hint).not.toContain(secret);
