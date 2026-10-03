@@ -1,9 +1,8 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PROBLEM_TYPE_PREFIX } from "@/entities/problem/mappers";
 import { fakeFetch, type FakeFetch } from "@/test/fake-fetch";
 import { resetEnvCache } from "../env";
-import { REQUEST_ID_HEADER, TENANT_HEADER, WRITE_TOKEN_HEADER, call } from "./client";
+import { REQUEST_ID_HEADER, TENANT_HEADER, WRITE_TOKEN_HEADER } from "./client";
 import {
   identityClient,
   llmGatewayClient,
@@ -11,7 +10,6 @@ import {
   obligationClient,
   profileClient,
   qaClient,
-  rulebookAdmin,
   rulebookClient,
   tenantIdOf,
   type ClientContext,
@@ -104,72 +102,5 @@ describe("rulebookClient", () => {
     expect(fake.requests[0]?.headers[TENANT_HEADER]).toBeUndefined();
     expect(fake.requests[0]?.headers[WRITE_TOKEN_HEADER]).toBeUndefined();
     expect(fake.requests[0]?.headers.accept).toBe("application/json");
-  });
-});
-
-describe("rulebookAdmin", () => {
-  it("refuses a session without a regulatory role, before any request", () => {
-    vi.stubEnv("CW_WEB_RULEBOOK_WRITE_TOKEN", "local-write-token");
-    const fake = fakeFetch([]);
-    for (const session of [owner, null]) {
-      const result = rulebookAdmin(ctx(session, fake));
-      expect(result.ok).toBe(false);
-      if (result.ok) throw new Error("expected an error");
-      expect(result.error.kind).toBe("forbidden");
-      expect(result.error.requestId).toBe("");
-      expect(result.error.problem?.type).toBe(`${PROBLEM_TYPE_PREFIX}web-regulatory-role-required`);
-    }
-    expect(fake.requests).toHaveLength(0);
-  });
-
-  it("answers unavailable while the write token is not configured", () => {
-    const result = rulebookAdmin(ctx(analyst, fakeFetch([])));
-    expect(result).toMatchObject({
-      ok: false,
-      error: {
-        kind: "unavailable",
-        status: 503,
-        message: "Rulebook writes are not configured",
-        problem: { type: `${PROBLEM_TYPE_PREFIX}web-write-token-missing` },
-      },
-    });
-  });
-
-  it("attaches the write token, and no tenant header, for a regulatory session", async () => {
-    vi.stubEnv("CW_WEB_RULEBOOK_WRITE_TOKEN", "local-write-token");
-    const fake = fakeFetch([
-      {
-        method: "POST",
-        path: "/v1/rulebook/review/entities/decisions",
-        body: {
-          entity_id: null,
-          items_closed: 0,
-          relation_targets_updated: 0,
-          resolution: null,
-          status: "rejected",
-        },
-      },
-    ]);
-    const admin = rulebookAdmin(ctx(analyst, fake, OTHER_TENANT));
-    expect(admin.ok).toBe(true);
-    if (!admin.ok) throw new Error("expected a client");
-    const result = await call(
-      admin.value.POST("/v1/rulebook/review/entities/decisions", {
-        body: {
-          decided_by: analyst.userId,
-          decision: "reject",
-          entity_type: "form",
-          proposed_name: "example form",
-          reject_reason: "not_an_entity",
-        },
-      }),
-    );
-    expect(result.ok).toBe(true);
-    expect(fake.requests[0]?.headers[WRITE_TOKEN_HEADER]).toBe("local-write-token");
-    expect(fake.requests[0]?.headers[TENANT_HEADER]).toBeUndefined();
-    expect(fake.requests[0]?.body).toMatchObject({
-      decided_by: analyst.userId,
-      decision: "reject",
-    });
   });
 });

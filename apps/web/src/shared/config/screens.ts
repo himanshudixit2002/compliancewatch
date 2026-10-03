@@ -1177,7 +1177,7 @@ const SCREEN_LIST = [
     e2e: ["admin-home.spec.ts", "admin-gate.spec.ts", "a11y.spec.ts"],
     guideRef: "14, 15, 17",
     notes:
-      "Also probes GET /health on every service (the py-common liveness route, outside the API specs).",
+      "Also probes GET /health on every service, the py-common liveness route each spec lists.",
   },
   {
     id: "admin.not-available",
