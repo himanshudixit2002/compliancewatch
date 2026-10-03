@@ -46,6 +46,34 @@ a service yet. A client component receives a server action as a prop from its pa
 form takes `action` and the options the page built), because the layer rule keeps client
 components to `shared`, `entities` and their own directory.
 
+## Parked feature folders
+
+A feature folder exists for a screen that a page renders. Fourteen folders under `features/`
+hold the model and the views of screens that are not built yet (the team, recipient, activity
+and data-rights settings, a business's obligations, changes and reminders, the flag console,
+and the source, pipeline, audit, error-report, tenant and Q&A triage tools): no route file
+imports them, so no bundle carries them; their unit tests run with the rest. Each one is
+parked: `PARKED_FEATURES` in `src/test/architecture.ts` maps the folder to the registry ids
+of the screens it will serve, and `architecture.test.ts` holds the map to the tree and the
+registry. It fails when
+
+- a folder that no file under `app/` imports is not in the map, so a new folder starts with
+  its page or with an entry, never as an orphan;
+- a mapped screen id is not in the registry;
+- a mapped screen is `live` while its folder is still not imported, so a screen is not built
+  beside its parked folder;
+- a mapped folder is imported by a route file, or no longer exists, so the map shrinks as the
+  screens are built.
+
+The package that builds a parked screen builds on the folder: its page imports the folder's
+`index.ts`, the gateway, queries and actions join the folder as for any feature that reads data
+(the views take plain props already), the parked tests stay, the entry goes `live`, and the
+folder's line leaves the map in the same change. A folder serving two screens leaves when the
+first of them is wired. The map is empty when every parked screen is built, and then
+`architecture.test.ts` keeps it empty: a folder without a page fails the first rule. A folder
+whose screen is dropped is deleted rather than kept parked (D-038 in
+[decisions.md](decisions.md)).
+
 ## Directory map
 
 ```
@@ -66,7 +94,7 @@ apps/web/
                                auth (sign-in form, action, seed state), account, business (the business API and
                                profile node gateway, the attribute view models and controls), consents (the
                                consent step), rulebook-documents (open a document, the viewer with clause
-                               anchors and marked spans)
+                               anchors and marked spans); the parked folders above, which no page imports yet
   src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims),
                                ontology/ (the attributes and their wording from GET /v1/ontology),
                                business/ (a business, its nodes and values, onboarding, review tasks, snapshots),
@@ -84,8 +112,9 @@ apps/web/
   src/shared/i18n/             messages/en.json and t()
   src/shared/ui/               TenantShell, InternalShell, RouterLink, Breadcrumbs, ScreenStatusChip, SessionMenu,
                                SignOutButton, ServiceError, RefreshButton
-  src/test/                    vitest setup, the architecture rules and their test, the screens.md drift test,
-                               fake-fetch.ts and fake-cookies.ts
+  src/test/                    vitest setup, the architecture rules and their test with the parked folder map,
+                               the screens.md drift test, the synthetic fixtures guard, fake-fetch.ts and
+                               fake-cookies.ts
   src/proxy.ts                 the optimistic redirect to /sign-in for gated screens without a cookie
   src/instrumentation.ts       onRequestError: one JSON line per server error
   scripts/screens-doc.mts      generates docs/web/screens.md; --check and --audit modes
@@ -114,7 +143,8 @@ An entry carries:
 - `awaits`: the service routes it still needs, each with an `owner` (`plan-a` for the services
   track, `plan-k` for the KAG track, `unplanned` for nobody) and a `ref` (the delivering package
   or a note). A KAG-track path carries `unconfirmed: true` until that track's spec is committed;
-  every route the registry awaits today is the services track's or nobody's.
+  every route the registry awaits today is the services track's or nobody's (the last KAG-track
+  awaits moved to the services track's packages).
   `awaitsFiles` names a repository file instead of a route (the flag registry).
 - `status`: `planned`, `waiting`, `ready` or `live`, in the order a screen moves through them
   (below).

@@ -35,6 +35,23 @@ axe over a page-sized jsdom tree takes tens of seconds on a CI runner; the Playw
 `AxeBuilder` over those pages in full. No unit test sets its own timeout; the configured 30 s
 ceiling applies.
 
+**Synthetic fixtures.** Test data reads as invented at a glance: "Example ..." text (`Example
+return 1`, `Example notice 1`, `Example regulator`, `Example owner`), dates in the year 2000,
+zero or example identifiers (`00000000-0000-4000-8000-...`), `example.com` addresses and numbers
+such as `+910000000001`. A fixture that names a real return, regulator, business or person can be
+taken for a statement about the rules, and it goes stale when they change.
+`src/test/synthetic-fixtures.test.ts` reads every test (`*.test.ts(x)`, `*.test.mts`, `*.spec.ts`)
+and every fixture (a file whose name holds `fixture`, or any file under a `fixtures/` folder) in
+`apps/web/src`, `apps/web/e2e`, `apps/web/scripts` and `packages/ui/src`, and fails on the
+realistic tokens, in any case and at the start of a word: CBIC, GSTR (so GSTR-1 and GSTR-3B), CGST,
+IGST, SGST, Acme and Asha. Exempt: the recorded rulebook fixtures under
+`apps/web/scripts/seed/fixtures`, which were recorded from a real notification and which the seed
+replays and hashes byte for byte (there are no recorded e2e fixtures; the specs read what the seed
+wrote at run time). Allowed, each with its reason in the test: the guard itself and the design
+catalogue's `fixtures.test.ts`, which name the tokens in order to reject them. A new test uses the
+example forms above; a live page whose test seems to need a realistic token gets synthetic data
+instead, or one narrow entry in the allow list with the reason.
+
 **Coverage.** Both packages hold 80% for lines, functions, branches and statements. In `apps/web`
 the route files (`page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`,
 `global-error.tsx`, `route.ts`), `instrumentation.ts`, `proxy.ts` and `src/shared/generated/**`
@@ -50,7 +67,7 @@ outside `src` and outside the floor.
 | `features/*/model`, `entities`   | pure functions: inputs to outputs, edge cases                                                                                              |
 | `shared/config/screens.ts`       | the status rules against the committed OpenAPI specs, route coverage both ways, unique ids and routes, `matchScreen`, `hrefFor`, visibility |
 | `shared/config` (roles, flags)   | set membership, `can()`, the flag declaration shape                                                                                        |
-| `shared/i18n`                    | every `t("...")` literal in `src` exists in `en.json`; interpolation; the key-by-key fallback                                               |
+| `shared/i18n`                    | every `t("...")` literal in `src` exists in `en.json`, and every key in `en.json` is referenced in `src`: as a literal, or as a member of one of the dynamic families the test lists (a template literal such as `` t(`status.${status}`) `` builds the key; each family names its module, and a family no template literal needs fails); interpolation; the key-by-key fallback |
 | `shared/lib`                     | IST rendering, financial-year labels, decimal money, identifiers, `safeNext`                                                               |
 | `server/legal.ts`                | version and title extraction, that no file in `docs/legal` contains a raw HTML tag (marked does not sanitise), and the onboarding gate: closed in prod while the terms or the privacy notice is a draft, open in local, test and staging |
 | `server/required-consents.ts`    | the required purposes granted at the current versions (missing, withdrawn and older grants refused), the read's subject, tenant header and no-store, a problem passed on; `createBusiness` makes no profile call without them |
@@ -59,7 +76,8 @@ outside `src` and outside the floor.
 | `server/auth/*`                  | `providerFor` per variable value; the fake adapter's validation, stable user id, second-factor assertion and refusal outside local and test |
 | `features/auth`                  | the form (roles per kind, the busy state, the errors it shows) with a fake action; the action's cookie and redirect; the seed-state reader |
 | `src/proxy.ts`                   | the matcher through `next/experimental/testing/server` and the pass-or-redirect decision for every registry page (excluded from the coverage floor) |
-| `src/test/architecture.test.ts`  | the layer rules over the real tree                                                                                                         |
+| `src/test/architecture.test.ts`  | the layer rules over the real tree; the parked folder map: every feature folder no route file imports is parked for registry screens that exist and are not live, and a folder a page imports leaves the map ([architecture.md](architecture.md), "Parked feature folders") |
+| `src/test/synthetic-fixtures.test.ts` | no realistic token in a test or a fixture of the web app or the UI kit ("Synthetic fixtures" above) |
 | `src/test/screens-doc.test.ts`   | `docs/web/screens.md` equals the generator's output; the awaits audit                                                                      |
 | `packages/ui` tokens             | `contrast.test.ts` (4.5:1 text, 3:1 UI, both schemes), `tokens.test.ts` (the two dark blocks agree), `tokens.build.test.ts` (the utilities compile) |
 | `packages/ui/src/imports.test.ts`| internal imports are relative, never `@/` or the package name                                                                              |

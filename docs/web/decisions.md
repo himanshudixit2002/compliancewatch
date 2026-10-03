@@ -549,3 +549,32 @@ neither route has a loading boundary: one above the viewer would stream its not-
 status 200, and an unknown or malformed id is a real 404. Consequences: a link into a document needs
 only the ids and offsets the services already return; the text is never rewritten, whitespace
 included (`whitespace-pre-wrap`).
+
+## D-038: Orphan feature folders are deleted or parked, and three guards keep it that way
+
+2026-10-04. Two pull requests (#41, #42) added 29 folders under `apps/web/src/features` that no page
+imported: models and views for screens the registry lists but nobody had built, tested with
+realistic data (return and tax names, a regulator, stock business and person names) and carrying
+hundreds of message keys. Code no page imports is reached by no e2e spec, drifts from the services'
+contracts unnoticed, and makes the folder list overstate what the app does. Fifteen folders matched
+no planned screen (an owner home and dashboard, a CA dashboard, reports, risk, evidence, a review
+queue and task, an admin team page, a notification log, evals, backfill, quality and CA settings in
+shapes the registry does not have) and were deleted, with the 460 message keys only they used, the
+34 `reviewTask.*` keys #41 and #42 added among them (U3's 12, which the business pages use, stay).
+Fourteen folders hold the model and views of a registered screen and were kept as parked folders:
+`PARKED_FEATURES` in `src/test/architecture.ts` maps each to the screens it will serve, their tests
+now use synthetic data, and the package that builds the screen wires the folder from its page and
+deletes its line ([architecture.md](architecture.md), "Parked feature folders"). Three tests keep
+this from recurring. The architecture test fails on a feature folder no route file imports that is
+not parked, on a parked screen missing from the registry or live while its folder is still
+unimported, and on a map entry whose folder a page imports or that is gone.
+`synthetic-fixtures.test.ts` rejects realistic tokens (CBIC, GSTR, CGST, IGST, SGST, Acme, Asha) in
+every test and fixture of the web app and the UI kit; the recorded seed fixtures are exempt and two
+files that list the tokens to reject them are allowed by name ([testing.md](testing.md), "Synthetic
+fixtures"). The i18n test requires every key in `en.json` to be referenced in `src`, as a literal or
+as a member of a listed dynamic family that a template literal builds; it removed 78 more keys
+nothing used (the `review.*` wording of the decision forms that are not on `main`, chrome strings
+the foundation never used, and #41 leftovers in the parked namespaces). Consequences: a feature
+folder arrives with its page or with a map entry, and the map is empty once every parked screen is
+built; a screen brings its message keys with it; a dynamic family is listed with the module that
+builds it; test data stays obviously invented ("Example return 1", dates in the year 2000).
