@@ -1,13 +1,4 @@
-/**
- * The data rights feature: the model for data subject access and rectification requests and
- * the view component.
- */
+export { DATA_REQUEST_FIELDS, DATA_REQUEST_KINDS } from "./model/data-rights";
+export type { DataRequest, DataRequestKind, DataRequestStatus } from "./model/data-rights";
 export { DataRightsView } from "./ui/data-rights-view";
 export type { DataRightsViewProps } from "./ui/data-rights-view";
-export { emptyDataRights } from "./model/data-rights";
-export type {
-  DataRight,
-  DataRightStatus,
-  DataRightType,
-  DataRightsView as DataRightsViewModel,
-} from "./model/data-rights";

@@ -1,189 +1,199 @@
-"use client";
-
-import { useState } from "react";
 import {
-  Badge,
+  Banner,
   Button,
-  Card,
+  CopyButton,
   EmptyState,
+  Field,
   Input,
-  PageHeader,
+  StatusChip,
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from "@compliancewatch/ui";
-import { formatDate, formatDateTime } from "@/shared/lib/dates";
+import type { Crumb, NavLink } from "@/shared/config/nav";
 import { t } from "@/shared/i18n";
-import type { ApiKey } from "../model/settings";
-import { apiKeyStatusLabel, apiKeyStatusTone } from "../model/settings";
+import { formatDate, formatDateTime } from "@/shared/lib/dates";
+import { SettingsHeader } from "@/shared/ui/settings-header";
+import {
+  API_KEY_FIELDS,
+  API_KEY_NAME_MAX,
+  API_KEY_STATUS_LABEL,
+  API_KEY_STATUS_TONE,
+  apiKeyCounts,
+  apiKeyStatus,
+  keyHint,
+  sortApiKeys,
+} from "../model/api-keys";
+import type { ApiKey, NewApiKey } from "../model/api-keys";
+import { ConfirmAction } from "./confirm-action";
+
+type FormAction = (formData: FormData) => Promise<void>;
 
 export interface ApiKeysViewProps {
   title: string;
   keys: readonly ApiKey[];
-  onCreateKey?: (name: string) => void | Promise<void>;
-  onRevokeKey?: (id: string) => void | Promise<void>;
+  crumbs: readonly Crumb[];
+  tabs: readonly NavLink[];
+  /** Creates a key named by API_KEY_FIELDS.name; the create form is left out without it. */
+  createAction?: FormAction;
+  /** Revokes the key whose id is API_KEY_FIELDS.keyId; no revoke buttons show without it. */
+  revokeAction?: FormAction;
+  /** The key the create action has just made: the only time its whole secret is shown. */
+  newKey?: NewApiKey;
 }
 
-interface NewKeyFormProps {
-  onSubmit: (name: string) => void | Promise<void>;
-  onCancel: () => void;
-}
-
-function NewKeyForm({ onSubmit, onCancel }: NewKeyFormProps) {
-  const [name, setName] = useState("");
-  const [pending, setPending] = useState(false);
-
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!name.trim()) return;
-    setPending(true);
-    try {
-      await onSubmit(name.trim());
-      setName("");
-    } finally {
-      setPending(false);
-    }
-  };
-
+function NewKeyBanner({ newKey }: { newKey: NewApiKey }) {
   return (
-    <form
-      onSubmit={submit}
+    <Banner
+      tone="success"
+      title={t("caSettings.apiKeys.newKey.title", { name: newKey.name })}
       data-slot="new-api-key"
-      className="flex flex-col gap-3 rounded-md border border-line bg-surface p-4 sm:flex-row sm:items-end"
-      aria-label={t("caSettings.apiKey.createLabel")}
     >
-      <div className="flex flex-1 flex-col gap-1">
-        <label htmlFor="new-api-key-name" className="text-sm font-medium text-fg">
-          {t("caSettings.apiKey.name")}
-        </label>
-        <Input
-          id="new-api-key-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder={t("caSettings.apiKey.namePlaceholder")}
-          maxLength={120}
-          required
-          autoComplete="off"
-        />
+      <p>{t("caSettings.apiKeys.newKey.body")}</p>
+      <div className="mt-2 flex items-center gap-1">
+        <code className="rounded-sm border border-line bg-surface px-2 py-1 font-mono text-xs break-all text-fg">
+          {newKey.secret}
+        </code>
+        <CopyButton value={newKey.secret} label={t("caSettings.apiKeys.newKey.copy")} />
       </div>
-      <div className="flex gap-2">
-        <Button type="submit" disabled={pending || !name.trim()}>
-          {pending ? t("caSettings.apiKey.creating") : t("caSettings.apiKey.create")}
-        </Button>
-        <Button type="button" variant="ghost" onClick={onCancel} disabled={pending}>
-          {t("caSettings.cancel")}
-        </Button>
-      </div>
-    </form>
+    </Banner>
   );
 }
 
-export function ApiKeysView({ title, keys, onCreateKey, onRevokeKey }: ApiKeysViewProps) {
-  const [creating, setCreating] = useState(false);
-  const [revokingId, setRevokingId] = useState<string | null>(null);
-
-  const handleCreate = async (name: string) => {
-    if (!onCreateKey) return;
-    await onCreateKey(name);
-    setCreating(false);
-  };
-
-  const handleRevoke = async (id: string) => {
-    if (!onRevokeKey) return;
-    setRevokingId(id);
-    try {
-      await onRevokeKey(id);
-    } finally {
-      setRevokingId(null);
-    }
-  };
-
+function CreateKeyForm({ action }: { action: FormAction }) {
   return (
-    <div data-slot="ca-api-keys" className="flex max-w-3xl flex-col gap-6">
-      <PageHeader
-        title={title}
-        description={t("caSettings.apiKey.intro")}
-        actions={
-          onCreateKey && !creating ? (
-            <Button onClick={() => setCreating(true)}>{t("caSettings.apiKey.create")}</Button>
-          ) : null
-        }
-      />
-
-      {creating && onCreateKey ? (
-        <NewKeyForm onSubmit={handleCreate} onCancel={() => setCreating(false)} />
-      ) : null}
-
-      {keys.length === 0 ? (
-        <Card>
-          <EmptyState
-            title={t("caSettings.apiKey.emptyTitle")}
-            description={t("caSettings.apiKey.emptyDescription")}
+    <section
+      aria-labelledby="api-key-create-title"
+      data-slot="api-key-create"
+      className="flex flex-col gap-3 rounded-md border border-line bg-surface p-4"
+    >
+      <h2 id="api-key-create-title" className="text-base font-semibold text-fg">
+        {t("caSettings.apiKeys.create.title")}
+      </h2>
+      <form action={action} className="flex max-w-md flex-col gap-3">
+        <Field
+          id="api-key-name"
+          label={t("caSettings.apiKeys.create.name")}
+          description={t("caSettings.apiKeys.create.nameHelp")}
+          required
+        >
+          <Input
+            name={API_KEY_FIELDS.name}
+            maxLength={API_KEY_NAME_MAX}
+            autoComplete="off"
+            required
           />
-        </Card>
+        </Field>
+        <Button type="submit" className="self-start">
+          {t("caSettings.apiKeys.create.submit")}
+        </Button>
+      </form>
+    </section>
+  );
+}
+
+function KeyRow({ apiKey, revokeAction }: { apiKey: ApiKey; revokeAction?: FormAction }) {
+  const status = apiKeyStatus(apiKey);
+  return (
+    <TableRow data-api-key={apiKey.id}>
+      <TableCell className="font-medium text-fg">{apiKey.name}</TableCell>
+      <TableCell>
+        <code className="font-mono text-xs text-fg">{keyHint(apiKey)}</code>
+      </TableCell>
+      <TableCell className="text-fg-muted">{formatDate(apiKey.createdAt)}</TableCell>
+      <TableCell className="text-fg-muted">
+        {apiKey.lastUsedAt === null ? t("caSettings.never") : formatDateTime(apiKey.lastUsedAt)}
+      </TableCell>
+      <TableCell>
+        <StatusChip
+          status={status}
+          tone={API_KEY_STATUS_TONE[status]}
+          label={t(API_KEY_STATUS_LABEL[status])}
+        />
+        {apiKey.revokedAt === null ? null : (
+          <span className="block pt-1 text-xs text-fg-muted">
+            {t("caSettings.apiKeys.revokedOn", { date: formatDate(apiKey.revokedAt) })}
+          </span>
+        )}
+      </TableCell>
+      {revokeAction === undefined ? null : (
+        <TableCell>
+          {status === "active" ? (
+            <ConfirmAction
+              action={revokeAction}
+              fields={{ [API_KEY_FIELDS.keyId]: apiKey.id }}
+              label={t("caSettings.apiKeys.revoke.label")}
+              subject={apiKey.name}
+              title={t("caSettings.apiKeys.revoke.title", { name: apiKey.name })}
+              description={t("caSettings.apiKeys.revoke.body")}
+              confirmLabel={t("caSettings.apiKeys.revoke.confirm")}
+            />
+          ) : null}
+        </TableCell>
+      )}
+    </TableRow>
+  );
+}
+
+/**
+ * The API keys settings page: the settings header, the new key's secret right after it is made,
+ * the create form when creating is possible, and every key (working ones first) by its name,
+ * its first and last characters, when it was made and last used, and whether it still works.
+ */
+export function ApiKeysView({
+  title,
+  keys,
+  crumbs,
+  tabs,
+  createAction,
+  revokeAction,
+  newKey,
+}: ApiKeysViewProps) {
+  const counts = apiKeyCounts(keys);
+  return (
+    <div data-slot="ca-api-keys" className="flex flex-col gap-6">
+      <SettingsHeader
+        title={title}
+        description={t("caSettings.apiKeys.intro")}
+        crumbs={crumbs}
+        tabs={tabs}
+      />
+      {newKey === undefined ? null : <NewKeyBanner newKey={newKey} />}
+      {createAction === undefined ? null : <CreateKeyForm action={createAction} />}
+      {keys.length === 0 ? (
+        <EmptyState
+          title={t("caSettings.apiKeys.emptyTitle")}
+          body={t("caSettings.apiKeys.emptyBody")}
+        />
       ) : (
-        <div className="overflow-hidden rounded-md border border-line">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("caSettings.apiKey.name")}</TableHead>
-                <TableHead>{t("caSettings.apiKey.prefix")}</TableHead>
-                <TableHead>{t("caSettings.apiKey.created")}</TableHead>
-                <TableHead>{t("caSettings.apiKey.lastUsed")}</TableHead>
-                <TableHead>{t("caSettings.apiKey.status")}</TableHead>
-                <TableHead aria-label={t("caSettings.actions")} />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {keys.map((key) => (
-                <TableRow key={key.id}>
-                  <TableCell>
-                    <div className="flex flex-col gap-1">
-                      <span className="font-medium text-fg">{key.name}</span>
-                      <code className="text-xs text-fg-muted">{key.id}</code>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <code className="text-sm text-fg">{key.keyPrefix}</code>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-sm text-fg">{formatDate(key.createdAt)}</span>
-                  </TableCell>
-                  <TableCell>
-                    {key.lastUsed ? (
-                      <span className="text-sm text-fg">{formatDateTime(key.lastUsed)}</span>
-                    ) : (
-                      <span className="text-sm text-fg-muted">{t("caSettings.never")}</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge tone={apiKeyStatusTone(key.active)}>
-                      {apiKeyStatusLabel(key.active)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {key.active && onRevokeKey ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRevoke(key.id)}
-                        disabled={revokingId === key.id}
-                        aria-busy={revokingId === key.id || undefined}
-                      >
-                        {revokingId === key.id
-                          ? t("caSettings.apiKey.revoking")
-                          : t("caSettings.apiKey.revoke")}
-                      </Button>
-                    ) : null}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <Table>
+          <TableCaption className="text-left text-sm text-fg-muted">
+            {t("caSettings.apiKeys.caption", { active: counts.active, revoked: counts.revoked })}
+          </TableCaption>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("caSettings.apiKeys.column.name")}</TableHead>
+              <TableHead>{t("caSettings.apiKeys.column.key")}</TableHead>
+              <TableHead>{t("caSettings.apiKeys.column.created")}</TableHead>
+              <TableHead>{t("caSettings.apiKeys.column.lastUsed")}</TableHead>
+              <TableHead>{t("caSettings.apiKeys.column.status")}</TableHead>
+              {revokeAction === undefined ? null : (
+                <TableHead>
+                  <span className="sr-only">{t("caSettings.column.actions")}</span>
+                </TableHead>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sortApiKeys(keys).map((apiKey) => (
+              <KeyRow key={apiKey.id} apiKey={apiKey} revokeAction={revokeAction} />
+            ))}
+          </TableBody>
+        </Table>
       )}
     </div>
   );
