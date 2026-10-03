@@ -61,6 +61,9 @@ src/server/         server-only modules; every file starts with `import "server-
                     api/problem.ts: RFC 9457 parsing to ApiError kinds and field errors
                     api/services.ts: the client factories (tenant header from the session; rulebookAdmin() adds
                     the write token after a regulatory-role check)
+                    api/rulebook-write.ts: the rulebook's write and review tokens and the analyst decisions
+                    (entity groups, relation candidates) behind the role, web.admin_rulebook_writes and the
+                    review token
                     api/idempotency.ts: the per-render Idempotency-Key input and header (sent only for the routes
                     that require it, the business API's two creating POSTs; the natural keys are listed in the module)
                     cache.ts: the cache tags, cachedRead() for global reads (five minutes under tags), uncachedRead()

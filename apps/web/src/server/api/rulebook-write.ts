@@ -235,8 +235,7 @@ export class RefusedWriteGateway implements RulebookWritePort {
 export type WriteRefusal = "role" | "flag" | "token";
 
 export type WriteAccess =
-  | { allowed: true }
-  | { allowed: false; refusal: WriteRefusal; error: ApiError; flag: FlagName };
+  { allowed: true } | { allowed: false; refusal: WriteRefusal; error: ApiError; flag: FlagName };
 
 type Checked =
   | { allowed: true; client: RulebookClient; decidedBy: string }
