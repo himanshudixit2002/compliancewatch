@@ -1,104 +1,105 @@
-import type { Tone } from "@compliancewatch/ui";
-import { t } from "@/shared/i18n";
-import type { MessageKey } from "@/shared/i18n";
+import type { SelectOption, Tone } from "@compliancewatch/ui";
+import type { identity } from "@compliancewatch/contracts/openapi";
+import { t, type MessageKey } from "@/shared/i18n";
 
-export const TENANT_KIND = ["business", "ca_firm"] as const;
+/**
+ * The tenants screen's model: every tenant as the identity service describes one (`TenantOut`;
+ * the admin listing, `GET /v1/identity/admin/tenants`, is still to come), with the labels and
+ * tones the table and the summary row use.
+ */
+export type TenantDto = identity.components["schemas"]["TenantOut"];
+export type TenantKind = identity.components["schemas"]["TenantKind"];
+export type TenantStatus = identity.components["schemas"]["TenantStatus"];
 
-export type TenantKind = (typeof TENANT_KIND)[number];
+export const TENANT_KINDS: readonly TenantKind[] = ["business", "ca_firm", "internal"];
 
-export const TENANT_STATUS = ["active", "inactive", "suspended"] as const;
-
-export type TenantStatus = (typeof TENANT_STATUS)[number];
+export const TENANT_STATUSES: readonly TenantStatus[] = ["active", "deletion_requested", "erased"];
 
 export interface Tenant {
   id: string;
   name: string;
   kind: TenantKind;
   status: TenantStatus;
-  /** When the tenant was created, an ISO instant. */
+  /** Where the tenant's data is kept, for example "ap-south-1". */
+  region: string;
+  /** When the tenant signed up, an ISO instant. */
   createdAt: string;
-  /** When the tenant was last updated, an ISO instant. */
-  updatedAt: string;
-  /** Number of members in the tenant. */
-  memberCount: number;
-  /** Overall compliance score as a percentage 0-100. */
-  complianceScore: number;
 }
 
-export type TenantFilter = "all" | TenantKind;
-
-export interface AdminTenantsView {
-  tenants: readonly Tenant[];
-  totalCount: number;
-  filter: TenantFilter;
-  sort: string;
-}
-
-/** The totals the summary row reads. */
-export interface AdminTenantsSummary {
+/** The figures in the summary row. */
+export interface TenantsSummary {
   total: number;
   active: number;
-  suspended: number;
+  deletionRequested: number;
+  erased: number;
 }
 
-export const TENANT_STATUS_LABEL: Readonly<Record<TenantStatus, MessageKey>> = {
-  active: "adminTenants.status.active",
-  inactive: "adminTenants.status.inactive",
-  suspended: "adminTenants.status.suspended",
-};
-
-export const TENANT_STATUS_TONE: Readonly<Record<TenantStatus, Tone>> = {
-  active: "success",
-  inactive: "neutral",
-  suspended: "warning",
-};
-
-export const TENANT_KIND_LABEL: Readonly<Record<TenantKind, MessageKey>> = {
+const KIND_LABEL: Readonly<Record<TenantKind, MessageKey>> = {
   business: "tenantKind.business",
   ca_firm: "tenantKind.ca_firm",
+  internal: "tenantKind.internal",
 };
 
-export const TENANT_KIND_TONE: Readonly<Record<TenantKind, Tone>> = {
-  business: "info",
-  ca_firm: "warning",
+const STATUS_LABEL: Readonly<Record<TenantStatus, MessageKey>> = {
+  active: "adminTenants.status.active",
+  deletion_requested: "adminTenants.status.deletionRequested",
+  erased: "adminTenants.status.erased",
 };
 
-export function emptyAdminTenants(): AdminTenantsView {
+const STATUS_TONE: Readonly<Record<TenantStatus, Tone>> = {
+  active: "success",
+  deletion_requested: "warning",
+  erased: "neutral",
+};
+
+export function tenantFromDto(dto: TenantDto): Tenant {
   return {
-    tenants: [],
-    totalCount: 0,
-    filter: "all",
-    sort: "name",
+    id: dto.id,
+    name: dto.name,
+    kind: dto.kind,
+    status: dto.status,
+    region: dto.region,
+    createdAt: dto.created_at,
   };
 }
 
-/** The totals the summary row reads. */
-export function adminTenantsSummary(tenants: readonly Tenant[]): AdminTenantsSummary {
-  let active = 0;
-  let suspended = 0;
-  for (const tenant of tenants) {
-    if (tenant.status === "active") active += 1;
-    if (tenant.status === "suspended") suspended += 1;
-  }
-  return { total: tenants.length, active, suspended };
-}
-
-/** The status badge's label in the user's language. */
-export function tenantStatusLabel(status: TenantStatus): string {
-  return t(TENANT_STATUS_LABEL[status]);
-}
-
-/** The kind badge's label in the user's language. */
 export function tenantKindLabel(kind: TenantKind): string {
-  return t(TENANT_KIND_LABEL[kind]);
+  return t(KIND_LABEL[kind]);
 }
 
-/** The tone the status badge takes; active is success, suspended is warning, inactive is neutral. */
+export function tenantStatusLabel(status: TenantStatus): string {
+  return t(STATUS_LABEL[status]);
+}
+
 export function tenantStatusTone(status: TenantStatus): Tone {
-  return TENANT_STATUS_TONE[status];
+  return STATUS_TONE[status];
 }
 
-/** The tone the kind badge takes; business is info, CA firm is warning. */
-export function tenantKindTone(kind: TenantKind): Tone {
-  return TENANT_KIND_TONE[kind];
+/** One tab per tenant kind, in the order the identity service lists them. */
+export function tenantKindTabs(): SelectOption[] {
+  return TENANT_KINDS.map((value) => ({ value, label: tenantKindLabel(value) }));
+}
+
+/**
+ * Impersonation is offered for active business and CA firm tenants only: the internal tenant is
+ * the admins' own, and a tenant whose deletion was requested or carried out is left alone.
+ */
+export function canImpersonate(tenant: Pick<Tenant, "kind" | "status">): boolean {
+  return tenant.status === "active" && tenant.kind !== "internal";
+}
+
+/** Tenants by name, the order the table lists them in. */
+export function sortTenants(tenants: readonly Tenant[]): Tenant[] {
+  return [...tenants].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function tenantsSummary(tenants: readonly Tenant[]): TenantsSummary {
+  const count = (status: TenantStatus) =>
+    tenants.filter((tenant) => tenant.status === status).length;
+  return {
+    total: tenants.length,
+    active: count("active"),
+    deletionRequested: count("deletion_requested"),
+    erased: count("erased"),
+  };
 }
