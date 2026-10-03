@@ -17,12 +17,12 @@ import {
 function report(overrides: Partial<ErrorReport> = {}): ErrorReport {
   return {
     id: "err_1",
-    title: "Wrong due date for GSTR-3B",
+    title: "Wrong due date for example return 1",
     message: "The obligation says the 20th but the notification moved it to the 22nd.",
-    subject: "GSTR-3B monthly return",
+    subject: "Example monthly return",
     severity: "medium",
     status: "open",
-    reportedAt: "2026-10-01T05:00:00Z",
+    reportedAt: "2000-10-01T05:00:00Z",
     ...overrides,
   };
 }
@@ -59,12 +59,12 @@ describe("sortReports", () => {
       report({
         id: "open-critical-late",
         severity: "critical",
-        reportedAt: "2026-10-02T05:00:00Z",
+        reportedAt: "2000-10-02T05:00:00Z",
       }),
       report({
         id: "open-critical-early",
         severity: "critical",
-        reportedAt: "2026-10-02T09:00:00+05:30",
+        reportedAt: "2000-10-02T09:00:00+05:30",
       }),
       report({ id: "open-medium" }),
     ];

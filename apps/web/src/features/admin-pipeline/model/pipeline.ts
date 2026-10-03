@@ -18,7 +18,7 @@ export const PIPELINE_RUN_STATUSES: readonly PipelineRunStatus[] = [
 
 export interface PipelineRun {
   id: string;
-  /** What the run works through, for example "CBIC circulars". */
+  /** What the run works through, such as "Example circulars". */
   name: string;
   /** The pipeline stage: fetch, parse, extract and so on. */
   stage: string;

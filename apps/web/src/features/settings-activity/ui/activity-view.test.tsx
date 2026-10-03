@@ -18,24 +18,24 @@ const TABS = [
 const ENTRIES: ActivityEntry[] = [
   {
     id: "ev_1",
-    actor: "Asha Rao",
+    actor: "Example owner",
     action: "consent_withdrawn",
     subject: "WhatsApp reminders",
-    at: "2026-09-30T10:00:00Z",
+    at: "2000-09-30T10:00:00Z",
   },
   {
     id: "ev_2",
     actor: null,
     action: "obligation.rescheduled",
-    subject: "GSTR-3B for September 2026",
-    at: "2026-10-02T03:30:00Z",
+    subject: "Example return 1 for September 2000",
+    at: "2000-10-02T03:30:00Z",
   },
   {
     id: "ev_3",
-    actor: "Asha Rao",
+    actor: "Example owner",
     action: "role_changed",
-    subject: "Ravi Kumar",
-    at: "2026-10-01T08:15:00Z",
+    subject: "Example staff member",
+    at: "2000-10-01T08:15:00Z",
   },
 ];
 
@@ -54,18 +54,18 @@ describe("ActivityView", () => {
         .getAllByRole("cell")
         .map((cell) => cell.textContent),
     ).toEqual([
-      formatDateTime("2026-10-02T03:30:00Z"),
+      formatDateTime("2000-10-02T03:30:00Z"),
       "ComplianceWatch (automatic)",
       "Obligation rescheduled",
-      "GSTR-3B for September 2026",
+      "Example return 1 for September 2000",
     ]);
     expect(
       within(rows[2]!)
         .getAllByRole("cell")
         .map((cell) => cell.textContent),
     ).toEqual([
-      formatDateTime("2026-09-30T10:00:00Z"),
-      "Asha Rao",
+      formatDateTime("2000-09-30T10:00:00Z"),
+      "Example owner",
       "Consent withdrawn",
       "WhatsApp reminders",
     ]);

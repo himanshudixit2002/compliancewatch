@@ -10,7 +10,7 @@ test.describe("not available yet", () => {
     await page.goto("/admin/review/stats");
     await expect(page.getByRole("heading", { level: 1, name: "Review stats" })).toBeVisible();
     await expect(page.getByText("GET /v1/rulebook/review/stats")).toBeVisible();
-    await expect(page.getByText("KAG track")).toBeVisible();
+    await expect(page.getByText("services track (WP21)")).toBeVisible();
     const crumbs = page.getByRole("navigation", { name: "Breadcrumb" });
     await expect(crumbs.getByRole("link", { name: "Review queue" })).toHaveAttribute(
       "href",

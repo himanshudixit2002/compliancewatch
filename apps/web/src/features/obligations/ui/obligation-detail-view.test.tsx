@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { OBLIGATION_STATUS_FIELDS, type Obligation } from "../model/obligations";
 import { ObligationDetailView } from "./obligation-detail-view";
 
-/** Noon on 15 Oct 2026 in India. */
-const NOW = new Date("2026-10-15T06:30:00Z");
+/** Noon on 15 Oct 2000 in India. */
+const NOW = new Date("2000-10-15T06:30:00Z");
 
 const EVIDENCE_HREF = "/b/biz_1/obligations/obl_1/evidence" as Route;
 
@@ -15,20 +15,20 @@ function obligation(overrides: Partial<Obligation> = {}): Obligation {
   return {
     id: "obl_1",
     businessId: "biz_1",
-    title: "File GSTR-3B for the month",
+    title: "File example return 1 for the month",
     status: "open",
-    dueAt: "2026-10-12T18:29:59Z",
+    dueAt: "2000-10-12T18:29:59Z",
     evidenceType: "filing_acknowledgement",
     steps: [
       "Reconcile the month's supplies",
       "Pay the tax due",
-      "File FORM GSTR-3B on the GST portal",
+      "File example return 1 on the example portal",
     ],
     ruleVersionId: "rv_1",
     decisionId: "dec_1",
-    periodLabel: "2026-08",
-    periodStart: "2026-08-01",
-    periodEnd: "2026-09-01",
+    periodLabel: "2000-08",
+    periodStart: "2000-08-01",
+    periodEnd: "2000-09-01",
     closedAt: null,
     closedReason: null,
     ...overrides,
@@ -70,13 +70,13 @@ describe("ObligationDetailView", () => {
       />,
     );
     expect(
-      screen.getByRole("heading", { level: 1, name: "File GSTR-3B for the month" }),
+      screen.getByRole("heading", { level: 1, name: "File example return 1 for the month" }),
     ).toBeDefined();
-    expect(screen.getByText("Period 2026-08: 1 Aug 2026 to 31 Aug 2026")).toBeDefined();
+    expect(screen.getByText("Period 2000-08: 1 Aug 2000 to 31 Aug 2000")).toBeDefined();
     expect(screen.getByRole("link", { name: "Evidence" }).getAttribute("href")).toBe(EVIDENCE_HREF);
     expect(figures(container)).toEqual({
       Status: { value: "Open", tone: "info" },
-      Due: { value: "12 Oct 2026", tone: "danger" },
+      Due: { value: "12 Oct 2000", tone: "danger" },
       "Evidence needed": { value: "Filing acknowledgement", tone: "neutral" },
     });
     expect(screen.getByText("Overdue by 3 days")).toBeDefined();
@@ -103,7 +103,7 @@ describe("ObligationDetailView", () => {
     ).toEqual([
       "Reconcile the month's supplies",
       "Pay the tax due",
-      "File FORM GSTR-3B on the GST portal",
+      "File example return 1 on the example portal",
     ]);
     expect(fact("Rule version")).toContain("rv_1");
     expect(fact("Applicability decision")).toContain("dec_1");
@@ -121,7 +121,7 @@ describe("ObligationDetailView", () => {
   it("only offers to mark an obligation in progress done", () => {
     render(
       <ObligationDetailView
-        obligation={obligation({ status: "in_progress", dueAt: "2026-10-20T18:29:59Z" })}
+        obligation={obligation({ status: "in_progress", dueAt: "2000-10-20T18:29:59Z" })}
         statusAction={vi.fn(async () => undefined)}
         now={NOW}
       />,
@@ -143,7 +143,7 @@ describe("ObligationDetailView", () => {
       <ObligationDetailView
         obligation={obligation({
           status: "done",
-          closedAt: "2026-10-10T05:00:00Z",
+          closedAt: "2000-10-10T05:00:00Z",
           closedReason: "completed",
         })}
         statusAction={vi.fn(async () => undefined)}
@@ -151,9 +151,9 @@ describe("ObligationDetailView", () => {
       />,
     );
     expect(figures(container).Status).toEqual({ value: "Done", tone: "success" });
-    expect(figures(container).Due).toEqual({ value: "12 Oct 2026", tone: "neutral" });
+    expect(figures(container).Due).toEqual({ value: "12 Oct 2000", tone: "neutral" });
     expect(container.querySelector("[data-slot='stat-card'] p")).toBeNull();
-    expect(fact("Closed")).toBe("Completed on 10 Oct 2026");
+    expect(fact("Closed")).toBe("Completed on 10 Oct 2000");
     expect(screen.queryByRole("heading", { name: "Update the status" })).toBeNull();
     expect(await runAxe(container)).toHaveNoViolations();
   });
@@ -161,11 +161,11 @@ describe("ObligationDetailView", () => {
   it("gives the closing date alone when the service names no reason", () => {
     render(
       <ObligationDetailView
-        obligation={obligation({ status: "waived", closedAt: "2026-10-10T05:00:00Z" })}
+        obligation={obligation({ status: "waived", closedAt: "2000-10-10T05:00:00Z" })}
         now={NOW}
       />,
     );
-    expect(fact("Closed")).toBe("10 Oct 2026");
+    expect(fact("Closed")).toBe("10 Oct 2000");
   });
 
   it("words a one-off obligation without a due date, steps or named evidence", async () => {

@@ -27,10 +27,10 @@ export const SOURCE_KEY_FIELD = "source_key";
 
 /** One source the pipeline fetches from. */
 export interface PipelineSource {
-  /** The stable key, such as "cbic_notifications"; the pipeline's routes address a source by it. */
+  /** The stable key, such as "example_notices"; the pipeline's routes address a source by it. */
   key: string;
   name: string;
-  /** The site it is fetched from, such as "taxinformation.cbic.gov.in". */
+  /** The site it is fetched from, such as "notices.example.com". */
   site: string;
   documentType: SourceDocumentType;
   status: SourceStatus;

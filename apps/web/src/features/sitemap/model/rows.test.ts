@@ -31,7 +31,7 @@ describe("sitemapSections", () => {
     ]);
     const stats = toSitemapRow(screenById("admin.review.stats"));
     expect(stats.waitsFor).toEqual([
-      { method: "GET", path: "/v1/rulebook/review/stats", owner: "KAG track" },
+      { method: "GET", path: "/v1/rulebook/review/stats", owner: "services track (WP21)" },
     ]);
     expect(stats.roles).toContain("Analyst");
     const flags = toSitemapRow(screenById("admin.flags"));

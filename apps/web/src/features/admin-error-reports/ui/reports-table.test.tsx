@@ -8,9 +8,9 @@ import { ReportsTable } from "./reports-table";
 function row(overrides: Partial<ReportRow>): ReportRow {
   return {
     id: "r1",
-    title: "Wrong due date for GSTR-3B",
+    title: "Wrong due date for example return 1",
     message: "The obligation says the 20th but the notification moved it to the 22nd.",
-    subject: "GSTR-3B monthly return",
+    subject: "Example monthly return",
     href: "/admin/error-reports/r1",
     severity: "critical",
     severityLabel: "Critical",
@@ -18,7 +18,7 @@ function row(overrides: Partial<ReportRow>): ReportRow {
     status: "open",
     statusLabel: "Open",
     statusTone: "warning",
-    reportedLabel: "1 Oct 2026, 10:30 am IST",
+    reportedLabel: "1 Oct 2000, 10:30 am IST",
     ...overrides,
   };
 }
@@ -27,9 +27,9 @@ const ROWS = [
   row({}),
   row({
     id: "r2",
-    title: "TDS rate is out of date",
+    title: "Example rate is out of date",
     message: "The rate changed in the last budget.",
-    subject: "TDS on rent",
+    subject: "Example tax on rent",
     href: null,
     severity: "low",
     severityLabel: "Low",
@@ -64,23 +64,22 @@ describe("ReportsTable", () => {
     expect(screen.getByRole("table", { name: "Reported errors" })).toBeDefined();
 
     const first = container.querySelector("[data-report='r1']") as HTMLElement;
-    expect(within(first).getByRole("link", { name: "Wrong due date for GSTR-3B" })).toHaveProperty(
-      "href",
-      expect.stringContaining("/admin/error-reports/r1"),
-    );
+    expect(
+      within(first).getByRole("link", { name: "Wrong due date for example return 1" }),
+    ).toHaveProperty("href", expect.stringContaining("/admin/error-reports/r1"));
     expect(first.textContent).toContain("moved it to the 22nd");
-    expect(first.textContent).toContain("GSTR-3B monthly return");
+    expect(first.textContent).toContain("Example monthly return");
     const badge = first.querySelector("[data-slot='badge']");
     expect(badge?.textContent).toBe("Critical");
     expect(badge?.getAttribute("data-tone")).toBe("danger");
     expect(first.querySelector("[data-slot='status-chip']")?.getAttribute("data-tone")).toBe(
       "warning",
     );
-    expect(first.textContent).toContain("1 Oct 2026, 10:30 am IST");
+    expect(first.textContent).toContain("1 Oct 2000, 10:30 am IST");
 
     const second = container.querySelector("[data-report='r2']") as HTMLElement;
     expect(within(second).queryByRole("link")).toBeNull();
-    expect(within(second).getByText("TDS rate is out of date")).toBeDefined();
+    expect(within(second).getByText("Example rate is out of date")).toBeDefined();
     expect(second.querySelector("[data-slot='status-chip']")?.textContent).toBe("Dismissed");
     expect(await runAxe(container)).toHaveNoViolations();
   });

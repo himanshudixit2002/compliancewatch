@@ -124,6 +124,13 @@ export const ANALYST: Persona = {
   displayName: "Example analyst",
 };
 
+export const REVIEWER: Persona = {
+  key: "reviewer",
+  tenantKind: "internal",
+  roles: ["reviewer"],
+  displayName: "Example reviewer",
+};
+
 export const ADMIN: Persona = {
   key: "admin",
   tenantKind: "internal",

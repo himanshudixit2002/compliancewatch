@@ -2,6 +2,7 @@ import type { Route } from "next";
 import type { FlagName } from "./flags.ts";
 import { REGULATORY_ROLES, TENANT_MEMBER_ROLES } from "./roles.ts";
 import type { Role, TenantKind } from "./roles.ts";
+import { SERVICES_WITH_SPECS } from "./services.ts";
 import type { HttpMethod, RouteRef, ServiceName } from "./services.ts";
 
 /**
@@ -19,9 +20,8 @@ import type { HttpMethod, RouteRef, ServiceName } from "./services.ts";
  *   live     every `uses` path exists in a spec; a page has its page.tsx and e2e specs
  * A waiting entry whose awaits have all landed fails the test with "backend merged"; the change
  * that notices moves it to ready, and building the screen stays with the package that owns it.
- * Screens whose every route already existed when they were first listed (the obligation list
- * and calendar, ask, and the rule version, canonical entity, relations graph and clause search
- * tools) are not registered yet; each can join as a ready entry with its routes under `uses`.
+ * A screen whose every route is already in a committed spec joins as a ready entry with its
+ * routes under `uses` and nothing awaited.
  *
  * Files in this directory use explicit ".ts" relative imports and no "@/" alias so the docs
  * generator can load them under plain Node.
@@ -103,15 +103,6 @@ const servicesTrack = (
   path: string,
 ): AwaitedRoute => ({ service, method, path, owner: "plan-a", ref });
 
-/** A route the KAG track delivers; its spec is not committed, so the path is unconfirmed. */
-const kagTrack = (service: ServiceName, method: HttpMethod, path: string): AwaitedRoute => ({
-  service,
-  method,
-  path,
-  owner: "plan-k",
-  unconfirmed: true,
-});
-
 /** A route nobody has scheduled; the path is indicative. */
 const unscheduled = (
   service: ServiceName,
@@ -125,6 +116,16 @@ const NODE_REVIEW_TASKS = uses("profile", "GET", "/v1/profile/nodes/{node_id}/re
 const RULE_VERSIONS = uses("rulebook", "GET", "/v1/rulebook/rule-versions");
 const RULE_VERSION = uses("rulebook", "GET", "/v1/rulebook/rule-versions/{rule_version_id}");
 const RELATIONS = uses("rulebook", "GET", "/v1/rulebook/relations");
+const RULEBOOK_DOCUMENT = uses("rulebook", "GET", "/v1/rulebook/documents/{document_id}");
+const CLAUSE = uses("rulebook", "GET", "/v1/rulebook/clauses/{clause_id}");
+const ENTITY = uses("rulebook", "GET", "/v1/rulebook/entities/{entity_id}");
+const REVIEW_RELATIONS = uses("rulebook", "GET", "/v1/rulebook/review/relations");
+const OBLIGATIONS_LIST = uses("obligation", "GET", "/v1/obligation/obligations");
+/** py-common's liveness and readiness routes, which every committed spec carries. */
+const PROBES: readonly RouteRef[] = SERVICES_WITH_SPECS.flatMap((service) => [
+  uses(service, "GET", "/health"),
+  uses(service, "GET", "/ready"),
+]);
 const ONTOLOGY = servicesTrack("WP12", "profile", "GET", "/v1/ontology");
 const RAW_DOCUMENT = servicesTrack(
   "WP18",
@@ -169,7 +170,7 @@ const NOTIFICATIONS_LIST = servicesTrack(
 const NOTIFICATIONS = uses("notification", "GET", "/v1/notification/notifications");
 const BUDGET_ALARMS = servicesTrack("WP27", "eval", "GET", "/v1/eval/budget-alarms");
 const QA_COVERAGE = servicesTrack("WP28", "eval", "GET", "/v1/eval/qa-coverage");
-const REVIEW_STATS = kagTrack("rulebook", "GET", "/v1/rulebook/review/stats");
+const REVIEW_STATS = servicesTrack("WP21", "rulebook", "GET", "/v1/rulebook/review/stats");
 
 const SCREEN_LIST = [
   // ---- system -----------------------------------------------------------------------------
@@ -677,6 +678,40 @@ const SCREEN_LIST = [
       "Lists the tasks the answers opened; resolving one waits for a route nobody has designed.",
   },
   {
+    id: "owner.obligations",
+    kind: "page",
+    route: "/b/[businessId]/obligations",
+    title: "Obligations",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [OBLIGATIONS_LIST],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "F8",
+    nav: { group: "business", order: 9 },
+    parent: "owner.business",
+    notes: "The business's obligations with status and due-window filters, sorted by due date.",
+  },
+  {
+    id: "owner.calendar",
+    kind: "page",
+    route: "/b/[businessId]/calendar",
+    title: "Calendar",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [OBLIGATIONS_LIST],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "F8",
+    nav: { group: "business", order: 10 },
+    parent: "owner.business",
+    notes: "A month of obligations by due day in India, as a keyboard-operable grid.",
+  },
+  {
     id: "owner.obligation",
     kind: "page",
     route: "/b/[businessId]/obligations/[obligationId]",
@@ -693,7 +728,7 @@ const SCREEN_LIST = [
       ),
     ],
     awaits: [
-      kagTrack("obligation", "GET", "/v1/obligation/obligations/{obligation_id}"),
+      servicesTrack("WP23", "obligation", "GET", "/v1/obligation/obligations/{obligation_id}"),
       servicesTrack(
         "WP23",
         "obligation",
@@ -716,6 +751,7 @@ const SCREEN_LIST = [
     status: "waiting",
     e2e: [],
     guideRef: "F8, F11, 8, 16",
+    parent: "owner.obligations",
   },
   {
     id: "owner.evidence",
@@ -811,6 +847,24 @@ const SCREEN_LIST = [
     e2e: [],
     guideRef: "16; G06",
     parent: "owner.obligation",
+  },
+  {
+    id: "owner.ask",
+    kind: "page",
+    route: "/b/[businessId]/ask",
+    title: "Ask",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    flag: "web.qa_enabled",
+    uses: [uses("qa", "POST", "/v1/qa/ask"), CLAUSE, RULEBOOK_DOCUMENT],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "2 uc3, F10; ADR-012",
+    nav: { group: "business", order: 11 },
+    parent: "owner.business",
+    notes: "A question about the business, answered with citations to clauses or as not covered.",
   },
   {
     id: "owner.answer-feedback",
@@ -1112,11 +1166,18 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [
+      uses("rulebook", "GET", "/v1/rulebook/review/entities"),
+      uses("rulebook", "GET", "/v1/rulebook/review/relations"),
+      uses("rulebook", "GET", "/v1/rulebook/rules"),
+      uses("llm-gateway", "GET", "/v1/llm-gateway/prompts"),
+    ],
     awaits: [],
     status: "live",
-    e2e: ["admin-home.spec.ts", "a11y.spec.ts"],
+    e2e: ["admin-home.spec.ts", "admin-gate.spec.ts", "a11y.spec.ts"],
     guideRef: "14, 15, 17",
+    notes:
+      "Also probes GET /health on every service, the py-common liveness route each spec lists.",
   },
   {
     id: "admin.not-available",
@@ -1151,6 +1212,190 @@ const SCREEN_LIST = [
     parent: "admin.home",
   },
   {
+    id: "admin.rulebook.documents",
+    kind: "page",
+    route: "/admin/rulebook/documents",
+    title: "Documents",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [uses("rulebook", "GET", "/v1/rulebook/documents/{document_id}")],
+    awaits: [servicesTrack("WP18", "pipeline", "GET", "/v1/pipeline/sources/{key}/documents")],
+    status: "live",
+    e2e: ["admin-rulebook-documents.spec.ts", "a11y.spec.ts"],
+    guideRef: "15; ADR-018",
+    nav: { group: "rulebook", order: 1 },
+    parent: "admin.home",
+    notes:
+      "Opens one document by its id or its sha256; a list of documents arrives with the source manager's document route.",
+  },
+  {
+    id: "admin.rulebook.document",
+    kind: "page",
+    route: "/admin/rulebook/documents/[documentId]",
+    title: "Document",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [uses("rulebook", "GET", "/v1/rulebook/documents/{document_id}")],
+    awaits: [],
+    status: "live",
+    e2e: ["admin-rulebook-documents.spec.ts"],
+    guideRef: "15",
+    parent: "admin.rulebook.documents",
+  },
+  {
+    id: "admin.rulebook.entities",
+    kind: "page",
+    route: "/admin/rulebook/entities",
+    title: "Entity review",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [uses("rulebook", "GET", "/v1/rulebook/review/entities")],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15",
+    nav: { group: "rulebook", order: 2 },
+    parent: "admin.home",
+    notes: "The open entity mentions, grouped by entity type and proposed name, in pages.",
+  },
+  {
+    id: "admin.rulebook.entities.group",
+    kind: "page",
+    route: "/admin/rulebook/entities/group",
+    title: "Entity group",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [
+      uses("rulebook", "GET", "/v1/rulebook/review/entities/items"),
+      uses("rulebook", "POST", "/v1/rulebook/review/entities/decisions"),
+    ],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15",
+    parent: "admin.rulebook.entities",
+    notes:
+      "One group, named by the query (?type=&name=) because a proposed name may hold a slash; a decision is sent only with web.admin_rulebook_writes on and the review token configured.",
+  },
+  {
+    id: "admin.rulebook.relations",
+    kind: "page",
+    route: "/admin/rulebook/relations",
+    title: "Relation candidates",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [REVIEW_RELATIONS],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15",
+    nav: { group: "rulebook", order: 3 },
+    parent: "admin.home",
+    notes: "The relation candidates by status and document, in pages, each with its evidence.",
+  },
+  {
+    id: "admin.rulebook.relation",
+    kind: "page",
+    route: "/admin/rulebook/relations/[candidateId]",
+    title: "Relation candidate",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [
+      REVIEW_RELATIONS,
+      RULEBOOK_DOCUMENT,
+      uses("rulebook", "POST", "/v1/rulebook/review/relations/{candidate_id}/approve"),
+      uses("rulebook", "POST", "/v1/rulebook/review/relations/{candidate_id}/reject"),
+    ],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15; ADR-018",
+    parent: "admin.rulebook.relations",
+    notes:
+      "No route reads one candidate, so the page finds it in the queue's list; approving and rejecting are sent only with web.admin_rulebook_writes on and the review token configured.",
+  },
+  {
+    id: "admin.rulebook.relations.graph",
+    kind: "page",
+    route: "/admin/rulebook/relations/graph",
+    title: "Relations graph",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [RELATIONS, RULE_VERSION, ENTITY],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15; ADR-017",
+    parent: "admin.rulebook.relations",
+  },
+  {
+    id: "admin.rulebook.rules",
+    kind: "page",
+    route: "/admin/rulebook/rules",
+    title: "Rules",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [uses("rulebook", "GET", "/v1/rulebook/rules")],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15",
+    nav: { group: "rulebook", order: 4 },
+    parent: "admin.home",
+  },
+  {
+    id: "admin.rulebook.versions",
+    kind: "page",
+    route: "/admin/rulebook/versions",
+    title: "Rule versions",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [RULE_VERSIONS],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15",
+    nav: { group: "rulebook", order: 5 },
+    parent: "admin.home",
+  },
+  {
+    id: "admin.rulebook.version",
+    kind: "page",
+    route: "/admin/rulebook/versions/[ruleVersionId]",
+    title: "Rule version",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [
+      RULE_VERSION,
+      uses("rulebook", "GET", "/v1/rulebook/rule-versions/{rule_version_id}/citations"),
+      uses("rulebook", "PUT", "/v1/rulebook/rule-versions/{rule_version_id}/citations"),
+      uses("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/submit"),
+      uses("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/return"),
+      uses("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/approve"),
+      uses("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/publish"),
+      uses("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/withdraw"),
+      CLAUSE,
+      RELATIONS,
+    ],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "ADR-006; F4, 6",
+    parent: "admin.rulebook.versions",
+    notes:
+      "The version with its citations, relations and publish workflow; the workflow's actions are sent only with web.publish_actions on.",
+  },
+  {
     id: "admin.rulebook.canonical",
     kind: "page",
     route: "/admin/rulebook/entities/canonical",
@@ -1159,12 +1404,46 @@ const SCREEN_LIST = [
     roles: REGULATORY,
     tenantKinds: ["internal"],
     uses: [uses("rulebook", "GET", "/v1/rulebook/entities/resolve")],
-    awaits: [kagTrack("rulebook", "GET", "/v1/rulebook/entities")],
-    status: "waiting",
+    awaits: [],
+    status: "ready",
     e2e: [],
     guideRef: "15",
-    nav: { group: "rulebook", order: 2 },
+    nav: { group: "rulebook", order: 6 },
     parent: "admin.home",
+    notes:
+      "The resolve tool: an entity type and a name give the canonical entity the rulebook holds, to open. No committed route lists the entities.",
+  },
+  {
+    id: "admin.rulebook.canonical.entity",
+    kind: "page",
+    route: "/admin/rulebook/entities/canonical/[entityId]",
+    title: "Canonical entity",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [ENTITY, uses("rulebook", "GET", "/v1/rulebook/entities/{entity_id}/clauses"), RELATIONS],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15",
+    parent: "admin.rulebook.canonical",
+  },
+  {
+    id: "admin.rulebook.search",
+    kind: "page",
+    route: "/admin/rulebook/search",
+    title: "Clause search",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [uses("rulebook", "POST", "/v1/rulebook/search")],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15; ADR-012",
+    nav: { group: "rulebook", order: 7 },
+    parent: "admin.home",
+    notes: "The query is posted, never put in the address.",
   },
   {
     id: "admin.review",
@@ -1472,6 +1751,22 @@ const SCREEN_LIST = [
     parent: "admin.notifications",
   },
   {
+    id: "admin.notifications.templates",
+    kind: "page",
+    route: "/admin/notifications/templates",
+    title: "Message templates",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [uses("notification", "GET", "/v1/notification/templates")],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15; 9",
+    nav: { group: "operations", order: 5 },
+    parent: "admin.notifications",
+  },
+  {
     id: "admin.ontology",
     kind: "page",
     route: "/admin/ontology",
@@ -1488,7 +1783,7 @@ const SCREEN_LIST = [
     preview: "OntologyTable",
     e2e: [],
     guideRef: "15; G25",
-    nav: { group: "operations", order: 5 },
+    nav: { group: "operations", order: 6 },
     parent: "admin.home",
   },
   {
@@ -1506,7 +1801,7 @@ const SCREEN_LIST = [
     preview: "FlagTable",
     e2e: [],
     guideRef: "15; G90",
-    nav: { group: "operations", order: 6 },
+    nav: { group: "operations", order: 7 },
     parent: "admin.home",
   },
   {
@@ -1522,7 +1817,7 @@ const SCREEN_LIST = [
     status: "waiting",
     e2e: [],
     guideRef: "15, 16; G36",
-    nav: { group: "operations", order: 7 },
+    nav: { group: "operations", order: 8 },
     parent: "admin.home",
   },
   {
@@ -1723,6 +2018,94 @@ const SCREEN_LIST = [
     parent: "admin.home",
   },
   {
+    id: "admin.llm.prompts",
+    kind: "page",
+    route: "/admin/llm/prompts",
+    title: "Prompts",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [uses("llm-gateway", "GET", "/v1/llm-gateway/prompts")],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15",
+    nav: { group: "evals", order: 3 },
+    parent: "admin.home",
+  },
+  {
+    id: "admin.llm.models",
+    kind: "page",
+    route: "/admin/llm/models",
+    title: "Model routes",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [uses("llm-gateway", "GET", "/v1/llm-gateway/models")],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15",
+    nav: { group: "evals", order: 4 },
+    parent: "admin.home",
+  },
+  {
+    id: "admin.llm.usage",
+    kind: "page",
+    route: "/admin/llm/usage",
+    title: "Usage and budgets",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [uses("llm-gateway", "GET", "/v1/llm-gateway/usage")],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15",
+    nav: { group: "evals", order: 5 },
+    parent: "admin.home",
+  },
+  {
+    id: "admin.profiles.review-tasks",
+    kind: "page",
+    route: "/admin/profiles/review-tasks",
+    title: "Profile review tasks",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [
+      uses("profile", "GET", "/v1/profile/nodes/{node_id}"),
+      NODE_REVIEW_TASKS,
+      uses("profile", "GET", "/v1/profile/nodes/{node_id}/snapshot"),
+    ],
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "15",
+    nav: { group: "identity", order: 2 },
+    parent: "admin.home",
+    notes:
+      "A node looked up by tenant id and node id, the one admin read for another tenant; a tenant-wide list waits for GET /v1/profile/admin/attribute-usage (services track, WP30).",
+  },
+  {
+    id: "admin.system",
+    kind: "page",
+    route: "/admin/system",
+    title: "System",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: PROBES,
+    awaits: [],
+    status: "ready",
+    e2e: [],
+    guideRef: "14, 18",
+    nav: { group: "operations", order: 9 },
+    parent: "admin.home",
+    notes:
+      "Every service's health and readiness with its version and latency, the ports and the web app's facts; the pipeline's probes are the same py-common routes outside a committed spec.",
+  },
+  {
     id: "admin.backfill",
     kind: "page",
     route: "/admin/backfill",
@@ -1735,7 +2118,7 @@ const SCREEN_LIST = [
     status: "planned",
     e2e: [],
     guideRef: "15; G53",
-    nav: { group: "operations", order: 8 },
+    nav: { group: "operations", order: 10 },
     parent: "admin.home",
     notes: "make backfill SERVICE=pipeline is the current path.",
   },
@@ -1817,6 +2200,18 @@ export function hrefFor(screen: Screen, params: Readonly<Record<string, string>>
     return encodeURIComponent(value);
   });
   return href as Route;
+}
+
+/**
+ * The href of the live page registered at a static route, or null while that page is not built:
+ * a link to a tool from elsewhere (a count tile, a "show all" link) appears once the tool does.
+ */
+export function livePageHref(route: string): Route | null {
+  const screen = SCREENS.find(
+    (entry) => entry.kind === "page" && entry.route === route && entry.status === "live",
+  );
+  if (screen === undefined || routeParams(screen.route).length > 0) return null;
+  return hrefFor(screen);
 }
 
 /** The screens a principal may open: public ones, or those sharing a role with it. */

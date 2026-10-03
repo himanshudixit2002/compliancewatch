@@ -522,11 +522,20 @@ component handles one.
   unset token (`web-write-token-missing`, kind `unavailable`), and otherwise a client that
   sends `x-cw-write-token`. A wrong token is still the rulebook's 401. The local stack and CI
   use the placeholder `local-write-token`, which is not a secret.
-- **Rulebook review token**: the rulebook's analyst routes (review decisions, relation
-  approvals, citations, the version lifecycle) need `x-cw-review-token` (ADR-018). The web
-  layer does not carry it on `main`; the screen that first decides a review item adds it with
-  its own variable and factory, the same way, and `make web-stack` then sets it for the local
-  rulebook.
+- **Rulebook review token** (`CW_WEB_RULEBOOK_REVIEW_TOKEN`, the rulebook's
+  `CW_RULEBOOK_REVIEW_TOKEN`): the rulebook's analyst routes (entity decisions, relation
+  approvals and rejections; later citations and the version lifecycle) need
+  `x-cw-review-token` (ADR-018), and the write token does not open them.
+  `server/api/rulebook-write.ts` is the only module that sends it. `rulebookReviewClient(ctx)`
+  (and `rulebookWriteClient(ctx)`, the same over the write token) refuses a session without a
+  regulatory role and an unset token as `rulebookAdmin` does. `rulebookWrites(ctx)` gives an
+  admin action the decisions port only for a regulatory role, with `web.admin_rulebook_writes`
+  on for the session's tenant and the review token set, checked in that order; otherwise every
+  method of the port answers that refusal without a request, and `rulebookWriteAccess(ctx)` tells
+  a form which one applies. `decided_by` in each body is the session's user id. A rulebook 401
+  or 503 about either token is reworded to name the variable to set and the side that needs it,
+  never its value. `make web-stack` does not set a review token, so the decisions answer
+  `web-review-token-missing` there.
 - **Bearer token**: once identity issues tokens, the session carries one and the factories send
   `Authorization: Bearer` ([auth-and-roles.md](auth-and-roles.md)); nothing sends one today.
 

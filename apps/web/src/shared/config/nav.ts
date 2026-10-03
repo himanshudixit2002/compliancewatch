@@ -3,7 +3,7 @@ import { isRegulatory } from "./roles.ts";
 import type { Principal, Role, TenantKind } from "./roles.ts";
 import { isActivePath, safeNext, withQuery } from "../lib/url.ts";
 import { SCREENS, hrefFor, isVisibleTo, routeParams, screenById } from "./screens.ts";
-import type { Screen, ScreenId } from "./screens.ts";
+import type { Screen, ScreenId, ScreenStatus } from "./screens.ts";
 
 /**
  * Navigation derived from the registry: the app shell's groups for tenant users, the admin
@@ -16,6 +16,8 @@ export interface NavLink {
   href: string;
   label: string;
   active?: boolean;
+  /** Set for a screen that is not built yet, so a shell can say so next to the link. */
+  status?: Exclude<ScreenStatus, "live">;
 }
 
 export interface NavSection {
@@ -78,6 +80,7 @@ function toLink(screen: Screen, ctx: NavContext): NavLink {
   const href = hrefFor(screen, ctx.params ?? {});
   const link: NavLink = { id: screen.id, href, label: screen.title };
   if (ctx.currentPath !== undefined && isActive(href, ctx.currentPath)) link.active = true;
+  if (screen.status !== "live") link.status = screen.status;
   return link;
 }
 

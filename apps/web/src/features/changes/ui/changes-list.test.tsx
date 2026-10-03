@@ -8,9 +8,9 @@ import { ChangesList } from "./changes-list";
 function row(overrides: Partial<ChangeRow>): ChangeRow {
   return {
     id: "1",
-    title: "GST return due date moved",
-    regulator: "CBIC",
-    summary: "The GSTR-3B due date moves.",
+    title: "Example return due date moved",
+    regulator: "Example regulator",
+    summary: "The example return due date moves.",
     href: "/changes/1",
     applicability: "applies",
     applicabilityLabel: "Applies to you",
@@ -18,8 +18,8 @@ function row(overrides: Partial<ChangeRow>): ChangeRow {
     reviewStatus: "published",
     reviewLabel: "Published",
     reviewTone: "success",
-    facts: ["From CBIC", "Effective 1 Apr 2026"],
-    categories: ["GST", "Returns"],
+    facts: ["From Example regulator", "Effective 1 Apr 2000"],
+    categories: ["Category A", "Category B"],
     ...overrides,
   };
 }
@@ -28,8 +28,8 @@ const ROWS = [
   row({ id: "1" }),
   row({
     id: "2",
-    title: "TDS rate change",
-    regulator: "CBDT",
+    title: "Example tax rate change",
+    regulator: "Example authority",
     href: "/changes/2",
     applicability: "pending",
     applicabilityLabel: "Pending review",
@@ -61,11 +61,15 @@ describe("ChangesList", () => {
     const { container } = render(<ChangesList rows={ROWS} {...OPTIONS} />);
     expect(screen.getByRole("status").textContent).toBe("Showing 2 of 2 changes.");
     const first = container.querySelector("[data-change='1']") as HTMLElement;
-    expect(within(first).getByRole("heading", { name: "GST return due date moved" })).toBeDefined();
-    expect(within(first).getByText("Effective 1 Apr 2026")).toBeDefined();
-    expect(within(first).getByRole("list", { name: "Categories" }).textContent).toBe("GSTReturns");
     expect(
-      within(first).getByRole("link", { name: /^View change\s*GST return due date moved$/ }),
+      within(first).getByRole("heading", { name: "Example return due date moved" }),
+    ).toBeDefined();
+    expect(within(first).getByText("Effective 1 Apr 2000")).toBeDefined();
+    expect(within(first).getByRole("list", { name: "Categories" }).textContent).toBe(
+      "Category ACategory B",
+    );
+    expect(
+      within(first).getByRole("link", { name: /^View change\s*Example return due date moved$/ }),
     ).toHaveProperty("href", expect.stringContaining("/changes/1"));
     const second = container.querySelector("[data-change='2']") as HTMLElement;
     expect(within(second).queryByRole("list", { name: "Categories" })).toBeNull();
@@ -76,7 +80,7 @@ describe("ChangesList", () => {
     const user = userEvent.setup();
     const { container } = render(<ChangesList rows={ROWS} {...OPTIONS} />);
 
-    await user.type(screen.getByLabelText("Search by title or regulator"), "cbdt");
+    await user.type(screen.getByLabelText("Search by title or regulator"), "authority");
     expect(shownIds(container)).toEqual(["2"]);
     await user.clear(screen.getByLabelText("Search by title or regulator"));
 

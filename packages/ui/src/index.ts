@@ -108,6 +108,8 @@ export { ErrorState } from "./components/error-state";
 export type { ErrorStateProps } from "./components/error-state";
 export { Field } from "./components/field";
 export type { FieldProps } from "./components/field";
+export { HighlightMark } from "./components/highlight-mark";
+export type { HighlightMarkProps } from "./components/highlight-mark";
 export { JsonView } from "./components/json-view";
 export type { JsonViewProps } from "./components/json-view";
 export { KeyValue } from "./components/key-value";

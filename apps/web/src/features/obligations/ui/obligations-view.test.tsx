@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Obligation } from "../model/obligations";
 import { ObligationsView } from "./obligations-view";
 
-/** Noon on 15 Oct 2026 in India. */
-const NOW = new Date("2026-10-15T06:30:00Z");
+/** Noon on 15 Oct 2000 in India. */
+const NOW = new Date("2000-10-15T06:30:00Z");
 
 const hrefFor = (id: string) => `/b/biz_1/obligations/${id}` as Route;
 
@@ -14,16 +14,16 @@ function obligation(overrides: Partial<Obligation>): Obligation {
   return {
     id: "obl_1",
     businessId: "biz_1",
-    title: "File GSTR-3B for the month",
+    title: "File example return 1 for the month",
     status: "open",
-    dueAt: "2026-10-20T18:29:59Z",
+    dueAt: "2000-10-20T18:29:59Z",
     evidenceType: "filing_acknowledgement",
-    steps: ["Pay the tax due", "File FORM GSTR-3B"],
+    steps: ["Pay the tax due", "File example return 1"],
     ruleVersionId: "rv_1",
     decisionId: "dec_1",
-    periodLabel: "2026-08",
-    periodStart: "2026-08-01",
-    periodEnd: "2026-09-01",
+    periodLabel: "2000-08",
+    periodStart: "2000-08-01",
+    periodEnd: "2000-09-01",
     closedAt: null,
     closedReason: null,
     ...overrides,
@@ -33,9 +33,9 @@ function obligation(overrides: Partial<Obligation>): Obligation {
 const OBLIGATIONS: Obligation[] = [
   obligation({
     id: "obl_2",
-    title: "Deposit TDS for September",
+    title: "Deposit example tax for September",
     status: "in_progress",
-    dueAt: "2026-10-07T18:29:59Z",
+    dueAt: "2000-10-07T18:29:59Z",
     evidenceType: "",
     periodLabel: null,
     periodStart: null,
@@ -44,10 +44,10 @@ const OBLIGATIONS: Obligation[] = [
   obligation({ id: "obl_1" }),
   obligation({
     id: "obl_3",
-    title: "File GSTR-1 for the month",
+    title: "File example return 2 for the month",
     status: "done",
-    dueAt: "2026-10-11T18:29:59Z",
-    closedAt: "2026-10-10T05:00:00Z",
+    dueAt: "2000-10-11T18:29:59Z",
+    closedAt: "2000-10-10T05:00:00Z",
     closedReason: "completed",
   }),
 ];
@@ -88,19 +88,21 @@ describe("ObligationsView", () => {
       "obl_1",
       "obl_3",
     ]);
-    const [tds, gstr3b, gstr1] = rows as [HTMLElement, HTMLElement, HTMLElement];
-    expect(tds.textContent).toContain("In progress");
-    expect(tds.textContent).toContain("7 Oct 2026");
-    expect(tds.textContent).toContain("Overdue by 8 days");
-    expect(tds.textContent).toContain("Not specified");
-    expect(gstr3b.textContent).toContain("Period 2026-08: 1 Aug 2026 to 31 Aug 2026");
-    expect(gstr3b.textContent).toContain("Due in 5 days");
-    expect(gstr3b.textContent).toContain("Filing acknowledgement");
-    expect(gstr1.textContent).toContain("Done");
-    expect(gstr1.textContent).toContain("11 Oct 2026");
-    expect(gstr1.querySelector("[data-slot='due-note']")).toBeNull();
+    const [deposit, monthly, closed] = rows as [HTMLElement, HTMLElement, HTMLElement];
+    expect(deposit.textContent).toContain("In progress");
+    expect(deposit.textContent).toContain("7 Oct 2000");
+    expect(deposit.textContent).toContain("Overdue by 8 days");
+    expect(deposit.textContent).toContain("Not specified");
+    expect(monthly.textContent).toContain("Period 2000-08: 1 Aug 2000 to 31 Aug 2000");
+    expect(monthly.textContent).toContain("Due in 5 days");
+    expect(monthly.textContent).toContain("Filing acknowledgement");
+    expect(closed.textContent).toContain("Done");
+    expect(closed.textContent).toContain("11 Oct 2000");
+    expect(closed.querySelector("[data-slot='due-note']")).toBeNull();
     expect(
-      screen.getByRole("link", { name: "File GSTR-1 for the month" }).getAttribute("href"),
+      screen
+        .getByRole("link", { name: "File example return 2 for the month" })
+        .getAttribute("href"),
     ).toBe("/b/biz_1/obligations/obl_3");
     expect(await runAxe(container)).toHaveNoViolations();
   });

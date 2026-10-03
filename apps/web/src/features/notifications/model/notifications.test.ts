@@ -16,7 +16,7 @@ function summary(id: string, state: DeliveryState): NotificationSummary {
     subject: `Subject ${id}`,
     channel: "whatsapp",
     state,
-    recipient: "+919876543210",
+    recipient: "+910000000001",
     templateKey: "reminder_due",
     sentAt: null,
   };

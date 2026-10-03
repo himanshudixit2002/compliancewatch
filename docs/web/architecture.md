@@ -46,6 +46,34 @@ a service yet. A client component receives a server action as a prop from its pa
 form takes `action` and the options the page built), because the layer rule keeps client
 components to `shared`, `entities` and their own directory.
 
+## Parked feature folders
+
+A feature folder exists for a screen that a page renders. Fourteen folders under `features/`
+hold the model and the views of screens that are not built yet (the team, recipient, activity
+and data-rights settings, a business's obligations, changes and reminders, the flag console,
+and the source, pipeline, audit, error-report, tenant and Q&A triage tools): no route file
+imports them, so no bundle carries them; their unit tests run with the rest. Each one is
+parked: `PARKED_FEATURES` in `src/test/architecture.ts` maps the folder to the registry ids
+of the screens it will serve, and `architecture.test.ts` holds the map to the tree and the
+registry. It fails when
+
+- a folder that no file under `app/` imports is not in the map, so a new folder starts with
+  its page or with an entry, never as an orphan;
+- a mapped screen id is not in the registry;
+- a mapped screen is `live` while its folder is still not imported, so a screen is not built
+  beside its parked folder;
+- a mapped folder is imported by a route file, or no longer exists, so the map shrinks as the
+  screens are built.
+
+The package that builds a parked screen builds on the folder: its page imports the folder's
+`index.ts`, the gateway, queries and actions join the folder as for any feature that reads data
+(the views take plain props already), the parked tests stay, the entry goes `live`, and the
+folder's line leaves the map in the same change. A folder serving two screens leaves when the
+first of them is wired. The map is empty when every parked screen is built, and then
+`architecture.test.ts` keeps it empty: a folder without a page fails the first rule. A folder
+whose screen is dropped is deleted rather than kept parked (D-038 in
+[decisions.md](decisions.md)).
+
 ## Directory map
 
 ```
@@ -55,31 +83,38 @@ apps/web/
     (public)/                  home, /sitemap, /legal/[doc], /forbidden, /design, /sign-in; the visitor shell
     (app)/                     tenant screens under the session-aware shell: /account, /onboarding and the
                                catch-all [...slug]
-    admin/                     /admin (the tool list), the admin layout behind requireAdmin, the catch-all [...slug]
+    admin/                     (home)/ for /admin (the counts, the services summary and the tool list, with its
+                               loading skeleton), the admin layout behind requireAdmin, its error and not-found
+                               boundaries, rulebook/documents (open by id) and its [documentId] viewer, the
+                               catch-all [...slug]
     sign-out/route.ts          POST: clears the session cookie
     api/health/route.ts        {status, version, commit}
     error.tsx, global-error.tsx, not-found.tsx
   src/features/                home, sitemap, legal, not-available, admin-home, system-pages, design-catalogue,
                                auth (sign-in form, action, seed state), account, business (the business API and
                                profile node gateway, the attribute view models and controls), consents (the
-                               consent step)
+                               consent step), rulebook-documents (open a document, the viewer with clause
+                               anchors and marked spans); the parked folders above, which no page imports yet
   src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims),
                                ontology/ (the attributes and their wording from GET /v1/ontology),
                                business/ (a business, its nodes and values, onboarding, review tasks, snapshots),
-                               consent/ (consent records), notification/ (a channel preference)
+                               consent/ (consent records), notification/ (a channel preference),
+                               rulebook/ (a rulebook document and its clauses)
   src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError, webError),
                                api/ (typed clients, problem parsing, idempotency), cache.ts (tags and revalidation),
                                session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a
                                POST handler), auth/ (the provider port and the fake adapter), legal.ts,
                                ontology.ts (the ontology read, cached an hour by tag), flags.ts (the flag
-                               reader), analytics.ts (product events behind the flag and the consent)
+                               reader), analytics.ts (product events behind the flag and the consent),
+                               health.ts (the services' /health probes for the internal tools)
   src/shared/config/           screens.ts, roles.ts, permissions.ts, flags.ts, nav.ts, services.ts, legal-docs.ts
   src/shared/lib/              dates, financial years, decimal money, humanise, identifiers, pagination, urls, assert
   src/shared/i18n/             messages/en.json and t()
   src/shared/ui/               TenantShell, InternalShell, RouterLink, Breadcrumbs, ScreenStatusChip, SessionMenu,
-                               SignOutButton, ServiceError
-  src/test/                    vitest setup, the architecture rules and their test, the screens.md drift test,
-                               fake-fetch.ts and fake-cookies.ts
+                               SignOutButton, ServiceError, RefreshButton
+  src/test/                    vitest setup, the architecture rules and their test with the parked folder map,
+                               the screens.md drift test, the synthetic fixtures guard, fake-fetch.ts and
+                               fake-cookies.ts
   src/proxy.ts                 the optimistic redirect to /sign-in for gated screens without a cookie
   src/instrumentation.ts       onRequestError: one JSON line per server error
   scripts/screens-doc.mts      generates docs/web/screens.md; --check and --audit modes
@@ -107,7 +142,9 @@ An entry carries:
 - `uses`: the service routes the screen calls today; each must exist in a committed OpenAPI spec.
 - `awaits`: the service routes it still needs, each with an `owner` (`plan-a` for the services
   track, `plan-k` for the KAG track, `unplanned` for nobody) and a `ref` (the delivering package
-  or a note). KAG-track paths carry `unconfirmed: true` until that track's specs are committed.
+  or a note). A KAG-track path carries `unconfirmed: true` until that track's spec is committed;
+  every route the registry awaits today is the services track's or nobody's (the last KAG-track
+  awaits moved to the services track's packages).
   `awaitsFiles` names a repository file instead of a route (the flag registry).
 - `status`: `planned`, `waiting`, `ready` or `live`, in the order a screen moves through them
   (below).
@@ -136,9 +173,10 @@ groups such as `(public)` are stripped). When every awaited item of a waiting en
 the test fails with `backend merged: flip <id> to ready (or live once built)`. The change that
 sees it moves the entry to `ready`; building the screen is the work of the package that owns it,
 which then sets `live` ([adding-a-screen.md](adding-a-screen.md), D-013 in
-[decisions.md](decisions.md)). A few screens whose routes all existed before they were listed
-(the obligation list and calendar, ask, and some rulebook tools) are not registered yet; each
-can join as a ready entry with its routes under `uses`.
+[decisions.md](decisions.md)). A screen whose every route is already in a committed spec when it
+is listed joins as a ready entry with its routes under `uses` and nothing awaited, as the
+obligation list and calendar, ask, and the rulebook, model registry, message template, profile
+lookup and system tools did.
 
 Helpers: `screenById`, `matchScreen(pathname)` (the most specific page entry with its decoded
 parameters), `hrefFor(screen, params)` (a typed href; a missing parameter throws), `screensFor`

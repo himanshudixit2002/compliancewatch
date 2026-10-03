@@ -8,15 +8,15 @@ import { AuditTable } from "./audit-table";
 function row(overrides: Partial<AuditRow>): AuditRow {
   return {
     id: "ev_1",
-    actor: "Meera Iyer",
+    actor: "Example analyst",
     action: "user.disabled",
     category: "user",
     categoryLabel: "User",
     subjectType: "user",
     subjectId: "u_42",
     changes: ["status: active → disabled"],
-    at: "12 Apr 2026, 10:30 am IST",
-    day: "2026-04-12",
+    at: "12 Apr 2000, 10:30 am IST",
+    day: "2000-04-12",
     ...overrides,
   };
 }
@@ -31,21 +31,21 @@ const ROWS = [
     categoryLabel: "Rule",
     subjectType: "rule_version",
     subjectId: "rv_7",
-    changes: ["status: in_review → published", "approver set to Kabir Shah"],
-    at: "11 Apr 2026, 4:00 pm IST",
-    day: "2026-04-11",
+    changes: ["status: in_review → published", "approver set to Example admin"],
+    at: "11 Apr 2000, 4:00 pm IST",
+    day: "2000-04-11",
   }),
   row({
     id: "ev_3",
-    actor: "Kabir Shah",
+    actor: "Example admin",
     action: "tenant.exported",
     category: "tenant",
     categoryLabel: "Tenant",
     subjectType: "tenant",
     subjectId: "t_9",
     changes: [],
-    at: "10 Apr 2026, 9:00 am IST",
-    day: "2026-04-10",
+    at: "10 Apr 2000, 9:00 am IST",
+    day: "2000-04-10",
   }),
 ];
 
@@ -69,7 +69,7 @@ describe("AuditTable", () => {
     expect(screen.getByRole("table", { name: "Audit events, newest first" })).toBeDefined();
 
     const published = container.querySelector("[data-event='ev_2']") as HTMLElement;
-    expect(published.textContent).toContain("11 Apr 2026, 4:00 pm IST");
+    expect(published.textContent).toContain("11 Apr 2000, 4:00 pm IST");
     expect(published.textContent).toContain("rulebook");
     expect(published.textContent).toContain("rule.published");
     expect(published.querySelector("[data-slot='badge']")?.textContent).toBe("Rule");
@@ -77,7 +77,7 @@ describe("AuditTable", () => {
     expect(published.textContent).toContain("rv_7");
     expect([...published.querySelectorAll("li")].map((item) => item.textContent)).toEqual([
       "status: in_review → published",
-      "approver set to Kabir Shah",
+      "approver set to Example admin",
     ]);
     const exported = container.querySelector("[data-event='ev_3']") as HTMLElement;
     expect(exported.querySelector("li")).toBeNull();
@@ -95,7 +95,7 @@ describe("AuditTable", () => {
     const user = userEvent.setup();
     const { container } = render(<AuditTable rows={ROWS} categoryOptions={CATEGORIES} />);
 
-    await user.type(screen.getByLabelText("Search by actor, action or record"), "kabir");
+    await user.type(screen.getByLabelText("Search by actor, action or record"), "admin");
     expect(shownIds(container)).toEqual(["ev_3"]);
     await user.clear(screen.getByLabelText("Search by actor, action or record"));
 
@@ -112,13 +112,13 @@ describe("AuditTable", () => {
     expect(from.hasAttribute("max")).toBe(false);
     expect(to.hasAttribute("min")).toBe(false);
 
-    fireEvent.change(from, { target: { value: "2026-04-11" } });
+    fireEvent.change(from, { target: { value: "2000-04-11" } });
     expect(shownIds(container)).toEqual(["ev_1", "ev_2"]);
-    expect(to.getAttribute("min")).toBe("2026-04-11");
+    expect(to.getAttribute("min")).toBe("2000-04-11");
 
-    fireEvent.change(to, { target: { value: "2026-04-11" } });
+    fireEvent.change(to, { target: { value: "2000-04-11" } });
     expect(shownIds(container)).toEqual(["ev_2"]);
-    expect(from.getAttribute("max")).toBe("2026-04-11");
+    expect(from.getAttribute("max")).toBe("2000-04-11");
 
     await user.selectOptions(screen.getByLabelText("Category"), "user");
     expect(shownIds(container)).toEqual([]);

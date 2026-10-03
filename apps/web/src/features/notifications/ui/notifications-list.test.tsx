@@ -10,30 +10,30 @@ import { NotificationsList } from "./notifications-list";
 const ITEMS: NotificationSummary[] = [
   {
     id: "ntf-1",
-    subject: "GST return filed",
+    subject: "Example return filed",
     channel: "email",
     state: "delivered",
     recipient: "owner@example.com",
-    templateKey: "gst_filed",
-    sentAt: "2026-10-01T05:00:00Z",
+    templateKey: "example_filed",
+    sentAt: "2000-10-01T05:00:00Z",
   },
   {
     id: "ntf-2",
-    subject: "Reminder: GSTR-3B due",
+    subject: "Reminder: example return due",
     channel: "whatsapp",
     state: "queued",
-    recipient: "+919876543210",
-    templateKey: "gstr3b_reminder",
+    recipient: "+910000000001",
+    templateKey: "example_reminder",
     sentAt: null,
   },
   {
     id: "ntf-3",
-    subject: "TDS payment overdue",
+    subject: "Example payment overdue",
     channel: "whatsapp",
     state: "failed",
-    recipient: "+919812345678",
-    templateKey: "tds_overdue",
-    sentAt: "2026-09-30T05:00:00Z",
+    recipient: "+910000000002",
+    templateKey: "example_overdue",
+    sentAt: "2000-09-30T05:00:00Z",
   },
 ];
 
@@ -58,7 +58,7 @@ describe("NotificationsList", () => {
 
     const table = screen.getByRole("table");
     expect(within(table).getAllByRole("row")).toHaveLength(4);
-    expect(screen.getByRole("link", { name: "GST return filed" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Example return filed" }).getAttribute("href")).toBe(
       "/account/notifications/ntf-1",
     );
     const queued = container.querySelector("[data-notification='ntf-2']") as HTMLElement;
@@ -68,7 +68,7 @@ describe("NotificationsList", () => {
       "neutral",
     );
     const sent = container.querySelector("[data-notification='ntf-1']") as HTMLElement;
-    expect(sent.textContent).toContain(formatDateTime("2026-10-01T05:00:00Z"));
+    expect(sent.textContent).toContain(formatDateTime("2000-10-01T05:00:00Z"));
     expect(sent.textContent).toContain("Email");
     expect(screen.getByText("Showing 3 of 3 notifications.")).toBeDefined();
     expect(await runAxe(container)).toHaveNoViolations();
@@ -81,13 +81,13 @@ describe("NotificationsList", () => {
 
     await user.type(search, "whatsapp");
     expect(screen.getByText("Showing 2 of 3 notifications.")).toBeDefined();
-    expect(screen.queryByRole("link", { name: "GST return filed" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Example return filed" })).toBeNull();
 
     await user.clear(search);
-    await user.type(search, "  income tax ");
+    await user.type(search, "  no such text ");
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.getByRole("heading", { name: "No notification matches" })).toBeDefined();
-    expect(screen.getByText('Nothing matches "income tax". Try a shorter search.')).toBeDefined();
+    expect(screen.getByText('Nothing matches "no such text". Try a shorter search.')).toBeDefined();
     expect(await runAxe(container)).toHaveNoViolations();
 
     await user.clear(search);

@@ -498,3 +498,83 @@ screen's scheme, keeps the banner on a printed draft, and adds a line naming the
 version. Consequences: production onboarding opens with the release that carries the reviewed
 Version lines, with no configuration change; the e2e suite runs in `test` and never sees the
 closed state, which the unit tests cover.
+
+## D-036: The admin home counts one page of each list and probes every service itself
+
+2026-09-29. The admin home is where an analyst starts: it should say how much is waiting in the
+review queues and whether the services are up, without a counting route (none exists) and without
+failing when one service is away. The home reads one page of each list at the largest size the route
+serves: the open entity groups (with the mentions in them) and the open relation candidates, fresh
+on every visit because the pipeline fills them outside this app, and the rules and the prompts
+through their cached global reads. A full page is shown as "200+". Each count is its own tile with
+its own error state (the problem and the correlation id), and a tile links to the tool that lists
+its records only once that tool's page is live in the registry (`livePageHref`), so no link leads to
+a "not available yet" notice from a number. The services summary probes `GET /health` on every
+service in parallel (`server/health.ts`, two seconds each, no tenant header, no token) and names
+each one that does not answer with the address probed and the reason; the system page is meant to
+reuse the same probe. The health route is py-common's liveness contract, outside the API specs, so
+the registry entry notes it instead of listing it in `uses`. The shell also says which tools are not
+built: a link to a waiting, ready or unscheduled tool carries a short hint ("Waiting", "Not built",
+"Not scheduled") outside the link's name, announced as its description. Unexpected errors and
+not-found answers in a tool render inside the admin shell (`app/admin/error.tsx`,
+`app/admin/not-found.tsx`), and the home's loading skeleton sits in a route group,
+`app/admin/(home)/`, so it wraps the home alone: a loading boundary above the other tools would
+stream their not-found answers with status 200 instead of a real 404. A session without a regulatory
+role still gets the root 404 from the layout's gate, with no admin markup. Consequences: the home
+costs four reads and ten probes per visit and is `force-dynamic`, with a Refresh button that renders
+it again; the counts are never asserted as numbers in the e2e suite, since other specs change the
+queues on the same stack.
+
+## D-037: The document viewer opens by id or sha256, and links mark spans in code points
+
+2026-09-29. Analysts need to read a rulebook document beside the review items and relation
+candidates that point into it, and no route lists documents yet (the source manager's document route
+brings one). `/admin/rulebook/documents` opens a document by its id or by the sha256 of its source
+file (the id is the sha256's first 32 hex characters written as a UUID, so it is not a random UUID
+and `isUuid` would refuse it; `isHexUuid` and `documentIdFrom` accept it); the action reads the
+document before it moves to the viewer, so an id the rulebook does not hold is answered on the field
+rather than on a not-found page. The viewer shows the source facts and every clause in reading order
+with its page and an anchor of its own (`#clause-en.p3`, focusable, so a jump lands keyboard and
+screen-reader users on the clause too). A link marks what it points at with `?clause_id=` (a whole
+clause, such as a relation's evidence) or `?clause_id=&start=&end=` (a span, such as a mention). The
+services count offsets in Unicode code points, end exclusive, so the text is split into code points
+before it is cut (`shared/lib/highlight.ts`); a span that runs past its clause marks the whole
+clause and says the span did not match, and a clause the document does not hold, or a malformed
+link, marks nothing and says so. The marked text is a `HighlightMark`: tinted and underlined, with
+the start and the end announced, since most screen readers skip `<mark>`. The rulebook document
+types and their mapper live in `entities/rulebook`, since the relation queue will show evidence
+clauses from the same record. The document read is cached for five minutes under the document's own
+tag (the rulebook never stores other clauses under an id it holds, and only a 200 is cached), and
+neither route has a loading boundary: one above the viewer would stream its not-found answer with
+status 200, and an unknown or malformed id is a real 404. Consequences: a link into a document needs
+only the ids and offsets the services already return; the text is never rewritten, whitespace
+included (`whitespace-pre-wrap`).
+
+## D-038: Orphan feature folders are deleted or parked, and three guards keep it that way
+
+2026-10-04. Two pull requests (#41, #42) added 29 folders under `apps/web/src/features` that no page
+imported: models and views for screens the registry lists but nobody had built, tested with
+realistic data (return and tax names, a regulator, stock business and person names) and carrying
+hundreds of message keys. Code no page imports is reached by no e2e spec, drifts from the services'
+contracts unnoticed, and makes the folder list overstate what the app does. Fifteen folders matched
+no planned screen (an owner home and dashboard, a CA dashboard, reports, risk, evidence, a review
+queue and task, an admin team page, a notification log, evals, backfill, quality and CA settings in
+shapes the registry does not have) and were deleted, with the 460 message keys only they used, the
+34 `reviewTask.*` keys #41 and #42 added among them (U3's 12, which the business pages use, stay).
+Fourteen folders hold the model and views of a registered screen and were kept as parked folders:
+`PARKED_FEATURES` in `src/test/architecture.ts` maps each to the screens it will serve, their tests
+now use synthetic data, and the package that builds the screen wires the folder from its page and
+deletes its line ([architecture.md](architecture.md), "Parked feature folders"). Three tests keep
+this from recurring. The architecture test fails on a feature folder no route file imports that is
+not parked, on a parked screen missing from the registry or live while its folder is still
+unimported, and on a map entry whose folder a page imports or that is gone.
+`synthetic-fixtures.test.ts` rejects realistic tokens (CBIC, GSTR, CGST, IGST, SGST, Acme, Asha) in
+every test and fixture of the web app and the UI kit; the recorded seed fixtures are exempt and two
+files that list the tokens to reject them are allowed by name ([testing.md](testing.md), "Synthetic
+fixtures"). The i18n test requires every key in `en.json` to be referenced in `src`, as a literal or
+as a member of a listed dynamic family that a template literal builds; it removed 78 more keys
+nothing used (the `review.*` wording of the decision forms that are not on `main`, chrome strings
+the foundation never used, and #41 leftovers in the parked namespaces). Consequences: a feature
+folder arrives with its page or with a map entry, and the map is empty once every parked screen is
+built; a screen brings its message keys with it; a dynamic family is listed with the module that
+builds it; test data stays obviously invented ("Example return 1", dates in the year 2000).

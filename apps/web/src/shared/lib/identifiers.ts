@@ -9,6 +9,8 @@ const PAN = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const GSTIN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const E164 = /^\+[1-9][0-9]{7,14}$/;
 const HEX_ID = /^[0-9a-f]{32}$/;
+const HEX_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SHA256 = /^[0-9a-f]{64}$/;
 /** Something@domain.tld, no spaces; the mail provider is the real check. */
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const EMAIL_MAX_LENGTH = 254;
@@ -43,6 +45,34 @@ export function normalisePhone(value: string): string {
 /** Rulebook document ids are 32 hex characters. */
 export function isHexId(value: string): boolean {
   return HEX_ID.test(value);
+}
+
+/**
+ * Any 128-bit id in the 8-4-4-4-12 form, whatever its version bits: a rulebook document id is
+ * the first 32 hex characters of the document's sha256 written that way, not a random UUID.
+ */
+export function isHexUuid(value: string): boolean {
+  return HEX_UUID.test(value);
+}
+
+/**
+ * The rulebook document id for what someone pasted: the id itself (with or without dashes, any
+ * case) or the document's sha256, whose first 32 hex characters are the id. Null otherwise.
+ */
+export function documentIdFrom(value: string): string | null {
+  const text = value.trim().toLowerCase();
+  let hex: string;
+  if (HEX_UUID.test(text)) hex = text.replace(/-/g, "");
+  else if (HEX_ID.test(text)) hex = text;
+  else if (SHA256.test(text)) hex = text.slice(0, 32);
+  else return null;
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join("-");
 }
 
 /** Upper-cases and strips spaces so a pasted value compares cleanly. */

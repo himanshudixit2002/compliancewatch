@@ -20,8 +20,15 @@ describe("businessHeaderLinks", () => {
 describe("laterScreens", () => {
   it("lists the business's pages that are not built, with their notices", () => {
     const later = laterScreens(OWNER, "b1");
-    expect(later.map((screen) => screen.id)).toEqual(["owner.changes", "owner.reminders"]);
-    expect(later[0]).toMatchObject({ status: "waiting", href: "/b/b1/changes" });
+    expect(later.map((screen) => screen.id)).toEqual([
+      "owner.obligations",
+      "owner.calendar",
+      "owner.changes",
+      "owner.reminders",
+      "owner.ask",
+    ]);
+    expect(later[0]).toMatchObject({ status: "ready", href: "/b/b1/obligations" });
+    expect(later[2]).toMatchObject({ status: "waiting", href: "/b/b1/changes" });
   });
 
   it("leaves out pages with more parameters and pages the viewer may not open", () => {

@@ -9,40 +9,40 @@ import { PipelineView, type RetryAction } from "./pipeline-view";
 const RUNS: PipelineRun[] = [
   {
     id: "run_fetch",
-    name: "CBIC circulars",
+    name: "Example circulars",
     stage: "fetch",
     status: "running",
     processed: 120,
     total: 300,
-    startedAt: "2026-10-02T04:00:00Z",
+    startedAt: "2000-10-02T04:00:00Z",
     finishedAt: null,
     error: null,
   },
   {
     id: "run_parse",
-    name: "GST notifications",
+    name: "Example notices",
     stage: "parse",
     status: "failed",
     processed: 40,
     total: 90,
-    startedAt: "2026-10-02T03:00:00Z",
-    finishedAt: "2026-10-02T03:12:05Z",
+    startedAt: "2000-10-02T03:00:00Z",
+    finishedAt: "2000-10-02T03:12:05Z",
     error: "The source answered 503",
   },
   {
     id: "run_extract",
-    name: "MCA circulars",
+    name: "Example filings",
     stage: "extract",
     status: "completed",
     processed: 75,
     total: 75,
-    startedAt: "2026-10-01T10:00:00Z",
-    finishedAt: "2026-10-01T12:04:00Z",
+    startedAt: "2000-10-01T10:00:00Z",
+    finishedAt: "2000-10-01T12:04:00Z",
     error: null,
   },
   {
     id: "run_queued",
-    name: "RBI master directions",
+    name: "Example directions",
     stage: "fetch",
     status: "pending",
     processed: 0,
@@ -53,12 +53,12 @@ const RUNS: PipelineRun[] = [
   },
   {
     id: "run_counting",
-    name: "SEBI circulars",
+    name: "Example bulletins",
     stage: "fetch",
     status: "running",
     processed: 12,
     total: null,
-    startedAt: "2026-10-02T04:30:00Z",
+    startedAt: "2000-10-02T04:30:00Z",
     finishedAt: null,
     error: null,
   },
@@ -113,12 +113,12 @@ describe("PipelineView", () => {
       "run_counting",
     ]);
 
-    const bar = screen.getByRole("progressbar", { name: "Progress of CBIC circulars" });
+    const bar = screen.getByRole("progressbar", { name: "Progress of Example circulars" });
     expect(bar.getAttribute("aria-valuenow")).toBe("120");
     expect(bar.getAttribute("aria-valuemax")).toBe("300");
     expect(bar.getAttribute("aria-valuetext")).toBe("120 of 300 documents");
     const fetch = runRow(container, "run_fetch");
-    expect(fetch.textContent).toContain(formatDateTime("2026-10-02T04:00:00Z"));
+    expect(fetch.textContent).toContain(formatDateTime("2000-10-02T04:00:00Z"));
     expect(fetch.textContent).toContain("Not finished");
     expect(fetch.querySelector("[data-slot='status-chip']")?.getAttribute("data-tone")).toBe(
       "info",
@@ -140,9 +140,7 @@ describe("PipelineView", () => {
 
     expect(screen.getByRole("columnheader", { name: "Actions" })).toBeDefined();
     expect(screen.getAllByRole("button", { name: /^Retry/ })).toHaveLength(1);
-    expect(
-      within(parse).getByRole("button", { name: /^Retry\s*GST notifications$/ }),
-    ).toBeDefined();
+    expect(within(parse).getByRole("button", { name: /^Retry\s*Example notices$/ })).toBeDefined();
     expect(await runAxe(container)).toHaveNoViolations();
   });
 
@@ -150,7 +148,7 @@ describe("PipelineView", () => {
     const user = userEvent.setup();
     const retryAction = vi.fn<RetryAction>(async () => undefined);
     render(<PipelineView runs={RUNS} retryAction={retryAction} />);
-    await user.click(screen.getByRole("button", { name: /^Retry\s*GST notifications$/ }));
+    await user.click(screen.getByRole("button", { name: /^Retry\s*Example notices$/ }));
     await waitFor(() => expect(retryAction).toHaveBeenCalledTimes(1));
     const formData = retryAction.mock.calls[0]?.[0] as FormData;
     expect(formData.get(RUN_ID_FIELD)).toBe("run_parse");

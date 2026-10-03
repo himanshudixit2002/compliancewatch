@@ -13,12 +13,12 @@ import {
 
 function source(overrides: Partial<PipelineSource> = {}): PipelineSource {
   return {
-    key: "cbic_notifications",
-    name: "CBIC notifications",
-    site: "taxinformation.cbic.gov.in",
+    key: "example_notices",
+    name: "Example notices",
+    site: "notices.example.com",
     documentType: "notification",
     status: "healthy",
-    lastFetchedAt: "2026-10-02T04:00:00Z",
+    lastFetchedAt: "2000-10-02T04:00:00Z",
     documentCount: 1200,
     ...overrides,
   };
@@ -74,9 +74,9 @@ describe("sourceCounts", () => {
     expect(
       sourceCounts([
         source(),
-        source({ key: "cbic_circulars", status: "failing" }),
-        source({ key: "gstn_advisories", status: "paused" }),
-        source({ key: "gstcouncil_press", status: "fetching" }),
+        source({ key: "example_circulars", status: "failing" }),
+        source({ key: "example_advisories", status: "paused" }),
+        source({ key: "example_press", status: "fetching" }),
       ]),
     ).toEqual({ total: 4, healthy: 1, failing: 1 });
     expect(sourceCounts([])).toEqual({ total: 0, healthy: 0, failing: 0 });
