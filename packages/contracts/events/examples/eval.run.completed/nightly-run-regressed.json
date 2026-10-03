@@ -1,0 +1,24 @@
+{
+  "event_id": "9d0e1f2a-3b4c-4d5e-9f6a-7b8c9d0e1f2a",
+  "topic": "eval.run.completed",
+  "schema_version": "1.0.0",
+  "occurred_at": "2026-10-02T21:14:41Z",
+  "tenant_id": null,
+  "correlation_id": "0e1f2a3b-4c5d-4e6f-8a7b-8c9d0e1f2a3b",
+  "causation_id": null,
+  "payload": {
+    "run_id": "1f2a3b4c-5d6e-4f7a-9b8c-9d0e1f2a3b4c",
+    "suite": "extraction",
+    "profile": "nightly",
+    "passed": false,
+    "gates_total": 3,
+    "failed_gates": ["extraction.extraction_acceptance[gateway]"],
+    "regressed_gates": [
+      "extraction.extraction_acceptance[gateway]",
+      "extraction.citation_validity[gateway]"
+    ],
+    "previous_run_id": "2a3b4c5d-6e7f-4a8b-8c9d-0e1f2a3b4c5d",
+    "started_at": "2026-10-02T21:02:10Z",
+    "completed_at": "2026-10-02T21:14:40Z"
+  }
+}

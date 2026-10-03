@@ -39,10 +39,12 @@ export const SERVICES_WITH_SPECS: readonly ServiceName[] = [
   "identity",
   "profile",
   "rulebook",
+  "applicability-engine",
   "obligation",
   "notification",
   "qa",
   "llm-gateway",
+  "eval",
 ];
 
 export function isServiceName(value: string): value is ServiceName {

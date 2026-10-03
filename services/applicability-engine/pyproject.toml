@@ -1,7 +1,7 @@
 [project]
 name = "compliancewatch-applicability-engine"
 version = "0.1.0"
-description = "ComplianceWatch applicability-engine service"
+description = "ComplianceWatch applicability-engine service: evaluates rule versions against business profiles and stores the decisions"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.120",
@@ -11,11 +11,16 @@ dependencies = [
   "sqlalchemy>=2.0",
   "alembic>=1.16",
   "psycopg[binary]>=3.2",
+  "httpx2>=2.13",
   "py-common",
+  "domain-kernel",
+  "ontology",
 ]
 
 [tool.uv.sources]
 py-common = { workspace = true }
+domain-kernel = { workspace = true }
+ontology = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

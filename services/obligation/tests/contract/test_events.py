@@ -8,6 +8,7 @@ from domain_kernel.status import ClosureReason, ObligationStatus
 from obligation.domain.events import (
     ObligationClosed,
     ObligationCreated,
+    ObligationDueSoon,
     ObligationRescheduled,
     RescheduleReason,
 )
@@ -81,5 +82,20 @@ def test_obligation_closed_matches_its_schema() -> None:
             reason=ClosureReason.COMPLETED,
             closed_at=NOW,
             closed_by=UserId.new(),
+        )
+    )
+
+
+def test_obligation_due_soon_matches_its_schema() -> None:
+    check(
+        ObligationDueSoon(
+            tenant_id=TENANT,
+            obligation_id=ObligationId.new(),
+            business_id=BusinessId.new(),
+            rule_version_id=RuleVersionId.new(),
+            title="File GSTR-3B (2026-09)",
+            due_at=NOW,
+            days_left=7,
+            reminder_index=1,
         )
     )

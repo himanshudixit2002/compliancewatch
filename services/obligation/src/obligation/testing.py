@@ -1,6 +1,7 @@
 """Builders for tests of this service and of services that consume its events: fixed ids, a
-fixed clock and a sample recurring rule version."""
+fixed clock, a sample recurring rule version and a rulebook reader from a dict."""
 
+from collections.abc import Iterable
 from datetime import UTC, date, datetime
 
 from domain_kernel.ids import BusinessId, DecisionId, RuleId, RuleVersionId, TenantId
@@ -9,6 +10,7 @@ from domain_kernel.periods import EffectivePeriod
 from domain_kernel.predicates import Predicate
 from domain_kernel.recurrence import Recurrence
 from domain_kernel.rules import ObligationTemplate, RuleVersionSnapshot
+from obligation.domain.errors import RulebookUnavailableError
 
 TENANT = TenantId.new()
 OTHER_TENANT = TenantId.new()
@@ -43,3 +45,18 @@ def rule(
         ),
         recurrence=recurrence,
     )
+
+
+class FakeRuleVersionReader:
+    """The rulebook's versions from a dict; ``down`` makes every read fail as an outage would."""
+
+    def __init__(self, versions: Iterable[RuleVersionSnapshot] = (), *, down: bool = False) -> None:
+        self.versions = {version.rule_version_id: version for version in versions}
+        self.down = down
+        self.reads: list[RuleVersionId] = []
+
+    def get(self, rule_version_id: RuleVersionId) -> RuleVersionSnapshot | None:
+        self.reads.append(rule_version_id)
+        if self.down:
+            raise RulebookUnavailableError("rulebook unreachable (fake)")
+        return self.versions.get(rule_version_id)

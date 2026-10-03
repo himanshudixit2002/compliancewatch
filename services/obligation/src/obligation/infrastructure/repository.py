@@ -1,6 +1,17 @@
 """The Postgres unit of work: one transaction with the tenant setting for row-level security,
-the obligation repository on it, the outbox writer as the event sink, and the change log on the
-same session, so a change row commits or rolls back with its outbox row."""
+the obligation repository on it, the outbox writer as the event sink, and the change log and the
+reminder log on the same session, so a change or reminder row commits or rolls back with its
+outbox row.
+
+``PostgresUnitOfWorkFactory.on_connection(connection)`` makes units inside a transaction someone
+else owns, such as a consumer's inbox transaction (``py_common.outbox.sync``): the handler's
+writes, their outbox rows and the ``processed_event`` row then commit together.
+
+``obligation_tenant`` lists the tenants that have obligations. The repository records the tenant
+of the unit when it adds the unit's first obligation, under the tenant's own setting (the
+directory's write policy checks it); ``PostgresTenantDirectory`` reads the ids across tenants for
+the sweeps, which then open one unit of work per tenant (migration 0003).
+"""
 
 from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
@@ -8,6 +19,7 @@ from datetime import UTC, datetime
 from typing import Self
 
 from sqlalchemy import Connection, Engine, create_engine, select, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
@@ -26,15 +38,25 @@ from domain_kernel.recurrence import Period
 from domain_kernel.status import ClosureReason, ObligationStatus
 from obligation.domain.history import ChangeKind, ObligationChange
 from obligation.domain.model import Obligation
-from obligation.domain.repository import UnitOfWork
-from obligation.infrastructure.models import TENANT_SETTING, ObligationChangeRow, ObligationRow
+from obligation.domain.reminders import Reminder
+from obligation.domain.repository import UnitOfWork, UnitOfWorkFactory
+from obligation.infrastructure.models import (
+    TENANT_SETTING,
+    ObligationChangeRow,
+    ObligationReminderRow,
+    ObligationRow,
+    ObligationTenantRow,
+)
 from py_common.outbox import OutboxWriter
+
+OPEN_STATUSES = ("open", "in_progress")
 
 
 class SqlAlchemyObligationRepository:
     def __init__(self, session: Session, tenant_id: TenantId) -> None:
         self._session = session
         self._tenant_id = tenant_id
+        self._tenant_listed = False
 
     def get(self, obligation_id: ObligationId) -> Obligation | None:
         row = self._session.get(ObligationRow, obligation_id.value)
@@ -54,13 +76,17 @@ class SqlAlchemyObligationRepository:
         return None if row is None else _to_obligation(row)
 
     def open_for_rule_version(
-        self, rule_version_id: RuleVersionId, period_label: str | None = None
+        self,
+        rule_version_id: RuleVersionId,
+        period_label: str | None = None,
+        *,
+        business_id: BusinessId | None = None,
     ) -> Sequence[Obligation]:
         statement = (
             select(ObligationRow)
             .where(
                 ObligationRow.rule_version_id == rule_version_id.value,
-                ObligationRow.status.in_(("open", "in_progress")),
+                ObligationRow.status.in_(OPEN_STATUSES),
             )
             .order_by(
                 ObligationRow.period_start.nulls_first(), ObligationRow.created_at, ObligationRow.id
@@ -68,6 +94,20 @@ class SqlAlchemyObligationRepository:
         )
         if period_label is not None:
             statement = statement.where(ObligationRow.period_label == period_label)
+        if business_id is not None:
+            statement = statement.where(ObligationRow.business_id == business_id.value)
+        return [_to_obligation(row) for row in self._session.scalars(statement).all()]
+
+    def open_due_between(self, due_after: datetime, due_before: datetime) -> Sequence[Obligation]:
+        statement = (
+            select(ObligationRow)
+            .where(
+                ObligationRow.status.in_(OPEN_STATUSES),
+                ObligationRow.due_at >= due_after,
+                ObligationRow.due_at < due_before,
+            )
+            .order_by(ObligationRow.due_at, ObligationRow.id)
+        )
         return [_to_obligation(row) for row in self._session.scalars(statement).all()]
 
     def list_for_business(
@@ -101,6 +141,13 @@ class SqlAlchemyObligationRepository:
     def add(self, obligation: Obligation) -> None:
         self._session.add(_to_row(obligation))
         self._session.flush()
+        if not self._tenant_listed:
+            self._session.execute(
+                insert(ObligationTenantRow)
+                .values(tenant_id=self._tenant_id.value)
+                .on_conflict_do_nothing(index_elements=["tenant_id"])
+            )
+            self._tenant_listed = True
 
     def save(self, obligation: Obligation) -> None:
         self._session.merge(_to_row(obligation))
@@ -127,10 +174,34 @@ class SqlAlchemyUnitOfWork:
         self.obligations = SqlAlchemyObligationRepository(session, tenant_id)
         self.events = OutboxSink(connection, writer)
         self.history = SqlAlchemyChangeLog(session)
+        self.reminders = SqlAlchemyReminderLog(session)
+
+
+class ConnectionUnitOfWorkFactory:
+    """Units of work inside the transaction ``connection`` has begun. A unit neither commits
+    nor rolls back: the owner of the transaction does. The tenant setting holds until that
+    transaction ends, so every unit on one connection should be of one tenant."""
+
+    def __init__(self, connection: Connection, writer: OutboxWriter) -> None:
+        if not connection.in_transaction():
+            raise ValueError("on_connection needs a connection inside a transaction")
+        self._connection = connection
+        self._writer = writer
+
+    def __call__(self, tenant_id: TenantId) -> AbstractContextManager[UnitOfWork]:
+        return self._open(tenant_id)
+
+    @contextmanager
+    def _open(self, tenant_id: TenantId) -> Iterator[UnitOfWork]:
+        with Session(bind=self._connection, expire_on_commit=False) as session:
+            yield SqlAlchemyUnitOfWork(session, tenant_id, self._writer)
+            session.flush()
 
 
 class PostgresUnitOfWorkFactory:
-    """``factory(tenant_id)`` opens a transaction with ``app.tenant_id`` set for its duration."""
+    """``factory(tenant_id)`` opens a transaction with ``app.tenant_id`` set for its duration;
+    ``PostgresUnitOfWorkFactory.on_connection(connection)`` makes units inside a transaction
+    the caller owns."""
 
     def __init__(self, engine: Engine, *, writer: OutboxWriter | None = None) -> None:
         self._engine = engine
@@ -143,6 +214,12 @@ class PostgresUnitOfWorkFactory:
     @property
     def engine(self) -> Engine:
         return self._engine
+
+    @staticmethod
+    def on_connection(
+        connection: Connection, *, writer: OutboxWriter | None = None
+    ) -> UnitOfWorkFactory:
+        return ConnectionUnitOfWorkFactory(connection, writer or OutboxWriter())
 
     def __call__(self, tenant_id: TenantId) -> AbstractContextManager[UnitOfWork]:
         return self._open(tenant_id)
@@ -274,3 +351,58 @@ def _to_change(row: ObligationChangeRow) -> ObligationChange:
         actor=None if row.actor is None else UserId(row.actor),
         correlation_id=CorrelationId(row.correlation_id),
     )
+
+
+class SqlAlchemyReminderLog:
+    """The reminders on the unit of work's session; row-level security scopes it to the
+    tenant."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def for_obligation(self, obligation_id: ObligationId) -> Sequence[Reminder]:
+        statement = (
+            select(ObligationReminderRow)
+            .where(ObligationReminderRow.obligation_id == obligation_id.value)
+            .order_by(ObligationReminderRow.reminder_index)
+        )
+        return [_to_reminder(row) for row in self._session.scalars(statement).all()]
+
+    def add(self, reminder: Reminder) -> None:
+        self._session.add(
+            ObligationReminderRow(
+                id=reminder.id.value,
+                tenant_id=reminder.tenant_id.value,
+                obligation_id=reminder.obligation_id.value,
+                due_at=reminder.due_at,
+                threshold_days=reminder.threshold_days,
+                reminder_index=reminder.reminder_index,
+                sent_at=reminder.sent_at,
+            )
+        )
+        self._session.flush()
+
+
+def _to_reminder(row: ObligationReminderRow) -> Reminder:
+    return Reminder(
+        id=EventId(row.id),
+        tenant_id=TenantId(row.tenant_id),
+        obligation_id=ObligationId(row.obligation_id),
+        due_at=row.due_at.astimezone(UTC),
+        threshold_days=row.threshold_days,
+        reminder_index=row.reminder_index,
+        sent_at=row.sent_at.astimezone(UTC),
+    )
+
+
+class PostgresTenantDirectory:
+    """The ``obligation_tenant`` ids, read without a tenant setting: the table's read policy
+    admits every row, and it holds nothing but the ids."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def tenants(self) -> Sequence[TenantId]:
+        statement = select(ObligationTenantRow.tenant_id).order_by(ObligationTenantRow.tenant_id)
+        with self._engine.connect() as connection:
+            return [TenantId(value) for value in connection.execute(statement).scalars()]

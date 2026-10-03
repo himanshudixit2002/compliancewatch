@@ -4,6 +4,10 @@ Versions follow semver per topic. Adding an optional field is a minor bump, chan
 a field or making one required is a major bump and a new `v<major>` schema file, wording is a
 patch. Every line names the topic and its version.
 
+## 2026-10-01
+
+- eval.run.completed 1.0.0: first version
+
 ## 2026-09-29
 
 - notification.sent 1.0.1: the dedupe_key description names the key of each occasion

@@ -3,8 +3,8 @@
 Guide section 11: wiring of interfaces to implementations happens here, never inside the layers.
 The use cases run on the Postgres unit of work (row-level security by tenant, events through the
 outbox). The API reads a business's obligations; the caller and its tenant come from
-``py_common.auth`` by ``CW_AUTH_MODE`` (``api.deps``). Nothing writes through the API yet: the use
-cases that create and change obligations wait for their event consumers.
+``py_common.auth`` by ``CW_AUTH_MODE`` (``api.deps``). Nothing writes through the API yet: the
+worker (``obligation.worker``) creates and closes obligations from applicability decisions.
 """
 
 from collections.abc import Callable

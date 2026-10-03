@@ -11,10 +11,14 @@ dependencies = [
   "sqlalchemy>=2.0",
   "alembic>=1.16",
   "psycopg[binary]>=3.2",
+  "domain-kernel",
   "py-common",
+  "compliancewatch-evals",
 ]
 
 [tool.uv.sources]
+compliancewatch-evals = { workspace = true }
+domain-kernel = { workspace = true }
 py-common = { workspace = true }
 
 [build-system]

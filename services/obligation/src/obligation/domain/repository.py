@@ -9,6 +9,7 @@ from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId, TenantId
 from obligation.domain.history import ObligationChange
 from obligation.domain.model import Obligation
+from obligation.domain.reminders import Reminder
 
 
 class ObligationRepository(Protocol):
@@ -21,8 +22,20 @@ class ObligationRepository(Protocol):
     ) -> Obligation | None: ...
 
     def open_for_rule_version(
-        self, rule_version_id: RuleVersionId, period_label: str | None = None
-    ) -> Sequence[Obligation]: ...
+        self,
+        rule_version_id: RuleVersionId,
+        period_label: str | None = None,
+        *,
+        business_id: BusinessId | None = None,
+    ) -> Sequence[Obligation]:
+        """Open obligations of the rule version, of one period and one business when given,
+        by period start (none first), creation and id."""
+        ...
+
+    def open_due_between(self, due_after: datetime, due_before: datetime) -> Sequence[Obligation]:
+        """Open obligations due at or after ``due_after`` and before ``due_before``, by due
+        date and id: what the reminder sweep looks at."""
+        ...
 
     def list_for_business(
         self,
@@ -59,6 +72,24 @@ class ChangeLog(Protocol):
         ...
 
 
+class ReminderLog(Protocol):
+    """The reminders sent for the tenant's obligations, one per obligation, due date and
+    threshold."""
+
+    def for_obligation(self, obligation_id: ObligationId) -> Sequence[Reminder]:
+        """The obligation's reminders, oldest first."""
+        ...
+
+    def add(self, reminder: Reminder) -> None: ...
+
+
+class TenantDirectory(Protocol):
+    """The tenants that have obligations, read across tenants; each call is a transaction of
+    its own. Only ids: what a sweep needs to open one unit of work per tenant."""
+
+    def tenants(self) -> Sequence[TenantId]: ...
+
+
 class UnitOfWork(Protocol):
     """One transaction: the repository, the event sink and the change log commit or roll back
     together. The factory returns it as a context manager; leaving the block cleanly commits."""
@@ -71,6 +102,9 @@ class UnitOfWork(Protocol):
 
     @property
     def history(self) -> ChangeLog: ...
+
+    @property
+    def reminders(self) -> ReminderLog: ...
 
 
 class UnitOfWorkFactory(Protocol):

@@ -4,6 +4,7 @@ export type { ApplicabilityDecided } from "./applicability.decided.v1";
 export type { DocumentDiscovered } from "./document.discovered.v1";
 export type { DocumentParsed } from "./document.parsed.v1";
 export type { EventEnvelope } from "./envelope.v1";
+export type { EvalRunCompleted } from "./eval.run.completed.v1";
 export type { NotificationFailed } from "./notification.failed.v1";
 export type { NotificationSent } from "./notification.sent.v1";
 export type { ObligationClosed } from "./obligation.closed.v1";
@@ -26,6 +27,7 @@ export const EVENT_TOPICS = {
   "applicability.decided": { version: "1.0.0", tenantScoped: true },
   "document.discovered": { version: "1.0.0", tenantScoped: false },
   "document.parsed": { version: "1.0.0", tenantScoped: false },
+  "eval.run.completed": { version: "1.0.0", tenantScoped: false },
   "notification.failed": { version: "1.0.1", tenantScoped: true },
   "notification.sent": { version: "1.0.1", tenantScoped: true },
   "obligation.closed": { version: "1.0.0", tenantScoped: true },

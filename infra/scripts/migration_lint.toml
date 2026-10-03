@@ -112,3 +112,12 @@ before it knows their tenant, then handles each in a unit of work of the entry's
 receipts find their tenant by the provider's message id. It holds ids and times, no message
 content (migration 0001 of notification).
 """
+
+[[exemptions]]
+table = "obligation.obligation_tenant"
+kind = "routing_directory"
+reason = """
+The tenants that have obligations, which the reminder sweep reads before it knows a tenant and
+then visits one tenant unit of work at a time. Every session may read the ids; every write must
+pass the tenant policy. It holds tenant ids only (migration 0003 of obligation).
+"""
