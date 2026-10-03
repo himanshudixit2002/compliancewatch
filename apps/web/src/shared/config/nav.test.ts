@@ -154,7 +154,7 @@ describe("navFor", () => {
     const sections = adminNavFor({
       roles: ["admin"],
       tenantKind: "internal",
-      currentPath: "/admin/sources/cbic",
+      currentPath: "/admin/sources/example",
     });
     expect(sections.map((s) => s.key)).toEqual([
       "rulebook",
@@ -196,7 +196,7 @@ describe("navFor", () => {
 
 describe("isActive", () => {
   it("matches the path and its children, except for the home links", () => {
-    expect(isActive("/admin/sources", "/admin/sources/cbic")).toBe(true);
+    expect(isActive("/admin/sources", "/admin/sources/example")).toBe(true);
     expect(isActive("/admin/sources", "/admin/sourcesx")).toBe(false);
     expect(isActive("/admin", "/admin/sources")).toBe(false);
     expect(isActive("/", "/")).toBe(true);

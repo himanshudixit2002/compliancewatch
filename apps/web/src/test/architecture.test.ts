@@ -1,14 +1,19 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { posix, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
+import { isScreenId, screenById } from "@/shared/config/screens";
 import {
+  PARKED_FEATURES,
   checkFile,
   checkTree,
+  featuresImportedByApp,
   importRefs,
   isClientModule,
   layerOf,
   moduleRootOf,
+  parkedFolderProblems,
   resolveInternal,
+  type ParkedFolderCheck,
   type SourceFile,
 } from "./architecture";
 
@@ -229,5 +234,73 @@ describe("apps/web/src", () => {
     const files = sourceFiles(SRC);
     expect(files.length).toBeGreaterThan(0);
     expect(checkTree(files)).toEqual([]);
+  });
+});
+
+describe("parked feature folders", () => {
+  const statuses: Record<string, string> = { "x.live": "live", "x.ready": "ready" };
+  const base: ParkedFolderCheck = {
+    folders: ["home", "parked"],
+    imported: new Set(["home"]),
+    parked: { parked: ["x.ready"] },
+    statusOf: (id) => statuses[id],
+  };
+
+  it("finds the feature folders a route file imports, and only those", () => {
+    const imported = featuresImportedByApp([
+      file("app/page.tsx", 'import { HomeView } from "@/features/home";'),
+      file("app/b/page.tsx", 'import { a } from "@/features/business/ui/a";\nimport "./x.css";'),
+      file("app/c/page.tsx", 'import { t } from "@/shared/i18n";'),
+      file("features/sitemap/index.ts", 'import { r } from "@/features/sitemap/model/rows";'),
+      file("test/x.ts", 'import { s } from "@/features/settings";'),
+    ]);
+    expect([...imported].sort()).toEqual(["business", "home"]);
+  });
+
+  it("accepts a folder parked for screens that are not live", () => {
+    expect(parkedFolderProblems(base)).toEqual([]);
+  });
+
+  it("fails on a folder no route file imports that is not parked", () => {
+    expect(parkedFolderProblems({ ...base, folders: [...base.folders, "orphan"] })).toEqual([
+      "features/orphan: no route file imports it and it is not parked",
+    ]);
+  });
+
+  it("fails while a parked screen is live and its folder is still not imported", () => {
+    expect(parkedFolderProblems({ ...base, parked: { parked: ["x.ready", "x.live"] } })).toEqual([
+      "features/parked: x.live is live, but no route file imports the folder",
+    ]);
+  });
+
+  it("fails on a parked screen the registry does not hold, and on a folder parked for none", () => {
+    expect(parkedFolderProblems({ ...base, parked: { parked: ["x.gone"] } })).toEqual([
+      "features/parked: parked for x.gone, which the registry does not hold",
+    ]);
+    expect(parkedFolderProblems({ ...base, parked: { parked: [] } })).toEqual([
+      "features/parked: parked for no screen",
+    ]);
+  });
+
+  it("fails on an entry whose folder a page now imports, or that no longer exists", () => {
+    expect(parkedFolderProblems({ ...base, imported: new Set(["home", "parked"]) })).toEqual([
+      "features/parked: a route file imports it, so it is no longer parked",
+    ]);
+    expect(parkedFolderProblems({ ...base, folders: ["home"] })).toEqual([
+      "features/parked: parked, but the folder does not exist",
+    ]);
+  });
+
+  it("parks every folder of apps/web/src/features that no route file imports", () => {
+    const folders = readdirSync(posix.join(SRC, "features"), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+    const problems = parkedFolderProblems({
+      folders,
+      imported: featuresImportedByApp(sourceFiles(SRC)),
+      parked: PARKED_FEATURES,
+      statusOf: (id) => (isScreenId(id) ? screenById(id).status : undefined),
+    });
+    expect(problems).toEqual([]);
   });
 });

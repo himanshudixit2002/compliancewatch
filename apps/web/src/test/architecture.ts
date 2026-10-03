@@ -216,3 +216,84 @@ export function checkFile(file: SourceFile): Violation[] {
 export function checkTree(files: readonly SourceFile[]): Violation[] {
   return files.flatMap((file) => checkFile(file));
 }
+
+// ---- Parked feature folders -----------------------------------------------------------------
+
+/**
+ * Feature folders that no route file imports yet, each parked for the registry screens it will
+ * serve (docs/web/architecture.md, "Parked feature folders"). The package that builds one of
+ * those screens wires the folder from its page, sets the entry live and deletes the folder's
+ * line here; the map is empty once every parked screen is built. architecture.test.ts holds the
+ * map to the tree and the registry with `parkedFolderProblems`.
+ */
+export const PARKED_FEATURES: Readonly<Record<string, readonly string[]>> = {
+  "admin-audit": ["admin.audit"],
+  "admin-error-reports": ["admin.error-reports"],
+  "admin-pipeline": ["admin.pipeline"],
+  "admin-qa-triage": ["admin.qa-triage"],
+  "admin-sources": ["admin.sources"],
+  "admin-tenants": ["admin.tenants"],
+  changes: ["owner.changes"],
+  flags: ["admin.flags"],
+  "notification-recipients": ["owner.settings.notification-recipients"],
+  notifications: ["owner.reminders", "owner.reminder"],
+  obligations: ["owner.obligations", "owner.obligation"],
+  "settings-activity": ["owner.settings.activity"],
+  "settings-data-rights": ["owner.settings.data-rights"],
+  team: ["owner.settings.team"],
+};
+
+/** The feature folders (their names under features/) that a file of the app layer imports. */
+export function featuresImportedByApp(files: readonly SourceFile[]): Set<string> {
+  const imported = new Set<string>();
+  for (const file of files) {
+    if (layerOf(file.path) !== "app") continue;
+    for (const ref of importRefs(file.source)) {
+      const target = resolveInternal(file.path, ref.specifier);
+      const root = target === null ? undefined : moduleRootOf(target);
+      if (root?.startsWith("features/")) imported.add(root.slice("features/".length));
+    }
+  }
+  return imported;
+}
+
+export interface ParkedFolderCheck {
+  /** Every directory under src/features. */
+  folders: readonly string[];
+  /** The folders a route file imports. */
+  imported: ReadonlySet<string>;
+  parked: Readonly<Record<string, readonly string[]>>;
+  /** A screen's registry status, or undefined for an id the registry does not hold. */
+  statusOf: (id: string) => string | undefined;
+}
+
+/**
+ * What is wrong with the parked map, one sentence each: a folder no route file imports that is
+ * not parked, a parked screen the registry does not hold, a parked screen that is live while its
+ * folder is still not imported, and a map entry for a folder a page now imports or that is gone.
+ */
+export function parkedFolderProblems(check: ParkedFolderCheck): string[] {
+  const problems: string[] = [];
+  for (const folder of check.folders) {
+    if (!check.imported.has(folder) && !Object.hasOwn(check.parked, folder)) {
+      problems.push(`features/${folder}: no route file imports it and it is not parked`);
+    }
+  }
+  for (const [folder, ids] of Object.entries(check.parked)) {
+    if (!check.folders.includes(folder)) {
+      problems.push(`features/${folder}: parked, but the folder does not exist`);
+    } else if (check.imported.has(folder)) {
+      problems.push(`features/${folder}: a route file imports it, so it is no longer parked`);
+    }
+    if (ids.length === 0) problems.push(`features/${folder}: parked for no screen`);
+    for (const id of ids) {
+      const status = check.statusOf(id);
+      if (status === undefined) {
+        problems.push(`features/${folder}: parked for ${id}, which the registry does not hold`);
+      } else if (status === "live" && !check.imported.has(folder)) {
+        problems.push(`features/${folder}: ${id} is live, but no route file imports the folder`);
+      }
+    }
+  }
+  return problems;
+}
