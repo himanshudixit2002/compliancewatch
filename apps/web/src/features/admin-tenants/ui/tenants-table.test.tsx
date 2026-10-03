@@ -8,7 +8,7 @@ import { TenantsTable } from "./tenants-table";
 function row(overrides: Partial<TenantRow>): TenantRow {
   return {
     id: "t1",
-    name: "Acme Traders",
+    name: "Example Traders",
     href: "/admin/tenants/t1",
     kind: "business",
     kindLabel: "Business",
@@ -16,7 +16,7 @@ function row(overrides: Partial<TenantRow>): TenantRow {
     statusLabel: "Active",
     statusTone: "success",
     region: "ap-south-1",
-    created: "10 Apr 2026",
+    created: "10 Apr 2000",
     impersonateHref: "/admin/tenants/t1/impersonate",
     ...overrides,
   };
@@ -26,7 +26,7 @@ const ROWS = [
   row({ id: "t1" }),
   row({
     id: "t2",
-    name: "Rao & Co",
+    name: "Example Firm & Co",
     href: null,
     kind: "ca_firm",
     kindLabel: "CA firm",
@@ -70,22 +70,22 @@ describe("TenantsTable", () => {
     expect(shownIds(container)).toEqual(["t1", "t2", "t3"]);
     expect(screen.getByRole("status").textContent).toBe("Showing 3 of 3 tenants");
 
-    const acme = container.querySelector("[data-tenant='t1']") as HTMLElement;
-    expect(within(acme).getByRole("link", { name: "Acme Traders" }).getAttribute("href")).toBe(
-      "/admin/tenants/t1",
-    );
+    const business = container.querySelector("[data-tenant='t1']") as HTMLElement;
     expect(
-      within(acme)
-        .getByRole("link", { name: /^Impersonate\s*Acme Traders$/ })
+      within(business).getByRole("link", { name: "Example Traders" }).getAttribute("href"),
+    ).toBe("/admin/tenants/t1");
+    expect(
+      within(business)
+        .getByRole("link", { name: /^Impersonate\s*Example Traders$/ })
         .getAttribute("href"),
     ).toBe("/admin/tenants/t1/impersonate");
-    expect(acme.textContent).toContain("ap-south-1");
-    expect(acme.textContent).toContain("10 Apr 2026");
+    expect(business.textContent).toContain("ap-south-1");
+    expect(business.textContent).toContain("10 Apr 2000");
 
-    const rao = container.querySelector("[data-tenant='t2']") as HTMLElement;
-    expect(within(rao).queryByRole("link")).toBeNull();
-    expect(rao.textContent).toContain("CA firm");
-    expect(rao.querySelector("[data-slot='status-chip']")?.getAttribute("data-tone")).toBe(
+    const firm = container.querySelector("[data-tenant='t2']") as HTMLElement;
+    expect(within(firm).queryByRole("link")).toBeNull();
+    expect(firm.textContent).toContain("CA firm");
+    expect(firm.querySelector("[data-slot='status-chip']")?.getAttribute("data-tone")).toBe(
       "warning",
     );
     expect(screen.getByRole("columnheader", { name: "Actions" })).toBeDefined();

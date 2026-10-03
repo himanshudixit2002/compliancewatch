@@ -8,8 +8,8 @@ import { TriageTable } from "./triage-table";
 function row(overrides: Partial<TriageRow>): TriageRow {
   return {
     id: "t1",
-    question: "When is GSTR-3B due for March?",
-    category: "GST returns",
+    question: "When is example return 1 due for March?",
+    category: "Example returns",
     href: "/admin/qa-triage/t1",
     reason: "not_covered",
     reasonLabel: "Not covered",
@@ -19,7 +19,7 @@ function row(overrides: Partial<TriageRow>): TriageRow {
     statusLabel: "Open",
     statusTone: "warning",
     assignee: "Unassigned",
-    createdLabel: "1 Oct 2026, 10:30 am IST",
+    createdLabel: "1 Oct 2000, 10:30 am IST",
     ...overrides,
   };
 }
@@ -28,8 +28,8 @@ const ROWS = [
   row({}),
   row({
     id: "t2",
-    question: "Is TDS due on rent?",
-    category: "TDS",
+    question: "Is example tax due on rent?",
+    category: "Example tax",
     href: null,
     reason: "thumbs_down",
     reasonLabel: "Marked unhelpful",
@@ -38,7 +38,7 @@ const ROWS = [
     status: "closed",
     statusLabel: "Closed",
     statusTone: "success",
-    assignee: "Asha Rao",
+    assignee: "Example reviewer",
   }),
 ];
 
@@ -67,22 +67,22 @@ describe("TriageTable", () => {
 
     const first = container.querySelector("[data-triage='t1']") as HTMLElement;
     expect(
-      within(first).getByRole("link", { name: "When is GSTR-3B due for March?" }),
+      within(first).getByRole("link", { name: "When is example return 1 due for March?" }),
     ).toHaveProperty("href", expect.stringContaining("/admin/qa-triage/t1"));
-    expect(first.textContent).toContain("GST returns");
+    expect(first.textContent).toContain("Example returns");
     expect(first.textContent).toContain("Not covered");
     expect(first.querySelector("[data-slot='badge']")?.getAttribute("data-tone")).toBe("danger");
     const chip = first.querySelector("[data-slot='status-chip']");
     expect(chip?.textContent).toBe("Open");
     expect(chip?.getAttribute("data-tone")).toBe("warning");
     expect(first.textContent).toContain("Unassigned");
-    expect(first.textContent).toContain("1 Oct 2026, 10:30 am IST");
+    expect(first.textContent).toContain("1 Oct 2000, 10:30 am IST");
 
     const second = container.querySelector("[data-triage='t2']") as HTMLElement;
     expect(within(second).queryByRole("link")).toBeNull();
-    expect(within(second).getByText("Is TDS due on rent?")).toBeDefined();
+    expect(within(second).getByText("Is example tax due on rent?")).toBeDefined();
     expect(second.textContent).toContain("Marked unhelpful");
-    expect(second.textContent).toContain("Asha Rao");
+    expect(second.textContent).toContain("Example reviewer");
     expect(await runAxe(container)).toHaveNoViolations();
   });
 
@@ -90,7 +90,7 @@ describe("TriageTable", () => {
     const user = userEvent.setup();
     const { container } = render(<TriageTable rows={ROWS} {...OPTIONS} />);
 
-    await user.type(screen.getByLabelText("Search by question or topic"), "tds");
+    await user.type(screen.getByLabelText("Search by question or topic"), "tax");
     expect(shownIds(container)).toEqual(["t2"]);
     await user.clear(screen.getByLabelText("Search by question or topic"));
 

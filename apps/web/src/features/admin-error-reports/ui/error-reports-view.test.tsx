@@ -12,29 +12,29 @@ const REPORTS: ErrorReport[] = [
   {
     id: "err_resolved",
     title: "Missing late fee",
-    message: "The late fee for GSTR-1 is not shown.",
-    subject: "GSTR-1",
+    message: "The late fee for example return 2 is not shown.",
+    subject: "Example return 2",
     severity: "critical",
     status: "resolved",
-    reportedAt: "2026-09-20T05:00:00Z",
+    reportedAt: "2000-09-20T05:00:00Z",
   },
   {
     id: "err_low",
-    title: "TDS rate is out of date",
+    title: "Example rate is out of date",
     message: "The rate changed in the last budget.",
-    subject: "TDS on rent",
+    subject: "Example tax on rent",
     severity: "low",
     status: "open",
-    reportedAt: "2026-09-25T05:00:00Z",
+    reportedAt: "2000-09-25T05:00:00Z",
   },
   {
     id: "err_high",
-    title: "Wrong due date for GSTR-3B",
+    title: "Wrong due date for example return 1",
     message: "The notification moved it to the 22nd.",
-    subject: "GSTR-3B monthly return",
+    subject: "Example monthly return",
     severity: "high",
     status: "open",
-    reportedAt: "2026-10-01T05:00:00Z",
+    reportedAt: "2000-10-01T05:00:00Z",
   },
 ];
 
@@ -68,8 +68,8 @@ describe("AdminErrorReportsView", () => {
       "err_low",
       "err_resolved",
     ]);
-    expect(rows[0]?.textContent).toContain("GSTR-3B monthly return");
-    expect(rows[0]?.textContent).toContain(formatDateTime("2026-10-01T05:00:00Z"));
+    expect(rows[0]?.textContent).toContain("Example monthly return");
+    expect(rows[0]?.textContent).toContain(formatDateTime("2000-10-01T05:00:00Z"));
     expect(rows[1]?.querySelector("[data-slot='badge']")?.textContent).toBe("Low");
     expect(rows[2]?.querySelector("[data-slot='status-chip']")?.textContent).toBe("Resolved");
     expect(screen.getByRole("link", { name: "Missing late fee" }).getAttribute("href")).toBe(

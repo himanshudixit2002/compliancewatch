@@ -12,12 +12,12 @@ import {
 function run(overrides: Partial<PipelineRun> = {}): PipelineRun {
   return {
     id: "run_1",
-    name: "CBIC circulars",
+    name: "Example circulars",
     stage: "fetch",
     status: "running",
     processed: 10,
     total: 20,
-    startedAt: "2026-10-02T04:00:00Z",
+    startedAt: "2000-10-02T04:00:00Z",
     finishedAt: null,
     error: null,
     ...overrides,
@@ -59,17 +59,17 @@ describe("runDurationSeconds", () => {
   it("measures from start to finish in whole seconds", () => {
     expect(
       runDurationSeconds({
-        startedAt: "2026-10-02T04:00:00Z",
-        finishedAt: "2026-10-02T04:12:05.4Z",
+        startedAt: "2000-10-02T04:00:00Z",
+        finishedAt: "2000-10-02T04:12:05.4Z",
       }),
     ).toBe(725);
   });
 
   it("has no duration until the run has started and finished, and never a negative one", () => {
     expect(runDurationSeconds({ startedAt: null, finishedAt: null })).toBeNull();
-    expect(runDurationSeconds({ startedAt: "2026-10-02T04:00:00Z", finishedAt: null })).toBeNull();
+    expect(runDurationSeconds({ startedAt: "2000-10-02T04:00:00Z", finishedAt: null })).toBeNull();
     expect(
-      runDurationSeconds({ startedAt: "2026-10-02T04:00:00Z", finishedAt: "2026-10-02T03:59:00Z" }),
+      runDurationSeconds({ startedAt: "2000-10-02T04:00:00Z", finishedAt: "2000-10-02T03:59:00Z" }),
     ).toBe(0);
   });
 });

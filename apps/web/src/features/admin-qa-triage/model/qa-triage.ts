@@ -26,7 +26,7 @@ export interface TriageItem {
   id: string;
   /** The question as it was asked. */
   question: string;
-  /** The topic it is filed under, such as "GST returns". */
+  /** The topic it is filed under, such as "Example returns". */
   category: string;
   reason: TriageReason;
   priority: TriagePriority;

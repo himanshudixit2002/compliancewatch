@@ -8,13 +8,13 @@ import { ObligationsTable } from "./obligations-table";
 function row(overrides: Partial<ObligationRow>): ObligationRow {
   return {
     id: "1",
-    title: "File GSTR-3B for the month",
+    title: "File example return 1 for the month",
     href: "/b/biz_1/obligations/1",
-    period: "Period 2026-09: 1 Sept 2026 to 30 Sept 2026",
+    period: "Period 2000-09: 1 Sept 2000 to 30 Sept 2000",
     status: "open",
     statusLabel: "Open",
     statusTone: "info",
-    due: "20 Oct 2026",
+    due: "20 Oct 2000",
     dueNote: "Due in 5 days",
     overdue: false,
     evidence: "Filing acknowledgement",
@@ -26,24 +26,24 @@ const ROWS = [
   row({ id: "1" }),
   row({
     id: "2",
-    title: "Pay TDS",
+    title: "Pay example tax",
     href: "/b/biz_1/obligations/2",
     period: null,
     status: "in_progress",
     statusLabel: "In progress",
     statusTone: "warning",
-    due: "7 Oct 2026",
+    due: "7 Oct 2000",
     dueNote: "Overdue by 8 days",
     overdue: true,
   }),
   row({
     id: "3",
-    title: "File GSTR-1",
-    period: "Period 2026-08",
+    title: "File example return 2",
+    period: "Period 2000-08",
     status: "done",
     statusLabel: "Done",
     statusTone: "success",
-    due: "11 Sept 2026",
+    due: "11 Sept 2000",
     dueNote: null,
   }),
 ];
@@ -68,13 +68,12 @@ describe("ObligationsTable", () => {
     expect(screen.getByRole("status").textContent).toBe("Showing 3 of 3 obligations.");
     expect(screen.getByRole("table", { name: "The business's obligations" })).toBeDefined();
     const first = container.querySelector("[data-obligation='1']") as HTMLElement;
-    expect(within(first).getByRole("link", { name: "File GSTR-3B for the month" })).toHaveProperty(
-      "href",
-      expect.stringContaining("/b/biz_1/obligations/1"),
-    );
-    expect(first.textContent).toContain("Period 2026-09: 1 Sept 2026 to 30 Sept 2026");
+    expect(
+      within(first).getByRole("link", { name: "File example return 1 for the month" }),
+    ).toHaveProperty("href", expect.stringContaining("/b/biz_1/obligations/1"));
+    expect(first.textContent).toContain("Period 2000-09: 1 Sept 2000 to 30 Sept 2000");
     expect(first.querySelector("[data-slot='status-chip']")?.textContent).toBe("Open");
-    expect(first.textContent).toContain("20 Oct 2026");
+    expect(first.textContent).toContain("20 Oct 2000");
     expect(first.querySelector("[data-slot='due-note']")?.className).toContain("text-fg-muted");
     expect(first.textContent).toContain("Filing acknowledgement");
     const overdue = container.querySelector("[data-obligation='2']") as HTMLElement;
@@ -98,7 +97,7 @@ describe("ObligationsTable", () => {
     expect(screen.getByRole("status").textContent).toBe("Showing 1 of 3 obligations.");
 
     await user.selectOptions(screen.getByLabelText("Status"), "all");
-    await user.type(screen.getByLabelText("Search by title or period"), "gstr");
+    await user.type(screen.getByLabelText("Search by title or period"), "example return");
     expect(shownIds(container)).toEqual(["1", "3"]);
 
     await user.selectOptions(screen.getByLabelText("Status"), "done");

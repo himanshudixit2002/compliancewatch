@@ -7,36 +7,36 @@ import { AdminTenantsView } from "./admin-tenants-view";
 
 const TENANTS: Tenant[] = [
   {
-    id: "t-zen",
-    name: "Zen Foods",
+    id: "t-active",
+    name: "Example tenant D",
     kind: "business",
     status: "active",
     region: "ap-south-1",
-    createdAt: "2026-04-10T05:00:00Z",
+    createdAt: "2000-04-10T05:00:00Z",
   },
   {
-    id: "t-rao",
-    name: "Rao & Co",
+    id: "t-firm",
+    name: "Example tenant C",
     kind: "ca_firm",
     status: "deletion_requested",
     region: "ap-south-1",
-    createdAt: "2026-05-02T05:00:00Z",
+    createdAt: "2000-05-02T05:00:00Z",
   },
   {
     id: "t-ops",
-    name: "ComplianceWatch regulatory",
+    name: "Example tenant A",
     kind: "internal",
     status: "active",
     region: "ap-south-1",
-    createdAt: "2026-01-05T05:00:00Z",
+    createdAt: "2000-01-05T05:00:00Z",
   },
   {
     id: "t-old",
-    name: "Old Mills",
+    name: "Example tenant B",
     kind: "business",
     status: "erased",
     region: "ap-south-1",
-    createdAt: "2025-11-20T05:00:00Z",
+    createdAt: "1999-11-20T05:00:00Z",
   },
 ];
 
@@ -74,27 +74,27 @@ describe("AdminTenantsView", () => {
       "Deletion requested": { value: "1", tone: "warning" },
       Erased: { value: "1", tone: "neutral" },
     });
-    expect(shownIds(container)).toEqual(["t-ops", "t-old", "t-rao", "t-zen"]);
+    expect(shownIds(container)).toEqual(["t-ops", "t-old", "t-firm", "t-active"]);
 
-    const zen = container.querySelector("[data-tenant='t-zen']") as HTMLElement;
-    expect(within(zen).getByRole("link", { name: "Zen Foods" }).getAttribute("href")).toBe(
-      "/admin/tenants/t-zen",
-    );
+    const active = container.querySelector("[data-tenant='t-active']") as HTMLElement;
     expect(
-      within(zen)
-        .getByRole("link", { name: /^Impersonate\s*Zen Foods$/ })
+      within(active).getByRole("link", { name: "Example tenant D" }).getAttribute("href"),
+    ).toBe("/admin/tenants/t-active");
+    expect(
+      within(active)
+        .getByRole("link", { name: /^Impersonate\s*Example tenant D$/ })
         .getAttribute("href"),
-    ).toBe("/admin/tenants/t-zen/impersonate");
-    expect(zen.textContent).toContain("Business");
-    expect(zen.textContent).toContain("10 Apr 2026");
-    expect(zen.querySelector("[data-slot='status-chip']")?.textContent).toBe("Active");
+    ).toBe("/admin/tenants/t-active/impersonate");
+    expect(active.textContent).toContain("Business");
+    expect(active.textContent).toContain("10 Apr 2000");
+    expect(active.querySelector("[data-slot='status-chip']")?.textContent).toBe("Active");
 
-    for (const id of ["t-ops", "t-old", "t-rao"]) {
+    for (const id of ["t-ops", "t-old", "t-firm"]) {
       const other = container.querySelector(`[data-tenant='${id}']`) as HTMLElement;
       expect(within(other).queryByRole("link", { name: /Impersonate/ })).toBeNull();
     }
-    const rao = container.querySelector("[data-tenant='t-rao']") as HTMLElement;
-    expect(rao.textContent).toContain("Deletion requested");
+    const firm = container.querySelector("[data-tenant='t-firm']") as HTMLElement;
+    expect(firm.textContent).toContain("Deletion requested");
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "All",
       "Business",

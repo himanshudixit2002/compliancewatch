@@ -14,19 +14,19 @@ const TABS = [{ id: "owner.settings.team", href: "/account/team", label: "Team" 
 const MEMBERS: TeamMember[] = [
   {
     id: "u2",
-    name: "Ravi Kumar",
-    email: "ravi@example.com",
+    name: "Example staff member",
+    email: "staff@example.com",
     roles: [],
     status: "disabled",
-    joinedAt: "2026-05-02T05:00:00Z",
+    joinedAt: "2000-05-02T05:00:00Z",
   },
   {
     id: "u1",
-    name: "Asha Rao",
-    email: "asha@example.com",
+    name: "Example owner",
+    email: "owner@example.com",
     roles: ["owner", "compliance_lead"],
     status: "active",
-    joinedAt: "2026-04-10T05:00:00Z",
+    joinedAt: "2000-04-10T05:00:00Z",
   },
 ];
 
@@ -51,15 +51,15 @@ describe("TeamView", () => {
 
     const rows = container.querySelectorAll("tbody tr");
     expect([...rows].map((row) => row.getAttribute("data-member"))).toEqual(["u1", "u2"]);
-    const asha = rows[0] as HTMLElement;
-    expect(asha.textContent).toContain("asha@example.com");
-    expect(asha.textContent).toContain("Owner");
-    expect(asha.textContent).toContain("Compliance lead");
-    expect(asha.textContent).toContain("10 Apr 2026");
-    expect(asha.querySelector("[data-slot='status-chip']")?.textContent).toBe("Active");
-    const ravi = rows[1] as HTMLElement;
-    expect(ravi.textContent).toContain("None");
-    expect(ravi.querySelector("[data-slot='status-chip']")?.getAttribute("data-tone")).toBe(
+    const owner = rows[0] as HTMLElement;
+    expect(owner.textContent).toContain("owner@example.com");
+    expect(owner.textContent).toContain("Owner");
+    expect(owner.textContent).toContain("Compliance lead");
+    expect(owner.textContent).toContain("10 Apr 2000");
+    expect(owner.querySelector("[data-slot='status-chip']")?.textContent).toBe("Active");
+    const staff = rows[1] as HTMLElement;
+    expect(staff.textContent).toContain("None");
+    expect(staff.querySelector("[data-slot='status-chip']")?.getAttribute("data-tone")).toBe(
       "danger",
     );
     expect(await runAxe(container)).toHaveNoViolations();

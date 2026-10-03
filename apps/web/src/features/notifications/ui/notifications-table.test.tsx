@@ -8,14 +8,14 @@ import { NotificationsTable } from "./notifications-table";
 const ROWS: NotificationRow[] = [
   {
     id: "n1",
-    subject: "GSTR-3B due on 20 Oct",
+    subject: "Example return due on 20 Oct",
     href: "/n/n1" as Route,
     channelLabel: "WhatsApp",
     state: "sent",
     stateLabel: "Sent",
     tone: "info",
-    recipient: "+919876543210",
-    sentLabel: "1 Oct 2026, 10:30 am IST",
+    recipient: "+910000000001",
+    sentLabel: "1 Oct 2000, 10:30 am IST",
   },
 ];
 
@@ -23,13 +23,13 @@ describe("NotificationsTable", () => {
   it("renders the prepared row as given", () => {
     const { container } = render(<NotificationsTable rows={ROWS} />);
     const row = container.querySelector("[data-notification='n1']") as HTMLElement;
-    expect(row.textContent).toContain("1 Oct 2026, 10:30 am IST");
+    expect(row.textContent).toContain("1 Oct 2000, 10:30 am IST");
     const chip = row.querySelector("[data-slot='status-chip']");
     expect(chip?.getAttribute("data-status")).toBe("sent");
     expect(chip?.getAttribute("data-tone")).toBe("info");
-    expect(screen.getByRole("link", { name: "GSTR-3B due on 20 Oct" }).getAttribute("href")).toBe(
-      "/n/n1",
-    );
+    expect(
+      screen.getByRole("link", { name: "Example return due on 20 Oct" }).getAttribute("href"),
+    ).toBe("/n/n1");
   });
 
   it("describes the search box and keeps what was typed", async () => {

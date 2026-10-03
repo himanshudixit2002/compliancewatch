@@ -8,17 +8,17 @@ import { NotificationDetail } from "./notification-detail";
 
 const RECORD: NotificationRecord = {
   id: "ntf-1",
-  subject: "GST return filed successfully",
+  subject: "Example return filed successfully",
   channel: "email",
   state: "read",
   recipient: "owner@example.com",
-  templateKey: "gst_filed",
-  sentAt: "2026-10-01T05:00:00Z",
-  body: "Your GST return has been filed\nfor September.",
-  businessName: "Acme Pvt Ltd",
+  templateKey: "example_filed",
+  sentAt: "2000-10-01T05:00:00Z",
+  body: "Your example return has been filed\nfor September.",
+  businessName: "Example business",
   attempts: 1,
-  deliveredAt: "2026-10-01T05:01:00Z",
-  readAt: "2026-10-01T06:00:00Z",
+  deliveredAt: "2000-10-01T05:01:00Z",
+  readAt: "2000-10-01T06:00:00Z",
   error: null,
 };
 
@@ -33,7 +33,7 @@ describe("NotificationDetail", () => {
   it("shows the delivery record, the message and a link back to the list", async () => {
     const { container } = render(<NotificationDetail notification={RECORD} listHref={LIST} />);
     expect(
-      screen.getByRole("heading", { level: 1, name: "GST return filed successfully" }),
+      screen.getByRole("heading", { level: 1, name: "Example return filed successfully" }),
     ).toBeDefined();
     expect(screen.getByRole("link", { name: "All notifications" }).getAttribute("href")).toBe(
       "/account/notifications",
@@ -41,10 +41,10 @@ describe("NotificationDetail", () => {
     expect(valueOf(container, "Delivery")).toBe("Read");
     expect(valueOf(container, "Channel")).toBe("Email");
     expect(valueOf(container, "Recipient")).toBe("owner@example.com");
-    expect(valueOf(container, "Business")).toBe("Acme Pvt Ltd");
-    expect(valueOf(container, "Template")).toBe("gst_filed");
-    expect(valueOf(container, "Sent")).toBe(formatDateTime("2026-10-01T05:00:00Z"));
-    expect(valueOf(container, "Read")).toBe(formatDateTime("2026-10-01T06:00:00Z"));
+    expect(valueOf(container, "Business")).toBe("Example business");
+    expect(valueOf(container, "Template")).toBe("example_filed");
+    expect(valueOf(container, "Sent")).toBe(formatDateTime("2000-10-01T05:00:00Z"));
+    expect(valueOf(container, "Read")).toBe(formatDateTime("2000-10-01T06:00:00Z"));
     expect(valueOf(container, "Attempts")).toBe("1");
     expect(screen.getByRole("button", { name: "Copy Notification id" })).toBeDefined();
     expect(screen.getByText(/for September\./).textContent).toBe(RECORD.body);

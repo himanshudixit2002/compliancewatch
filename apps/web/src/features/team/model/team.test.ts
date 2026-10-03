@@ -7,29 +7,29 @@ import type { TeamMember, UserDto } from "./team";
 const DTO: UserDto = {
   id: "u1",
   tenant_id: "t1",
-  display_name: "Asha Rao",
-  email: "asha@example.com",
-  phone: "+919800000001",
+  display_name: "Example owner",
+  email: "owner@example.com",
+  phone: "+910000000001",
   roles: ["owner"],
   status: "active",
   session_version: 1,
-  created_at: "2026-04-10T05:00:00Z",
-  updated_at: "2026-04-11T05:00:00Z",
+  created_at: "2000-04-10T05:00:00Z",
+  updated_at: "2000-04-11T05:00:00Z",
 };
 
 function member(id: string, name: string, status: TeamMember["status"]): TeamMember {
-  return { id, name, email: `${id}@example.com`, roles: ["staff"], status, joinedAt: "2026-01-01" };
+  return { id, name, email: `${id}@example.com`, roles: ["staff"], status, joinedAt: "2000-01-01" };
 }
 
 describe("teamMemberFromDto", () => {
   it("keeps what the table shows and drops the phone and session version", () => {
     expect(teamMemberFromDto(DTO)).toEqual({
       id: "u1",
-      name: "Asha Rao",
-      email: "asha@example.com",
+      name: "Example owner",
+      email: "owner@example.com",
       roles: ["owner"],
       status: "active",
-      joinedAt: "2026-04-10T05:00:00Z",
+      joinedAt: "2000-04-10T05:00:00Z",
     });
   });
 });
@@ -46,13 +46,18 @@ describe("role maps", () => {
 describe("sortMembers", () => {
   it("puts active members first, then orders by name, without changing the input", () => {
     const input = [
-      member("c", "Chitra", "disabled"),
-      member("b", "Bala", "active"),
-      member("a", "Arun", "disabled"),
-      member("d", "Anil", "active"),
+      member("c", "Example member D", "disabled"),
+      member("b", "Example member C", "active"),
+      member("a", "Example member B", "disabled"),
+      member("d", "Example member A", "active"),
     ];
-    expect(sortMembers(input).map((m) => m.name)).toEqual(["Anil", "Bala", "Arun", "Chitra"]);
-    expect(input[0]?.name).toBe("Chitra");
+    expect(sortMembers(input).map((m) => m.name)).toEqual([
+      "Example member A",
+      "Example member C",
+      "Example member B",
+      "Example member D",
+    ]);
+    expect(input[0]?.name).toBe("Example member D");
   });
 });
 
