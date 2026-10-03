@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { evidenceTone, formatFileSize } from "./evidence";
+import {
+  EVIDENCE_STATUSES,
+  evidenceCounts,
+  evidenceStatusLabel,
+  evidenceStatusTabs,
+  evidenceTone,
+  formatFileSize,
+  type EvidenceItem,
+} from "./evidence";
+
+function item(overrides: Partial<EvidenceItem> = {}): EvidenceItem {
+  return {
+    id: "e1",
+    fileName: "challan.pdf",
+    sizeBytes: 1536,
+    uploadedBy: "Priya Shah",
+    uploadedAt: "2026-10-01T09:00:00Z",
+    status: "submitted",
+    ...overrides,
+  };
+}
 
 describe("formatFileSize", () => {
   it("uses binary multiples with at most one decimal", () => {
@@ -16,10 +36,38 @@ describe("formatFileSize", () => {
   });
 });
 
-describe("evidenceTone", () => {
-  it("maps each status to a tone", () => {
-    expect(evidenceTone("submitted")).toBe("info");
-    expect(evidenceTone("accepted")).toBe("success");
-    expect(evidenceTone("rejected")).toBe("danger");
+describe("evidence labels and tones", () => {
+  it("words and tones each review status", () => {
+    expect(EVIDENCE_STATUSES.map(evidenceStatusLabel)).toEqual([
+      "Submitted",
+      "Accepted",
+      "Rejected",
+    ]);
+    expect(EVIDENCE_STATUSES.map(evidenceTone)).toEqual(["info", "success", "danger"]);
+  });
+
+  it("builds one tab per review status, in review order", () => {
+    expect(evidenceStatusTabs()).toEqual([
+      { value: "submitted", label: "Submitted" },
+      { value: "accepted", label: "Accepted" },
+      { value: "rejected", label: "Rejected" },
+    ]);
+  });
+});
+
+describe("evidenceCounts", () => {
+  it("counts every file and each review status", () => {
+    expect(
+      evidenceCounts([
+        item(),
+        item({ id: "e2", status: "accepted" }),
+        item({ id: "e3", status: "accepted" }),
+        item({ id: "e4", status: "rejected" }),
+      ]),
+    ).toEqual({ total: 4, submitted: 1, accepted: 2, rejected: 1 });
+  });
+
+  it("is all zeros without files", () => {
+    expect(evidenceCounts([])).toEqual({ total: 0, submitted: 0, accepted: 0, rejected: 0 });
   });
 });
