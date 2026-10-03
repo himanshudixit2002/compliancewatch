@@ -81,11 +81,15 @@ export function EvidenceViewComponent({ view, onUpload, onDelete, onPreview }: E
         </Card>
         <Card className="p-4">
           <p className="text-sm text-fg-muted">Accepted</p>
-          <p className="text-2xl font-semibold text-success">{view.items.filter((i) => i.status === "accepted").length}</p>
+          <p className="text-2xl font-semibold text-success">
+            {view.items.filter((i) => i.status === "accepted").length}
+          </p>
         </Card>
         <Card className="p-4">
           <p className="text-sm text-fg-muted">Rejected</p>
-          <p className="text-2xl font-semibold text-danger">{view.items.filter((i) => i.status === "rejected").length}</p>
+          <p className="text-2xl font-semibold text-danger">
+            {view.items.filter((i) => i.status === "rejected").length}
+          </p>
         </Card>
       </div>
 
@@ -126,17 +130,31 @@ export function EvidenceViewComponent({ view, onUpload, onDelete, onPreview }: E
                   <TableCell className="font-medium text-fg">{item.fileName}</TableCell>
                   <TableCell className="text-fg-muted">{formatFileSize(item.sizeBytes)}</TableCell>
                   <TableCell>
-                    <Badge tone={item.status === "accepted" ? "success" : item.status === "rejected" ? "danger" : "info"}>
+                    <Badge
+                      tone={
+                        item.status === "accepted"
+                          ? "success"
+                          : item.status === "rejected"
+                            ? "danger"
+                            : "info"
+                      }
+                    >
                       {item.status}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-fg-muted">{item.uploadedBy}</TableCell>
-                  <TableCell className="text-fg-muted">{new Date(item.uploadedAt).toLocaleString()}</TableCell>
+                  <TableCell className="text-fg-muted">
+                    {new Date(item.uploadedAt).toLocaleString()}
+                  </TableCell>
                   <TableCell>
                     <div className="flex gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => onPreview?.(item)}>Preview</Button>
+                      <Button variant="ghost" size="sm" onClick={() => onPreview?.(item)}>
+                        Preview
+                      </Button>
                       {item.status === "submitted" && onDelete && (
-                        <Button variant="ghost" size="sm" onClick={() => onDelete(item.id)}>Delete</Button>
+                        <Button variant="ghost" size="sm" onClick={() => onDelete(item.id)}>
+                          Delete
+                        </Button>
                       )}
                     </div>
                   </TableCell>

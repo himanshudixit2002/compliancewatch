@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { requireScreenSession } from "@/server/dal";
-import { ReviewTaskDetailComponent, emptyReviewTask, type ReviewTask } from "@/features/review-task";
+import {
+  ReviewTaskDetailComponent,
+  emptyReviewTask,
+  type ReviewTask,
+} from "@/features/review-task";
 import { screenById } from "@/shared/config/screens";
 
 const SCREEN = screenById("admin.review.task");

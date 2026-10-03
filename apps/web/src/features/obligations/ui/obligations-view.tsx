@@ -39,7 +39,13 @@ const SORT_OPTIONS = [
   { value: "title", label: "Title" },
 ];
 
-function ObligationRow({ obligation, href }: { obligation: Obligation; href: (id: string) => string }) {
+function ObligationRow({
+  obligation,
+  href,
+}: {
+  obligation: Obligation;
+  href: (id: string) => string;
+}) {
   const overdue = isObligationOverdue(obligation);
   const statusTone = obligationStatusTone(obligation.status);
 
@@ -54,9 +60,7 @@ function ObligationRow({ obligation, href }: { obligation: Obligation; href: (id
             <span className="text-xs text-fg-muted line-clamp-1">{obligation.description}</span>
           )}
           {obligation.periodLabel && (
-            <span className="text-xs text-fg-muted">
-              Period: {obligation.periodLabel}
-            </span>
+            <span className="text-xs text-fg-muted">Period: {obligation.periodLabel}</span>
           )}
         </div>
       </TableCell>
@@ -68,9 +72,7 @@ function ObligationRow({ obligation, href }: { obligation: Obligation; href: (id
           <span className={overdue ? "text-danger font-medium" : "text-fg"}>
             {formatObligationDate(obligation.dueAt)}
           </span>
-          {overdue && (
-            <span className="text-xs text-danger">Overdue</span>
-          )}
+          {overdue && <span className="text-xs text-danger">Overdue</span>}
         </div>
       </TableCell>
       <TableCell>
@@ -116,7 +118,7 @@ export function ObligationsViewComponent({ view, businessId, href }: Obligations
         (o) =>
           o.title.toLowerCase().includes(q) ||
           o.description?.toLowerCase().includes(q) ||
-          o.evidenceType.toLowerCase().includes(q)
+          o.evidenceType.toLowerCase().includes(q),
       );
     }
 
@@ -186,7 +188,12 @@ export function ObligationsViewComponent({ view, businessId, href }: Obligations
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1"
         />
-        <Select value={sort} onChange={(v) => setSort(v as ObligationView["sort"])} options={SORT_OPTIONS} className="w-full sm:w-48" />
+        <Select
+          value={sort}
+          onChange={(v) => setSort(v as ObligationView["sort"])}
+          options={SORT_OPTIONS}
+          className="w-full sm:w-48"
+        />
       </div>
 
       {filtered.length === 0 ? (

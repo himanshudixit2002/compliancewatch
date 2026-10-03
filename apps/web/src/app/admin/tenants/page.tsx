@@ -12,10 +12,5 @@ export const dynamic = "force-dynamic";
 export default async function AdminTenantsPage() {
   await requireScreenSession(SCREEN);
 
-  return (
-    <AdminTenantsViewComponent
-      view={emptyAdminTenants()}
-      onImpersonate={() => {}}
-    />
-  );
+  return <AdminTenantsViewComponent view={emptyAdminTenants()} onImpersonate={() => {}} />;
 }

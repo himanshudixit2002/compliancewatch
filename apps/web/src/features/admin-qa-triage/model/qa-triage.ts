@@ -21,9 +21,13 @@ export function emptyAdminQaTriage(): AdminQaTriageView {
 
 export function qaPriorityTone(priority: string): "success" | "warning" | "danger" | "info" {
   switch (priority) {
-    case "low": return "info";
-    case "medium": return "warning";
-    case "high": return "danger";
-    default: return "neutral";
+    case "low":
+      return "info";
+    case "medium":
+      return "warning";
+    case "high":
+      return "danger";
+    default:
+      return "neutral";
   }
 }

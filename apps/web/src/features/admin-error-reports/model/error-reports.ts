@@ -21,11 +21,17 @@ export function emptyAdminErrorReports(): AdminErrorReportsView {
   return { reports: [], totalCount: 0 };
 }
 
-export function errorSeverityTone(severity: ErrorReport["severity"]): "success" | "info" | "warning" | "danger" {
+export function errorSeverityTone(
+  severity: ErrorReport["severity"],
+): "success" | "info" | "warning" | "danger" {
   switch (severity) {
-    case "low": return "info";
-    case "medium": return "warning";
-    case "high": return "danger";
-    case "critical": return "danger";
+    case "low":
+      return "info";
+    case "medium":
+      return "warning";
+    case "high":
+      return "danger";
+    case "critical":
+      return "danger";
   }
 }

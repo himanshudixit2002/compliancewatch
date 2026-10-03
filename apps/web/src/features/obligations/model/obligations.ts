@@ -54,7 +54,9 @@ export function obligationStatusLabel(status: ObligationStatus): string {
   return t(`obligation.status.${status}`);
 }
 
-export function obligationStatusTone(status: ObligationStatus): "danger" | "warning" | "success" | "info" | "neutral" {
+export function obligationStatusTone(
+  status: ObligationStatus,
+): "danger" | "warning" | "success" | "info" | "neutral" {
   switch (status) {
     case "open":
       return "info";
@@ -72,7 +74,12 @@ export function obligationStatusTone(status: ObligationStatus): "danger" | "warn
 }
 
 export function isObligationOverdue(obligation: Obligation): boolean {
-  if (!obligation.dueAt || obligation.status === "done" || obligation.status === "waived" || obligation.status === "closed_not_applicable") {
+  if (
+    !obligation.dueAt ||
+    obligation.status === "done" ||
+    obligation.status === "waived" ||
+    obligation.status === "closed_not_applicable"
+  ) {
     return false;
   }
   return new Date(obligation.dueAt) < new Date();

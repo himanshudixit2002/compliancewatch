@@ -1,13 +1,36 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, EmptyState, Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@compliancewatch/ui";
+import {
+  Badge,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  EmptyState,
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@compliancewatch/ui";
 import type { BadgeTone } from "@compliancewatch/ui";
 import type { Crumb, NavLink } from "@/shared/config/nav";
 import { t } from "@/shared/i18n";
 import { formatDate } from "@/shared/lib/dates";
 import { SettingsHeader } from "@/shared/ui/settings-header";
-import type { DataRight, DataRightStatus, DataRightType, DataRightsView } from "../model/data-rights";
+import type {
+  DataRight,
+  DataRightStatus,
+  DataRightType,
+  DataRightsView,
+} from "../model/data-rights";
 
 export interface DataRightsViewProps {
   title: string;
@@ -31,7 +54,12 @@ const TYPE_LABEL: Readonly<Record<DataRightType, string>> = {
   portability: "Portability",
 };
 
-const REQUEST_TYPES: readonly DataRightType[] = ["access", "rectification", "erasure", "portability"];
+const REQUEST_TYPES: readonly DataRightType[] = [
+  "access",
+  "rectification",
+  "erasure",
+  "portability",
+];
 
 function StatusBadge({ status }: { status: DataRightStatus }) {
   return <Badge tone={STATUS_TONE[status]}>{status}</Badge>;
@@ -44,8 +72,12 @@ function RightRow({ right }: { right: DataRight }) {
       <TableCell>
         <StatusBadge status={right.status} />
       </TableCell>
-      <TableCell className="text-fg-muted whitespace-nowrap">{formatDate(right.requestedAt)}</TableCell>
-      <TableCell className="text-fg-muted whitespace-nowrap">{right.resolvedAt ? formatDate(right.resolvedAt) : "—"}</TableCell>
+      <TableCell className="text-fg-muted whitespace-nowrap">
+        {formatDate(right.requestedAt)}
+      </TableCell>
+      <TableCell className="text-fg-muted whitespace-nowrap">
+        {right.resolvedAt ? formatDate(right.resolvedAt) : "—"}
+      </TableCell>
       <TableCell className="max-w-xs truncate">{right.description}</TableCell>
     </TableRow>
   );
@@ -100,7 +132,13 @@ export function DataRightsView({ title, view, crumbs, tabs, onRequest }: DataRig
   );
 }
 
-function RequestDialog({ onRequest, trigger }: { onRequest?: (type: DataRightType) => void; trigger?: React.ReactNode }) {
+function RequestDialog({
+  onRequest,
+  trigger,
+}: {
+  onRequest?: (type: DataRightType) => void;
+  trigger?: React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -109,7 +147,9 @@ function RequestDialog({ onRequest, trigger }: { onRequest?: (type: DataRightTyp
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Request data right</DialogTitle>
-          <DialogDescription>Choose the type of data right you want to request under data protection law.</DialogDescription>
+          <DialogDescription>
+            Choose the type of data right you want to request under data protection law.
+          </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-2">
           {REQUEST_TYPES.map((type) => (
@@ -127,7 +167,9 @@ function RequestDialog({ onRequest, trigger }: { onRequest?: (type: DataRightTyp
           ))}
         </div>
         <DialogFooter>
-          <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button variant="secondary" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

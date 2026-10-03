@@ -35,7 +35,10 @@ export default async function ObligationDetailPage({
         periodEnd: null,
         periodLabel: null,
       }}
-      evidenceHref={hrefFor(screenById("owner.evidence"), { businessId: params.businessId, obligationId: params.obligationId })}
+      evidenceHref={hrefFor(screenById("owner.evidence"), {
+        businessId: params.businessId,
+        obligationId: params.obligationId,
+      })}
       onStatusChange={async () => {}}
     />
   );

@@ -12,7 +12,12 @@ import {
   Tabs,
 } from "@compliancewatch/ui";
 import { StatCard } from "@/shared/ui/stat-card";
-import { obligationStatusLabel, obligationStatusTone, isObligationOverdue, formatObligationDate } from "../model/obligations";
+import {
+  obligationStatusLabel,
+  obligationStatusTone,
+  isObligationOverdue,
+  formatObligationDate,
+} from "../model/obligations";
 import type { Obligation } from "../model/obligations";
 
 export interface ObligationDetailProps {
@@ -21,18 +26,28 @@ export interface ObligationDetailProps {
   evidenceHref: string;
 }
 
-export function ObligationDetail({ obligation, onStatusChange, evidenceHref }: ObligationDetailProps) {
+export function ObligationDetail({
+  obligation,
+  onStatusChange,
+  evidenceHref,
+}: ObligationDetailProps) {
   const overdue = isObligationOverdue(obligation);
   const statusTone = obligationStatusTone(obligation.status);
 
   const progress = useMemo(() => {
     switch (obligation.status) {
-      case "open": return 0;
-      case "in_progress": return 50;
-      case "done": return 100;
-      case "waived": return 100;
-      case "closed_not_applicable": return 100;
-      default: return 0;
+      case "open":
+        return 0;
+      case "in_progress":
+        return 50;
+      case "done":
+        return 100;
+      case "waived":
+        return 100;
+      case "closed_not_applicable":
+        return 100;
+      default:
+        return 0;
     }
   }, [obligation.status]);
 
@@ -44,10 +59,22 @@ export function ObligationDetail({ obligation, onStatusChange, evidenceHref }: O
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Status" value={obligationStatusLabel(obligation.status)} tone={statusTone} />
-        <StatCard label="Due date" value={formatObligationDate(obligation.dueAt)} tone={overdue ? "danger" : "neutral"} />
+        <StatCard
+          label="Status"
+          value={obligationStatusLabel(obligation.status)}
+          tone={statusTone}
+        />
+        <StatCard
+          label="Due date"
+          value={formatObligationDate(obligation.dueAt)}
+          tone={overdue ? "danger" : "neutral"}
+        />
         <StatCard label="Evidence type" value={obligation.evidenceType} tone="info" />
-        <StatCard label="Progress" value={`${progress}%`} tone={progress === 100 ? "success" : "info"} />
+        <StatCard
+          label="Progress"
+          value={`${progress}%`}
+          tone={progress === 100 ? "success" : "info"}
+        />
       </div>
 
       <Card className="p-6">
@@ -105,23 +132,22 @@ export function ObligationDetail({ obligation, onStatusChange, evidenceHref }: O
       </Card>
 
       <div className="flex flex-col gap-3 sm:flex-row">
-        {obligation.status !== "done" && obligation.status !== "waived" && obligation.status !== "closed_not_applicable" && (
-          <>
-            <Button
-              variant="primary"
-              onClick={() => onStatusChange?.("in_progress")}
-              disabled={obligation.status === "in_progress"}
-            >
-              {obligation.status === "open" ? "Start" : "Mark in progress"}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => onStatusChange?.("done")}
-            >
-              Mark complete
-            </Button>
-          </>
-        )}
+        {obligation.status !== "done" &&
+          obligation.status !== "waived" &&
+          obligation.status !== "closed_not_applicable" && (
+            <>
+              <Button
+                variant="primary"
+                onClick={() => onStatusChange?.("in_progress")}
+                disabled={obligation.status === "in_progress"}
+              >
+                {obligation.status === "open" ? "Start" : "Mark in progress"}
+              </Button>
+              <Button variant="secondary" onClick={() => onStatusChange?.("done")}>
+                Mark complete
+              </Button>
+            </>
+          )}
         <Button variant="secondary" asChild>
           <Link href={evidenceHref}>Manage evidence</Link>
         </Button>

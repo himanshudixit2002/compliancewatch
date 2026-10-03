@@ -36,7 +36,9 @@ function EvalRow({ run }: { run: AdminEvalsView["runs"][number] }) {
       </TableCell>
       <TableCell className="text-fg-muted">{new Date(run.createdAt).toLocaleString()}</TableCell>
       <TableCell>
-        <Button variant="ghost" size="sm">View</Button>
+        <Button variant="ghost" size="sm">
+          View
+        </Button>
       </TableCell>
     </TableRow>
   );
@@ -60,11 +62,15 @@ export function AdminEvalsViewComponent({ view }: AdminEvalsViewProps) {
         </Card>
         <Card className="p-4">
           <p className="text-sm text-fg-muted">Avg score</p>
-          <p className="text-2xl font-semibold">{avgScore !== null ? `${Math.round(avgScore * 100)}%` : "—"}</p>
+          <p className="text-2xl font-semibold">
+            {avgScore !== null ? `${Math.round(avgScore * 100)}%` : "—"}
+          </p>
         </Card>
         <Card className="p-4">
           <p className="text-sm text-fg-muted">Passed</p>
-          <p className="text-2xl font-semibold text-success">{view.runs.filter((r) => (r.score ?? 0) >= 0.8).length}</p>
+          <p className="text-2xl font-semibold text-success">
+            {view.runs.filter((r) => (r.score ?? 0) >= 0.8).length}
+          </p>
         </Card>
       </div>
 

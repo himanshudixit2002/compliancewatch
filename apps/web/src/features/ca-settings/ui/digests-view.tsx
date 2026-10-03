@@ -17,11 +17,7 @@ import {
   type SelectOption,
 } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
-import {
-  COMMON_TIMEZONES,
-  DIGEST_FREQUENCIES,
-  type DigestConfig,
-} from "../model/settings";
+import { COMMON_TIMEZONES, DIGEST_FREQUENCIES, type DigestConfig } from "../model/settings";
 
 export interface DigestsViewProps {
   title: string;
@@ -95,10 +91,7 @@ export function DigestsView({ title, config, onSave }: DigestsViewProps) {
 
   return (
     <div data-slot="ca-digests" className="flex max-w-2xl flex-col gap-6">
-      <PageHeader
-        title={title}
-        description={t("caSettings.digest.intro")}
-      />
+      <PageHeader title={title} description={t("caSettings.digest.intro")} />
 
       <Card>
         <CardHeader>
@@ -117,7 +110,10 @@ export function DigestsView({ title, config, onSave }: DigestsViewProps) {
                 id={frequencyId}
                 value={values.frequency}
                 onChange={(event: React.ChangeEvent<HTMLSelectElement>) =>
-                  setValues({ ...values, frequency: event.target.value as DigestConfig["frequency"] })
+                  setValues({
+                    ...values,
+                    frequency: event.target.value as DigestConfig["frequency"],
+                  })
                 }
                 options={FREQUENCY_OPTIONS}
               />
@@ -164,9 +160,7 @@ export function DigestsView({ title, config, onSave }: DigestsViewProps) {
               <Button type="submit" disabled={saving} aria-busy={saving || undefined}>
                 {saving ? t("caSettings.digest.saving") : t("caSettings.digest.save")}
               </Button>
-              {saved ? (
-                <Banner tone="success" title={t("caSettings.digest.saved")} />
-              ) : null}
+              {saved ? <Banner tone="success" title={t("caSettings.digest.saved")} /> : null}
             </div>
           </form>
         </CardContent>

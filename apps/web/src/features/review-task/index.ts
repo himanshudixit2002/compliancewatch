@@ -1,8 +1,4 @@
-export {
-  emptyReviewTask,
-  reviewTaskStatusLabel,
-  reviewTaskStatusTone,
-} from "./model/review-task";
+export { emptyReviewTask, reviewTaskStatusLabel, reviewTaskStatusTone } from "./model/review-task";
 export type {
   ReviewTask,
   ReviewTaskAction,

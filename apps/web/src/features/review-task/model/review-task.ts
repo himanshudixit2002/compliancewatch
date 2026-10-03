@@ -1,10 +1,6 @@
 import type { Tone } from "@compliancewatch/ui";
 import { t, type MessageKey } from "@/shared/i18n";
-import {
-  type ReviewItemType,
-  type ReviewPriority,
-  type ReviewStatus,
-} from "../review-queue";
+import { type ReviewItemType, type ReviewPriority, type ReviewStatus } from "../review-queue";
 
 /**
  * The admin review-workbench domain: a single item the queue lists, with an assignee and the

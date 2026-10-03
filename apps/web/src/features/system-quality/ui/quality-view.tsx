@@ -35,7 +35,10 @@ export function emptySystemQuality(): SystemQualityView {
 }
 
 export function SystemQualityViewComponent({ view }: { view: SystemQualityView }) {
-  const healthyCount = useMemo(() => view.metrics.filter((m) => m.status === "healthy").length, [view.metrics]);
+  const healthyCount = useMemo(
+    () => view.metrics.filter((m) => m.status === "healthy").length,
+    [view.metrics],
+  );
 
   return (
     <div data-slot="system-quality" className="flex flex-col gap-6">
@@ -44,7 +47,9 @@ export function SystemQualityViewComponent({ view }: { view: SystemQualityView }
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card className="p-4">
           <p className="text-sm text-fg-muted">Overall score</p>
-          <p className="text-2xl font-semibold">{view.overallScore > 0 ? `${view.overallScore}%` : "—"}</p>
+          <p className="text-2xl font-semibold">
+            {view.overallScore > 0 ? `${view.overallScore}%` : "—"}
+          </p>
         </Card>
         <Card className="p-4">
           <p className="text-sm text-fg-muted">Healthy metrics</p>
@@ -58,10 +63,7 @@ export function SystemQualityViewComponent({ view }: { view: SystemQualityView }
 
       {view.metrics.length === 0 ? (
         <Card>
-          <EmptyState
-            title="No metrics"
-            description="System quality metrics will appear here."
-          />
+          <EmptyState title="No metrics" description="System quality metrics will appear here." />
         </Card>
       ) : (
         <div className="overflow-hidden rounded-md border border-line">
@@ -78,10 +80,22 @@ export function SystemQualityViewComponent({ view }: { view: SystemQualityView }
               {view.metrics.map((metric) => (
                 <TableRow key={metric.id}>
                   <TableCell className="font-medium text-fg">{metric.name}</TableCell>
-                  <TableCell className="text-fg">{metric.value} {metric.unit}</TableCell>
-                  <TableCell className="text-fg-muted">{metric.target} {metric.unit}</TableCell>
+                  <TableCell className="text-fg">
+                    {metric.value} {metric.unit}
+                  </TableCell>
+                  <TableCell className="text-fg-muted">
+                    {metric.target} {metric.unit}
+                  </TableCell>
                   <TableCell>
-                    <Badge tone={metric.status === "healthy" ? "success" : metric.status === "warning" ? "warning" : "danger"}>
+                    <Badge
+                      tone={
+                        metric.status === "healthy"
+                          ? "success"
+                          : metric.status === "warning"
+                            ? "warning"
+                            : "danger"
+                      }
+                    >
                       {metric.status}
                     </Badge>
                   </TableCell>

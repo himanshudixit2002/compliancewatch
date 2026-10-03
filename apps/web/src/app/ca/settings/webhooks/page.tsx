@@ -13,10 +13,5 @@ export default async function WebhooksPage() {
   await requireScreenSession(SCREEN);
   const view = emptyCaSettings();
 
-  return (
-    <WebhooksView
-      title={SCREEN.title}
-      webhooks={view.webhooks}
-    />
-  );
+  return <WebhooksView title={SCREEN.title} webhooks={view.webhooks} />;
 }

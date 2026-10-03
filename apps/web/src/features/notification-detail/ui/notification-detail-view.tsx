@@ -58,16 +58,37 @@ export function NotificationDetailView({
       <Card>
         <CardContent className="p-6">
           <div className="grid gap-4 sm:grid-cols-2">
-            <KeyValue label={t("notificationLog.field.state")} value={<StatusChip status={state} tone="info" label={state} />} />
+            <KeyValue
+              label={t("notificationLog.field.state")}
+              value={<StatusChip status={state} tone="info" label={state} />}
+            />
             <KeyValue label={t("notificationLog.field.channel")} value={channel} />
             <KeyValue label={t("notificationLog.field.recipient")} value={recipient} />
-            <KeyValue label={t("notificationLog.field.business")} value={businessName || t("common.none")} />
-            <KeyValue label={t("notificationLog.field.template")} value={<code className="font-mono text-xs">{templateKey}</code>} />
+            <KeyValue
+              label={t("notificationLog.field.business")}
+              value={businessName || t("common.none")}
+            />
+            <KeyValue
+              label={t("notificationLog.field.template")}
+              value={<code className="font-mono text-xs">{templateKey}</code>}
+            />
             <KeyValue label={t("notificationLog.field.attempts")} value={String(attempts)} />
-            <KeyValue label={t("notificationLog.field.sentAt")} value={sentAt || t("common.none")} />
-            <KeyValue label={t("notificationLog.field.deliveredAt")} value={deliveredAt || t("common.none")} />
-            <KeyValue label={t("notificationLog.field.readAt")} value={readAt || t("common.none")} />
-            <KeyValue label={t("notificationLog.field.id")} value={<code className="font-mono text-xs">{id}</code>} />
+            <KeyValue
+              label={t("notificationLog.field.sentAt")}
+              value={sentAt || t("common.none")}
+            />
+            <KeyValue
+              label={t("notificationLog.field.deliveredAt")}
+              value={deliveredAt || t("common.none")}
+            />
+            <KeyValue
+              label={t("notificationLog.field.readAt")}
+              value={readAt || t("common.none")}
+            />
+            <KeyValue
+              label={t("notificationLog.field.id")}
+              value={<code className="font-mono text-xs">{id}</code>}
+            />
           </div>
         </CardContent>
       </Card>

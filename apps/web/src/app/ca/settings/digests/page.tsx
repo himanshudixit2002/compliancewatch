@@ -13,10 +13,5 @@ export default async function DigestsPage() {
   await requireScreenSession(SCREEN);
   const view = emptyCaSettings();
 
-  return (
-    <DigestsView
-      title={SCREEN.title}
-      config={view.digests[0] ?? null}
-    />
-  );
+  return <DigestsView title={SCREEN.title} config={view.digests[0] ?? null} />;
 }

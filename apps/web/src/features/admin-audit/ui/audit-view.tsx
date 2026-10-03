@@ -16,11 +16,7 @@ import {
   TableRow,
   Tabs,
 } from "@compliancewatch/ui";
-import {
-  actionCategory,
-  actionLabel,
-  type AuditView,
-} from "../model/audit";
+import { actionCategory, actionLabel, type AuditView } from "../model/audit";
 
 export interface AuditViewProps {
   view: AuditView;
@@ -43,12 +39,8 @@ function AuditRow({ entry }: { entry: AuditView["entries"][number] }) {
       <TableCell className="text-fg-muted">
         {entry.targetType}: {entry.targetId}
       </TableCell>
-      <TableCell className="text-fg-muted max-w-xs truncate">
-        {entry.changes}
-      </TableCell>
-      <TableCell className="text-fg-muted font-mono text-xs">
-        {entry.ipAddress}
-      </TableCell>
+      <TableCell className="text-fg-muted max-w-xs truncate">{entry.changes}</TableCell>
+      <TableCell className="text-fg-muted font-mono text-xs">{entry.ipAddress}</TableCell>
     </TableRow>
   );
 }

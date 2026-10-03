@@ -30,11 +30,17 @@ export function emptyPipeline(): PipelineView {
   };
 }
 
-export function pipelineStatusTone(status: PipelineTask["status"]): "info" | "success" | "warning" | "danger" {
+export function pipelineStatusTone(
+  status: PipelineTask["status"],
+): "info" | "success" | "warning" | "danger" {
   switch (status) {
-    case "pending": return "info";
-    case "running": return "warning";
-    case "completed": return "success";
-    case "failed": return "danger";
+    case "pending":
+      return "info";
+    case "running":
+      return "warning";
+    case "completed":
+      return "success";
+    case "failed":
+      return "danger";
   }
 }

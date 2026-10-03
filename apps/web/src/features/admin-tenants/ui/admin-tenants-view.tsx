@@ -16,11 +16,7 @@ import {
   TableRow,
   Tabs,
 } from "@compliancewatch/ui";
-import {
-  tenantKindLabel,
-  tenantStatusLabel,
-  tenantStatusTone,
-} from "../model/admin-tenants";
+import { tenantKindLabel, tenantStatusLabel, tenantStatusTone } from "../model/admin-tenants";
 import type { AdminTenantsView, Tenant } from "../model/admin-tenants";
 
 export interface AdminTenantsViewProps {
@@ -28,7 +24,13 @@ export interface AdminTenantsViewProps {
   onImpersonate?: (tenantId: string) => void;
 }
 
-function TenantRow({ tenant, onImpersonate }: { tenant: Tenant; onImpersonate?: (id: string) => void }) {
+function TenantRow({
+  tenant,
+  onImpersonate,
+}: {
+  tenant: Tenant;
+  onImpersonate?: (id: string) => void;
+}) {
   return (
     <TableRow>
       <TableCell>
@@ -57,7 +59,9 @@ function TenantRow({ tenant, onImpersonate }: { tenant: Tenant; onImpersonate?: 
       </TableCell>
       <TableCell>
         <div className="flex gap-2">
-          <Button variant="ghost" size="sm">View</Button>
+          <Button variant="ghost" size="sm">
+            View
+          </Button>
           <Button variant="ghost" size="sm" onClick={() => onImpersonate?.(tenant.id)}>
             Impersonate
           </Button>

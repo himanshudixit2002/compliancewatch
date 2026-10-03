@@ -1,6 +1,17 @@
 "use client";
 
-import { Badge, Button, EmptyState, Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@compliancewatch/ui";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@compliancewatch/ui";
 import type { BadgeTone } from "@compliancewatch/ui";
 import type { Crumb, NavLink } from "@/shared/config/nav";
 import { t } from "@/shared/i18n";
@@ -30,13 +41,23 @@ function ChannelBadges({ channels }: { channels: readonly string[] }) {
   return (
     <div className="flex flex-wrap gap-1">
       {channels.map((channel) => (
-        <Badge key={channel} tone={CHANNEL_TONE[channel] ?? "neutral"}>{channel}</Badge>
+        <Badge key={channel} tone={CHANNEL_TONE[channel] ?? "neutral"}>
+          {channel}
+        </Badge>
       ))}
     </div>
   );
 }
 
-function ActiveToggle({ id, active, onToggle }: { id: string; active: boolean; onToggle?: (id: string, active: boolean) => void }) {
+function ActiveToggle({
+  id,
+  active,
+  onToggle,
+}: {
+  id: string;
+  active: boolean;
+  onToggle?: (id: string, active: boolean) => void;
+}) {
   return (
     <label className="inline-flex cursor-pointer items-center gap-2">
       <input
@@ -50,7 +71,15 @@ function ActiveToggle({ id, active, onToggle }: { id: string; active: boolean; o
   );
 }
 
-function RecipientRow({ recipient, onToggle, onDelete }: { recipient: Recipient; onToggle?: (id: string, active: boolean) => void; onDelete?: (id: string) => void }) {
+function RecipientRow({
+  recipient,
+  onToggle,
+  onDelete,
+}: {
+  recipient: Recipient;
+  onToggle?: (id: string, active: boolean) => void;
+  onDelete?: (id: string) => void;
+}) {
   return (
     <TableRow data-recipient-id={recipient.id}>
       <TableCell className="font-medium text-fg">{recipient.name}</TableCell>
@@ -63,7 +92,9 @@ function RecipientRow({ recipient, onToggle, onDelete }: { recipient: Recipient;
       </TableCell>
       <TableCell>
         <div className="flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => onDelete?.(recipient.id)}>Delete</Button>
+          <Button variant="ghost" size="sm" onClick={() => onDelete?.(recipient.id)}>
+            Delete
+          </Button>
         </div>
       </TableCell>
     </TableRow>
@@ -75,7 +106,15 @@ function RecipientRow({ recipient, onToggle, onDelete }: { recipient: Recipient;
  * a table of each recipient with their name, email, channels as badges, an active toggle and
  * actions, alphabetically by name.
  */
-export function RecipientsView({ title, view, crumbs, tabs, onAdd, onToggle, onDelete }: RecipientsViewProps) {
+export function RecipientsView({
+  title,
+  view,
+  crumbs,
+  tabs,
+  onAdd,
+  onToggle,
+  onDelete,
+}: RecipientsViewProps) {
   return (
     <div data-slot="settings-recipients" className="flex flex-col gap-6">
       <SettingsHeader title={title} crumbs={crumbs} tabs={tabs} />

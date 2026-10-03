@@ -17,17 +17,20 @@ import {
   TableRow,
   Tabs,
 } from "@compliancewatch/ui";
-import {
-  pipelineStatusTone,
-  type PipelineView,
-} from "../model/pipeline";
+import { pipelineStatusTone, type PipelineView } from "../model/pipeline";
 
 export interface PipelineViewProps {
   view: PipelineView;
   onRetry?: (taskId: string) => void;
 }
 
-function PipelineRow({ task, onRetry }: { task: PipelineView["tasks"][number]; onRetry?: (id: string) => void }) {
+function PipelineRow({
+  task,
+  onRetry,
+}: {
+  task: PipelineView["tasks"][number];
+  onRetry?: (id: string) => void;
+}) {
   return (
     <TableRow>
       <TableCell>
@@ -71,7 +74,9 @@ export function PipelineViewComponent({ view, onRetry }: PipelineViewProps) {
     }
     if (search) {
       const q = search.toLowerCase();
-      items = items.filter((t) => t.name.toLowerCase().includes(q) || t.type.toLowerCase().includes(q));
+      items = items.filter(
+        (t) => t.name.toLowerCase().includes(q) || t.type.toLowerCase().includes(q),
+      );
     }
     return items;
   }, [view.tasks, tab, search]);
@@ -118,10 +123,7 @@ export function PipelineViewComponent({ view, onRetry }: PipelineViewProps) {
 
       {filtered.length === 0 ? (
         <Card>
-          <EmptyState
-            title="No pipeline jobs"
-            description="Background jobs will appear here."
-          />
+          <EmptyState title="No pipeline jobs" description="Background jobs will appear here." />
         </Card>
       ) : (
         <div className="overflow-hidden rounded-md border border-line">

@@ -21,9 +21,13 @@ export function emptyAdminSources(): AdminSourcesView {
 
 export function dataSourceStatusTone(status: string): "success" | "info" | "danger" {
   switch (status) {
-    case "connected": return "success";
-    case "syncing": return "info";
-    case "error": return "danger";
-    default: return "neutral";
+    case "connected":
+      return "success";
+    case "syncing":
+      return "info";
+    case "error":
+      return "danger";
+    default:
+      return "neutral";
   }
 }

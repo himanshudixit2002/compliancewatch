@@ -10,18 +10,16 @@ export const metadata: Metadata = { title: SCREEN.title };
 
 export const dynamic = "force-dynamic";
 
-export default async function ObligationsPage({
-  params,
-}: {
-  params: { businessId: string };
-}) {
+export default async function ObligationsPage({ params }: { params: { businessId: string } }) {
   const session = await requireScreenSession(SCREEN);
 
   return (
     <ObligationsViewComponent
       view={emptyObligations(params.businessId)}
       businessId={params.businessId}
-      href={(id) => hrefFor(screenById("owner.obligation"), { businessId: params.businessId, obligationId: id })}
+      href={(id) =>
+        hrefFor(screenById("owner.obligation"), { businessId: params.businessId, obligationId: id })
+      }
     />
   );
 }

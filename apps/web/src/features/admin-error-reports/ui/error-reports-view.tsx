@@ -36,14 +36,19 @@ function ErrorReportRow({ report }: { report: AdminErrorReportsView["reports"][n
       <TableCell className="text-fg-muted max-w-xs truncate">{report.message}</TableCell>
       <TableCell className="text-fg-muted">{new Date(report.createdAt).toLocaleString()}</TableCell>
       <TableCell>
-        <Button variant="ghost" size="sm">View</Button>
+        <Button variant="ghost" size="sm">
+          View
+        </Button>
       </TableCell>
     </TableRow>
   );
 }
 
 export function AdminErrorReportsViewComponent({ view }: AdminErrorReportsViewProps) {
-  const criticalCount = useMemo(() => view.reports.filter((r) => r.severity === "critical" || r.severity === "high").length, [view.reports]);
+  const criticalCount = useMemo(
+    () => view.reports.filter((r) => r.severity === "critical" || r.severity === "high").length,
+    [view.reports],
+  );
 
   return (
     <div data-slot="admin-error-reports" className="flex flex-col gap-6">
@@ -60,21 +65,17 @@ export function AdminErrorReportsViewComponent({ view }: AdminErrorReportsViewPr
         </Card>
         <Card className="p-4">
           <p className="text-sm text-fg-muted">Resolved</p>
-          <p className="text-2xl font-semibold text-success">{view.reports.filter((r) => r.resolvedAt).length}</p>
+          <p className="text-2xl font-semibold text-success">
+            {view.reports.filter((r) => r.resolvedAt).length}
+          </p>
         </Card>
       </div>
 
-      <Input
-        placeholder="Search errors..."
-        onChange={() => {}}
-      />
+      <Input placeholder="Search errors..." onChange={() => {}} />
 
       {view.reports.length === 0 ? (
         <Card>
-          <EmptyState
-            title="No error reports"
-            description="System errors will appear here."
-          />
+          <EmptyState title="No error reports" description="System errors will appear here." />
         </Card>
       ) : (
         <div className="overflow-hidden rounded-md border border-line">

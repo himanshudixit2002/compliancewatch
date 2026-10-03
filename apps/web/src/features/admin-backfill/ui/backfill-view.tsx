@@ -1,12 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Button,
-  Card,
-  PageHeader,
-  ProgressBar,
-} from "@compliancewatch/ui";
+import { Button, Card, PageHeader, ProgressBar } from "@compliancewatch/ui";
 
 export interface BackfillJob {
   id: string;
@@ -61,7 +56,9 @@ export function AdminBackfillViewComponent({ view }: { view: AdminBackfillView }
         </Card>
         <Card className="p-4">
           <p className="text-sm text-fg-muted">Completed</p>
-          <p className="text-2xl font-semibold text-success">{view.jobs.filter((j) => j.status === "completed").length}</p>
+          <p className="text-2xl font-semibold text-success">
+            {view.jobs.filter((j) => j.status === "completed").length}
+          </p>
         </Card>
       </div>
 
@@ -104,7 +101,10 @@ export function AdminBackfillViewComponent({ view }: { view: AdminBackfillView }
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <div className="h-2 w-24 rounded-full bg-muted">
-                        <div className="h-2 rounded-full bg-primary" style={{ width: `${job.progress}%` }} />
+                        <div
+                          className="h-2 rounded-full bg-primary"
+                          style={{ width: `${job.progress}%` }}
+                        />
                       </div>
                       <span className="text-xs text-fg-muted">{job.progress}%</span>
                     </div>

@@ -13,7 +13,5 @@ export const dynamic = "force-dynamic";
 export default async function ActivityLogPage() {
   const session = await requireScreenSession(SCREEN);
   const { crumbs, tabs } = settingsHeaderLinks(SCREEN, session);
-  return (
-    <ActivityView title={SCREEN.title} view={emptyActivity()} crumbs={crumbs} tabs={tabs} />
-  );
+  return <ActivityView title={SCREEN.title} view={emptyActivity()} crumbs={crumbs} tabs={tabs} />;
 }

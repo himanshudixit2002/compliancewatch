@@ -39,14 +39,19 @@ function QaRow({ item }: { item: AdminQaTriageView["items"][number] }) {
       <TableCell className="text-fg-muted">{item.assignee}</TableCell>
       <TableCell className="text-fg-muted">{new Date(item.createdAt).toLocaleString()}</TableCell>
       <TableCell>
-        <Button variant="ghost" size="sm">Review</Button>
+        <Button variant="ghost" size="sm">
+          Review
+        </Button>
       </TableCell>
     </TableRow>
   );
 }
 
 export function AdminQaTriageViewComponent({ view }: AdminQaTriageViewProps) {
-  const openCount = useMemo(() => view.items.filter((i) => i.status === "open").length, [view.items]);
+  const openCount = useMemo(
+    () => view.items.filter((i) => i.status === "open").length,
+    [view.items],
+  );
 
   return (
     <div data-slot="admin-qa-triage" className="flex flex-col gap-6">
@@ -63,14 +68,13 @@ export function AdminQaTriageViewComponent({ view }: AdminQaTriageViewProps) {
         </Card>
         <Card className="p-4">
           <p className="text-sm text-fg-muted">Closed</p>
-          <p className="text-2xl font-semibold text-success">{view.items.filter((i) => i.status === "closed").length}</p>
+          <p className="text-2xl font-semibold text-success">
+            {view.items.filter((i) => i.status === "closed").length}
+          </p>
         </Card>
       </div>
 
-      <Input
-        placeholder="Search..."
-        onChange={() => {}}
-      />
+      <Input placeholder="Search..." onChange={() => {}} />
 
       {view.items.length === 0 ? (
         <Card>

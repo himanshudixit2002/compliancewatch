@@ -108,9 +108,7 @@ export function ApiKeysView({ title, keys, onCreateKey, onRevokeKey }: ApiKeysVi
         description={t("caSettings.apiKey.intro")}
         actions={
           onCreateKey && !creating ? (
-            <Button onClick={() => setCreating(true)}>
-              {t("caSettings.apiKey.create")}
-            </Button>
+            <Button onClick={() => setCreating(true)}>{t("caSettings.apiKey.create")}</Button>
           ) : null
         }
       />
@@ -158,9 +156,7 @@ export function ApiKeysView({ title, keys, onCreateKey, onRevokeKey }: ApiKeysVi
                     {key.lastUsed ? (
                       <span className="text-sm text-fg">{formatDateTime(key.lastUsed)}</span>
                     ) : (
-                      <span className="text-sm text-fg-muted">
-                        {t("caSettings.never")}
-                      </span>
+                      <span className="text-sm text-fg-muted">{t("caSettings.never")}</span>
                     )}
                   </TableCell>
                   <TableCell>

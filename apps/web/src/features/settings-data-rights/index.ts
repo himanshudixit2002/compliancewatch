@@ -5,4 +5,9 @@
 export { DataRightsView } from "./ui/data-rights-view";
 export type { DataRightsViewProps } from "./ui/data-rights-view";
 export { emptyDataRights } from "./model/data-rights";
-export type { DataRight, DataRightStatus, DataRightType, DataRightsView as DataRightsViewModel } from "./model/data-rights";
+export type {
+  DataRight,
+  DataRightStatus,
+  DataRightType,
+  DataRightsView as DataRightsViewModel,
+} from "./model/data-rights";

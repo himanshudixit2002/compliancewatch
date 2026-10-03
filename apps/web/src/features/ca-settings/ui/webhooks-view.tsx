@@ -32,7 +32,11 @@ import { webhookEventLabel } from "../model/settings";
 export interface WebhooksViewProps {
   title: string;
   webhooks: readonly Webhook[];
-  onAddWebhook?: (webhook: { url: string; events: string[]; active: boolean }) => void | Promise<void>;
+  onAddWebhook?: (webhook: {
+    url: string;
+    events: string[];
+    active: boolean;
+  }) => void | Promise<void>;
   onToggleActive?: (id: string, active: boolean) => void | Promise<void>;
 }
 
@@ -58,7 +62,7 @@ function AddWebhookForm({ onSubmit }: AddWebhookFormProps) {
 
   const toggleEvent = (value: string) => {
     setSelectedEvents((current) =>
-      current.includes(value) ? current.filter((e) => e !== value) : [...current, value]
+      current.includes(value) ? current.filter((e) => e !== value) : [...current, value],
     );
   };
 
@@ -229,7 +233,9 @@ export function WebhooksView({ title, webhooks, onAddWebhook, onToggleActive }: 
                   </TableCell>
                   <TableCell>
                     {webhook.lastTriggered ? (
-                      <span className="text-sm text-fg">{formatDateTime(webhook.lastTriggered)}</span>
+                      <span className="text-sm text-fg">
+                        {formatDateTime(webhook.lastTriggered)}
+                      </span>
                     ) : (
                       <span className="text-sm text-fg-muted">{t("caSettings.never")}</span>
                     )}

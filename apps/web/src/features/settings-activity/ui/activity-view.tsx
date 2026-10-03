@@ -1,6 +1,16 @@
 "use client";
 
-import { Badge, EmptyState, Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@compliancewatch/ui";
+import {
+  Badge,
+  EmptyState,
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@compliancewatch/ui";
 import type { BadgeTone } from "@compliancewatch/ui";
 import type { Crumb, NavLink } from "@/shared/config/nav";
 import { t } from "@/shared/i18n";
@@ -37,7 +47,9 @@ function ActionBadge({ action }: { action: string }) {
 function EntryRow({ entry }: { entry: ActivityEntry }) {
   return (
     <TableRow data-activity-id={entry.id}>
-      <TableCell className="text-fg-muted whitespace-nowrap">{formatDate(entry.timestamp)}</TableCell>
+      <TableCell className="text-fg-muted whitespace-nowrap">
+        {formatDate(entry.timestamp)}
+      </TableCell>
       <TableCell>
         <ActionBadge action={entry.action} />
       </TableCell>
@@ -54,13 +66,22 @@ function EntryRow({ entry }: { entry: ActivityEntry }) {
 export function ActivityView({ title, view, crumbs, tabs }: ActivityViewProps) {
   return (
     <div data-slot="activity" className="flex flex-col gap-6">
-      <SettingsHeader title={title} description={t("settings.about.owner.settings.activity")} crumbs={crumbs} tabs={tabs} />
+      <SettingsHeader
+        title={title}
+        description={t("settings.about.owner.settings.activity")}
+        crumbs={crumbs}
+        tabs={tabs}
+      />
       {view.entries.length === 0 ? (
-        <EmptyState title={t("dashboard.activityEmptyTitle")} body={t("dashboard.activityEmptyBody")} />
+        <EmptyState
+          title={t("dashboard.activityEmptyTitle")}
+          body={t("dashboard.activityEmptyBody")}
+        />
       ) : (
         <Table>
           <TableCaption className="text-left text-sm text-fg-muted">
-            {t("dashboard.activityTitle")} — {view.totalCount} {view.totalCount === 1 ? "entry" : "entries"}
+            {t("dashboard.activityTitle")} — {view.totalCount}{" "}
+            {view.totalCount === 1 ? "entry" : "entries"}
           </TableCaption>
           <TableHeader>
             <TableRow>

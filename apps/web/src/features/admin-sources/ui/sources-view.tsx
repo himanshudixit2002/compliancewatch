@@ -31,21 +31,31 @@ function SourceRow({ source }: { source: AdminSourcesView["sources"][number] }) 
       <TableCell>
         <Badge tone={dataSourceStatusTone(source.status)}>{source.status}</Badge>
       </TableCell>
-      <TableCell className="text-fg-muted">{source.lastSync ? new Date(source.lastSync).toLocaleString() : "Never"}</TableCell>
+      <TableCell className="text-fg-muted">
+        {source.lastSync ? new Date(source.lastSync).toLocaleString() : "Never"}
+      </TableCell>
       <TableCell className="text-fg-muted">{source.recordCount.toLocaleString()}</TableCell>
       <TableCell>
-        <Button variant="ghost" size="sm">Sync</Button>
+        <Button variant="ghost" size="sm">
+          Sync
+        </Button>
       </TableCell>
     </TableRow>
   );
 }
 
 export function AdminSourcesViewComponent({ view }: AdminSourcesViewProps) {
-  const connectedCount = useMemo(() => view.sources.filter((s) => s.status === "connected").length, [view.sources]);
+  const connectedCount = useMemo(
+    () => view.sources.filter((s) => s.status === "connected").length,
+    [view.sources],
+  );
 
   return (
     <div data-slot="admin-sources" className="flex flex-col gap-6">
-      <PageHeader title="Data sources" description="Manage external data sources and integrations" />
+      <PageHeader
+        title="Data sources"
+        description="Manage external data sources and integrations"
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card className="p-4">
@@ -58,7 +68,9 @@ export function AdminSourcesViewComponent({ view }: AdminSourcesViewProps) {
         </Card>
         <Card className="p-4">
           <p className="text-sm text-fg-muted">Errors</p>
-          <p className="text-2xl font-semibold text-danger">{view.sources.filter((s) => s.status === "error").length}</p>
+          <p className="text-2xl font-semibold text-danger">
+            {view.sources.filter((s) => s.status === "error").length}
+          </p>
         </Card>
       </div>
 

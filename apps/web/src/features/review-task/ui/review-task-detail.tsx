@@ -7,18 +7,17 @@ import type { KeyValueItem } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
 import { formatDateTime } from "@/shared/lib/dates";
 import { StatCard } from "@/shared/ui/stat-card";
-import {
-  reviewPriorityLabel,
-  reviewTypeLabel,
-  type ReviewTask,
-} from "@/features/review-queue";
+import { reviewPriorityLabel, reviewTypeLabel, type ReviewTask } from "@/features/review-queue";
 import { reviewTaskStatusLabel, reviewTaskStatusTone } from "../model/review-task";
 
 function priorityTone(priority: string): "success" | "info" | "warning" | "danger" {
   switch (priority) {
-    case "high": return "danger";
-    case "medium": return "warning";
-    default: return "info";
+    case "high":
+      return "danger";
+    case "medium":
+      return "warning";
+    default:
+      return "info";
   }
 }
 
@@ -34,9 +33,9 @@ export interface ReviewTaskDetailProps {
   backHref?: Route;
 }
 
-function actionButtonVariant(
-  tone: "primary" | "secondary" | "danger" | undefined,
-): { variant: "default" | "outline" | "destructive" } {
+function actionButtonVariant(tone: "primary" | "secondary" | "danger" | undefined): {
+  variant: "default" | "outline" | "destructive";
+} {
   if (tone === "danger") return { variant: "destructive" };
   if (tone === "secondary") return { variant: "outline" };
   return { variant: "default" };
@@ -84,9 +83,7 @@ export function ReviewTaskDetailComponent({
         title={task.title || t("reviewTask.untitled")}
         description={t("reviewTask.detailDescription")}
       >
-        <Badge tone={reviewTaskStatusTone(task.status)}>
-          {reviewTaskStatusLabel(task.status)}
-        </Badge>
+        <Badge tone={reviewTaskStatusTone(task.status)}>{reviewTaskStatusLabel(task.status)}</Badge>
       </PageHeader>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -118,22 +115,14 @@ export function ReviewTaskDetailComponent({
       </Card>
 
       <div className="flex flex-wrap gap-2">
+        {canAct ? <Button onClick={onApprove}>{t("reviewTask.action.approve")}</Button> : null}
         {canAct ? (
-          <Button onClick={onApprove}>{t("reviewTask.action.approve")}</Button>
-        ) : null}
-        {canAct ? (
-          <Button
-            {...actionButtonVariant("danger")}
-            onClick={onReject}
-          >
+          <Button {...actionButtonVariant("danger")} onClick={onReject}>
             {t("reviewTask.action.reject")}
           </Button>
         ) : null}
         {canAct ? (
-          <Button
-            {...actionButtonVariant("secondary")}
-            onClick={onAssign}
-          >
+          <Button {...actionButtonVariant("secondary")} onClick={onAssign}>
             {t("reviewTask.action.assign")}
           </Button>
         ) : null}

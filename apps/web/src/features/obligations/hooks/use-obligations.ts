@@ -8,7 +8,11 @@ import { emptyObligations, type ObligationView, type ObligationFilter } from "..
 
 export type ObligationSort = "due" | "status" | "created" | "title";
 
-export function useObligations(businessId: string, filter: ObligationFilter = "all", sort: ObligationSort = "due") {
+export function useObligations(
+  businessId: string,
+  filter: ObligationFilter = "all",
+  sort: ObligationSort = "due",
+) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<ObligationView>(() => emptyObligations(businessId));
@@ -46,7 +50,13 @@ export function useObligations(businessId: string, filter: ObligationFilter = "a
       const inProgressCount = mapped.filter((o) => o.status === "in_progress").length;
       const doneCount = mapped.filter((o) => o.status === "done").length;
       const overdueCount = mapped.filter((o) => {
-        if (!o.dueAt || o.status === "done" || o.status === "waived" || o.status === "closed_not_applicable") return false;
+        if (
+          !o.dueAt ||
+          o.status === "done" ||
+          o.status === "waived" ||
+          o.status === "closed_not_applicable"
+        )
+          return false;
         return new Date(o.dueAt) < now;
       }).length;
 
@@ -72,10 +82,13 @@ export function useObligations(businessId: string, filter: ObligationFilter = "a
     void load();
   }, [load]);
 
-  return useMemo(() => ({
-    view,
-    loading,
-    error,
-    refresh: load,
-  }), [view, loading, error, load]);
+  return useMemo(
+    () => ({
+      view,
+      loading,
+      error,
+      refresh: load,
+    }),
+    [view, loading, error, load],
+  );
 }
