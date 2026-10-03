@@ -79,3 +79,4 @@ tmp/
 .cache/
 var/
 evals/reports/
+.claude/
