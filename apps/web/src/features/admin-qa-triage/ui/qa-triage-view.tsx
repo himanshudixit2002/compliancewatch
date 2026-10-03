@@ -1,109 +1,76 @@
-"use client";
-
-import { useMemo } from "react";
+import type { Route } from "next";
+import { EmptyState, PageHeader } from "@compliancewatch/ui";
+import { t } from "@/shared/i18n";
+import { formatDateTime } from "@/shared/lib/dates";
+import { StatCard } from "@/shared/ui/stat-card";
 import {
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  Input,
-  PageHeader,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-  Tabs,
-} from "@compliancewatch/ui";
-import { qaPriorityTone } from "../model/qa-triage";
-import type { AdminQaTriageView } from "../model/qa-triage";
+  sortTriageItems,
+  triageCounts,
+  triagePriorityLabel,
+  triagePriorityTone,
+  triageReasonLabel,
+  triageReasonOptions,
+  triageStatusLabel,
+  triageStatusOptions,
+  triageStatusTone,
+  type TriageItem,
+} from "../model/qa-triage";
+import type { TriageRow } from "./triage-filters";
+import { TriageTable } from "./triage-table";
 
 export interface AdminQaTriageViewProps {
-  view: AdminQaTriageView;
+  items: readonly TriageItem[];
+  /** Where an analyst reviews one item; without it the questions are not links. */
+  hrefFor?: (itemId: string) => Route;
 }
 
-function QaRow({ item }: { item: AdminQaTriageView["items"][number] }) {
-  return (
-    <TableRow>
-      <TableCell className="font-medium text-fg">{item.title}</TableCell>
-      <TableCell>
-        <Badge tone="info">{item.category}</Badge>
-      </TableCell>
-      <TableCell>
-        <Badge tone={qaPriorityTone(item.priority)}>{item.priority}</Badge>
-      </TableCell>
-      <TableCell>
-        <Badge tone="info">{item.status}</Badge>
-      </TableCell>
-      <TableCell className="text-fg-muted">{item.assignee}</TableCell>
-      <TableCell className="text-fg-muted">{new Date(item.createdAt).toLocaleString()}</TableCell>
-      <TableCell>
-        <Button variant="ghost" size="sm">
-          Review
-        </Button>
-      </TableCell>
-    </TableRow>
-  );
+function triageRow(item: TriageItem, hrefFor?: (itemId: string) => Route): TriageRow {
+  return {
+    id: item.id,
+    question: item.question,
+    category: item.category,
+    href: hrefFor === undefined ? null : hrefFor(item.id),
+    reason: item.reason,
+    reasonLabel: triageReasonLabel(item.reason),
+    priorityLabel: triagePriorityLabel(item.priority),
+    priorityTone: triagePriorityTone(item.priority),
+    status: item.status,
+    statusLabel: triageStatusLabel(item.status),
+    statusTone: triageStatusTone(item.status),
+    assignee: item.assignee ?? t("adminQaTriage.unassigned"),
+    createdLabel: formatDateTime(item.createdAt),
+  };
 }
 
-export function AdminQaTriageViewComponent({ view }: AdminQaTriageViewProps) {
-  const openCount = useMemo(
-    () => view.items.filter((i) => i.status === "open").length,
-    [view.items],
-  );
-
+/**
+ * The Q&A triage queue: how many questions there are, open and closed, then the queue with its
+ * filters, open questions first and the most urgent at the top, or an empty state when nothing
+ * waits for triage.
+ */
+export function AdminQaTriageView({ items, hrefFor }: AdminQaTriageViewProps) {
+  const counts = triageCounts(items);
   return (
     <div data-slot="admin-qa-triage" className="flex flex-col gap-6">
-      <PageHeader title="QA triage" description="Quality assurance workflow" />
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Total items</p>
-          <p className="text-2xl font-semibold text-fg">{view.totalCount}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Open</p>
-          <p className="text-2xl font-semibold text-warning">{openCount}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Closed</p>
-          <p className="text-2xl font-semibold text-success">
-            {view.items.filter((i) => i.status === "closed").length}
-          </p>
-        </Card>
-      </div>
-
-      <Input placeholder="Search..." onChange={() => {}} />
-
-      {view.items.length === 0 ? (
-        <Card>
-          <EmptyState
-            title="No QA items"
-            description="Quality items will appear here for review."
-          />
-        </Card>
+      <PageHeader title={t("adminQaTriage.title")} description={t("adminQaTriage.intro")} />
+      {items.length === 0 ? (
+        <EmptyState title={t("adminQaTriage.empty.title")} body={t("adminQaTriage.empty.body")} />
       ) : (
-        <div className="overflow-hidden rounded-md border border-line">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Title</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Priority</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Assignee</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {view.items.map((item) => (
-                <QaRow key={item.id} item={item} />
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatCard label={t("adminQaTriage.stat.total")} value={counts.total} tone="info" />
+            <StatCard
+              label={t("adminQaTriage.stat.open")}
+              value={counts.open}
+              tone={counts.open > 0 ? "warning" : "neutral"}
+            />
+            <StatCard label={t("adminQaTriage.stat.closed")} value={counts.closed} tone="success" />
+          </div>
+          <TriageTable
+            rows={sortTriageItems(items).map((item) => triageRow(item, hrefFor))}
+            statusOptions={triageStatusOptions()}
+            reasonOptions={triageReasonOptions()}
+          />
+        </>
       )}
     </div>
   );
