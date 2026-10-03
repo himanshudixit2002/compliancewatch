@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from cw_contracts.events.applicability_decided_v1 import ApplicabilityDecidedV1
 from cw_contracts.events.document_discovered_v1 import DocumentDiscoveredV1
 from cw_contracts.events.document_parsed_v1 import DocumentParsedV1
+from cw_contracts.events.eval_run_completed_v1 import EvalRunCompletedV1
 from cw_contracts.events.notification_failed_v1 import NotificationFailedV1
 from cw_contracts.events.notification_sent_v1 import NotificationSentV1
 from cw_contracts.events.obligation_closed_v1 import ObligationClosedV1
@@ -61,6 +62,13 @@ TOPICS: Mapping[str, TopicSpec] = MappingProxyType(
             model=DocumentParsedV1,
             tenant_scoped=False,
             schema_file="document.parsed.v1.json",
+        ),
+        "eval.run.completed": TopicSpec(
+            topic="eval.run.completed",
+            version="1.0.0",
+            model=EvalRunCompletedV1,
+            tenant_scoped=False,
+            schema_file="eval.run.completed.v1.json",
         ),
         "notification.failed": TopicSpec(
             topic="notification.failed",

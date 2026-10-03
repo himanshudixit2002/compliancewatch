@@ -684,7 +684,14 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [RULE_VERSION],
+    uses: [
+      RULE_VERSION,
+      uses(
+        "applicability-engine",
+        "GET",
+        "/v1/applicability-engine/businesses/{business_id}/decisions",
+      ),
+    ],
     awaits: [
       kagTrack("obligation", "GET", "/v1/obligation/obligations/{obligation_id}"),
       servicesTrack(
@@ -704,12 +711,6 @@ const SCREEN_LIST = [
         "obligation",
         "POST",
         "/v1/obligation/obligations/{obligation_id}/comments",
-      ),
-      servicesTrack(
-        "WP22",
-        "applicability-engine",
-        "GET",
-        "/v1/applicability-engine/businesses/{business_id}/decisions",
       ),
     ],
     status: "waiting",
@@ -1660,9 +1661,8 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [uses("eval", "GET", "/v1/eval/runs")],
     awaits: [
-      servicesTrack("WP27", "eval", "GET", "/v1/eval/runs"),
       servicesTrack("WP27", "eval", "GET", "/v1/eval/deliveries"),
       BUDGET_ALARMS,
       QA_COVERAGE,
@@ -1681,9 +1681,9 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
-    awaits: [servicesTrack("WP27", "eval", "GET", "/v1/eval/runs/{run_id}")],
-    status: "waiting",
+    uses: [uses("eval", "GET", "/v1/eval/runs/{run_id}")],
+    awaits: [],
+    status: "ready",
     e2e: [],
     guideRef: "8, 15",
     parent: "admin.evals",

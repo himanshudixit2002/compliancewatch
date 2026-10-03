@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKeyConstraint,
     Index,
+    Integer,
     PrimaryKeyConstraint,
     String,
     Text,
@@ -146,6 +147,67 @@ class ObligationChangeRow(Base):
     caused_by_rule_version_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     actor: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     correlation_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ObligationReminderRow(Base):
+    """One reminder sent for one obligation, due date and threshold, keyed by the id of its
+    obligation.due_soon event (migration 0003)."""
+
+    __tablename__ = "obligation_reminder"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_obligation_reminder"),
+        ForeignKeyConstraint(
+            ["obligation_id"],
+            ["obligation.id"],
+            name="fk_obligation_reminder_obligation_id_obligation",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "obligation_id", "due_at", "threshold_days", name="uq_obligation_reminder_threshold"
+        ),
+        UniqueConstraint("obligation_id", "reminder_index", name="uq_obligation_reminder_index"),
+        CheckConstraint("threshold_days >= 0", name="ck_obligation_reminder_threshold_days"),
+        CheckConstraint("reminder_index >= 1", name="ck_obligation_reminder_reminder_index"),
+        {
+            "comment": (
+                "Reminders sent for open obligations, one per obligation, due date and "
+                "threshold, written with the obligation.due_soon outbox row. Row-level "
+                "security by tenant_id."
+            )
+        },
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, nullable=False, comment="The id of the obligation.due_soon event"
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    obligation_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    threshold_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    reminder_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ObligationTenantRow(Base):
+    """A tenant that has obligations: the directory the reminder sweep reads across tenants
+    (migration 0003)."""
+
+    __tablename__ = "obligation_tenant"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", name="pk_obligation_tenant"),
+        {
+            "comment": (
+                "Tenants that have obligations, for sweeps that run one tenant unit at a time. "
+                "Row-level security: any session may read the ids, a write needs the tenant "
+                "setting of its own row."
+            )
+        },
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

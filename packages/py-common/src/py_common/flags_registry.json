@@ -123,6 +123,20 @@
       ]
     },
     {
+      "name": "obligation.reminder_sweep",
+      "type": "bool",
+      "default": false,
+      "owner": "core-product",
+      "description": "The obligation worker's reminder sweep: every CW_OBLIGATION_SWEEP_INTERVAL_SECONDS it publishes obligation.due_soon for open obligations due within 7, 3 and 1 days, once per obligation, due date and threshold. Off, the worker only consumes applicability.decided.",
+      "removal": "Once reminders have gone out from the sweep in production for 30 days.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_OBLIGATION_SWEEP_ENABLED",
+      "services": [
+        "obligation"
+      ]
+    },
+    {
       "name": "pipeline.knowledge",
       "type": "bool",
       "default": false,

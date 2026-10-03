@@ -13,9 +13,10 @@ import { isUuid } from "@/shared/lib/identifiers";
  * the browser sends the same hidden value on every submit of that render, and the server action
  * turns it into the header with `idempotencyHeaders(formData, operation)`. The header is sent
  * only for an operation in `IDEMPOTENT_OPERATIONS`: the routes that read it, which answer 428
- * without it and replay the first response for 24 hours (py-common's idempotency module). On
- * `main` those are the business API's two creating POSTs. The other creating writes are safe to
- * repeat without it because each has a natural key on the service:
+ * without it and replay the first response for 24 hours (py-common's idempotency module): the
+ * business API's two creating POSTs and the applicability engine's evaluate, which appends a
+ * decision each time. The other creating writes are safe to repeat without it because each has
+ * a natural key on the service:
  *
  *   profile registration     the GSTIN: a second POST returns the existing node, created false
  *   profile entity           the PAN, the same way
@@ -47,6 +48,11 @@ export const IDEMPOTENT_ROUTES = {
     service: "profile",
     method: "POST",
     path: "/v1/businesses/{business_id}/registrations",
+  },
+  "applicability-engine.evaluate": {
+    service: "applicability-engine",
+    method: "POST",
+    path: "/v1/applicability-engine/businesses/{business_id}/decisions",
   },
 } as const satisfies Readonly<Record<string, RouteRef>>;
 

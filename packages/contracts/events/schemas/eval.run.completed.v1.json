@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:eval.run.completed:v1",
+  "title": "eval.run.completed",
+  "description": "The eval service ran one suite of the eval harness under a profile and stored the run with its gates and their drift against the previous run of the same suite and profile. Eval runs are platform data, so tenant_id is null. Producer: eval. Consumers: none yet.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "eval",
+  "x-tenant-scoped": false,
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The stored run; GET /v1/eval/runs/{run_id} has every gate."
+    },
+    "suite": {
+      "type": "string",
+      "enum": ["extraction", "relations", "qa"],
+      "description": "The harness suite that ran."
+    },
+    "profile": {
+      "type": "string",
+      "enum": ["ci", "nightly"],
+      "description": "The harness profile: ci gates the scripted and fake providers, nightly a real model through the gateway."
+    },
+    "passed": {
+      "type": "boolean",
+      "description": "True when every gate passed; false when one failed or none was measured."
+    },
+    "gates_total": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many gates the run measured."
+    },
+    "failed_gates": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Names of the gates that failed, as suite.metric[provider] (>=baseline added for a gate held to another suite's value).",
+      "uniqueItems": true
+    },
+    "regressed_gates": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Names of the gates whose value fell since the previous run of the suite and profile, whether or not they still pass; empty for the first run.",
+      "uniqueItems": true
+    },
+    "previous_run_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "The previous run of the same suite and profile the drift is measured against; null for the first run."
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the harness started."
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the harness finished."
+    }
+  },
+  "required": [
+    "run_id",
+    "suite",
+    "profile",
+    "passed",
+    "gates_total",
+    "failed_gates",
+    "regressed_gates",
+    "previous_run_id",
+    "started_at",
+    "completed_at"
+  ]
+}

@@ -1,12 +1,12 @@
 # obligation service
 
-Part of the ComplianceWatch monorepo. **Domain, use cases, the Postgres unit of work and a read route exist; no write API and no event consumer yet.**
+Part of the ComplianceWatch monorepo. **Domain, use cases, the Postgres unit of work, a read route and the worker (the applicability.decided consumer and the reminder sweep) exist; no write API yet.**
 Design reference: Project Foundation guide, sections 7 and 14.
 
 - **Owns:** Obligations, evidence metadata, the append-only change log of every obligation (`obligation_change`); builds obligations from the RuleVersion template, computes due dates, schedules reminders
 - **Owning team:** Core Product (guide section 14)
 - **Consumes:** applicability.decided; user actions
-- **Emits / publishes:** obligation.created, obligation.rescheduled, obligation.closed (through the outbox); obligation.due_soon arrives with the reminder scheduler
+- **Emits / publishes:** obligation.created, obligation.rescheduled, obligation.closed and obligation.due_soon (through the outbox)
 
 ## What is here
 
@@ -29,6 +29,21 @@ Design reference: Project Foundation guide, sections 7 and 14.
   together. A use case that leaves an obligation unchanged, or skips a closed one, writes
   neither. This table is the single history of an obligation; later kinds (started, completed,
   assigned) widen `ChangeKind` and its CHECK constraint. The change log has no read route yet.
+- `application/decisions.py`: `ApplyDecision` acts on one applicability decision. `applies`
+  without `needs_review` materialises the business's obligations of the rule version, read from
+  the rulebook (`domain/ports.py` `RuleVersionReader`, `infrastructure/rulebook_client.py`), as of
+  the day of the decision in India; `not_applicable` without `needs_review` closes the business's
+  open obligations of the rule version with `profile_changed`; a decision that needs review
+  changes nothing. Both are idempotent under redelivery. A closed obligation stays closed: a
+  later `applies` only creates periods that have no obligation yet.
+- `domain/reminders.py` and `application/reminders.py`: `SendDueReminders`, the reminder sweep.
+  For every tenant in the tenant directory it opens one unit of work and publishes
+  `obligation.due_soon` for each open obligation whose `days_left` falls in a threshold of
+  `REMINDER_DAYS` (7, 3, 1) it has not been reminded at for its current due date, recording an
+  `obligation_reminder` row with the outbox row. A sweep that first sees an obligation late sends
+  only the most urgent reminder; a rescheduled obligation is reminded again against its new date;
+  `reminder_index` counts the obligation's reminders and never repeats. A tenant whose unit fails
+  rolls back alone and is retried by the next sweep.
 - `application/queries.py`: `ListObligations` reads one business's obligations in any status,
   optionally due inside a `DueWindow` (days in India, both ends included, at most 366 days) and
   of one rule version; due date first (undated last), then period start, creation and id; at
@@ -45,12 +60,26 @@ Design reference: Project Foundation guide, sections 7 and 14.
   always refused, and DELETE only in a transaction that has set `app.erasure` to `on`. A tenant
   erasure (not built yet; a later work package adds it) must set `app.erasure=on` and delete the
   change rows before the obligations.
+- `migrations/versions/20261004_0003_obligation_reminders.py`: `obligation_reminder` (one row per
+  reminder, unique per obligation, due date and threshold and per obligation and index, forced
+  row-level security, cascades with its obligation) and `obligation_tenant`, the tenant
+  directory: a routing directory in infra/scripts/migration_lint.toml whose ids every session
+  may read while every write passes the tenant policy. The repository records the unit's tenant
+  when it adds the tenant's first obligation; `PostgresTenantDirectory` reads it for the sweep.
+- `worker.py`: `python -m obligation.worker` (`make worker SERVICE=obligation`, needs
+  `CW_OBLIGATION_STORE=postgres`). The consumer group `obligation.decisions` reads
+  `applicability.decided` and applies each decision in the consumer's own transaction
+  (`PostgresUnitOfWorkFactory.on_connection`), so the obligations, their outbox and change rows
+  and the `processed_event` row commit together; what it cannot apply goes to
+  `applicability.decided.obligation.decisions.dlq` after the retries. The reminder sweep runs
+  every `CW_OBLIGATION_SWEEP_INTERVAL_SECONDS` (3600) when `CW_OBLIGATION_SWEEP_ENABLED` (flag
+  `obligation.reminder_sweep`, off by default) is on. The outbox relay runs on its own
+  (`make relay SERVICE=obligation`).
 
-The caller of the write use cases is the applicability engine's decision consumer, which lands
-with the profile and engine work; until then they are exercised by the tests and by hand. The
-rulebook now publishes `rule.deadline_changed`, `rule.withdrawn` and `rule.superseded`; the
-consumer that turns them into `ApplyDeadlineChange` and `WithdrawRule` for every tenant's open
-obligations is not built yet, because it needs a cross-tenant design under row-level security.
+The rulebook publishes `rule.deadline_changed`, `rule.withdrawn` and `rule.superseded` without a
+tenant; the consumer that turns them into `ApplyDeadlineChange` and `WithdrawRule` for every
+tenant's open obligations is not built yet. It can iterate the `obligation_tenant` directory one
+tenant unit at a time, the way the reminder sweep does, without relaxing row-level security.
 
 ## API
 
@@ -87,11 +116,12 @@ been used in a session.
 ```
 src/obligation/
   api/             # router.py (the read route), schemas.py (ObligationOut), deps.py (caller and tenant, wiring)
-  application/     # materialise.py, changes.py, queries.py
-  domain/          # model.py (Obligation, DueWindow), events.py, errors.py, repository.py (protocols)
-  infrastructure/  # models.py, repository.py (Postgres unit of work with the outbox), memory.py
+  application/     # materialise.py, changes.py, decisions.py, reminders.py, queries.py
+  domain/          # model.py (Obligation, DueWindow), events.py, errors.py, reminders.py, ports.py, repository.py (protocols)
+  infrastructure/  # models.py, repository.py (Postgres unit of work with the outbox), memory.py, rulebook_client.py
   wiring.py        # what the api layer gets from the composition root
   main.py          # composition root: wire(settings), build_app(settings), problem statuses
+  worker.py        # the worker's composition root: components(settings), the decision handler, the sweep job
 migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA)
 tests/
   unit/            # domain and application with fakes; no I/O
@@ -108,6 +138,7 @@ From the repo root:
 make dev                          # infrastructure (Docker Compose)
 make migrate SERVICE=obligation
 make run SERVICE=obligation           # http://localhost:8005/health, /ready, /v1/obligation/obligations
+make worker SERVICE=obligation        # the applicability.decided consumer (and the sweep when enabled)
 make test                         # unit + contract tests with the coverage gate
 docker build -f services/obligation/Dockerfile -t compliancewatch-obligation .
 ```

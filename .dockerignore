@@ -3,7 +3,10 @@
 .git
 .github
 docs
-evals
+# The eval image carries the harness and its golden sets (services/eval/Dockerfile).
+evals/*
+!evals/harness
+!evals/golden
 infra
 apps/web/*
 !apps/web/package.json

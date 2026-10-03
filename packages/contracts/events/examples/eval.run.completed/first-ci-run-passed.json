@@ -1,0 +1,21 @@
+{
+  "event_id": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+  "topic": "eval.run.completed",
+  "schema_version": "1.0.0",
+  "occurred_at": "2026-10-01T21:00:07Z",
+  "tenant_id": null,
+  "correlation_id": "7b8c9d0e-1f2a-4b3c-9d4e-5f6a7b8c9d0e",
+  "causation_id": null,
+  "payload": {
+    "run_id": "8c9d0e1f-2a3b-4c4d-8e5f-6a7b8c9d0e1f",
+    "suite": "relations",
+    "profile": "ci",
+    "passed": true,
+    "gates_total": 4,
+    "failed_gates": [],
+    "regressed_gates": [],
+    "previous_run_id": null,
+    "started_at": "2026-10-01T21:00:05Z",
+    "completed_at": "2026-10-01T21:00:07Z"
+  }
+}

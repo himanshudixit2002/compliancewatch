@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import ClassVar
 
-from domain_kernel._validation import require_aware, require_instance, require_text
+from domain_kernel._validation import require_aware, require_instance, require_int, require_text
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, DecisionId, ObligationId, RuleVersionId, UserId
 from domain_kernel.status import ClosureReason, ObligationStatus
@@ -94,3 +94,30 @@ class ObligationClosed(DomainEvent):
         require_aware(self.closed_at, "closed_at")
         if self.closed_by is not None:
             require_instance(self.closed_by, UserId, "closed_by")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ObligationDueSoon(DomainEvent):
+    """An open obligation's due date is near: the reminder sweep publishes one per obligation,
+    due date and reminder threshold (``domain.reminders``)."""
+
+    topic: ClassVar[str] = "obligation.due_soon"
+    schema_version: ClassVar[str] = "1.0.0"
+
+    obligation_id: ObligationId
+    business_id: BusinessId
+    rule_version_id: RuleVersionId
+    title: str
+    due_at: datetime
+    days_left: int
+    reminder_index: int
+
+    def __post_init__(self) -> None:
+        DomainEvent.__post_init__(self)
+        require_instance(self.obligation_id, ObligationId, "obligation_id")
+        require_instance(self.business_id, BusinessId, "business_id")
+        require_instance(self.rule_version_id, RuleVersionId, "rule_version_id")
+        require_text(self.title, "title")
+        require_aware(self.due_at, "due_at")
+        require_int(self.days_left, "days_left", minimum=0)
+        require_int(self.reminder_index, "reminder_index", minimum=1)

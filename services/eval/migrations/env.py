@@ -7,6 +7,7 @@ CW_DB_SCHEMA selects the service schema and holds this service's own alembic_ver
 from alembic import context
 from sqlalchemy import MetaData, engine_from_config, pool
 
+from eval_service.infrastructure.models import Base
 from py_common.logging import configure_logging
 from py_common.settings import Settings
 
@@ -17,8 +18,7 @@ config = context.config
 # ConfigParser interpolation: a literal % in the URL must be escaped.
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
-# Point at eval_service.infrastructure.models.Base.metadata once the first model exists.
-target_metadata: MetaData | None = None
+target_metadata: MetaData = Base.metadata
 
 
 def run_migrations_offline() -> None:

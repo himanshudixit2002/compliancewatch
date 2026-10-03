@@ -33,3 +33,19 @@ class ObligationTenantRequiredError(DomainError, PermissionError):
 class ObligationWindowInvalidError(DomainError, ValueError):
     type_slug = "obligation-window-invalid"
     title = "Due window is invalid"
+
+
+class RuleVersionNotFoundError(DomainError, LookupError):
+    type_slug = "obligation-rule-version-not-found"
+    title = "Rule version not found for obligations"
+
+    def __init__(self, rule_version_id: str) -> None:
+        super().__init__(f"the rulebook has no rule version {rule_version_id}")
+        self.rule_version_id = rule_version_id
+
+
+class RulebookUnavailableError(DomainError, ConnectionError):
+    """The rulebook could not answer now; another try may succeed."""
+
+    type_slug = "rulebook-unavailable"
+    title = "Rulebook unavailable"
