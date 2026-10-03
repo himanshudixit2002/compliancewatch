@@ -1,7 +1,7 @@
-"use client";
-
+import type { Route } from "next";
+import Link from "next/link";
 import {
-  Badge,
+  Button,
   EmptyState,
   Table,
   TableBody,
@@ -11,92 +11,78 @@ import {
   TableHeader,
   TableRow,
 } from "@compliancewatch/ui";
-import type { BadgeTone } from "@compliancewatch/ui";
 import type { Crumb, NavLink } from "@/shared/config/nav";
 import { t } from "@/shared/i18n";
-import { formatDate } from "@/shared/lib/dates";
+import { formatDateTime } from "@/shared/lib/dates";
 import { SettingsHeader } from "@/shared/ui/settings-header";
-import type { ActivityEntry, ActivityView } from "../model/activity";
+import { actionLabel, actorLabel, newestFirst } from "../model/activity";
+import type { ActivityEntry } from "../model/activity";
 
 export interface ActivityViewProps {
   title: string;
-  view: ActivityView;
+  entries: readonly ActivityEntry[];
   crumbs: readonly Crumb[];
   tabs: readonly NavLink[];
-}
-
-const ACTION_TONE: Readonly<Record<string, BadgeTone>> = {
-  sign_in: "success",
-  sign_out: "neutral",
-  consent_grant: "info",
-  consent_withdraw: "warning",
-  profile_update: "info",
-  business_added: "success",
-  user_invited: "info",
-  role_changed: "warning",
-  user_disabled: "danger",
-  subscription_started: "success",
-  subscription_cancelled: "danger",
-};
-
-function ActionBadge({ action }: { action: string }) {
-  const tone = ACTION_TONE[action] ?? "neutral";
-  return <Badge tone={tone}>{action}</Badge>;
+  /** The next page of older entries, from the trail's cursor; the link is left out without it. */
+  olderHref?: Route;
 }
 
 function EntryRow({ entry }: { entry: ActivityEntry }) {
   return (
-    <TableRow data-activity-id={entry.id}>
-      <TableCell className="text-fg-muted whitespace-nowrap">
-        {formatDate(entry.timestamp)}
+    <TableRow data-activity={entry.id}>
+      <TableCell className="text-fg-muted">{formatDateTime(entry.at)}</TableCell>
+      <TableCell className={entry.actor === null ? "text-fg-muted" : "text-fg"}>
+        {actorLabel(entry.actor)}
       </TableCell>
-      <TableCell>
-        <ActionBadge action={entry.action} />
-      </TableCell>
-      <TableCell className="max-w-xs truncate">{entry.description}</TableCell>
-      <TableCell className="font-mono text-xs text-fg-muted">{entry.ipAddress}</TableCell>
+      <TableCell className="font-medium text-fg">{actionLabel(entry.action)}</TableCell>
+      <TableCell className="whitespace-normal">{entry.subject}</TableCell>
     </TableRow>
   );
 }
 
 /**
- * The activity log settings page: the settings header and a table of account actions with their
- * timestamps, descriptions and the IP addresses they came from, newest first.
+ * The activity settings page: the settings header, then the audit trail newest first, each
+ * entry with when it happened, who made the change (or the service, for an automatic one), what
+ * was done and what it applied to, and a link to older entries when there are more.
  */
-export function ActivityView({ title, view, crumbs, tabs }: ActivityViewProps) {
+export function ActivityView({ title, entries, crumbs, tabs, olderHref }: ActivityViewProps) {
   return (
     <div data-slot="activity" className="flex flex-col gap-6">
       <SettingsHeader
         title={title}
-        description={t("settings.about.owner.settings.activity")}
+        description={t("settingsActivity.intro")}
         crumbs={crumbs}
         tabs={tabs}
       />
-      {view.entries.length === 0 ? (
+      {entries.length === 0 ? (
         <EmptyState
-          title={t("dashboard.activityEmptyTitle")}
-          body={t("dashboard.activityEmptyBody")}
+          title={t("settingsActivity.emptyTitle")}
+          body={t("settingsActivity.emptyBody")}
         />
       ) : (
         <Table>
           <TableCaption className="text-left text-sm text-fg-muted">
-            {t("dashboard.activityTitle")} — {view.totalCount}{" "}
-            {view.totalCount === 1 ? "entry" : "entries"}
+            {t("settingsActivity.caption")}
           </TableCaption>
           <TableHeader>
             <TableRow>
-              <TableHead>Timestamp</TableHead>
-              <TableHead>Action</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>IP address</TableHead>
+              <TableHead>{t("settingsActivity.column.when")}</TableHead>
+              <TableHead>{t("settingsActivity.column.who")}</TableHead>
+              <TableHead>{t("settingsActivity.column.action")}</TableHead>
+              <TableHead>{t("settingsActivity.column.subject")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {view.entries.map((entry) => (
+            {newestFirst(entries).map((entry) => (
               <EntryRow key={entry.id} entry={entry} />
             ))}
           </TableBody>
         </Table>
+      )}
+      {olderHref === undefined ? null : (
+        <Button asChild variant="secondary" className="self-start">
+          <Link href={olderHref}>{t("settingsActivity.older")}</Link>
+        </Button>
       )}
     </div>
   );

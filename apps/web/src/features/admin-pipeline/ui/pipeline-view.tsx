@@ -1,150 +1,195 @@
-"use client";
-
-import { useState, useMemo } from "react";
 import {
-  Badge,
   Button,
-  Card,
   EmptyState,
-  Input,
   PageHeader,
   ProgressBar,
+  StatusChip,
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
   Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  VisuallyHidden,
 } from "@compliancewatch/ui";
-import { pipelineStatusTone, type PipelineView } from "../model/pipeline";
+import { t } from "@/shared/i18n";
+import { formatDateTime } from "@/shared/lib/dates";
+import { StatCard } from "@/shared/ui/stat-card";
+import {
+  PIPELINE_RUN_STATUSES,
+  RUN_ID_FIELD,
+  formatDuration,
+  pipelineCounts,
+  runDurationSeconds,
+  runStatusLabel,
+  runStatusTone,
+  type PipelineRun,
+} from "../model/pipeline";
+
+/** A server action that re-runs the run named by the form's RUN_ID_FIELD. */
+export type RetryAction = (formData: FormData) => Promise<void>;
 
 export interface PipelineViewProps {
-  view: PipelineView;
-  onRetry?: (taskId: string) => void;
+  runs: readonly PipelineRun[];
+  /** Offered on each failed run; without it no retry is offered. */
+  retryAction?: RetryAction;
 }
 
-function PipelineRow({
-  task,
-  onRetry,
-}: {
-  task: PipelineView["tasks"][number];
-  onRetry?: (id: string) => void;
-}) {
+function RunProgress({ run }: { run: PipelineRun }) {
+  if (run.status === "pending") {
+    return <span className="text-fg-muted">{t("adminPipeline.progress.waiting")}</span>;
+  }
+  if (run.total === null) {
+    return <span>{t("adminPipeline.progress.uncounted", { processed: run.processed })}</span>;
+  }
   return (
-    <TableRow>
-      <TableCell>
-        <div className="flex flex-col">
-          <span className="font-medium text-fg">{task.name}</span>
-          <span className="text-xs text-fg-muted">{task.type}</span>
-        </div>
-      </TableCell>
-      <TableCell>
-        <Badge tone={pipelineStatusTone(task.status)}>{task.status}</Badge>
-      </TableCell>
-      <TableCell>
-        <div className="w-32">
-          <ProgressBar value={task.progress} />
-          <span className="text-xs text-fg-muted">{task.progress}%</span>
-        </div>
-      </TableCell>
-      <TableCell className="text-fg-muted text-sm">{task.duration || "—"}</TableCell>
-      <TableCell className="text-fg-muted text-sm">
-        {task.startedAt ? new Date(task.startedAt).toLocaleString() : "—"}
-      </TableCell>
-      <TableCell>
-        {task.status === "failed" && (
-          <Button variant="ghost" size="sm" onClick={() => onRetry?.(task.id)}>
-            Retry
-          </Button>
+    <ProgressBar
+      className="min-w-40"
+      label={
+        <VisuallyHidden>{t("adminPipeline.progress.label", { name: run.name })}</VisuallyHidden>
+      }
+      value={run.processed}
+      max={run.total}
+      valueText={t("adminPipeline.progress.counted", {
+        processed: run.processed,
+        total: run.total,
+      })}
+    />
+  );
+}
+
+function RunRow({ run, retryAction }: { run: PipelineRun; retryAction?: RetryAction }) {
+  const seconds = runDurationSeconds(run);
+  return (
+    <TableRow data-run={run.id}>
+      <TableCell className="whitespace-normal">
+        <span className="block font-medium text-fg">{run.name}</span>
+        <span className="block text-xs text-fg-muted">{run.stage}</span>
+        {run.error === null ? null : (
+          <span className="block text-xs text-danger">
+            {t("adminPipeline.error", { error: run.error })}
+          </span>
         )}
       </TableCell>
+      <TableCell>
+        <StatusChip
+          status={run.status}
+          tone={runStatusTone(run.status)}
+          label={runStatusLabel(run.status)}
+        />
+      </TableCell>
+      <TableCell>
+        <RunProgress run={run} />
+      </TableCell>
+      <TableCell className="text-fg-muted">
+        {run.startedAt === null ? t("adminPipeline.notStarted") : formatDateTime(run.startedAt)}
+      </TableCell>
+      <TableCell className="text-fg-muted">
+        {seconds === null ? t("adminPipeline.notFinished") : formatDuration(seconds)}
+      </TableCell>
+      {retryAction === undefined ? null : (
+        <TableCell>
+          {run.status === "failed" ? (
+            <form action={retryAction}>
+              <input type="hidden" name={RUN_ID_FIELD} value={run.id} />
+              <Button type="submit" variant="secondary" size="sm">
+                {t("adminPipeline.retry")}
+                <VisuallyHidden> {run.name}</VisuallyHidden>
+              </Button>
+            </form>
+          ) : null}
+        </TableCell>
+      )}
     </TableRow>
   );
 }
 
-export function PipelineViewComponent({ view, onRetry }: PipelineViewProps) {
-  const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<string>("all");
+function RunsTable({ runs, retryAction }: PipelineViewProps) {
+  if (runs.length === 0) {
+    return (
+      <EmptyState title={t("adminPipeline.noMatch.title")} body={t("adminPipeline.noMatch.body")} />
+    );
+  }
+  return (
+    <Table>
+      <TableCaption className="sr-only">{t("adminPipeline.caption")}</TableCaption>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t("adminPipeline.column.run")}</TableHead>
+          <TableHead>{t("adminPipeline.column.status")}</TableHead>
+          <TableHead>{t("adminPipeline.column.progress")}</TableHead>
+          <TableHead>{t("adminPipeline.column.started")}</TableHead>
+          <TableHead>{t("adminPipeline.column.duration")}</TableHead>
+          {retryAction === undefined ? null : (
+            <TableHead>{t("adminPipeline.column.actions")}</TableHead>
+          )}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {runs.map((run) => (
+          <RunRow key={run.id} run={run} retryAction={retryAction} />
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
 
-  const filtered = useMemo(() => {
-    let items = view.tasks;
-    if (tab !== "all") {
-      items = items.filter((t) => t.status === tab);
-    }
-    if (search) {
-      const q = search.toLowerCase();
-      items = items.filter(
-        (t) => t.name.toLowerCase().includes(q) || t.type.toLowerCase().includes(q),
-      );
-    }
-    return items;
-  }, [view.tasks, tab, search]);
-
+/**
+ * The pipeline monitor for the regulatory team: how many runs there are and how many are
+ * running, completed or failed, then the runs under status tabs with each one's progress,
+ * timing and failure, and a retry on failed runs when the page offers one.
+ */
+export function PipelineView({ runs, retryAction }: PipelineViewProps) {
+  const counts = pipelineCounts(runs);
+  const tabs = [
+    { value: "all", label: t("adminPipeline.tab.all"), runs },
+    ...PIPELINE_RUN_STATUSES.map((status) => ({
+      value: status,
+      label: runStatusLabel(status),
+      runs: runs.filter((run) => run.status === status),
+    })),
+  ];
   return (
     <div data-slot="admin-pipeline" className="flex flex-col gap-6">
-      <PageHeader title="Pipeline" description="Background job monitoring" />
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Total jobs</p>
-          <p className="text-2xl font-semibold text-fg">{view.totalCount}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Running</p>
-          <p className="text-2xl font-semibold text-warning">{view.runningCount}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Completed</p>
-          <p className="text-2xl font-semibold text-success">{view.completedCount}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Failed</p>
-          <p className="text-2xl font-semibold text-danger">{view.failedCount}</p>
-        </Card>
-      </div>
-
-      <Tabs
-        tabs={[
-          { value: "all", label: "All" },
-          { value: "running", label: "Running" },
-          { value: "completed", label: "Completed" },
-          { value: "failed", label: "Failed" },
-        ]}
-        value={tab}
-        onChange={(v) => setTab(v)}
-      />
-
-      <Input
-        placeholder="Search jobs..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
-
-      {filtered.length === 0 ? (
-        <Card>
-          <EmptyState title="No pipeline jobs" description="Background jobs will appear here." />
-        </Card>
+      <PageHeader title={t("adminPipeline.title")} description={t("adminPipeline.description")} />
+      {runs.length === 0 ? (
+        <EmptyState title={t("adminPipeline.empty.title")} body={t("adminPipeline.empty.body")} />
       ) : (
-        <div className="overflow-hidden rounded-md border border-line">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Job</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Progress</TableHead>
-                <TableHead>Duration</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead>Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((task) => (
-                <PipelineRow key={task.id} task={task} onRetry={onRetry} />
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard label={t("adminPipeline.stat.total")} value={counts.total} tone="info" />
+            <StatCard label={t("adminPipeline.stat.running")} value={counts.running} />
+            <StatCard
+              label={t("adminPipeline.stat.completed")}
+              value={counts.completed}
+              tone="success"
+            />
+            <StatCard
+              label={t("adminPipeline.stat.failed")}
+              value={counts.failed}
+              tone={counts.failed > 0 ? "danger" : "neutral"}
+            />
+          </div>
+          <Tabs defaultValue="all">
+            <TabsList aria-label={t("adminPipeline.tabs")}>
+              {tabs.map((tab) => (
+                <TabsTrigger key={tab.value} value={tab.value}>
+                  {t("adminPipeline.tab.count", { label: tab.label, count: tab.runs.length })}
+                </TabsTrigger>
               ))}
-            </TableBody>
-          </Table>
-        </div>
+            </TabsList>
+            {tabs.map((tab) => (
+              <TabsContent key={tab.value} value={tab.value} className="pt-2">
+                <RunsTable runs={tab.runs} retryAction={retryAction} />
+              </TabsContent>
+            ))}
+          </Tabs>
+        </>
       )}
     </div>
   );

@@ -1,106 +1,147 @@
-"use client";
-
-import { useMemo } from "react";
+import type { Route } from "next";
+import Link from "next/link";
 import {
-  Badge,
   Button,
-  Card,
   EmptyState,
   PageHeader,
+  StatusChip,
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from "@compliancewatch/ui";
-import { dataSourceStatusTone } from "../model/sources";
-import type { AdminSourcesView } from "../model/sources";
+import { t } from "@/shared/i18n";
+import { formatDateTime } from "@/shared/lib/dates";
+import { StatCard } from "@/shared/ui/stat-card";
+import {
+  SOURCE_KEY_FIELD,
+  canFetch,
+  documentTypeLabel,
+  formatCount,
+  sourceCounts,
+  sourceStatusLabel,
+  sourceStatusTone,
+  type PipelineSource,
+} from "../model/sources";
 
 export interface AdminSourcesViewProps {
-  view: AdminSourcesView;
+  sources: readonly PipelineSource[];
+  /** A source's history page; without it the source names are not links. */
+  hrefFor?: (key: string) => Route;
+  /**
+   * Asks the pipeline to fetch one source now: a plain form action that receives the source's
+   * key in SOURCE_KEY_FIELD. Without it the table has no fetch control.
+   */
+  fetchAction?: (formData: FormData) => Promise<void>;
 }
 
-function SourceRow({ source }: { source: AdminSourcesView["sources"][number] }) {
+type SourceRowProps = Omit<AdminSourcesViewProps, "sources"> & { source: PipelineSource };
+
+function SourceRow({ source, hrefFor, fetchAction }: SourceRowProps) {
   return (
-    <TableRow>
-      <TableCell className="font-medium text-fg">{source.name}</TableCell>
-      <TableCell>
-        <Badge tone="info">{source.type}</Badge>
+    <TableRow data-source={source.key}>
+      <TableCell className="whitespace-normal">
+        {hrefFor === undefined ? (
+          <span className="font-medium text-fg">{source.name}</span>
+        ) : (
+          <Link
+            href={hrefFor(source.key)}
+            className="font-medium text-fg underline-offset-4 hover:underline"
+          >
+            {source.name}
+          </Link>
+        )}
+        <p className="text-xs text-fg-muted">{source.site}</p>
       </TableCell>
+      <TableCell>{documentTypeLabel(source.documentType)}</TableCell>
       <TableCell>
-        <Badge tone={dataSourceStatusTone(source.status)}>{source.status}</Badge>
+        <StatusChip
+          status={source.status}
+          tone={sourceStatusTone(source.status)}
+          label={sourceStatusLabel(source.status)}
+        />
       </TableCell>
       <TableCell className="text-fg-muted">
-        {source.lastSync ? new Date(source.lastSync).toLocaleString() : "Never"}
+        {source.lastFetchedAt === null
+          ? t("adminSources.neverFetched")
+          : formatDateTime(source.lastFetchedAt)}
       </TableCell>
-      <TableCell className="text-fg-muted">{source.recordCount.toLocaleString()}</TableCell>
-      <TableCell>
-        <Button variant="ghost" size="sm">
-          Sync
-        </Button>
-      </TableCell>
+      <TableCell className="text-right tabular-nums">{formatCount(source.documentCount)}</TableCell>
+      {fetchAction === undefined ? null : (
+        <TableCell>
+          {canFetch(source) ? (
+            <form action={fetchAction}>
+              <input type="hidden" name={SOURCE_KEY_FIELD} value={source.key} />
+              <Button type="submit" variant="secondary" size="sm">
+                {t("adminSources.fetchNow")}
+                <span className="sr-only"> {source.name}</span>
+              </Button>
+            </form>
+          ) : null}
+        </TableCell>
+      )}
     </TableRow>
   );
 }
 
-export function AdminSourcesViewComponent({ view }: AdminSourcesViewProps) {
-  const connectedCount = useMemo(
-    () => view.sources.filter((s) => s.status === "connected").length,
-    [view.sources],
-  );
-
+/**
+ * The sources the pipeline fetches documents from: how many there are, healthy and failing, then
+ * each source's document type, state, last fetch and documents collected, with a fetch control
+ * when the page supplies the action, or an empty state before any source is configured.
+ */
+export function AdminSourcesView({ sources, hrefFor, fetchAction }: AdminSourcesViewProps) {
+  const counts = sourceCounts(sources);
   return (
     <div data-slot="admin-sources" className="flex flex-col gap-6">
-      <PageHeader
-        title="Data sources"
-        description="Manage external data sources and integrations"
-      />
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Total sources</p>
-          <p className="text-2xl font-semibold text-fg">{view.totalCount}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Connected</p>
-          <p className="text-2xl font-semibold text-success">{connectedCount}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Errors</p>
-          <p className="text-2xl font-semibold text-danger">
-            {view.sources.filter((s) => s.status === "error").length}
-          </p>
-        </Card>
-      </div>
-
-      {view.sources.length === 0 ? (
-        <Card>
-          <EmptyState
-            title="No data sources"
-            description="Connect external data sources to enrich compliance data."
-          />
-        </Card>
+      <PageHeader title={t("adminSources.title")} description={t("adminSources.intro")} />
+      {sources.length === 0 ? (
+        <EmptyState title={t("adminSources.empty.title")} body={t("adminSources.empty.body")} />
       ) : (
-        <div className="overflow-hidden rounded-md border border-line">
+        <>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatCard label={t("adminSources.stat.total")} value={counts.total} tone="info" />
+            <StatCard
+              label={t("adminSources.stat.healthy")}
+              value={counts.healthy}
+              tone="success"
+            />
+            <StatCard
+              label={t("adminSources.stat.failing")}
+              value={counts.failing}
+              tone={counts.failing > 0 ? "danger" : "neutral"}
+            />
+          </div>
           <Table>
+            <TableCaption className="sr-only">{t("adminSources.caption")}</TableCaption>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Last sync</TableHead>
-                <TableHead>Records</TableHead>
-                <TableHead>Action</TableHead>
+                <TableHead scope="col">{t("adminSources.column.source")}</TableHead>
+                <TableHead scope="col">{t("adminSources.column.type")}</TableHead>
+                <TableHead scope="col">{t("adminSources.column.status")}</TableHead>
+                <TableHead scope="col">{t("adminSources.column.lastFetched")}</TableHead>
+                <TableHead scope="col" className="text-right">
+                  {t("adminSources.column.documents")}
+                </TableHead>
+                {fetchAction === undefined ? null : (
+                  <TableHead scope="col">{t("adminSources.column.fetch")}</TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {view.sources.map((source) => (
-                <SourceRow key={source.id} source={source} />
+              {sources.map((source) => (
+                <SourceRow
+                  key={source.key}
+                  source={source}
+                  hrefFor={hrefFor}
+                  fetchAction={fetchAction}
+                />
               ))}
             </TableBody>
           </Table>
-        </div>
+        </>
       )}
     </div>
   );

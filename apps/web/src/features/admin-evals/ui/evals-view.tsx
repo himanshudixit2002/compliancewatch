@@ -1,106 +1,121 @@
-"use client";
-
-import { useMemo } from "react";
+import type { Route } from "next";
+import Link from "next/link";
 import {
-  Badge,
-  Button,
-  Card,
   EmptyState,
   PageHeader,
+  StatusChip,
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from "@compliancewatch/ui";
-import { evalScoreTone } from "../model/evals";
-import type { AdminEvalsView } from "../model/evals";
+import { t } from "@/shared/i18n";
+import { formatDateTime } from "@/shared/lib/dates";
+import { StatCard } from "@/shared/ui/stat-card";
+import {
+  evalSummary,
+  runStatusLabel,
+  runStatusTone,
+  scorePercent,
+  sortRuns,
+  type EvalRun,
+} from "../model/evals";
 
 export interface AdminEvalsViewProps {
-  view: AdminEvalsView;
+  runs: readonly EvalRun[];
+  /** A run's own page; without it the run names are not links. */
+  hrefFor?: (runId: string) => Route;
 }
 
-function EvalRow({ run }: { run: AdminEvalsView["runs"][number] }) {
+/** A whole percentage as text, or the words for a missing score. */
+function percentText(value: number | null): string {
+  return value === null ? t("adminEvals.noScore") : t("adminEvals.percent", { percent: value });
+}
+
+function RunRow({ run, hrefFor }: { run: EvalRun; hrefFor?: (runId: string) => Route }) {
   return (
-    <TableRow>
-      <TableCell className="font-medium text-fg">{run.name}</TableCell>
-      <TableCell>
-        <Badge tone="info">{run.model}</Badge>
+    <TableRow data-run={run.id}>
+      <TableCell className="whitespace-normal">
+        {hrefFor === undefined ? (
+          <span className="font-medium text-fg">{run.name}</span>
+        ) : (
+          <Link
+            href={hrefFor(run.id)}
+            className="font-medium text-fg underline-offset-4 hover:underline"
+          >
+            {run.name}
+          </Link>
+        )}
       </TableCell>
       <TableCell>
-        <Badge tone={evalScoreTone(run.score)}>{run.status}</Badge>
+        <code className="font-mono text-xs text-fg">{run.model}</code>
       </TableCell>
-      <TableCell className="text-fg-muted">
-        {run.score !== null ? `${Math.round(run.score * 100)}%` : "—"}
-      </TableCell>
-      <TableCell className="text-fg-muted">{new Date(run.createdAt).toLocaleString()}</TableCell>
       <TableCell>
-        <Button variant="ghost" size="sm">
-          View
-        </Button>
+        <StatusChip
+          status={run.status}
+          tone={runStatusTone(run.status)}
+          label={runStatusLabel(run.status)}
+        />
       </TableCell>
+      <TableCell className="text-right tabular-nums">
+        {percentText(scorePercent(run.score))}
+      </TableCell>
+      <TableCell className="text-fg-muted">{formatDateTime(run.startedAt)}</TableCell>
     </TableRow>
   );
 }
 
-export function AdminEvalsViewComponent({ view }: AdminEvalsViewProps) {
-  const avgScore = useMemo(() => {
-    const scored = view.runs.filter((r) => r.score !== null);
-    if (scored.length === 0) return null;
-    return scored.reduce((sum, r) => sum + (r.score ?? 0), 0) / scored.length;
-  }, [view.runs]);
-
+/**
+ * The evaluation runs: how many there are, their average score and how many passed and failed,
+ * then each run, newest first, with its model, outcome, score and start, or an empty state
+ * before the first run.
+ */
+export function AdminEvalsView({ runs, hrefFor }: AdminEvalsViewProps) {
+  const summary = evalSummary(runs);
   return (
     <div data-slot="admin-evals" className="flex flex-col gap-6">
-      <PageHeader title="LLM evaluations" description="Monitor and evaluate model performance" />
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Total runs</p>
-          <p className="text-2xl font-semibold text-fg">{view.totalCount}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Avg score</p>
-          <p className="text-2xl font-semibold">
-            {avgScore !== null ? `${Math.round(avgScore * 100)}%` : "—"}
-          </p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Passed</p>
-          <p className="text-2xl font-semibold text-success">
-            {view.runs.filter((r) => (r.score ?? 0) >= 0.8).length}
-          </p>
-        </Card>
-      </div>
-
-      {view.runs.length === 0 ? (
-        <Card>
-          <EmptyState
-            title="No evaluation runs"
-            description="Run evaluations to measure model performance."
-          />
-        </Card>
+      <PageHeader title={t("adminEvals.title")} description={t("adminEvals.intro")} />
+      {runs.length === 0 ? (
+        <EmptyState title={t("adminEvals.empty.title")} body={t("adminEvals.empty.body")} />
       ) : (
-        <div className="overflow-hidden rounded-md border border-line">
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard label={t("adminEvals.stat.total")} value={summary.total} tone="info" />
+            <StatCard
+              label={t("adminEvals.stat.average")}
+              value={percentText(summary.averageScore)}
+              hint={t("adminEvals.stat.averageHint", { count: summary.scored })}
+            />
+            <StatCard label={t("adminEvals.stat.passed")} value={summary.passed} tone="success" />
+            <StatCard
+              label={t("adminEvals.stat.failed")}
+              value={summary.failed}
+              tone={summary.failed > 0 ? "danger" : "neutral"}
+            />
+          </div>
           <Table>
+            <TableCaption className="sr-only">{t("adminEvals.caption")}</TableCaption>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Model</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Score</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Action</TableHead>
+                <TableHead scope="col">{t("adminEvals.column.run")}</TableHead>
+                <TableHead scope="col">{t("adminEvals.column.model")}</TableHead>
+                <TableHead scope="col">{t("adminEvals.column.status")}</TableHead>
+                <TableHead scope="col" className="text-right">
+                  {t("adminEvals.column.score")}
+                </TableHead>
+                <TableHead scope="col">{t("adminEvals.column.started")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {view.runs.map((run) => (
-                <EvalRow key={run.id} run={run} />
+              {sortRuns(runs).map((run) => (
+                <RunRow key={run.id} run={run} hrefFor={hrefFor} />
               ))}
             </TableBody>
           </Table>
-        </div>
+        </>
       )}
     </div>
   );

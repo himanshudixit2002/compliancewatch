@@ -774,7 +774,7 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [NOTIFICATIONS],
+    uses: [uses("notification", "GET", "/v1/notification/notifications/{notification_id}")],
     awaits: [
       servicesTrack(
         "WP13",
