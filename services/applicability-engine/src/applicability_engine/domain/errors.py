@@ -22,7 +22,7 @@ class BusinessNotFoundError(DomainError, LookupError):
 
 class RuleVersionNotFoundError(DomainError, LookupError):
     type_slug = "applicability-rule-version-not-found"
-    title = "Rule version not found"
+    title = "Rule version not found for applicability"
 
     def __init__(self, rule_version_id: str) -> None:
         super().__init__(f"the rulebook has no rule version {rule_version_id}")

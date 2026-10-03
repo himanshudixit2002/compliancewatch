@@ -36,8 +36,8 @@ class ObligationWindowInvalidError(DomainError, ValueError):
 
 
 class RuleVersionNotFoundError(DomainError, LookupError):
-    type_slug = "rule-version-not-found"
-    title = "Rule version not found"
+    type_slug = "obligation-rule-version-not-found"
+    title = "Rule version not found for obligations"
 
     def __init__(self, rule_version_id: str) -> None:
         super().__init__(f"the rulebook has no rule version {rule_version_id}")
