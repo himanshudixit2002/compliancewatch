@@ -1,119 +1,164 @@
-"use client";
+import {
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  PageHeader,
+  ProgressBar,
+  StatusChip,
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  VisuallyHidden,
+} from "@compliancewatch/ui";
+import { t } from "@/shared/i18n";
+import { formatDateTime } from "@/shared/lib/dates";
+import { StatCard } from "@/shared/ui/stat-card";
+import {
+  backfillCounts,
+  backfillStatusLabel,
+  backfillStatusTone,
+  type BackfillJob,
+} from "../model/backfill";
 
-import { useState } from "react";
-import { Button, Card, PageHeader, ProgressBar } from "@compliancewatch/ui";
+/** A server action that starts a full rebuild. */
+export type StartBackfillAction = (formData: FormData) => Promise<void>;
 
-export interface BackfillJob {
-  id: string;
-  name: string;
-  status: "pending" | "running" | "completed" | "failed";
-  progress: number;
-  startedAt: string | null;
-  completedAt: string | null;
+export interface AdminBackfillViewProps {
+  /** The jobs, newest first. */
+  jobs: readonly BackfillJob[];
+  /** Offered above the jobs; without it the page cannot start a backfill. */
+  startAction?: StartBackfillAction;
 }
 
-export interface AdminBackfillView {
-  jobs: BackfillJob[];
-  totalCount: number;
-  runningCount: number;
+function JobProgress({ job }: { job: BackfillJob }) {
+  if (job.status === "pending") {
+    return <span className="text-fg-muted">{t("adminBackfill.progress.waiting")}</span>;
+  }
+  if (job.total === null) {
+    return <span>{t("adminBackfill.progress.uncounted", { processed: job.processed })}</span>;
+  }
+  return (
+    <ProgressBar
+      className="min-w-40"
+      label={
+        <VisuallyHidden>{t("adminBackfill.progress.label", { name: job.name })}</VisuallyHidden>
+      }
+      value={job.processed}
+      max={job.total}
+      valueText={t("adminBackfill.progress.counted", {
+        processed: job.processed,
+        total: job.total,
+      })}
+    />
+  );
 }
 
-export function emptyAdminBackfill(): AdminBackfillView {
-  return { jobs: [], totalCount: 0, runningCount: 0 };
+function StartBackfill({ action }: { action: StartBackfillAction }) {
+  return (
+    <Card data-slot="start-backfill" className="gap-4">
+      <CardHeader>
+        <CardTitle>
+          <h2 className="text-base font-semibold text-fg">{t("adminBackfill.start.title")}</h2>
+        </CardTitle>
+        <CardDescription>{t("adminBackfill.start.body")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form action={action}>
+          <Button type="submit">{t("adminBackfill.start.submit")}</Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
 }
 
-export function AdminBackfillViewComponent({ view }: { view: AdminBackfillView }) {
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState(0);
+function JobsTable({ jobs }: { jobs: readonly BackfillJob[] }) {
+  return (
+    <Table>
+      <TableCaption className="sr-only">{t("adminBackfill.caption")}</TableCaption>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t("adminBackfill.column.job")}</TableHead>
+          <TableHead>{t("adminBackfill.column.status")}</TableHead>
+          <TableHead>{t("adminBackfill.column.progress")}</TableHead>
+          <TableHead>{t("adminBackfill.column.started")}</TableHead>
+          <TableHead>{t("adminBackfill.column.finished")}</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {jobs.map((job) => (
+          <TableRow key={job.id} data-job={job.id}>
+            <TableCell className="whitespace-normal">
+              <span className="block font-medium text-fg">{job.name}</span>
+              <span className="block text-xs text-fg-muted">
+                {t("adminBackfill.service", { service: job.service })}
+              </span>
+            </TableCell>
+            <TableCell>
+              <StatusChip
+                status={job.status}
+                tone={backfillStatusTone(job.status)}
+                label={backfillStatusLabel(job.status)}
+              />
+            </TableCell>
+            <TableCell>
+              <JobProgress job={job} />
+            </TableCell>
+            <TableCell className="text-fg-muted">
+              {job.startedAt === null
+                ? t("adminBackfill.notStarted")
+                : formatDateTime(job.startedAt)}
+            </TableCell>
+            <TableCell className="text-fg-muted">
+              {job.finishedAt === null
+                ? t("adminBackfill.notFinished")
+                : formatDateTime(job.finishedAt)}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
 
-  const startBackfill = () => {
-    setRunning(true);
-    setProgress(0);
-    const interval = setInterval(() => {
-      setProgress((p) => {
-        if (p >= 100) {
-          clearInterval(interval);
-          setRunning(false);
-          return 100;
-        }
-        return p + 10;
-      });
-    }, 300);
-  };
-
+/**
+ * The backfill console for admins: the form that starts a full rebuild when the page offers
+ * one, how many jobs there are and how many are running, completed or failed, then each job
+ * with its progress as the job reports it.
+ */
+export function AdminBackfillView({ jobs, startAction }: AdminBackfillViewProps) {
+  const counts = backfillCounts(jobs);
   return (
     <div data-slot="admin-backfill" className="flex flex-col gap-6">
-      <PageHeader title="Backfill" description="Rebuild derived data from source records" />
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Total jobs</p>
-          <p className="text-2xl font-semibold text-fg">{view.totalCount}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Running</p>
-          <p className="text-2xl font-semibold text-warning">{view.runningCount}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-sm text-fg-muted">Completed</p>
-          <p className="text-2xl font-semibold text-success">
-            {view.jobs.filter((j) => j.status === "completed").length}
-          </p>
-        </Card>
-      </div>
-
-      <Card className="p-6">
-        <h3 className="text-sm font-medium text-fg mb-4">Quick backfill</h3>
-        <p className="text-sm text-fg-muted mb-4">
-          Trigger a full rebuild of derived data from source records. This may take several minutes.
-        </p>
-        {running ? (
-          <div className="flex flex-col gap-2">
-            <ProgressBar value={progress} />
-            <span className="text-sm text-fg-muted">Processing... {progress}%</span>
+      <PageHeader title={t("adminBackfill.title")} description={t("adminBackfill.description")} />
+      {startAction === undefined ? null : <StartBackfill action={startAction} />}
+      {jobs.length === 0 ? (
+        <EmptyState title={t("adminBackfill.empty.title")} body={t("adminBackfill.empty.body")} />
+      ) : (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard label={t("adminBackfill.stat.total")} value={counts.total} tone="info" />
+            <StatCard label={t("adminBackfill.stat.running")} value={counts.running} />
+            <StatCard
+              label={t("adminBackfill.stat.completed")}
+              value={counts.completed}
+              tone="success"
+            />
+            <StatCard
+              label={t("adminBackfill.stat.failed")}
+              value={counts.failed}
+              tone={counts.failed > 0 ? "danger" : "neutral"}
+            />
           </div>
-        ) : (
-          <Button variant="primary" onClick={startBackfill}>
-            Start backfill
-          </Button>
-        )}
-      </Card>
-
-      {view.jobs.length > 0 && (
-        <div className="overflow-hidden rounded-md border border-line">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-line">
-                <th className="px-4 py-3 text-left text-sm font-medium text-fg-muted">Job</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-fg-muted">Status</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-fg-muted">Progress</th>
-              </tr>
-            </thead>
-            <tbody>
-              {view.jobs.map((job) => (
-                <tr key={job.id} className="border-b border-line last:border-0">
-                  <td className="px-4 py-3 text-sm text-fg">{job.name}</td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex rounded-full px-2 py-1 text-xs font-medium bg-muted text-fg-muted">
-                      {job.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="h-2 w-24 rounded-full bg-muted">
-                        <div
-                          className="h-2 rounded-full bg-primary"
-                          style={{ width: `${job.progress}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-fg-muted">{job.progress}%</span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+          <JobsTable jobs={jobs} />
+        </>
       )}
     </div>
   );
