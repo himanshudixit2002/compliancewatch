@@ -18,7 +18,7 @@ describe("NotAvailablePage", () => {
     );
     expect(screen.getByRole("heading", { level: 1, name: "Review stats" })).toBeDefined();
     expect(screen.getByText("GET /v1/rulebook/review/stats")).toBeDefined();
-    expect(screen.getByText("KAG track")).toBeDefined();
+    expect(screen.getByText("services track (WP21)")).toBeDefined();
     expect(screen.getByText("Analyst, Reviewer, Admin")).toBeDefined();
     expect(screen.getByRole("link", { name: "Back" }).getAttribute("href")).toBe("/admin");
     const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });

@@ -113,7 +113,8 @@ An entry carries:
 - `uses`: the service routes the screen calls today; each must exist in a committed OpenAPI spec.
 - `awaits`: the service routes it still needs, each with an `owner` (`plan-a` for the services
   track, `plan-k` for the KAG track, `unplanned` for nobody) and a `ref` (the delivering package
-  or a note). KAG-track paths carry `unconfirmed: true` until that track's specs are committed.
+  or a note). A KAG-track path carries `unconfirmed: true` until that track's spec is committed;
+  every route the registry awaits today is the services track's or nobody's.
   `awaitsFiles` names a repository file instead of a route (the flag registry).
 - `status`: `planned`, `waiting`, `ready` or `live`, in the order a screen moves through them
   (below).
@@ -142,9 +143,10 @@ groups such as `(public)` are stripped). When every awaited item of a waiting en
 the test fails with `backend merged: flip <id> to ready (or live once built)`. The change that
 sees it moves the entry to `ready`; building the screen is the work of the package that owns it,
 which then sets `live` ([adding-a-screen.md](adding-a-screen.md), D-013 in
-[decisions.md](decisions.md)). A few screens whose routes all existed before they were listed
-(the obligation list and calendar, ask, and some rulebook tools) are not registered yet; each
-can join as a ready entry with its routes under `uses`.
+[decisions.md](decisions.md)). A screen whose every route is already in a committed spec when it
+is listed joins as a ready entry with its routes under `uses` and nothing awaited, as the
+obligation list and calendar, ask, and the rulebook, model registry, message template, profile
+lookup and system tools did.
 
 Helpers: `screenById`, `matchScreen(pathname)` (the most specific page entry with its decoded
 parameters), `hrefFor(screen, params)` (a typed href; a missing parameter throws), `screensFor`

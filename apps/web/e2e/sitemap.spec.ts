@@ -10,7 +10,7 @@ test.describe("sitemap", () => {
     await expect(page.getByRole("table")).toHaveCount(5);
     const stats = page.locator("[data-screen='admin.review.stats']");
     await expect(stats).toContainText("GET /v1/rulebook/review/stats");
-    await expect(stats).toContainText("KAG track");
+    await expect(stats).toContainText("services track (WP21)");
     await expect(stats).toContainText("Waiting for a backend");
     await expect(page.locator("[data-screen='system.sitemap']")).toContainText("Available");
     await expect(page.locator("[data-screen='admin.flags']")).toContainText("Ready to build");

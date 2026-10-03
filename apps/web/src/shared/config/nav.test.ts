@@ -77,6 +77,8 @@ describe("navFor", () => {
       "/b/b1/review-tasks",
       "/b/b1/changes",
       "/b/b1/reminders",
+      "/b/b1/obligations",
+      "/b/b1/calendar",
     ]);
     // A link is active on its own path and below it; the shells mark the longest one current.
     expect(business?.items.filter((item) => item.active).map((item) => item.id)).toEqual([
@@ -100,7 +102,17 @@ describe("navFor", () => {
       "owner.business.review-tasks",
       "owner.changes",
       "owner.reminders",
+      "owner.obligations",
+      "owner.calendar",
     ]);
+    // Ask sits behind web.qa_enabled: its tab appears only when the flag reads on.
+    const withAsk = businessNavFor({
+      roles: ["compliance_lead"],
+      tenantKind: "business",
+      params: { businessId: "b1" },
+      isFlagEnabled: (flag) => flag === "web.qa_enabled",
+    });
+    expect(withAsk.map((item) => item.id).at(-1)).toBe("owner.ask");
     expect(
       businessNavFor({ roles: ["analyst"], tenantKind: "internal", params: { businessId: "b1" } }),
     ).toEqual([]);
@@ -155,8 +167,11 @@ describe("navFor", () => {
     const operations = sections.find((s) => s.key === "operations");
     expect(operations?.items[0]?.id).toBe("admin.sources");
     expect(operations?.items[0]?.active).toBe(true);
+    // The tenant and user tools are the admin's; an analyst finds only the profile lookup there.
     const analyst = adminNavFor({ roles: ["analyst"], tenantKind: "internal" });
-    expect(analyst.find((s) => s.key === "identity")).toBeUndefined();
+    expect(analyst.find((s) => s.key === "identity")?.items.map((item) => item.id)).toEqual([
+      "admin.profiles.review-tasks",
+    ]);
   });
 
   it("marks the links of tools that are not built with their status", () => {
