@@ -84,14 +84,14 @@ describe("ApiKeysView", () => {
   });
 
   it("never shows more of a listed key than its hint", () => {
-    const secret = "cw_live_9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e";
+    const secret = "cw_live_test0000000000000000000000000000wxyz";
     const leaky: ApiKey = { ...KEYS[1]!, prefix: secret, lastFour: secret };
     const { container } = render(
       <ApiKeysView title="API keys" keys={[leaky]} crumbs={CRUMBS} tabs={TABS} />,
     );
     expect(container.textContent).not.toContain(secret);
     expect(row(container, "key_tally").querySelector("code")?.textContent).toBe(
-      "cw_live_9b8c…5d4e",
+      "cw_live_test…wxyz",
     );
   });
 
@@ -162,13 +162,13 @@ describe("ApiKeysView", () => {
         keys={KEYS}
         crumbs={CRUMBS}
         tabs={TABS}
-        newKey={{ name: "ERP connector", secret: "cw_live_5e6f7a8b9c0d1e2f3a4b5c6d" }}
+        newKey={{ name: "ERP connector", secret: "cw_live_new00000000000000000000000000000000" }}
       />,
     );
     const banner = container.querySelector("[data-slot='new-api-key']") as HTMLElement;
     expect(banner.textContent).toContain("Key created: ERP connector");
     expect(banner.textContent).toContain("this is the only time the whole key is shown");
-    expect(within(banner).getByText("cw_live_5e6f7a8b9c0d1e2f3a4b5c6d")).toBeDefined();
+    expect(within(banner).getByText("cw_live_new00000000000000000000000000000000")).toBeDefined();
     expect(within(banner).getByRole("button", { name: "Copy the key" })).toBeDefined();
     expect(await runAxe(container)).toHaveNoViolations();
   });
