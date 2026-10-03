@@ -767,6 +767,28 @@ const SCREEN_LIST = [
     nav: { group: "business", order: 8 },
   },
   {
+    id: "owner.reminder",
+    kind: "page",
+    route: "/b/[businessId]/reminders/[notificationId]",
+    title: "Notification",
+    section: "owner",
+    roles: MEMBERS,
+    tenantKinds: BUSINESS_TENANTS,
+    uses: [NOTIFICATIONS],
+    awaits: [
+      servicesTrack(
+        "WP13",
+        "notification",
+        "GET",
+        "/v1/notification/notifications/{notification_id}",
+      ),
+    ],
+    status: "ready",
+    e2e: [],
+    guideRef: "9, F9",
+    parent: "owner.reminders",
+  },
+  {
     id: "owner.report-error",
     kind: "component",
     route: "/b/[businessId]/obligations/[obligationId]",
