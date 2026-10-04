@@ -46,3 +46,63 @@ export interface Template {
   language: string;
   status: string;
 }
+
+/**
+ * A recipient of a tenant's reminders: someone the notification service sends to about one or
+ * more businesses, in a role, with addresses tried in order (a WhatsApp number as +digits, an
+ * email address in lower case). Registering an address gives no consent: the service sends only
+ * to an address whose preference is opted in. `PUT /v1/notification/recipients/{id}` registers a
+ * recipient or replaces it whole.
+ */
+export type RecipientDto = Schemas["RecipientOut"];
+export type RecipientPageDto = Schemas["Page_RecipientOut_"];
+export type RecipientInDto = Schemas["RecipientIn"];
+export type RecipientRole = Schemas["RecipientRole"];
+export type DigestMode = Schemas["DigestMode"];
+
+export interface RecipientAddress {
+  channel: Channel;
+  address: string;
+}
+
+export interface BusinessLink {
+  businessId: string;
+  /** What the recipient calls the business; the messages name the business with it. */
+  label: string;
+}
+
+export interface Recipient {
+  id: string;
+  /** The person's user id when they sign in to the web app. */
+  userId: string | null;
+  role: RecipientRole;
+  /** Two letters, such as "en". */
+  language: string;
+  digestMode: DigestMode;
+  /** Notifications wait for the daily digest: chosen, or the recipient is a CA firm's. */
+  byDigest: boolean;
+  /** The organisation the recipient speaks for, such as a CA firm's name; may be empty. */
+  orgLabel: string;
+  /** In the order the service tries them. */
+  addresses: readonly RecipientAddress[];
+  businesses: readonly BusinessLink[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RecipientPage {
+  items: readonly Recipient[];
+  /** Send as the cursor for the next page; null on the last page. */
+  nextCursor: string | null;
+}
+
+/** What a PUT sends: the whole recipient, since the service replaces it. */
+export interface RecipientInput {
+  role: RecipientRole;
+  userId: string | null;
+  language: string;
+  digestMode: DigestMode;
+  orgLabel: string;
+  addresses: readonly RecipientAddress[];
+  businesses: readonly BusinessLink[];
+}

@@ -1,85 +1,61 @@
 import { describe, expect, it } from "vitest";
+import type { Recipient } from "@/entities/notification/types";
 import { isMessageKey } from "@/shared/i18n";
 import {
   CHANNEL_LABEL,
+  DIGEST_LABEL,
   ROLE_LABEL,
-  languageName,
-  recipientFromDto,
   recipientSummary,
+  rolesFor,
   sortRecipients,
 } from "./recipients";
-import type { Recipient, RecipientDto } from "./recipients";
-
-const DTO: RecipientDto = {
-  id: "r1",
-  user_id: null,
-  org_label: "Example & Co",
-  role: "ca_admin",
-  language: "hi",
-  digest_mode: "daily",
-  by_digest: true,
-  addresses: [
-    { channel: "email", address: "desk@firm.example", position: 2 },
-    { channel: "whatsapp", address: "+910000000001", position: 1 },
-  ],
-  businesses: [
-    { business_id: "b1", label: "Example business 1" },
-    { business_id: "b2", label: "Example business 2" },
-  ],
-  created_at: "2000-01-01T05:00:00Z",
-  updated_at: "2000-04-10T05:00:00Z",
-};
 
 function recipient(overrides: Partial<Recipient>): Recipient {
   return {
     id: "r",
-    orgLabel: "Org",
+    userId: null,
     role: "owner",
     language: "en",
+    digestMode: "off",
+    byDigest: false,
+    orgLabel: "Org",
     addresses: [],
     businesses: [],
-    byDigest: false,
+    createdAt: "2000-01-01T00:00:00Z",
     updatedAt: "2000-01-01T00:00:00Z",
     ...overrides,
   };
 }
 
-describe("recipientFromDto", () => {
-  it("orders the addresses by position and keeps the business labels", () => {
-    expect(recipientFromDto(DTO)).toEqual({
-      id: "r1",
-      orgLabel: "Example & Co",
-      role: "ca_admin",
-      language: "hi",
-      addresses: [
-        { channel: "whatsapp", address: "+910000000001" },
-        { channel: "email", address: "desk@firm.example" },
-      ],
-      businesses: ["Example business 1", "Example business 2"],
-      byDigest: true,
-      updatedAt: "2000-04-10T05:00:00Z",
-    });
-    expect(DTO.addresses[0]?.position).toBe(2);
-  });
-});
-
 describe("wording maps", () => {
-  it("label every recipient role and channel", () => {
-    for (const key of [...Object.values(ROLE_LABEL), ...Object.values(CHANNEL_LABEL)]) {
-      expect(isMessageKey(key)).toBe(true);
+  it("label every recipient role, channel and delivery", () => {
+    for (const key of [
+      ...Object.values(ROLE_LABEL),
+      ...Object.values(CHANNEL_LABEL),
+      ...Object.values(DIGEST_LABEL),
+    ]) {
+      expect(isMessageKey(key), key).toBe(true);
     }
   });
 });
 
+describe("rolesFor", () => {
+  it("offers a business's own roles, a CA firm's, and none to the internal tenant", () => {
+    expect(rolesFor("business")).toEqual(["owner", "staff"]);
+    expect(rolesFor("ca_firm")).toEqual(["ca_admin", "ca_staff"]);
+    expect(rolesFor("internal")).toEqual([]);
+  });
+});
+
 describe("sortRecipients", () => {
-  it("orders by organisation with unnamed recipients last", () => {
+  it("orders by organisation with unnamed recipients last, then by when they were added", () => {
     const sorted = sortRecipients([
-      recipient({ id: "1", orgLabel: "" }),
+      recipient({ id: "1", orgLabel: "", createdAt: "2000-01-02T00:00:00Z" }),
       recipient({ id: "2", orgLabel: "Zed" }),
       recipient({ id: "3", orgLabel: "Alpha" }),
-      recipient({ id: "4", orgLabel: "" }),
+      recipient({ id: "4", orgLabel: "", createdAt: "2000-01-01T00:00:00Z" }),
     ]);
-    expect(sorted.map((r) => r.id)).toEqual(["3", "2", "1", "4"]);
+    expect(sorted.map((r) => r.id)).toEqual(["3", "2", "4", "1"]);
   });
 });
 
@@ -89,27 +65,19 @@ describe("recipientSummary", () => {
       recipientSummary([
         recipient({
           addresses: [
-            { channel: "whatsapp", address: "+91" },
-            { channel: "whatsapp", address: "+92" },
+            { channel: "whatsapp", address: "+910000000001" },
+            { channel: "whatsapp", address: "+910000000002" },
           ],
           byDigest: true,
         }),
         recipient({
           addresses: [
             { channel: "email", address: "a@example.com" },
-            { channel: "whatsapp", address: "+93" },
+            { channel: "whatsapp", address: "+910000000003" },
           ],
         }),
         recipient({}),
       ]),
     ).toEqual({ total: 3, whatsapp: 2, email: 1, byDigest: 1 });
-  });
-});
-
-describe("languageName", () => {
-  it("names a language, and falls back to the code for an unknown or invalid one", () => {
-    expect(languageName("hi")).toBe("Hindi");
-    expect(languageName("zz")).toBe("zz");
-    expect(languageName("not a code")).toBe("not a code");
   });
 });

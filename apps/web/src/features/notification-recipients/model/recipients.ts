@@ -1,46 +1,14 @@
-import type { notification } from "@compliancewatch/contracts/openapi";
-import type { Channel } from "@/entities/notification/types";
+import type { Channel, DigestMode, Recipient, RecipientRole } from "@/entities/notification/types";
+import type { TenantKind } from "@/shared/config/roles";
 import type { MessageKey } from "@/shared/i18n";
 
 /**
- * The notification recipients screen's model: who the notification service sends reminders
- * to, as `GET /v1/notification/recipients` returns them. A recipient speaks for an
- * organisation in a role, has addresses tried in order, is linked to businesses, and may have
- * its notifications held for the daily digest.
+ * The notification recipients screen's model: who the notification service sends a business's
+ * reminders to, as `GET /v1/notification/recipients?business_id=` returns them. A recipient
+ * speaks for an organisation in a role, has addresses tried in order, follows one or more
+ * businesses, and may have its notifications held for the daily digest (always, for a CA firm's
+ * people).
  */
-type Schemas = notification.components["schemas"];
-
-export type RecipientDto = Schemas["RecipientOut"];
-export type RecipientRole = Schemas["RecipientRole"];
-
-export interface RecipientAddress {
-  channel: Channel;
-  address: string;
-}
-
-export interface Recipient {
-  id: string;
-  orgLabel: string;
-  role: RecipientRole;
-  /** Two letters, such as "en". */
-  language: string;
-  /** In the order the service tries them. */
-  addresses: readonly RecipientAddress[];
-  /** The labels of the businesses the recipient hears about. */
-  businesses: readonly string[];
-  /** Notifications wait for the daily digest (chosen, or a CA firm's recipient). */
-  byDigest: boolean;
-  /** An ISO instant. */
-  updatedAt: string;
-}
-
-export interface RecipientSummary {
-  total: number;
-  whatsapp: number;
-  email: number;
-  byDigest: number;
-}
-
 export const ROLE_LABEL: Readonly<Record<RecipientRole, MessageKey>> = {
   owner: "role.owner",
   staff: "role.staff",
@@ -53,26 +21,37 @@ export const CHANNEL_LABEL: Readonly<Record<Channel, MessageKey>> = {
   email: "notifications.channel.email",
 };
 
-export function recipientFromDto(dto: RecipientDto): Recipient {
-  return {
-    id: dto.id,
-    orgLabel: dto.org_label,
-    role: dto.role,
-    language: dto.language,
-    addresses: [...dto.addresses]
-      .sort((a, b) => a.position - b.position)
-      .map(({ channel, address }) => ({ channel, address })),
-    businesses: dto.businesses.map((business) => business.label),
-    byDigest: dto.by_digest,
-    updatedAt: dto.updated_at,
-  };
+export const DIGEST_LABEL: Readonly<Record<DigestMode, MessageKey>> = {
+  off: "recipients.delivery.immediate",
+  daily: "recipients.delivery.digest",
+};
+
+export const DIGEST_MODES: readonly DigestMode[] = ["off", "daily"];
+
+/** The roles a recipient of the tenant may have: a business's own people, or a CA firm's. */
+const ROLES_BY_KIND: Readonly<Record<TenantKind, readonly RecipientRole[]>> = {
+  business: ["owner", "staff"],
+  ca_firm: ["ca_admin", "ca_staff"],
+  internal: [],
+};
+
+export function rolesFor(kind: TenantKind): readonly RecipientRole[] {
+  return ROLES_BY_KIND[kind];
 }
 
-/** Recipients by organisation, unnamed ones last. */
+export interface RecipientSummary {
+  total: number;
+  whatsapp: number;
+  email: number;
+  byDigest: number;
+}
+
+/** Recipients by organisation, unnamed ones last, then by when they were added. */
 export function sortRecipients(recipients: readonly Recipient[]): Recipient[] {
   return [...recipients].sort((a, b) => {
-    if (a.orgLabel === "" || b.orgLabel === "") return a.orgLabel === "" ? 1 : -1;
-    return a.orgLabel.localeCompare(b.orgLabel);
+    if (a.orgLabel === "" && b.orgLabel !== "") return 1;
+    if (b.orgLabel === "" && a.orgLabel !== "") return -1;
+    return a.orgLabel.localeCompare(b.orgLabel) || a.createdAt.localeCompare(b.createdAt);
   });
 }
 
@@ -88,15 +67,4 @@ export function recipientSummary(recipients: readonly Recipient[]): RecipientSum
     email: recipients.filter((recipient) => reaches(recipient, "email")).length,
     byDigest: recipients.filter((recipient) => recipient.byDigest).length,
   };
-}
-
-const languageNames = new Intl.DisplayNames(["en"], { type: "language", fallback: "none" });
-
-/** "hi" to "Hindi", from the platform's language names; the code itself when it has none. */
-export function languageName(code: string): string {
-  try {
-    return languageNames.of(code) ?? code;
-  } catch {
-    return code;
-  }
 }

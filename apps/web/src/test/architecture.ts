@@ -234,7 +234,6 @@ export const PARKED_FEATURES: Readonly<Record<string, readonly string[]>> = {
   "admin-sources": ["admin.sources"],
   "admin-tenants": ["admin.tenants"],
   changes: ["owner.changes"],
-  "notification-recipients": ["owner.settings.notification-recipients"],
   notifications: ["owner.reminders", "owner.reminder"],
   obligations: ["owner.obligations", "owner.obligation"],
   "settings-activity": ["owner.settings.activity"],

@@ -40,7 +40,8 @@ src/features/       one directory per screen family: model/, ui/, index.ts (port
                     identity consents and reminder preference gateway, the purposes and their documents,
                     the step's view, the form and the recordConsents action), flags (the flag console
                     over the registry and the web server's reader), admin-ontology (the ontology
-                    browser); and the parked folders of screens
+                    browser), notification-recipients (a business's recipients: the gateway, the form
+                    and the save and remove actions); and the parked folders of screens
                     not built yet, which no page imports (docs/web/architecture.md, "Parked feature folders")
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
                     problem/ types the RFC 9457 body every service returns (from the generated contracts);

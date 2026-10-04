@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BUSINESS_ID, RECIPIENT_ID, recipientDto } from "@/test/notification-fixture";
 import {
   CHANNELS,
   emailKeyOf,
@@ -6,7 +7,10 @@ import {
   isRecipientKey,
   preferenceChangeToDto,
   preferenceFromDto,
+  recipientFromDto,
+  recipientInputToDto,
   recipientLabel,
+  recipientPageFromDto,
   templateFromDto,
   whatsappKeyOf,
   whatsappNumberOf,
@@ -103,5 +107,58 @@ describe("templateFromDto", () => {
         body: "Example body {name}",
       }),
     ).toEqual({ key: "example_template", channel: "email", language: "en", status: "draft" });
+  });
+});
+
+describe("recipient mappers", () => {
+  it("maps a recipient with its addresses in the order they are tried", () => {
+    expect(recipientFromDto(recipientDto())).toEqual({
+      id: RECIPIENT_ID,
+      userId: null,
+      role: "owner",
+      language: "en",
+      digestMode: "off",
+      byDigest: false,
+      orgLabel: "",
+      addresses: [
+        { channel: "whatsapp", address: "+910000000000" },
+        { channel: "email", address: "owner@example.com" },
+      ],
+      businesses: [{ businessId: BUSINESS_ID, label: "Example business" }],
+      createdAt: "2000-01-01T05:00:00Z",
+      updatedAt: "2000-01-02T05:00:00Z",
+    });
+  });
+
+  it("maps a page and keeps its cursor, null on the last page", () => {
+    expect(recipientPageFromDto({ items: [recipientDto()], next_cursor: "next" }).nextCursor).toBe(
+      "next",
+    );
+    expect(recipientPageFromDto({ items: [], next_cursor: null })).toEqual({
+      items: [],
+      nextCursor: null,
+    });
+  });
+
+  it("sends the whole recipient on a PUT", () => {
+    expect(
+      recipientInputToDto({
+        role: "ca_staff",
+        userId: "00000000-0000-4000-8000-0000000000a2",
+        language: "hi",
+        digestMode: "daily",
+        orgLabel: "Example firm",
+        addresses: [{ channel: "email", address: "desk@example.com" }],
+        businesses: [{ businessId: BUSINESS_ID, label: "Example client" }],
+      }),
+    ).toEqual({
+      role: "ca_staff",
+      user_id: "00000000-0000-4000-8000-0000000000a2",
+      language: "hi",
+      digest_mode: "daily",
+      org_label: "Example firm",
+      addresses: [{ channel: "email", address: "desk@example.com" }],
+      businesses: [{ business_id: BUSINESS_ID, label: "Example client" }],
+    });
   });
 });

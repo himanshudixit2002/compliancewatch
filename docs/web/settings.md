@@ -1,10 +1,12 @@
 # Settings
 
-The settings pages of a tenant user: the index, the consents, the notification preferences and
-billing. They are the registry entries `owner.settings`, `owner.settings.consents`,
-`owner.settings.notifications` and `owner.settings.billing`; the session facts and signing out
-are on `/account` (`account.home`). The client-level detail of each call is in
-[data-layer.md](data-layer.md) under "Consents", "Notification preferences" and "Billing".
+The settings pages of a tenant user: the index, the consents, the notification preferences, the
+notification recipients and billing. They are the registry entries `owner.settings`,
+`owner.settings.consents`, `owner.settings.notifications`,
+`owner.settings.notification-recipients` and `owner.settings.billing`; the session facts and
+signing out are on `/account` (`account.home`). The client-level detail of each call is in
+[data-layer.md](data-layer.md) under "Consents", "Notification preferences", "Notification
+recipients" and "Billing".
 
 | Page                      | Who                                                   | Calls                                                                                              |
 | ------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -12,6 +14,7 @@ are on `/account` (`account.home`). The client-level detail of each call is in
 | `/settings/consents`      | every tenant member role                              | identity consents (read, append); the WhatsApp preference (set) when WhatsApp reminders change     |
 | `/settings/notifications` | every tenant member role                              | notification preference per channel and recipient (read, replace), templates, identity consents |
 | `/settings/billing`       | `owner`, `ca_admin`                                   | identity billing plans (read), subscriptions (start)                                              |
+| `/settings/notifications/recipients` | `owner`, `ca_admin`                        | profile businesses (read); notification recipients (list, read, register or replace, remove), templates |
 
 ## The index: `/settings`
 
@@ -83,6 +86,37 @@ user's consent to that channel's reminders is on file.
   is recorded all the same and applies once the channel is connected.
 - A number opted in by writing START on WhatsApp shows as opted in, with a note when the web
   consent is not on file.
+
+## Notification recipients: `/settings/notifications/recipients`
+
+For the owner and the CA admin (the tenant admins). A recipient is someone the notification
+service sends a business's reminders to: it speaks for an organisation in a role, has addresses
+tried in order, follows one or more businesses, and its notifications go out as they happen or
+wait for the daily digest (always, for a CA firm's people). The page works one business at a time:
+
+- The business comes from `?business=<id>` (a business id is not personal data), chosen with a
+  GET form when the tenant has more than one; without one, the first of the tenant's businesses
+  by name (`GET /v1/businesses`, one page of up to 200). An id that is not one of the tenant's
+  businesses is the not-found page; a tenant without a business is asked to add one.
+- The recipients that follow it (`GET /v1/notification/recipients?business_id=`, one page of up
+  to 200): the organisation and role, each address with its channel in the order tried, the
+  businesses it follows (named by the tenant's business list, else by the recipient's own label
+  for it), the language, the delivery and the last change, with Change and Remove.
+- The form adds a recipient for the business, or changes the one named by `?edit=<id>`
+  (`GET /v1/notification/recipients/{id}`): the role (the tenant kind's: owner or staff for a
+  business, CA admin or CA staff for a firm), an optional organisation, the addresses in rows
+  (WhatsApp with its country code, or email; an empty row is skipped; up to ten), the language
+  (those the service has templates in), the delivery, and the businesses it hears about. The
+  field names are the service's (`addresses.0.address`), so a 422 from it lands on the field.
+- `saveRecipient` replaces the recipient whole with `PUT /v1/notification/recipients/{id}`: what
+  the form sent plus what it does not show (the user id, and the label of each business link it
+  keeps); a new link is named after the business, which is how the messages name it. A new
+  recipient's id is minted for each render of the form, so a double submit replaces one recipient
+  instead of adding two. The page then shows "Saved" with the business it came from.
+- `removeRecipient` deletes the recipient with its addresses and links after a confirm dialog that
+  says so; each address keeps its opt-in or opt-out. A recipient already gone counts as removed.
+- Adding an address gives no consent: the service sends only to an address whose preference is
+  opted in (the notifications page, the consent step, or START on WhatsApp), and the form says so.
 
 ## Billing: `/settings/billing`
 

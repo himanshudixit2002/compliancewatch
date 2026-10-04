@@ -462,6 +462,17 @@ does not check it; opting out and changing the language or the window need no co
 email section says that the service's email channel is not connected on `main`: a preference is
 recorded all the same.
 
+## Notification recipients
+
+`features/notification-recipients/gateway.ts` lists a business's recipients (`GET
+/v1/notification/recipients?business_id=&limit=`), reads one (`GET .../{recipient_id}`; a 404 is
+a recipient that is gone), registers or replaces one whole (`PUT .../{recipient_id}`) and removes
+one (`DELETE .../{recipient_id}`, a 204) over the typed notification client, all tenant-scoped and
+uncached, plus the templates (cached under `notification:templates`) and the tenant's businesses
+(`GET /v1/businesses`, uncached) the page chooses from. `PUT` by id is a replacement, so a
+recipient's id, minted once per render of the add form, is its natural key: a repeat replaces the
+same recipient. [settings.md](settings.md) has the page.
+
 ## Billing
 
 `features/billing/gateway.ts` reads the plans (`GET /v1/identity/billing/plans`, the same for
@@ -503,6 +514,7 @@ key, because each has a natural key on the service:
 | rulebook document                      | the sha256: 201 created, 200 unchanged, 409 when the metadata differs       |
 | rulebook mentions, relation candidates | the document and the extractor: a repeat reports `unchanged`                |
 | notification preference                | PUT by channel and recipient: a replacement                                 |
+| notification recipient                 | PUT by the recipient id the form was rendered with: a replacement           |
 
 For a listed route, a page renders `<IdempotencyKeyInput />` inside the form (one UUID per
 render, so a double submit or a retry after a lost response sends the same key), and the action
