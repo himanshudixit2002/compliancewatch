@@ -3,8 +3,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ClientPrincipal } from "@/server/api/services";
 import { resetEnvCache } from "@/server/env";
 import { fakeFetch, jsonResponse, problemResponse, type RecordedRequest } from "@/test/fake-fetch";
-import { BUSINESS_ID, NOTIFICATION_ID, notificationDto } from "@/test/notification-fixture";
-import { getReminder, getReminders } from "./queries";
+import { TENANT_HEADER } from "@/server/api/client";
+import {
+  BUSINESS_ID,
+  NOTIFICATION_ID,
+  TEMPLATE_DTOS,
+  notificationDto,
+} from "@/test/notification-fixture";
+import {
+  getAdminNotification,
+  getAdminNotifications,
+  getReminder,
+  getReminders,
+  getTemplates,
+} from "./queries";
 
 const TENANT = "00000000-0000-4000-8000-0000000000a1";
 const owner: ClientPrincipal = {
@@ -131,5 +143,86 @@ describe("getReminder", () => {
       fetchImpl: services({ one: jsonResponse(200, notificationDto()) }).fetchImpl,
     });
     expect(plain.ok && plain.value.fallbackHref).toBeNull();
+  });
+});
+
+const LOOKED_UP = "00000000-0000-4000-8000-0000000000a9";
+const analyst: ClientPrincipal = {
+  userId: "00000000-0000-4000-8000-0000000000a3",
+  tenantId: "00000000-0000-4000-8000-0000000000a0",
+  tenantKind: "internal",
+  roles: ["analyst"],
+};
+
+describe("getAdminNotifications", () => {
+  it("reads the business's history for the tenant the lookup names, linking each with it", async () => {
+    const fake = services();
+    const view = await getAdminNotifications(
+      analyst,
+      { tenantId: LOOKED_UP, businessId: BUSINESS_ID },
+      { state: "failed" },
+      { fetchImpl: fake.fetchImpl },
+    );
+    expect(view.ok).toBe(true);
+    if (!view.ok) return;
+    expect(fake.requests[0]?.headers[TENANT_HEADER]).toBe(LOOKED_UP);
+    expect(fake.requests.some((request) => request.pathname.startsWith("/v1/businesses"))).toBe(
+      false,
+    );
+    expect(view.value.rows[0]?.href).toBe(
+      `/admin/notifications/${NOTIFICATION_ID}?tenant=${LOOKED_UP}&business=${BUSINESS_ID}`,
+    );
+    expect(view.value.nextHref).toBe(
+      `/admin/notifications?tenant=${LOOKED_UP}&business=${BUSINESS_ID}&state=failed&cursor=next`,
+    );
+  });
+
+  it("passes a failed read on", async () => {
+    const view = await getAdminNotifications(
+      analyst,
+      { tenantId: LOOKED_UP, businessId: BUSINESS_ID },
+      {},
+      { fetchImpl: services({ list: problemResponse(500) }).fetchImpl },
+    );
+    expect(!view.ok && view.error.kind).toBe("server");
+  });
+});
+
+describe("getAdminNotification", () => {
+  it("reads one notification for the tenant named, with the way back to its business", async () => {
+    const fake = services();
+    const view = await getAdminNotification(analyst, LOOKED_UP, NOTIFICATION_ID, {
+      fetchImpl: fake.fetchImpl,
+    });
+    expect(view.ok).toBe(true);
+    if (!view.ok) return;
+    expect(fake.requests[0]?.headers[TENANT_HEADER]).toBe(LOOKED_UP);
+    expect(view.value.tenantId).toBe(LOOKED_UP);
+    expect(view.value.listHref).toBe(
+      `/admin/notifications?tenant=${LOOKED_UP}&business=${BUSINESS_ID}`,
+    );
+    expect(view.value.fallbackHref).toBe(
+      `/admin/notifications/${FALLBACK}?tenant=${LOOKED_UP}&business=${BUSINESS_ID}`,
+    );
+    const plain = await getAdminNotification(analyst, LOOKED_UP, NOTIFICATION_ID, {
+      fetchImpl: services({ one: jsonResponse(200, notificationDto()) }).fetchImpl,
+    });
+    expect(plain.ok && plain.value.fallbackHref).toBeNull();
+    const gone = await getAdminNotification(analyst, LOOKED_UP, NOTIFICATION_ID, {
+      fetchImpl: services({ one: problemResponse(404) }).fetchImpl,
+    });
+    expect(!gone.ok && gone.error.kind).toBe("not_found");
+  });
+});
+
+describe("getTemplates", () => {
+  it("reads the templates without a tenant, cached under their tag", async () => {
+    const fake = fakeFetch([
+      { method: "GET", path: "/v1/notification/templates", body: TEMPLATE_DTOS },
+    ]);
+    const rows = await getTemplates({ fetchImpl: fake.fetchImpl });
+    expect(rows.ok && rows.value).toHaveLength(TEMPLATE_DTOS.length);
+    expect(fake.requests[0]?.headers[TENANT_HEADER]).toBeUndefined();
+    expect(fake.requests[0]?.next).toEqual({ revalidate: 300, tags: ["notification:templates"] });
   });
 });

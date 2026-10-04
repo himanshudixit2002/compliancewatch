@@ -105,7 +105,8 @@ Every request carries:
 - `accept: application/json`.
 - `x-tenant-id`: `ctx.tenantId ?? ctx.session?.tenantId` on the tenant-scoped services, and
   nothing when neither is set. The `tenantId` override is the only way a request acts for a
-  tenant other than the session's, and only admin lookups use it.
+  tenant other than the session's, and only admin lookups use it: the notification console reads
+  the tenant its lookup names ([admin-tools.md](admin-tools.md)).
 - The time limit: `AbortSignal.timeout(CW_WEB_REQUEST_TIMEOUT_MS)`, combined with the request's
   own signal.
 

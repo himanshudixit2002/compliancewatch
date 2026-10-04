@@ -1,8 +1,13 @@
 import "server-only";
 
-import { notificationFromDto, notificationPageFromDto } from "@/entities/notification/mappers";
+import {
+  messageTemplateFromDto,
+  notificationFromDto,
+  notificationPageFromDto,
+} from "@/entities/notification/mappers";
 import type {
   DeliveryState,
+  MessageTemplate,
   NotificationPage,
   NotificationRecord,
 } from "@/entities/notification/types";
@@ -14,10 +19,10 @@ import {
   type NotificationClient,
   type ProfileClient,
 } from "@/server/api/services";
-import { uncachedRead } from "@/server/cache";
+import { cachedRead, tags, uncachedRead } from "@/server/cache";
 import { mapBody, type Result } from "@/server/result";
 import type { BusinessRef } from "./model/history";
-import type { BusinessNamePort, NotificationHistoryPort } from "./ports";
+import type { BusinessNamePort, NotificationHistoryPort, TemplatesPort } from "./ports";
 
 /**
  * The notification history over the typed notification client, and the business it is about over
@@ -25,7 +30,9 @@ import type { BusinessNamePort, NotificationHistoryPort } from "./ports";
  * or for an admin lookup the tenant the lookup names, `ctx.tenantId`) and is never cached, since
  * delivery moves on.
  */
-export class NotificationsGateway implements NotificationHistoryPort, BusinessNamePort {
+export class NotificationsGateway
+  implements NotificationHistoryPort, BusinessNamePort, TemplatesPort
+{
   private readonly notification: NotificationClient;
   private readonly profile: ProfileClient;
 
@@ -62,6 +69,16 @@ export class NotificationsGateway implements NotificationHistoryPort, BusinessNa
       }),
     );
     return mapBody(result, notificationFromDto);
+  }
+
+  /** The templates are the same for every tenant: kept five minutes under their tag. */
+  async templates(): Promise<Result<readonly MessageTemplate[]>> {
+    const result = await call(
+      this.notification.GET("/v1/notification/templates", {
+        ...cachedRead([tags.notification.templates()]),
+      }),
+    );
+    return mapBody(result, (templates) => templates.map(messageTemplateFromDto));
   }
 
   async business(businessId: string): Promise<Result<BusinessRef>> {

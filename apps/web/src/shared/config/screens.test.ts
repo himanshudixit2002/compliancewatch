@@ -17,7 +17,14 @@ import {
   toRoutePattern,
 } from "./screens.ts";
 import type { AwaitedRoute, Screen } from "./screens.ts";
-import { HTTP_METHODS, SERVICES_WITH_SPECS, isServiceName, routeKey } from "./services.ts";
+import {
+  HTTP_METHODS,
+  SERVICES_WITH_SPECS,
+  awaitKey,
+  isServiceName,
+  requiredHeaderKey,
+  routeKey,
+} from "./services.ts";
 import type { RouteRef } from "./services.ts";
 
 const APP_DIR = resolve(__dirname, "../../app");
@@ -25,21 +32,33 @@ const E2E_DIR = resolve(__dirname, "../../../e2e");
 const REPO_ROOT = resolve(__dirname, "../../../../..");
 const SPEC_DIR = join(REPO_ROOT, "packages/contracts/openapi");
 
-interface OpenApiDocument {
-  paths: Record<string, Record<string, unknown>>;
+interface OpenApiOperation {
+  parameters?: { in?: string; name?: string; required?: boolean }[];
 }
 
-/** Every "service METHOD path" the committed specs offer. */
+interface OpenApiDocument {
+  paths: Record<string, Record<string, OpenApiOperation>>;
+}
+
+/**
+ * Every "service METHOD path" the committed specs offer, and the same key with each request
+ * header an operation requires ("... [header idempotency-key]"), which a hardened await needs.
+ */
 function committedRoutes(): Set<string> {
   const keys = new Set<string>();
   for (const service of SERVICES_WITH_SPECS) {
     const file = join(SPEC_DIR, `${service}.v1.json`);
     const spec = JSON.parse(readFileSync(file, "utf8")) as OpenApiDocument;
     for (const [path, operations] of Object.entries(spec.paths)) {
-      for (const method of Object.keys(operations)) {
+      for (const [method, operation] of Object.entries(operations)) {
         const upper = method.toUpperCase();
-        if ((HTTP_METHODS as readonly string[]).includes(upper)) {
-          keys.add(routeKey({ service, method: upper as RouteRef["method"], path }));
+        if (!(HTTP_METHODS as readonly string[]).includes(upper)) continue;
+        const route = { service, method: upper as RouteRef["method"], path };
+        keys.add(routeKey(route));
+        for (const parameter of operation.parameters ?? []) {
+          if (parameter.in === "header" && parameter.required === true && parameter.name) {
+            keys.add(requiredHeaderKey(route, parameter.name));
+          }
         }
       }
     }
@@ -49,6 +68,8 @@ function committedRoutes(): Set<string> {
 
 const COMMITTED = committedRoutes();
 const isCommitted = (route: RouteRef) => COMMITTED.has(routeKey(route));
+/** An awaited route is on main once its path is, with the header it must require if it names one. */
+const hasLanded = (route: AwaitedRoute) => COMMITTED.has(awaitKey(route));
 const fileExists = (repoPath: string) => existsSync(join(REPO_ROOT, repoPath));
 
 /** Route-group segments "(app)" are stripped: app/(app)/x/page.tsx serves /x. */
@@ -157,14 +178,14 @@ describe("screen registry", () => {
       const files = screen.awaitsFiles ?? [];
       expect(routes.length + files.length, `${screen.id} awaits nothing`).toBeGreaterThan(0);
       const absent = [
-        ...routes.filter((route) => !isCommitted(route)),
+        ...routes.filter((route) => !hasLanded(route)),
         ...files.filter((file) => !fileExists(file.path)),
       ];
       expect(
         absent.length,
         `backend merged: flip ${screen.id} to ready (or live once built)`,
       ).toBeGreaterThan(0);
-      for (const route of routes.filter(isCommitted)) {
+      for (const route of routes.filter(hasLanded)) {
         const used = screen.uses.some((use) => routeKey(use) === routeKey(route));
         expect(used, `${screen.id} awaits present route ${routeKey(route)} without using it`).toBe(
           true,
@@ -187,9 +208,7 @@ describe("screen registry", () => {
         `${screen.id} names no backend`,
       ).toBeGreaterThan(0);
       for (const route of routes) {
-        expect(isCommitted(route), `${screen.id} is ready but awaits ${routeKey(route)}`).toBe(
-          true,
-        );
+        expect(hasLanded(route), `${screen.id} is ready but awaits ${awaitKey(route)}`).toBe(true);
         const used = screen.uses.some((use) => routeKey(use) === routeKey(route));
         expect(used, `${screen.id} awaits present route ${routeKey(route)} without using it`).toBe(
           true,
@@ -303,5 +322,22 @@ describe("routes", () => {
       expect(screensFor([role]).length, role).toBeGreaterThan(1);
     }
     expect(() => screenById("nope" as never)).toThrow(/unknown screen/);
+  });
+});
+
+describe("hardened awaits", () => {
+  it("count a route awaited with a header as absent until a spec requires that header", () => {
+    const keyed = { service: "profile", method: "POST", path: "/v1/businesses" } as const;
+    expect(hasLanded({ ...keyed, owner: "plan-a", ref: "WP0" })).toBe(true);
+    expect(hasLanded({ ...keyed, owner: "plan-a", ref: "WP0", header: "Idempotency-Key" })).toBe(
+      true,
+    );
+    expect(hasLanded({ ...keyed, owner: "plan-a", ref: "WP0", header: "X-Example-Header" })).toBe(
+      false,
+    );
+    const resend = screenById("admin.notification.resend").awaits[0];
+    expect(resend?.header).toBe("Idempotency-Key");
+    expect(resend !== undefined && isCommitted(resend)).toBe(true);
+    expect(resend !== undefined && hasLanded(resend)).toBe(false);
   });
 });

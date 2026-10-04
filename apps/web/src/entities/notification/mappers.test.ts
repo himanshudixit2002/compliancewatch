@@ -16,6 +16,7 @@ import {
   emailKeyOf,
   isChannel,
   isRecipientKey,
+  messageTemplateFromDto,
   preferenceChangeToDto,
   preferenceFromDto,
   recipientFromDto,
@@ -219,5 +220,29 @@ describe("notification mappers", () => {
     expect(DELIVERY_STATES).toHaveLength(7);
     expect(isDeliveryState("digest_pending")).toBe(true);
     expect(isDeliveryState("lost")).toBe(false);
+  });
+});
+
+describe("messageTemplateFromDto", () => {
+  it("keeps the text, its placeholders and the Meta name with the template's facts", () => {
+    expect(
+      messageTemplateFromDto({
+        key: "example_template",
+        channel: "whatsapp",
+        language: "hi",
+        status: "draft",
+        meta_name: "cw_example_template_hi",
+        placeholders: ["business_name", "title"],
+        body: "Example {business_name}: {title}.",
+      }),
+    ).toEqual({
+      key: "example_template",
+      channel: "whatsapp",
+      language: "hi",
+      status: "draft",
+      metaName: "cw_example_template_hi",
+      placeholders: ["business_name", "title"],
+      body: "Example {business_name}: {title}.",
+    });
   });
 });

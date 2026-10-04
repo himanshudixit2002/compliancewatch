@@ -48,6 +48,17 @@ export interface Template {
 }
 
 /**
+ * A message template as the template console shows it: the text with its `{placeholders}`, the
+ * name it carries at Meta and its approval status there. The text holds placeholders only; the
+ * facts a message carries come from the rulebook and the obligation when it is sent.
+ */
+export interface MessageTemplate extends Template {
+  metaName: string;
+  placeholders: readonly string[];
+  body: string;
+}
+
+/**
  * A recipient of a tenant's reminders: someone the notification service sends to about one or
  * more businesses, in a role, with addresses tried in order (a WhatsApp number as +digits, an
  * email address in lower case). Registering an address gives no consent: the service sends only

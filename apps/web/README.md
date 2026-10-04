@@ -25,7 +25,9 @@ src/app/            route files only: page.tsx is gate, query, render; layouts, 
                     loading.tsx; [...slug] serves
                     unbuilt tenant screens behind the entry's roles
   admin/            /admin home and layout under AdminShell, behind requireAdmin; rulebook/documents and the
-                    viewer, flags (the flag console), ontology (the browser); [...slug] serves unbuilt tools
+                    viewer, flags (the flag console), ontology (the browser), notifications (the console
+                    by tenant and business, a notification, the message templates); [...slug] serves
+                    unbuilt tools
   sign-out/         POST handler: clears the session cookie and returns to /sign-in (GET is a 405)
   api/health/       liveness handler {status, version, commit}
 src/features/       one directory per screen family: model/, ui/, index.ts (ports, gateway, queries and

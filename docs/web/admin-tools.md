@@ -9,10 +9,12 @@ are built: what each shows, what it calls and what waits.
 The admin layout runs `requireAdmin()` before anything renders, so a tenant role gets the root
 404 with no admin markup; each page calls its gate again on its first line
 (`requireScreenSession`), and a regulatory role a tool's entry does not list gets the not-found
-page as well ([auth-and-roles.md](auth-and-roles.md)). A page that reads a service has a sibling
-`loading.tsx`; under it a not-found answer (an unknown id, a role the tool does not admit) is
-streamed with status 200 and a `noindex` tag rather than a 404 status, as on the business pages
-(D-029 in [decisions.md](decisions.md)).
+page as well ([auth-and-roles.md](auth-and-roles.md)). Each built tool below has a sibling
+`loading.tsx` with a skeleton (the console's sits in the route group `(console)`, so it wraps the
+console alone); under it a not-found answer (an unknown id, a regulatory role the tool does not
+list) is streamed with status 200 and a `noindex` tag rather than a 404 status, as on the business
+pages (D-029 in [decisions.md](decisions.md)). A tenant role still gets the real 404 from the
+layout's gate.
 
 | Tool                | Route                                    | Who                     | Calls                                                                 |
 | ------------------- | ---------------------------------------- | ----------------------- | --------------------------------------------------------------------- |
@@ -20,6 +22,8 @@ streamed with status 200 and a `noindex` tag rather than a 404 status, as on the
 | Documents           | `/admin/rulebook/documents`, `/[id]`     | every regulatory role   | `GET /v1/rulebook/documents/{document_id}`                            |
 | Feature flags       | `/admin/flags`                           | every regulatory role   | none: `packages/flags/registry.json` and the web server's flag reader |
 | Ontology            | `/admin/ontology`                        | every regulatory role   | `GET /v1/ontology` (profile; no tenant header, cached an hour)        |
+| Notifications       | `/admin/notifications`, `/[id]`          | `analyst`, `admin`      | `GET /v1/notification/notifications`, `.../{notification_id}`, for the tenant looked up |
+| Message templates   | `/admin/notifications/templates`         | every regulatory role   | `GET /v1/notification/templates` (cached five minutes)                |
 
 ## Internal tools: `/admin`
 
@@ -79,3 +83,53 @@ The usage per attribute (how many profiles hold it and in which state, and the r
 is the registry entry `admin.ontology.usage`, a component of this page that waits for
 `GET /v1/profile/admin/attribute-usage` (services track, WP30). The page shows a note built from
 that entry naming the route (D-039 in [decisions.md](decisions.md)).
+
+## Notifications: `/admin/notifications`
+
+The notification console, read-only, for the analyst and the admin. The notification routes are
+tenant-scoped: a request names one tenant in `x-tenant-id` and sees that tenant's notifications
+only, of one business at a time (the list needs `business_id`). The console is therefore a lookup,
+as the profile review-task lookup is designed:
+
+- A GET form takes the tenant id and the business id (ids, not personal data, so they sit in the
+  query string and a lookup can be shared or bookmarked); a value that is not a UUID is marked on
+  its field and nothing is read. The gateway is built with that tenant as `ClientContext.tenantId`,
+  the one way a request acts for a tenant other than the session's ([data-layer.md](data-layer.md)).
+- The history is the reminders pages' (D-040): newest first, 25 to a page with the service's
+  cursor, filtered by delivery state with a GET form that keeps the lookup, each row named by its
+  template with the occasion, channel, masked address, state, attempts and times. The service
+  answers an empty page for a business id it holds nothing about, so the empty state says to check
+  both ids. A failed read shows the problem and its correlation id under the form.
+- `/admin/notifications/[notificationId]?tenant=<id>` is one notification: the record with the
+  channel's last error, every time it moved and the values it was filled with, plus the ids an
+  operator traces a delivery by (business, obligation, recipient, dispatch, the provider's message
+  id). Opened without its tenant, the page asks for it with a GET form back to the same
+  notification; an unknown id for that tenant is the not-found page.
+
+Resending a notification that failed for good is not offered. The route on `main`
+(`POST /v1/notification/notifications/{id}/resend`) takes no reason, checks no admin role and
+needs no Idempotency-Key; the services track hardens it (WP30: a reason, the admin role, an
+Idempotency-Key, an audit row). The registry keeps the action as its own entry,
+`admin.notification.resend`, a capability of the notification page for the admin role, waiting
+on the route with the `Idempotency-Key` header it must require (D-041), and the page shows an
+admin what it waits for, from that entry.
+
+## Message templates: `/admin/notifications/templates`
+
+Every message template the notification service holds (`GET /v1/notification/templates`, the same
+for every tenant, cached five minutes under `notification:templates`), by message, channel and
+language: the name it carries at Meta, its approval status there (every template is a draft until
+it is submitted from the Meta business account), its placeholders and its text. The text holds
+placeholders only; the facts a message carries come from the rulebook and the obligation when it
+is sent. The page sits under the console's route, so it is built with it: a static route beside
+`/admin/notifications/[notificationId]` keeps `templates` from being read as a notification id.
+
+## What waits
+
+- The usage counts per attribute on the ontology browser: `GET /v1/profile/admin/attribute-usage`
+  (services track, WP30), the waiting component `admin.ontology.usage`.
+- Resending a failed notification: the hardened resend route (services track, WP30), the waiting
+  capability `admin.notification.resend`.
+- Reading another tenant once the services take the tenant from a bearer token: the console sends
+  the looked-up tenant in `x-tenant-id`, which the notification service honours without a token
+  today; with tokens it needs the admin reads the services track adds (WP30).

@@ -2,6 +2,7 @@ import { isE164, isEmailAddress } from "@/shared/lib/identifiers";
 import type {
   Channel,
   DeliveryState,
+  MessageTemplate,
   NotificationDto,
   NotificationPage,
   NotificationPageDto,
@@ -84,6 +85,15 @@ export function preferenceChangeToDto(change: PreferenceChange): PreferenceInDto
 
 export function templateFromDto(dto: TemplateDto): Template {
   return { key: dto.key, channel: dto.channel, language: dto.language, status: dto.status };
+}
+
+export function messageTemplateFromDto(dto: TemplateDto): MessageTemplate {
+  return {
+    ...templateFromDto(dto),
+    metaName: dto.meta_name,
+    placeholders: [...dto.placeholders],
+    body: dto.body,
+  };
 }
 
 export function recipientFromDto(dto: RecipientDto): Recipient {

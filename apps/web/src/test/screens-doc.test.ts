@@ -14,7 +14,7 @@ import {
 } from "../../scripts/screens-doc.mts";
 import { SCREENS, screenById } from "../shared/config/screens.ts";
 import type { Screen } from "../shared/config/screens.ts";
-import { routeKey } from "../shared/config/services.ts";
+import { requiredHeaderKey, routeKey } from "../shared/config/services.ts";
 
 describe("generated screen docs", () => {
   it("docs/web/screens.md is what the generator writes", async () => {
@@ -94,6 +94,35 @@ describe("awaits audit", () => {
         servicesWithSpec.includes(row.service),
       );
     }
+  });
+
+  it("keeps a hardened route listed until a spec requires its header", () => {
+    const resend = screenById("admin.notification.resend");
+    expect(waitsForCell(resend)).toBe(
+      "`POST /v1/notification/notifications/{notification_id}/resend` with `Idempotency-Key` (services track, WP30)",
+    );
+    const route = resend.awaits[0];
+    expect(route).toBeDefined();
+    if (route === undefined) return;
+    const committed = committedRoutes();
+    expect(committed.has(routeKey(route))).toBe(true);
+    expect(auditAwaits([resend], committed)).toEqual([
+      {
+        screenId: resend.id,
+        service: "notification",
+        method: "POST",
+        path: "/v1/notification/notifications/{notification_id}/resend",
+        header: "Idempotency-Key",
+        owner: "services track, WP30",
+        unconfirmed: false,
+        specExists: true,
+      },
+    ]);
+    expect(renderAudit(auditAwaits([resend], committed))).toContain(
+      "notification POST /v1/notification/notifications/{notification_id}/resend with Idempotency-Key <- admin.notification.resend",
+    );
+    const hardened = new Set([...committed, requiredHeaderKey(route, "Idempotency-Key")]);
+    expect(auditAwaits([resend], hardened)).toEqual([]);
   });
 
   it("drops a route once it is committed", () => {

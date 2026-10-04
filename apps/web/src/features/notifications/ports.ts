@@ -1,5 +1,6 @@
 import type {
   DeliveryState,
+  MessageTemplate,
   NotificationPage,
   NotificationRecord,
 } from "@/entities/notification/types";
@@ -21,4 +22,9 @@ export interface NotificationHistoryPort {
 /** And the business the history is about, to name it and to check the tenant holds it. */
 export interface BusinessNamePort {
   business(businessId: string): Promise<Result<BusinessRef>>;
+}
+
+/** And the message templates, the same for every tenant. */
+export interface TemplatesPort {
+  templates(): Promise<Result<readonly MessageTemplate[]>>;
 }

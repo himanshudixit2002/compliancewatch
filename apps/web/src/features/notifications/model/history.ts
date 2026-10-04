@@ -1,4 +1,5 @@
 import { withQuery } from "@/shared/lib/url";
+import type { AdminLookup } from "./lookup";
 import type { HistoryFilter, NotificationDetailView, NotificationRow } from "./notifications";
 
 /**
@@ -26,6 +27,23 @@ export interface ReminderView {
   detail: NotificationDetailView;
   listHref: string;
   /** The notification this one falls back from, under the same business. */
+  fallbackHref: string | null;
+}
+
+/** The admin console: a business's notifications, read for the tenant the lookup names. */
+export interface AdminNotificationsView {
+  lookup: AdminLookup;
+  rows: NotificationRow[];
+  filter: HistoryFilter;
+  nextHref: string | null;
+  firstHref: string | null;
+}
+
+export interface AdminNotificationView {
+  tenantId: string;
+  detail: NotificationDetailView;
+  /** The console on the notification's business, for this tenant. */
+  listHref: string;
   fallbackHref: string | null;
 }
 

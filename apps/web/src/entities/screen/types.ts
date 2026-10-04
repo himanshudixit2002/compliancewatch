@@ -12,6 +12,8 @@ export interface AwaitedRouteLike {
   path: string;
   owner: AwaitOwner;
   ref?: string;
+  /** A header the route must require in the form awaited (a hardened route). */
+  header?: string;
 }
 
 export interface AwaitedFileLike {

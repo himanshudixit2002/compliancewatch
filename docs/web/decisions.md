@@ -619,3 +619,28 @@ the workers; the stack's WhatsApp channel is not wired, so the record shows a fa
 its reason. Consequences: when the service starts storing a rendered message, the detail page
 gains it from the generated type; a support question about one message is answered from the
 template key, the values and the times, with the full address only on the service.
+
+## D-041: A route awaited in a hardened form names the header it must require; the console looks up a tenant
+
+2026-10-04. The notification console's entry listed the resend route among the routes it used and
+awaited it from WP30, which hardens it (a reason, the admin role, an Idempotency-Key, an audit
+row). The path is already in the committed notification spec, so the registry counted it as landed
+and the console could not go live without claiming a resend it must not offer. A waiting entry
+needs something absent, and a header is what changes: the hardened route requires
+`Idempotency-Key`. `AwaitedRoute` gains `header`: a route awaited with one counts as landed only
+when a committed spec requires that header on it (`awaitKey` in `shared/config/services.ts`;
+`screens.test.ts` and `scripts/screens-doc.mts` read the required header parameters of every
+operation). Resending is its own entry, `admin.notification.resend`, a capability of the
+notification page for the admin role, waiting on the resend route with `header: "Idempotency-Key"`;
+the console and the notification page are live and read-only, and the page shows an admin what
+resending waits for, from that entry. When the hardened spec lands, `screens.test.ts` fails with
+`backend merged: flip admin.notification.resend`, and `idempotency.test.ts` fails until the
+operation joins `IDEMPOTENT_ROUTES`. The routes are tenant-scoped, so the console is a lookup by
+tenant id and business id in the query string (ids are not personal data), through the gateway's
+`tenantId` override; a notification opened on its own carries its tenant as `?tenant=`. Building
+the console's static neighbour, the message templates page, came with it: without a page file at
+`/admin/notifications/templates`, the router would hand that path to
+`/admin/notifications/[notificationId]` instead of the catch-all. Consequences: the audit lists a
+hardened await as absent with its header; the notice of a page waiting on one names the header
+after the delivering package; with bearer tokens, a lookup of another tenant needs the admin reads
+of WP30.

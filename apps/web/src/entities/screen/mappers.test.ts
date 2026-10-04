@@ -5,6 +5,7 @@ import {
   roleLabels,
   statusLabel,
   statusTone,
+  toAwaitedItem,
   toNotAvailableView,
   toScreenRow,
 } from "./mappers";
@@ -103,6 +104,27 @@ describe("screen mappers", () => {
       status: "waiting",
       statusLabel: "Waiting for a backend",
       guideRef: "2 uc3",
+    });
+  });
+});
+
+describe("toAwaitedItem", () => {
+  it("names who delivers a route, and the header a hardened route must require", () => {
+    expect(
+      toAwaitedItem({ method: "GET", path: "/v1/example", owner: "plan-a", ref: "WP1" }),
+    ).toEqual({ method: "GET", path: "/v1/example", owner: "services track (WP1)" });
+    expect(
+      toAwaitedItem({
+        method: "POST",
+        path: "/v1/example/{id}/again",
+        owner: "plan-a",
+        ref: "WP2",
+        header: "Idempotency-Key",
+      }),
+    ).toEqual({
+      method: "POST",
+      path: "/v1/example/{id}/again",
+      owner: "services track (WP2), requiring Idempotency-Key",
     });
   });
 });
