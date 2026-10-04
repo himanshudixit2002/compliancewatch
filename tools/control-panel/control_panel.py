@@ -28,6 +28,12 @@ WEB_PID = STACK_DIR / "web.pid"
 WEB_LOG = STACK_DIR / "web.log"
 WEB_URL = "http://localhost:3000"
 TEMPORAL_UI = "http://localhost:8233"
+# The full product (make product): the one deployable's app and worker, and its own web app on
+# 3400 beside the UI-only stack's on 3000, opened at 127.0.0.1 so the two sessions stay apart.
+PRODUCT_DIR = REPO / "var" / "product"
+PRODUCT_READY = "http://127.0.0.1:8080/ready"
+PRODUCT_WEB_PORT = 3400
+PRODUCT_WEB_URL = f"http://127.0.0.1:{PRODUCT_WEB_PORT}"
 
 SERVICES = [
     ("identity", 8001),
@@ -80,7 +86,13 @@ def probe() -> dict:
             if parts and parts[0] in INFRA and ("healthy" in parts[1:] or parts[1:] == ["running"]):
                 healthy += 1
     services = {name: _http_up(f"http://localhost:{port}/health") for name, port in SERVICES}
-    return {"docker": docker, "infra": healthy, "services": services, "web": _http_up(WEB_URL)}
+    return {
+        "docker": docker,
+        "infra": healthy,
+        "services": services,
+        "web": _http_up(WEB_URL),
+        "product": _http_up(PRODUCT_READY),
+    }
 
 
 # ---- web app process --------------------------------------------------------------------------
@@ -225,6 +237,9 @@ class Panel:
         self._status_row(st, "docker", "Docker (Colima)")
         self._status_row(st, "infra", "Databases & queues")
         self._status_row(st, "web", "Web app  :3000", link=WEB_URL)
+        self._status_row(
+            st, "product", "Product  :8080", link=PRODUCT_WEB_URL, log=PRODUCT_DIR / "worker.log"
+        )
         ttk.Label(st, text="SERVICES", style="Head.TLabel").pack(anchor="w", pady=(12, 6))
         for name, port in SERVICES:
             self._status_row(
@@ -253,11 +268,22 @@ class Panel:
                 ],
             ),
             (
-                "Services",
+                "UI only",
                 [
                     ("Start", self.services_start),
                     ("Stop", lambda: self.run([("make web-stack-down", "make web-stack-down")])),
                     ("Restart", self.services_restart),
+                ],
+            ),
+            (
+                "Product",
+                [
+                    ("Start", self.product_start),
+                    ("Stop", lambda: self.run([("make product-down", "make product-down")])),
+                    ("Seed", lambda: self.run([("make product-seed", "make product-seed")])),
+                    ("Check", lambda: self.run([("make product-check", "make product-check")])),
+                    ("Logs folder", lambda: subprocess.run(["open", str(PRODUCT_DIR)])),
+                    ("Open ↗", lambda: webbrowser.open(PRODUCT_WEB_URL)),
                 ],
             ),
             (
@@ -373,6 +399,7 @@ class Panel:
         n = s["infra"]
         set_("infra", n == len(INFRA), f"{n}/{len(INFRA)} healthy", partial=0 < n < len(INFRA))
         set_("web", s["web"])
+        set_("product", s["product"], "running" if s["product"] else "")
         for name, up in s["services"].items():
             set_(name, up)
         up = sum(s["services"].values())
@@ -475,6 +502,15 @@ class Panel:
                 ("make web-stack", "make web-stack STORE=postgres"),
                 ("wait for services", "make web-stack-wait"),
             ]
+        )
+
+    def product_start(self) -> None:
+        self.run(
+            [
+                ("start Docker", self._docker_up),
+                ("make product", f"make product WEB_PORT={PRODUCT_WEB_PORT}"),
+            ],
+            title="start the product",
         )
 
     def services_restart(self) -> None:

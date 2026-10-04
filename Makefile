@@ -426,9 +426,11 @@ web-dev: check-pnpm ## next dev on WEB_PORT from .env; /admin lists the internal
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	PORT=$${WEB_PORT:-3000} $(PNPM) --filter web dev
 
-# The services behind the web app, every one on SERVICE_PORT_BASE+1 .. +10 in the SERVICES order
-# (8001-8010 unless .env moves the base; a second clone sets 9200), started with nohup, pids and
-# logs under var/web-stack. The stack is defined here rather than inherited from .env so a fresh
+# The UI-only stack: the services behind the web app as ten separate processes with no worker,
+# so no decision becomes obligations or a message here (make product, below, is the full
+# product). Every service on SERVICE_PORT_BASE+1 .. +10 in the SERVICES order (8001-8010 unless
+# .env moves the base; a second clone sets 9200), started with nohup, pids and logs under
+# var/web-stack. The stack is defined here rather than inherited from .env so a fresh
 # clone and CI see the same states: memory stores (no container), the profile's built-in static
 # GSTIN lookup (the demo GSTIN pre-fills), the billing provider "none" (subscribe answers 503;
 # BILLING=memory starts subscriptions in memory for a manual demo, and make web-e2e takes the
@@ -441,7 +443,7 @@ WEB_STACK_WAIT_SECONDS ?= 60
 STORE ?= memory
 BILLING ?= none
 
-web-stack: check-uv ## Start every service on SERVICE_PORT_BASE+1..10 with memory stores (pids and logs in var/web-stack): make web-stack [STORE=postgres] [BILLING=memory]
+web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_BASE+1..10 with memory stores (pids and logs in var/web-stack): make web-stack [STORE=postgres] [BILLING=memory]
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	[ "$(STORE)" = "memory" ] || [ "$(STORE)" = "postgres" ] || { echo "usage: make web-stack [STORE=memory|postgres]"; exit 1; }; \
 	[ "$(BILLING)" = "none" ] || [ "$(BILLING)" = "memory" ] || { echo "usage: make web-stack [BILLING=none|memory]"; exit 1; }; \
@@ -548,3 +550,140 @@ openapi-ts: check-pnpm ## Generate TypeScript types from packages/contracts/open
 
 openapi-ts-check: check-pnpm ## The generated OpenAPI types match the committed specs (part of make check)
 	$(PNPM) --filter @compliancewatch/contracts openapi-ts:check
+
+# ---- Product ---------------------------------------------------------------------------------
+.PHONY: product product-role product-start product-wait product-seed product-check product-down product-logs
+# The local product (ADR-013 on the dev stack, docs/onboarding/product.md): the one deployable's
+# app and worker processes (composition/mvp) with Kafka and Temporal on, and next dev for the web
+# app. make product-seed fills it with synthetic tenants and the demo publication, and
+# make product-check proves that a published rule becomes decisions, obligations with citations
+# and a change card sent through the notification sink (cw-product, tools/demo cw_demo.product).
+# make web-stack stays the UI-only stack: ten separate services and no worker, so nothing there
+# turns a decision into obligations or a message. Both use make dev's Postgres, Kafka and
+# Temporal, and the product's worker relays and consumes whatever either stack writes there.
+#
+# The services connect as PRODUCT_DB_USER (cw_app), a role that owns nothing and is not a
+# superuser, so row-level security keeps the tenants apart as it does in a deployment; make
+# product-role creates it on the running Postgres (infra/dev/postgres/50-app-role.sql), safe to
+# repeat. make migrate, make run and make web-stack still connect as the superuser.
+#
+# The product's own settings are passed here and nowhere else, never as a registry or settings
+# default: header auth; both listeners on 127.0.0.1; the worker's health on PRODUCT_WORKER_PORT
+# (8081, since 8001 is identity's under make run and make web-stack); the worker's Kafka and
+# Temporal switches and the reminder sweep on; rule publishing on with the placeholder tokens
+# local-write-token and local-review-token (not secrets; values in .env win); the profile's static
+# GSTIN lookup, so the demo GSTIN pre-fills; the notification sink in place of the real channels,
+# recording into var/product/sink.jsonl, with a five-second batching window so a change card goes
+# within the check's wait; and message links to the product's web app. The web app gets every
+# CW_WEB_*_URL at the internal listener and builds into .next/product, so it runs beside a
+# make web-dev of the same checkout (Next allows one dev server per build directory). Pids and
+# logs are under var/product; make product-down stops only the processes whose pids it recorded,
+# with their children.
+PRODUCT_DIR := var/product
+PRODUCT_DB_USER ?= cw_app
+PRODUCT_DB_PASSWORD ?= cw_app
+PRODUCT_WORKER_PORT ?= 8081
+PRODUCT_WAIT_SECONDS ?= 120
+WEB ?= 1
+PROC ?= app
+FOLLOW ?= 1
+PRODUCT_ENV = CW_AUTH_MODE=header CW_MVP_HOST=127.0.0.1 \
+  CW_DATABASE_URL="postgresql+psycopg://$(PRODUCT_DB_USER):$(PRODUCT_DB_PASSWORD)@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}" \
+  CW_MVP_WORKER_HEALTH_PORT=$(PRODUCT_WORKER_PORT) \
+  CW_WORKER_KAFKA_ENABLED=true CW_WORKER_TEMPORAL_ENABLED=true CW_OBLIGATION_SWEEP_ENABLED=true \
+  CW_RULEBOOK_PUBLISH_ENABLED=true \
+  CW_RULEBOOK_WRITE_TOKEN="$${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}" \
+  CW_RULEBOOK_REVIEW_TOKEN="$${CW_RULEBOOK_REVIEW_TOKEN:-local-review-token}" \
+  CW_PROFILE_GSTIN_LOOKUP=static CW_NOTIFICATION_CHANNELS=sink \
+  CW_NOTIFICATION_SINK_PATH=$(PRODUCT_DIR)/sink.jsonl CW_NOTIFICATION_BATCH_WINDOW_SECONDS=5 \
+  CW_WEB_BASE_URL="http://localhost:$${WEB_PORT:-3000}"
+
+product: check-uv ## The local product: make dev, make migrate, the seed calendar, cw-mvp serve and worker (Kafka, Temporal on), next dev on WEB_PORT (3000): make product [WEB=0] [WEB_PORT=3400]
+	@$(MAKE) --no-print-directory dev
+	@$(MAKE) --no-print-directory migrate
+	@$(MAKE) --no-print-directory product-role
+	@$(MAKE) --no-print-directory seed SERVICE=rulebook
+	@$(MAKE) --no-print-directory product-start
+	@$(MAKE) --no-print-directory product-wait
+
+product-role: check-docker ## Create or refresh PRODUCT_DB_USER, the product's role under row-level security, on the running Postgres (after make migrate)
+	$(COMPOSE) exec -T postgres sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v app_user=$(PRODUCT_DB_USER) -v app_password=$(PRODUCT_DB_PASSWORD)' < infra/dev/postgres/50-app-role.sql
+	@echo "role $(PRODUCT_DB_USER) can use every service schema; row-level security applies to it"
+
+product-start: check-uv
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	[ "$(WEB)" = "0" ] || [ "$(WEB)" = "1" ] || { echo "usage: make product [WEB=0|1] [WEB_PORT=3000]"; exit 1; }; \
+	mkdir -p $(PRODUCT_DIR); \
+	public_port=$${CW_MVP_PUBLIC_PORT:-8000}; internal_port=$${CW_MVP_INTERNAL_PORT:-8080}; web_port=$${WEB_PORT:-3000}; \
+	running() { [ -f "$(PRODUCT_DIR)/$$1.pid" ] && kill -0 "$$(cat "$(PRODUCT_DIR)/$$1.pid")" 2>/dev/null; }; \
+	taken() { for port in "$$@"; do if (exec 3<>"/dev/tcp/127.0.0.1/$$port") 2>/dev/null; then echo "$$port"; return 0; fi; done; return 1; }; \
+	start() { proc=$$1; ports=$$2; shift 2; \
+	  if running "$$proc"; then echo "  $$proc already running (pid $$(cat "$(PRODUCT_DIR)/$$proc.pid"))"; return 0; fi; \
+	  if busy=$$(taken $$ports); then echo "error: port $$busy is in use, so the product's $$proc cannot start; free it, or see docs/onboarding/product.md"; return 1; fi; \
+	  nohup "$$@" > "$(PRODUCT_DIR)/$$proc.log" 2>&1 & echo $$! > "$(PRODUCT_DIR)/$$proc.pid"; \
+	  echo "  $$proc started (pid $$(cat "$(PRODUCT_DIR)/$$proc.pid"), log $(PRODUCT_DIR)/$$proc.log)"; }; \
+	echo "product: cw-mvp serve on $$public_port and $$internal_port, cw-mvp worker (health on $(PRODUCT_WORKER_PORT))"; \
+	start app "$$public_port $$internal_port" env $(PRODUCT_ENV) $(UV) run --package compliancewatch-mvp cw-mvp serve || exit 1; \
+	start worker "$(PRODUCT_WORKER_PORT)" env $(PRODUCT_ENV) $(UV) run --package compliancewatch-mvp cw-mvp worker || exit 1; \
+	if [ "$(WEB)" = "1" ]; then \
+	  for svc in $(SERVICES); do export "CW_WEB_$$(echo "$$svc" | tr 'a-z-' 'A-Z_')_URL=http://localhost:$$internal_port"; done; \
+	  if [ -z "$${CW_WEB_AUTH_PROVIDER:-}" ] && ! grep -qs '^CW_WEB_AUTH_PROVIDER=.' apps/web/.env.local; then export CW_WEB_AUTH_PROVIDER=fake; fi; \
+	  if [ -z "$${CW_WEB_SESSION_SECRET:-}" ] && ! grep -qs '^CW_WEB_SESSION_SECRET=.' apps/web/.env.local; then \
+	    export CW_WEB_SESSION_SECRET="$$(openssl rand -base64 32)"; echo "  web: no session secret in apps/web/.env.local, so one for this run"; fi; \
+	  export PORT=$$web_port WEB_DIST_DIR=.next/product; \
+	  start web "$$web_port" $(PNPM) --filter web dev || exit 1; \
+	fi
+
+product-wait: ## Wait for the product: the internal listener ready, the worker healthy and the web app answering (PRODUCT_WAIT_SECONDS, default 120)
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	deadline=$$((SECONDS + $(PRODUCT_WAIT_SECONDS))); status=0; \
+	public="http://127.0.0.1:$${CW_MVP_PUBLIC_PORT:-8000}"; internal="http://127.0.0.1:$${CW_MVP_INTERNAL_PORT:-8080}"; \
+	worker="http://127.0.0.1:$(PRODUCT_WORKER_PORT)"; web="http://localhost:$${WEB_PORT:-3000}"; \
+	wait_for() { proc=$$1; url=$$2; \
+	  until curl -sf "$$url" >/dev/null 2>&1; do \
+	    if [ -f "$(PRODUCT_DIR)/$$proc.pid" ] && ! kill -0 "$$(cat "$(PRODUCT_DIR)/$$proc.pid")" 2>/dev/null; then \
+	      echo "error: the product's $$proc exited; the end of $(PRODUCT_DIR)/$$proc.log:"; tail -n 20 "$(PRODUCT_DIR)/$$proc.log"; return 1; fi; \
+	    if [ $$SECONDS -ge $$deadline ]; then echo "error: the product's $$proc did not answer $$url (see $(PRODUCT_DIR)/$$proc.log)"; return 1; fi; \
+	    sleep 1; \
+	  done; echo "  $$proc ready: $$url"; }; \
+	wait_for app "$$internal/ready" || status=1; \
+	wait_for worker "$$worker/health" || status=1; \
+	if [ "$(WEB)" = "1" ]; then wait_for web "$$web/api/health" || status=1; fi; \
+	if [ $$status -eq 0 ]; then \
+	  echo ""; echo "ComplianceWatch product"; \
+	  echo "  public listener    $$public   (the edge's routes; /health, /ready)"; \
+	  echo "  internal listener  $$internal   (every route; the web app and cw-product call it)"; \
+	  echo "  worker health      $$worker/health   (/loops lists consumers, relays, jobs, task queues)"; \
+	  if [ "$(WEB)" = "1" ]; then echo "  web app            $$web   (development sign-in after make product-seed)"; fi; \
+	  echo "  sink               $(PRODUCT_DIR)/sink.jsonl   (every message the product would have sent)"; \
+	  echo "Next: make product-seed, then make product-check"; \
+	fi; \
+	exit $$status
+
+product-seed: check-uv ## Fill the running product: synthetic tenants, the demo publication, first decisions (cw-product seed): make product-seed [ARGS="--rule gstr9_annual --json"]
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	$(PRODUCT_ENV) CW_LOG_LEVEL=WARNING $(UV) run --package compliancewatch-demo cw-product seed $(ARGS)
+
+product-check: check-uv ## Prove the running product works, step by step (cw-product check; exit 0 means accepted): make product-check [ARGS="--step loop --json"]
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	$(PRODUCT_ENV) CW_LOG_LEVEL=WARNING $(UV) run --package compliancewatch-demo cw-product check $(ARGS)
+
+product-down: ## Stop the product's processes: only the pids make product recorded in var/product, with their children (logs stay)
+	@tree() { for child in $$(pgrep -P "$$1" 2>/dev/null); do tree "$$child"; done; echo "$$1"; }; \
+	for proc in web worker app; do \
+	  pidfile=$(PRODUCT_DIR)/$$proc.pid; [ -f "$$pidfile" ] || continue; pid=$$(cat "$$pidfile"); \
+	  if ! kill -0 "$$pid" 2>/dev/null; then echo "  $$proc was not running"; rm -f "$$pidfile"; continue; fi; \
+	  case "$$(ps -o command= -p "$$pid")" in \
+	    *cw-mvp*|*"--filter web dev"*) ;; \
+	    *) echo "  $$proc: pid $$pid now belongs to another program; left alone"; rm -f "$$pidfile"; continue ;; \
+	  esac; \
+	  pids=$$(tree "$$pid"); kill -TERM $$pids 2>/dev/null; \
+	  n=0; while kill -0 "$$pid" 2>/dev/null && [ $$n -lt 40 ]; do n=$$((n+1)); sleep 0.25; done; \
+	  for left in $$pids; do kill -0 "$$left" 2>/dev/null && kill -KILL "$$left" 2>/dev/null; done; \
+	  echo "  $$proc stopped (pid $$pid)"; rm -f "$$pidfile"; \
+	done; true
+
+product-logs: ## Show a product process's log: make product-logs PROC=app|worker|web [FOLLOW=0]
+	@case "$(PROC)" in app|worker|web) ;; *) echo "usage: make product-logs PROC=app|worker|web [FOLLOW=0]"; exit 1 ;; esac; \
+	log=$(PRODUCT_DIR)/$(PROC).log; [ -f "$$log" ] || { echo "no $$log: make product starts the $(PROC) process"; exit 1; }; \
+	if [ "$(FOLLOW)" = "0" ]; then tail -n 200 "$$log"; else tail -n 100 -f "$$log"; fi

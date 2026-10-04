@@ -427,6 +427,7 @@ name = "compliancewatch-demo"
 version = "0.1.0"
 source = { editable = "tools/demo" }
 dependencies = [
+    { name = "compliancewatch-evals" },
     { name = "compliancewatch-identity" },
     { name = "compliancewatch-llm-gateway" },
     { name = "compliancewatch-mvp" },
@@ -445,6 +446,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "compliancewatch-evals", editable = "evals/harness" },
     { name = "compliancewatch-identity", editable = "services/identity" },
     { name = "compliancewatch-llm-gateway", editable = "services/llm-gateway" },
     { name = "compliancewatch-mvp", editable = "composition/mvp" },
