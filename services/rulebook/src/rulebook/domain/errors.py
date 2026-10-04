@@ -127,6 +127,15 @@ class UnknownRuleVersionError(DomainError, LookupError):
     title = "Rule version not found"
 
 
+class UnknownRuleError(DomainError, LookupError):
+    type_slug = "rulebook-rule-not-found"
+    title = "Rule not found"
+
+    def __init__(self, rule_key: str) -> None:
+        super().__init__(f"no rule has the key {rule_key!r}")
+        self.rule_key = rule_key
+
+
 class RuleVersionNotEditableError(DomainError, ValueError):
     """Relations and citations are added while the version they belong to is a draft: return a
     version under review or approved to draft first. A published, superseded or withdrawn
@@ -182,6 +191,17 @@ class ApprovalsMissingError(DomainError, ValueError):
 class DuplicateApproverError(DomainError, ValueError):
     type_slug = "rulebook-duplicate-approver"
     title = "Approver already approved this review round"
+
+
+class SyntheticApprovalRefusedError(DomainError, PermissionError):
+    """A synthetic approval, which no analyst made, outside the local and test environments:
+    there it would publish a version nobody reviewed."""
+
+    type_slug = "rulebook-synthetic-approval-refused"
+    title = "Synthetic approvals are refused here"
+
+    def __init__(self) -> None:
+        super().__init__("a synthetic approval is accepted only when CW_ENV is local or test")
 
 
 class RelationTargetStateError(DomainError, ValueError):

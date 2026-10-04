@@ -109,6 +109,34 @@
         "title": "ApproveIn",
         "type": "object"
       },
+      "ApproveVersionIn": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "description": "The analyst taking the step; a signed-in user's token overrides it",
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "synthetic": {
+            "default": false,
+            "description": "An approval no analyst made (the local product's demo publication): it counts towards the round, but the version keeps seed status needs_review. Refused (403) unless CW_ENV is local or test",
+            "title": "Synthetic",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "actor_id"
+        ],
+        "title": "ApproveVersionIn",
+        "type": "object"
+      },
       "AttributeLevel": {
         "description": "Which node of the business hierarchy holds the value: the legal entity (PAN), one\nregistration (GSTIN) or one place of business. Values are inherited downward.",
         "enum": [
@@ -5168,7 +5196,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ActorIn"
+                "$ref": "#/components/schemas/ApproveVersionIn"
               }
             }
           },
@@ -6029,6 +6057,66 @@
           }
         },
         "summary": "Rules by key with their latest title",
+        "tags": [
+          "rulebook",
+          "rules"
+        ]
+      }
+    },
+    "/v1/rulebook/rules/{rule_key}/versions": {
+      "get": {
+        "description": "The drafts the seed command writes as well as the versions past them: where a workbench\nfinds the version to cite, submit and publish. 404 when no rule has the key.",
+        "operationId": "list_versions_of_rule_v1_rulebook_rules__rule_key__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_key",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "title": "Rule Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RuleVersionOut"
+                  },
+                  "title": "Response List Versions Of Rule V1 Rulebook Rules  Rule Key  Versions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Every version of a rule in any status, by version number",
         "tags": [
           "rulebook",
           "rules"

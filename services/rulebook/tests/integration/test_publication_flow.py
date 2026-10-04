@@ -27,6 +27,7 @@ from rulebook.application.publication import (
     PublishVersion,
     SubmitForReview,
 )
+from rulebook.application.rule_versions import ListRuleVersions
 from rulebook.domain.documents import StoredDocument
 from rulebook.domain.events import RuleWithdrawn
 from rulebook.infrastructure.knowledge_repository import PostgresKnowledgeUnitOfWorkFactory
@@ -342,6 +343,31 @@ def test_a_high_impact_version_needs_two_approvers_of_this_round(
         update(engine, version_id, "status = 'published', published_at = now()")
     approve_directly(engine, version_id, REVIEWER)
     update(engine, version_id, "status = 'published', published_at = now()")
+
+
+def test_a_synthetic_round_publishes_a_version_that_stays_needs_review(
+    factory: PostgresKnowledgeUnitOfWorkFactory, clause: ClauseId
+) -> None:
+    clock = Clock()
+    rule_id = rule(factory.engine)
+    version_id = version(factory.engine, rule_id, 1)
+    AddCitations(factory, clock).run(version_id, [CitationInput(clause, QUOTE)])
+    SubmitForReview(factory, clock).run(version_id, actor_id=ANALYST, high_impact=True)
+    synthetic = ApproveVersion(factory, clock, synthetic_allowed=True)
+    synthetic.run(version_id, actor_id=REVIEWER, synthetic=True)
+    approved = synthetic.run(version_id, actor_id=ANALYST, synthetic=True)
+    assert (approved.record.status.value, approved.record.seed_status.value) == (
+        "approved",
+        "needs_review",
+    )
+    PublishVersion(factory, enabled=True, clock=clock).run(version_id, actor_id=REVIEWER)
+    key = scalar(factory.engine, "SELECT rule_key FROM rule WHERE id = :id", id=rule_id.value)
+    draft = version(factory.engine, rule_id, 2, effective_from=date(2026, 7, 1))
+    versions = ListRuleVersions(factory).run(str(key))
+    assert [(v.rule_version_id, v.status.value, v.seed_status.value) for v in versions] == [
+        (version_id, "published", "needs_review"),
+        (draft, "draft", "needs_review"),
+    ]
 
 
 def test_decisions_are_append_only_and_name_an_actor_or_a_cause(

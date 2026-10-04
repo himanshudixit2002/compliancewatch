@@ -49,7 +49,12 @@ from rulebook.application.review import (
     ListMentionGroups,
     ReadReviewQueueStats,
 )
-from rulebook.application.rule_versions import ListCitations, ListRulesInForce, ReadRuleVersion
+from rulebook.application.rule_versions import (
+    ListCitations,
+    ListRulesInForce,
+    ListRuleVersions,
+    ReadRuleVersion,
+)
 from rulebook.application.search import ListUnembeddedClauses, SearchClauses, StoreEmbeddings
 from rulebook.domain.errors import (
     ApprovalsMissingError,
@@ -77,12 +82,14 @@ from rulebook.domain.errors import (
     ReviewTokenInvalidError,
     RuleVersionNotEditableError,
     SupersessionCycleError,
+    SyntheticApprovalRefusedError,
     TargetAlreadyReplacedError,
     TargetUnresolvedError,
     TargetVersionRequiredError,
     UnknownClauseError,
     UnknownDocumentError,
     UnknownEntityError,
+    UnknownRuleError,
     UnknownRuleVersionError,
     WritesDisabledError,
     WriteTokenInvalidError,
@@ -116,6 +123,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     TargetUnresolvedError: 409,
     TargetVersionRequiredError: 422,
     UnknownRuleVersionError: 404,
+    UnknownRuleError: 404,
     RuleVersionNotEditableError: 409,
     SupersessionCycleError: 409,
     InvalidRelationError: 422,
@@ -126,6 +134,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     CitationsMissingError: 409,
     ApprovalsMissingError: 409,
     DuplicateApproverError: 409,
+    SyntheticApprovalRefusedError: 403,
     RelationTargetStateError: 409,
     ReplacementDatesError: 409,
     ReplacementsPendingError: 409,
@@ -167,6 +176,7 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
         reject_relation=RejectRelationCandidate(unit_of_work),
         list_rules=ListRules(unit_of_work),
         list_rules_in_force=ListRulesInForce(unit_of_work),
+        list_rule_versions=ListRuleVersions(unit_of_work),
         read_rule_version=ReadRuleVersion(unit_of_work),
         list_citations=ListCitations(unit_of_work),
         resolve_entity=ResolveEntity(unit_of_work),
@@ -180,7 +190,9 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
         add_citations=AddCitations(unit_of_work),
         submit_version=SubmitForReview(unit_of_work),
         return_version=ReturnToDraft(unit_of_work),
-        approve_version=ApproveVersion(unit_of_work),
+        approve_version=ApproveVersion(
+            unit_of_work, synthetic_allowed=settings.synthetic_approvals_allowed
+        ),
         publish_version=PublishVersion(unit_of_work, enabled=publishing),
         withdraw_version=WithdrawVersion(unit_of_work, enabled=publishing),
         apply_transitions=ApplyDueTransitions(unit_of_work, enabled=publishing),

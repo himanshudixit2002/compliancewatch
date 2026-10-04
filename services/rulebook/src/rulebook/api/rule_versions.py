@@ -1,10 +1,11 @@
-"""Rule versions: the ones in force on a date, one version with its citations. Open reads."""
+"""Rule versions: the ones in force on a date, every version of one rule, one version with its
+citations. Open reads."""
 
 from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Path, Query
 
 from domain_kernel.ids import RuleVersionId
 from py_common.problems import problem_responses
@@ -12,6 +13,8 @@ from rulebook.api.deps import Wired
 from rulebook.api.read_schemas import CitationOut, RuleVersionDetailOut, RuleVersionOut
 
 router = APIRouter(tags=["rules"])
+
+RULE_KEY = r"^[a-z][a-z0-9_]*$"
 
 
 @router.get(
@@ -32,6 +35,20 @@ def list_rule_versions(
         as_of, rule_key=rule_key, regulator=regulator, limit=limit, after=after
     )
     return [RuleVersionOut.from_record(record) for record in found]
+
+
+@router.get(
+    "/rules/{rule_key}/versions",
+    summary="Every version of a rule in any status, by version number",
+    responses=problem_responses(404, 422),
+)
+def list_versions_of_rule(
+    wired: Wired,
+    rule_key: Annotated[str, Path(max_length=80, pattern=RULE_KEY)],
+) -> list[RuleVersionOut]:
+    """The drafts the seed command writes as well as the versions past them: where a workbench
+    finds the version to cite, submit and publish. 404 when no rule has the key."""
+    return [RuleVersionOut.from_record(record) for record in wired.list_rule_versions.run(rule_key)]
 
 
 @router.get(

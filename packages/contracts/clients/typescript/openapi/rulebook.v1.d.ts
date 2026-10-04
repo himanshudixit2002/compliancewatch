@@ -496,6 +496,27 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/rulebook/rules/{rule_key}/versions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Every version of a rule in any status, by version number
+     * @description The drafts the seed command writes as well as the versions past them: where a workbench
+     *     finds the version to cite, submit and publish. 404 when no rule has the key.
+     */
+    get: operations["list_versions_of_rule_v1_rulebook_rules__rule_key__versions_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/rulebook/search": {
     parameters: {
       query?: never;
@@ -576,6 +597,26 @@ export type components = {
        * @description The affected version, for relations that target one
        */
       target_rule_version_id?: string | null;
+    };
+    /** ApproveVersionIn */
+    ApproveVersionIn: {
+      /**
+       * Actor Id
+       * Format: uuid
+       * @description The analyst taking the step; a signed-in user's token overrides it
+       */
+      actor_id: string;
+      /**
+       * Note
+       * @default
+       */
+      note?: string;
+      /**
+       * Synthetic
+       * @description An approval no analyst made (the local product's demo publication): it counts towards the round, but the version keeps seed status needs_review. Refused (403) unless CW_ENV is local or test
+       * @default false
+       */
+      synthetic?: boolean;
     };
     /**
      * AttributeLevel
@@ -3095,7 +3136,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["ActorIn"];
+        "application/json": components["schemas"]["ApproveVersionIn"];
       };
     };
     responses: {
@@ -3689,6 +3730,46 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RuleOut"][];
+        };
+      };
+    };
+  };
+  list_versions_of_rule_v1_rulebook_rules__rule_key__versions_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        rule_key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RuleVersionOut"][];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
     };
