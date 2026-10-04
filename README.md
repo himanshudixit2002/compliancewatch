@@ -306,7 +306,7 @@ cw-mvp worker  # background work: consumers, periodic jobs, Temporal workers; he
 
 Both switches are off by default; enable them with `CW_WORKER_KAFKA_ENABLED=1` (outbox relays and consumers) and `CW_WORKER_TEMPORAL_ENABLED=1` (Temporal workers on one client). The worker calls the app process's internal listener as the `worker` service client; its scopes are in `services/identity/src/identity/identity_dev_clients.toml`.
 
-`make demo` runs the same composition in-memory, without Postgres, for demos and tests.
+`cw_mvp.testing` builds the same composition on memory stores, without Postgres, for tests and demos; `tools/demo/tests/unit/test_mvp_flow.py` onboards and evaluates a business through both listeners. Running both processes locally: [composition/mvp/README.md](composition/mvp/README.md#running-it-locally).
 
 ## Not in this repository yet
 

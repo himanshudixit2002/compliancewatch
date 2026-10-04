@@ -61,3 +61,24 @@ manual steps.
   cost ledger are the model for watching them.
 - Revisit when a pilot cohort's fan-out exceeds what one worker process handles within the
   freshness objective, or when an enterprise customer needs a deployment inside its own cloud.
+
+## As built so far
+
+As of 2026-10-04 (package M1-1), `composition/mvp` is the one deployable, run as two processes
+of the same code:
+
+- `cw-mvp serve`: every service's FastAPI app in one uvicorn process behind one dispatcher, each
+  service on its own settings and schema. The public listener (8000) serves only the routes
+  `cw_mvp.exposure` classes public, and the admin ones in token mode; the internal listener
+  (8080) serves every route, and the services call each other there with tokens identity mints
+  in the process, so the app holds no client secrets.
+- `cw-mvp worker`: every service's consumers, periodic jobs and Temporal workers and the outbox
+  relays in one event loop, with a health endpoint. Kafka and Temporal each run behind a switch
+  that is off by default (`CW_WORKER_KAFKA_ENABLED`, `CW_WORKER_TEMPORAL_ENABLED`).
+- Managed brokers and collectors are settings of py-common: Kafka over SASL and TLS, Temporal
+  Cloud API keys or client certificates, OTLP over HTTP with headers.
+
+The relay still publishes to Kafka, so the managed queue is a Kafka-compatible one. Not built
+yet: both processes run together with Kafka and Temporal on (`make product`, package M1-2, on
+the dev stack first), the container image and the platform, and migrations and the seed as
+release steps.
