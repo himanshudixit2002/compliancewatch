@@ -64,7 +64,7 @@ manual steps.
 
 ## As built so far
 
-As of 2026-10-04 (package M1-1), `composition/mvp` is the one deployable, run as two processes
+As of 2026-10-04 (packages M1-1 and M1-2), `composition/mvp` is the one deployable, run as two processes
 of the same code:
 
 - `cw-mvp serve`: every service's FastAPI app in one uvicorn process behind one dispatcher, each
@@ -78,7 +78,13 @@ of the same code:
 - Managed brokers and collectors are settings of py-common: Kafka over SASL and TLS, Temporal
   Cloud API keys or client certificates, OTLP over HTTP with headers.
 
-The relay still publishes to Kafka, so the managed queue is a Kafka-compatible one. Not built
-yet: both processes run together with Kafka and Temporal on (`make product`, package M1-2, on
-the dev stack first), the container image and the platform, and migrations and the seed as
-release steps.
+The relay still publishes to Kafka, so the managed queue is a Kafka-compatible one.
+
+Package M1-2 runs both processes together on the dev stack with Kafka and Temporal on:
+`make product`, with the web app beside them (`docs/onboarding/product.md`). The services connect
+as a role that row-level security applies to, the notification channels are a sink that records
+each message, and `cw-product check` proves that a rule published by synthetic analysts (still
+needs_review) becomes decisions, obligations with citations and a change card. Not built yet: the
+engine's own trigger (evaluation is a command until it consumes profile.updated and
+rule.published), the container image and the platform, and migrations and the seed as release
+steps.

@@ -14,6 +14,7 @@ Flat; markdown guides.
 
 - [local-dev.md](local-dev.md): tools, the Docker Compose stack, ports, running a service, troubleshooting.
 - [demo.md](demo.md): the demo tenant end to end in one process (`make demo`).
+- [product.md](product.md): the local product (`make product`, `make product-seed`, `make product-check`): the one deployable with its worker on the dev stack, synthetic tenants, and the check of the event chain.
 - [repository-settings.md](repository-settings.md): the `gh` commands for branch protection (the required `CI gate` check), squash merges, Dependabot, secret scanning and private vulnerability reporting, and the secrets CI needs.
 
 ## How to run
