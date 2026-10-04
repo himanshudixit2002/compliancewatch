@@ -93,7 +93,8 @@ class AuditActor:
 
     @classmethod
     def service(cls, client_id: str) -> Self:
-        """A service client acting on its own account."""
+        """A service client, by the client id its token names, whether or not it acted for a
+        tenant."""
         return cls(AuditActorKind.SERVICE, client_id, f"service:{client_id}")
 
     @classmethod
