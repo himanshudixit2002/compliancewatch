@@ -295,6 +295,19 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 - Section 20: phased roadmap
 - Section 21: risks, open questions, decision log (ADRs in `docs/adr/`)
 
+## The MVP deployable (`composition/mvp`, ADR-013)
+
+`composition/mvp` is the one-process deploy profile: every service's FastAPI app behind one ASGI dispatcher on two listeners (`cw-mvp serve`), and one worker process (`cw-mvp worker`) that runs every service's background work in a single event loop. Read the full design in [composition/mvp/README.md](composition/mvp/README.md).
+
+```bash
+cw-mvp serve   # public listener on 8000, internal on 8080
+cw-mvp worker  # background work: consumers, periodic jobs, Temporal workers; health on 8001
+```
+
+Both switches are off by default; enable them with `CW_WORKER_KAFKA_ENABLED=1` (outbox relays and consumers) and `CW_WORKER_TEMPORAL_ENABLED=1` (Temporal workers on one client). The worker calls the app process's internal listener as the `worker` service client; its scopes are in `services/identity/src/identity/identity_dev_clients.toml`.
+
+`cw_mvp.testing` builds the same composition on memory stores, without Postgres, for tests and demos; `tools/demo/tests/unit/test_mvp_flow.py` onboards and evaluates a business through both listeners. Running both processes locally: [composition/mvp/README.md](composition/mvp/README.md#running-it-locally).
+
 ## Not in this repository yet
 
 - The repository settings in [docs/onboarding/repository-settings.md](docs/onboarding/repository-settings.md) (the required `CI gate` check, title-only squash merges, Dependabot security updates, secret scanning, private vulnerability reporting) until the owner applies them; an API scan (DAST) of the running services, which arrives with the deployable stack

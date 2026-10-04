@@ -20,6 +20,7 @@ from sqlalchemy.pool import NullPool
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import TenantId
 from py_common.events import EventMessage, encode, to_message
+from py_common.kafka import KafkaClientConfig
 from py_common.outbox import (
     ConsumerConfig,
     IdempotentConsumer,
@@ -209,8 +210,8 @@ class StubProducer:
 
     instances: ClassVar[list["StubProducer"]] = []
 
-    def __init__(self, bootstrap_servers: str, *, client_id: str) -> None:
-        self.bootstrap_servers = bootstrap_servers
+    def __init__(self, kafka: KafkaClientConfig | str, *, client_id: str) -> None:
+        self.kafka = kafka
         self.client_id = client_id
         self.entered = False
         StubProducer.instances.append(self)
@@ -234,9 +235,9 @@ async def test_run_consumer_wires_the_store_and_the_producer(
     item = message("from the broker")
 
     async def one_record(
-        self: IdempotentConsumer, *, bootstrap_servers: str, topics: Sequence[str], stop: Any
+        self: IdempotentConsumer, *, kafka: KafkaClientConfig, topics: Sequence[str], stop: Any
     ) -> int:
-        assert (bootstrap_servers, list(topics)) == ("broker:9092", [TOPIC])
+        assert (kafka, list(topics)) == (KafkaClientConfig("broker:9092"), [TOPIC])
         assert self.group_id == GROUP
         assert await self.process(inbound(item)) is Outcome.PROCESSED
         stop.set()
@@ -259,4 +260,5 @@ async def test_run_consumer_wires_the_store_and_the_producer(
     assert titles(engine) == ["from the broker"]
     (producer,) = StubProducer.instances
     assert producer.client_id == f"cw-consumer-{GROUP}"
+    assert producer.kafka == KafkaClientConfig("broker:9092")
     assert not producer.entered, "the producer is stopped when the consumer returns"

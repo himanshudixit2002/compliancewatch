@@ -9,7 +9,9 @@ from SNS with its signature verified. The dispatcher reads the facts of change c
 rulebook at ``CW_RULEBOOK_URL``, with the service's own access token once
 ``CW_SERVICE_CLIENT_SECRET`` is set, and counts deliveries through OpenTelemetry. ``wire(settings,
 channels=..., rules=..., email_feedback=...)`` replaces the channels, the rulebook reader and the
-SES feedback reader, which is how the demo and the tests send and receive through fakes.
+SES feedback reader, which is how the demo and the tests send and receive through fakes; and
+``token_source=`` replaces where the rulebook reader's access token comes from, which is how a
+process that hosts identity gives it a token minted in the process.
 
 ``notification.main`` builds the HTTP app on it and ``notification.worker`` the worker's
 components; this module builds no app, so the worker does not start the API's telemetry.
@@ -49,7 +51,7 @@ from notification.infrastructure.ses_feedback import SnsFeedbackReader
 from notification.infrastructure.whatsapp import DisabledChannel, WhatsAppCloudChannel
 from notification.settings import NotificationSettings
 from notification.wiring import Wiring
-from py_common.auth import service_auth_from
+from py_common.auth import TokenSource, service_auth_from
 
 WHATSAPP_DISABLED = "whatsapp channel disabled: set CW_WHATSAPP_ENABLED and the Meta credentials"
 EMAIL_DISABLED = "email channel disabled: set CW_EMAIL_ENABLED, CW_SMTP_HOST and CW_EMAIL_FROM"
@@ -92,6 +94,7 @@ def wire(
     channels: Mapping[Channel, ChannelAdapter] | None = None,
     rules: RuleVersionReader | None = None,
     email_feedback: EmailFeedbackReader | None = None,
+    token_source: TokenSource | None = None,
 ) -> Wiring:
     unit_of_work: UnitOfWorkFactory
     work_index: WorkIndex
@@ -111,7 +114,9 @@ def wire(
         work_index,
         wired_channels,
         rules=rules
-        or HttpRuleVersionReader(settings.rulebook_url, auth=service_auth_from(settings)),
+        or HttpRuleVersionReader(
+            settings.rulebook_url, auth=service_auth_from(settings, token_source=token_source)
+        ),
         web_base_url=settings.web_base_url,
         quiet_hours=quiet_hours,
         batch=batch,

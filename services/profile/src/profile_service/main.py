@@ -59,7 +59,8 @@ from profile_service.infrastructure.repository import (
 )
 from profile_service.settings import ProfileSettings
 from profile_service.wiring import Wiring
-from py_common.app import create_app
+from py_common.app import create_app, module_app
+from py_common.auth.fastapi import Authenticator
 from py_common.flags import configure_flags
 from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
 from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
@@ -160,9 +161,13 @@ def _ontology_ready(wiring: Wiring) -> Callable[[], Awaitable[bool]]:
 
 
 def build_app(
-    settings: ProfileSettings | None = None, *, flags: FeatureFlags | None = None
+    settings: ProfileSettings | None = None,
+    *,
+    flags: FeatureFlags | None = None,
+    authenticator: Authenticator | None = None,
 ) -> FastAPI:
-    """``flags`` replaces the OpenFeature flags (tests)."""
+    """``flags`` replaces the OpenFeature flags (tests). ``authenticator`` replaces the one
+    ``CW_AUTH_MODE`` describes; a process that hosts identity passes identity's own."""
     settings = settings or ProfileSettings(service_name=SERVICE_NAME)
     wiring = wire(settings, flags=flags)
     app = create_app(
@@ -172,12 +177,16 @@ def build_app(
         settings=settings,
         readiness_checks=[("store", wiring.store_ready), ("ontology", _ontology_ready(wiring))],
         problem_status=PROBLEM_STATUS,
+        authenticator=authenticator,
     )
     app.state.wiring = wiring
     return app
 
 
-app = build_app()
+def __getattr__(name: str) -> FastAPI:
+    """``app`` is built on first access, so importing this module builds nothing."""
+    return module_app(name, build_app)
+
 
 if __name__ == "__main__":
     import uvicorn

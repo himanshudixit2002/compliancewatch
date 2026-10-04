@@ -24,7 +24,8 @@ from eval_service.infrastructure.memory import MemoryStore
 from eval_service.infrastructure.repository import PostgresUnitOfWorkFactory
 from eval_service.settings import EvalSettings
 from eval_service.wiring import Wiring
-from py_common.app import create_app
+from py_common.app import create_app, module_app
+from py_common.auth.fastapi import Authenticator
 
 SERVICE_NAME = "eval"
 PROBLEM_STATUS: dict[type[DomainError], int] = {
@@ -62,8 +63,13 @@ def wire(settings: EvalSettings, *, runner: SuiteRunner | None = None) -> Wiring
 
 
 def build_app(
-    settings: EvalSettings | None = None, *, runner: SuiteRunner | None = None
+    settings: EvalSettings | None = None,
+    *,
+    runner: SuiteRunner | None = None,
+    authenticator: Authenticator | None = None,
 ) -> FastAPI:
+    """``authenticator`` replaces the one ``CW_AUTH_MODE`` describes; a process that hosts
+    identity passes identity's own."""
     settings = settings or EvalSettings(service_name=SERVICE_NAME)
     wiring = wire(settings, runner=runner)
     app = create_app(
@@ -73,12 +79,16 @@ def build_app(
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         problem_status=PROBLEM_STATUS,
+        authenticator=authenticator,
     )
     app.state.wiring = wiring
     return app
 
 
-app = build_app()
+def __getattr__(name: str) -> FastAPI:
+    """``app`` is built on first access, so importing this module builds nothing."""
+    return module_app(name, build_app)
+
 
 if __name__ == "__main__":
     import uvicorn

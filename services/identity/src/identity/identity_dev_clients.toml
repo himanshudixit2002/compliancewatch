@@ -8,6 +8,10 @@
 # scopes that call needs and no more. Staging and production create their clients with
 # identity-admin service-client create instead; nothing here reaches them.
 
+[applicability-engine]
+scopes = ["tenant:act"]
+reason = "evaluates a rule version for a tenant's business: reads the business's profile snapshot for that tenant and the published rule version, whose read routes need no scope"
+
 [notification]
 scopes = []
 reason = "reads the rule versions its messages cite from the rulebook, whose read routes need no scope"
@@ -23,3 +27,7 @@ reason = "answers a tenant's question: reads the tenant's profile and obligation
 [whatsapp-bot]
 scopes = ["notification:preferences", "notification:receipts", "identity:channel-consents", "tenant:act"]
 reason = "records keyword consents at identity, reads and changes channel preferences and reports delivery receipts to notification"
+
+[worker]
+scopes = ["rulebook:write", "llm:call", "tenant:act", "notification:send", "entitlements:read", "data:export"]
+reason = "the combined worker process (cw-mvp worker) runs every service's consumers, jobs and activities under one client: pipeline writes and model calls, engine and notification reads for a tenant, sends, plan checks and exports"

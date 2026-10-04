@@ -23,7 +23,10 @@ class RequestContextMiddleware:
 
     A client value is reused only when it matches ``REQUEST_ID_SHAPE``. The id is also kept in
     ``scope["state"]`` so that handlers running outside this middleware (Starlette's 500 handler)
-    can still read it.
+    can still read it. An id already in ``scope["state"]`` wins over both, and a response that
+    already carries ``x-request-id`` gets no second one, so an app mounted inside another that
+    runs this middleware too (several services in one process) keeps the outer id and sends
+    the header once.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -33,21 +36,28 @@ class RequestContextMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        correlation_id = _reusable(Headers(scope=scope).get(REQUEST_ID_HEADER)) or uuid.uuid4().hex
-        scope.setdefault("state", {})[_STATE_KEY] = correlation_id
+        state = scope.setdefault("state", {})
+        correlation_id = (
+            _reusable(state.get(_STATE_KEY))
+            or _reusable(Headers(scope=scope).get(REQUEST_ID_HEADER))
+            or uuid.uuid4().hex
+        )
+        state[_STATE_KEY] = correlation_id
 
         async def send_with_request_id(message: Message) -> None:
             if message["type"] == "http.response.start":
-                MutableHeaders(scope=message).append(REQUEST_ID_HEADER, correlation_id)
+                headers = MutableHeaders(scope=message)
+                if REQUEST_ID_HEADER not in headers:
+                    headers.append(REQUEST_ID_HEADER, correlation_id)
             await send(message)
 
         with structlog.contextvars.bound_contextvars(correlation_id=correlation_id):
             await self.app(scope, receive, send_with_request_id)
 
 
-def _reusable(offered: str | None) -> str | None:
-    """The client's id when it has the documented shape, else None."""
-    if offered is not None and REQUEST_ID_SHAPE.fullmatch(offered):
+def _reusable(offered: object) -> str | None:
+    """The offered id when it is a string of the documented shape, else None."""
+    if isinstance(offered, str) and REQUEST_ID_SHAPE.fullmatch(offered):
         return offered
     return None
 

@@ -70,3 +70,19 @@ def test_stdlib_records_are_rendered_through_the_same_formatter() -> None:
     assert record["service"] == "test-svc"
     assert record["logger"] == "uvicorn.access"
     assert record["level"] == "info"
+
+
+def test_a_bound_service_wins_over_the_configured_one() -> None:
+    buffer = io.StringIO()
+    configure_logging(service_name="compliancewatch-api", stream=buffer)
+    log = get_logger("py_common.tests")
+    with structlog.contextvars.bound_contextvars(service="rulebook"):
+        log.info("inside")
+        logging.getLogger("uvicorn.error").info("foreign inside")
+    log.info("outside")
+    lines = [json.loads(line) for line in buffer.getvalue().splitlines() if line.strip()]
+    assert [(line["event"], line["service"]) for line in lines] == [
+        ("inside", "rulebook"),
+        ("foreign inside", "rulebook"),
+        ("outside", "compliancewatch-api"),
+    ]
