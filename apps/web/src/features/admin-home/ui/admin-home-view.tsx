@@ -12,11 +12,20 @@ import {
 } from "@compliancewatch/ui";
 import type { AwaitedItemView } from "@/entities/screen/types";
 import { t } from "@/shared/i18n";
+import { RefreshButton } from "@/shared/ui/refresh-button";
 import { ScreenStatusChip } from "@/shared/ui/screen-status-chip";
+import type { CountTileView } from "../model/counts";
+import type { ServicesSummaryView } from "../model/services";
 import type { AdminTool, AdminToolGroup } from "../model/tools";
+import { CountTiles } from "./count-tiles";
+import { ServicesSummary } from "./services-summary";
 
 export interface AdminHomeViewProps {
   groups: readonly AdminToolGroup[];
+  tiles: readonly CountTileView[];
+  services: ServicesSummaryView;
+  /** The health probe's time limit in seconds, named under the services summary. */
+  probeTimeoutSeconds: number;
 }
 
 const SHOWN_AWAITS = 3;
@@ -55,11 +64,37 @@ function Services({ tool }: { tool: AdminTool }) {
   );
 }
 
-/** The internal tools from the registry, grouped like the sidebar, with status and dependencies. */
-export function AdminHomeView({ groups }: AdminHomeViewProps) {
+/**
+ * The admin home: counts of the review queues and registries, whether every service answers,
+ * and the internal tools from the registry, grouped like the sidebar, with their status and
+ * what each waits for.
+ */
+export function AdminHomeView({
+  groups,
+  tiles,
+  services,
+  probeTimeoutSeconds,
+}: AdminHomeViewProps) {
   return (
     <div data-slot="admin-home" className="flex flex-col gap-8">
-      <PageHeader title={t("admin.title")} description={t("admin.intro")} />
+      <PageHeader
+        title={t("admin.title")}
+        description={t("admin.intro")}
+        actions={<RefreshButton />}
+      />
+      <section aria-labelledby="admin-counts" className="flex flex-col gap-3">
+        <h2 id="admin-counts" className="text-lg font-semibold text-fg">
+          {t("admin.counts.heading")}
+        </h2>
+        <CountTiles tiles={tiles} />
+      </section>
+      <section aria-labelledby="admin-services" className="flex flex-col gap-3">
+        <h2 id="admin-services" className="text-lg font-semibold text-fg">
+          {t("admin.services.heading")}
+        </h2>
+        <ServicesSummary summary={services} timeoutSeconds={probeTimeoutSeconds} />
+      </section>
+      <h2 className="text-lg font-semibold text-fg">{t("admin.tools")}</h2>
       {groups.map((group) => (
         <Table key={group.key} data-group={group.key}>
           <TableCaption className="text-left text-base font-semibold text-fg">

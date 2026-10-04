@@ -26,20 +26,20 @@ const RECIPIENTS: Recipient[] = [
     addresses: [],
     businesses: [],
     byDigest: false,
-    updatedAt: "2026-05-02T05:00:00Z",
+    updatedAt: "2000-05-02T05:00:00Z",
   },
   {
     id: "r1",
-    orgLabel: "Rao & Co",
+    orgLabel: "Example & Co",
     role: "ca_admin",
     language: "hi",
     addresses: [
-      { channel: "whatsapp", address: "+919800000001" },
-      { channel: "email", address: "desk@rao.example" },
+      { channel: "whatsapp", address: "+910000000001" },
+      { channel: "email", address: "desk@firm.example" },
     ],
-    businesses: ["Asha Traders", "Kiran Foods"],
+    businesses: ["Example business 1", "Example business 2"],
     byDigest: true,
-    updatedAt: "2026-04-10T05:00:00Z",
+    updatedAt: "2000-04-10T05:00:00Z",
   },
 ];
 
@@ -71,17 +71,17 @@ describe("RecipientsView", () => {
 
     const rows = container.querySelectorAll("tbody tr");
     expect([...rows].map((row) => row.getAttribute("data-recipient"))).toEqual(["r1", "r2"]);
-    const rao = rows[0] as HTMLElement;
-    expect(rao.textContent).toContain("Rao & Co");
-    expect(rao.textContent).toContain("CA admin");
-    expect([...rao.querySelectorAll("ol li")].map((li) => li.textContent)).toEqual([
-      "WhatsApp+919800000001",
-      "Emaildesk@rao.example",
+    const firm = rows[0] as HTMLElement;
+    expect(firm.textContent).toContain("Example & Co");
+    expect(firm.textContent).toContain("CA admin");
+    expect([...firm.querySelectorAll("ol li")].map((li) => li.textContent)).toEqual([
+      "WhatsApp+910000000001",
+      "Emaildesk@firm.example",
     ]);
-    expect(rao.textContent).toContain("Asha Traders, Kiran Foods");
-    expect(rao.textContent).toContain("Hindi");
-    expect(rao.textContent).toContain("Daily digest");
-    expect(rao.textContent).toContain("10 Apr 2026");
+    expect(firm.textContent).toContain("Example business 1, Example business 2");
+    expect(firm.textContent).toContain("Hindi");
+    expect(firm.textContent).toContain("Daily digest");
+    expect(firm.textContent).toContain("10 Apr 2000");
 
     const unnamed = rows[1] as HTMLElement;
     expect(unnamed.textContent).toContain("No organisation named");

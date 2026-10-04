@@ -35,6 +35,23 @@ axe over a page-sized jsdom tree takes tens of seconds on a CI runner; the Playw
 `AxeBuilder` over those pages in full. No unit test sets its own timeout; the configured 30 s
 ceiling applies.
 
+**Synthetic fixtures.** Test data reads as invented at a glance: "Example ..." text (`Example
+return 1`, `Example notice 1`, `Example regulator`, `Example owner`), dates in the year 2000,
+zero or example identifiers (`00000000-0000-4000-8000-...`), `example.com` addresses and numbers
+such as `+910000000001`. A fixture that names a real return, regulator, business or person can be
+taken for a statement about the rules, and it goes stale when they change.
+`src/test/synthetic-fixtures.test.ts` reads every test (`*.test.ts(x)`, `*.test.mts`, `*.spec.ts`)
+and every fixture (a file whose name holds `fixture`, or any file under a `fixtures/` folder) in
+`apps/web/src`, `apps/web/e2e`, `apps/web/scripts` and `packages/ui/src`, and fails on the
+realistic tokens, in any case and at the start of a word: CBIC, GSTR (so GSTR-1 and GSTR-3B), CGST,
+IGST, SGST, Acme and Asha. Exempt: the recorded rulebook fixtures under
+`apps/web/scripts/seed/fixtures`, which were recorded from a real notification and which the seed
+replays and hashes byte for byte (there are no recorded e2e fixtures; the specs read what the seed
+wrote at run time). Allowed, each with its reason in the test: the guard itself and the design
+catalogue's `fixtures.test.ts`, which name the tokens in order to reject them. A new test uses the
+example forms above; a live page whose test seems to need a realistic token gets synthetic data
+instead, or one narrow entry in the allow list with the reason.
+
 **Coverage.** Both packages hold 80% for lines, functions, branches and statements. In `apps/web`
 the route files (`page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`,
 `global-error.tsx`, `route.ts`), `instrumentation.ts`, `proxy.ts` and `src/shared/generated/**`
@@ -50,15 +67,17 @@ outside `src` and outside the floor.
 | `features/*/model`, `entities`   | pure functions: inputs to outputs, edge cases                                                                                              |
 | `shared/config/screens.ts`       | the status rules against the committed OpenAPI specs, route coverage both ways, unique ids and routes, `matchScreen`, `hrefFor`, visibility |
 | `shared/config` (roles, flags)   | set membership, `can()`, the flag declaration shape                                                                                        |
-| `shared/i18n`                    | every `t("...")` literal in `src` exists in `en.json`; interpolation; the key-by-key fallback                                               |
+| `shared/i18n`                    | every `t("...")` literal in `src` exists in `en.json`, and every key in `en.json` is referenced in `src`: as a literal, or as a member of one of the dynamic families the test lists (a template literal such as `` t(`status.${status}`) `` builds the key; each family names its module, and a family no template literal needs fails); interpolation; the key-by-key fallback |
 | `shared/lib`                     | IST rendering, financial-year labels, decimal money, identifiers, `safeNext`                                                               |
 | `server/legal.ts`                | version and title extraction, that no file in `docs/legal` contains a raw HTML tag (marked does not sanitise), and the onboarding gate: closed in prod while the terms or the privacy notice is a draft, open in local, test and staging |
 | `server/required-consents.ts`    | the required purposes granted at the current versions (missing, withdrawn and older grants refused), the read's subject, tenant header and no-store, a problem passed on; `createBusiness` makes no profile call without them |
+| `server/api/rulebook-write.ts`   | the role, the flag and the review token checked in that order (a refused port answers every decision without a request), each token sent only by its own client and never in an error, `decided_by` from the session, the decision bodies and answers mapped, the rulebook's token problems reworded to name the variable to set |
 | `server/session.ts`, `dal.ts`    | the cookie round trip (tamper, expiry, wrong key, wrong shape), the cookie attributes per environment, each gate's redirect or 404 (the cookie store from `src/test/fake-cookies.ts`) |
 | `server/auth/*`                  | `providerFor` per variable value; the fake adapter's validation, stable user id, second-factor assertion and refusal outside local and test |
 | `features/auth`                  | the form (roles per kind, the busy state, the errors it shows) with a fake action; the action's cookie and redirect; the seed-state reader |
 | `src/proxy.ts`                   | the matcher through `next/experimental/testing/server` and the pass-or-redirect decision for every registry page (excluded from the coverage floor) |
-| `src/test/architecture.test.ts`  | the layer rules over the real tree                                                                                                         |
+| `src/test/architecture.test.ts`  | the layer rules over the real tree; the parked folder map: every feature folder no route file imports is parked for registry screens that exist and are not live, and a folder a page imports leaves the map ([architecture.md](architecture.md), "Parked feature folders") |
+| `src/test/synthetic-fixtures.test.ts` | no realistic token in a test or a fixture of the web app or the UI kit ("Synthetic fixtures" above) |
 | `src/test/screens-doc.test.ts`   | `docs/web/screens.md` equals the generator's output; the awaits audit                                                                      |
 | `packages/ui` tokens             | `contrast.test.ts` (4.5:1 text, 3:1 UI, both schemes), `tokens.test.ts` (the two dark blocks agree), `tokens.build.test.ts` (the utilities compile) |
 | `packages/ui/src/imports.test.ts`| internal imports are relative, never `@/` or the package name                                                                              |
@@ -73,7 +92,7 @@ listening on that port. On CI it retries once and writes the HTML report. `e2e/f
 extends `test` with `checkA11y(selector?)`, which runs `AxeBuilder` on the page (or one
 selector) and fails on any finding of impact `serious` or `critical` (moderate and minor
 findings are the unit level's business), and with `signIn(persona)`: the personas (`OWNER`,
-`COMPLIANCE_LEAD`, `CA_ADMIN`, `ANALYST`, `ADMIN`) are signed in once per worker through the
+`COMPLIANCE_LEAD`, `CA_ADMIN`, `ANALYST`, `REVIEWER`, `ADMIN`) are signed in once per worker through the
 fake form and their cookies are added to the test's context, so a spec that needs a session
 starts with `await signIn(ANALYST)`; `signInThroughForm(page, persona, next?)` drives the form
 itself for the specs that test it.
@@ -86,11 +105,12 @@ The specs on `main`:
 | `home.spec.ts`           | the landing links, the skip link moving focus to `main`, the sign-in link leading to the form                                                              |
 | `sign-in.spec.ts`        | the redirect with `next` from a gated page, the server's field errors, a refused submit keeping every value and focusing the errors, an owner signing in, returning to `/account`, the account menu and signing out, the role homes (`/businesses`, `/admin`), a signed-in visit to `/sign-in`, the last seeded tenant offered by the form and signed into (needs the seed), the roles following the tenant kind, `/sign-out` as POST only with the origin check, signing in and out through `127.0.0.1` (a host other than the one `next start` binds) |
 | `account.spec.ts`        | the session facts in IST, the copy controls, the note on `/me`, the header name linking to `/account`                                                     |
-| `admin-gate.spec.ts`     | anonymous `/admin` to sign-in with `next`, a 404 for a tenant role on every admin path, an analyst opening the tools without the admin-only entries and a 404 on one of them |
+| `admin-gate.spec.ts`     | anonymous `/admin` to sign-in with `next`; a 404 without any admin markup for an owner and a compliance lead on every admin path; an analyst opening the tools without the admin-only entries and a 404 on one of them; a reviewer and an admin opening the tools; an unknown admin path as a 404 inside the admin shell with the way back (axe) |
 | `sitemap.spec.ts`        | one table per section, a waiting tool's awaited route and owner, a ready tool's chip, the link to its notice                                              |
 | `legal.spec.ts`          | each listed document under the draft banner with its `-draft` version; an unlisted document is a 404; printed (print media, light and dark schemes): no shell, the banner kept, the paper line, black text on white |
 | `design.spec.ts`         | every catalogue section with axe, the theme control, dialogs (focus, Escape, the ten-character reason), the calendar keys                                   |
-| `admin-home.spec.ts`     | as an analyst: the tool list with status (waiting and ready) and service READMEs, the environment banner, sidebar navigation marking the current tool     |
+| `admin-home.spec.ts`     | as an analyst: the tool list with status (waiting and ready) and service READMEs, the environment banner, sidebar navigation marking the current tool, the "Waiting" hint of a tool not built yet as its link's description; against the stack (needs the seed): a number and no error in each count tile, the open mentions, every service answering its health check (axe); the counts are not compared with numbers, since other specs change the queues |
+| `admin-rulebook-documents.spec.ts` | a tenant role getting a 404 for the tool and the viewer; a malformed id as a real 404 inside the admin shell; against the recorded notification the seed registers (needs the seed): opened from its sha256 through the form (the current sidebar link, axe), the title, the reference in the breadcrumbs, every clause with its anchor and page, the id; an unknown id answered on the field (focused, value kept) and a 404 on the viewer; a jump to a clause (the address fragment, focus on the clause); a mention's span marked from a link with the clause ids read from the rulebook (the note, focus, axe), the whole clause when the span runs past it, a clause the document does not hold, a malformed link. Read-only, so it runs in parallel and again on the same stack |
 | `not-available.spec.ts`  | an admin tool's awaited routes and breadcrumbs, a parameterised tenant route through the catch-all, `/forbidden` for the wrong tenant kind, a planned tool's sentence and note, a ready tool's sentence and what it will use, real 404s with and without a session |
 | `forbidden.spec.ts`      | the page and its two links                                                                                                                                |
 | `health.spec.ts`         | the health JSON, the static security headers, no `x-powered-by`                                                                                            |

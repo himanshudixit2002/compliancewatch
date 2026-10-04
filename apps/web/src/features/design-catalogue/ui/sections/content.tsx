@@ -1,10 +1,20 @@
-import { CitationCard, JsonView, KeyValue, Stepper, Timeline } from "@compliancewatch/ui";
+import {
+  CitationCard,
+  HighlightMark,
+  JsonView,
+  KeyValue,
+  Stepper,
+  Timeline,
+} from "@compliancewatch/ui";
 import { FIXTURES } from "../fixtures";
 import { CatalogueSection, Example } from "./section";
 
 export function ContentSection() {
   return (
-    <CatalogueSection id="content" title="Key values, timeline, JSON, stepper and citations">
+    <CatalogueSection
+      id="content"
+      title="Key values, timeline, JSON, stepper, citations and highlights"
+    >
       <Example label="Key value">
         <KeyValue items={FIXTURES.keyValues} className="w-full max-w-md" />
       </Example>
@@ -16,6 +26,13 @@ export function ContentSection() {
       </Example>
       <Example label="Stepper">
         <Stepper steps={FIXTURES.steps} current={1} className="w-full" />
+      </Example>
+      <Example label="Highlight mark">
+        <p className="max-w-md text-sm whitespace-pre-wrap text-fg">
+          {FIXTURES.highlight.before}
+          <HighlightMark>{FIXTURES.highlight.mark}</HighlightMark>
+          {FIXTURES.highlight.after}
+        </p>
       </Example>
       <Example label="Citation card">
         <CitationCard

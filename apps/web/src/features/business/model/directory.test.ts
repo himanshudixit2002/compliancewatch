@@ -55,12 +55,12 @@ describe("readDirectoryQuery", () => {
     expect(
       readDirectoryQuery(
         form({
-          [DIRECTORY_FIELDS.q]: " acme ",
+          [DIRECTORY_FIELDS.q]: " example ",
           [DIRECTORY_FIELDS.cursor]: "c1",
           [DIRECTORY_FIELDS.page]: "3",
         }),
       ),
-    ).toEqual({ ok: true, q: "acme", cursor: "c1", page: 3 });
+    ).toEqual({ ok: true, q: "example", cursor: "c1", page: 3 });
   });
 
   it("falls back to the first page and no cursor", () => {

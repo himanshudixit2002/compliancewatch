@@ -13,21 +13,21 @@ import type { Recipient, RecipientDto } from "./recipients";
 const DTO: RecipientDto = {
   id: "r1",
   user_id: null,
-  org_label: "Rao & Co",
+  org_label: "Example & Co",
   role: "ca_admin",
   language: "hi",
   digest_mode: "daily",
   by_digest: true,
   addresses: [
-    { channel: "email", address: "desk@rao.example", position: 2 },
-    { channel: "whatsapp", address: "+919800000001", position: 1 },
+    { channel: "email", address: "desk@firm.example", position: 2 },
+    { channel: "whatsapp", address: "+910000000001", position: 1 },
   ],
   businesses: [
-    { business_id: "b1", label: "Asha Traders" },
-    { business_id: "b2", label: "Kiran Foods" },
+    { business_id: "b1", label: "Example business 1" },
+    { business_id: "b2", label: "Example business 2" },
   ],
-  created_at: "2026-01-01T05:00:00Z",
-  updated_at: "2026-04-10T05:00:00Z",
+  created_at: "2000-01-01T05:00:00Z",
+  updated_at: "2000-04-10T05:00:00Z",
 };
 
 function recipient(overrides: Partial<Recipient>): Recipient {
@@ -39,7 +39,7 @@ function recipient(overrides: Partial<Recipient>): Recipient {
     addresses: [],
     businesses: [],
     byDigest: false,
-    updatedAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2000-01-01T00:00:00Z",
     ...overrides,
   };
 }
@@ -48,16 +48,16 @@ describe("recipientFromDto", () => {
   it("orders the addresses by position and keeps the business labels", () => {
     expect(recipientFromDto(DTO)).toEqual({
       id: "r1",
-      orgLabel: "Rao & Co",
+      orgLabel: "Example & Co",
       role: "ca_admin",
       language: "hi",
       addresses: [
-        { channel: "whatsapp", address: "+919800000001" },
-        { channel: "email", address: "desk@rao.example" },
+        { channel: "whatsapp", address: "+910000000001" },
+        { channel: "email", address: "desk@firm.example" },
       ],
-      businesses: ["Asha Traders", "Kiran Foods"],
+      businesses: ["Example business 1", "Example business 2"],
       byDigest: true,
-      updatedAt: "2026-04-10T05:00:00Z",
+      updatedAt: "2000-04-10T05:00:00Z",
     });
     expect(DTO.addresses[0]?.position).toBe(2);
   });

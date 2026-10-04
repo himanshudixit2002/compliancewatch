@@ -34,6 +34,7 @@ describe("loadEnv", () => {
     expect(env.CW_WEB_SESSION_TTL_SECONDS).toBe(28_800);
     expect(env.CW_WEB_REQUEST_TIMEOUT_MS).toBe(10_000);
     expect(env.CW_WEB_RULEBOOK_WRITE_TOKEN).toBeUndefined();
+    expect(env.CW_WEB_RULEBOOK_REVIEW_TOKEN).toBeUndefined();
     expect(env.CW_WEB_ADMIN_IP_ALLOWLIST).toEqual([]);
     expect(env.CW_WEB_TRUST_FORWARDED_IP).toBe(false);
     expect(env.CW_WEB_SEED_STATE_PATH).toBe("../../var/seed/last.json");

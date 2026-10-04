@@ -12,12 +12,12 @@ import {
 function event(overrides: Partial<AuditEvent> = {}): AuditEvent {
   return {
     id: "ev_1",
-    actor: "Meera Iyer",
+    actor: "Example analyst",
     action: "user.disabled",
     subjectType: "user",
     subjectId: "u_42",
     changes: [],
-    at: "2026-04-10T05:00:00Z",
+    at: "2000-04-10T05:00:00Z",
     ...overrides,
   };
 }
@@ -56,8 +56,8 @@ describe("describeChange", () => {
     expect(describeChange({ field: "region", before: null, after: "ap-south-1" })).toBe(
       "region set to ap-south-1",
     );
-    expect(describeChange({ field: "phone", before: "+919876543210", after: null })).toBe(
-      "phone cleared (was +919876543210)",
+    expect(describeChange({ field: "phone", before: "+910000000001", after: null })).toBe(
+      "phone cleared (was +910000000001)",
     );
     expect(describeChange({ field: "status", before: "active", after: "disabled" })).toBe(
       "status: active → disabled",
@@ -68,10 +68,10 @@ describe("describeChange", () => {
 describe("newestFirst", () => {
   it("orders by instant, keeps ties in order and leaves the input as it was", () => {
     const input = [
-      event({ id: "old", at: "2026-04-01T05:00:00Z" }),
-      event({ id: "new", at: "2026-04-12T05:00:00+05:30" }),
-      event({ id: "tie-a", at: "2026-04-05T05:00:00Z" }),
-      event({ id: "tie-b", at: "2026-04-05T10:30:00+05:30" }),
+      event({ id: "old", at: "2000-04-01T05:00:00Z" }),
+      event({ id: "new", at: "2000-04-12T05:00:00+05:30" }),
+      event({ id: "tie-a", at: "2000-04-05T05:00:00Z" }),
+      event({ id: "tie-b", at: "2000-04-05T10:30:00+05:30" }),
     ];
     expect(newestFirst(input).map((item) => item.id)).toEqual(["new", "tie-a", "tie-b", "old"]);
     expect(input.map((item) => item.id)).toEqual(["old", "new", "tie-a", "tie-b"]);

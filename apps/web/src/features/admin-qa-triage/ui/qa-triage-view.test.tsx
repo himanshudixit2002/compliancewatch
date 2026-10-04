@@ -11,33 +11,33 @@ const hrefFor = (id: string) => `/admin/qa-triage/${id}` as Route;
 const ITEMS: TriageItem[] = [
   {
     id: "tri_closed",
-    question: "Who files ITC-04?",
-    category: "Job work",
+    question: "Who files example form 4?",
+    category: "Example topic",
     reason: "thumbs_down",
     priority: "high",
     status: "closed",
-    assignee: "Asha Rao",
-    createdAt: "2026-09-28T05:00:00Z",
+    assignee: "Example reviewer",
+    createdAt: "2000-09-28T05:00:00Z",
   },
   {
     id: "tri_low",
-    question: "Is TDS due on rent?",
-    category: "TDS",
+    question: "Is example tax due on rent?",
+    category: "Example tax",
     reason: "not_covered",
     priority: "low",
     status: "open",
     assignee: null,
-    createdAt: "2026-09-29T05:00:00Z",
+    createdAt: "2000-09-29T05:00:00Z",
   },
   {
     id: "tri_high",
-    question: "When is GSTR-3B due for March?",
-    category: "GST returns",
+    question: "When is example return 1 due for March?",
+    category: "Example returns",
     reason: "not_covered",
     priority: "high",
     status: "open",
-    assignee: "Ravi Kumar",
-    createdAt: "2026-10-01T05:00:00Z",
+    assignee: "Example analyst",
+    createdAt: "2000-10-01T05:00:00Z",
   },
 ];
 
@@ -70,15 +70,15 @@ describe("AdminQaTriageView", () => {
       "tri_low",
       "tri_closed",
     ]);
-    expect(rows[0]?.textContent).toContain("Ravi Kumar");
+    expect(rows[0]?.textContent).toContain("Example analyst");
     expect(rows[1]?.textContent).toContain("Unassigned");
     expect(rows[1]?.textContent).toContain("Low");
-    expect(rows[1]?.textContent).toContain(formatDateTime("2026-09-29T05:00:00Z"));
+    expect(rows[1]?.textContent).toContain(formatDateTime("2000-09-29T05:00:00Z"));
     expect(rows[2]?.textContent).toContain("Marked unhelpful");
     expect(rows[2]?.querySelector("[data-slot='status-chip']")?.textContent).toBe("Closed");
-    expect(screen.getByRole("link", { name: "Who files ITC-04?" }).getAttribute("href")).toBe(
-      "/admin/qa-triage/tri_closed",
-    );
+    expect(
+      screen.getByRole("link", { name: "Who files example form 4?" }).getAttribute("href"),
+    ).toBe("/admin/qa-triage/tri_closed");
     expect(screen.getAllByRole("option", { name: "Marked unhelpful" })).toHaveLength(1);
     expect(screen.getAllByRole("option", { name: "Closed" })).toHaveLength(1);
     expect(await runAxe(container)).toHaveNoViolations();
@@ -88,7 +88,7 @@ describe("AdminQaTriageView", () => {
     const closed = ITEMS.filter((item) => item.status === "closed");
     const { container } = render(<AdminQaTriageView items={closed} />);
     expect(screen.queryByRole("link")).toBeNull();
-    expect(screen.getByText("Who files ITC-04?")).toBeDefined();
+    expect(screen.getByText("Who files example form 4?")).toBeDefined();
     expect(figures(container).Open).toEqual({ value: "0", tone: "neutral" });
   });
 

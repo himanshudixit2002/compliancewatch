@@ -21,8 +21,11 @@ Add an entry to `SCREEN_LIST`:
 - `uses`: every service route the screen calls, as `uses(service, method, pathTemplate)`. Each
   must exist in a committed spec under `packages/contracts/openapi`; the test fails otherwise.
 - `awaits`: every route it still needs, through `servicesTrack("WP<n>", ...)` (the delivering
-  package), `kagTrack(...)` (path unconfirmed until that track's specs are committed) or
-  `unscheduled(...)`. A repository file it needs goes in `awaitsFiles`.
+  package) or `unscheduled(...)`. A route whose path comes from a design that is not a committed
+  spec yet is awaited with `owner: "plan-k"` and `unconfirmed: true`; no entry awaits one today
+  (the last ones moved to the services track's packages). A repository file it needs goes in
+  `awaitsFiles`.
+  A screen whose every route is already in a committed spec awaits nothing and is `ready`.
 - `status`, which moves `planned`, then `waiting`, then `ready`, then `live`: `planned` when
   every awaited item is `unscheduled`; `waiting` when at least one awaited route or file is
   absent; `ready` when every awaited route and file is on `main` (each awaited route also under
@@ -66,7 +69,12 @@ under `features/not-available/ui/previews.tsx` and name it in `preview`.
    failure with its correlation id (`ErrorState`). A feature that reads data adds `ports.ts`,
    `gateway.ts`, `queries.ts` and, for writes, `actions.ts` (the shape is in
    [data-layer.md](data-layer.md), "A feature that reads data"; `features/auth` has the first
-   `actions.ts` and `queries.ts`).
+   `actions.ts` and `queries.ts`). If `PARKED_FEATURES` in `src/test/architecture.ts` parks a
+   folder for the screen, build on that folder rather than a new one: the page imports it, the
+   data files join it, and its line leaves the map in the same change (the architecture test
+   fails on a live screen whose parked folder no page imports, and on a map entry for a folder a
+   page imports; [architecture.md](architecture.md), "Parked feature folders"). A new folder
+   arrives with its page.
 3. **Data.** Reads go through `queries.ts` and return a `Result`: the page renders the value,
    `EmptyState` with the reason for an empty list, or `ErrorState` from the error (title,
    detail, status, correlation id). A global read (plans, templates, rules, prompts, models)
@@ -79,10 +87,16 @@ under `features/not-available/ui/previews.tsx` and name it in `preview`.
    added to `messages/en.json`; the registry title is data and needs no key; enum values from a
    service go through `humanise()`. No regulatory fact is written into the app: it comes from
    service data, `docs/legal` or the ontology (`getOntology()`: questions, help lines and value
-   labels from `GET /v1/ontology`).
+   labels from `GET /v1/ontology`). Every key in `en.json` is referenced in `src`: write the key
+   out (`t("feature.key")` or a literal map of keys); a key built from a value with a template
+   literal belongs to a dynamic family the i18n test lists with the module that builds it, so a
+   new family is added there. A key nothing uses is deleted.
 5. **Unit tests.** `<name>.test.tsx` beside every view with the axe assertion; `model/*.test.ts`
    for the helpers; gateway and action tests with `fakeFetch` from `src/test/fake-fetch.ts`
    asserting the method, path, headers and body of each call. The 80% floor holds per package.
+   Test data is synthetic: "Example ..." text and dates in the year 2000; the guard in
+   `src/test/synthetic-fixtures.test.ts` rejects realistic return, regulator, business and person
+   names ([testing.md](testing.md), "Synthetic fixtures").
 6. **End-to-end spec.** `apps/web/e2e/<name>.spec.ts` using the `test` from `./fixtures`: visit
    the route (after `await signIn(OWNER)` or another persona from the fixtures for a gated
    page), assert what the page shows, call `checkA11y()`. A page that reads a service runs
@@ -120,7 +134,8 @@ has not been built yet. Building it is its own package (D-013 in [decisions.md](
 1. Delete the landed routes from `awaits` (they are already under `uses`) and the landed files
    from `awaitsFiles`; a live screen may keep an await for an action it renders disabled, as
    long as that route is still absent.
-2. Build the page, the feature and the tests as in section 3; add the e2e spec and list it.
+2. Build the page, the feature and the tests as in section 3; add the e2e spec and list it. A
+   parked folder for the screen is wired from the page and its line leaves `PARKED_FEATURES`.
 3. Set `status: "live"` and delete `notes`.
 4. `pnpm --filter web screens:gen`, then `pnpm --filter web test` and, with the stack up and
    seeded, `make web-e2e`.

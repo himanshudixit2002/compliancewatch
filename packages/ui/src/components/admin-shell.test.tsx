@@ -43,4 +43,33 @@ describe("AdminShell", () => {
       "/admin/system",
     );
   });
+
+  it("shows a tool's hint after its link and names it as the link's description", async () => {
+    const { container } = render(
+      <AdminShell
+        groups={[
+          {
+            label: "Review",
+            items: [
+              { href: "/admin/review", label: "Review queue", hint: "Waiting" },
+              { href: "/admin/rules", label: "Rules" },
+            ],
+          },
+        ]}
+        environment="test"
+      >
+        <h1>Tool</h1>
+      </AdminShell>,
+    );
+    const nav = screen.getByRole("navigation", { name: "Internal tools" });
+    const link = within(nav).getByRole("link", { name: "Review queue" });
+    expect(link.textContent).toBe("Review queue");
+    const hintId = link.getAttribute("aria-describedby");
+    expect(hintId).not.toBeNull();
+    expect(container.querySelector(`[id="${hintId}"]`)?.textContent).toBe("Waiting");
+    expect(
+      within(nav).getByRole("link", { name: "Rules" }).getAttribute("aria-describedby"),
+    ).toBeNull();
+    expect(await runAxe(nav)).toHaveNoViolations();
+  });
 });

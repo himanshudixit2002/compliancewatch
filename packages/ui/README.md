@@ -31,6 +31,7 @@ src/components/            # one file per component, <name>.test.tsx beside it
   page-header, app-shell, admin-shell, key-value, timeline, json-view, stepper
   confirm-dialog, reason-dialog, citation-card, month-calendar, data-table, not-available-yet
   checkbox-group, number-field, date-field                         # composite form fields
+  highlight-mark                                                   # a marked span inside text
 ```
 
 ## Components
@@ -84,8 +85,9 @@ Built on the primitives and the tokens; each has its accessibility contract in t
   one h1), `Skeleton` inside `SkeletonGroup` (`role="status"` with a screen-reader "Loading").
 - `AppShell` and `AdminShell`: skip link to `<main id="main">`, primary navigation (a Sheet
   under the md breakpoint), `aria-current="page"` on the active link, a `Link` prop for the
-  app's router link. AdminShell adds the grouped tool sidebar and an internal banner naming
-  the environment.
+  app's router link; a nav item's optional `hint` ("Waiting") sits after its link, outside the
+  link's name, as its `aria-describedby` description. AdminShell adds the grouped tool sidebar
+  and an internal banner naming the environment.
 - `KeyValue` (`<dl>`), `Timeline` (`<ol>` with `<time>`), `JsonView` (`<pre>` with `<details>`
   per object or array), `Stepper` (`aria-current="step"`, "Step 2 of 5").
 - `ConfirmDialog` (says what the action records; danger button when destructive; buttons
@@ -93,6 +95,8 @@ Built on the primitives and the tokens; each has its accessibility contract in t
   under ten characters; the error shows on blur; `onConfirm` receives the trimmed reason).
 - `CitationCard`: the quote in `<blockquote>`, the clause reference, the document link, and
   either a "Verified" chip or a "Not verified" warning; the quote is never paraphrased.
+- `HighlightMark`: a `<mark>` tinted and underlined (not colour alone), with visually hidden
+  "Highlight starts" and "Highlight ends" around it, since screen readers skip `<mark>`.
 - `MonthCalendar`: `role="grid"` with one focusable cell (roving tabindex), Arrow keys, Home,
   End, PageUp and PageDown (Shift for a year), Enter or Space to select, `aria-selected` and
   `aria-current="date"`, month buttons with labels, `renderDay` for per-day content, and a

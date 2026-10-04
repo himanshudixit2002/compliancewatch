@@ -6,25 +6,25 @@ import type { NotificationRow } from "./notification-rows";
 const ROWS: NotificationRow[] = [
   {
     id: "n1",
-    subject: "GSTR-3B due on 20 Oct",
+    subject: "Example return due on 20 Oct",
     href: "/n/n1" as Route,
     channelLabel: "WhatsApp",
     state: "delivered",
     stateLabel: "Delivered",
     tone: "success",
-    recipient: "+919876543210",
-    sentLabel: "1 Oct 2026",
+    recipient: "+910000000001",
+    sentLabel: "1 Oct 2000",
   },
   {
     id: "n2",
-    subject: "TDS return filed",
+    subject: "Example notice filed",
     href: "/n/n2" as Route,
     channelLabel: "Email",
     state: "failed",
     stateLabel: "Failed",
     tone: "danger",
     recipient: "owner@example.com",
-    sentLabel: "2 Oct 2026",
+    sentLabel: "2 Oct 2000",
   },
 ];
 
@@ -35,13 +35,13 @@ describe("filterNotificationRows", () => {
   });
 
   it("matches the subject, recipient, channel and state, ignoring case", () => {
-    expect(filterNotificationRows(ROWS, "gstr").map((row) => row.id)).toEqual(["n1"]);
+    expect(filterNotificationRows(ROWS, "RETURN").map((row) => row.id)).toEqual(["n1"]);
     expect(filterNotificationRows(ROWS, "OWNER@").map((row) => row.id)).toEqual(["n2"]);
     expect(filterNotificationRows(ROWS, " whatsapp ").map((row) => row.id)).toEqual(["n1"]);
     expect(filterNotificationRows(ROWS, "failed").map((row) => row.id)).toEqual(["n2"]);
   });
 
   it("returns nothing when no field matches", () => {
-    expect(filterNotificationRows(ROWS, "income tax")).toEqual([]);
+    expect(filterNotificationRows(ROWS, "no such text")).toEqual([]);
   });
 });

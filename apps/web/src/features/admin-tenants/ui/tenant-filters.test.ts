@@ -4,7 +4,7 @@ import { ALL, NO_TENANT_FILTERS, filterTenants, type TenantRow } from "./tenant-
 function row(overrides: Partial<TenantRow>): TenantRow {
   return {
     id: "t1",
-    name: "Acme Traders",
+    name: "Example Traders",
     href: null,
     kind: "business",
     kindLabel: "Business",
@@ -12,7 +12,7 @@ function row(overrides: Partial<TenantRow>): TenantRow {
     statusLabel: "Active",
     statusTone: "success",
     region: "ap-south-1",
-    created: "10 Apr 2026",
+    created: "10 Apr 2000",
     impersonateHref: null,
     ...overrides,
   };
@@ -20,7 +20,7 @@ function row(overrides: Partial<TenantRow>): TenantRow {
 
 const ROWS = [
   row({ id: "t1" }),
-  row({ id: "t2", name: "Rao & Co", kind: "ca_firm" }),
+  row({ id: "t2", name: "Example Firm & Co", kind: "ca_firm" }),
   row({ id: "a7-ops", name: "Regulatory team", kind: "internal" }),
 ];
 
@@ -37,8 +37,8 @@ describe("filterTenants", () => {
   });
 
   it("searches the name and the id, ignoring case and surrounding spaces", () => {
-    expect(ids(filterTenants(ROWS, { kind: ALL, search: "  RAO " }))).toEqual(["t2"]);
+    expect(ids(filterTenants(ROWS, { kind: ALL, search: "  FIRM " }))).toEqual(["t2"]);
     expect(ids(filterTenants(ROWS, { kind: ALL, search: "a7-" }))).toEqual(["a7-ops"]);
-    expect(ids(filterTenants(ROWS, { kind: "business", search: "rao" }))).toEqual([]);
+    expect(ids(filterTenants(ROWS, { kind: "business", search: "firm" }))).toEqual([]);
   });
 });

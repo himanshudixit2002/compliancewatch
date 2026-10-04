@@ -12,7 +12,7 @@ export interface ActivityEntry {
   actor: string | null;
   /** What was done, as the trail records it: "consent_withdrawn" or "consent.withdrawn". */
   action: string;
-  /** What it was done to, as the service words it: "WhatsApp reminders", "Asha Rao". */
+  /** What it was done to, as the service words it: "WhatsApp reminders", "Example staff member". */
   subject: string;
   /** An ISO instant. */
   at: string;

@@ -4,7 +4,9 @@ import {
   isE164,
   isEmailAddress,
   isGstin,
+  documentIdFrom,
   isHexId,
+  isHexUuid,
   isPan,
   isUuid,
   maskIdentifier,
@@ -28,6 +30,9 @@ describe("identifiers", () => {
     expect(isE164("9876543210")).toBe(false);
     expect(isHexId("0123456789abcdef0123456789abcdef")).toBe(true);
     expect(isHexId("0123")).toBe(false);
+    expect(isHexUuid("51f5dbee-1615-f0ec-4725-6abddb11061a")).toBe(true);
+    expect(isUuid("51f5dbee-1615-f0ec-4725-6abddb11061a")).toBe(false);
+    expect(isHexUuid("51f5dbee1615f0ec47256abddb11061a")).toBe(false);
     expect(isEmailAddress("owner@example.com")).toBe(true);
     expect(isEmailAddress("owner@example")).toBe(false);
     expect(isEmailAddress("owner @example.com")).toBe(false);
@@ -50,5 +55,30 @@ describe("identifiers", () => {
     expect(maskIdentifier(GSTIN)).toBe("************1Z5");
     expect(maskIdentifier("+919876543210", 4)).toBe("*********3210");
     expect(maskIdentifier("ab", 3)).toBe("ab");
+  });
+});
+
+describe("documentIdFrom", () => {
+  const id = "51f5dbee-1615-f0ec-4725-6abddb11061a";
+
+  it("takes the id with or without dashes, in any case, or the document's sha256", () => {
+    expect(documentIdFrom(id)).toBe(id);
+    expect(documentIdFrom(` ${id.toUpperCase()} `)).toBe(id);
+    expect(documentIdFrom("51f5dbee1615f0ec47256abddb11061a")).toBe(id);
+    expect(documentIdFrom("51f5dbee1615f0ec47256abddb11061a348e81b883051e89733a06b062bcebed")).toBe(
+      id,
+    );
+  });
+
+  it("refuses anything else", () => {
+    for (const value of [
+      "",
+      "51f5dbee",
+      "51f5-dbee1615f0ec47256abddb11061a",
+      `${id}0`,
+      "zz".repeat(16),
+    ]) {
+      expect(documentIdFrom(value), value).toBeNull();
+    }
   });
 });

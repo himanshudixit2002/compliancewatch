@@ -18,16 +18,16 @@ import {
 function changeItem(overrides: Partial<ChangeItem> = {}): ChangeItem {
   return {
     id: "chg_1",
-    title: "GST return due date moved",
-    regulator: "CBIC",
-    effectiveDate: "2026-04-01",
-    publishedAt: "2026-03-10",
+    title: "Example return due date moved",
+    regulator: "Example regulator",
+    effectiveDate: "2000-04-01",
+    publishedAt: "2000-03-10",
     applicability: "applies",
     confidence: 0.874,
     reviewStatus: "published",
-    categories: ["GST"],
+    categories: ["Example category"],
     supersedes: null,
-    summary: "The GSTR-3B due date moves to the 22nd.",
+    summary: "The example return due date moves to the 22nd.",
     ...overrides,
   };
 }
@@ -81,18 +81,18 @@ describe("shortSummary", () => {
 describe("changeFacts", () => {
   it("names the regulator, the dates and the confidence as a whole percentage", () => {
     expect(changeFacts(changeItem())).toEqual([
-      "From CBIC",
-      "Effective 1 Apr 2026",
-      "Published 10 Mar 2026",
+      "From Example regulator",
+      "Effective 1 Apr 2000",
+      "Published 10 Mar 2000",
       "Confidence 87%",
     ]);
   });
 
   it("adds what it supersedes and leaves out an unknown confidence", () => {
     expect(changeFacts(changeItem({ supersedes: "Old rule", confidence: null }))).toEqual([
-      "From CBIC",
-      "Effective 1 Apr 2026",
-      "Published 10 Mar 2026",
+      "From Example regulator",
+      "Effective 1 Apr 2000",
+      "Published 10 Mar 2000",
       "Supersedes Old rule",
     ]);
   });

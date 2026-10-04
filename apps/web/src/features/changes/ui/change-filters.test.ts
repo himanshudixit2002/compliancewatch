@@ -4,8 +4,8 @@ import { ALL, NO_CHANGE_FILTERS, filterChanges, type ChangeRow } from "./change-
 function row(overrides: Partial<ChangeRow>): ChangeRow {
   return {
     id: "1",
-    title: "GST return due date moved",
-    regulator: "CBIC",
+    title: "Example return due date moved",
+    regulator: "Example regulator",
     summary: "",
     href: "/changes/1",
     applicability: "applies",
@@ -22,8 +22,18 @@ function row(overrides: Partial<ChangeRow>): ChangeRow {
 
 const ROWS = [
   row({ id: "1" }),
-  row({ id: "2", title: "TDS rate change", regulator: "CBDT", applicability: "pending" }),
-  row({ id: "3", title: "Labour code", regulator: "MoLE", reviewStatus: "in_review" }),
+  row({
+    id: "2",
+    title: "Example tax rate change",
+    regulator: "Example authority",
+    applicability: "pending",
+  }),
+  row({
+    id: "3",
+    title: "Example labour code",
+    regulator: "Example ministry",
+    reviewStatus: "in_review",
+  }),
 ];
 
 const ids = (rows: readonly ChangeRow[]) => rows.map((r) => r.id);
@@ -34,8 +44,10 @@ describe("filterChanges", () => {
   });
 
   it("searches the title and the regulator, ignoring case and outer spaces", () => {
-    expect(ids(filterChanges(ROWS, { ...NO_CHANGE_FILTERS, search: "  tds " }))).toEqual(["2"]);
-    expect(ids(filterChanges(ROWS, { ...NO_CHANGE_FILTERS, search: "mole" }))).toEqual(["3"]);
+    expect(ids(filterChanges(ROWS, { ...NO_CHANGE_FILTERS, search: "  TAX rate " }))).toEqual([
+      "2",
+    ]);
+    expect(ids(filterChanges(ROWS, { ...NO_CHANGE_FILTERS, search: "ministry" }))).toEqual(["3"]);
     expect(filterChanges(ROWS, { ...NO_CHANGE_FILTERS, search: "nothing" })).toEqual([]);
   });
 

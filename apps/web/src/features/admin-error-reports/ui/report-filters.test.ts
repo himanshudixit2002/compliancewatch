@@ -4,9 +4,9 @@ import { ALL, NO_REPORT_FILTERS, filterReportRows, type ReportRow } from "./repo
 function row(overrides: Partial<ReportRow>): ReportRow {
   return {
     id: "1",
-    title: "Wrong due date for GSTR-3B",
+    title: "Wrong due date for example return 1",
     message: "The notification moved it to the 22nd.",
-    subject: "GSTR-3B monthly return",
+    subject: "Example monthly return",
     href: null,
     severity: "high",
     severityLabel: "High",
@@ -14,15 +14,20 @@ function row(overrides: Partial<ReportRow>): ReportRow {
     status: "open",
     statusLabel: "Open",
     statusTone: "warning",
-    reportedLabel: "1 Oct 2026, 10:30 am IST",
+    reportedLabel: "1 Oct 2000, 10:30 am IST",
     ...overrides,
   };
 }
 
 const ROWS = [
   row({ id: "1" }),
-  row({ id: "2", title: "TDS rate is out of date", subject: "TDS on rent", severity: "low" }),
-  row({ id: "3", title: "Missing late fee", subject: "GSTR-1", status: "resolved" }),
+  row({
+    id: "2",
+    title: "Example rate is out of date",
+    subject: "Example tax on rent",
+    severity: "low",
+  }),
+  row({ id: "3", title: "Missing late fee", subject: "Example return 2", status: "resolved" }),
 ];
 
 const ids = (rows: readonly ReportRow[]) => rows.map((r) => r.id);

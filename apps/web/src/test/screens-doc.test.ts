@@ -38,8 +38,21 @@ describe("generated screen docs", () => {
     expect(rolesCell(sitemap)).toBe("public");
     expect(waitsForCell(sitemap)).toBe("");
     const stats = screenById("admin.review.stats");
-    expect(waitsForCell(stats)).toBe(
-      "`GET /v1/rulebook/review/stats` (KAG track, path unconfirmed)",
+    expect(waitsForCell(stats)).toBe("`GET /v1/rulebook/review/stats` (services track, WP21)");
+    const unconfirmed: Screen = {
+      ...stats,
+      awaits: [
+        {
+          service: "rulebook",
+          method: "GET",
+          path: "/v1/rulebook/example",
+          owner: "plan-k",
+          unconfirmed: true,
+        },
+      ],
+    };
+    expect(waitsForCell(unconfirmed)).toBe(
+      "`GET /v1/rulebook/example` (KAG track, path unconfirmed)",
     );
     const flagged: Screen = { ...sitemap, roles: ["owner", "staff"], flag: "web.qa_enabled" };
     expect(rolesCell(flagged)).toBe("owner, staff; flag `web.qa_enabled`");
@@ -65,7 +78,8 @@ describe("awaits audit", () => {
       service: "rulebook",
       method: "GET",
       path: "/v1/rulebook/review/stats",
-      unconfirmed: true,
+      owner: "services track, WP21",
+      unconfirmed: false,
       specExists: true,
     });
     const sorted = [...rows].sort(
@@ -89,8 +103,14 @@ describe("awaits audit", () => {
     if (route === undefined) return;
     const rows = auditAwaits([stats], new Set([routeKey(route)]));
     expect(rows).toEqual([]);
-    const text = renderAudit(auditAwaits([stats], new Set()));
+    // A path the design named before its spec was committed is marked as unconfirmed.
+    const unconfirmed: Screen = {
+      ...stats,
+      awaits: [{ ...route, owner: "plan-k", unconfirmed: true }],
+    };
+    const text = renderAudit(auditAwaits([unconfirmed], new Set()));
     expect(text).toContain("1 awaited routes are absent");
+    expect(text).toContain("(1 with an unconfirmed path)");
     expect(text).toContain("[unconfirmed]");
     expect(text).toContain("0 entries are ready");
   });

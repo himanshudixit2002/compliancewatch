@@ -38,7 +38,8 @@ src/features/       one directory per screen family: model/, ui/, index.ts (port
                     posted search, and the business pages with their tabs, the node and year picker,
                     the attributes, snapshot and review task views and the location form), consents (the consent step: the
                     identity consents and reminder preference gateway, the purposes and their documents,
-                    the step's view, the form and the recordConsents action)
+                    the step's view, the form and the recordConsents action); and the parked folders of screens
+                    not built yet, which no page imports (docs/web/architecture.md, "Parked feature folders")
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
                     problem/ types the RFC 9457 body every service returns (from the generated contracts);
                     session/ the session claims, the render-safe view and the time helpers;
@@ -61,6 +62,9 @@ src/server/         server-only modules; every file starts with `import "server-
                     api/problem.ts: RFC 9457 parsing to ApiError kinds and field errors
                     api/services.ts: the client factories (tenant header from the session; rulebookAdmin() adds
                     the write token after a regulatory-role check)
+                    api/rulebook-write.ts: the rulebook's write and review tokens and the analyst decisions
+                    (entity groups, relation candidates) behind the role, web.admin_rulebook_writes and the
+                    review token
                     api/idempotency.ts: the per-render Idempotency-Key input and header (sent only for the routes
                     that require it, the business API's two creating POSTs; the natural keys are listed in the module)
                     cache.ts: the cache tags, cachedRead() for global reads (five minutes under tags), uncachedRead()
@@ -79,9 +83,12 @@ src/shared/lib/     IST dates, financial years, money and decimal strings, human
 src/shared/i18n/    messages/en.json and the typed t(); another locale falls back key by key
 src/shared/ui/      app-level compositions over the UI kit: the two shells over next/link, breadcrumbs, the status chip,
                     the session menu and the sign-out form, ServiceError (a failed read with its correlation id)
-src/test/           vitest setup, the architecture rules and test, the docs/web/screens.md drift test,
-                    fake-fetch.ts (a recording fetch with problem+json answers for client and gateway tests),
-                    fake-cookies.ts (the cookie store next/headers resolves to in session and gate tests)
+src/test/           vitest setup, the architecture rules and test (with PARKED_FEATURES, the feature folders no
+                    page imports yet and the screens each will serve), the docs/web/screens.md drift test,
+                    synthetic-fixtures.test.ts (no realistic return, regulator, business or person name in a
+                    test or fixture), fake-fetch.ts (a recording fetch with problem+json answers for client and
+                    gateway tests), fake-cookies.ts (the cookie store next/headers resolves to in session and
+                    gate tests)
 src/app/globals.css Tailwind v4 plus the UI kit's token file (@compliancewatch/ui/styles/tokens.css)
 src/instrumentation.ts  onRequestError writes one JSON line (digest, route, x-request-id) to stderr
 src/proxy.ts        the optimistic check before a render: no cw_session cookie on a gated screen or under

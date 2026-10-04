@@ -18,13 +18,13 @@ import {
 function item(overrides: Partial<TriageItem> = {}): TriageItem {
   return {
     id: "tri_1",
-    question: "When is GSTR-3B due for March?",
-    category: "GST returns",
+    question: "When is example return 1 due for March?",
+    category: "Example returns",
     reason: "not_covered",
     priority: "medium",
     status: "open",
     assignee: null,
-    createdAt: "2026-10-01T05:00:00Z",
+    createdAt: "2000-10-01T05:00:00Z",
     ...overrides,
   };
 }
@@ -55,8 +55,8 @@ describe("sortTriageItems", () => {
     const items = [
       item({ id: "closed-high", status: "closed", priority: "high" }),
       item({ id: "open-low", priority: "low" }),
-      item({ id: "open-high-new", priority: "high", createdAt: "2026-10-02T05:00:00Z" }),
-      item({ id: "open-high-old", priority: "high", createdAt: "2026-10-02T09:00:00+05:30" }),
+      item({ id: "open-high-new", priority: "high", createdAt: "2000-10-02T05:00:00Z" }),
+      item({ id: "open-high-old", priority: "high", createdAt: "2000-10-02T09:00:00+05:30" }),
       item({ id: "open-medium" }),
       item({ id: "closed-low", status: "closed", priority: "low" }),
     ];

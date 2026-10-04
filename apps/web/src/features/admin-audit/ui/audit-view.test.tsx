@@ -8,25 +8,25 @@ import { AuditView } from "./audit-view";
 const EVENTS: AuditEvent[] = [
   {
     id: "ev_old",
-    actor: "Kabir Shah",
+    actor: "Example admin",
     action: "tenant.exported",
     subjectType: "tenant",
     subjectId: "t_9",
     changes: [],
-    at: "2026-04-10T03:30:00Z",
+    at: "2000-04-10T03:30:00Z",
   },
   {
     id: "ev_late",
-    actor: "Meera Iyer",
+    actor: "Example analyst",
     action: "user.disabled",
     subjectType: "user",
     subjectId: "u_42",
     changes: [
       { field: "status", before: "active", after: "disabled" },
-      { field: "phone", before: "+919876543210", after: null },
+      { field: "phone", before: "+910000000001", after: null },
     ],
     // 01:30 on 11 April in IST, though still 10 April in UTC.
-    at: "2026-04-10T20:00:00Z",
+    at: "2000-04-10T20:00:00Z",
   },
   {
     id: "ev_rule",
@@ -34,8 +34,8 @@ const EVENTS: AuditEvent[] = [
     action: "rule.published",
     subjectType: "rule_version",
     subjectId: "rv_7",
-    changes: [{ field: "approver", before: null, after: "Kabir Shah" }],
-    at: "2026-04-10T12:00:00Z",
+    changes: [{ field: "approver", before: null, after: "Example admin" }],
+    at: "2000-04-10T12:00:00Z",
   },
 ];
 
@@ -52,15 +52,15 @@ describe("AuditView", () => {
     expect(shownIds(container)).toEqual(["ev_late", "ev_rule", "ev_old"]);
 
     const late = container.querySelector("[data-event='ev_late']") as HTMLElement;
-    expect(late.textContent).toContain(formatDateTime("2026-04-10T20:00:00Z"));
+    expect(late.textContent).toContain(formatDateTime("2000-04-10T20:00:00Z"));
     expect(late.querySelector("[data-slot='badge']")?.textContent).toBe("User");
     expect([...late.querySelectorAll("li")].map((item) => item.textContent)).toEqual([
       "status: active → disabled",
-      "phone cleared (was +919876543210)",
+      "phone cleared (was +910000000001)",
     ]);
     const rule = container.querySelector("[data-event='ev_rule']") as HTMLElement;
     expect(rule.querySelector("[data-slot='badge']")?.textContent).toBe("Rule");
-    expect(rule.textContent).toContain("approver set to Kabir Shah");
+    expect(rule.textContent).toContain("approver set to Example admin");
     expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
       "All categories",
       "User",
@@ -74,7 +74,7 @@ describe("AuditView", () => {
 
   it("files each event under its IST date for the date range", () => {
     const { container } = render(<AuditView events={EVENTS} />);
-    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-04-11" } });
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2000-04-11" } });
     expect(shownIds(container)).toEqual(["ev_late"]);
   });
 
