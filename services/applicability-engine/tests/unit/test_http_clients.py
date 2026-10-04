@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -14,7 +15,8 @@ from applicability_engine.infrastructure.profile_client import HttpProfiles
 from applicability_engine.infrastructure.rulebook_client import HttpRulebook
 from applicability_engine.testing import BUSINESS, TENANT
 from domain_kernel.financial_year import FinancialYear
-from domain_kernel.ids import RuleVersionId
+from domain_kernel.ids import BusinessId, RuleVersionId
+from domain_kernel.ontology import AttributeLevel
 from domain_kernel.operators import Operator
 from domain_kernel.predicates import AllOf, Predicate
 from domain_kernel.status import RuleVersionStatus
@@ -138,3 +140,123 @@ def test_a_snapshot_of_the_wrong_shape_or_no_connection_is_a_dependency_failure(
     for handler in (wrong, unreachable):
         with pytest.raises(DependencyUnavailableError):
             HttpProfiles(client=answering(handler)).snapshot(TENANT, BUSINESS, None)
+
+
+ENTITY = uuid4()
+BUSINESS_BODY: dict[str, Any] = {
+    "id": str(ENTITY),
+    "name": "Example Traders",
+    "pan": "ZZZZZ0000Z",
+    "version": 3,
+    "created_at": "2026-10-01T04:30:00Z",
+    "updated_at": "2026-10-01T04:30:00Z",
+    "attributes": [],
+    "registrations": [
+        {
+            "id": str(BUSINESS),
+            "level": "registration",
+            "key": "29ZZZZZ0000Z1Z5",
+            "name": "Example Traders Bengaluru",
+            "parent_id": str(ENTITY),
+            "version": 2,
+            "created": False,
+            "attributes": [],
+        }
+    ],
+}
+IN_FORCE = {key: DETAIL[key] for key in DETAIL if key != "citations"}
+
+
+def version_body(
+    rule_key: str, *, level: str = "registration", status: str = "published"
+) -> dict[str, Any]:
+    return {
+        **IN_FORCE,
+        "rule_version_id": str(uuid4()),
+        "rule_key": rule_key,
+        "level": level,
+        "status": status,
+    }
+
+
+def test_the_sample_listing_bodies_carry_every_field_the_specs_require() -> None:
+    assert required("profile.v1.json", "BusinessOut") <= set(BUSINESS_BODY)
+    assert required("rulebook.v1.json", "RuleVersionOut") <= set(IN_FORCE)
+
+
+def test_the_registrations_of_an_entity_are_read_for_the_tenant() -> None:
+    seen: list[httpx2.Request] = []
+
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return httpx2.Response(200, json=BUSINESS_BODY)
+
+    profiles = HttpProfiles(client=answering(answer))
+    assert profiles.registrations(TENANT, BusinessId(ENTITY)) == (BUSINESS,)
+    [request] = seen
+    assert request.url.path == f"/v1/businesses/{ENTITY}"
+    assert request.headers["x-tenant-id"] == str(TENANT)
+
+    def missing(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(404, json={"type": "not-found"})
+
+    assert HttpProfiles(client=answering(missing)).registrations(TENANT, BusinessId(ENTITY)) is None
+
+
+def test_the_rules_in_force_are_paged_by_rule_key_and_kept_by_level_and_status() -> None:
+    first = [version_body(f"rule_{index:03d}") for index in range(500)]
+    first[1]["status"] = "superseded"
+    first[2]["level"] = "entity"
+    second = [version_body("rule_500")]
+    asked: list[httpx2.QueryParams] = []
+
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        assert request.url.path == "/v1/rulebook/rule-versions"
+        asked.append(request.url.params)
+        return httpx2.Response(200, json=first if "after" not in request.url.params else second)
+
+    rulebook = HttpRulebook(client=answering(answer))
+    found = rulebook.rules_in_force(date(2026, 10, 1), AttributeLevel.REGISTRATION)
+    assert [params.get("after") for params in asked] == [None, "rule_499"]
+    assert {params["as_of"] for params in asked} == {"2026-10-01"}
+    assert {params["limit"] for params in asked} == {"500"}
+    assert len(found) == 499, "one superseded and one of the entity level left out"
+    assert found[0].rule_key == "rule_000"
+    assert found[0].spec.status is RuleVersionStatus.PUBLISHED
+    assert found[0].effective_from == date(2026, 4, 1)
+    assert found[0].effective_to is None
+    (entity,) = rulebook.rules_in_force(date(2026, 10, 1), AttributeLevel.ENTITY)
+    assert entity.rule_key == "rule_002"
+    assert len(asked) == 4, "no cache: each read asks again"
+
+
+def test_the_listing_of_a_day_is_cached_for_its_ttl() -> None:
+    asked: list[str] = []
+    now = [100.0]
+
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        asked.append(request.url.params["as_of"])
+        return httpx2.Response(200, json=[version_body("only")])
+
+    rulebook = HttpRulebook(client=answering(answer), cache_seconds=5, monotonic=lambda: now[0])
+    day, other_day = date(2026, 10, 1), date(2026, 10, 2)
+    for _ in range(3):
+        assert len(rulebook.rules_in_force(day, AttributeLevel.REGISTRATION)) == 1
+    rulebook.rules_in_force(day, AttributeLevel.ENTITY)
+    rulebook.rules_in_force(other_day, AttributeLevel.REGISTRATION)
+    assert asked == ["2026-10-01", "2026-10-02"]
+    now[0] += 5.0
+    rulebook.rules_in_force(day, AttributeLevel.REGISTRATION)
+    assert asked == ["2026-10-01", "2026-10-02", "2026-10-01"], "read again once expired"
+    with pytest.raises(ValueError, match="negative"):
+        HttpRulebook(client=answering(answer), cache_seconds=-1)
+
+
+def test_a_listing_of_the_wrong_shape_is_a_dependency_failure() -> None:
+    def wrong(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=[{**version_body("x"), "level": "planet"}])
+
+    with pytest.raises(DependencyUnavailableError):
+        HttpRulebook(client=answering(wrong)).rules_in_force(
+            date(2026, 10, 1), AttributeLevel.REGISTRATION
+        )

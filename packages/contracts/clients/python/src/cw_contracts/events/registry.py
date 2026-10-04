@@ -44,7 +44,7 @@ TOPICS: Mapping[str, TopicSpec] = MappingProxyType(
     {
         "applicability.decided": TopicSpec(
             topic="applicability.decided",
-            version="1.0.0",
+            version="1.1.0",
             model=ApplicabilityDecidedV1,
             tenant_scoped=True,
             schema_file="applicability.decided.v1.json",

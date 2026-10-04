@@ -4,7 +4,7 @@
   "title": "applicability.decided",
   "description": "The engine evaluated one rule version against one business profile version. Producer: applicability-engine. Consumers: obligation.",
   "type": "object",
-  "x-version": "1.0.0",
+  "x-version": "1.1.0",
   "x-producer": "applicability-engine",
   "x-tenant-scoped": true,
   "properties": {
@@ -50,8 +50,8 @@
     },
     "trigger": {
       "type": "string",
-      "enum": ["rule_published", "profile_updated", "manual"],
-      "description": "What caused the evaluation."
+      "enum": ["rule_published", "profile_updated", "manual", "review"],
+      "description": "What caused the evaluation; review is a person's resolution of a review item, with confidence 1."
     }
   },
   "required": [

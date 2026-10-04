@@ -21,12 +21,13 @@ class Result(StrEnum):
 
 class Trigger(StrEnum):
     """
-    What caused the evaluation.
+    What caused the evaluation; review is a person's resolution of a review item, with confidence 1.
     """
 
     rule_published = "rule_published"
     profile_updated = "profile_updated"
     manual = "manual"
+    review = "review"
 
 
 class ApplicabilityDecidedV1(BaseModel):
@@ -59,4 +60,9 @@ class ApplicabilityDecidedV1(BaseModel):
             description="True when the result is unsure or the confidence is below the review threshold."
         ),
     ]
-    trigger: Annotated[Trigger, Field(description="What caused the evaluation.")]
+    trigger: Annotated[
+        Trigger,
+        Field(
+            description="What caused the evaluation; review is a person's resolution of a review item, with confidence 1."
+        ),
+    ]

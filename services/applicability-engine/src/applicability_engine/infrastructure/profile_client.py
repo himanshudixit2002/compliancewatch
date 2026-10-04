@@ -1,6 +1,8 @@
-"""The profile service's snapshot route (``GET /v1/profile/nodes/{node_id}/snapshot``) as the
-engine's ``ProfileReader``."""
+"""The profile service's snapshot route (``GET /v1/profile/nodes/{node_id}/snapshot``) and its
+business read (``GET /v1/businesses/{business_id}``, the registrations under a legal entity) as
+the engine's ``ProfileReader``."""
 
+from collections.abc import Sequence
 from typing import Final
 from uuid import UUID
 
@@ -13,6 +15,7 @@ from domain_kernel.ontology import AttributeLevel
 from domain_kernel.profiles import ProfileSnapshot
 
 SNAPSHOT_PATH: Final = "/v1/profile/nodes/{node_id}/snapshot"
+BUSINESS_PATH: Final = "/v1/businesses/{business_id}"
 SERVICE: Final = "profile"
 
 
@@ -56,6 +59,20 @@ class HttpProfiles:
                 as_of_fy=None if as_of_fy is None else FinancialYear.parse(str(as_of_fy)),
                 level=None if level is None else AttributeLevel(level),
                 lineage=tuple(BusinessId(UUID(str(item))) for item in data.get("lineage", [])),
+            )
+
+    def registrations(
+        self, tenant_id: TenantId, entity_id: BusinessId
+    ) -> Sequence[BusinessId] | None:
+        data = self._http.get(
+            BUSINESS_PATH.format(business_id=entity_id),
+            headers={"x-tenant-id": str(tenant_id)},
+        )
+        if data is None:
+            return None
+        with reading(SERVICE):
+            return tuple(
+                BusinessId(UUID(str(registration["id"]))) for registration in data["registrations"]
             )
 
     def close(self) -> None:

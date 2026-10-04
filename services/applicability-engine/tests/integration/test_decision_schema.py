@@ -37,7 +37,15 @@ SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "applicability"
 TABLE = "applicability_decision"
-TABLES = {TABLE, "outbox_event", "idempotency_key", "alembic_version"}
+TABLES = {
+    TABLE,
+    "outbox_event",
+    "idempotency_key",
+    "alembic_version",
+    "processed_event",
+    "business_directory",
+    "review_item",
+}
 APP_ROLE = "applicability_app"
 APP_PASSWORD = "app-role-for-tests"
 REGULAR = {"attribute": "registration_type", "operator": "eq", "value": "regular"}

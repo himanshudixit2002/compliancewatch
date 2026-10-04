@@ -1,5 +1,6 @@
 """The event the engine publishes; payload fields follow
-packages/contracts/events/schemas/applicability.decided.v1.json."""
+packages/contracts/events/schemas/applicability.decided.v1.json (1.1.0 added the trigger
+``review``, a person's resolution of a review item)."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -9,7 +10,7 @@ from applicability_engine.domain.model import Decision, Trigger
 from domain_kernel._validation import require_aware, require_bool, require_instance, require_int
 from domain_kernel.confidence import Confidence
 from domain_kernel.events import DomainEvent
-from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId
+from domain_kernel.ids import BusinessId, CorrelationId, DecisionId, EventId, RuleVersionId
 from domain_kernel.predicates import Applicability
 
 
@@ -19,7 +20,7 @@ class ApplicabilityDecided(DomainEvent):
     obligation service consumes it."""
 
     topic: ClassVar[str] = "applicability.decided"
-    schema_version: ClassVar[str] = "1.0.0"
+    schema_version: ClassVar[str] = "1.1.0"
 
     decision_id: DecisionId
     business_id: BusinessId
@@ -44,9 +45,19 @@ class ApplicabilityDecided(DomainEvent):
         require_instance(self.trigger, Trigger, "trigger")
 
     @classmethod
-    def of(cls, decision: Decision) -> Self:
+    def of(
+        cls,
+        decision: Decision,
+        *,
+        correlation_id: CorrelationId | None = None,
+        causation_id: EventId | None = None,
+    ) -> Self:
+        """The event of ``decision``; an event that caused it (a profile.updated) passes its
+        correlation id and its own id as the cause."""
         return cls(
             tenant_id=decision.tenant_id,
+            correlation_id=correlation_id or CorrelationId.new(),
+            causation_id=causation_id,
             occurred_at=decision.decided_at,
             decision_id=decision.decision_id,
             business_id=decision.business_id,

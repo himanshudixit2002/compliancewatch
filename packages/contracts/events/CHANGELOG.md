@@ -4,6 +4,10 @@ Versions follow semver per topic. Adding an optional field is a minor bump, chan
 a field or making one required is a major bump and a new `v<major>` schema file, wording is a
 patch. Every line names the topic and its version.
 
+## 2026-10-04
+
+- applicability.decided 1.1.0: trigger review, a person's resolution of a review item
+
 ## 2026-10-01
 
 - eval.run.completed 1.0.0: first version

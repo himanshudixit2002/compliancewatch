@@ -6,13 +6,15 @@ specification is evaluated deterministically (``domain.evaluation``): free text 
 ontology cannot decide is unsure and the decision goes to review, never a guess. Every run
 appends a new decision, even when nothing changed since the last one, and writes its
 ``applicability.decided`` event in the same transaction, so the obligation service hears of
-every decision that was stored and of no other.
+every decision that was stored and of no other. The review queue follows the decision in that
+transaction too (``application.review.track_review``).
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from applicability_engine.application.review import track_review
 from applicability_engine.domain.errors import (
     BusinessNotFoundError,
     RuleVersionNotFoundError,
@@ -86,4 +88,5 @@ class EvaluateRule:
         with self._unit_of_work(request.tenant_id) as uow:
             uow.decisions.add(decision)
             uow.events.publish(ApplicabilityDecided.of(decision))
+            track_review(uow, decision, at=now)
         return decision
