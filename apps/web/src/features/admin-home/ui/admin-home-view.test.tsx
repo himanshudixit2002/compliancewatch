@@ -47,9 +47,10 @@ describe("AdminHomeView", () => {
     expect(task?.querySelector("a")).toBeNull();
     expect(task?.textContent).toContain("services/rulebook/README.md");
     expect(task?.textContent).toContain("+");
+    const system = container.querySelector("[data-tool='admin.system']");
+    expect(system?.textContent).toContain("Ready to build");
     const flags = container.querySelector("[data-tool='admin.flags']");
-    expect(flags?.textContent).toContain("file packages/flags/registry.json");
-    expect(flags?.textContent).toContain("Ready to build");
+    expect(flags?.textContent).toContain("Available");
     const sources = container.querySelector("[data-tool='admin.sources']");
     expect(sources?.textContent).toContain("Waiting for a backend");
     // axe over every tool group is page sized and slow in jsdom on CI runners, so it checks one

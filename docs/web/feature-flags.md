@@ -82,6 +82,19 @@ A gated form renders a `Banner` naming the flag, and a gated action refuses with
 naming the flag, rather than either disappearing silently. `flags.test.ts` in `server/` covers
 the default, the override in local and in prod, and the failed configuration.
 
+`flagProviderStatus()` says which provider the reader answers through (`env` or `unleash`), or
+why it could not be configured. The flag console uses it.
+
+## The flag console
+
+`/admin/flags` (every regulatory role) lists every entry of the registry, not only the web
+flags: the name, the variable, the description and removal condition, the owner, the default,
+the expiry date with a badge once it is 30 days away or past, and, for the flags the web app
+reads, the value `isEnabled` answers for the session's tenant. A flag only other services read
+says which ones read it instead of a value, because the web server cannot see their variables.
+When the reader cannot be configured the page shows why and evaluates nothing. Nothing on the
+page changes a flag. [admin-tools.md](admin-tools.md) has the detail.
+
 ## Product analytics
 
 `server/analytics.ts` exports `track(principal, event)`. An event is one JSON line on stdout

@@ -48,10 +48,10 @@ components to `shared`, `entities` and their own directory.
 
 ## Parked feature folders
 
-A feature folder exists for a screen that a page renders. Fourteen folders under `features/`
+A feature folder exists for a screen that a page renders. Thirteen folders under `features/`
 hold the model and the views of screens that are not built yet (the team, recipient, activity
-and data-rights settings, a business's obligations, changes and reminders, the flag console,
-and the source, pipeline, audit, error-report, tenant and Q&A triage tools): no route file
+and data-rights settings, a business's obligations, changes and reminders, and the source,
+pipeline, audit, error-report, tenant and Q&A triage tools): no route file
 imports them, so no bundle carries them; their unit tests run with the rest. Each one is
 parked: `PARKED_FEATURES` in `src/test/architecture.ts` maps the folder to the registry ids
 of the screens it will serve, and `architecture.test.ts` holds the map to the tree and the

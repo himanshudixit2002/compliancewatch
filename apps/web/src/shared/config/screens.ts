@@ -1796,13 +1796,13 @@ const SCREEN_LIST = [
     tenantKinds: ["internal"],
     uses: [],
     awaits: [],
-    awaitsFiles: [{ path: "packages/flags/registry.json", owner: "plan-a", ref: "WP12" }],
-    status: "ready",
-    preview: "FlagTable",
-    e2e: [],
+    status: "live",
+    e2e: ["admin-flags.spec.ts", "a11y.spec.ts"],
     guideRef: "15; G90",
     nav: { group: "operations", order: 7 },
     parent: "admin.home",
+    notes:
+      "Every flag in packages/flags/registry.json with its owner, default and expiry; the value the web server's reader answers for the flags the web app reads. No flag is changed here.",
   },
   {
     id: "admin.audit",

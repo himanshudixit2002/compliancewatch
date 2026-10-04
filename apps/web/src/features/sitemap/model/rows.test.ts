@@ -34,8 +34,8 @@ describe("sitemapSections", () => {
       { method: "GET", path: "/v1/rulebook/review/stats", owner: "services track (WP21)" },
     ]);
     expect(stats.roles).toContain("Analyst");
-    const flags = toSitemapRow(screenById("admin.flags"));
-    expect(flags.waitsFor[0]?.method).toBe("file");
+    const hindi = toSitemapRow(screenById("system.hindi-ui"));
+    expect(hindi.waitsFor[0]?.method).toBe("file");
   });
 
   it("drops empty sections", () => {

@@ -52,14 +52,33 @@ function logLine(line: string): void {
   console.warn(line);
 }
 
-let configured: Promise<unknown> | undefined;
+type FlagProvider = Awaited<ReturnType<typeof configureFlags>>;
 
-function configure(log: FlagLog): Promise<unknown> {
+let configured: Promise<FlagProvider> | undefined;
+
+function configure(log: FlagLog): Promise<FlagProvider> {
   configured ??= configureFlags(flagEnvironment(process.env, getEnv().CW_WEB_ENV), {
     serviceName: "web",
     log,
   });
   return configured;
+}
+
+/**
+ * Whether the reader can answer, and through which provider: `env` or `unleash`, as
+ * `CW_FLAGS_PROVIDER` chose; or why it could not be configured, in which case every web flag
+ * reads as off. The flag console shows this above the values it evaluates.
+ */
+export type FlagProviderStatus = { ok: true; provider: string } | { ok: false; reason: string };
+
+export async function flagProviderStatus(): Promise<FlagProviderStatus> {
+  try {
+    const provider = await configure(logLine);
+    return { ok: true, provider: provider.metadata.name };
+  } catch (error) {
+    configured = undefined;
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /** Whether the web flag is on; off when the provider could not be configured. */

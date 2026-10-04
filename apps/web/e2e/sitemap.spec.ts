@@ -13,7 +13,8 @@ test.describe("sitemap", () => {
     await expect(stats).toContainText("services track (WP21)");
     await expect(stats).toContainText("Waiting for a backend");
     await expect(page.locator("[data-screen='system.sitemap']")).toContainText("Available");
-    await expect(page.locator("[data-screen='admin.flags']")).toContainText("Ready to build");
+    await expect(page.locator("[data-screen='admin.system']")).toContainText("Ready to build");
+    await expect(page.locator("[data-screen='admin.flags']")).toContainText("Available");
     await checkA11y();
   });
 
