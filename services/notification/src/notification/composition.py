@@ -4,7 +4,9 @@ Guide section 11: wiring of interfaces to implementations happens here, never in
 use cases run on the Postgres unit of work (row-level security by tenant, events through the outbox)
 unless ``CW_NOTIFICATION_STORE=memory``. The WhatsApp channel is real only behind
 ``CW_WHATSAPP_ENABLED`` with a phone number id and an access token, and the email channel only
-behind ``CW_EMAIL_ENABLED`` with ``CW_SMTP_HOST`` and ``CW_EMAIL_FROM``. The SES feedback is read
+behind ``CW_EMAIL_ENABLED`` with ``CW_SMTP_HOST`` and ``CW_EMAIL_FROM``; with
+``CW_NOTIFICATION_CHANNELS=sink`` (local and test only) both are the sink, which records each
+message in ``CW_NOTIFICATION_SINK_PATH`` instead of sending it. The SES feedback is read
 from SNS with its signature verified. The dispatcher reads the facts of change cards from the
 rulebook at ``CW_RULEBOOK_URL``, with the service's own access token once
 ``CW_SERVICE_CLIENT_SECRET`` is set, and counts deliveries through OpenTelemetry. ``wire(settings,
@@ -18,6 +20,7 @@ components; this module builds no app, so the worker does not start the API's te
 """
 
 from collections.abc import Callable, Mapping
+from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
 
@@ -48,6 +51,7 @@ from notification.infrastructure.metrics import OtelDeliveryMetrics
 from notification.infrastructure.repository import PostgresUnitOfWorkFactory
 from notification.infrastructure.rulebook_client import HttpRuleVersionReader
 from notification.infrastructure.ses_feedback import SnsFeedbackReader
+from notification.infrastructure.sink import SinkChannel
 from notification.infrastructure.whatsapp import DisabledChannel, WhatsAppCloudChannel
 from notification.settings import NotificationSettings
 from notification.wiring import Wiring
@@ -58,7 +62,11 @@ EMAIL_DISABLED = "email channel disabled: set CW_EMAIL_ENABLED, CW_SMTP_HOST and
 
 
 def default_channels(settings: NotificationSettings) -> dict[Channel, ChannelAdapter]:
-    """The channels the settings enable; a disabled one fails every send with the reason."""
+    """The channels the settings enable; a disabled one fails every send with the reason. The
+    sink stands in for both when the settings choose it."""
+    if settings.notification_channels == "sink":
+        sink = SinkChannel(Path(settings.notification_sink_path))
+        return {Channel.WHATSAPP: sink, Channel.EMAIL: sink}
     whatsapp: ChannelAdapter
     if (
         settings.whatsapp_enabled

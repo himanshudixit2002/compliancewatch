@@ -77,6 +77,10 @@ NOT_FLAGS: Mapping[str, str] = {
     "CW_EVAL_STORE": _STORE,
     "CW_APPLICABILITY_ENGINE_STORE": _STORE,
     "CW_LLM_LEDGER": "store selector of the gateway's usage ledger: memory or postgres",
+    "CW_NOTIFICATION_CHANNELS": (
+        "channel selector like the stores: sink records messages for the local product and "
+        "tests instead of sending them, is refused outside local and test, and never rolls out"
+    ),
     "CW_LLM_EMBEDDING_DIMENSIONS_PARAM": (
         "provider compatibility: whether an embedding request carries dimensions=512, for a "
         "model without that parameter; not a rollout, and it defaults on"

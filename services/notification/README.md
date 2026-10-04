@@ -130,7 +130,27 @@ setup and the alerts.
 
 The WhatsApp channel is wired only with `CW_WHATSAPP_ENABLED=true`,
 `CW_WHATSAPP_PHONE_NUMBER_ID` and `CW_WHATSAPP_ACCESS_TOKEN`; otherwise every WhatsApp send
-fails saying the channel is disabled. The inbound side (webhook, keywords, status forwarding)
+fails saying the channel is disabled.
+
+### The sink
+
+`CW_NOTIFICATION_CHANNELS` picks what delivers: `real` (the default) wires the two channels as
+above, `sink` wires `infrastructure/sink.py` for both, which records each message as one JSON line
+in `CW_NOTIFICATION_SINK_PATH` (`var/notification/sink.jsonl`; `make product` uses
+`var/product/sink.jsonl`) instead of sending it, and answers with the provider message id
+`sink:<dispatch id>`. The settings refuse `sink` unless `CW_ENV` is local or test, so no
+deployment runs a channel that reaches nobody; it is configuration like the stores, not a flag
+(`NOT_FLAGS` in `infra/scripts/check_flags.py`). Every delivery rule is the dispatcher's or the
+consumer's and holds unchanged: consent and suppressions, dedupe by occasion, quiet hours,
+batching, digests, retries and fallbacks. WhatsApp's 24-hour window is the adapter's, and the sink
+applies it as the Cloud API adapter does: a draft template outside the window is refused with the
+same reason (and the email fallback goes at once), inside the window the message goes as free
+text, and an email always goes as rendered text. Every template is a draft, and a draft never
+reaches a person through the sink either; each line records the template's status, the outcome
+(`sent` or `refused` with the reason), the channel, the dispatch and provider message ids, the
+address, the language, whether the window was open, and the subject and body. The file is local
+(`var/` is git-ignored) and created readable by its owner only, since it holds addresses; the API
+process and the worker append to it with one write per line. The inbound side (webhook, keywords, status forwarding)
 is `apps/whatsapp-bot`; its recorded calls are in
 `packages/contracts/consumers/whatsapp-bot/notification.json`, and
 `tests/contract/test_consumers.py` replays them against this service.
@@ -205,8 +225,8 @@ src/notification/
   domain/          # notification.py (states and transitions), occasions.py (dedupe keys), routing.py (EVENT_ROUTES),
                    # recipients.py, addresses.py, digest.py, policy.py, receipts.py, channels.py, templates.py,
                    # values.py, preferences.py, repository.py and ports.py (protocols), events.py, errors.py
-  infrastructure/  # repository.py and work_index.py (Postgres), memory.py, whatsapp.py, email.py, ses_feedback.py,
-                   # rulebook_client.py, events_in.py, metrics.py, models.py
+  infrastructure/  # repository.py and work_index.py (Postgres), memory.py, whatsapp.py, email.py, sink.py,
+                   # ses_feedback.py, rulebook_client.py, events_in.py, metrics.py, models.py
   composition.py   # wire(settings): the use cases on the configured store, channels and rulebook reader
   worker.py        # components(settings): consumer, dispatcher, retention sweep (python -m notification.worker)
   testing.py       # fake channel, clock, rulebook reader, metrics and SNS, and a settings builder for tests
