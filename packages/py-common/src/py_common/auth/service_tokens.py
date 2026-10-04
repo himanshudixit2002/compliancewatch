@@ -16,6 +16,12 @@ as a wrong shared secret or a missing tenant, goes back to the caller as it came
 Every outgoing client is built with ``auth=service_auth_from(settings)``, which is None, and so
 sends no token, while no client secret is configured. Clients built from the same settings share
 one token. The client id is ``CW_SERVICE_CLIENT_ID``, or the service's name when that is empty.
+
+A process that hosts the identity service next to the services calling each other needs no
+client secrets: ``IssuerTokenSource`` mints the service's token with identity's own
+``TokenIssuer`` in the process, and ``service_auth_from(settings, token_source=...)`` puts it on
+the service's clients. Any object with ``client_id``, ``token()`` and ``invalidate(token)``
+(``TokenSource``) will do.
 """
 
 import asyncio
@@ -25,12 +31,15 @@ import threading
 import time
 from collections.abc import AsyncGenerator, Callable, Generator
 from dataclasses import dataclass
-from typing import Any, Final
+from datetime import timedelta
+from typing import Any, Final, Protocol
 
 import httpx2
 from pydantic import SecretStr
 
+from domain_kernel.access import Principal, PrincipalKind
 from py_common.auth.errors import ServiceTokenUnavailableError
+from py_common.auth.tokens import TokenIssuer
 from py_common.logging import get_logger
 from py_common.settings import Settings
 
@@ -41,6 +50,21 @@ FAILED_FETCH_RETRY_SECONDS: Final = 5.0
 """After a failed fetch, the next attempt waits this long."""
 
 log = get_logger(__name__)
+
+
+IN_PROCESS_TOKEN_TTL: Final = timedelta(minutes=10)
+"""How long a token ``IssuerTokenSource`` mints lives, the identity service's default."""
+
+
+class TokenSource(Protocol):
+    """Where ``BearerAuth`` gets the token it sends."""
+
+    @property
+    def client_id(self) -> str: ...
+
+    def token(self) -> str: ...
+
+    def invalidate(self, token: str) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +175,58 @@ class ServiceTokenSource:
         return _Cached(token=token, refresh_at=expires_at - margin, expires_at=expires_at)
 
 
+class IssuerTokenSource:
+    """Service tokens minted in the process with the identity service's own issuer, for a
+    process that hosts identity next to the services that call each other. Each token names
+    ``principal`` (a service with its scopes) and is kept until a minute before it expires, as
+    ``ServiceTokenSource`` keeps the ones it fetches. Thread-safe."""
+
+    def __init__(
+        self,
+        issuer: TokenIssuer,
+        principal: Principal,
+        *,
+        ttl: timedelta = IN_PROCESS_TOKEN_TTL,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if principal.kind is not PrincipalKind.SERVICE:
+            raise ValueError("an in-process token source mints service tokens only")
+        if ttl <= timedelta(0):
+            raise ValueError("ttl must be positive")
+        self._issuer = issuer
+        self._principal = principal
+        self._ttl = ttl
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._cached: _Cached | None = None
+
+    @property
+    def client_id(self) -> str:
+        return self._principal.subject
+
+    @property
+    def principal(self) -> Principal:
+        return self._principal
+
+    def token(self) -> str:
+        with self._lock:
+            now = self._clock()
+            if self._cached is not None and now < self._cached.refresh_at:
+                return self._cached.token
+            issued = self._issuer.issue(self._principal, self._ttl)
+            lifetime = self._ttl.total_seconds()
+            margin = min(REFRESH_MARGIN_SECONDS, lifetime / 2)
+            self._cached = _Cached(
+                token=issued.token, refresh_at=now + lifetime - margin, expires_at=now + lifetime
+            )
+            return issued.token
+
+    def invalidate(self, token: str) -> None:
+        with self._lock:
+            if self._cached is not None and hmac.compare_digest(self._cached.token, token):
+                self._cached = None
+
+
 def _problem_type(response: httpx2.Response) -> str:
     try:
         body = response.json()
@@ -212,7 +288,7 @@ class BearerAuth(httpx2.Auth):
 
     requires_request_body = True
 
-    def __init__(self, source: ServiceTokenSource) -> None:
+    def __init__(self, source: TokenSource) -> None:
         self.source = source
 
     def sync_auth_flow(
@@ -257,11 +333,18 @@ def service_client_id(settings: Settings) -> str:
 
 
 def service_auth_from(
-    settings: Settings, *, client: httpx2.Client | None = None
+    settings: Settings,
+    *,
+    client: httpx2.Client | None = None,
+    token_source: TokenSource | None = None,
 ) -> BearerAuth | None:
     """The auth for this process's outgoing clients: None (no token is sent) until
     ``CW_SERVICE_CLIENT_SECRET`` is set. Clients built from the same settings share one token
-    source; ``client`` (for tests) gets a source of its own."""
+    source; ``client`` (for tests) gets a source of its own. A ``token_source`` of the caller's,
+    such as an ``IssuerTokenSource`` in a process that hosts identity, is used whatever the
+    settings say."""
+    if token_source is not None:
+        return BearerAuth(token_source)
     secret = settings.service_client_secret
     if secret is None or not secret.get_secret_value():
         return None

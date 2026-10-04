@@ -5,7 +5,8 @@ until the replacement takes effect; this command moves every such version whose 
 ``effective_from`` is today in India (or ``--as-of``, never later) to superseded or withdrawn and
 writes its event to the outbox. It is idempotent, so running it more than once a day is safe.
 With ``CW_RULEBOOK_PUBLISH_ENABLED`` off it changes nothing. ``POST /v1/rulebook/maintenance/
-transitions`` runs the same sweep.
+transitions`` runs the same sweep, and the rulebook worker runs it every day
+(``rulebook.worker``).
 """
 
 import argparse

@@ -6,7 +6,9 @@ Request validation errors, HTTP errors and unhandled exceptions get the same sha
 parses one error format. An error may carry extra response headers in ``problem_headers``
 (the gateway's budget error sets ``Retry-After`` that way). A required header listed in
 ``MISSING_HEADER_ERRORS`` that a request leaves out is answered with its own problem rather than
-request-invalid: a creating request without ``Idempotency-Key`` is a 428.
+request-invalid: a creating request without ``Idempotency-Key`` is a 428. ``problem_response``
+builds the same body for code outside a FastAPI app, such as ASGI middleware that answers a
+request itself.
 """
 
 import json
@@ -116,7 +118,7 @@ def install_problem_handlers(
         if not isinstance(exc, DomainError):  # pragma: no cover - registered for DomainError
             raise exc
         headers = getattr(exc, "problem_headers", None)
-        return _respond(
+        return problem_response(
             request,
             status=_status_for(exc, statuses, default_status),
             type_uri=exc.type_uri,
@@ -135,7 +137,7 @@ def install_problem_handlers(
             ValidationIssue(loc=[*error["loc"]], msg=error["msg"], type=error["type"])
             for error in exc.errors()
         ]
-        return _respond(
+        return problem_response(
             request,
             status=422,
             type_uri=VALIDATION_TYPE,
@@ -147,7 +149,7 @@ def install_problem_handlers(
     def http_error(request: Request, exc: Exception) -> JSONResponse:
         if not isinstance(exc, HTTPException):  # pragma: no cover
             raise exc
-        return _respond(
+        return problem_response(
             request,
             status=exc.status_code,
             type_uri="about:blank",
@@ -166,7 +168,7 @@ def install_problem_handlers(
             exc_info=exc,
         )
         headers = {REQUEST_ID_HEADER: correlation_id} if correlation_id else None
-        return _respond(
+        return problem_response(
             request,
             status=500,
             type_uri=INTERNAL_TYPE,
@@ -207,7 +209,7 @@ def _phrase(status: int) -> str:
         return "Error"
 
 
-def _respond(
+def problem_response(
     request: Request,
     *,
     status: int,
@@ -217,6 +219,9 @@ def _respond(
     headers: Mapping[str, str] | None = None,
     errors: list[ValidationIssue] | None = None,
 ) -> JSONResponse:
+    """An ``application/problem+json`` response for ``request``, carrying its path as
+    ``instance`` and its correlation id. A pure ASGI app builds ``request`` from the scope
+    (``Request(scope)``) and awaits the response with the scope, receive and send."""
     problem = Problem(
         type=type_uri,
         title=title,

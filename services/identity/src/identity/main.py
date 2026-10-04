@@ -77,7 +77,7 @@ from identity.infrastructure.providers.fake import FakeIdentityProvider
 from identity.infrastructure.repository import PostgresUnitOfWorkFactory
 from identity.settings import IdentitySettings
 from identity.wiring import Wiring
-from py_common.app import create_app
+from py_common.app import create_app, module_app
 from py_common.auth import (
     KeySet,
     StaticKeySource,
@@ -262,7 +262,10 @@ def build_app(settings: IdentitySettings | None = None) -> FastAPI:
     return app
 
 
-app = build_app()
+def __getattr__(name: str) -> FastAPI:
+    """``app`` is built on first access, so importing this module builds nothing."""
+    return module_app(name, build_app)
+
 
 if __name__ == "__main__":
     import uvicorn

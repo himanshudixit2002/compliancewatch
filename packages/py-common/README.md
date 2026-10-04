@@ -12,7 +12,8 @@ Design reference: Project Foundation guide, sections 13, 14 and 18.
 
 ```
 src/py_common/
-  settings.py          # pydantic-settings, env_prefix CW_, env_file .env
+  settings.py          # pydantic-settings, env_prefix CW_, env_file .env; with_search_path(url, schema)
+  kafka.py             # KafkaClientConfig: bootstrap servers, SASL/SCRAM and TLS for every Kafka client
   flags.py             # configure_flags, flag_enabled, flag_value: OpenFeature over the flag registry (env or Unleash)
   flags_registry.json  # generated from packages/flags/registry.json by make flags; never edited by hand
   logging.py           # structlog JSON logging bridging stdlib records; correlation_id/tenant_id/actor contextvars
@@ -20,24 +21,25 @@ src/py_common/
   request_context.py   # x-request-id middleware; correlation_id_of(request) for handlers and dependencies
   problems.py          # RFC 9457 problem+json handlers, Problem schema, problem_responses() for routers
   pagination.py        # keyset pagination: Pagination (limit, cursor), encode/decode_cursor, Page[T], page_of
-  app.py               # create_app(service_name, version, routers, problem_status, authenticator, ...)
+  app.py               # create_app(service_name, version, routers, problem_status, authenticator, ...); module_app for lazy main modules
+  database.py          # create_pooled_engine: QueuePool sized by CW_DB_POOL_SIZE and CW_DB_MAX_OVERFLOW, pinged before use
   auth/                # verified identities; the package itself loads no FastAPI
     keys.py            # ES256 SigningKey, KeySet (first signs, all published), load_signing_keys
     tokens.py          # TokenIssuer, TokenVerifier (ES256 only), JwksUrlSource (1 h cache), StaticKeySource
     errors.py          # 401 token required, 401 token invalid, 403 forbidden, 403 tenant mismatch, 503 keys unavailable
     context.py         # current_principal, bind_principal: actor and tenant_id in the log context
     fastapi.py         # Authenticator by CW_AUTH_MODE, authenticate, tenant_scope, require_roles, shared_token_or_roles
-    service_tokens.py  # ServiceTokenSource (cached until a minute before expiry), BearerAuth, service_auth_from
+    service_tokens.py  # ServiceTokenSource (cached until a minute before expiry), IssuerTokenSource (in process), BearerAuth, service_auth_from
     testing.py         # TestIssuer: tokens signed with a key generated at run time; bearer(token)
-  telemetry.py         # configure_telemetry (OTLP to CW_OTEL_ENDPOINT), instrument_app, instrument_engine
+  telemetry.py         # configure_telemetry (OTLP gRPC or HTTP to CW_OTEL_ENDPOINT, with CW_OTEL_HEADERS), instrument_app, instrument_engine
   temporal/
-    client.py          # connect(settings): pydantic converter + tracing interceptor
+    client.py          # connect(settings): pydantic converter + tracing interceptor; API key or mTLS for Temporal Cloud
     activity.py        # ActivityBase: validate/run/record, retry policy and timeouts on the class, schedule()
     worker.py          # WorkerConfig, build_worker, run_worker (stops on SIGTERM/SIGINT)
     liveness.py        # running(task_queue): the temporal_worker_up{task_queue} gauge while a worker runs
   events.py            # EventMessage (the envelope), to_message/encode/decode, payload_of(event)
   migrations.py        # alembic helpers: enable_tenant_rls, create_append_only_guard and their drop twins
-  runtime.py           # WorkerComponents (consumers, relays, periodic jobs, Temporal workers); run_worker_process
+  runtime.py           # WorkerComponents (consumers, relays, periodic jobs, Temporal workers, tasks, hooks); ComponentRegistry; run_worker_process
   outbox/
     schema.py          # outbox_event and processed_event tables; create_*/drop_* helpers for alembic
     writer.py          # OutboxWriter.write(connection, event): the row commits with the state change
@@ -54,6 +56,7 @@ src/py_common/
     schema.py          # idempotency_key: create/drop_idempotency_table(op), forced tenant policy, purge policy
     fastapi.py         # IdempotencyKey dependency, run_idempotent, IDEMPOTENCY_RESPONSES
     errors.py          # 428 key required, 422 key reused, 409 request in flight
+    purge.py           # purge_expired_keys(settings) and purge_job(settings): the daily purge as a worker component
     __main__.py        # python -m py_common.idempotency purge
 tests/unit/
 tests/integration/     # the outbox against Postgres and Redpanda, the migration helpers and idempotency keys on Postgres, flags on an Unleash server (testcontainers)
@@ -152,6 +155,12 @@ or a missing tenant, comes back as it came. When identity cannot be reached or r
 client, the cached token stays in use until it expires and the next attempt waits 5 seconds;
 with no valid token the call fails at once with `service-token-unavailable` (503).
 
+A process that hosts the identity service next to the services that call each other needs no
+client secrets for those calls: `IssuerTokenSource(issuer, Principal.service(client_id, scopes))`
+mints the service's token with identity's own `TokenIssuer` in the process and keeps it the same
+way, and `service_auth_from(settings, token_source=source)` puts it on the service's clients
+whatever the settings say.
+
 Tests use `py_common.auth.testing.TestIssuer`, which generates its key at run time:
 `Settings(**issuer.settings_overrides("token"))` makes a service verify its tokens, and
 `bearer(issuer.user(tenant, [Role.OWNER]))` or `bearer(issuer.service("pipeline", scopes))` is
@@ -239,10 +248,23 @@ Log lines inside a recording span carry `trace_id` and `span_id`. The HTTP instr
 emits the stable semantic conventions (`http.server.request.duration` in seconds,
 `http.route`, `http.response.status_code`), which the Grafana dashboard queries.
 
+A managed collector is reached the way it asks: `CW_OTEL_PROTOCOL=http/protobuf` sends traces to
+`<endpoint>/v1/traces` and metrics to `<endpoint>/v1/metrics` (Grafana Cloud's OTLP gateway, for
+example), and `CW_OTEL_HEADERS` holds the headers every export carries, in the
+`OTEL_EXPORTER_OTLP_HEADERS` form `Authorization=Basic%20<token>,key2=value2` (URL-encoded
+values). The default is gRPC to the endpoint itself with no headers, the dev stack's collector.
+`Telemetry.shutdown()` flushes once; later calls do nothing, so every app of a process that
+hosts several can call it from its lifespan.
+
 ## Temporal
 
 `py_common.temporal.connect(settings)` returns a client with the pydantic data converter and
 the OpenTelemetry tracing interceptor (spans are created even when the starter carried none).
+It connects in plain text to the dev stack's server. For Temporal Cloud it sends
+`CW_TEMPORAL_API_KEY` over TLS, or presents the client certificate `CW_TEMPORAL_TLS_CERT` with
+its key `CW_TEMPORAL_TLS_KEY` (PEM text, so they fit a secret store) for mutual TLS; the settings
+refuse both at once and a certificate without its key. `CW_TEMPORAL_TLS` turns TLS on or off
+explicitly; left empty it is on whenever a credential is set.
 An activity is a class:
 
 ```python
@@ -291,6 +313,17 @@ exponential backoff and moves a message to `<topic>.dlq` after eight failures
 `CW_OTEL_ENDPOINT` set it exports its counters by topic and the `outbox_relay_pending` gauge by
 `db_schema` every 15 seconds, which the `OutboxBacklog` alert reads.
 
+Every Kafka client (the relay's producer, consumers, their dead-letter producers and the topic
+tooling) connects through `py_common.kafka.KafkaClientConfig.from_settings(settings)`, whose
+`aiokafka_kwargs()` carry `CW_KAFKA_BOOTSTRAP` and the security settings: the dev stack's
+`PLAINTEXT` by default, or `CW_KAFKA_SECURITY_PROTOCOL=SASL_SSL` with
+`CW_KAFKA_SASL_MECHANISM` (`SCRAM-SHA-256` or `SCRAM-SHA-512`), `CW_KAFKA_SASL_USERNAME` and
+`CW_KAFKA_SASL_PASSWORD` for a managed cluster, verified against `CW_KAFKA_SSL_CAFILE` or the
+system's certificate authorities. The settings refuse a SASL protocol without all three.
+`AiokafkaProducer` takes the config or a bare bootstrap string, `IdempotentConsumer.run` takes
+`kafka=`, and `relay.run(settings, stop=...)` leaves signal handling to a caller that passes its
+own stop event.
+
 Consuming: a migration calls `create_processed_event_table(op)`; the service runs
 `IdempotentConsumer(group_id=..., store=PostgresProcessedStore(engine, group_id=...),
 handler=..., producer=...)`. The handler receives the decoded `EventMessage` and the unit of
@@ -314,16 +347,54 @@ tests can run it on a SQLite file.
 ## Worker processes
 
 A service with background work exposes `<pkg>.worker.components(settings)`, which returns
-`py_common.runtime.WorkerComponents`: `consumers` (`ConsumerComponent(group_id, topics,
-handler)`, run with `run_consumer`), `relays` (`RelayComponent()`, the outbox relay of the
-service schema), `periodic` (`PeriodicComponent(name, fn, interval_seconds=...)`, or
-`next_run=daily_at(time(3, 0, tzinfo=IST))` for a daily job; a sync `fn` runs on a thread and a
-failing run is logged and tried again at the next time) and `temporal` (`TaskComponent(name,
-run)`, any coroutine that runs until the stop event, such as a Temporal worker). Its
-`python -m <pkg>.worker` calls `run_worker_process(settings, components, version=...)`, and
+`py_common.runtime.WorkerComponents`:
+
+- `consumers`: `ConsumerComponent(group_id, topics, handler)`, run with `run_consumer` on a
+  `SyncProcessedStore` (`store_factory=` replaces it);
+- `relays`: `RelayComponent()`, the outbox relay of the service schema;
+- `periodic`: `PeriodicComponent(name, fn, interval_seconds=...)`, or
+  `next_run=daily_at(time(3, 0, tzinfo=IST))` for a daily job; a sync `fn` runs on a thread and a
+  failing run is logged and tried again at the next time. `py_common.idempotency.purge.purge_job`
+  is the daily purge of expired idempotency keys;
+- `temporal`: `TemporalComponent(WorkerConfig(task_queue), workflows, activities)`; the Temporal
+  workers of a process run on one client through `run_temporal`, each inside
+  `liveness.running(task_queue)`;
+- `tasks`: `TaskComponent(name, run)`, any coroutine that runs until the stop event;
+- `startup` and `shutdown`: `LifecycleHook(name, fn)`. Startup hooks run in order before
+  anything starts (a failing one ends the process); shutdown hooks run in reverse once everything
+  has stopped, however it stopped, and a failing one is logged.
+
+Its `python -m <pkg>.worker` calls `run_worker_process(settings, components, version=...)`, and
 `make worker SERVICE=<svc>` runs that locally. Every component runs until SIGTERM or SIGINT; when
 one fails, the others stop and the process exits with the error, for the supervisor to restart
-it. Components add up (`a + b`), so one process can host several services' work.
+it. Components of one service add up (`a + b`). A process that hosts several services registers
+each one's components with the settings they run on,
+`ComponentRegistry().register("profile", profile_settings, components)`, and runs them with
+`run_registry(registry, stop)`: each consumer, relay and job reads its own service's database
+schema, consumer groups and task queues must be unique across the services, and the Temporal
+workers share one client. Every consumer, relay, periodic job and task reports
+`worker_loop_up{loop="<service>/<component>"}` while it runs; Temporal workers report
+`temporal_worker_up{task_queue}` instead.
+
+## Several services in one process
+
+The pieces a composition root needs to host several services' apps in one process:
+
+- each service's `main` module exposes `build_app(settings=None, ...)` and serves `app` lazily
+  through `module_app(name, build_app)` in a module `__getattr__`, so importing a service builds
+  nothing and reads no environment, while `uvicorn <pkg>.main:app` and `make openapi` still work;
+- `create_app` keeps its readiness checks on `app.state.readiness_checks`, for an outer `/ready`;
+- `RequestContextMiddleware` reuses a correlation id an outer copy of itself put in
+  `scope["state"]` and adds `x-request-id` to a response only once;
+- a bound `service` log context variable wins over the configured service name, so each request
+  logs as the service that served it;
+- `problem_response(request, ...)` answers with a problem from plain ASGI code;
+- `Telemetry.shutdown()` is safe to call from every app's lifespan;
+- `create_pooled_engine(settings)` gives each engine a small pool (`CW_DB_POOL_SIZE`, default
+  3, and `CW_DB_MAX_OVERFLOW`, default 2), and `max_connections(settings)` is what one engine may
+  hold, to add up against the database's limit;
+- `IssuerTokenSource` and `service_auth_from(settings, token_source=...)` carry service tokens
+  without client secrets.
 
 ## How to run
 

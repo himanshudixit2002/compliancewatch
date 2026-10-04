@@ -16,6 +16,7 @@ from enum import StrEnum
 from aiokafka import AIOKafkaConsumer, TopicPartition
 
 from py_common.events import DecodeError, EventMessage, decode
+from py_common.kafka import KafkaClientConfig
 from py_common.logging import get_logger
 from py_common.outbox.producer import MessageProducer
 from py_common.outbox.store import ProcessedStore, UnitOfWork
@@ -144,12 +145,13 @@ class IdempotentConsumer:
         )
 
     async def run(
-        self, *, bootstrap_servers: str, topics: Sequence[str], stop: asyncio.Event
+        self, *, kafka: KafkaClientConfig, topics: Sequence[str], stop: asyncio.Event
     ) -> int:
-        """Consume ``topics`` until ``stop`` is set; returns how many records were handled."""
+        """Consume ``topics`` from the cluster ``kafka`` names until ``stop`` is set; returns
+        how many records were handled."""
         consumer = AIOKafkaConsumer(
             *topics,
-            bootstrap_servers=bootstrap_servers,
+            **kafka.aiokafka_kwargs(),
             group_id=self.group_id,
             enable_auto_commit=False,
             auto_offset_reset="earliest",

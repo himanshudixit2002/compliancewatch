@@ -23,3 +23,7 @@ reason = "answers a tenant's question: reads the tenant's profile and obligation
 [whatsapp-bot]
 scopes = ["notification:preferences", "notification:receipts", "identity:channel-consents", "tenant:act"]
 reason = "records keyword consents at identity, reads and changes channel preferences and reports delivery receipts to notification"
+
+[worker]
+scopes = ["rulebook:write", "llm:call", "tenant:act", "notification:send", "entitlements:read", "data:export"]
+reason = "the combined worker process (cw-mvp worker) runs every service's consumers, jobs and activities under one client: pipeline writes and model calls, engine and notification reads for a tenant, sends, plan checks and exports"

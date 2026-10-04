@@ -1,0 +1,175 @@
+"""Every service this deployable hosts, and the settings each one runs on.
+
+``REGISTRY`` has one ``ServiceEntry`` per directory under ``services/``, identity first: the
+app process builds identity before the others and hands its authenticator to all of them. An
+entry names:
+
+- ``name``, the service directory, which is also its route prefix ``/v1/<name>``;
+- ``schema``, its Postgres schema (the Makefile's ``SCHEMA_*`` and ``infra/dev/postgres/init.sql``);
+- ``settings_type`` and ``build``, the service's settings class and ``<pkg>.main.build_app``;
+- ``components``, ``<pkg>.worker.components`` for a service with background work;
+- ``url_fields``, the settings that hold the URL of another service, all set to the internal
+  listener; a field ``<service>_url`` points at that service;
+- ``loopback_routes``, the routes (``METHOD /path``) that call other services over the internal
+  listener while they serve a request. The app runs at most ``CW_MVP_LOOPBACK_LIMIT`` of them at
+  once, and a service they call makes no such calls itself (one level deep), so the calls they
+  make always find a free thread;
+- ``takes_authenticator`` and ``takes_token_source``, whether ``build`` accepts identity's
+  authenticator and a source of service tokens minted in the process.
+
+A package that adds ``build_app`` arguments, worker components, URL settings or routes that call
+other services registers them here in the same change; ``tests/unit/test_registry.py`` fails
+until it does. ``service_settings(entry, root)`` builds an entry's settings.
+"""
+
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, Final
+
+from fastapi import FastAPI
+
+from applicability_engine.main import build_app as build_applicability_engine
+from eval_service.main import build_app as build_eval
+from identity.main import build_app as build_identity
+from identity.settings import IdentitySettings
+from llm_gateway.main import build_app as build_llm_gateway
+from llm_gateway.settings import GatewaySettings
+from notification.main import build_app as build_notification
+from notification.settings import NotificationSettings
+from notification.worker import components as notification_components
+from obligation.main import build_app as build_obligation
+from obligation.settings import ObligationSettings
+from pipeline.main import build_app as build_pipeline
+from pipeline.settings import PipelineSettings
+from pipeline.worker import components as pipeline_components
+from profile_service.main import build_app as build_profile
+from profile_service.settings import ProfileSettings
+from py_common.runtime import WorkerComponents
+from py_common.settings import Settings, with_search_path
+from qa.main import build_app as build_qa
+from qa.settings import QaSettings
+from rulebook.main import build_app as build_rulebook
+from rulebook.settings import RulebookSettings
+from rulebook.worker import components as rulebook_components
+
+JWKS_PATH: Final = "/v1/identity/.well-known/jwks.json"
+URL_SUFFIX: Final = "_url"
+SHARED_FIELDS_SET_PER_SERVICE: Final = frozenset({"service_name", "database_url", "db_schema"})
+"""The shared settings each service gets its own value of; the rest are the root's."""
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceEntry[S: Settings]:
+    name: str
+    schema: str
+    settings_type: type[S]
+    build: Callable[..., FastAPI]
+    components: Callable[[S], WorkerComponents] | None = None
+    url_fields: tuple[str, ...] = ()
+    loopback_routes: tuple[str, ...] = ()
+    takes_authenticator: bool = True
+    takes_token_source: bool = False
+
+    def __post_init__(self) -> None:
+        for field in self.url_fields:
+            if not field.endswith(URL_SUFFIX) or field not in self.settings_type.model_fields:
+                raise ValueError(f"{self.name}: {field!r} is not a URL field of its settings")
+
+    @property
+    def prefix(self) -> str:
+        """Where its routes are, the facade paths of the public API aside."""
+        return f"/v1/{self.name}"
+
+    @property
+    def calls(self) -> tuple[str, ...]:
+        """The services it calls: ``rulebook_url`` names rulebook, ``llm_gateway_url``
+        llm-gateway."""
+        return tuple(field.removesuffix(URL_SUFFIX).replace("_", "-") for field in self.url_fields)
+
+
+REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
+    ServiceEntry(
+        "identity", "identity", IdentitySettings, build_identity, takes_authenticator=False
+    ),
+    ServiceEntry("profile", "profile", ProfileSettings, build_profile),
+    ServiceEntry(
+        "rulebook", "rulebook", RulebookSettings, build_rulebook, components=rulebook_components
+    ),
+    ServiceEntry("applicability-engine", "applicability", Settings, build_applicability_engine),
+    ServiceEntry("obligation", "obligation", ObligationSettings, build_obligation),
+    ServiceEntry(
+        "notification",
+        "notification",
+        NotificationSettings,
+        build_notification,
+        components=notification_components,
+        url_fields=("rulebook_url",),
+        takes_token_source=True,
+    ),
+    ServiceEntry(
+        "qa",
+        "qa",
+        QaSettings,
+        build_qa,
+        url_fields=("rulebook_url", "profile_url", "obligation_url", "llm_gateway_url"),
+        loopback_routes=("POST /v1/qa/ask",),
+        takes_token_source=True,
+    ),
+    ServiceEntry("llm-gateway", "llm_gateway", GatewaySettings, build_llm_gateway),
+    ServiceEntry("eval", "eval", Settings, build_eval),
+    ServiceEntry(
+        "pipeline",
+        "pipeline",
+        PipelineSettings,
+        build_pipeline,
+        components=pipeline_components,
+        url_fields=("rulebook_url", "llm_gateway_url"),
+    ),
+)
+
+
+def entry_named(name: str, registry: Sequence[ServiceEntry[Any]] = REGISTRY) -> ServiceEntry[Any]:
+    for entry in registry:
+        if entry.name == name:
+            return entry
+    raise KeyError(f"no service named {name!r} is registered")
+
+
+def service_settings[S: Settings](
+    entry: ServiceEntry[S], root: Settings, *, internal_url: str, **overrides: Any
+) -> S:
+    """``entry``'s settings: the root's shared settings, the service's name, its schema and a
+    database URL whose ``search_path`` starts with it, every URL of another service (identity's
+    and its key set's included) at ``internal_url``, then ``overrides``. The service's own
+    ``CW_*`` settings come from the environment and the ``.env`` files the root read."""
+    base = internal_url.rstrip("/")
+    values: dict[str, Any] = {
+        name: getattr(root, name)
+        for name in Settings.model_fields
+        if name not in SHARED_FIELDS_SET_PER_SERVICE
+    }
+    values.update(
+        service_name=entry.name,
+        database_url=with_search_path(root.database_url, entry.schema),
+        db_schema=entry.schema,
+        identity_url=base,
+        auth_jwks_url=base + JWKS_PATH,
+    )
+    values.update(dict.fromkeys(entry.url_fields, base))
+    values.update(overrides)
+    env_files = list(root.env_files) or None
+    return entry.settings_type(_env_file=env_files, **values)
+
+
+def schemas(registry: Sequence[ServiceEntry[Any]] = REGISTRY) -> tuple[str, ...]:
+    return tuple(entry.schema for entry in registry)
+
+
+def check_overrides(
+    overrides: Mapping[str, object], registry: Sequence[ServiceEntry[Any]] = REGISTRY
+) -> None:
+    """Raise on overrides for a service the registry does not have: a misspelt name would be
+    ignored silently otherwise."""
+    unknown = sorted(set(overrides) - {entry.name for entry in registry})
+    if unknown:
+        raise KeyError(f"overrides name services that are not registered: {unknown}")

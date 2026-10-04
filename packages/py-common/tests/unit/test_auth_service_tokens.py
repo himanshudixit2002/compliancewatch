@@ -1,6 +1,7 @@
 import json
 import threading
 from collections.abc import Callable
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -8,13 +9,18 @@ import httpx2
 import pytest
 from pydantic import SecretStr
 
+from domain_kernel.access import Principal, Role, Scope
+from domain_kernel.ids import TenantId, UserId
 from py_common.auth import (
     BearerAuth,
+    IssuerTokenSource,
     ServiceTokenSource,
     ServiceTokenUnavailableError,
+    TokenIssuer,
     service_auth_from,
 )
 from py_common.auth.service_tokens import SERVICE_TOKENS_PATH, service_client_id, token_refused
+from py_common.auth.testing import TestIssuer
 from py_common.settings import Settings
 
 _IDENTITY = "http://identity.test"
@@ -433,3 +439,57 @@ def test_an_injected_client_gets_its_own_source() -> None:
         client.get(_TARGET)
     assert rulebook.seen[0][0] == "Bearer token-1"
     assert identity.requests[0]["client_id"] == "pipeline"
+
+
+def _minter(clock: _Clock) -> tuple[TestIssuer, IssuerTokenSource]:
+    issuer = TestIssuer()
+    principal = Principal.service("qa", [Scope.TENANT_ACT, Scope.LLM_CALL])
+    return issuer, IssuerTokenSource(
+        TokenIssuer(issuer.keys, issuer=issuer.issuer_name, audience=issuer.audience),
+        principal,
+        clock=clock,
+    )
+
+
+def test_an_in_process_source_mints_verifiable_service_tokens_and_keeps_them() -> None:
+    clock = _Clock()
+    issuer, source = _minter(clock)
+    assert source.client_id == "qa"
+    first = source.token()
+    principal = issuer.verifier().verify(first)
+    assert principal.subject == "qa"
+    assert principal.scopes == frozenset({Scope.TENANT_ACT, Scope.LLM_CALL})
+    clock.now += 539
+    assert source.token() == first, "kept until a minute before it expires"
+    clock.now += 1
+    second = source.token()
+    assert second != first
+    source.invalidate("not-the-cached-token")
+    assert source.token() == second
+    source.invalidate(second)
+    assert source.token() != second
+
+
+def test_an_in_process_source_mints_for_services_only() -> None:
+    issuer = TestIssuer()
+    minting = TokenIssuer(issuer.keys, issuer=issuer.issuer_name, audience=issuer.audience)
+    person = Principal.user(UserId.new(), TenantId.new(), [Role.OWNER])
+    with pytest.raises(ValueError, match="service tokens only"):
+        IssuerTokenSource(minting, person)
+    with pytest.raises(ValueError, match="ttl"):
+        IssuerTokenSource(minting, Principal.service("qa", []), ttl=timedelta(0))
+
+
+def test_a_token_source_of_the_callers_is_used_without_a_secret() -> None:
+    _, source = _minter(_Clock())
+    auth = service_auth_from(_settings(), token_source=source)
+    assert isinstance(auth, BearerAuth)
+    assert auth.source is source
+    rulebook = _Rulebook()
+    with httpx2.Client(transport=httpx2.MockTransport(rulebook), auth=auth) as client:
+        client.get(_TARGET)
+    assert rulebook.seen[0][0] == f"Bearer {source.token()}"
+    with_secret = _settings(service_client_id="qa", service_client_secret=_CLIENT_SECRET)
+    chosen = service_auth_from(with_secret, token_source=source)
+    assert chosen is not None
+    assert chosen.source is source, "the caller's source wins over the client secret"

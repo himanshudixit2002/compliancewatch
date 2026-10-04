@@ -132,7 +132,7 @@ def test_the_secret_settings_stay_secret() -> None:
 def test_dev_clients_come_from_the_committed_file_or_the_setting() -> None:
     committed = identity_settings().dev_clients
     assert committed["pipeline"] == {Scope.RULEBOOK_WRITE, Scope.LLM_CALL, Scope.TENANT_ACT}
-    assert set(committed) == {"notification", "pipeline", "qa", "whatsapp-bot"}
+    assert set(committed) == {"notification", "pipeline", "qa", "whatsapp-bot", "worker"}
     assert committed["notification"] == frozenset()
     given = identity_settings(
         identity_dev_clients="qa=llm:call, bot = tenant:act+llm:call"

@@ -34,6 +34,9 @@
 /services/pipeline/              @himanshudixit2002 # team: Regulatory Intelligence
 /services/pipeline/prompts/      @himanshudixit2002 # team: AI Platform (wording reviewed by a Regulatory Analyst; merged only with a green eval run)
 
+# ---- Composition root (ADR-013) ----------------------------------------------
+/composition/                    @himanshudixit2002 # team: Platform and Infrastructure (every service in one deployable; service owners review their registry and exposure entries)
+
 # ---- Packages ---------------------------------------------------------------
 /packages/contracts/             @himanshudixit2002 # team: Platform and Infrastructure (custodian; every consuming team reviews a contract change; add their handles here when teams exist)
 /packages/domain-kernel/         @himanshudixit2002 # team: Platform and Infrastructure (custodian)

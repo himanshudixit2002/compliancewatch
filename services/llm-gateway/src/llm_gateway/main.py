@@ -45,7 +45,8 @@ from llm_gateway.infrastructure.tracing.langfuse import LangfuseTracer
 from llm_gateway.infrastructure.tracing.log import LogTracer
 from llm_gateway.settings import GatewaySettings
 from llm_gateway.wiring import GatewayWiring
-from py_common.app import create_app
+from py_common.app import create_app, module_app
+from py_common.auth.fastapi import Authenticator
 from py_common.logging import get_logger
 
 SERVICE_NAME = "llm-gateway"
@@ -182,8 +183,13 @@ def wire(
 
 
 def build_app(
-    settings: GatewaySettings | None = None, *, completion_provider: LLMProvider | None = None
+    settings: GatewaySettings | None = None,
+    *,
+    completion_provider: LLMProvider | None = None,
+    authenticator: Authenticator | None = None,
 ) -> FastAPI:
+    """``authenticator`` replaces the one ``CW_AUTH_MODE`` describes; a process that hosts
+    identity passes identity's own."""
     settings = settings or GatewaySettings(service_name=SERVICE_NAME)
     wiring = wire(settings, completion_provider=completion_provider)
 
@@ -202,6 +208,7 @@ def build_app(
         readiness_checks=[(name, _threaded(check)) for name, check in wiring.checks],
         lifespan=lifespan,
         problem_status=PROBLEM_STATUS,
+        authenticator=authenticator,
     )
     app.state.gateway = wiring
     # After create_app, which configures logging: the line is JSON and carries the service field.
@@ -237,7 +244,10 @@ def _threaded(check: Callable[[], bool]) -> Callable[[], Awaitable[bool]]:
     return run
 
 
-app = build_app()
+def __getattr__(name: str) -> FastAPI:
+    """``app`` is built on first access, so importing this module builds nothing."""
+    return module_app(name, build_app)
+
 
 if __name__ == "__main__":
     import uvicorn

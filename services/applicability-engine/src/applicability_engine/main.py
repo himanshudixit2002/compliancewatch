@@ -3,10 +3,11 @@
 Guide section 11: wiring of interfaces to implementations happens here, never inside the layers.
 The use cases run on the Postgres unit of work (row-level security by tenant, events through the
 outbox) and read the profile service and the rulebook over HTTP, every call with this service's
-own access token once ``CW_SERVICE_CLIENT_SECRET`` is set; tests pass their own ``Readers``. The
-caller and its tenant come from ``py_common.auth`` by ``CW_AUTH_MODE`` (``api.deps``). Idempotency
-keys live next to the decisions (``idempotency_key``, migration 0001), each key in its own short
-transaction. The ontology is the packaged one.
+own access token once ``CW_SERVICE_CLIENT_SECRET`` is set, or with the token of ``token_source``
+when the process that hosts the engine passes one (identity's issuer in the process); tests pass
+their own ``Readers``. The caller and its tenant come from ``py_common.auth`` by ``CW_AUTH_MODE``
+(``api.deps``). Idempotency keys live next to the decisions (``idempotency_key``, migration
+0001), each key in its own short transaction. The ontology is the packaged one.
 """
 
 from collections.abc import Callable
@@ -36,8 +37,9 @@ from applicability_engine.wiring import Readers, Wiring
 from domain_kernel.errors import DomainError
 from domain_kernel.ontology import Ontology
 from ontology import load as load_ontology
-from py_common.app import create_app
-from py_common.auth import service_auth_from
+from py_common.app import create_app, module_app
+from py_common.auth import TokenSource, service_auth_from
+from py_common.auth.fastapi import Authenticator
 from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
 from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
 
@@ -52,8 +54,10 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
 }
 
 
-def http_readers(settings: ApplicabilityEngineSettings) -> Readers:
-    auth = service_auth_from(settings)
+def http_readers(
+    settings: ApplicabilityEngineSettings, *, token_source: TokenSource | None = None
+) -> Readers:
+    auth = service_auth_from(settings, token_source=token_source)
     timeout = settings.applicability_engine_http_timeout_seconds
     return Readers(
         profiles=HttpProfiles(settings.profile_url, auth=auth, timeout_seconds=timeout),
@@ -65,10 +69,12 @@ def wire(
     settings: ApplicabilityEngineSettings,
     readers: Readers | None = None,
     ontology: Ontology | None = None,
+    *,
+    token_source: TokenSource | None = None,
 ) -> Wiring:
     """Build the use cases on the store the settings name, reading over HTTP unless ``readers``
     are given, with the packaged ontology unless another is."""
-    readers = readers or http_readers(settings)
+    readers = readers or http_readers(settings, token_source=token_source)
     unit_of_work: UnitOfWorkFactory
     ping: Callable[[], bool]
     idempotency: IdempotencyStore
@@ -101,9 +107,13 @@ def build_app(
     *,
     readers: Readers | None = None,
     ontology: Ontology | None = None,
+    authenticator: Authenticator | None = None,
+    token_source: TokenSource | None = None,
 ) -> FastAPI:
+    """``authenticator`` replaces the one ``CW_AUTH_MODE`` describes and ``token_source`` the
+    service client's tokens; a process that hosts identity passes identity's own."""
     settings = settings or ApplicabilityEngineSettings(service_name=SERVICE_NAME)
-    wiring = wire(settings, readers, ontology)
+    wiring = wire(settings, readers, ontology, token_source=token_source)
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
@@ -111,12 +121,16 @@ def build_app(
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         problem_status=PROBLEM_STATUS,
+        authenticator=authenticator,
     )
     app.state.wiring = wiring
     return app
 
 
-app = build_app()
+def __getattr__(name: str) -> FastAPI:
+    """``app`` is built on first access, so importing this module builds nothing."""
+    return module_app(name, build_app)
+
 
 if __name__ == "__main__":
     import uvicorn

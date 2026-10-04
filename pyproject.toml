@@ -15,7 +15,7 @@ dev = [
   "hypothesis>=6.140",
   "import-linter>=2.5",
   "types-pyyaml>=6.0.12",
-  "testcontainers[postgres]>=4.15",
+  "testcontainers[postgres,community]>=4.15",
   "httpx2>=2.13",  # Starlette >= 1.7 TestClient transport; httpx 0.x is deprecated there
   # Event contracts (packages/contracts/events): schema checks and the generators behind `make contracts`
   "jsonschema[format-nongpl]>=4.26",
@@ -36,14 +36,20 @@ required-version = ">=0.8"
 py-common = { workspace = true }
 
 [tool.uv.workspace]
-members = ["packages/*", "packages/contracts/clients/python", "services/*", "evals/harness", "tools/demo"]
+members = [
+  "packages/*", "packages/contracts/clients/python", "services/*", "evals/harness", "tools/demo",
+  "composition/*",
+]
 exclude = ["packages/ui", "packages/contracts", "packages/flags"]
 
 # ---------------------------------------------------------------- ruff
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["packages/*/src", "packages/contracts/clients/python/src", "services/*/src", "evals/harness/src", "tools/demo/src", "infra/scripts"]
+src = [
+  "packages/*/src", "packages/contracts/clients/python/src", "services/*/src", "evals/harness/src",
+  "tools/demo/src", "composition/*/src", "infra/scripts",
+]
 # The cases for the Semgrep rules hold insecure code on purpose (.semgrep/cw.py).
 extend-exclude = [".semgrep"]
 
@@ -69,7 +75,7 @@ plugins = ["pydantic.mypy"]
 files = [
   "packages/py-common/src", "packages/domain-kernel/src", "packages/ontology/src",
   "packages/contracts/clients/python/src", "packages/contracts/scripts",
-  "services/*/src", "evals/harness/src", "tools/demo/src", "infra/scripts",
+  "services/*/src", "evals/harness/src", "tools/demo/src", "composition/*/src", "infra/scripts",
 ]
 exclude = ["migrations/versions/"]
 
@@ -86,7 +92,7 @@ warn_required_dynamic_aliases = true
 # ---------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
 minversion = "8.4"
-testpaths = ["packages", "services", "evals", "tools", "infra"]
+testpaths = ["packages", "services", "evals", "tools", "composition", "infra"]
 # The repository checks in infra/scripts are plain scripts, not packages; their tests import them.
 pythonpath = ["infra/scripts"]
 addopts = "-ra -q --strict-markers --strict-config --import-mode=importlib"
@@ -101,7 +107,7 @@ xfail_strict = true
 # ---------------------------------------------------------------- coverage
 [tool.coverage.run]
 branch = true
-source = ["packages", "services", "evals", "tools"]
+source = ["packages", "services", "evals", "tools", "composition"]
 omit = ["*/tests/*", "*/migrations/*"]
 relative_files = true
 
@@ -129,7 +135,7 @@ output = "coverage.xml"
 root_packages = [
   "py_common", "domain_kernel", "ontology", "cw_contracts",
   "identity", "profile_service", "rulebook", "applicability_engine", "obligation",
-  "notification", "qa", "llm_gateway", "eval_service", "pipeline",
+  "notification", "qa", "llm_gateway", "eval_service", "pipeline", "cw_mvp",
 ]
 include_external_packages = true
 
@@ -226,3 +232,15 @@ forbidden_modules = [
   "identity", "profile_service", "rulebook", "applicability_engine", "obligation",
   "notification", "qa", "llm_gateway", "eval_service", "pipeline",
 ]
+
+[[tool.importlinter.contracts]]
+# composition/mvp (ADR-013) builds every service into one app process and one worker process. It
+# may import every service, as tools/demo does; nothing it hosts may import it back.
+name = "The composition root imports the services; no service or shared package imports it"
+type = "forbidden"
+source_modules = [
+  "py_common", "domain_kernel", "ontology", "cw_contracts",
+  "identity", "profile_service", "rulebook", "applicability_engine", "obligation",
+  "notification", "qa", "llm_gateway", "eval_service", "pipeline",
+]
+forbidden_modules = ["cw_mvp"]
