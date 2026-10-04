@@ -581,12 +581,13 @@ openapi-ts-check: check-pnpm ## The generated OpenAPI types match the committed 
 # The product's own settings are passed here and nowhere else, never as a registry or settings
 # default: header auth; both listeners on 127.0.0.1; the worker's health on PRODUCT_WORKER_PORT
 # (8081, since 8001 is identity's under make run and make web-stack); the worker's Kafka and
-# Temporal switches and the reminder sweep on; rule publishing on with the placeholder tokens
-# local-write-token and local-review-token (not secrets; values in .env win); the profile's static
-# GSTIN lookup, so the demo GSTIN pre-fills; the notification sink in place of the real channels,
-# recording into var/product/sink.jsonl, with a five-second batching window so a change card goes
-# within the check's wait; and message links to the product's web app. The web app gets every
-# CW_WEB_*_URL at the internal listener and builds into .next/product, so it runs beside a
+# Temporal switches and the reminder sweep on; the engine's recompute on profile.updated on, with
+# the rulebook's in-force listing cached for five seconds; rule publishing on with the placeholder
+# tokens local-write-token and local-review-token (not secrets; values in .env win); the profile's
+# static GSTIN lookup, so the demo GSTIN pre-fills; the notification sink in place of the real
+# channels, recording into var/product/sink.jsonl, with a five-second batching window so a change
+# card goes within the check's wait; and message links to the product's web app. The web app gets
+# every CW_WEB_*_URL at the internal listener and builds into .next/product, so it runs beside a
 # make web-dev of the same checkout (Next allows one dev server per build directory). Pids and
 # logs are under var/product; make product-down stops only the processes whose pids it recorded,
 # with their children.
@@ -602,6 +603,7 @@ PRODUCT_ENV = CW_AUTH_MODE=header CW_MVP_HOST=127.0.0.1 \
   CW_DATABASE_URL="postgresql+psycopg://$(PRODUCT_DB_USER):$(PRODUCT_DB_PASSWORD)@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}" \
   CW_MVP_WORKER_HEALTH_PORT=$(PRODUCT_WORKER_PORT) \
   CW_WORKER_KAFKA_ENABLED=true CW_WORKER_TEMPORAL_ENABLED=true CW_OBLIGATION_SWEEP_ENABLED=true \
+  CW_APPLICABILITY_RECOMPUTE_ENABLED=true CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS=5 \
   CW_RULEBOOK_PUBLISH_ENABLED=true \
   CW_RULEBOOK_WRITE_TOKEN="$${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}" \
   CW_RULEBOOK_REVIEW_TOKEN="$${CW_RULEBOOK_REVIEW_TOKEN:-local-review-token}" \

@@ -22,6 +22,16 @@ the API answers. One failed step does not stop the next.
   file holds its line when this machine can read it.
 - ``isolation``: the CA firm's tenant reads none of the business tenant's decisions, obligations,
   notifications or business, and the business tenant none of the CA firm's clients'.
+- ``recompute``: a new synthetic business in the business tenant, made through the profile's
+  business API (``POST /v1/businesses``), gets its decisions from profile.updated alone (the
+  engine's consumer, never ``evaluate``) and the obligations of the rule that applies; then a
+  changed answer (``PATCH /v1/businesses/{id}``, the registration moves to the quarterly scheme)
+  brings a new decision that the monthly rule does not apply and closes its obligations with
+  ``profile_changed``, while the quarterly rule of its state gets obligations when it is
+  published. Every decision of the business has the trigger profile_updated, and no review item
+  opens for it (none of the seed rules has a free-text predicate; unsure for an unanswered
+  question opens none). Each run makes a new business, named with the time it was made, since a
+  closed obligation stays closed and only a new business shows the whole change again.
 """
 
 import json
@@ -32,7 +42,7 @@ from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import Any, Final
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx2
 
@@ -45,7 +55,13 @@ from cw_demo.product.evaluate import (
     today_in_india,
 )
 from cw_demo.product.publish import RULEBOOK, rule_versions, supported
-from cw_demo.product.tenants import APPLIES, BUSINESS_TENANT, CA_FIRM_TENANT, SyntheticTenant
+from cw_demo.product.tenants import (
+    APPLIES,
+    BUSINESS_TENANT,
+    CA_FIRM_TENANT,
+    NOT_APPLICABLE,
+    SyntheticTenant,
+)
 from cw_evals.qa.world import load_world
 from notification.infrastructure.sink import MESSAGE_ID_PREFIX
 from ontology import load as load_ontology
@@ -59,6 +75,7 @@ NOTIFICATIONS: Final = "/v1/notification/notifications"
 CHANGE_CARD: Final = "change_card"
 SENT_STATES: Final = frozenset({"sent", "delivered", "read"})
 CONSUMER_GROUPS: Final = (
+    "applicability-engine/consumer:applicability-engine.profiles",
     "obligation/consumer:obligation.decisions",
     "notification/consumer:notification.obligations",
 )
@@ -72,6 +89,27 @@ RELAYS: Final = (
 JOBS: Final = ("notification/notification-dispatch", "obligation/obligation-reminder-sweep")
 TASK_QUEUES: Final = ("pipeline",)
 REVIEWED: Final = "reviewed"
+BUSINESSES: Final = "/v1/businesses"
+REVIEW_ITEMS: Final = f"{ENGINE}/review-items"
+MONTHLY: Final = "gstr3b_monthly"
+QUARTERLY: Final = "gstr3b_quarterly_group_a"
+"""The quarterly GSTR-3B rule of the probe's state (Karnataka, 29)."""
+PROFILE_UPDATED: Final = "profile_updated"
+CLOSED: Final = "closed_not_applicable"
+PROFILE_CHANGED: Final = "profile_changed"
+PROBE_ANSWERS: Final[tuple[tuple[str, object], ...]] = (
+    ("state_codes", ["29"]),
+    ("registration_type", "regular"),
+    ("filing_scheme", "regular_monthly"),
+    ("return_filing_frequency", "monthly"),
+)
+"""A monthly GSTR-3B filer in Karnataka: the entity's state and the registration's answers (a
+GSTIN no lookup knows pre-fills nothing, so the registration type is answered too)."""
+PROBE_FLIP: Final[tuple[tuple[str, object], ...]] = (
+    ("filing_scheme", "regular_qrmp"),
+    ("return_filing_frequency", "quarterly"),
+)
+"""The change the check makes: the registration moves to the quarterly scheme (QRMP)."""
 
 
 class StepFailedError(Exception):
@@ -447,6 +485,159 @@ def _holdings(product: Product, reader: UUID, seeded: Iterable[SeededRegistratio
     return Holdings(decisions, obligations, notifications)
 
 
+# ---------------------------------------------------------------- recompute
+
+
+@dataclass(frozen=True, slots=True)
+class Probe:
+    """The business the recompute step makes: its name, GSTIN, entity and registration."""
+
+    name: str
+    gstin: str
+    entity_id: str
+    registration_id: str
+
+
+def probe_gstin(token: int) -> str:
+    """A GSTIN of Karnataka that no lookup knows: the PAN ZZZ<two letters><four digits>Z, like
+    the made-up Delhi one of the CA firm's client."""
+    letters = chr(ord("A") + token % 26) + chr(ord("A") + token // 26 % 26)
+    digits = token // 676 % 10_000
+    return f"29ZZZ{letters}{digits:04d}Z1Z5"
+
+
+def make_probe(context: CheckContext, headers: Mapping[str, str]) -> Probe:
+    """A new business in the business tenant, through the profile's business API."""
+    stamp = context.now().astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    answers = [{"key": key, "value": value} for key, value in PROBE_ANSWERS]
+    for _ in range(3):
+        gstin = probe_gstin(uuid4().int)
+        name = f"Recompute probe {stamp} (synthetic)"
+        body = {"name": name, "gstin": gstin, "registration_name": name, "answers": answers}
+        created = ok(
+            context.product.internal.post(
+                BUSINESSES, json=body, headers={**headers, "Idempotency-Key": str(uuid4())}
+            ),
+            201,
+        )
+        if created["created"]:
+            business = created["business"]
+            (registration,) = business["registrations"]
+            return Probe(name, gstin, str(business["id"]), str(registration["id"]))
+    raise StepFailedError("three made-up GSTINs in a row were taken; run the check again")
+
+
+def recompute(context: CheckContext) -> list[str]:
+    product = context.product
+    headers = as_tenant(BUSINESS_TENANT.tenant_id)
+    versions = {
+        str(version["rule_key"]): str(version["rule_version_id"])
+        for version in published_in_force(product, today_in_india(context.now()))
+    }
+    if MONTHLY not in versions:
+        raise StepFailedError(f"{MONTHLY} is not published: run cw-product seed")
+    monthly, quarterly = versions[MONTHLY], versions.get(QUARTERLY)
+    probe = make_probe(context, headers)
+    wait = partial(poll, timeout=context.timeout, interval=context.interval)
+
+    def decision_of(version_id: str, result: str, after: str | None = None) -> dict[str, Any]:
+        page = answered(
+            product.internal.get(
+                f"{ENGINE}/businesses/{probe.registration_id}/decisions",
+                params={"rule_version_id": version_id, "limit": 1},
+                headers=headers,
+            )
+        )
+        if not page["items"]:
+            raise NotYetError(f"no decision of {MONTHLY} yet for {probe.name}")
+        latest: dict[str, Any] = page["items"][0]
+        if latest["decision_id"] == after or (latest["result"], latest["trigger"]) != (
+            result,
+            PROFILE_UPDATED,
+        ):
+            raise NotYetError(
+                f"the latest decision of {MONTHLY} is {latest['result']} "
+                f"({latest['trigger']}); waiting for {result} from profile.updated"
+            )
+        return latest
+
+    def obligations_of(version_id: str) -> list[dict[str, Any]]:
+        listed: list[dict[str, Any]] = answered(
+            product.internal.get(
+                OBLIGATIONS,
+                params={"business_id": probe.registration_id, "rule_version_id": version_id},
+                headers=headers,
+            )
+        )
+        return listed
+
+    def opened() -> list[dict[str, Any]]:
+        made = obligations_of(monthly)
+        if not made or any(o["status"] == CLOSED for o in made):
+            raise NotYetError(f"no open obligation of {MONTHLY} yet for {probe.name}")
+        return made
+
+    def closed() -> list[dict[str, Any]]:
+        made = obligations_of(monthly)
+        still = [o for o in made if (o["status"], o["closed_reason"]) != (CLOSED, PROFILE_CHANGED)]
+        if still:
+            raise NotYetError(f"{len(still)} obligations of {MONTHLY} are not closed yet")
+        return made
+
+    def quarterly_made() -> list[dict[str, Any]]:
+        made = obligations_of(quarterly or "")
+        if not made:
+            raise NotYetError(f"no obligation of {QUARTERLY} yet for {probe.name}")
+        return made
+
+    first = wait(partial(decision_of, monthly, APPLIES))
+    made = wait(opened)
+    ok(
+        product.internal.patch(
+            f"{BUSINESSES}/{probe.entity_id}",
+            json={
+                "changes": [
+                    {"key": key, "value": value, "node_id": probe.registration_id}
+                    for key, value in PROBE_FLIP
+                ]
+            },
+            headers=headers,
+        )
+    )
+    flipped = wait(partial(decision_of, monthly, NOT_APPLICABLE, first["decision_id"]))
+    closed_ones = wait(closed)
+    lines = [
+        f"probe: {probe.name}, {probe.gstin}, registration {probe.registration_id}, "
+        "made with POST /v1/businesses",
+        f"profile.updated decided {MONTHLY} {first['result']} ({first['decision_id']}); "
+        f"{len(made)} obligations made",
+        f"after PATCH to the quarterly scheme: {MONTHLY} {flipped['result']} "
+        f"({flipped['decision_id']}); {len(closed_ones)} obligations closed ({PROFILE_CHANGED})",
+    ]
+    if quarterly is not None:
+        lines.append(f"{QUARTERLY}: {len(wait(quarterly_made))} obligations made")
+    every = answered(
+        product.internal.get(
+            f"{ENGINE}/businesses/{probe.registration_id}/decisions",
+            params={"limit": 200},
+            headers=headers,
+        )
+    )["items"]
+    triggers = sorted({str(item["trigger"]) for item in every})
+    if triggers != [PROFILE_UPDATED]:
+        raise StepFailedError(f"the probe's decisions have the triggers {triggers}")
+    items = answered(product.internal.get(REVIEW_ITEMS, params={"limit": 200}, headers=headers))[
+        "items"
+    ]
+    mine = [item for item in items if item["business_id"] == probe.registration_id]
+    if mine:
+        raise StepFailedError(f"{len(mine)} review items opened for {probe.name}")
+    lines.append(
+        f"{len(every)} decisions, every one from profile.updated; no review item for the probe"
+    )
+    return lines
+
+
 # ---------------------------------------------------------------- the command
 
 STEPS: list[Step] = [
@@ -454,6 +645,11 @@ STEPS: list[Step] = [
     Step("honesty", "only cited seed rules are published, all still needs_review", honesty),
     Step("loop", "a published rule becomes decisions, obligations and a change card", loop),
     Step("isolation", "neither synthetic tenant reads the other's records", isolation),
+    Step(
+        "recompute",
+        "a business made or changed in the profile gets decisions and obligations by itself",
+        recompute,
+    ),
 ]
 """The steps in the order they run. A later package appends its own."""
 
