@@ -558,8 +558,10 @@ component handles one.
   method of the port answers that refusal without a request, and `rulebookWriteAccess(ctx)` tells
   a form which one applies. `decided_by` in each body is the session's user id. A rulebook 401
   or 503 about either token is reworded to name the variable to set and the side that needs it,
-  never its value. `make web-stack` does not set a review token, so the decisions answer
-  `web-review-token-missing` there.
+  never its value. `make web-stack` gives the rulebook the placeholder `local-review-token`, and
+  `make web-e2e` and the e2e config give the web app the same; under `next dev` the web app needs
+  `CW_WEB_RULEBOOK_REVIEW_TOKEN` in `apps/web/.env.local`, or its writes answer
+  `web-review-token-missing`.
 - **Bearer token**: once identity issues tokens, the session carries one and the factories send
   `Authorization: Bearer` ([auth-and-roles.md](auth-and-roles.md)); nothing sends one today.
 
@@ -601,10 +603,15 @@ through `entities/<entity>/mappers.ts` so the view never sees a wire type.
 
 `make web-stack` starts every service on `SERVICE_PORT_BASE`+1 to +10 (8001-8010 by default,
 9201-9210 in a second working copy) with memory stores and fixed demo settings: the profile's
-static GSTIN lookup, the billing provider `none` (subscribe answers its 503), the publish flow
-and the KAG layer off, and the write token from `.env` or `local-write-token` (D-020).
+static GSTIN lookup, the billing provider `none` (subscribe answers its 503), the KAG layer off,
+and the rulebook publishing (`CW_RULEBOOK_PUBLISH_ENABLED=true`) with its write and review tokens
+from `.env` or the placeholders `local-write-token` and `local-review-token`, as `make product`
+passes them (D-020, D-042). On the memory store the rulebook starts with the seed calendar's
+draft rule versions (`CW_RULEBOOK_SEED_ON_START`, honoured in local and test only), every one
+needing review; with `STORE=postgres`, `make seed SERVICE=rulebook` writes them. `make web-e2e`
+gives the web app the same two tokens and the e2e config turns `web.publish_actions` on.
 `make web-stack-wait` waits for every `/health`; `make web-stack-down` stops them, and the
-memory stores forget their rows.
+memory stores forget their rows (the rule versions an e2e run moved included).
 
 `make web-seed` (`apps/web/scripts/seed`, run by Node's type stripping) fills the running stack
 with the demo tenant over the services' HTTP APIs: the owner's four consents, the demo GSTIN's

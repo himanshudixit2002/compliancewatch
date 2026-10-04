@@ -8,7 +8,10 @@ import { defineConfig, devices } from "@playwright/test";
  * ones `make web-stack` starts (`make web-e2e` points the app at their ports); the specs that
  * need the services and the seeded tenant run once `make web-stack`, `make web-stack-wait` and
  * `make web-seed` have written var/seed/last.json (the CI job runs them first and fails such a
- * spec without that file; elsewhere it is skipped).
+ * spec without that file; elsewhere it is skipped). The app gets the rulebook's two placeholder
+ * tokens `make web-stack` gives the rulebook (unless the environment names others), and the
+ * web.publish_actions flag on (its override counts in local and test only), so the rule version
+ * specs can cite, submit, approve and return drafts through the web app.
  */
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE_URL = `http://localhost:${PORT}`;
@@ -33,6 +36,10 @@ export default defineConfig({
       CW_WEB_ENV: process.env.CW_WEB_ENV ?? "test",
       CW_WEB_AUTH_PROVIDER: process.env.CW_WEB_AUTH_PROVIDER ?? "fake",
       CW_WEB_SESSION_SECRET: process.env.CW_WEB_SESSION_SECRET ?? E2E_SESSION_SECRET,
+      CW_WEB_RULEBOOK_WRITE_TOKEN: process.env.CW_WEB_RULEBOOK_WRITE_TOKEN ?? "local-write-token",
+      CW_WEB_RULEBOOK_REVIEW_TOKEN:
+        process.env.CW_WEB_RULEBOOK_REVIEW_TOKEN ?? "local-review-token",
+      CW_WEB_FLAG_PUBLISH_ACTIONS: process.env.CW_WEB_FLAG_PUBLISH_ACTIONS ?? "true",
     },
   },
 });

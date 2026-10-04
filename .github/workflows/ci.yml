@@ -627,8 +627,9 @@ jobs:
         run: make web-screens-check openapi-ts-check
       # Every service on 8001-8010 (SERVICE_PORT_BASE 8000, the app's default URLs), started in
       # the background with memory stores and the fixed demo settings of the web stack (the
-      # static GSTIN lookup, billing "none", publish and KAG off, the placeholder write token
-      # local-write-token): no container. They start while the app builds.
+      # static GSTIN lookup, billing "none", KAG off, the rulebook publishing with the placeholder
+      # tokens local-write-token and local-review-token and starting with the seed calendar's
+      # drafts): no container. They start while the app builds.
       - name: Start the services (memory stores, no container)
         run: make web-stack
       # The playwright package has no install script (strictDepBuilds stays satisfied); the

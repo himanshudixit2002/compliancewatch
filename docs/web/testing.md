@@ -179,8 +179,11 @@ adding a route, run one of them before relying on `tsc` for link errors.
 but all at once and on memory stores: pids and logs under `var/web-stack`, the profile's static
 GSTIN lookup, the billing provider `none` (`BILLING=memory` starts subscriptions in memory for
 a manual demo; give `make web-e2e` the same `BILLING` and the billing spec expects that state),
-the publish flow and the KAG layer off, and the rulebook write token from `.env` or the
-placeholder `local-write-token`, so a fresh clone and CI see the same states (`docs/onboarding/local-dev.md`, "Running a second clone", has the ports).
+the KAG layer off, and the rulebook publishing with the write and review tokens from `.env` or
+the placeholders `local-write-token` and `local-review-token`, starting with the seed calendar's
+draft rule versions (memory store, `CW_RULEBOOK_SEED_ON_START`), so a fresh clone and CI see the
+same states (`docs/onboarding/local-dev.md`, "Running a second clone", has the ports). The
+Playwright config gives `next start` the same two tokens and turns `web.publish_actions` on.
 No page on `main` calls a service yet, so the suite passes without the stack apart from the
 seeded-tenant test, which is skipped; with `make web-stack && make web-stack-wait && make
 web-seed` first, `make web-e2e` runs everything, as the CI job does. A spec for a page that

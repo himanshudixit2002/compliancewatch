@@ -644,3 +644,25 @@ the console's static neighbour, the message templates page, came with it: withou
 hardened await as absent with its header; the notice of a page waiting on one names the header
 after the delivering package; with bearer tokens, a lookup of another tenant needs the admin reads
 of WP30.
+
+## D-042: The web stack's rulebook publishes and starts with the seed calendar's drafts
+
+2026-10-04. The rule version screens and the publish workflow need versions to show, and the web
+stack's rulebook ran on a memory store that nothing filled: the seed calendar's drafts are written
+by `make seed SERVICE=rulebook` through SQL, and the stack had publishing off and no review token,
+so no analyst step could be taken against it. Writing the drafts from the web seed would have
+been a second writer of the calendar, and recording them as fixtures would have copied regulatory
+content into the web app. The rulebook gained `CW_RULEBOOK_SEED_ON_START`: on the memory store it
+loads the packaged calendar when the app is built, through `MemoryKnowledgeStore.apply_seed`,
+which follows the seed command's rules (a draft per rule, `needs_review`, nothing cited, approved
+or published). The setting is refused unless `CW_ENV` is `local` or `test` and with the Postgres
+store, and `make flags-check` lists it as configuration beside the store selectors. `make
+web-stack` turns it on for the memory store, turns publishing on and gives the rulebook the
+review token, both tokens from `.env` or the placeholders `make product` uses
+(`local-write-token`, `local-review-token`); `make web-e2e` and the Playwright config give the
+web app the same tokens and turn `web.publish_actions` on (default off; the override counts in
+local and test only). Consequences: every analyst on the stack is a synthetic user of the fake
+sign-in, and only their steps through the web app move a version; the e2e specs that move
+versions take a different seeded draft each and return it to draft first when an earlier run
+left it under review, and none publishes or withdraws, which the memory store could not undo;
+a fresh `make web-stack` starts every draft over.

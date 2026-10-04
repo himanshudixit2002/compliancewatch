@@ -275,7 +275,10 @@ product, [product.md](product.md)): every service on
 `SERVICE_PORT_BASE`+1 to +10 in the `SERVICES` order (8001 to 8010 with the example `.env`;
 `SERVICE_PORT_BASE=9200` in a second copy), on memory stores so no container is needed, with
 the profile's static GSTIN lookup, the billing provider `none` (`BILLING=memory` for a
-subscription demo), the publish flow and the KAG layer off, and the rulebook write token from `.env` or the placeholder `local-write-token`;
+subscription demo), the KAG layer off, and the rulebook publishing with its write and review
+tokens from `.env` or the placeholders `local-write-token` and `local-review-token` and, on the
+memory store, starting with the seed calendar's drafts (`CW_RULEBOOK_SEED_ON_START`, local and
+test only; with `STORE=postgres`, `make seed SERVICE=rulebook` writes them);
 pids and logs land in `var/web-stack`. `make web-stack-wait` waits for every `/health`,
 `make web-stack-logs SERVICE=identity` tails one log, `make web-stack-down` stops them all
 (memory stores forget their rows then; `STORE=postgres` runs the stores on the compose
