@@ -9,7 +9,16 @@ const SECURITY_HEADERS = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
 ];
 
+// `make product` runs its own `next dev` beside a `make web-dev` of the same checkout. Next allows
+// one dev server per build directory, so the product's builds into WEB_DIST_DIR (.next/product).
+// It also answers on 127.0.0.1 as well as localhost: cookies ignore the port, so a session opened
+// on localhost would be the other app's session too.
+const productDistDir = process.env.WEB_DIST_DIR;
+
 const nextConfig: NextConfig = {
+  ...(productDistDir === undefined || productDistDir === ""
+    ? {}
+    : { distDir: productDistDir, allowedDevOrigins: ["127.0.0.1"] }),
   reactStrictMode: true,
   poweredByHeader: false,
   // The shared UI kit and the flag registry's client are consumed from TypeScript source

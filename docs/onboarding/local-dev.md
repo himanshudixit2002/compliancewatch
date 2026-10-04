@@ -1,6 +1,9 @@
 # Local development
 
-Everything runs from the repo root through `make`; `make help` lists every target.
+Everything runs from the repo root through `make`; `make help` lists every target. To run the
+whole product (the one deployable's app and worker with Kafka and Temporal on, and the web app)
+and prove its event chain, see [product.md](product.md): `make product`, `make product-seed`,
+`make product-check`.
 
 ## Prerequisites
 
@@ -194,11 +197,13 @@ writing. Every version stays `needs_review` until an analyst reviews it.
 
 ## Row-level security in the dev stack
 
-Tenant tables (the obligation service's first) carry a policy on `tenant_id`, but the dev
-stack connects as `cw`, the container's superuser, and a superuser bypasses every policy. The
-policy is therefore visible but not enforced locally; the obligation integration test proves it
-through a plain role. A non-superuser application role for the dev stack arrives with the
-deployment work, where every service gets its own role.
+Tenant tables (the obligation service's first) carry a policy on `tenant_id`, but `make run`,
+`make worker` and `make web-stack` connect as `cw`, the container's superuser, and a superuser
+bypasses every policy. The policy is therefore visible but not enforced there, and the services
+whose queries leave the tenant to the policy (profile, the engine, obligation) read across
+tenants; the integration tests prove the policies through a plain role. `make product` connects
+as `cw_app`, a role that owns nothing and is not a superuser (`make product-role`), so the
+policies apply to the local product. A role per service arrives with the deployment work.
 
 ## Traces and metrics
 
@@ -264,7 +269,9 @@ Rewrite `CW_DATABASE_URL`, `CW_REDIS_URL`, `CW_KAFKA_BOOTSTRAP`, `CW_TEMPORAL_AD
 `CW_*_URL` service URLs to those ports as well. `make web-e2e` needs no container at all: it
 builds the app and runs Playwright against `next start` on `WEB_PORT`.
 
-The services behind the web app come up together with `make web-stack`: every service on
+The services behind the web app come up together with `make web-stack`, the UI-only stack (no
+worker, so no decision becomes obligations or a message there; `make product` is the full
+product, [product.md](product.md)): every service on
 `SERVICE_PORT_BASE`+1 to +10 in the `SERVICES` order (8001 to 8010 with the example `.env`;
 `SERVICE_PORT_BASE=9200` in a second copy), on memory stores so no container is needed, with
 the profile's static GSTIN lookup, the billing provider `none` (`BILLING=memory` for a

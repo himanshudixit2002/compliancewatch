@@ -130,6 +130,12 @@ port under `make run` and `make web-stack`. Outside `header` mode the worker sen
 with `CW_SERVICE_CLIENT_SECRET` set: locally the `CW_IDENTITY_DEV_CLIENT_SECRET` identity creates
 its dev clients, `worker` among them, with.
 
+`make product` does all of this on the dev stack with Kafka and Temporal on, the worker's health
+on 8081, the services connecting as `cw_app` so row-level security applies, the notification sink
+in place of the real channels, and the web app beside them; `make product-seed` and
+`make product-check` fill it and prove the chain from a published rule to a change card
+([docs/onboarding/product.md](../../docs/onboarding/product.md)).
+
 ## Adding to a service
 
 A change that adds a route, `build_app` argument, worker component or URL of another service

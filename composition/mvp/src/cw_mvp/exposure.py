@@ -97,6 +97,7 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "POST /v1/rulebook/search": PUBLIC,
         # The analysts' review queues, decisions and the publish flow.
         "GET /v1/rulebook/rules": ADMIN,
+        "GET /v1/rulebook/rules/{rule_key}/versions": ADMIN,
         "GET /v1/rulebook/documents/{document_id}": ADMIN,
         "GET /v1/rulebook/review/entities": ADMIN,
         "GET /v1/rulebook/review/entities/items": ADMIN,

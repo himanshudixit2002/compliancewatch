@@ -72,6 +72,17 @@ class SubmitIn(ActorIn):
     )
 
 
+class ApproveVersionIn(ActorIn):
+    synthetic: bool = Field(
+        default=False,
+        description=(
+            "An approval no analyst made (the local product's demo publication): it counts "
+            "towards the round, but the version keeps seed status needs_review. Refused (403) "
+            "unless CW_ENV is local or test"
+        ),
+    )
+
+
 class EventOut(BaseModel):
     event_id: UUID
     topic: str

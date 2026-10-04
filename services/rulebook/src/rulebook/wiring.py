@@ -30,7 +30,12 @@ from rulebook.application.relations import (
     StageRelationCandidates,
 )
 from rulebook.application.review import DecideMentionGroup, ListGroupItems, ListMentionGroups
-from rulebook.application.rule_versions import ListCitations, ListRulesInForce, ReadRuleVersion
+from rulebook.application.rule_versions import (
+    ListCitations,
+    ListRulesInForce,
+    ListRuleVersions,
+    ReadRuleVersion,
+)
 from rulebook.application.search import ListUnembeddedClauses, SearchClauses, StoreEmbeddings
 from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
 from rulebook.settings import RulebookSettings
@@ -53,6 +58,7 @@ class Wiring:
     reject_relation: RejectRelationCandidate
     list_rules: ListRules
     list_rules_in_force: ListRulesInForce
+    list_rule_versions: ListRuleVersions
     read_rule_version: ReadRuleVersion
     list_citations: ListCitations
     resolve_entity: ResolveEntity

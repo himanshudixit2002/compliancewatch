@@ -1,5 +1,5 @@
-"""The read use cases on the memory store: rule versions in force, citations, entity resolution,
-the clauses that mention an entity, relations and clauses."""
+"""The read use cases on the memory store: rule versions in force, every version of a rule,
+citations, entity resolution, the clauses that mention an entity, relations and clauses."""
 
 import hashlib
 from datetime import UTC, date, datetime
@@ -21,9 +21,19 @@ from rulebook.application.graph import (
     ReadEntity,
     ResolveEntity,
 )
-from rulebook.application.rule_versions import ListCitations, ListRulesInForce, ReadRuleVersion
+from rulebook.application.rule_versions import (
+    ListCitations,
+    ListRulesInForce,
+    ListRuleVersions,
+    ReadRuleVersion,
+)
 from rulebook.domain.documents import StoredDocument
-from rulebook.domain.errors import ClauseNotStoredError, UnknownEntityError, UnknownRuleVersionError
+from rulebook.domain.errors import (
+    ClauseNotStoredError,
+    UnknownEntityError,
+    UnknownRuleError,
+    UnknownRuleVersionError,
+)
 from rulebook.domain.graph import RelationQuery, ResolutionStatus
 from rulebook.domain.relations import RelationCandidate
 from rulebook.domain.rule_versions import IN_FORCE_STATUSES, in_force, out_of_force
@@ -176,6 +186,20 @@ def test_a_version_reads_in_any_status_with_its_citations(store: MemoryKnowledge
     assert citations[1].document_id == document
     assert citations[1].verified_at is not None
     assert ListCitations(store).run(version) == citations
+
+
+def test_every_version_of_a_rule_reads_in_any_status(store: MemoryKnowledgeStore) -> None:
+    _, first = store.add_rule("gstr3b_monthly", status=RuleVersionStatus.PUBLISHED)
+    second = store.add_version("gstr3b_monthly", effective_from=JULY)
+    store.add_rule("gstr1_monthly")
+    versions = ListRuleVersions(store).run("gstr3b_monthly")
+    assert [(v.rule_version_id, v.version, v.status) for v in versions] == [
+        (first, 1, RuleVersionStatus.PUBLISHED),
+        (second, 2, RuleVersionStatus.DRAFT),
+    ]
+    assert {v.seed_status for v in versions} == {SeedStatus.NEEDS_REVIEW}
+    with pytest.raises(UnknownRuleError, match="no_such_rule"):
+        ListRuleVersions(store).run("no_such_rule")
 
 
 def test_unknown_versions_are_reported(store: MemoryKnowledgeStore) -> None:

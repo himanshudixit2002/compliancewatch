@@ -3,8 +3,9 @@ route is an analyst's action (``api.deps``): an analyst cites and submits, a rev
 publishes and withdraws, either returns a version to draft, and any regulatory role runs the
 sweep; without a bearer the review token opens them all, in header and dual mode. A signed-in
 user is the actor of the step, whatever ``actor_id`` the body names, so two approvals of a
-high-impact version come from two people. Publishing, withdrawing and the sweep also need
-``CW_RULEBOOK_PUBLISH_ENABLED``."""
+high-impact version come from two people. An approval marked ``synthetic`` (the local product's
+demo publication) leaves the version needs_review and is refused outside local and test.
+Publishing, withdrawing and the sweep also need ``CW_RULEBOOK_PUBLISH_ENABLED``."""
 
 from uuid import UUID
 
@@ -22,6 +23,7 @@ from rulebook.api.deps import (
 )
 from rulebook.api.publication_schemas import (
     ActorIn,
+    ApproveVersionIn,
     CitationsIn,
     CitationsOut,
     LifecycleOut,
@@ -83,10 +85,13 @@ def return_to_draft(
     responses=problem_responses(401, 403, 404, 409, 422, 503),
 )
 def approve(
-    rule_version_id: UUID, body: ActorIn, reviewer: Reviewing, wired: Wired
+    rule_version_id: UUID, body: ApproveVersionIn, reviewer: Reviewing, wired: Wired
 ) -> LifecycleOut:
     state = wired.approve_version.run(
-        RuleVersionId(rule_version_id), actor_id=actor_of(reviewer, body.actor_id), note=body.note
+        RuleVersionId(rule_version_id),
+        actor_id=actor_of(reviewer, body.actor_id),
+        note=body.note,
+        synthetic=body.synthetic,
     )
     return LifecycleOut.from_state(state)
 

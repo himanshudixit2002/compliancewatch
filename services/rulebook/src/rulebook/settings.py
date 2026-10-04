@@ -7,6 +7,8 @@ from pydantic import SecretStr
 from py_common.settings import Settings
 
 Store = Literal["memory", "postgres"]
+SYNTHETIC_ENVIRONMENTS = frozenset({"local", "test"})
+"""Where a synthetic approval is accepted."""
 
 
 class RulebookSettings(Settings):
@@ -31,9 +33,17 @@ class RulebookSettings(Settings):
     obligation consumer of the rule events is live). Off, those routes answer 503, the
     ``rulebook-transitions`` command stops without changing anything, and citing and review
     still work.
+
+    ``synthetic_approvals_allowed`` follows ``CW_ENV``: only local and test accept an approval
+    marked synthetic, the one the local product's demo publication sends, which counts towards
+    the review round but leaves the version needs_review.
     """
 
     rulebook_store: Store = "postgres"
     rulebook_write_token: SecretStr | None = None
     rulebook_review_token: SecretStr | None = None
     rulebook_publish_enabled: bool = False
+
+    @property
+    def synthetic_approvals_allowed(self) -> bool:
+        return self.env in SYNTHETIC_ENVIRONMENTS

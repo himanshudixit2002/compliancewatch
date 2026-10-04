@@ -88,6 +88,23 @@ def test_an_unknown_rule_version_is_404(client: TestClient, suffix: str) -> None
     assert response.json()["type"].endswith("rulebook-rule-version-not-found")
 
 
+def test_every_version_of_a_rule(client: TestClient, store: MemoryKnowledgeStore) -> None:
+    _, first = store.add_rule("gstr3b_monthly", title="GSTR-3B", status=RuleVersionStatus.PUBLISHED)
+    second = store.add_version("gstr3b_monthly", title="GSTR-3B", effective_from=date(2026, 7, 1))
+    response = client.get(f"{BASE}/rules/gstr3b_monthly/versions")
+    assert response.status_code == 200
+    assert [(v["rule_version_id"], v["version"], v["status"]) for v in response.json()] == [
+        (str(first), 1, "published"),
+        (str(second), 2, "draft"),
+    ]
+    unknown = client.get(f"{BASE}/rules/no_such_rule/versions")
+    assert (unknown.status_code, unknown.json()["type"]) == (
+        404,
+        "urn:compliancewatch:problem:rulebook-rule-not-found",
+    )
+    assert client.get(f"{BASE}/rules/Not-A-Key/versions").status_code == 422
+
+
 def test_resolve_answers_200_with_a_status(client: TestClient, store: MemoryKnowledgeStore) -> None:
     form = store.add_entity(EntityType.FORM, "GSTR-3B")
     resolved = client.get(f"{BASE}/entities/resolve", params={"type": "form", "name": "gstr 3b"})

@@ -68,6 +68,7 @@ OPERATIONS = frozenset(
         "POST /v1/rulebook/rule-versions/{rule_version_id}/submit",
         "POST /v1/rulebook/rule-versions/{rule_version_id}/withdraw",
         "GET /v1/rulebook/rules",
+        "GET /v1/rulebook/rules/{rule_key}/versions",
         "POST /v1/rulebook/search",
     }
 )

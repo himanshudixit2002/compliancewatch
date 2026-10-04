@@ -118,6 +118,12 @@ make test                     # pytest with the coverage gate + vitest
 make check                    # the CI gates that need no Docker (CONTRIBUTING.md lists every gate)
 ```
 
+The whole product on your machine: `make product` (the one deployable's app and worker with Kafka
+and Temporal on, and the web app), then `make product-seed` and `make product-check`, which proves
+that a published rule becomes decisions, obligations and a change card
+([docs/onboarding/product.md](docs/onboarding/product.md)). `make web-stack` is the UI-only stack,
+without the worker.
+
 Prerequisites: Node 22.18+ (type stripping for the bot's dev script), Docker (Docker Desktop or `brew install colima docker docker-compose docker-buildx && colima start --cpu 4 --memory 8 --disk 60`), `uv`, `pnpm` and Node 22+. Details and troubleshooting in [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
 
 ## Layout principles (section 13)
@@ -255,6 +261,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | `make eval-check` | The KAG question-answering golden set and its world are well formed: verbatim quotes, seed supports, scripted plans and answers against qa's schemas |
 | `make label` | Labelling tool for the extraction golden set: `ARGS="check"`, `"index ..."`, `"prepare ..."` |
 | `make demo` | The demo tenant end to end in one process: consent, profile, rules, obligations, a reminder ([docs/onboarding/demo.md](docs/onboarding/demo.md)) |
+| `make product` / `product-seed` / `product-check` / `product-logs PROC=` / `product-down` | The local product: the one deployable's app and worker (Kafka, Temporal on) and the web app on the dev stack; synthetic tenants and the demo publication; the check that a published rule becomes decisions, obligations and a change card ([docs/onboarding/product.md](docs/onboarding/product.md)) |
 | `make runbooks-check` | Every Prometheus alert links an existing runbook (part of `make check`) |
 | `make dev-backup` / `dev-restore FILE=` | pg_dump and pg_restore of the dev database ([docs/runbooks/backup-restore.md](docs/runbooks/backup-restore.md)) |
 | `make hooks` | Install the pre-commit and commit-msg hooks |
@@ -306,7 +313,7 @@ cw-mvp worker  # background work: consumers, periodic jobs, Temporal workers; he
 
 Both switches are off by default; enable them with `CW_WORKER_KAFKA_ENABLED=1` (outbox relays and consumers) and `CW_WORKER_TEMPORAL_ENABLED=1` (Temporal workers on one client). The worker calls the app process's internal listener as the `worker` service client; its scopes are in `services/identity/src/identity/identity_dev_clients.toml`.
 
-`cw_mvp.testing` builds the same composition on memory stores, without Postgres, for tests and demos; `tools/demo/tests/unit/test_mvp_flow.py` onboards and evaluates a business through both listeners. Running both processes locally: [composition/mvp/README.md](composition/mvp/README.md#running-it-locally).
+`cw_mvp.testing` builds the same composition on memory stores, without Postgres, for tests and demos; `tools/demo/tests/unit/test_mvp_flow.py` onboards and evaluates a business through both listeners. Running both processes locally: [composition/mvp/README.md](composition/mvp/README.md#running-it-locally). `make product` runs both on the dev stack with Kafka and Temporal on ([docs/onboarding/product.md](docs/onboarding/product.md)).
 
 ## Not in this repository yet
 

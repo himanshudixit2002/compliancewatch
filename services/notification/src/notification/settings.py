@@ -21,17 +21,26 @@ with ``smtp_username`` and ``smtp_password`` when a username is set. The SES bou
 complaint feedback arrives through SNS with HTTP basic credentials whose password is
 ``notification_email_feedback_token`` (unset, the route refuses everything), and, when
 ``notification_ses_topic_arn`` is set, only from that topic.
+
+``notification_channels`` picks what delivers: ``real`` (the default) wires the WhatsApp and email
+channels as above; ``sink`` wires ``infrastructure.sink.SinkChannel`` for both, which records
+each message as a JSON line in ``notification_sink_path`` instead of sending it (the local
+product, ``make product``). The sink is configuration for local stacks and tests, never a
+rollout, and is refused unless ``env`` is local or test.
 """
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 
 from py_common.settings import Settings
 
 Store = Literal["memory", "postgres"]
+Channels = Literal["real", "sink"]
 CLOCK_TIME = r"^([01][0-9]|2[0-3]):[0-5][0-9]$"
 """``HH:MM`` on a 24-hour clock."""
+SINK_ENVIRONMENTS = frozenset({"local", "test"})
+"""Where the sink may replace the channels."""
 
 
 class NotificationSettings(Settings):
@@ -54,5 +63,16 @@ class NotificationSettings(Settings):
     email_from: str = ""
     notification_email_feedback_token: SecretStr | None = None
     notification_ses_topic_arn: str = ""
+    notification_channels: Channels = "real"
+    notification_sink_path: str = "var/notification/sink.jsonl"
     rulebook_url: str = "http://localhost:8003"
     web_base_url: str = "http://localhost:3000"
+
+    @model_validator(mode="after")
+    def _sink_stays_local(self) -> Self:
+        if self.notification_channels == "sink" and self.env not in SINK_ENVIRONMENTS:
+            raise ValueError(
+                "CW_NOTIFICATION_CHANNELS=sink records messages instead of sending them: it is "
+                f"refused when CW_ENV is {self.env}, only local and test take it"
+            )
+        return self

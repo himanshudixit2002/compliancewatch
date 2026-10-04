@@ -1,14 +1,17 @@
-"""Read rule versions: the ones in force on a date, one version in any status, its citations.
+"""Read rule versions: the ones in force on a date, every version of one rule in any status, one
+version in any status, its citations.
 
 The Q&A service answers from exactly what ``ListRulesInForce`` returns for the question's date,
 so a draft, a version under review or a withdrawn one never reaches an answer.
+``ListRuleVersions`` is the editorial view: the drafts the seed command writes and the versions
+past them, which is how a workbench finds a version to cite and submit.
 """
 
 from collections.abc import Sequence
 from datetime import date
 
-from domain_kernel.ids import RuleVersionId
-from rulebook.domain.errors import UnknownRuleVersionError
+from domain_kernel.ids import RuleId, RuleVersionId
+from rulebook.domain.errors import UnknownRuleError, UnknownRuleVersionError
 from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
 from rulebook.domain.rule_versions import CitationRecord, RuleVersionRecord
 
@@ -36,6 +39,20 @@ class ListRulesInForce:
                 limit=min(max(limit, 1), MAX_VERSIONS),
                 after=after,
             )
+
+
+class ListRuleVersions:
+    """Every version of the rule with ``rule_key``, by version number, in any status."""
+
+    def __init__(self, unit_of_work: KnowledgeUnitOfWorkFactory) -> None:
+        self._unit_of_work = unit_of_work
+
+    def run(self, rule_key: str) -> Sequence[RuleVersionRecord]:
+        with self._unit_of_work() as uow:
+            rule_id = uow.rules.rule_id(rule_key)
+            if rule_id is None:
+                raise UnknownRuleError(rule_key)
+            return uow.rule_versions.of_rule(RuleId(rule_id))
 
 
 class ReadRuleVersion:

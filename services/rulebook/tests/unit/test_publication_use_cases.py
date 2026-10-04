@@ -35,6 +35,7 @@ from rulebook.domain.errors import (
     PublishingDisabledError,
     ReplacementsPendingError,
     RuleVersionNotEditableError,
+    SyntheticApprovalRefusedError,
     UnknownClauseError,
     UnknownRuleVersionError,
 )
@@ -328,6 +329,59 @@ def test_an_approved_version_is_returned_to_draft_to_change_it(
         DecisionAction.APPROVED,
         DecisionAction.PUBLISHED,
     ]
+
+
+def test_a_synthetic_round_publishes_and_leaves_the_version_needs_review(
+    store: MemoryKnowledgeStore, clock: Clock, flow: Flow, clause: ClauseId
+) -> None:
+    version = draft(store)
+    synthetic = ApproveVersion(store, clock, synthetic_allowed=True)
+    flow.cite.run(version, [CitationInput(clause, QUOTE)])
+    flow.submit.run(version, actor_id=ANALYST, high_impact=True, note="synthetic")
+    first = synthetic.run(version, actor_id=REVIEWER, synthetic=True)
+    assert first.record.status is RuleVersionStatus.IN_REVIEW
+    with pytest.raises(DuplicateApproverError):
+        synthetic.run(version, actor_id=REVIEWER, synthetic=True)
+    second = synthetic.run(version, actor_id=UserId(UUID(int=13)), synthetic=True)
+    assert (second.record.status, second.record.seed_status) == (
+        RuleVersionStatus.APPROVED,
+        SeedStatus.NEEDS_REVIEW,
+    )
+    published = flow.publish.run(version, actor_id=REVIEWER).plan.published
+    assert (published.status, published.seed_status) == (
+        RuleVersionStatus.PUBLISHED,
+        SeedStatus.NEEDS_REVIEW,
+    )
+
+
+def test_a_real_approval_that_completes_the_round_marks_the_version_reviewed(
+    store: MemoryKnowledgeStore, clock: Clock, flow: Flow, clause: ClauseId
+) -> None:
+    version = draft(store)
+    flow.cite.run(version, [CitationInput(clause, QUOTE)])
+    flow.submit.run(version, actor_id=ANALYST, high_impact=True)
+    ApproveVersion(store, clock, synthetic_allowed=True).run(
+        version, actor_id=REVIEWER, synthetic=True
+    )
+    assert flow.approve.run(version, actor_id=ANALYST).record.seed_status is SeedStatus.REVIEWED
+
+
+def test_a_synthetic_approval_is_refused_unless_allowed(
+    store: MemoryKnowledgeStore, flow: Flow, clause: ClauseId
+) -> None:
+    version = draft(store)
+    flow.cite.run(version, [CitationInput(clause, QUOTE)])
+    flow.submit.run(version, actor_id=ANALYST)
+    with pytest.raises(SyntheticApprovalRefusedError, match="local or test"):
+        flow.approve.run(version, actor_id=REVIEWER, synthetic=True)
+    with store() as uow:
+        record = uow.rule_versions.get(version)
+    assert record is not None
+    assert (record.status, record.seed_status) == (
+        RuleVersionStatus.IN_REVIEW,
+        SeedStatus.NEEDS_REVIEW,
+    )
+    assert [d.action for d in store.decisions(version)] == [DecisionAction.SUBMITTED]
 
 
 def test_review_steps_follow_the_transition_table(store: MemoryKnowledgeStore, flow: Flow) -> None:

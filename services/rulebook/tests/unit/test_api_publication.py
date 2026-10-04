@@ -198,6 +198,41 @@ def test_a_version_goes_from_draft_to_published(
     assert sweep.json()["transitions"] == []
 
 
+def test_synthetic_approvals_publish_a_version_that_stays_needs_review(
+    publishing_app: FastAPI, publishing: TestClient
+) -> None:
+    store = store_of(publishing_app, publishing)
+    _, version = store.add_rule("gstr3b_extension", title="Extension")
+    cite(publishing, version)
+    step(publishing, version, "submit", high_impact=True)
+    for reviewer in (ANALYST, REVIEWER):
+        approved = publishing.post(
+            f"{BASE}/rule-versions/{version}/approve",
+            json={"actor_id": reviewer, "note": "synthetic", "synthetic": True},
+            headers=REVIEW,
+        )
+        assert approved.status_code == 200
+    assert (approved.json()["status"], approved.json()["seed_status"]) == (
+        "approved",
+        "needs_review",
+    )
+    published = step(publishing, version, "publish").json()
+    assert (published["status"], published["seed_status"]) == ("published", "needs_review")
+
+
+def test_a_synthetic_approval_is_refused_outside_local_and_test() -> None:
+    with TestClient(build_app(rulebook_settings(env="staging"))) as staging:
+        refused = staging.post(
+            f"{BASE}/rule-versions/{UUID(int=1)}/approve",
+            json={"actor_id": REVIEWER, "synthetic": True},
+            headers=REVIEW,
+        )
+    assert (refused.status_code, refused.json()["type"]) == (
+        403,
+        PROBLEM + "rulebook-synthetic-approval-refused",
+    )
+
+
 def test_problem_types_of_the_flow(publishing_app: FastAPI, publishing: TestClient) -> None:
     store = store_of(publishing_app, publishing)
     _, version = store.add_rule("gstr3b_extension", title="Extension")

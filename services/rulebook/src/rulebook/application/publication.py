@@ -4,7 +4,9 @@ replacement takes effect.
 A version is drafted (the seed calendar writes drafts), cited, submitted for review, approved by
 one analyst or two different ones when it is high impact, and published (ADR-006). Citations and
 relations change only while it is a draft, so the round approves what is published; a version
-under review or approved is returned to draft to change them. Each step is
+under review or approved is returned to draft to change them. An approval can be synthetic,
+made by no analyst (the local product's demo publication): it counts towards the round but never
+marks the version reviewed, and it is refused outside local and test. Each step is
 one transaction: it locks the version, checks the move against the kernel's transition table,
 writes the new state and appends a row to the decision audit. Publishing writes its events to
 the outbox in the same transaction; ``rulebook.domain.publication`` decides what it changes.
@@ -32,6 +34,7 @@ from rulebook.domain.errors import (
     DuplicateApproverError,
     PublishingDisabledError,
     RuleVersionNotEditableError,
+    SyntheticApprovalRefusedError,
     UnknownClauseError,
     UnknownRuleVersionError,
 )
@@ -292,15 +295,36 @@ class ReturnToDraft:
 class ApproveVersion:
     """Record one approval of the current round. The approval that completes the round (the
     first, or the second different approver of a high-impact version) moves the version to
-    approved and marks its seed status reviewed."""
+    approved and marks its seed status reviewed.
 
-    def __init__(self, unit_of_work: KnowledgeUnitOfWorkFactory, clock: Clock = default_clock):
+    A ``synthetic`` approval is one no analyst made: the local product publishes seed rules
+    with synthetic reviewers so that its event chain has published rules to work on. It counts
+    towards the round like any other, but a round it completes leaves the seed status as it was
+    (needs_review), so no version claims a review that never happened. It is accepted only
+    where ``synthetic_allowed`` (CW_ENV local or test); a real approval that completes a round
+    a synthetic one started still marks the version reviewed, as its approver attests."""
+
+    def __init__(
+        self,
+        unit_of_work: KnowledgeUnitOfWorkFactory,
+        clock: Clock = default_clock,
+        *,
+        synthetic_allowed: bool = False,
+    ) -> None:
         self._unit_of_work = unit_of_work
         self._clock = clock
+        self._synthetic_allowed = synthetic_allowed
 
     def run(
-        self, rule_version_id: RuleVersionId, *, actor_id: UserId, note: str = ""
+        self,
+        rule_version_id: RuleVersionId,
+        *,
+        actor_id: UserId,
+        note: str = "",
+        synthetic: bool = False,
     ) -> VersionState:
+        if synthetic and not self._synthetic_allowed:
+            raise SyntheticApprovalRefusedError()
         now = self._clock()
         with self._unit_of_work() as uow:
             version = _locked(uow, rule_version_id)
@@ -319,7 +343,9 @@ class ApproveVersion:
             after = version
             if len(approvers) >= required_approvals(version.high_impact):
                 after = replace(
-                    version, status=RuleVersionStatus.APPROVED, seed_status=SeedStatus.REVIEWED
+                    version,
+                    status=RuleVersionStatus.APPROVED,
+                    seed_status=version.seed_status if synthetic else SeedStatus.REVIEWED,
                 )
                 uow.rule_versions.save_lifecycle(after)
             uow.rule_versions.record_decision(
