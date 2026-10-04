@@ -8,7 +8,8 @@ that is not the event loop's, and a handler meant for this store refuses any oth
 
 import asyncio
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
@@ -31,11 +32,14 @@ from py_common.outbox import (
     SyncUnit,
     outbox_event,
     processed_event,
+    read_first_store,
+    read_then_write,
     run_consumer,
     sync_handler,
 )
 from py_common.outbox import sync as sync_module
 from py_common.outbox.consumer import Handler
+from py_common.outbox.store import ProcessedStore
 from py_common.outbox.testing import FakeProducer, MemoryProcessedStore
 from py_common.settings import Settings
 
@@ -262,3 +266,125 @@ async def test_run_consumer_wires_the_store_and_the_producer(
     assert producer.client_id == f"cw-consumer-{GROUP}"
     assert producer.kafka == KafkaClientConfig("broker:9092")
     assert not producer.entered, "the producer is stopped when the consumer returns"
+
+
+# ------------------------------------------------- units that begin on write (read_then_write)
+
+
+class Reads:
+    """A ``read`` that records whether the unit's connection had a transaction open."""
+
+    def __init__(self, unit_connection: list[Connection]) -> None:
+        self.unit_connection = unit_connection
+        self.open_during_read: list[bool] = []
+        self.threads: list[int] = []
+
+    def __call__(self, item: EventMessage) -> str:
+        self.threads.append(threading.get_ident())
+        (connection,) = self.unit_connection
+        self.open_during_read.append(connection.in_transaction())
+        return str(item.payload["title"]).upper()
+
+
+def write_plan(item: EventMessage, plan: str, connection: Connection) -> None:
+    connection.execute(handled.insert().values(title=plan))
+    assert connection.in_transaction(), "the first write begins the unit's transaction"
+
+
+def remembering(store: ProcessedStore, seen: list[Connection]) -> Any:
+    """``store`` whose units record their connection, so a read can look at it."""
+
+    class Remembering:
+        def unit(self) -> Any:
+            return self._unit()
+
+        @asynccontextmanager
+        async def _unit(self) -> AsyncIterator[Any]:
+            async with store.unit() as unit:
+                assert isinstance(unit, SyncUnit)
+                seen[:] = [unit.connection]
+                yield unit
+
+    return Remembering()
+
+
+async def test_the_reads_run_with_no_transaction_open_and_the_writes_commit_with_the_inbox(
+    engine: Engine,
+) -> None:
+    seen: list[Connection] = []
+    reads = Reads(seen)
+    producer = FakeProducer()
+    store = remembering(read_first_store(engine, GROUP), seen)
+    run = consumer(store, read_then_write(reads, write_plan), producer)
+    first = message("first")
+    assert await run.process(inbound(first)) is Outcome.PROCESSED
+    assert await run.process(inbound(first, offset=1)) is Outcome.SKIPPED, "a redelivery"
+    assert reads.open_during_read == [False]
+    assert reads.threads[0] != threading.get_ident(), "the reads never block the loop"
+    assert titles(engine) == ["FIRST"]
+    assert processed(engine) == [(GROUP, TOPIC)]
+    assert producer.sent == []
+
+
+async def test_a_failing_write_rolls_back_and_is_dead_lettered(engine: Engine) -> None:
+    def explode(item: EventMessage, plan: str, connection: Connection) -> None:
+        write_plan(item, plan, connection)
+        raise RuntimeError("cannot write")
+
+    producer = FakeProducer()
+    run = consumer(read_first_store(engine, GROUP), read_then_write(str, explode), producer)
+    assert await run.process(inbound(message("poison"))) is Outcome.DEAD
+    assert titles(engine) == []
+    assert processed(engine) == []
+    assert producer.topics() == [f"{TOPIC}.{GROUP}.dlq"]
+
+
+async def test_a_failing_read_writes_nothing(engine: Engine) -> None:
+    def unreachable(item: EventMessage) -> str:
+        raise ConnectionError("the other service did not answer")
+
+    producer = FakeProducer()
+    run = consumer(
+        read_first_store(engine, GROUP), read_then_write(unreachable, write_plan), producer
+    )
+    assert await run.process(inbound(message("later"))) is Outcome.DEAD
+    assert titles(engine) == []
+    assert processed(engine) == []
+    assert b"did not answer" in (producer.sent[0].header("error") or b"")
+
+
+@pytest.mark.parametrize(
+    "store",
+    [
+        lambda engine: SyncProcessedStore(engine, group_id=GROUP),
+        lambda engine: MemoryProcessedStore(),
+    ],
+    ids=["begins-at-open", "memory"],
+)
+async def test_read_then_write_refuses_a_unit_that_does_not_begin_on_write(
+    engine: Engine, store: Any
+) -> None:
+    producer = FakeProducer()
+    reads: list[EventMessage] = []
+
+    def read(item: EventMessage) -> str:
+        reads.append(item)
+        return "read"
+
+    run = consumer(store(engine), read_then_write(read, write_plan), producer, attempts=1)
+    assert await run.process(inbound(message("eager"))) is Outcome.DEAD
+    assert reads == [], "nothing is read inside a transaction"
+    assert b"read_first_store" in (producer.sent[0].header("error") or b"")
+
+
+async def test_a_unit_that_begins_on_write_is_not_in_a_transaction_after_the_inbox_check(
+    engine: Engine,
+) -> None:
+    async with read_first_store(engine, GROUP).unit() as unit:
+        assert isinstance(unit, SyncUnit)
+        assert unit.begins_on_write
+        assert not await unit.already_processed(message("x").event_id)
+        assert not await unit.run(lambda connection: connection.in_transaction())
+        await unit.run(lambda c: c.execute(handled.insert().values(title="kept")))
+        assert await unit.run(lambda connection: connection.in_transaction())
+    assert titles(engine) == ["kept"]

@@ -11,8 +11,9 @@ consume them once.
 - ``consumer``: ``IdempotentConsumer`` processes each event id once per consumer group and
   dead-letters what its handler cannot process.
 - ``sync``: ``SyncProcessedStore`` and ``sync_handler`` run a handler written against a sync
-  connection in the consumer's transaction, on a thread of its own; ``run_consumer`` runs one
-  consumer group until a stop event.
+  connection in the consumer's transaction, on a thread of its own; ``read_first_store`` and
+  ``read_then_write`` run a handler that reads other services before it writes, with no
+  transaction open while it reads; ``run_consumer`` runs one consumer group until a stop event.
 """
 
 from py_common.outbox.consumer import ConsumerConfig, IdempotentConsumer, InboundRecord, Outcome
@@ -40,6 +41,8 @@ from py_common.outbox.sync import (
     SyncHandler,
     SyncProcessedStore,
     SyncUnit,
+    read_first_store,
+    read_then_write,
     run_consumer,
     sync_handler,
 )
@@ -75,6 +78,8 @@ __all__ = [
     "drop_processed_event_table",
     "outbox_event",
     "processed_event",
+    "read_first_store",
+    "read_then_write",
     "run_consumer",
     "sync_handler",
 ]
