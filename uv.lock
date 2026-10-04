@@ -384,6 +384,7 @@ version = "0.1.0"
 source = { editable = "services/applicability-engine" }
 dependencies = [
     { name = "alembic" },
+    { name = "compliancewatch-contracts" },
     { name = "domain-kernel" },
     { name = "fastapi" },
     { name = "httpx2" },
@@ -399,6 +400,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.16" },
+    { name = "compliancewatch-contracts", editable = "packages/contracts/clients/python" },
     { name = "domain-kernel", editable = "packages/domain-kernel" },
     { name = "fastapi", specifier = ">=0.120" },
     { name = "httpx2", specifier = ">=2.13" },

@@ -95,6 +95,53 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/applicability-engine/review-items": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * The tenant's review items, oldest first, a page at a time
+     * @description Decisions a person has to settle: a free-text predicate nobody judged, or a judgement
+     *     below the review threshold. A decision unsure only for an attribute the profile has not set
+     *     opens no item. Each item carries the decision under review with every predicate's outcome;
+     *     at most one item of a business and rule version is open.
+     */
+    get: operations["list_review_items_v1_applicability_engine_review_items_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/applicability-engine/review-items/{item_id}/resolve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Settle an open review item: applies, not_applicable or dismiss, with a note
+     * @description applies and not_applicable append a decision with trigger review, the reviewer's result
+     *     and confidence 1, made from the decision under review, and publish applicability.decided;
+     *     the obligation service then makes or closes the obligations. dismiss appends nothing. A
+     *     signed-in reviewer is the one recorded; without a token the body's resolved_by is. 404 when
+     *     the tenant has no such item, 409 when it is already resolved.
+     */
+    post: operations["resolve_review_item_v1_applicability_engine_review_items__item_id__resolve_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 };
 export type webhooks = Record<string, never>;
 export type components = {
@@ -178,6 +225,16 @@ export type components = {
        */
       next_cursor: string | null;
     };
+    /** Page[ReviewItemOut] */
+    Page_ReviewItemOut_: {
+      /** Items */
+      items: components["schemas"]["ReviewItemOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
     /**
      * PredicateKind
      * @enum {string}
@@ -248,11 +305,87 @@ export type components = {
       status: string;
     };
     /**
-     * Trigger
-     * @description What caused an evaluation; the ``trigger`` of ``applicability.decided``.
+     * Resolution
+     * @description What the reviewer settled on: a result for the decision, or no decision at all.
      * @enum {string}
      */
-    Trigger: "manual" | "rule_published" | "profile_updated";
+    Resolution: "applies" | "not_applicable" | "dismiss";
+    /** ResolveIn */
+    ResolveIn: {
+      /**
+       * Note
+       * @description Why: kept with the item
+       */
+      note: string;
+      /** @description applies or not_applicable appends a decision with trigger review and publishes applicability.decided; dismiss closes the item and appends nothing */
+      resolution: components["schemas"]["Resolution"];
+      /**
+       * Resolved By
+       * Format: uuid
+       * @description The reviewer settling the item; a signed-in user's token overrides it
+       */
+      resolved_by: string;
+    };
+    /**
+     * ReviewItemOut
+     * @description A decision waiting for a reviewer, or settled. ``decision`` is the decision under review:
+     *     the latest of the business and the rule version while the item is open. ``resolved_by`` is
+     *     the reviewer, or null when a later decision that needs no review settled the item;
+     *     ``resolution_decision_id`` is the decision a resolution to applies or not_applicable
+     *     appended.
+     */
+    ReviewItemOut: {
+      /**
+       * Business Id
+       * Format: uuid
+       */
+      business_id: string;
+      decision: components["schemas"]["DecisionOut"];
+      /**
+       * Item Id
+       * Format: uuid
+       */
+      item_id: string;
+      /** Note */
+      note: string;
+      /**
+       * Opened At
+       * Format: date-time
+       */
+      opened_at: string;
+      reason: components["schemas"]["ReviewReason"];
+      resolution: components["schemas"]["Resolution"] | null;
+      /** Resolution Decision Id */
+      resolution_decision_id: string | null;
+      /** Resolved At */
+      resolved_at: string | null;
+      /** Resolved By */
+      resolved_by: string | null;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+      status: components["schemas"]["ReviewStatus"];
+    };
+    /**
+     * ReviewReason
+     * @description Why a decision needs a person.
+     * @enum {string}
+     */
+    ReviewReason: "free_text" | "low_confidence";
+    /**
+     * ReviewStatus
+     * @enum {string}
+     */
+    ReviewStatus: "open" | "resolved";
+    /**
+     * Trigger
+     * @description What caused an evaluation; the ``trigger`` of ``applicability.decided``. ``review`` is a
+     *     person's resolution of a review item.
+     * @enum {string}
+     */
+    Trigger: "manual" | "rule_published" | "profile_updated" | "review";
     /**
      * ValidationIssue
      * @description One failed check on the request. The submitted value is not echoed back.
@@ -564,6 +697,146 @@ export interface operations {
           "application/json": {
             [key: string]: string;
           };
+        };
+      };
+    };
+  };
+  list_review_items_v1_applicability_engine_review_items_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Only the items of this status; every item without */
+        status?: components["schemas"]["ReviewStatus"] | null;
+      };
+      header?: {
+        /** @description The tenant whose review items to read or settle. A regulatory user's token names the internal tenant, so on the review routes the header names the tenant reviewed. */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_ReviewItemOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  resolve_review_item_v1_applicability_engine_review_items__item_id__resolve_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The tenant whose review items to read or settle. A regulatory user's token names the internal tenant, so on the review routes the header names the tenant reviewed. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        item_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ResolveIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReviewItemOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
     };

@@ -10,7 +10,7 @@
 
 [applicability-engine]
 scopes = ["tenant:act"]
-reason = "evaluates a rule version for a tenant's business: reads the business's profile snapshot for that tenant and the published rule version, whose read routes need no scope"
+reason = "evaluates a rule version for a tenant's business, and recomputes a business on profile.updated: reads the business, its registrations and their profile snapshots for that tenant, and the published rule versions, whose read routes need no scope"
 
 [notification]
 scopes = []

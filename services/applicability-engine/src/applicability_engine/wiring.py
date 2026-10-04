@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from applicability_engine.application.evaluate import EvaluateRule
 from applicability_engine.application.queries import ListDecisions, ReadDecision
+from applicability_engine.application.review import ListReviewItems, ResolveReviewItem
 from applicability_engine.domain.ports import ProfileReader, RulebookReader
 from applicability_engine.domain.repository import UnitOfWorkFactory
 from applicability_engine.settings import ApplicabilityEngineSettings
@@ -29,3 +30,5 @@ class Wiring:
     evaluate: EvaluateRule
     list_decisions: ListDecisions
     read_decision: ReadDecision
+    list_review_items: ListReviewItems
+    resolve_review_item: ResolveReviewItem

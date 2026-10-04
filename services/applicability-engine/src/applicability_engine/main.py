@@ -7,7 +7,9 @@ own access token once ``CW_SERVICE_CLIENT_SECRET`` is set, or with the token of 
 when the process that hosts the engine passes one (identity's issuer in the process); tests pass
 their own ``Readers``. The caller and its tenant come from ``py_common.auth`` by ``CW_AUTH_MODE``
 (``api.deps``). Idempotency keys live next to the decisions (``idempotency_key``, migration
-0001), each key in its own short transaction. The ontology is the packaged one.
+0001), each key in its own short transaction. The ontology is the packaged one. The review
+queue's routes run on the same units of work; the profile.updated consumer is the worker's
+(``applicability_engine.worker``), which builds its readers with ``http_readers`` too.
 """
 
 from collections.abc import Callable
@@ -19,11 +21,14 @@ from applicability_engine import __version__
 from applicability_engine.api.router import router
 from applicability_engine.application.evaluate import EvaluateRule
 from applicability_engine.application.queries import ListDecisions, ReadDecision
+from applicability_engine.application.review import ListReviewItems, ResolveReviewItem
 from applicability_engine.domain.errors import (
     ApplicabilityTenantRequiredError,
     BusinessNotFoundError,
     DecisionNotFoundError,
     DependencyUnavailableError,
+    ReviewItemNotFoundError,
+    ReviewItemResolvedError,
     RuleVersionNotFoundError,
     RuleVersionNotPublishedError,
 )
@@ -49,7 +54,9 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     BusinessNotFoundError: 404,
     RuleVersionNotFoundError: 404,
     DecisionNotFoundError: 404,
+    ReviewItemNotFoundError: 404,
     RuleVersionNotPublishedError: 409,
+    ReviewItemResolvedError: 409,
     DependencyUnavailableError: 503,
 }
 
@@ -61,7 +68,12 @@ def http_readers(
     timeout = settings.applicability_engine_http_timeout_seconds
     return Readers(
         profiles=HttpProfiles(settings.profile_url, auth=auth, timeout_seconds=timeout),
-        rulebook=HttpRulebook(settings.rulebook_url, auth=auth, timeout_seconds=timeout),
+        rulebook=HttpRulebook(
+            settings.rulebook_url,
+            auth=auth,
+            timeout_seconds=timeout,
+            cache_seconds=settings.applicability_engine_rules_cache_seconds,
+        ),
     )
 
 
@@ -99,6 +111,8 @@ def wire(
         ),
         list_decisions=ListDecisions(unit_of_work),
         read_decision=ReadDecision(unit_of_work),
+        list_review_items=ListReviewItems(unit_of_work),
+        resolve_review_item=ResolveReviewItem(unit_of_work),
     )
 
 
