@@ -171,8 +171,6 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
     ping: Callable[[], bool]
     if settings.rulebook_store == "memory":
         memory = MemoryKnowledgeStore()
-        if settings.rulebook_seed_on_start:
-            seed_memory_store(memory)
         unit_of_work, ping = memory, memory.ping
     else:
         postgres = PostgresKnowledgeUnitOfWorkFactory.from_url(settings.database_url)
@@ -252,6 +250,10 @@ def build_app(
         authenticator=authenticator,
     )
     app.state.wiring = wiring
+    # After create_app, which configures logging, so the line the seed writes is kept. The
+    # settings refuse the switch with any store but memory.
+    if settings.rulebook_seed_on_start and isinstance(wiring.unit_of_work, MemoryKnowledgeStore):
+        seed_memory_store(wiring.unit_of_work)
     install_review_metrics(app, wiring)
     return app
 
