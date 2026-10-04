@@ -578,3 +578,69 @@ the foundation never used, and #41 leftovers in the parked namespaces). Conseque
 folder arrives with its page or with a map entry, and the map is empty once every parked screen is
 built; a screen brings its message keys with it; a dynamic family is listed with the module that
 builds it; test data stays obviously invented ("Example return 1", dates in the year 2000).
+
+## D-039: A part of a built page that waits for a backend is its own registry entry
+
+2026-10-04. The ontology browser needs only `GET /v1/ontology`, which is on `main`, but its entry
+also awaited the usage counts per attribute (`GET /v1/profile/admin/attribute-usage`, services
+track WP30), so the whole screen stayed waiting for the part it could not show. Keeping it waiting
+would hide a working browser for a package or two; listing the counts route under a live entry
+would make the entry claim a call the page does not make. The registry splits the screen instead:
+`admin.ontology` is a live page with the one route it calls, and `admin.ontology.usage` is a
+`component` hosted on `/admin/ontology` that stays `waiting` on the WP30 route, with the rule
+versions it will read (which rules read an attribute) under its `uses`. The page renders a note
+built from that entry, its title and its awaited routes with their owner, so what is missing is
+said in the registry's words rather than in copy that can drift. Consequences: when the route
+lands, `screens.test.ts` fails with `backend merged: flip admin.ontology.usage`, and the change
+that builds the counts adds them to the page that already exists; the admin tool list and
+`screens.md` show the component under the ontology; a later screen with the same shape (a built
+page with one panel or action still waiting) registers the waiting part as a `component` or
+`capability` rather than holding the page back.
+
+## D-040: The notification history shows the service's record, named by template, addresses masked
+
+2026-10-04. The parked notifications folder drew each notification with a subject and a body, but
+the notification service keeps neither: a message is rendered from its template when it goes out
+and the text is not stored (`NotificationOut` has the template, its language and the values it
+was filled with). The reminders pages and the admin console show the record as the service keeps
+it: a row is named by its template (`opt_in_confirmed` reads "Opt in confirmed", with the key
+under it), and the page gives the occasion, the channel and the address, the delivery state, the
+attempts, every time the notification moved and the channel's last error. The mapper is built on
+the generated type in `entities/notification`. The address is masked wherever the history shows
+it (the last four digits of a number, the first letter and the domain of a mailbox): every member
+of a tenant reads its reminders, and a recipient can be a colleague or a CA firm's person, while
+the console reads another tenant's records; the recipients settings page, which only the tenant's
+admins open and which edits addresses, shows them in full. The history pages are filtered by
+delivery state in the query string and paged with the service's opaque cursor; there is no
+client-side search, since a page is only part of the history. The demo business gets its one
+notification from the seed: the opt-in confirmation through `POST /v1/notification/send`, with the
+nil UUID as its obligation, because nothing else on the web stack creates a notification without
+the workers; the stack's WhatsApp channel is not wired, so the record shows a failed attempt and
+its reason. Consequences: when the service starts storing a rendered message, the detail page
+gains it from the generated type; a support question about one message is answered from the
+template key, the values and the times, with the full address only on the service.
+
+## D-041: A route awaited in a hardened form names the header it must require; the console looks up a tenant
+
+2026-10-04. The notification console's entry listed the resend route among the routes it used and
+awaited it from WP30, which hardens it (a reason, the admin role, an Idempotency-Key, an audit
+row). The path is already in the committed notification spec, so the registry counted it as landed
+and the console could not go live without claiming a resend it must not offer. A waiting entry
+needs something absent, and a header is what changes: the hardened route requires
+`Idempotency-Key`. `AwaitedRoute` gains `header`: a route awaited with one counts as landed only
+when a committed spec requires that header on it (`awaitKey` in `shared/config/services.ts`;
+`screens.test.ts` and `scripts/screens-doc.mts` read the required header parameters of every
+operation). Resending is its own entry, `admin.notification.resend`, a capability of the
+notification page for the admin role, waiting on the resend route with `header: "Idempotency-Key"`;
+the console and the notification page are live and read-only, and the page shows an admin what
+resending waits for, from that entry. When the hardened spec lands, `screens.test.ts` fails with
+`backend merged: flip admin.notification.resend`, and `idempotency.test.ts` fails until the
+operation joins `IDEMPOTENT_ROUTES`. The routes are tenant-scoped, so the console is a lookup by
+tenant id and business id in the query string (ids are not personal data), through the gateway's
+`tenantId` override; a notification opened on its own carries its tenant as `?tenant=`. Building
+the console's static neighbour, the message templates page, came with it: without a page file at
+`/admin/notifications/templates`, the router would hand that path to
+`/admin/notifications/[notificationId]` instead of the catch-all. Consequences: the audit lists a
+hardened await as absent with its header; the notice of a page waiting on one names the header
+after the delivering package; with bearer tokens, a lookup of another tenant needs the admin reads
+of WP30.

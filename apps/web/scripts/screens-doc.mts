@@ -6,7 +6,13 @@ import { ownerLabel } from "../src/entities/screen/mappers.ts";
 import { ROLES } from "../src/shared/config/roles.ts";
 import { SCREENS } from "../src/shared/config/screens.ts";
 import type { AwaitedRoute, Screen, ScreenSection } from "../src/shared/config/screens.ts";
-import { HTTP_METHODS, SERVICES_WITH_SPECS, routeKey } from "../src/shared/config/services.ts";
+import {
+  HTTP_METHODS,
+  SERVICES_WITH_SPECS,
+  awaitKey,
+  requiredHeaderKey,
+  routeKey,
+} from "../src/shared/config/services.ts";
 import type { RouteRef, ServiceName } from "../src/shared/config/services.ts";
 
 /**
@@ -56,10 +62,14 @@ export function ownerCell(item: {
   return parts.join(item.owner === "unplanned" ? "; " : ", ");
 }
 
+/** `POST /path`, and the header a hardened route must require: `POST /path` with `Idempotency-Key`. */
+function awaitedRouteText(route: AwaitedRoute): string {
+  const text = code(`${route.method} ${route.path}`);
+  return route.header === undefined ? text : `${text} with ${code(route.header)}`;
+}
+
 export function waitsForCell(screen: Screen): string {
-  const routes = screen.awaits.map(
-    (route) => `${code(`${route.method} ${route.path}`)} (${ownerCell(route)})`,
-  );
+  const routes = screen.awaits.map((route) => `${awaitedRouteText(route)} (${ownerCell(route)})`);
   const files = (screen.awaitsFiles ?? []).map(
     (file) => `${code(`file ${file.path}`)} (${ownerCell(file)})`,
   );
@@ -156,11 +166,19 @@ export async function formatScreensDoc(markdown: string): Promise<string> {
   return format(markdown, { ...options, parser: "markdown" });
 }
 
-interface OpenApiDocument {
-  paths: Record<string, Record<string, unknown>>;
+interface OpenApiOperation {
+  parameters?: { in?: string; name?: string; required?: boolean }[];
 }
 
-/** Every "service METHOD path" the committed specs offer; a service without a spec is absent. */
+interface OpenApiDocument {
+  paths: Record<string, Record<string, OpenApiOperation>>;
+}
+
+/**
+ * Every "service METHOD path" the committed specs offer, and each with every request header it
+ * requires ("... [header idempotency-key]"), which a hardened await needs; a service without a
+ * spec is absent.
+ */
 export function committedRoutes(specDir: string = SPEC_DIR): Set<string> {
   const keys = new Set<string>();
   for (const service of SERVICES_WITH_SPECS) {
@@ -168,10 +186,15 @@ export function committedRoutes(specDir: string = SPEC_DIR): Set<string> {
     if (!existsSync(file)) continue;
     const spec = JSON.parse(readFileSync(file, "utf8")) as OpenApiDocument;
     for (const [path, operations] of Object.entries(spec.paths)) {
-      for (const method of Object.keys(operations)) {
+      for (const [method, operation] of Object.entries(operations)) {
         const upper = method.toUpperCase();
-        if ((HTTP_METHODS as readonly string[]).includes(upper)) {
-          keys.add(routeKey({ service, method: upper as RouteRef["method"], path }));
+        if (!(HTTP_METHODS as readonly string[]).includes(upper)) continue;
+        const route = { service, method: upper as RouteRef["method"], path };
+        keys.add(routeKey(route));
+        for (const parameter of operation.parameters ?? []) {
+          if (parameter.in === "header" && parameter.required === true && parameter.name) {
+            keys.add(requiredHeaderKey(route, parameter.name));
+          }
         }
       }
     }
@@ -184,6 +207,8 @@ export interface AuditRow {
   service: ServiceName;
   method: string;
   path: string;
+  /** The header the route must require in the awaited form, when it names one. */
+  header?: string;
   owner: string;
   unconfirmed: boolean;
   /** False when the service has no committed spec at all. */
@@ -191,7 +216,8 @@ export interface AuditRow {
 }
 
 /**
- * Awaited routes that are not in a committed spec. Those whose service has a spec are the
+ * Awaited routes that are not in a committed spec, or not in the hardened form they are awaited
+ * in (a header the spec does not require yet). Those whose service has a spec are the
  * interesting ones: either the route has not landed, or it landed under a different path
  * (the KAG-track paths are unconfirmed until its specs are committed).
  */
@@ -202,12 +228,13 @@ export function auditAwaits(
   const rows: AuditRow[] = [];
   for (const screen of screens) {
     for (const route of screen.awaits) {
-      if (committed.has(routeKey(route))) continue;
+      if (committed.has(awaitKey(route))) continue;
       rows.push({
         screenId: screen.id,
         service: route.service,
         method: route.method,
         path: route.path,
+        ...(route.header === undefined ? {} : { header: route.header }),
         owner: ownerCell(route),
         unconfirmed: route.unconfirmed === true,
         specExists: SERVICES_WITH_SPECS.includes(route.service),
@@ -255,8 +282,9 @@ export function renderAudit(rows: readonly AuditRow[], ready: readonly ReadyRow[
   );
   for (const row of withSpec) {
     const mark = row.unconfirmed ? " [unconfirmed]" : "";
+    const header = row.header === undefined ? "" : ` with ${row.header}`;
     lines.push(
-      `  ${row.service} ${row.method} ${row.path} <- ${row.screenId} (${row.owner})${mark}`,
+      `  ${row.service} ${row.method} ${row.path}${header} <- ${row.screenId} (${row.owner})${mark}`,
     );
   }
   const services = [...new Set(withoutSpec.map((row) => row.service))].sort();

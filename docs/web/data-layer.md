@@ -105,7 +105,8 @@ Every request carries:
 - `accept: application/json`.
 - `x-tenant-id`: `ctx.tenantId ?? ctx.session?.tenantId` on the tenant-scoped services, and
   nothing when neither is set. The `tenantId` override is the only way a request acts for a
-  tenant other than the session's, and only admin lookups use it.
+  tenant other than the session's, and only admin lookups use it: the notification console reads
+  the tenant its lookup names ([admin-tools.md](admin-tools.md)).
 - The time limit: `AbortSignal.timeout(CW_WEB_REQUEST_TIMEOUT_MS)`, combined with the request's
   own signal.
 
@@ -462,6 +463,28 @@ does not check it; opting out and changing the language or the window need no co
 email section says that the service's email channel is not connected on `main`: a preference is
 recorded all the same.
 
+## Notification history
+
+`features/notifications/gateway.ts` reads a business's notifications (`GET
+/v1/notification/notifications?business_id=&state=&limit=&cursor=`) and one notification (`GET
+.../{notification_id}`) over the typed notification client, and names the business from the
+profile service (`GET /v1/businesses/{business_id}`), all tenant-scoped and uncached. The tenant
+is the session's on the reminders pages; the admin console builds the gateway with the tenant its
+lookup names (`ClientContext.tenantId`). `entities/notification` maps `NotificationOut` as the
+generated type has it, with no subject or body. [business-pages.md](business-pages.md) has the
+reminders pages and [admin-tools.md](admin-tools.md) the console.
+
+## Notification recipients
+
+`features/notification-recipients/gateway.ts` lists a business's recipients (`GET
+/v1/notification/recipients?business_id=&limit=`), reads one (`GET .../{recipient_id}`; a 404 is
+a recipient that is gone), registers or replaces one whole (`PUT .../{recipient_id}`) and removes
+one (`DELETE .../{recipient_id}`, a 204) over the typed notification client, all tenant-scoped and
+uncached, plus the templates (cached under `notification:templates`) and the tenant's businesses
+(`GET /v1/businesses`, uncached) the page chooses from. `PUT` by id is a replacement, so a
+recipient's id, minted once per render of the add form, is its natural key: a repeat replaces the
+same recipient. [settings.md](settings.md) has the page.
+
 ## Billing
 
 `features/billing/gateway.ts` reads the plans (`GET /v1/identity/billing/plans`, the same for
@@ -503,6 +526,7 @@ key, because each has a natural key on the service:
 | rulebook document                      | the sha256: 201 created, 200 unchanged, 409 when the metadata differs       |
 | rulebook mentions, relation candidates | the document and the extractor: a repeat reports `unchanged`                |
 | notification preference                | PUT by channel and recipient: a replacement                                 |
+| notification recipient                 | PUT by the recipient id the form was rendered with: a replacement           |
 
 For a listed route, a page renders `<IdempotencyKeyInput />` inside the form (one UUID per
 render, so a double submit or a retry after a lost response sends the same key), and the action
@@ -584,9 +608,16 @@ memory stores forget their rows.
 
 `make web-seed` (`apps/web/scripts/seed`, run by Node's type stripping) fills the running stack
 with the demo tenant over the services' HTTP APIs: the owner's four consents, the demo GSTIN's
-registration with its pre-fill and answers, the WhatsApp preference, and notification
-01/2026-Central Tax with its clauses, mentions and relation candidate, replayed from fixtures
-recorded once with the pipeline's parser and grammar (D-021). The seed has its own small HTTP
+registration with its pre-fill and answers, the WhatsApp preference, the opt-in confirmation
+sent to that number, and notification 01/2026-Central Tax with its clauses, mentions and relation
+candidate, replayed from fixtures recorded once with the pipeline's parser and grammar (D-021).
+The confirmation is the demo business's one notification, which the reminders pages show: it goes
+through `POST /v1/notification/send` (the route that sends one notification now, with the nil
+UUID as its obligation, since it is about none) because nothing else on the stack creates a
+notification, the obligation events that queue reminders needing the workers. The stack's
+WhatsApp channel is not wired, so the service records it as failed with the channel's reason (or,
+inside the quiet hours, queued for their end); a repeat on the same tenant is a duplicate and
+records nothing. The seed has its own small HTTP
 module (`scripts/seed/http.mts`): `openapi-fetch` clients typed from the same generated
 contracts, because a plain Node script cannot import the app's `server-only` modules. It sends
 the tenant header on identity, profile and notification only and the write token on its

@@ -1,4 +1,9 @@
-import type { PreferenceDto, TemplateDto } from "@/entities/notification/types";
+import type {
+  NotificationDto,
+  PreferenceDto,
+  RecipientDto,
+  TemplateDto,
+} from "@/entities/notification/types";
 
 /**
  * Notification service bodies for unit tests: an obviously synthetic number and address, and
@@ -46,3 +51,60 @@ export const TEMPLATE_DTOS: TemplateDto[] = [
   templateDto("whatsapp", "hi"),
   templateDto("email", "en"),
 ];
+
+export const RECIPIENT_ID = "00000000-0000-4000-8000-0000000000e1";
+export const BUSINESS_ID = "00000000-0000-4000-8000-0000000000b1";
+
+/** A recipient as `GET /v1/notification/recipients/{id}` returns it; addresses out of order. */
+export function recipientDto(overrides: Partial<RecipientDto> = {}): RecipientDto {
+  return {
+    id: RECIPIENT_ID,
+    user_id: null,
+    role: "owner",
+    language: "en",
+    digest_mode: "off",
+    by_digest: false,
+    org_label: "",
+    addresses: [
+      { channel: "email", address: EMAIL_KEY, position: 1 },
+      { channel: "whatsapp", address: `+${WHATSAPP_KEY}`, position: 0 },
+    ],
+    businesses: [{ business_id: BUSINESS_ID, label: "Example business" }],
+    created_at: "2000-01-01T05:00:00Z",
+    updated_at: "2000-01-02T05:00:00Z",
+    ...overrides,
+  };
+}
+
+export const NOTIFICATION_ID = "00000000-0000-4000-8000-0000000000f1";
+export const OBLIGATION_ID = "00000000-0000-4000-8000-0000000000c1";
+
+/** A notification as `GET /v1/notification/notifications/{id}` returns it: failed on WhatsApp. */
+export function notificationDto(overrides: Partial<NotificationDto> = {}): NotificationDto {
+  return {
+    id: NOTIFICATION_ID,
+    business_id: BUSINESS_ID,
+    obligation_id: OBLIGATION_ID,
+    recipient_id: null,
+    channel: "whatsapp",
+    address: `+${WHATSAPP_KEY}`,
+    occasion: "manual",
+    template_key: "example_template",
+    language: "en",
+    params: {},
+    state: "failed",
+    attempts: 1,
+    available_at: "2000-01-01T05:00:00Z",
+    dispatch_id: null,
+    provider_message_id: "",
+    error: "Example channel error",
+    fallback_of: null,
+    created_at: "2000-01-01T05:00:00Z",
+    updated_at: "2000-01-01T05:00:00Z",
+    sent_at: null,
+    delivered_at: null,
+    read_at: null,
+    failed_at: "2000-01-01T05:00:00Z",
+    ...overrides,
+  };
+}

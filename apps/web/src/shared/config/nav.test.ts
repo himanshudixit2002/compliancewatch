@@ -32,6 +32,7 @@ describe("settingsNavFor", () => {
         "/settings/consents",
         "/settings/notifications",
         "/settings/billing",
+        "/settings/notifications/recipients",
         "/settings/data-rights",
         "/settings/team",
         "/settings/activity",

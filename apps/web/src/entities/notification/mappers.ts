@@ -1,10 +1,22 @@
 import { isE164, isEmailAddress } from "@/shared/lib/identifiers";
 import type {
   Channel,
+  DeliveryState,
+  MessageTemplate,
+  NotificationDto,
+  NotificationPage,
+  NotificationPageDto,
+  NotificationRecord,
   Preference,
   PreferenceChange,
   PreferenceDto,
   PreferenceInDto,
+  Recipient,
+  RecipientDto,
+  RecipientInDto,
+  RecipientInput,
+  RecipientPage,
+  RecipientPageDto,
   Template,
   TemplateDto,
 } from "./types";
@@ -73,4 +85,98 @@ export function preferenceChangeToDto(change: PreferenceChange): PreferenceInDto
 
 export function templateFromDto(dto: TemplateDto): Template {
   return { key: dto.key, channel: dto.channel, language: dto.language, status: dto.status };
+}
+
+export function messageTemplateFromDto(dto: TemplateDto): MessageTemplate {
+  return {
+    ...templateFromDto(dto),
+    metaName: dto.meta_name,
+    placeholders: [...dto.placeholders],
+    body: dto.body,
+  };
+}
+
+export function recipientFromDto(dto: RecipientDto): Recipient {
+  return {
+    id: dto.id,
+    userId: dto.user_id ?? null,
+    role: dto.role,
+    language: dto.language,
+    digestMode: dto.digest_mode,
+    byDigest: dto.by_digest,
+    orgLabel: dto.org_label,
+    addresses: [...dto.addresses]
+      .sort((a, b) => a.position - b.position)
+      .map(({ channel, address }) => ({ channel, address })),
+    businesses: dto.businesses.map((link) => ({ businessId: link.business_id, label: link.label })),
+    createdAt: dto.created_at,
+    updatedAt: dto.updated_at,
+  };
+}
+
+export function recipientPageFromDto(dto: RecipientPageDto): RecipientPage {
+  return { items: dto.items.map(recipientFromDto), nextCursor: dto.next_cursor ?? null };
+}
+
+/** The PUT body: everything, in the order the addresses are to be tried. */
+export function recipientInputToDto(input: RecipientInput): RecipientInDto {
+  return {
+    role: input.role,
+    user_id: input.userId,
+    language: input.language,
+    digest_mode: input.digestMode,
+    org_label: input.orgLabel,
+    addresses: input.addresses.map(({ channel, address }) => ({ channel, address })),
+    businesses: input.businesses.map((link) => ({
+      business_id: link.businessId,
+      label: link.label,
+    })),
+  };
+}
+
+/** The delivery states, in the order a notification moves through them, then the dead ends. */
+export const DELIVERY_STATES: readonly DeliveryState[] = [
+  "queued",
+  "digest_pending",
+  "sent",
+  "delivered",
+  "read",
+  "failed",
+  "suppressed",
+];
+
+export function isDeliveryState(value: string): value is DeliveryState {
+  return (DELIVERY_STATES as readonly string[]).includes(value);
+}
+
+export function notificationFromDto(dto: NotificationDto): NotificationRecord {
+  return {
+    id: dto.id,
+    businessId: dto.business_id,
+    obligationId: dto.obligation_id,
+    recipientId: dto.recipient_id ?? null,
+    channel: dto.channel,
+    address: dto.address,
+    occasion: dto.occasion,
+    templateKey: dto.template_key,
+    language: dto.language,
+    params: { ...dto.params },
+    state: dto.state,
+    attempts: dto.attempts,
+    availableAt: dto.available_at,
+    dispatchId: dto.dispatch_id ?? null,
+    providerMessageId: dto.provider_message_id,
+    error: dto.error,
+    fallbackOf: dto.fallback_of ?? null,
+    createdAt: dto.created_at,
+    updatedAt: dto.updated_at,
+    sentAt: dto.sent_at ?? null,
+    deliveredAt: dto.delivered_at ?? null,
+    readAt: dto.read_at ?? null,
+    failedAt: dto.failed_at ?? null,
+  };
+}
+
+export function notificationPageFromDto(dto: NotificationPageDto): NotificationPage {
+  return { items: dto.items.map(notificationFromDto), nextCursor: dto.next_cursor ?? null };
 }

@@ -48,10 +48,10 @@ components to `shared`, `entities` and their own directory.
 
 ## Parked feature folders
 
-A feature folder exists for a screen that a page renders. Fourteen folders under `features/`
-hold the model and the views of screens that are not built yet (the team, recipient, activity
-and data-rights settings, a business's obligations, changes and reminders, the flag console,
-and the source, pipeline, audit, error-report, tenant and Q&A triage tools): no route file
+A feature folder exists for a screen that a page renders. Eleven folders under `features/`
+hold the model and the views of screens that are not built yet (the team, activity and
+data-rights settings, a business's obligations and changes, and the source, pipeline, audit,
+error-report, tenant and Q&A triage tools): no route file
 imports them, so no bundle carries them; their unit tests run with the rest. Each one is
 parked: `PARKED_FEATURES` in `src/test/architecture.ts` maps the folder to the registry ids
 of the screens it will serve, and `architecture.test.ts` holds the map to the tree and the
@@ -144,8 +144,10 @@ An entry carries:
   track, `plan-k` for the KAG track, `unplanned` for nobody) and a `ref` (the delivering package
   or a note). A KAG-track path carries `unconfirmed: true` until that track's spec is committed;
   every route the registry awaits today is the services track's or nobody's (the last KAG-track
-  awaits moved to the services track's packages).
-  `awaitsFiles` names a repository file instead of a route (the flag registry).
+  awaits moved to the services track's packages). A route awaited in a hardened form names the
+  request `header` it must require (`Idempotency-Key`): it counts as absent until a committed
+  spec requires that header on it, even though its path is there (D-041).
+  `awaitsFiles` names a repository file instead of a route (the Hindi interface's message and wording files).
 - `status`: `planned`, `waiting`, `ready` or `live`, in the order a screen moves through them
   (below).
 - `preview`: the name of a component the not-available page may render under the notice; none
@@ -166,8 +168,9 @@ A screen's status moves planned, then waiting, then ready, then live:
 `route.ts`) and names at least one existing e2e spec, and every `uses` path is in a committed
 spec. A ready entry names at least one route or file, every route and file it awaits is present,
 every awaited route is also under `uses`, and it has no page file. A waiting entry awaits at
-least one route or file that is absent, lists any awaited route that is already present under
-`uses` as well, and has no page file. A planned entry awaits only from `unplanned` and has no
+least one route or file that is absent (a hardened route counts as absent while no committed spec
+requires its header), lists any awaited route that is already present under `uses` as well, and
+has no page file. A planned entry awaits only from `unplanned` and has no
 page file. Every `page.tsx` and `route.ts` under `src/app` is registered exactly once (route
 groups such as `(public)` are stripped). When every awaited item of a waiting entry has landed,
 the test fails with `backend merged: flip <id> to ready (or live once built)`. The change that

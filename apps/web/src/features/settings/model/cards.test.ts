@@ -10,6 +10,7 @@ describe("settingsIndexView", () => {
       "owner.settings.consents",
       "owner.settings.notifications",
       "owner.settings.billing",
+      "owner.settings.notification-recipients",
       "owner.settings.data-rights",
       "owner.settings.team",
       "owner.settings.activity",

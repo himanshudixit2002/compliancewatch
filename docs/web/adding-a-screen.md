@@ -23,8 +23,13 @@ Add an entry to `SCREEN_LIST`:
 - `awaits`: every route it still needs, through `servicesTrack("WP<n>", ...)` (the delivering
   package) or `unscheduled(...)`. A route whose path comes from a design that is not a committed
   spec yet is awaited with `owner: "plan-k"` and `unconfirmed: true`; no entry awaits one today
-  (the last ones moved to the services track's packages). A repository file it needs goes in
+  (the last ones moved to the services track's packages). A route that exists but is awaited in a
+  hardened form (a reason, a role, an Idempotency-Key it does not take yet) is awaited with the
+  `header` it must require, `{ ...servicesTrack(...), header: "Idempotency-Key" }`; it counts as
+  absent until a committed spec requires that header (D-041). A repository file it needs goes in
   `awaitsFiles`.
+  A part of a built page that still waits (a panel, an action) is its own `component` or
+  `capability` entry hosted on the page's route, so the page can go live (D-039).
   A screen whose every route is already in a committed spec awaits nothing and is `ready`.
 - `status`, which moves `planned`, then `waiting`, then `ready`, then `live`: `planned` when
   every awaited item is `unscheduled`; `waiting` when at least one awaited route or file is

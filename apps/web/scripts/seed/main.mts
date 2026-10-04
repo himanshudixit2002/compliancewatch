@@ -10,7 +10,7 @@ import {
 } from "./lib.mts";
 import { seedState, summary, writeSeedState, type SeedReport } from "./report.mts";
 import { seedConsents } from "./steps/consents.mts";
-import { seedNotificationPreference } from "./steps/notification.mts";
+import { seedNotification } from "./steps/notification.mts";
 import { seedProfile } from "./steps/profile.mts";
 import { seedRulebook } from "./steps/rulebook.mts";
 
@@ -20,7 +20,8 @@ import { seedRulebook } from "./steps/rulebook.mts";
  *
  *   1. identity      the owner's four consents
  *   2. profile       the registration and its entity, the GSTIN pre-fill, the answers
- *   3. notification  the owner's WhatsApp preference
+ *   3. notification  the owner's WhatsApp preference, and the opt-in confirmation sent to it for
+ *                    the demo business (the business's one notification)
  *   4. rulebook      one recorded CBIC notification with its clauses, mentions and relation
  *                    candidate (--skip-rulebook leaves it out; needs the write token)
  *
@@ -71,7 +72,7 @@ async function main(argv: readonly string[]): Promise<number> {
   try {
     report.consents = await seedConsents(clients, options.ownerId, log);
     report.profile = await seedProfile(clients, options.ownerId, log);
-    report.notification = await seedNotificationPreference(clients, log);
+    report.notification = await seedNotification(clients, report.profile.entityNodeId, log);
     if (!options.skipRulebook) {
       report.rulebook = await seedRulebook(clients, log);
       if (report.rulebook.optionalFailure !== null) {

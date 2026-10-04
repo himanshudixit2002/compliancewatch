@@ -41,9 +41,9 @@ describe("adminToolGroups", () => {
     expect(tool.roles).toEqual(["Analyst", "Reviewer", "Admin"]);
     const sources = toAdminTool(screenById("admin.sources"));
     expect(sources.href).toBe("/admin/sources");
-    const flags = toAdminTool(screenById("admin.flags"));
-    expect(flags.services).toEqual([]);
-    expect(flags.waitsFor[0]?.method).toBe("file");
+    const hindi = toAdminTool(screenById("system.hindi-ui"));
+    expect(hindi.services).toEqual([]);
+    expect(hindi.waitsFor[0]?.method).toBe("file");
   });
 
   it("puts a tool without any placement under other", () => {

@@ -21,10 +21,13 @@ src/app/            route files only: page.tsx is gate, query, render; layouts, 
   (app)/            tenant screens under the session-aware shell: /account, /onboarding (the consent step),
                     /onboarding/business (the business step), /onboarding/[businessId]/questions and
                     /onboarding/[businessId]/done, /businesses and /b/[businessId] with /profile,
-                    /attributes, /snapshot and /review-tasks, each with loading.tsx; [...slug] serves
+                    /attributes, /snapshot, /review-tasks, /reminders and /reminders/[notificationId], each with
+                    loading.tsx; [...slug] serves
                     unbuilt tenant screens behind the entry's roles
-  admin/            /admin home and layout under AdminShell, behind requireAdmin; [...slug] serves unbuilt
-                    tools
+  admin/            /admin home and layout under AdminShell, behind requireAdmin; rulebook/documents and the
+                    viewer, flags (the flag console), ontology (the browser), notifications (the console
+                    by tenant and business, a notification, the message templates); [...slug] serves
+                    unbuilt tools
   sign-out/         POST handler: clears the session cookie and returns to /sign-in (GET is a 405)
   api/health/       liveness handler {status, version, commit}
 src/features/       one directory per screen family: model/, ui/, index.ts (ports, gateway, queries and
@@ -38,7 +41,12 @@ src/features/       one directory per screen family: model/, ui/, index.ts (port
                     posted search, and the business pages with their tabs, the node and year picker,
                     the attributes, snapshot and review task views and the location form), consents (the consent step: the
                     identity consents and reminder preference gateway, the purposes and their documents,
-                    the step's view, the form and the recordConsents action); and the parked folders of screens
+                    the step's view, the form and the recordConsents action), flags (the flag console
+                    over the registry and the web server's reader), admin-ontology (the ontology
+                    browser), notification-recipients (a business's recipients: the gateway, the form
+                    and the save and remove actions), notifications (the notification history of a
+                    business and of the admin console, named by template, addresses masked); and the
+                    parked folders of screens
                     not built yet, which no page imports (docs/web/architecture.md, "Parked feature folders")
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
                     problem/ types the RFC 9457 body every service returns (from the generated contracts);
@@ -96,7 +104,8 @@ src/proxy.ts        the optimistic check before a render: no cw_session cookie o
 scripts/screens-doc.mts generates docs/web/screens.md from the registry (screens:gen, screens:check, screens:audit)
 scripts/seed/       the demo-tenant seed (pnpm --filter web seed, make web-seed): main.mts runs the steps in
                     order, steps/ fills identity consents, the profile registration, pre-fill and answers,
-                    the notification preference and the rulebook; http.mts is the openapi-fetch clients typed
+                    the notification preference with the opt-in confirmation sent to it, and the rulebook;
+                    http.mts is the openapi-fetch clients typed
                     from the contracts; lib.mts the demo facts, arguments and fixture checks; report.mts the
                     summary and var/seed/last.json; fixtures/rulebook/ the recorded notification (README,
                     record.py)
@@ -198,7 +207,8 @@ service on `SERVICE_PORT_BASE`+1 to +10 from the root `.env`, memory stores, pid
 `.env.local`'s `CW_WEB_*_URL` values point the app at them when the base is not 8000.
 `make web-seed` then fills them with the demo tenant over their HTTP APIs: the owner's four
 consents, the demo GSTIN's registration with the static pre-fill and the answers on both nodes,
-the WhatsApp preference, and notification 01/2026-Central Tax with its six clauses, five
+the WhatsApp preference with the opt-in confirmation sent to that number (the demo business's
+one notification), and notification 01/2026-Central Tax with its six clauses, five
 mentions and one relation candidate, replayed from `scripts/seed/fixtures/rulebook` (recorded
 once with the pipeline's parser and grammar; the README there has the command). It prints the
 tenant id, the node ids and the document id, writes them to `var/seed/last.json` (the sign-in

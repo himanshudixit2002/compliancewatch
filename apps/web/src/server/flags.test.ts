@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetEnvCache } from "./env";
-import { flagEnvironment, isEnabled, resetFlagReader } from "./flags";
+import { flagEnvironment, flagProviderStatus, isEnabled, resetFlagReader } from "./flags";
 
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -72,5 +72,23 @@ describe("isEnabled", () => {
     vi.stubEnv("CW_FLAGS_PROVIDER", "env");
     vi.stubEnv("CW_WEB_FLAG_ANALYTICS_ENABLED", "true");
     expect(await isEnabled("web.analytics_enabled")).toBe(true);
+  });
+});
+
+describe("flagProviderStatus", () => {
+  it("names the provider the reader answers through", async () => {
+    vi.stubEnv("CW_WEB_ENV", "test");
+    expect(await flagProviderStatus()).toEqual({ ok: true, provider: "env" });
+  });
+
+  it("says why the provider could not be configured, then tries again", async () => {
+    vi.stubEnv("CW_WEB_ENV", "test");
+    vi.stubEnv("CW_FLAGS_PROVIDER", "unleash");
+    const status = await flagProviderStatus();
+    expect(status.ok).toBe(false);
+    expect(!status.ok && status.reason).toContain("CW_UNLEASH_URL");
+
+    vi.stubEnv("CW_FLAGS_PROVIDER", "env");
+    expect(await flagProviderStatus()).toEqual({ ok: true, provider: "env" });
   });
 });

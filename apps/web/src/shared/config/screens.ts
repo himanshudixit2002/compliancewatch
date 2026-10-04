@@ -40,6 +40,12 @@ export interface AwaitedRoute extends RouteRef {
   ref?: string;
   /** The path comes from a design whose spec is not committed yet; the audit reports drift. */
   unconfirmed?: true;
+  /**
+   * A request header the route requires in the form the screen waits for (the Idempotency-Key of
+   * a hardened route whose path is already on main). Until a committed spec declares the header
+   * required on that route, the route counts as absent.
+   */
+  header?: string;
 }
 
 /** A repository file a screen needs (the flag registry), for the few screens without a route. */
@@ -161,13 +167,12 @@ const DATA_EXPORT = servicesTrack(
   "GET",
   "/v1/identity/data-requests/{request_id}/export",
 );
-const NOTIFICATIONS_LIST = servicesTrack(
-  "WP13",
+const NOTIFICATIONS = uses("notification", "GET", "/v1/notification/notifications");
+const NOTIFICATION = uses(
   "notification",
   "GET",
-  "/v1/notification/notifications",
+  "/v1/notification/notifications/{notification_id}",
 );
-const NOTIFICATIONS = uses("notification", "GET", "/v1/notification/notifications");
 const BUDGET_ALARMS = servicesTrack("WP27", "eval", "GET", "/v1/eval/budget-alarms");
 const QA_COVERAGE = servicesTrack("WP28", "eval", "GET", "/v1/eval/qa-coverage");
 const REVIEW_STATS = servicesTrack("WP21", "rulebook", "GET", "/v1/rulebook/review/stats");
@@ -796,12 +801,15 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [NOTIFICATIONS],
-    awaits: [NOTIFICATIONS_LIST],
-    status: "ready",
-    e2e: [],
+    uses: [BUSINESS, NOTIFICATIONS],
+    awaits: [],
+    status: "live",
+    e2e: ["owner-reminders.spec.ts"],
     guideRef: "9, F9",
     nav: { group: "business", order: 8 },
+    parent: "owner.business",
+    notes:
+      "The notifications the service recorded for the business, newest first, by delivery state: template, channel, masked address, state, attempts and times. The service keeps no message text.",
   },
   {
     id: "owner.reminder",
@@ -811,19 +819,14 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [uses("notification", "GET", "/v1/notification/notifications/{notification_id}")],
-    awaits: [
-      servicesTrack(
-        "WP13",
-        "notification",
-        "GET",
-        "/v1/notification/notifications/{notification_id}",
-      ),
-    ],
-    status: "ready",
-    e2e: [],
+    uses: [BUSINESS, NOTIFICATION],
+    awaits: [],
+    status: "live",
+    e2e: ["owner-reminders.spec.ts"],
     guideRef: "9, F9",
     parent: "owner.reminders",
+    notes:
+      "One notification's delivery record: the channel's last error, every time it moved, and the values the message was filled with.",
   },
   {
     id: "owner.report-error",
@@ -994,21 +997,21 @@ const SCREEN_LIST = [
     roles: TENANT_ADMINS,
     tenantKinds: BUSINESS_TENANTS,
     uses: [
+      uses("profile", "GET", "/v1/businesses"),
       uses("notification", "GET", "/v1/notification/recipients"),
       uses("notification", "PUT", "/v1/notification/recipients/{recipient_id}"),
       uses("notification", "GET", "/v1/notification/recipients/{recipient_id}"),
       uses("notification", "DELETE", "/v1/notification/recipients/{recipient_id}"),
+      uses("notification", "GET", "/v1/notification/templates"),
     ],
-    awaits: [
-      servicesTrack("WP13", "notification", "GET", "/v1/notification/recipients"),
-      servicesTrack("WP13", "notification", "PUT", "/v1/notification/recipients/{recipient_id}"),
-      servicesTrack("WP13", "notification", "GET", "/v1/notification/recipients/{recipient_id}"),
-      servicesTrack("WP13", "notification", "DELETE", "/v1/notification/recipients/{recipient_id}"),
-    ],
-    status: "ready",
-    e2e: [],
+    awaits: [],
+    status: "live",
+    e2e: ["owner-settings-recipients.spec.ts", "a11y.spec.ts"],
     guideRef: "9, F9",
+    nav: { group: "settings", order: 4 },
     parent: "owner.settings.notifications",
+    notes:
+      "Who hears about each business: a business's recipients with their addresses in the order tried, language, delivery and businesses; adding, changing and removing one. An address still needs its opt-in.",
   },
   {
     id: "owner.settings.data-rights",
@@ -1709,24 +1712,15 @@ const SCREEN_LIST = [
     section: "admin",
     roles: ["analyst", "admin"],
     tenantKinds: ["internal"],
-    uses: [
-      NOTIFICATIONS,
-      uses("notification", "POST", "/v1/notification/notifications/{notification_id}/resend"),
-    ],
-    awaits: [
-      NOTIFICATIONS_LIST,
-      servicesTrack(
-        "WP30",
-        "notification",
-        "POST",
-        "/v1/notification/notifications/{notification_id}/resend",
-      ),
-    ],
-    status: "ready",
-    e2e: [],
+    uses: [NOTIFICATIONS],
+    awaits: [],
+    status: "live",
+    e2e: ["admin-notifications.spec.ts", "a11y.spec.ts"],
     guideRef: "15; 9",
     nav: { group: "operations", order: 4 },
     parent: "admin.home",
+    notes:
+      "Read-only: a business's notifications looked up by tenant id and business id (the routes are tenant-scoped), by delivery state, addresses masked. Resend is its own entry, admin.notification.resend.",
   },
   {
     id: "admin.notification",
@@ -1736,19 +1730,41 @@ const SCREEN_LIST = [
     section: "admin",
     roles: ["analyst", "admin"],
     tenantKinds: ["internal"],
-    uses: [uses("notification", "GET", "/v1/notification/notifications/{notification_id}")],
-    awaits: [
-      servicesTrack(
-        "WP13",
-        "notification",
-        "GET",
-        "/v1/notification/notifications/{notification_id}",
-      ),
-    ],
-    status: "ready",
-    e2e: [],
+    uses: [NOTIFICATION],
+    awaits: [],
+    status: "live",
+    e2e: ["admin-notifications.spec.ts"],
     guideRef: "15",
     parent: "admin.notifications",
+    notes:
+      "One notification of the tenant named in ?tenant=, with the ids an operator traces a delivery by.",
+  },
+  {
+    id: "admin.notification.resend",
+    kind: "capability",
+    route: "/admin/notifications/[notificationId]",
+    title: "Resend a notification",
+    section: "admin",
+    roles: ["admin"],
+    tenantKinds: ["internal"],
+    uses: [],
+    awaits: [
+      {
+        ...servicesTrack(
+          "WP30",
+          "notification",
+          "POST",
+          "/v1/notification/notifications/{notification_id}/resend",
+        ),
+        header: "Idempotency-Key",
+      },
+    ],
+    status: "waiting",
+    e2e: [],
+    guideRef: "15; 9",
+    parent: "admin.notification",
+    notes:
+      "Queue a notification that failed for good again, with a reason, by an admin; it waits for the hardened route (reason, admin role, Idempotency-Key, audit). The route on main takes none of them, so the console does not offer it.",
   },
   {
     id: "admin.notifications.templates",
@@ -1760,11 +1776,13 @@ const SCREEN_LIST = [
     tenantKinds: ["internal"],
     uses: [uses("notification", "GET", "/v1/notification/templates")],
     awaits: [],
-    status: "ready",
-    e2e: [],
+    status: "live",
+    e2e: ["admin-notifications.spec.ts", "a11y.spec.ts"],
     guideRef: "15; 9",
     nav: { group: "operations", order: 5 },
     parent: "admin.notifications",
+    notes:
+      "Every message template with its channel, language, Meta name, approval status, placeholders and text, as the notification service holds them.",
   },
   {
     id: "admin.ontology",
@@ -1774,17 +1792,32 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [RULE_VERSIONS, uses("profile", "GET", "/v1/ontology")],
-    awaits: [
-      ONTOLOGY,
-      servicesTrack("WP30", "profile", "GET", "/v1/profile/admin/attribute-usage"),
-    ],
-    status: "waiting",
-    preview: "OntologyTable",
-    e2e: [],
+    uses: [uses("profile", "GET", "/v1/ontology")],
+    awaits: [],
+    status: "live",
+    e2e: ["admin-ontology.spec.ts", "a11y.spec.ts"],
     guideRef: "15; G25",
     nav: { group: "operations", order: 6 },
     parent: "admin.home",
+    notes:
+      "The attributes by level with their questions, help, meanings, allowed values, examples and rule operators; read-only. The usage per attribute is its own entry, admin.ontology.usage.",
+  },
+  {
+    id: "admin.ontology.usage",
+    kind: "component",
+    route: "/admin/ontology",
+    title: "Attribute usage",
+    section: "admin",
+    roles: REGULATORY,
+    tenantKinds: ["internal"],
+    uses: [RULE_VERSIONS],
+    awaits: [servicesTrack("WP30", "profile", "GET", "/v1/profile/admin/attribute-usage")],
+    status: "waiting",
+    e2e: [],
+    guideRef: "15; G25",
+    parent: "admin.ontology",
+    notes:
+      "How many profiles hold each attribute and in which state, and the rules in force that read it, on the ontology browser; the counts wait for the profile admin route.",
   },
   {
     id: "admin.flags",
@@ -1796,13 +1829,13 @@ const SCREEN_LIST = [
     tenantKinds: ["internal"],
     uses: [],
     awaits: [],
-    awaitsFiles: [{ path: "packages/flags/registry.json", owner: "plan-a", ref: "WP12" }],
-    status: "ready",
-    preview: "FlagTable",
-    e2e: [],
+    status: "live",
+    e2e: ["admin-flags.spec.ts", "a11y.spec.ts"],
     guideRef: "15; G90",
     nav: { group: "operations", order: 7 },
     parent: "admin.home",
+    notes:
+      "Every flag in packages/flags/registry.json with its owner, default and expiry; the value the web server's reader answers for the flags the web app reads. No flag is changed here.",
   },
   {
     id: "admin.audit",

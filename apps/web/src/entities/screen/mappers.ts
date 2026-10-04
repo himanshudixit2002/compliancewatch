@@ -66,8 +66,14 @@ export function ownerLabel(owner: AwaitOwner, ref?: string): string {
   return ref === undefined ? label : `${label} (${ref})`;
 }
 
+/** The route and who delivers it; a hardened route also says which header it must require. */
 export function toAwaitedItem(route: AwaitedRouteLike): AwaitedItemView {
-  return { method: route.method, path: route.path, owner: ownerLabel(route.owner, route.ref) };
+  const owner = ownerLabel(route.owner, route.ref);
+  return {
+    method: route.method,
+    path: route.path,
+    owner: route.header === undefined ? owner : `${owner}, requiring ${route.header}`,
+  };
 }
 
 export function toAwaitedFileItem(file: AwaitedFileLike): AwaitedItemView {

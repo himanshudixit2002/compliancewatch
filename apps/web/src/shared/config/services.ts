@@ -59,3 +59,21 @@ export function normalisePath(path: string): string {
 export function routeKey(route: Pick<RouteRef, "service" | "method" | "path">): string {
   return `${route.service} ${route.method} ${normalisePath(route.path)}`;
 }
+
+/** The key of a route that requires a request header: `service METHOD path [header name]`. */
+export function requiredHeaderKey(
+  route: Pick<RouteRef, "service" | "method" | "path">,
+  header: string,
+): string {
+  return `${routeKey(route)} [header ${header.toLowerCase()}]`;
+}
+
+/**
+ * The key an awaited route lands under: its route key, or, for a route awaited in a hardened
+ * form, the key of the route requiring that header. A set of committed keys holds both kinds.
+ */
+export function awaitKey(
+  route: Pick<RouteRef, "service" | "method" | "path"> & { header?: string },
+): string {
+  return route.header === undefined ? routeKey(route) : requiredHeaderKey(route, route.header);
+}

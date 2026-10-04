@@ -49,12 +49,14 @@ Flat; markdown files. Reading order for someone new to the app:
 12. [legal-pages.md](legal-pages.md): the legal documents, their loader and draft banner, the
     versions a consent records, production onboarding closed while they are drafts, printing,
     and adding a document.
-13. [decisions.md](decisions.md): the log of decisions local to the web app, `D-001` onward.
+13. [admin-tools.md](admin-tools.md): the internal tools under `/admin` that are built: what
+    each shows and calls, who may open it, and what waits.
+14. [decisions.md](decisions.md): the log of decisions local to the web app, `D-001` onward.
     The platform-level one, that the browser never calls a service and the session is an
     encrypted cookie, is [ADR-019](../adr/ADR-019-web-server-layer-and-stateless-session.md).
-14. [screens.md](screens.md): generated; every registry entry with its route, roles, status and
+15. [screens.md](screens.md): generated; every registry entry with its route, roles, status and
     what it waits for, plus the role-by-screen matrix.
-15. [glossary.md](glossary.md): the words the code and these docs use.
+16. [glossary.md](glossary.md): the words the code and these docs use.
 
 The package READMEs ([apps/web/README.md](../../apps/web/README.md),
 [packages/ui/README.md](../../packages/ui/README.md)) carry the layout trees and the run
@@ -74,6 +76,7 @@ commands; the docs here carry the reasoning and the procedures.
 | A message key convention or a shared helper                              | `i18n.md`                                                                                                      |
 | A flag declaration, the reader, a product event                          | `feature-flags.md`                                                                                             |
 | What an owner or CA screen shows, calls, records or waits for            | `onboarding-flow.md`, `business-pages.md`, `settings.md` or `legal-pages.md`                                   |
+| What an internal tool shows, calls or waits for                          | `admin-tools.md`                                                                                               |
 | A choice local to the web app                                            | A `D-0NN` entry in `decisions.md`; a choice that binds other parts of the platform is an ADR under `docs/adr/` |
 
 ## How to run
