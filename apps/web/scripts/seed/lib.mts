@@ -57,6 +57,8 @@ export const DEMO = {
   consentEvidence: "onboarding checkbox (seed)",
   whatsappLanguage: "hi",
   quietHours: { start: "21:00", end: "08:00" },
+  /** The notification service's template for the message that confirms an opt-in. */
+  confirmationTemplate: "opt_in_confirmed",
   entityAttributes: [
     { key: "state_codes", value: ["29"] },
     { key: "business_category", value: "wholesale_trade" },
@@ -77,6 +79,12 @@ export const DEMO = {
 } as const;
 
 export type SeedConsentPurpose = (typeof DEMO.consentPurposes)[number];
+
+/**
+ * The obligation id a notification about no obligation carries: `POST /v1/notification/send`
+ * requires one, and the opt-in confirmation the seed sends is about none.
+ */
+export const NO_OBLIGATION = "00000000-0000-0000-0000-000000000000";
 
 /**
  * The docs/legal document each seeded purpose refers to, as the web consent step maps it

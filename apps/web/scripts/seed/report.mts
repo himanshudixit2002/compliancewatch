@@ -70,6 +70,10 @@ export function summary(report: SeedReport, statePath: string | null): string {
     lines.push(
       `  notification  ${n.channel} ${n.recipient} ${n.optedIn ? "opted in" : "not opted in"}, ${n.language}, quiet ${n.quietHours}`,
     );
+    const error = n.confirmation.error === "" ? "" : ` (${n.confirmation.error})`;
+    lines.push(
+      `                opt-in confirmation ${n.confirmation.outcome}${error}; ${n.history.total} notification(s) for the business: ${n.history.states.join(", ")}`,
+    );
   }
   if (report.rulebook !== null) {
     const r = report.rulebook;

@@ -47,6 +47,8 @@ function fullReport(): SeedReport {
       optedIn: true,
       language: "hi",
       quietHours: "21:00-08:00",
+      confirmation: { outcome: "failed", error: "example channel not wired" },
+      history: { total: 1, states: ["queued"] },
     },
     rulebook: {
       documentId: DOCUMENT,
@@ -91,12 +93,22 @@ describe("summary", () => {
     expect(text).toContain("consents      2 granted: terms, privacy_notice");
     expect(text).toContain(`profile       entity ${ENTITY}, registration ${REGISTRATION}`);
     expect(text).toContain("notification  whatsapp 910000000000 opted in, hi, quiet 21:00-08:00");
+    expect(text).toContain(
+      "opt-in confirmation failed (example channel not wired); 1 notification(s) for the business: queued",
+    );
     expect(text).toContain(`rulebook      document ${DOCUMENT} (6 clauses); 5 mention(s) queued`);
     expect(text).toContain("state         /tmp/example/last.json");
     expect(text).toContain('FAILED        rulebook: PUT /m -> 422 "Refused"');
   });
 
   it("says when the mentions were refused, the rulebook was skipped or nothing was recorded", () => {
+    const deferred = fullReport();
+    if (deferred.notification !== null) {
+      deferred.notification.confirmation = { outcome: "deferred", error: "" };
+    }
+    expect(summary(deferred, null)).toContain(
+      "opt-in confirmation deferred; 1 notification(s) for the business: queued",
+    );
     const refused = fullReport();
     if (refused.rulebook !== null) refused.rulebook.mentions = null;
     expect(summary(refused, null)).toContain("mentions refused");

@@ -596,9 +596,16 @@ memory stores forget their rows.
 
 `make web-seed` (`apps/web/scripts/seed`, run by Node's type stripping) fills the running stack
 with the demo tenant over the services' HTTP APIs: the owner's four consents, the demo GSTIN's
-registration with its pre-fill and answers, the WhatsApp preference, and notification
-01/2026-Central Tax with its clauses, mentions and relation candidate, replayed from fixtures
-recorded once with the pipeline's parser and grammar (D-021). The seed has its own small HTTP
+registration with its pre-fill and answers, the WhatsApp preference, the opt-in confirmation
+sent to that number, and notification 01/2026-Central Tax with its clauses, mentions and relation
+candidate, replayed from fixtures recorded once with the pipeline's parser and grammar (D-021).
+The confirmation is the demo business's one notification, which the reminders pages show: it goes
+through `POST /v1/notification/send` (the route that sends one notification now, with the nil
+UUID as its obligation, since it is about none) because nothing else on the stack creates a
+notification, the obligation events that queue reminders needing the workers. The stack's
+WhatsApp channel is not wired, so the service records it as failed with the channel's reason (or,
+inside the quiet hours, queued for their end); a repeat on the same tenant is a duplicate and
+records nothing. The seed has its own small HTTP
 module (`scripts/seed/http.mts`): `openapi-fetch` clients typed from the same generated
 contracts, because a plain Node script cannot import the app's `server-only` modules. It sends
 the tenant header on identity, profile and notification only and the write token on its
