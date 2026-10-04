@@ -429,6 +429,7 @@ source = { editable = "tools/demo" }
 dependencies = [
     { name = "compliancewatch-identity" },
     { name = "compliancewatch-llm-gateway" },
+    { name = "compliancewatch-mvp" },
     { name = "compliancewatch-notification" },
     { name = "compliancewatch-obligation" },
     { name = "compliancewatch-pipeline" },
@@ -446,6 +447,7 @@ dependencies = [
 requires-dist = [
     { name = "compliancewatch-identity", editable = "services/identity" },
     { name = "compliancewatch-llm-gateway", editable = "services/llm-gateway" },
+    { name = "compliancewatch-mvp", editable = "composition/mvp" },
     { name = "compliancewatch-notification", editable = "services/notification" },
     { name = "compliancewatch-obligation", editable = "services/obligation" },
     { name = "compliancewatch-pipeline", editable = "services/pipeline" },
