@@ -9,9 +9,10 @@ are built: what each shows, what it calls and what waits.
 The admin layout runs `requireAdmin()` before anything renders, so a tenant role gets the root
 404 with no admin markup; each page calls its gate again on its first line
 (`requireScreenSession`), and a regulatory role a tool's entry does not list gets the not-found
-page as well ([auth-and-roles.md](auth-and-roles.md)). The flags, ontology, notification and
-template pages each have a sibling `loading.tsx` with a skeleton (the console's sits in the route
-group `(console)`, so it wraps the console alone, as the home's sits in `(home)`); under one, a
+page as well ([auth-and-roles.md](auth-and-roles.md)). The flags, ontology, notification,
+template and rulebook pages each have a sibling `loading.tsx` with a skeleton (the console's sits
+in the route group `(console)`, the rule version list's in `(list)` and the resolve tool's in
+`(resolve)`, so each wraps that page alone, as the home's sits in `(home)`); under one, a
 not-found answer (an unknown id, a regulatory role the tool does not list) is streamed with status
 200 and a `noindex` tag rather than a 404 status, as on the business pages (D-029 in
 [decisions.md](decisions.md)). A tenant role still gets the real 404 from the layout's gate. The
@@ -25,6 +26,12 @@ document tool has no loading boundary, so its unknown ids stay real 404s (D-037)
 | Ontology            | `/admin/ontology`                        | every regulatory role   | `GET /v1/ontology` (profile; no tenant header, cached an hour)        |
 | Notifications       | `/admin/notifications`, `/[id]`          | `analyst`, `admin`      | `GET /v1/notification/notifications`, `.../{notification_id}`, for the tenant looked up |
 | Message templates   | `/admin/notifications/templates`         | every regulatory role   | `GET /v1/notification/templates` (cached five minutes)                |
+| Rule versions       | `/admin/rulebook/versions`               | every regulatory role   | `GET /v1/rulebook/rule-versions`, `.../rules`, `.../rules/{rule_key}/versions` |
+| Rule version        | `/admin/rulebook/versions/[id]`          | every regulatory role   | the version, its citations and their clauses, its relations, the ontology; citations and the publish workflow with the review token behind `web.publish_actions` |
+| Canonical entities  | `/admin/rulebook/entities/canonical`     | every regulatory role   | `GET /v1/rulebook/entities/resolve`                                   |
+| Canonical entity    | `/admin/rulebook/entities/canonical/[id]`| every regulatory role   | the entity, the clauses that mention it, the relations to it and their versions |
+| Clause search       | `/admin/rulebook/search`                 | every regulatory role   | `POST /v1/rulebook/search` (the words posted, never in the address)   |
+| Relations graph     | `/admin/rulebook/relations/graph`        | every regulatory role   | `GET /v1/rulebook/relations` and each version it reaches              |
 
 ## Internal tools: `/admin`
 
@@ -125,6 +132,110 @@ placeholders only; the facts a message carries come from the rulebook and the ob
 is sent. The page sits under the console's route, so it is built with it: a static route beside
 `/admin/notifications/[notificationId]` keeps `templates` from being read as a notification id.
 
+## Rule versions: `/admin/rulebook/versions`
+
+Every version of the rulebook's rules, by rule key. A row names the version (`rule_key v2`, which
+opens its page) and its title, its status, whether an analyst has reviewed it ("Not yet reviewed"
+until an approval completes a review round), its effective period, the approvers it needs (one,
+two different ones for a high-impact version) and its open questions, and when it was published.
+
+- Status chips choose the list. **In force** (the default) is the rulebook's as-of read, `GET
+  /v1/rulebook/rule-versions?as_of=`: the published or superseded version of each rule whose period
+  covers the date (today in IST unless the date field says otherwise), paged by rule key with the
+  route's `after` cursor. A draft is never in force, so on a stack where nothing is published the
+  list is empty and says so, with the way to the drafts.
+- **Draft**, **In review**, **Approved**, **Published**, **Superseded**, **Withdrawn** and **Every
+  status** read each rule's versions (`GET /v1/rulebook/rules`, then `GET
+  /v1/rulebook/rules/{rule_key}/versions`, the only read that returns drafts), eight rules at a
+  time from the cursor until a page holds 25 rows, and page on after the last rule read (D-043).
+- A rule select narrows either list to one rule. The chips and the form are links and GET requests
+  (rule keys and dates are not personal data), so a list can be shared; a malformed date or rule key
+  is marked on its field and nothing is read. Nothing is cached: versions move through review
+  outside this server too.
+
+## Rule version: `/admin/rulebook/versions/[ruleVersionId]`
+
+One version for the analyst who reviews it: the facts (rule, version, status, review, regulator,
+the level it applies to, its period, publication, high impact, id), a warning while it needs review,
+the summary, the condition in words, the obligation it creates and how it recurs, the cited
+instrument, the open questions, its citations, its relations and the publish workflow, and the
+four open mappings as stored at the foot.
+
+- **The condition in words.** The kernel's predicate tree (`all_of`, `any_of`, `not`,
+  predicates) is described, not evaluated: each predicate names its attribute with the ontology's
+  meaning, the operator in words ("is one of", "is at least") and each value with the ontology's
+  label; free text is shown as what has to be judged, an attribute the ontology does not hold is
+  marked, and a node of a shape the web app cannot read is shown as stored. Without the ontology
+  (`GET /v1/ontology` failed) the values are shown as stored and the page says why.
+- **Citations** (`GET .../citations`): each cited clause (read from `GET /v1/rulebook/clauses/{id}`,
+  cached five minutes under its tag) with its document, the quote, the clause's text with the quote
+  marked when it appears word for word, and the verification (verified or not, the match score, when).
+  While the version is a draft the form cites more: rows of a clause id and a quote, sent together
+  by `PUT .../citations`. The rulebook stores every row or none: a quote it cannot find in its
+  clause, or a clause it does not hold, refuses the whole request; the form keeps the rows, lists
+  every failure the rulebook gave and puts each one on its row when it can tell which row it is
+  (it reads the rows' clauses for their references). A save says how many citations are new and
+  each quote's score, and the table shows them. Past draft, the section says citations change only
+  in a draft.
+- **Relations** (`GET /v1/rulebook/relations?published_only=false`, from and to the version): what
+  it says about other versions and entities, and what other versions say about it, each with its
+  evidence clause opened in the document, the version at the other end named by rule key and
+  number (read for the purpose), and a link to the graph.
+- **The publish workflow.** The steps the version's status allows, as the rulebook's routes state
+  them: submit a draft (optionally as high impact, which a later submission keeps), approve or
+  return a version in review, publish or return an approved one, withdraw a published one. Each
+  opens a dialog that says what the rulebook records; return and withdraw ask for a reason of ten
+  characters or more (`ReasonDialog`), the others take an optional note (`ConfirmDialog`). The
+  acting analyst is the session's user, filled in by `server/api/rulebook-write.ts`, never a form
+  field, and an approval is never sent as synthetic. The panel says what the step did and lists the
+  round's approvers from the rulebook's answer ("1 of 2 approvals in this round. It needs a second
+  approver: a different analyst.", the signed-in analyst named); every refusal (the same analyst
+  approving twice, citations missing or unverified, an overlap, a relation that cannot take effect,
+  publishing turned off) is shown under the step with the rulebook's title, detail and correlation
+  id. On success the page renders again in the new status.
+- Citations and steps are sent only with `web.publish_actions` on for the session's tenant and
+  `CW_WEB_RULEBOOK_REVIEW_TOKEN` set; otherwise the page shows the refusal (which names the flag or
+  the variable) and offers nothing. The rulebook's version read does not carry the round's
+  approvers yet, so before a step the panel says they show after one.
+
+## Canonical entities: `/admin/rulebook/entities/canonical`
+
+The resolve tool. A GET form takes an entity type (the kernel's ten) and a name, and shows what the
+rulebook's alignment would make of it (`GET /v1/rulebook/entities/resolve`): the status in words
+with what it means (resolved, ambiguous, not found, unqualified, empty), the name after the
+kernel's normalisation, and the entities it points at to open: the one entity for a resolved name,
+every candidate sharing an ambiguous alias. No route lists the entities, so this is the way to one.
+
+## Canonical entity: `/admin/rulebook/entities/canonical/[entityId]`
+
+One entity: its type, canonical name, aliases and id; the clauses that mention it, newest document
+first (`GET .../clauses`, 50 at most), with every mention marked in code points and a link to the
+document with the first mention marked; with a date (a GET form), only documents published by
+then, each clause saying whether its rule is out of force on it; and the relations rule versions
+state about it (`GET /v1/rulebook/relations?to_entity_id=`), each source version named.
+
+## Clause search: `/admin/rulebook/search`
+
+The rulebook's hybrid search (`POST /v1/rulebook/search`). The words, a regulator, document types, a
+publication date and how many hits are posted to a server action, so the words never reach an
+address; the form keeps them after a search. Each hit shows its clause and document, the text with
+the searched words marked (`HighlightMark`, where a clause word starts with one), the fused score,
+the rank in the full-text leg and in the vector leg as the rulebook returned them, the published
+versions citing it, whether its rule is out of force, and a link to the clause in its document.
+The page sends the words without an embedding, so the vector leg does not run from here and says
+so (D-044).
+
+## Relations graph: `/admin/rulebook/relations/graph`
+
+The relations around one rule version, one or two relations out, every relation or only those of
+published versions (a GET form; a version's page links here). The walk reads the relations from and
+to each version it reaches, and those to each aligned entity, up to 40 nodes (the page says when it
+stops short), and reads each version for its name. The graph is an inline SVG laid out in columns
+(the start in the middle, what it points at to the right, what points at it to the left), hidden
+from assistive technology; a table beside it lists the same relations with their links and
+evidence. No graph library is used (D-044). An id the rulebook does not hold is answered on the
+form's field.
+
 ## What waits
 
 - The usage counts per attribute on the ontology browser: `GET /v1/profile/admin/attribute-usage`
@@ -134,3 +245,10 @@ is sent. The page sits under the console's route, so it is built with it: a stat
 - Reading another tenant once the services take the tenant from a bearer token: the console sends
   the looked-up tenant in `x-tenant-id`, which the notification service honours without a token
   today; with tokens it needs the admin reads the services track adds (WP30).
+- The approvers of a review round on a fresh visit: the rulebook's version read does not carry them
+  yet (the services track adds them to it), so the rule version page shows them from the answer
+  to a step.
+- Creating an entity: only an analyst's decision on the entity review queue does it, and those
+  screens are not built, so on a fresh stack every name resolves to not found, unqualified or empty.
+- The vector leg of the clause search: it needs a query embedding from the LLM gateway, which the
+  page does not ask for.

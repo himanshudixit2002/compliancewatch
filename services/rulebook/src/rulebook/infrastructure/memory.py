@@ -29,6 +29,7 @@ from domain_kernel.ids import (
 )
 from domain_kernel.knowledge import EntityRef, EntityType, RelationKind, RuleRelation
 from domain_kernel.ontology import AttributeLevel
+from domain_kernel.predicates import specification_to_mapping
 from domain_kernel.status import RULE_VERSION_TRANSITIONS, RuleVersionStatus
 from domain_kernel.vectors import ClauseFilter, Vector
 from rulebook.domain.documents import StoredClause, StoredDocument
@@ -65,7 +66,15 @@ from rulebook.domain.rule_versions import (
 )
 from rulebook.domain.runs import ExtractionRun, RuleSummary
 from rulebook.domain.search import CitedClause, ClauseEmbedding
-from rulebook.domain.seed import SeedStatus
+from rulebook.domain.seed import (
+    SEED_CONTENT_KEYS,
+    SeedCalendar,
+    SeedOutcome,
+    SeedRule,
+    SeedStatus,
+    reviewed_content,
+    seed_content,
+)
 
 EXAMPLES_PER_GROUP = 5
 TEST_EFFECTIVE_FROM = date(2026, 4, 1)
@@ -809,6 +818,42 @@ def _version_record(
     )
 
 
+def _seed_version(rule: _Rule, seeded: SeedRule, number: int) -> _Version:
+    """A draft version holding what the seed calendar says about a rule."""
+    source: dict[str, object] = dict(seeded.source.to_mapping())
+    return _Version(
+        rule_id=rule.rule_id,
+        rule_key=rule.rule_key,
+        version=number,
+        status=RuleVersionStatus.DRAFT,
+        title=seeded.title,
+        summary=seeded.summary,
+        specification=specification_to_mapping(seeded.specification),
+        obligation_template=seeded.obligation_template.to_mapping(),
+        recurrence=None if seeded.recurrence is None else seeded.recurrence.to_mapping(),
+        effective_from=seeded.effective_from,
+        effective_to=None,
+        source=source,
+        seed_status=seeded.seed_status,
+        todo=seeded.todo,
+    )
+
+
+def _seed_content_of(version: _Version) -> dict[str, object]:
+    """A stored version in the form ``seed_content`` gives a seed rule, to compare the two."""
+    return {
+        "title": version.title,
+        "summary": version.summary,
+        "specification": version.specification,
+        "obligation_template": version.obligation_template,
+        "recurrence": version.recurrence,
+        "effective_from": version.effective_from,
+        "source": version.source,
+        "seed_status": version.seed_status.value,
+        "todo": list(version.todo),
+    }
+
+
 class MemoryCitationRepository:
     def __init__(self, tables: _Tables) -> None:
         self._tables = tables
@@ -1029,6 +1074,57 @@ class MemoryKnowledgeStore:
                 high_impact=high_impact,
             )
         return version_id
+
+    def apply_seed(self, calendar: SeedCalendar) -> SeedOutcome:
+        """The seed calendar's rules as draft versions, the way ``rulebook-seed`` writes them
+        into Postgres (``SqlAlchemySeedRepository``): a new rule gets version 1; while its
+        latest version is a draft it is updated in place; a version past draft is never changed,
+        and a rule whose content differs from it gets a new draft version. ``seed_status`` is
+        left out of that comparison. Everything written is a draft that needs review; this is
+        what ``CW_RULEBOOK_SEED_ON_START`` loads in local and test."""
+        created_rules: list[str] = []
+        created_versions: list[str] = []
+        updated: list[str] = []
+        unchanged: list[str] = []
+        with self._lock:
+            for rule in calendar.rules:
+                stored = self._tables.rules.get(rule.rule_key)
+                if stored is None:
+                    stored = _Rule(uuid4(), rule.rule_key, rule.regulator, rule.title, rule.level)
+                    self._tables.rules[rule.rule_key] = stored
+                    created_rules.append(rule.rule_key)
+                content = seed_content(rule)
+                versions = [
+                    (version_id, version)
+                    for version_id, version in self._tables.versions.items()
+                    if version.rule_id == stored.rule_id
+                ]
+                latest = max(versions, key=lambda item: item[1].version, default=None)
+                if latest is None:
+                    self._tables.versions[RuleVersionId.new()] = _seed_version(stored, rule, 1)
+                    created_versions.append(f"{rule.rule_key}@1")
+                elif latest[1].status is RuleVersionStatus.DRAFT:
+                    latest_id, draft = latest
+                    if _seed_content_of(draft) == content:
+                        unchanged.append(rule.rule_key)
+                        continue
+                    seeded = _seed_version(stored, rule, draft.version)
+                    self._tables.versions[latest_id] = replace(
+                        draft, **{key: getattr(seeded, key) for key in SEED_CONTENT_KEYS}
+                    )
+                    updated.append(f"{rule.rule_key}@{draft.version}")
+                elif reviewed_content(_seed_content_of(latest[1])) == reviewed_content(content):
+                    unchanged.append(rule.rule_key)
+                    continue
+                else:
+                    number = latest[1].version + 1
+                    self._tables.versions[RuleVersionId.new()] = _seed_version(stored, rule, number)
+                    created_versions.append(f"{rule.rule_key}@{number}")
+                # GET /v1/rulebook/rules lists a rule by the title of its latest version.
+                stored.title = rule.title
+        return SeedOutcome(
+            tuple(created_rules), tuple(created_versions), tuple(updated), tuple(unchanged)
+        )
 
     def add_citation(
         self,

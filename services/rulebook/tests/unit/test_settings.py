@@ -38,3 +38,31 @@ def test_synthetic_approvals_are_allowed_in_local_and_test_only(
     assert settings.synthetic_approvals_allowed is allowed
     prod = RulebookSettings(_env_file=None, service_name="rulebook", env="prod", auth_mode="token")
     assert prod.synthetic_approvals_allowed is False
+
+
+def test_seed_on_start_is_off_by_default_and_reads_its_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert rulebook_settings().rulebook_seed_on_start is False
+    monkeypatch.setenv("CW_RULEBOOK_SEED_ON_START", "true")
+    monkeypatch.setenv("CW_RULEBOOK_STORE", "memory")
+    settings = RulebookSettings(_env_file=None, service_name="rulebook")
+    assert settings.rulebook_seed_on_start is True
+
+
+@pytest.mark.parametrize("env", ["local", "test"])
+def test_seed_on_start_is_honoured_in_local_and_test(env: Environment) -> None:
+    settings = rulebook_settings(env=env, rulebook_seed_on_start=True)
+    assert settings.rulebook_seed_on_start is True
+
+
+def test_seed_on_start_is_refused_outside_local_and_test() -> None:
+    with pytest.raises(ValueError, match="SEED_ON_START is refused with CW_ENV=staging"):
+        rulebook_settings(env="staging", rulebook_seed_on_start=True)
+    with pytest.raises(ValueError, match="refused with CW_ENV=prod"):
+        rulebook_settings(env="prod", auth_mode="token", rulebook_seed_on_start=True)
+
+
+def test_seed_on_start_is_refused_with_the_postgres_store() -> None:
+    with pytest.raises(ValueError, match="fills the memory store"):
+        rulebook_settings(rulebook_store="postgres", rulebook_seed_on_start=True)

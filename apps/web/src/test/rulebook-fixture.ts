@@ -1,4 +1,9 @@
-import type { RulebookDocumentDto } from "@/entities/rulebook/types";
+import type {
+  EntityDto,
+  MentionedClauseDto,
+  RelationDto,
+  RulebookDocumentDto,
+} from "@/entities/rulebook/types";
 
 /**
  * Rulebook records for unit tests: obviously synthetic ("Example ..." text, the year 2000), never
@@ -50,6 +55,67 @@ export function documentDto(overrides: Partial<RulebookDocumentDto> = {}): Ruleb
         text: "Example clause text without a page.",
       },
     ],
+    ...overrides,
+  };
+}
+
+export const EXAMPLE_ENTITY_ID = "00000000-0000-4000-8000-0000000000e1";
+export const EXAMPLE_OTHER_ENTITY_ID = "00000000-0000-4000-8000-0000000000e2";
+
+/** A canonical entity as `GET /v1/rulebook/entities/{id}` answers it. */
+export function entityDto(overrides: Partial<EntityDto> = {}): EntityDto {
+  return {
+    entity_id: EXAMPLE_ENTITY_ID,
+    entity_type: "form",
+    canonical_name: "example form",
+    aliases: ["example form 1", "form e"],
+    ...overrides,
+  };
+}
+
+/** A clause that mentions the entity twice, with its document's facts. */
+export function mentionedClauseDto(
+  overrides: Partial<MentionedClauseDto> = {},
+): MentionedClauseDto {
+  return {
+    clause_id: EXAMPLE_CLAUSE_IDS.first,
+    document_id: EXAMPLE_DOCUMENT_ID,
+    clause_ref: "en.p1",
+    ordinal: 1,
+    page: 1,
+    text: "Example clause names example form, then example form 1 again.",
+    regulator: "Example regulator",
+    doc_type: "circular",
+    external_ref: "Example 1/2000",
+    title: "Example document title",
+    url: "https://example.com/example-document.pdf",
+    language: "en",
+    published_at: "2000-01-15",
+    mentions: [
+      { text: "example form", span_start: 21, span_end: 33 },
+      { text: "example form 1", span_start: 40, span_end: 54 },
+    ],
+    out_of_force: false,
+    ...overrides,
+  };
+}
+
+/** A relation from a rule version to the entity, with its evidence clause. */
+export function relationDto(overrides: Partial<RelationDto> = {}): RelationDto {
+  return {
+    relation_id: "00000000-0000-4000-8000-0000000000b1",
+    from_rule_version_id: "00000000-0000-4000-8000-0000000000f1",
+    relation: "refers_to",
+    to_kind: "form",
+    to_ref: "example form",
+    to_rule_version_id: null,
+    to_entity_id: EXAMPLE_ENTITY_ID,
+    evidence_clause_id: EXAMPLE_CLAUSE_IDS.first,
+    evidence_clause_ref: "en.p1",
+    evidence_document_id: EXAMPLE_DOCUMENT_ID,
+    candidate_id: null,
+    period_label: null,
+    new_due_on: null,
     ...overrides,
   };
 }

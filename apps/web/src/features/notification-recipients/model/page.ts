@@ -113,10 +113,12 @@ export function recipientName(recipient: Pick<Recipient, "orgLabel" | "role">): 
   return recipient.orgLabel === "" ? t(ROLE_LABEL[recipient.role]) : recipient.orgLabel;
 }
 
+/** The businesses a recipient follows, by name: the service orders them by id, which reads as
+ * random, so they are sorted for the page. */
 function businessNames(recipient: Recipient, names: ReadonlyMap<string, string>): string[] {
-  return recipient.businesses.map(
-    (link) => names.get(link.businessId) ?? (link.label === "" ? link.businessId : link.label),
-  );
+  return recipient.businesses
+    .map((link) => names.get(link.businessId) ?? (link.label === "" ? link.businessId : link.label))
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function deliveryLabel(recipient: Recipient): string {

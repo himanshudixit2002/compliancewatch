@@ -4,9 +4,11 @@ The web app's flags are declared in the repository's flag registry,
 [`packages/flags/registry.json`](../../packages/flags/registry.json), next to every other
 rollout switch; [packages/flags/README.md](../../packages/flags/README.md) describes the entry
 format, the check and the two SDKs. `apps/web/src/shared/config/flags.ts` keeps only the typed
-list of the web flag names, and `apps/web/src/server/flags.ts` is the reader. One flag is read
-on `main`: `web.analytics_enabled`, by the product events (`server/analytics.ts`). The navigation
-still hides a flagged registry entry, because no flagged screen is built yet.
+list of the web flag names, and `apps/web/src/server/flags.ts` is the reader. Three flags are
+read on `main`: `web.analytics_enabled`, by the product events (`server/analytics.ts`), and
+`web.admin_rulebook_writes` and `web.publish_actions`, by `server/api/rulebook-write.ts` before it
+sends an analyst's decision, or a rule version's citations or workflow step, to the rulebook. The
+navigation still hides a flagged registry entry, because no flagged screen is built yet.
 
 ## An entry
 
@@ -55,11 +57,14 @@ files together.
 | `web.admin_rulebook_writes` | regulatory-intelligence | Entity and relation decisions from `/admin` through a server-side write token |
 | `web.analytics_enabled`     | core-product            | Product events for sessions that granted the analytics consent                |
 | `web.otel_enabled`          | platform                | OpenTelemetry registration in `instrumentation.ts`                            |
-| `web.publish_actions`       | regulatory-intelligence | The publish workflow actions on a rule version                                |
+| `web.publish_actions`       | regulatory-intelligence | Citations and the publish workflow on a rule version's page                   |
 | `web.qa_enabled`            | ai-platform             | The ask screen                                                                |
 | `web.tenant_header_off`     | identity-partner        | Stops sending `x-tenant-id` once services take the tenant from a token        |
 
-`web.analytics_enabled` is read by `server/analytics.ts`; the other five are not read yet.
+`web.analytics_enabled` is read by `server/analytics.ts`, and `web.admin_rulebook_writes` and
+`web.publish_actions` by `server/api/rulebook-write.ts`; the other three are not read yet. The e2e
+run turns `web.publish_actions` on through its override (the Playwright config), so the rule
+version specs can cite, submit, approve and return drafts.
 
 ## The reader
 

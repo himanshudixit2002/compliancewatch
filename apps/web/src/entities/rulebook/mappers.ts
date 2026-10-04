@@ -4,17 +4,31 @@ import type {
   CandidateApproval,
   CandidateApproved,
   CandidateRejection,
+  CanonicalEntity,
   Clause,
+  ClauseDetail,
+  ClauseDetailDto,
   ClauseDto,
   EntityDecisionInDto,
   EntityDecisionOutDto,
+  EntityDto,
   EntityGroupDecided,
   EntityGroupDecision,
+  EntityResolution,
+  EntityResolutionDto,
+  MentionedClause,
+  MentionedClauseDto,
   RejectInDto,
   RelationCandidate,
   RelationCandidateDto,
+  RelationDto,
+  RuleRelation,
   RulebookDocument,
   RulebookDocumentDto,
+  SearchHit,
+  SearchHitDto,
+  SearchInDto,
+  SearchQuery,
 } from "./types";
 
 export function clauseFromDto(dto: ClauseDto): Clause {
@@ -114,5 +128,103 @@ export function relationCandidateFromDto(dto: RelationCandidateDto): RelationCan
     status: dto.status,
     rejectReason: dto.reject_reason ?? null,
     decidedBy: dto.decided_by,
+  };
+}
+
+export function entityFromDto(dto: EntityDto): CanonicalEntity {
+  return {
+    entityId: dto.entity_id,
+    entityType: dto.entity_type,
+    canonicalName: dto.canonical_name,
+    aliases: [...dto.aliases],
+  };
+}
+
+export function resolutionFromDto(dto: EntityResolutionDto): EntityResolution {
+  return {
+    status: dto.status,
+    entityType: dto.entity_type,
+    name: dto.name,
+    normalised: dto.normalised,
+    entity: dto.entity === null || dto.entity === undefined ? null : entityFromDto(dto.entity),
+    candidates: dto.candidates.map(entityFromDto),
+  };
+}
+
+export function clauseDetailFromDto(dto: ClauseDetailDto): ClauseDetail {
+  return {
+    clauseId: dto.clause_id,
+    documentId: dto.document_id,
+    clauseRef: dto.clause_ref,
+    ordinal: dto.ordinal,
+    page: dto.page ?? null,
+    text: dto.text,
+    regulator: dto.regulator,
+    docType: dto.doc_type,
+    externalRef: dto.external_ref,
+    title: dto.title,
+    url: dto.url,
+    language: dto.language,
+    publishedAt: dto.published_at ?? null,
+  };
+}
+
+export function mentionedClauseFromDto(dto: MentionedClauseDto): MentionedClause {
+  return {
+    ...clauseDetailFromDto(dto),
+    mentions: dto.mentions.map((mention) => ({
+      text: mention.text,
+      start: mention.span_start,
+      end: mention.span_end,
+    })),
+    outOfForce: dto.out_of_force,
+  };
+}
+
+export function relationFromDto(dto: RelationDto): RuleRelation {
+  return {
+    relationId: dto.relation_id,
+    fromRuleVersionId: dto.from_rule_version_id,
+    relation: dto.relation,
+    toKind: dto.to_kind,
+    toRef: dto.to_ref,
+    toRuleVersionId: dto.to_rule_version_id ?? null,
+    toEntityId: dto.to_entity_id ?? null,
+    evidenceClauseId: dto.evidence_clause_id,
+    evidenceClauseRef: dto.evidence_clause_ref,
+    evidenceDocumentId: dto.evidence_document_id,
+    candidateId: dto.candidate_id ?? null,
+    periodLabel: dto.period_label ?? null,
+    newDueOn: dto.new_due_on ?? null,
+  };
+}
+
+/** The search body: text only, so the vector leg runs only for a caller that sends a vector. */
+export function searchToDto(query: SearchQuery): SearchInDto {
+  return {
+    text: query.text,
+    k: query.k,
+    doc_types: [...query.docTypes],
+    ...(query.regulator === undefined ? {} : { regulator: query.regulator }),
+    ...(query.asOf === undefined ? {} : { as_of: query.asOf }),
+  };
+}
+
+export function searchHitFromDto(dto: SearchHitDto): SearchHit {
+  return {
+    clauseId: dto.clause_id,
+    documentId: dto.document_id,
+    clauseRef: dto.clause_ref,
+    text: dto.text,
+    regulator: dto.regulator,
+    docType: dto.doc_type,
+    externalRef: dto.external_ref,
+    title: dto.title,
+    publishedAt: dto.published_at ?? null,
+    score: dto.score,
+    lexicalRank: dto.lexical_rank ?? null,
+    vectorRank: dto.vector_rank ?? null,
+    citedBy: [...dto.cited_by],
+    outOfForce: dto.out_of_force,
   };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { codePointLength, highlightSpan } from "./highlight";
+import { codePointLength, highlightSpan, markSpans } from "./highlight";
 
 describe("highlightSpan", () => {
   it("cuts the text around the span, end exclusive", () => {
@@ -26,5 +26,43 @@ describe("highlightSpan", () => {
     expect(highlightSpan("abc", 2, 1)).toBeNull();
     expect(highlightSpan("abc", 0.5, 2)).toBeNull();
     expect(highlightSpan("abc", 0, Number.NaN)).toBeNull();
+  });
+});
+
+describe("markSpans", () => {
+  it("cuts the text into plain and marked runs, in code points", () => {
+    expect(
+      markSpans("Example 𝔸 text here", [
+        { start: 8, end: 9 },
+        { start: 15, end: 19 },
+      ]),
+    ).toEqual([
+      { text: "Example ", mark: false },
+      { text: "𝔸", mark: true },
+      { text: " text ", mark: false },
+      { text: "here", mark: true },
+    ]);
+  });
+
+  it("merges overlapping spans, sorts them and leaves out those that do not fit", () => {
+    expect(
+      markSpans("Example text", [
+        { start: 8, end: 12 },
+        { start: 0, end: 3 },
+        { start: 2, end: 7 },
+        { start: 5, end: 99 },
+        { start: 4, end: 4 },
+        { start: 1.5, end: 2 },
+      ]),
+    ).toEqual([
+      { text: "Example", mark: true },
+      { text: " ", mark: false },
+      { text: "text", mark: true },
+    ]);
+  });
+
+  it("keeps a text without spans as one plain run, the empty text included", () => {
+    expect(markSpans("Example", [])).toEqual([{ text: "Example", mark: false }]);
+    expect(markSpans("", [])).toEqual([{ text: "", mark: false }]);
   });
 });

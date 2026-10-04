@@ -6,6 +6,7 @@ version is published through the review flow.
 """
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -13,7 +14,7 @@ from enum import StrEnum
 from domain_kernel._validation import require_date, require_instance, require_text
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ontology import AttributeLevel
-from domain_kernel.predicates import Specification
+from domain_kernel.predicates import Specification, specification_to_mapping
 from domain_kernel.recurrence import Recurrence
 from domain_kernel.rules import ObligationTemplate
 
@@ -131,3 +132,55 @@ class SeedCalendar:
     @property
     def keys(self) -> tuple[str, ...]:
         return tuple(rule.rule_key for rule in self.rules)
+
+
+SEED_CONTENT_KEYS = (
+    "title",
+    "summary",
+    "specification",
+    "obligation_template",
+    "recurrence",
+    "effective_from",
+    "source",
+    "seed_status",
+    "todo",
+)
+"""The parts of a rule version the seed writes, and the parts a re-run compares."""
+
+
+def seed_content(rule: SeedRule) -> dict[str, object]:
+    """What a seed rule stores in its draft version, in the stored (JSON-ready) form."""
+    return {
+        "title": rule.title,
+        "summary": rule.summary,
+        "specification": specification_to_mapping(rule.specification),
+        "obligation_template": rule.obligation_template.to_mapping(),
+        "recurrence": None if rule.recurrence is None else rule.recurrence.to_mapping(),
+        "effective_from": rule.effective_from,
+        "source": rule.source.to_mapping(),
+        "seed_status": rule.seed_status.value,
+        "todo": list(rule.todo),
+    }
+
+
+def reviewed_content(content: Mapping[str, object]) -> dict[str, object]:
+    """The content a version past draft is compared on: everything but ``seed_status``, which
+    review sets to reviewed while the file still says needs_review."""
+    return {key: value for key, value in content.items() if key != "seed_status"}
+
+
+@dataclass(frozen=True, slots=True)
+class SeedOutcome:
+    """What one run of the seed did, rule by rule (``rule_key@version`` for versions)."""
+
+    created_rules: tuple[str, ...] = ()
+    created_versions: tuple[str, ...] = ()
+    updated_drafts: tuple[str, ...] = ()
+    unchanged: tuple[str, ...] = ()
+
+    @property
+    def summary(self) -> str:
+        return (
+            f"{len(self.created_rules)} new rules, {len(self.created_versions)} new versions, "
+            f"{len(self.updated_drafts)} drafts updated, {len(self.unchanged)} unchanged"
+        )

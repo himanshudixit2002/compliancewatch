@@ -9,33 +9,24 @@ not a change to the rule.
 """
 
 import uuid
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from sqlalchemy import Engine, create_engine, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
-from domain_kernel.predicates import specification_to_mapping
 from domain_kernel.status import RuleVersionStatus
-from rulebook.domain.seed import SeedCalendar, SeedRule
+from rulebook.domain.seed import (
+    SEED_CONTENT_KEYS,
+    SeedCalendar,
+    SeedOutcome,
+    SeedRule,
+    reviewed_content,
+    seed_content,
+)
 from rulebook.infrastructure.models import RuleRow, RuleVersionRow
 
-
-@dataclass(frozen=True, slots=True)
-class SeedOutcome:
-    created_rules: tuple[str, ...] = ()
-    created_versions: tuple[str, ...] = ()
-    updated_drafts: tuple[str, ...] = ()
-    unchanged: tuple[str, ...] = ()
-    problems: tuple[str, ...] = field(default_factory=tuple)
-
-    @property
-    def summary(self) -> str:
-        return (
-            f"{len(self.created_rules)} new rules, {len(self.created_versions)} new versions, "
-            f"{len(self.updated_drafts)} drafts updated, {len(self.unchanged)} unchanged"
-        )
+__all__ = ["SeedOutcome", "SqlAlchemySeedRepository"]
 
 
 class SqlAlchemySeedRepository:
@@ -73,7 +64,7 @@ class SqlAlchemySeedRepository:
                     .where(RuleVersionRow.rule_id == row.id)
                     .order_by(RuleVersionRow.version.desc())
                 ).first()
-                content = _content(rule)
+                content = seed_content(rule)
                 if latest is None:
                     session.add(_version(row, rule, 1, content, now))
                     created_versions.append(f"{rule.rule_key}@1")
@@ -84,7 +75,7 @@ class SqlAlchemySeedRepository:
                         for key, value in content.items():
                             setattr(latest, key, value)
                         updated.append(f"{rule.rule_key}@{latest.version}")
-                elif _reviewed(_content_of(latest)) == _reviewed(content):
+                elif reviewed_content(_content_of(latest)) == reviewed_content(content):
                     unchanged.append(rule.rule_key)
                 else:
                     session.add(_version(row, rule, latest.version + 1, content, now))
@@ -99,40 +90,8 @@ class SqlAlchemySeedRepository:
         return True
 
 
-CONTENT_KEYS = (
-    "title",
-    "summary",
-    "specification",
-    "obligation_template",
-    "recurrence",
-    "effective_from",
-    "source",
-    "seed_status",
-    "todo",
-)
-
-
-def _content(rule: SeedRule) -> dict[str, object]:
-    return {
-        "title": rule.title,
-        "summary": rule.summary,
-        "specification": specification_to_mapping(rule.specification),
-        "obligation_template": rule.obligation_template.to_mapping(),
-        "recurrence": None if rule.recurrence is None else rule.recurrence.to_mapping(),
-        "effective_from": rule.effective_from,
-        "source": rule.source.to_mapping(),
-        "seed_status": rule.seed_status.value,
-        "todo": list(rule.todo),
-    }
-
-
 def _content_of(row: RuleVersionRow) -> dict[str, object]:
-    return {key: getattr(row, key) for key in CONTENT_KEYS}
-
-
-def _reviewed(content: dict[str, object]) -> dict[str, object]:
-    """The content a version past draft is compared on: everything but ``seed_status``."""
-    return {key: value for key, value in content.items() if key != "seed_status"}
+    return {key: getattr(row, key) for key in SEED_CONTENT_KEYS}
 
 
 def _version(

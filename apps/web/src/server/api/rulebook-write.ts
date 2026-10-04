@@ -18,6 +18,21 @@ import type {
   EntityGroupDecision,
   RelationCandidate,
 } from "@/entities/rulebook/types";
+import {
+  actorToDto,
+  citationReportFromDto,
+  citationsToDto,
+  lifecycleFromDto,
+  publicationFromDto,
+  submitToDto,
+  versionApprovalToDto,
+} from "@/entities/rule-version/mappers";
+import type {
+  CitationInput,
+  CitationReport,
+  Publication,
+  VersionLifecycle,
+} from "@/entities/rule-version/types";
 import { isProblemOf } from "@/entities/problem/mappers";
 import type { FlagName } from "@/shared/config/flags";
 import { isRegulatory } from "@/shared/config/roles";
@@ -42,16 +57,26 @@ import type { ClientContext } from "./services";
  *                               web.admin_rulebook_writes and the review token; a refusal is a
  *                               port whose every method answers the refusal without a request
  *   rulebookWriteAccess(ctx)    whether a form may offer those decisions, and why not
+ *   rulebookWorkflow(ctx)       a rule version's citations and the publish workflow (submit,
+ *                               return, approve, publish, withdraw), behind the role, the flag
+ *                               web.publish_actions and the review token, the same way
+ *   rulebookWorkflowAccess(ctx) whether the version page may offer them, and why not
  *
- * The body's decided_by is the session's user id, filled here, so a form cannot name someone
- * else; the rulebook takes it as the caller's word until identity issues verified claims. A
- * rulebook answer about a token (wrong: 401; not configured on the rulebook: 503) is reworded to
- * say which side to fix, with the variable to set and never its value.
+ * The body's decided_by or actor_id is the session's user id, filled here, so a form cannot name
+ * someone else; the rulebook takes it as the caller's word until identity issues verified claims.
+ * An approval never carries `synthetic`: that marks an approval no analyst made, which only the
+ * local product's demo tool sends. A rulebook answer about a token (wrong: 401; not configured on
+ * the rulebook: 503) is reworded to say which side to fix, with the variable to set and never its
+ * value; every other refusal (a guard of the publish flow, a quote not in its clause) passes on
+ * with the rulebook's own problem.
  */
 export const REVIEW_TOKEN_HEADER = "x-cw-review-token";
 
 /** The flag that gates every decision an admin tool sends to the rulebook. */
 export const RULEBOOK_WRITES_FLAG: FlagName = "web.admin_rulebook_writes";
+
+/** The flag that gates a rule version's citations and the steps of its publish workflow. */
+export const PUBLISH_ACTIONS_FLAG: FlagName = "web.publish_actions";
 
 export type RulebookClient = Client<rulebook.paths>;
 
@@ -241,27 +266,33 @@ type Checked =
   | { allowed: true; client: RulebookClient; decidedBy: string }
   | { allowed: false; refusal: WriteRefusal; error: ApiError };
 
-function flagRefusal(): ApiError {
+function flagRefusal(flag: FlagName): ApiError {
   return webError(
     "unavailable",
-    "web-rulebook-writes-off",
-    t("rulebookWrites.flagOff", { flag: RULEBOOK_WRITES_FLAG }),
-    t("rulebookWrites.flagOffDetail", { flag: RULEBOOK_WRITES_FLAG }),
+    flag === RULEBOOK_WRITES_FLAG ? "web-rulebook-writes-off" : "web-publish-actions-off",
+    t("rulebookWrites.flagOff", { flag }),
+    t("rulebookWrites.flagOffDetail", { flag }),
   );
 }
 
 /** The role, then the flag for the session's tenant, then the review token. */
-async function check(ctx: ClientContext): Promise<Checked> {
+async function check(ctx: ClientContext, flag: FlagName): Promise<Checked> {
   const { session } = ctx;
   if (session === null || !isRegulatory(session)) {
     return { allowed: false, refusal: "role", error: roleRefusal() };
   }
-  if (!(await isEnabled(RULEBOOK_WRITES_FLAG, { tenantId: session.tenantId }))) {
-    return { allowed: false, refusal: "flag", error: flagRefusal() };
+  if (!(await isEnabled(flag, { tenantId: session.tenantId }))) {
+    return { allowed: false, refusal: "flag", error: flagRefusal(flag) };
   }
   const client = rulebookReviewClient(ctx);
   if (!client.ok) return { allowed: false, refusal: "token", error: client.error };
   return { allowed: true, client: client.value, decidedBy: session.userId };
+}
+
+async function access(ctx: ClientContext, flag: FlagName): Promise<WriteAccess> {
+  const checked = await check(ctx, flag);
+  if (checked.allowed) return { allowed: true };
+  return { allowed: false, refusal: checked.refusal, error: checked.error, flag };
 }
 
 /**
@@ -270,14 +301,7 @@ async function check(ctx: ClientContext): Promise<Checked> {
  * message, which names the flag or the variable to set.
  */
 export async function rulebookWriteAccess(ctx: ClientContext): Promise<WriteAccess> {
-  const checked = await check(ctx);
-  if (checked.allowed) return { allowed: true };
-  return {
-    allowed: false,
-    refusal: checked.refusal,
-    error: checked.error,
-    flag: RULEBOOK_WRITES_FLAG,
-  };
+  return access(ctx, RULEBOOK_WRITES_FLAG);
 }
 
 /**
@@ -286,8 +310,157 @@ export async function rulebookWriteAccess(ctx: ClientContext): Promise<WriteAcce
  * calls this itself, so a request made without the form (a replayed POST) meets the same checks.
  */
 export async function rulebookWrites(ctx: ClientContext): Promise<RulebookWritePort> {
-  const checked = await check(ctx);
+  const checked = await check(ctx, RULEBOOK_WRITES_FLAG);
   return checked.allowed
     ? new RulebookWriteGateway(checked.client, checked.decidedBy)
     : new RefusedWriteGateway(checked.error);
+}
+
+// ---- A rule version's citations and publish workflow (web.publish_actions) ----------------------
+
+/** What the rule version page sends to the rulebook. */
+export interface RuleVersionWorkflowPort {
+  cite(ruleVersionId: string, citations: readonly CitationInput[]): Promise<Result<CitationReport>>;
+  submit(
+    ruleVersionId: string,
+    input: { highImpact: boolean; note: string },
+  ): Promise<Result<VersionLifecycle>>;
+  returnToDraft(ruleVersionId: string, reason: string): Promise<Result<VersionLifecycle>>;
+  approve(ruleVersionId: string, note: string): Promise<Result<VersionLifecycle>>;
+  publish(ruleVersionId: string, note: string): Promise<Result<Publication>>;
+  withdraw(ruleVersionId: string, reason: string): Promise<Result<VersionLifecycle>>;
+}
+
+/** The workflow over the review client, with actor_id from the session. */
+export class RuleVersionWorkflowGateway implements RuleVersionWorkflowPort {
+  private readonly client: RulebookClient;
+  private readonly actorId: string;
+
+  constructor(client: RulebookClient, actorId: string) {
+    this.client = client;
+    this.actorId = actorId;
+  }
+
+  private path(ruleVersionId: string) {
+    return { params: { path: { rule_version_id: ruleVersionId } } };
+  }
+
+  async cite(
+    ruleVersionId: string,
+    citations: readonly CitationInput[],
+  ): Promise<Result<CitationReport>> {
+    const result = await call(
+      this.client.PUT("/v1/rulebook/rule-versions/{rule_version_id}/citations", {
+        ...this.path(ruleVersionId),
+        body: citationsToDto(citations),
+      }),
+    );
+    return explained(mapBody(result, citationReportFromDto));
+  }
+
+  async submit(
+    ruleVersionId: string,
+    input: { highImpact: boolean; note: string },
+  ): Promise<Result<VersionLifecycle>> {
+    const result = await call(
+      this.client.POST("/v1/rulebook/rule-versions/{rule_version_id}/submit", {
+        ...this.path(ruleVersionId),
+        body: submitToDto(input, this.actorId),
+      }),
+    );
+    return explained(mapBody(result, lifecycleFromDto));
+  }
+
+  async returnToDraft(ruleVersionId: string, reason: string): Promise<Result<VersionLifecycle>> {
+    const result = await call(
+      this.client.POST("/v1/rulebook/rule-versions/{rule_version_id}/return", {
+        ...this.path(ruleVersionId),
+        body: actorToDto(reason, this.actorId),
+      }),
+    );
+    return explained(mapBody(result, lifecycleFromDto));
+  }
+
+  async approve(ruleVersionId: string, note: string): Promise<Result<VersionLifecycle>> {
+    const result = await call(
+      this.client.POST("/v1/rulebook/rule-versions/{rule_version_id}/approve", {
+        ...this.path(ruleVersionId),
+        body: versionApprovalToDto(note, this.actorId),
+      }),
+    );
+    return explained(mapBody(result, lifecycleFromDto));
+  }
+
+  async publish(ruleVersionId: string, note: string): Promise<Result<Publication>> {
+    const result = await call(
+      this.client.POST("/v1/rulebook/rule-versions/{rule_version_id}/publish", {
+        ...this.path(ruleVersionId),
+        body: actorToDto(note, this.actorId),
+      }),
+    );
+    return explained(mapBody(result, publicationFromDto));
+  }
+
+  async withdraw(ruleVersionId: string, reason: string): Promise<Result<VersionLifecycle>> {
+    const result = await call(
+      this.client.POST("/v1/rulebook/rule-versions/{rule_version_id}/withdraw", {
+        ...this.path(ruleVersionId),
+        body: actorToDto(reason, this.actorId),
+      }),
+    );
+    return explained(mapBody(result, lifecycleFromDto));
+  }
+}
+
+/** A workflow port that refuses every step with the same error and sends nothing. */
+export class RefusedWorkflowGateway implements RuleVersionWorkflowPort {
+  readonly error: ApiError;
+
+  constructor(error: ApiError) {
+    this.error = error;
+  }
+
+  async cite(): Promise<Result<CitationReport>> {
+    return err(this.error);
+  }
+
+  async submit(): Promise<Result<VersionLifecycle>> {
+    return err(this.error);
+  }
+
+  async returnToDraft(): Promise<Result<VersionLifecycle>> {
+    return err(this.error);
+  }
+
+  async approve(): Promise<Result<VersionLifecycle>> {
+    return err(this.error);
+  }
+
+  async publish(): Promise<Result<Publication>> {
+    return err(this.error);
+  }
+
+  async withdraw(): Promise<Result<VersionLifecycle>> {
+    return err(this.error);
+  }
+}
+
+/**
+ * Whether the version page may offer citations and the workflow: a regulatory role, the flag
+ * web.publish_actions on for the session's tenant, and the review token configured.
+ */
+export async function rulebookWorkflowAccess(ctx: ClientContext): Promise<WriteAccess> {
+  return access(ctx, PUBLISH_ACTIONS_FLAG);
+}
+
+/**
+ * The workflow port for a rule version action: the gateway over the review client when the role,
+ * the flag and the token allow it, else a port that answers the refusal to every step. The
+ * action calls this itself, so a replayed POST meets the same checks.
+ */
+export async function rulebookWorkflow(ctx: ClientContext): Promise<RuleVersionWorkflowPort> {
+  const checked = await check(ctx, PUBLISH_ACTIONS_FLAG);
+  return checked.allowed
+    ? new RuleVersionWorkflowGateway(checked.client, checked.decidedBy)
+    : new RefusedWorkflowGateway(checked.error);
 }

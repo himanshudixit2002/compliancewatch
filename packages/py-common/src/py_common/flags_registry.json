@@ -286,7 +286,7 @@
       "type": "bool",
       "default": false,
       "owner": "regulatory-intelligence",
-      "description": "Submit, return, approve, publish and withdraw on the web app's rule version detail.",
+      "description": "Citations and the publish workflow (submit, return, approve, publish, withdraw) on the web app's rule version page, sent with the review token. Off, the page says which flag holds them back.",
       "removal": "When the publish workflow has run in staging for a release cycle.",
       "expires": "2027-03-31",
       "targeting": "none",

@@ -77,6 +77,11 @@ NOT_FLAGS: Mapping[str, str] = {
     "CW_EVAL_STORE": _STORE,
     "CW_APPLICABILITY_ENGINE_STORE": _STORE,
     "CW_LLM_LEDGER": "store selector of the gateway's usage ledger: memory or postgres",
+    "CW_RULEBOOK_SEED_ON_START": (
+        "a store setting like the selectors above: the memory store starts with the seed "
+        "calendar's drafts; refused outside local and test and with the Postgres store, so it "
+        "never rolls out"
+    ),
     "CW_NOTIFICATION_CHANNELS": (
         "channel selector like the stores: sink records messages for the local product and "
         "tests instead of sending them, is refused outside local and test, and never rolls out"

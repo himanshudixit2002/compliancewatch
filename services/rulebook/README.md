@@ -122,7 +122,8 @@ the sweep also need
 `CW_RULEBOOK_PUBLISH_ENABLED=true` (default off, 503 `rulebook-publishing-disabled`); citing and
 review work without it. The spec is committed at `packages/contracts/openapi/rulebook.v1.json`
 (`make openapi SERVICE=rulebook`) and pinned by `tests/contract/test_openapi.py`.
-`CW_RULEBOOK_STORE=memory` runs the service without a database (tests and demos).
+`CW_RULEBOOK_STORE=memory` runs the service without a database (tests and demos); with
+`CW_RULEBOOK_SEED_ON_START=true` (local and test only) it starts with the seed calendar's drafts.
 
 ### Authentication
 
@@ -263,7 +264,17 @@ The command is idempotent: a re-run after editing the file updates the draft ver
 place; a version that has left draft is never modified and a changed rule gets a new draft
 version instead (`rulebook.infrastructure.seed_repository`). The seed status that review sets to
 reviewed is not compared, so re-running the seed after an approval adds nothing. `rulebook.application.seed_loader`
-parses and checks the file; `rulebook.domain.seed` is the value object. Tests replay the
+parses and checks the file; `rulebook.domain.seed` is the value object.
+
+A rulebook on the memory store has no database for the command to write into, so
+`CW_RULEBOOK_SEED_ON_START=true` loads the same calendar into the memory store when the app is
+built (`seed_memory_store` in `main.py`, through `MemoryKnowledgeStore.apply_seed`, which follows
+the command's rules). Every version it loads is a draft that needs review; nothing is cited,
+approved or published. It is a local and test convenience for the web app's `make web-stack`,
+where analysts cite, submit and review the drafts: the setting is refused unless `CW_ENV` is
+`local` or `test`, and refused with `CW_RULEBOOK_STORE=postgres`, which `make seed
+SERVICE=rulebook` fills. It defaults to off and is configuration, not a rollout flag
+(`NOT_FLAGS` in `infra/scripts/check_flags.py`). Tests replay the
 calendar against sample profiles (a monthly filer, a QRMP filer in each state group, a
 composition taxpayer) and check every due date the recurrences produce.
 
@@ -297,13 +308,13 @@ src/rulebook/
   application/     # use cases: documents.py, alignment.py, review.py, relations.py, rule_versions.py, publication.py, graph.py, search.py; seed_loader.py
   domain/          # documents.py, alignment.py, review.py, relations.py, rule_versions.py, publication.py (the planner), events.py, graph.py, search.py, runs.py, ids.py, errors.py, repository.py, seed.py
   infrastructure/  # models.py (with the Vector column type), knowledge_repository.py (Postgres unit of work and outbox sink), memory.py, seed_repository.py, review_metrics.py (the review queue gauges)
-  settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN, CW_RULEBOOK_REVIEW_TOKEN, CW_RULEBOOK_PUBLISH_ENABLED
+  settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN, CW_RULEBOOK_REVIEW_TOKEN, CW_RULEBOOK_PUBLISH_ENABLED, CW_RULEBOOK_SEED_ON_START (local and test, memory store)
   testing.py       # rulebook_settings() for tests and demos: memory store, known tokens (WRITE_TOKEN, REVIEW_TOKEN)
   wiring.py        # what the api layer gets from the composition root
   seed.py          # rulebook-seed command
   quality.py       # rulebook-quality command: domain/quality.py checks, application/quality.py, infrastructure/quality_reader.py
   transitions.py   # rulebook-transitions command (the daily sweep)
-  main.py          # composition root: build_app(settings), store selection, problem statuses, the review queue gauges when telemetry is on
+  main.py          # composition root: build_app(settings), store selection, the seed calendar loaded at start when asked, problem statuses, the review queue gauges when telemetry is on
 seed/gst_calendar.yaml   # the seed calendar
 migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and targets models.Base.metadata
   versions/20260928_0001_knowledge_schema.py   # hand-written, mirrors models.py
