@@ -80,6 +80,17 @@ each secret and the scopes, never a secret (migration 0003 of identity).
 """
 
 [[exemptions]]
+table = "audit.event"
+kind = "exempt"
+reason = """
+The audit log every service writes, so tenant_id is null for a platform-wide action that no tenant
+owns. Row-level security is enabled and forced all the same: event_tenant_isolation, the tenant
+policy, lets a session read and write the rows of its app.tenant_id setting, and
+event_platform_insert lets it insert a row with no tenant. No policy reads the rows of no tenant,
+and a trigger refuses UPDATE and DELETE (migration 0005 of identity, py_common.audit.schema).
+"""
+
+[[exemptions]]
 table = "notification.channel_preference"
 reason = """
 Consent per channel and normalised address, recorded before any tenant links the address: an
