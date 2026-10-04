@@ -32,8 +32,9 @@ Temporal Cloud, serves staging and production):
 - ``worker_temporal_enabled`` (``CW_WORKER_TEMPORAL_ENABLED``): every service's Temporal workers,
   on one client.
 
-Periodic jobs (notification dispatch and retention, the rulebook's transitions, the idempotency
-purge of every schema with the table) run with either switch off.
+Periodic jobs (notification dispatch and retention, the rulebook's transitions, obligation's
+reminder sweep, the idempotency purge of every schema with the table) run with either switch
+off, each behind its service's own switch where it has one.
 """
 
 from typing import Self

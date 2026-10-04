@@ -1,8 +1,8 @@
 """The composed worker relays a service's outbox to Kafka. Needs Docker.
 
 Postgres holds a ``profile`` schema with the outbox table, as profile's migration leaves it, and
-an ``obligation`` schema that has not been migrated. The worker finds the table where it is,
-starts one relay for it, and the row it publishes arrives on the topic.
+no ``eval`` schema: eval has not been migrated. The worker finds the table where it is, starts
+one relay for it, and the row it publishes arrives on the topic.
 """
 
 import asyncio
@@ -110,12 +110,12 @@ async def test_the_worker_relays_the_schemas_that_have_an_outbox(
         mvp_host="127.0.0.1",
         log_level="WARNING",
     )
-    profile, obligation = entry_named("profile"), entry_named("obligation")
+    profile, unmigrated = entry_named("profile"), entry_named("eval")
     url = root.mvp_internal_url
     assert await has_table(worker_settings(profile, root, internal_url=url), OUTBOX_TABLE)
-    assert not await has_table(worker_settings(obligation, root, internal_url=url), OUTBOX_TABLE)
+    assert not await has_table(worker_settings(unmigrated, root, internal_url=url), OUTBOX_TABLE)
 
-    hosted = await build_registry(root, registry=(profile, obligation))
+    hosted = await build_registry(root, registry=(profile, unmigrated))
     assert hosted.loops() == ("profile/outbox-relay",)
 
     message = write_event(database_url)

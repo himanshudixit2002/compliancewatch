@@ -196,6 +196,8 @@ def test_in_token_mode_services_share_identity_s_keys_and_mint_tokens_in_process
     assert isinstance(qa_tokens, IssuerTokenSource)
     assert qa_tokens.principal == Principal.service("qa", {Scope.LLM_CALL, Scope.TENANT_ACT})
     assert seen["notification"]["token_source"].principal == Principal.service("notification", ())
+    engine = seen["applicability-engine"]["token_source"].principal
+    assert engine == Principal.service("applicability-engine", {Scope.TENANT_ACT})
     assert authenticator.principal_for(qa_tokens.token()) == qa_tokens.principal
 
     node = f"/v1/profile/nodes/{uuid4()}"
@@ -215,8 +217,8 @@ def test_in_header_mode_no_tokens_are_minted() -> None:
         service_overrides=MEMORY_SERVICES,
         registry=_spying(REGISTRY, seen),
     )
-    assert "token_source" not in seen["qa"]
-    assert "token_source" not in seen["notification"]
+    for caller in ("qa", "notification", "applicability-engine"):
+        assert "token_source" not in seen[caller], caller
 
 
 def test_scopes_come_from_the_setting_when_it_is_given(memory_app: CombinedApp) -> None:

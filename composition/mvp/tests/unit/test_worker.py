@@ -8,6 +8,7 @@ import httpx2
 import pytest
 from pydantic import ValidationError
 from starlette.testclient import TestClient
+from structlog.testing import capture_logs
 
 from cw_mvp import worker as worker_module
 from cw_mvp.cli import main as cli_main
@@ -16,6 +17,9 @@ from cw_mvp.settings import MvpSettings
 from cw_mvp.testing import mvp_settings
 from cw_mvp.worker import WORKER_CLIENT_ID, build_registry, run_worker, worker_settings
 from cw_mvp.worker_health import HealthServer, WorkerHealth, health_app, heartbeat
+from obligation.settings import ObligationSettings
+from obligation.worker import GROUP_ID as DECISIONS_GROUP
+from obligation.worker import SWEEP_JOB
 from pipeline.settings import PipelineSettings
 from py_common.idempotency.purge import JOB_NAME as PURGE_JOB
 from py_common.idempotency.schema import IDEMPOTENCY_TABLE
@@ -76,9 +80,40 @@ async def test_relays_start_only_for_schemas_with_an_outbox() -> None:
     hosted = await build_registry(_root(worker_kafka_enabled=True), probe=_inspector())
     relaying = {entry.service for entry in hosted.hosted if entry.components.relays}
     assert relaying == OUTBOX_SCHEMAS
-    assert hosted.consumer_groups() == ("notification.obligations",)
+    assert hosted.consumer_groups() == (DECISIONS_GROUP, "notification.obligations")
     assert "profile/outbox-relay" in hosted.loops()
     assert hosted.task_queues() == ()
+
+
+async def test_obligation_consumes_decisions_with_kafka_and_sweeps_behind_its_own_switch() -> None:
+    sweeping = {"obligation": {"obligation_sweep_enabled": True}}
+    neither = await build_registry(_root(), probe=_inspector())
+    assert not [loop for loop in neither.loops() if loop.startswith("obligation/")]
+    kafka = await build_registry(_root(worker_kafka_enabled=True), probe=_inspector())
+    assert DECISIONS_GROUP in kafka.consumer_groups()
+    assert f"obligation/{SWEEP_JOB}" not in kafka.loops()
+    sweep = await build_registry(_root(), probe=_inspector(), service_overrides=sweeping)
+    assert f"obligation/{SWEEP_JOB}" in sweep.loops()
+    assert DECISIONS_GROUP not in sweep.consumer_groups()
+    (obligation,) = [entry for entry in sweep.hosted if entry.service == "obligation"]
+    assert isinstance(obligation.settings, ObligationSettings)
+    assert obligation.settings.rulebook_url == _root().mvp_internal_url
+
+
+async def test_a_service_on_its_memory_store_is_left_to_the_app_process() -> None:
+    inspector = _inspector()
+    in_memory = {"obligation": {"obligation_store": "memory", "obligation_sweep_enabled": True}}
+    with capture_logs() as logs:
+        hosted = await build_registry(
+            _root(worker_kafka_enabled=True), probe=inspector, service_overrides=in_memory
+        )
+    assert "obligation" not in {entry.service for entry in hosted.hosted}
+    assert DECISIONS_GROUP not in hosted.consumer_groups()
+    assert not [asked for asked in inspector.asked if asked[0] == "obligation"]
+    assert {"profile", "rulebook", "notification"} <= {entry.service for entry in hosted.hosted}
+    (skipped,) = [log for log in logs if log["event"] == "worker.service_skipped"]
+    assert skipped["service"] == "obligation"
+    assert "CW_OBLIGATION_STORE=memory" in skipped["reason"]
 
 
 async def test_temporal_workers_start_with_their_switch() -> None:
@@ -286,6 +321,7 @@ def test_the_health_app_answers_on_its_own_thread(health_server: HealthServer) -
 def test_every_service_with_background_work_is_hosted_by_the_worker() -> None:
     assert {entry.name for entry in REGISTRY if entry.components is not None} == {
         "notification",
+        "obligation",
         "pipeline",
         "rulebook",
     }

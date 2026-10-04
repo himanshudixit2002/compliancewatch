@@ -4,13 +4,15 @@ Every route a hosted service serves has one class:
 
 - ``public``: user-facing routes, served on both listeners;
 - ``admin``: the regulatory team's and operators' routes (rulebook review and publishing, the
-  gateway's prompts, models and usage, notification resends). The public listener serves them
-  only when ``CW_AUTH_MODE=token``, where each route itself requires an analyst, reviewer or
-  admin a verified token names; in ``header`` and ``dual`` mode a request without a token could
-  reach them, so they stay internal;
+  gateway's prompts, models and usage, notification resends, the stored eval runs). The public
+  listener serves them only when ``CW_AUTH_MODE=token``, where each route itself requires an
+  analyst, reviewer or admin a verified token names; in ``header`` and ``dual`` mode a request
+  without a token could reach them, so they stay internal;
 - ``internal``: service-to-service routes (identity's service tokens and channel consents,
   notification's send, preferences and WhatsApp receipts, the rulebook's pipeline writes, the
-  gateway's model calls), served on the internal listener only.
+  gateway's model calls, the engine's evaluations, which call the profile and the rulebook) and
+  starting an eval run, which spends compute and model budget, served on the internal listener
+  only.
 
 The internal listener, on the private network, serves every route. The public listener answers
 any route without a class, and any path no service serves, with the same 404
@@ -118,6 +120,11 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
     },
     "applicability-engine": {
         "GET /v1/applicability-engine/ping": INTERNAL,
+        # A tenant's decisions, read by its members.
+        "GET /v1/applicability-engine/businesses/{business_id}/decisions": PUBLIC,
+        "GET /v1/applicability-engine/decisions/{decision_id}": PUBLIC,
+        # Evaluating reads the profile and the rulebook over the internal listener.
+        "POST /v1/applicability-engine/businesses/{business_id}/decisions": INTERNAL,
     },
     "obligation": {
         "GET /v1/obligation/ping": PUBLIC,
@@ -154,6 +161,11 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
     },
     "eval": {
         "GET /v1/eval/ping": INTERNAL,
+        # The stored runs and their gates, for the regulatory team.
+        "GET /v1/eval/runs": ADMIN,
+        "GET /v1/eval/runs/{run_id}": ADMIN,
+        # A run spends compute and, under the nightly profile, model budget.
+        "POST /v1/eval/runs": INTERNAL,
     },
     "pipeline": {
         "GET /v1/pipeline/ping": INTERNAL,

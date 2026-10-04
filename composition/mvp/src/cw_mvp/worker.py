@@ -10,9 +10,19 @@ service at ``--internal-url`` or ``CW_MVP_INTERNAL_URL``):
 - the daily idempotency purge of its schema, when the schema has an ``idempotency_key`` table.
 
 ``CW_WORKER_KAFKA_ENABLED`` turns the relays and the consumers on, ``CW_WORKER_TEMPORAL_ENABLED``
-the Temporal workers, which share one client; periodic jobs run either way. The calls the
-services make to each other go to the app process's internal listener with the worker's own
-service client (``CW_SERVICE_CLIENT_ID``, ``worker`` when it is empty, and
+the Temporal workers, which share one client; periodic jobs run either way, behind their
+service's own switch where it has one. So obligation's consumer of applicability.decided runs
+only with Kafka on, and its reminder sweep whenever ``CW_OBLIGATION_SWEEP_ENABLED`` is on: the
+reminders wait in obligation's outbox until a relay publishes them.
+
+A service on its memory store (its ``<service>_store`` setting, such as
+``CW_OBLIGATION_STORE=memory``) keeps its state in the app process, out of the worker's reach,
+so the worker hosts nothing of it, not even its schema's relay or purge, and logs
+``worker.service_skipped``. The service's own worker refuses to start on that store (``python -m
+obligation.worker``); here the other services still run.
+
+The calls the services make to each other go to the app process's internal listener with the
+worker's own service client (``CW_SERVICE_CLIENT_ID``, ``worker`` when it is empty, and
 ``CW_SERVICE_CLIENT_SECRET``), whose tokens identity issues and every service verifies.
 
 ``run_worker`` runs them all (``py_common.runtime.run_registry``) next to the heartbeat of the
@@ -52,6 +62,8 @@ from py_common.telemetry import configure_telemetry
 WORKER_CLIENT_ID: Final = "worker"
 """The service client the worker calls the other services as, unless CW_SERVICE_CLIENT_ID
 names another."""
+POSTGRES: Final = "postgres"
+"""The store the worker can share with the app process."""
 
 TableProbe = Callable[[Settings, str], Awaitable[bool]]
 """Whether the schema of the settings has the named table."""
@@ -93,6 +105,16 @@ def worker_settings[S: Settings](
     return service_settings(entry, root, internal_url=internal_url, **values)
 
 
+def store_elsewhere(entry: ServiceEntry[Any], settings: Settings) -> str | None:
+    """``CW_<SERVICE>_STORE=<store>`` when ``entry`` keeps its state off Postgres (its memory
+    store); None for a service on Postgres or without a store setting."""
+    field = entry.store_field
+    if field is None:
+        return None
+    store = str(getattr(settings, field))
+    return None if store == POSTGRES else f"CW_{field.upper()}={store}"
+
+
 async def build_registry(
     root: MvpSettings,
     *,
@@ -101,8 +123,8 @@ async def build_registry(
     probe: TableProbe = has_table,
     service_overrides: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> ComponentRegistry:
-    """What the worker runs for every service, by the switches and the tables each schema
-    has."""
+    """What the worker runs for every service, by the switches, the store each service is on
+    and the tables each schema has."""
     overrides = service_overrides or {}
     check_overrides(overrides, registry)
     url = internal_url or root.mvp_internal_url
@@ -110,6 +132,14 @@ async def build_registry(
     hosted = ComponentRegistry()
     for entry in registry:
         settings = worker_settings(entry, root, internal_url=url, **overrides.get(entry.name, {}))
+        elsewhere = store_elsewhere(entry, settings)
+        if elsewhere is not None:
+            log.warning(
+                "worker.service_skipped",
+                service=entry.name,
+                reason=f"{elsewhere}: its state is in the app process, out of the worker's reach",
+            )
+            continue
         own = WorkerComponents() if entry.components is None else entry.components(settings)
         components = selected(own, kafka=kafka, temporal=temporal)
         if kafka and not components.relays and await probe(settings, OUTBOX_TABLE):

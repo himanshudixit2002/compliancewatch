@@ -19,7 +19,7 @@ from cw_mvp.registry import (
     schemas,
     service_settings,
 )
-from cw_mvp.testing import mvp_settings
+from cw_mvp.testing import MEMORY_SERVICES, mvp_settings
 from py_common.settings import Settings
 from qa.main import build_app as build_qa
 from qa.settings import QaSettings
@@ -84,7 +84,7 @@ def test_every_url_of_another_service_is_a_registered_url_field(entry: ServiceEn
 
 def test_routes_that_call_other_services_go_one_level_deep() -> None:
     callers = [entry for entry in REGISTRY if entry.loopback_routes]
-    assert [entry.name for entry in callers] == ["qa"]
+    assert [entry.name for entry in callers] == ["applicability-engine", "qa"]
     for entry in callers:
         assert set(entry.loopback_routes) <= set(EXPOSURE[entry.name])
         assert entry.calls, f"{entry.name} lists loopback routes but calls no service"
@@ -92,6 +92,19 @@ def test_routes_that_call_other_services_go_one_level_deep() -> None:
             assert not BY_NAME[called].loopback_routes, (
                 f"{called} is called by {entry.name} and makes calls of its own"
             )
+
+
+@pytest.mark.parametrize("entry", REGISTRY, ids=lambda entry: entry.name)
+def test_a_store_setting_is_named_after_its_service(entry: ServiceEntry[Any]) -> None:
+    own = set(entry.settings_type.model_fields) - set(Settings.model_fields)
+    stores = {field for field in own if field.endswith("_store")}
+    assert stores == ({entry.store_field} if entry.store_field else set())
+
+
+def test_the_memory_services_put_every_store_in_memory() -> None:
+    for entry in REGISTRY:
+        if entry.store_field is not None:
+            assert MEMORY_SERVICES[entry.name][entry.store_field] == "memory", entry.name
 
 
 def test_service_settings_point_every_service_url_at_the_internal_listener() -> None:

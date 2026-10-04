@@ -17,6 +17,9 @@ entry names:
 - ``takes_authenticator`` and ``takes_token_source``, whether ``build`` accepts identity's
   authenticator and a source of service tokens minted in the process.
 
+An entry's ``store_field`` is the setting that picks where the service keeps its state,
+``<service>_store`` (``obligation_store``), when its settings have one.
+
 A package that adds ``build_app`` arguments, worker components, URL settings or routes that call
 other services registers them here in the same change; ``tests/unit/test_registry.py`` fails
 until it does. ``service_settings(entry, root)`` builds an entry's settings.
@@ -29,7 +32,9 @@ from typing import Any, Final
 from fastapi import FastAPI
 
 from applicability_engine.main import build_app as build_applicability_engine
+from applicability_engine.settings import ApplicabilityEngineSettings
 from eval_service.main import build_app as build_eval
+from eval_service.settings import EvalSettings
 from identity.main import build_app as build_identity
 from identity.settings import IdentitySettings
 from llm_gateway.main import build_app as build_llm_gateway
@@ -39,6 +44,7 @@ from notification.settings import NotificationSettings
 from notification.worker import components as notification_components
 from obligation.main import build_app as build_obligation
 from obligation.settings import ObligationSettings
+from obligation.worker import components as obligation_components
 from pipeline.main import build_app as build_pipeline
 from pipeline.settings import PipelineSettings
 from pipeline.worker import components as pipeline_components
@@ -54,6 +60,7 @@ from rulebook.worker import components as rulebook_components
 
 JWKS_PATH: Final = "/v1/identity/.well-known/jwks.json"
 URL_SUFFIX: Final = "_url"
+STORE_SUFFIX: Final = "_store"
 SHARED_FIELDS_SET_PER_SERVICE: Final = frozenset({"service_name", "database_url", "db_schema"})
 """The shared settings each service gets its own value of; the rest are the root's."""
 
@@ -86,6 +93,13 @@ class ServiceEntry[S: Settings]:
         llm-gateway."""
         return tuple(field.removesuffix(URL_SUFFIX).replace("_", "-") for field in self.url_fields)
 
+    @property
+    def store_field(self) -> str | None:
+        """The setting that picks its store, ``applicability_engine_store`` for
+        applicability-engine; None for a service without one."""
+        field = self.name.replace("-", "_") + STORE_SUFFIX
+        return field if field in self.settings_type.model_fields else None
+
 
 REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
     ServiceEntry(
@@ -95,8 +109,23 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
     ServiceEntry(
         "rulebook", "rulebook", RulebookSettings, build_rulebook, components=rulebook_components
     ),
-    ServiceEntry("applicability-engine", "applicability", Settings, build_applicability_engine),
-    ServiceEntry("obligation", "obligation", ObligationSettings, build_obligation),
+    ServiceEntry(
+        "applicability-engine",
+        "applicability",
+        ApplicabilityEngineSettings,
+        build_applicability_engine,
+        url_fields=("profile_url", "rulebook_url"),
+        loopback_routes=("POST /v1/applicability-engine/businesses/{business_id}/decisions",),
+        takes_token_source=True,
+    ),
+    ServiceEntry(
+        "obligation",
+        "obligation",
+        ObligationSettings,
+        build_obligation,
+        components=obligation_components,
+        url_fields=("rulebook_url",),
+    ),
     ServiceEntry(
         "notification",
         "notification",
@@ -116,7 +145,7 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         takes_token_source=True,
     ),
     ServiceEntry("llm-gateway", "llm_gateway", GatewaySettings, build_llm_gateway),
-    ServiceEntry("eval", "eval", Settings, build_eval),
+    ServiceEntry("eval", "eval", EvalSettings, build_eval),
     ServiceEntry(
         "pipeline",
         "pipeline",

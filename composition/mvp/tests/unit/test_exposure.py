@@ -11,6 +11,7 @@ from cw_mvp.exposure import ADMIN, EXPOSURE, INTERNAL, PUBLIC, Exposure, served_
 from cw_mvp.registry import REGISTRY
 
 PUBLIC_SPEC = Path(__file__).resolve().parents[4] / "packages/contracts/openapi/public.v1.json"
+ENGINE = "/v1/applicability-engine"
 
 RULEBOOK_PUBLIC_READS = {
     "GET /v1/rulebook/rule-versions",
@@ -63,8 +64,18 @@ def test_service_to_service_routes_stay_internal() -> None:
         ("notification", "POST /v1/notification/receipts/whatsapp"),
         ("rulebook", "PUT /v1/rulebook/documents/{document_id}"),
         ("llm-gateway", "POST /v1/llm-gateway/completions"),
+        ("applicability-engine", f"POST {ENGINE}/businesses/{{business_id}}/decisions"),
+        ("eval", "POST /v1/eval/runs"),
     ):
         assert EXPOSURE[service][key] is INTERNAL, key
+
+
+def test_tenants_read_their_decisions_and_operators_their_eval_runs() -> None:
+    engine, runs = EXPOSURE["applicability-engine"], EXPOSURE["eval"]
+    assert engine[f"GET {ENGINE}/businesses/{{business_id}}/decisions"] is PUBLIC
+    assert engine[f"GET {ENGINE}/decisions/{{decision_id}}"] is PUBLIC
+    assert runs["GET /v1/eval/runs"] is ADMIN
+    assert runs["GET /v1/eval/runs/{run_id}"] is ADMIN
 
 
 @pytest.mark.parametrize(

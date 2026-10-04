@@ -8,6 +8,10 @@
 # scopes that call needs and no more. Staging and production create their clients with
 # identity-admin service-client create instead; nothing here reaches them.
 
+[applicability-engine]
+scopes = ["tenant:act"]
+reason = "evaluates a rule version for a tenant's business: reads the business's profile snapshot for that tenant and the published rule version, whose read routes need no scope"
+
 [notification]
 scopes = []
 reason = "reads the rule versions its messages cite from the rulebook, whose read routes need no scope"
