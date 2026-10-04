@@ -2,6 +2,18 @@
   "$schema": "./registry.schema.json",
   "flags": [
     {
+      "name": "applicability.recompute",
+      "type": "bool",
+      "default": false,
+      "owner": "core-product",
+      "description": "The applicability engine's profile.updated consumer (group applicability-engine.profiles) evaluates the changed business and the registrations under it against every rule version in force, stores the decisions, publishes applicability.decided when a result applies or changes, and opens review items for free-text and low-confidence predicates. Off, the consumer only keeps the business directory.",
+      "removal": "Once recompute has run in production for 30 days and the rule.published fan-out reads the directory it keeps.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_APPLICABILITY_RECOMPUTE_ENABLED",
+      "services": ["applicability-engine"]
+    },
+    {
       "name": "auth.mode",
       "type": "string",
       "default": "header",

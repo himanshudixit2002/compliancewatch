@@ -293,11 +293,36 @@ def test_steps_run_in_order_and_one_failure_does_not_stop_the_next(product: Prod
 
 
 def test_steps_are_chosen_by_name_in_the_check_order() -> None:
-    assert [step.name for step in check.STEPS] == ["health", "honesty", "loop", "isolation"]
+    assert [step.name for step in check.STEPS] == [
+        "health",
+        "honesty",
+        "loop",
+        "isolation",
+        "recompute",
+    ]
     assert [step.name for step in select(["isolation", "health"])] == ["health", "isolation"]
     assert select(None) == check.STEPS
     with pytest.raises(ProductError, match="no step nope"):
         select(["nope"])
+
+
+def test_the_recompute_step_needs_the_monthly_rule_published(sink: Path) -> None:
+    class Unpublished(Scripted):
+        def __call__(self, request: httpx2.Request) -> httpx2.Response:
+            if request.url.path == "/v1/rulebook/rule-versions":
+                return httpx2.Response(200, json=[])
+            return super().__call__(request)
+
+    product = scripted_product(Unpublished(), sink)
+    with pytest.raises(StepFailedError, match="gstr3b_monthly is not published"):
+        check.recompute(context_of(product))
+
+
+def test_the_probe_gstins_are_made_up_karnataka_ones() -> None:
+    made = {check.probe_gstin(token) for token in (0, 1, 26, 677, 2**64)}
+    assert len(made) == 5
+    assert all(gstin.startswith("29ZZZ") and gstin.endswith("Z1Z5") for gstin in made)
+    assert check.probe_gstin(0) == "29ZZZAA0000Z1Z5"
 
 
 def test_a_step_result_reports_its_error_line() -> None:

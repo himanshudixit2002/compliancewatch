@@ -4,10 +4,10 @@ Every route a hosted service serves has one class:
 
 - ``public``: user-facing routes, served on both listeners;
 - ``admin``: the regulatory team's and operators' routes (rulebook review and publishing, the
-  gateway's prompts, models and usage, notification resends, the stored eval runs). The public
-  listener serves them only when ``CW_AUTH_MODE=token``, where each route itself requires an
-  analyst, reviewer or admin a verified token names; in ``header`` and ``dual`` mode a request
-  without a token could reach them, so they stay internal;
+  engine's review queue, the gateway's prompts, models and usage, notification resends, the
+  stored eval runs). The public listener serves them only when ``CW_AUTH_MODE=token``, where each
+  route itself requires an analyst, reviewer or admin a verified token names; in ``header`` and
+  ``dual`` mode a request without a token could reach them, so they stay internal;
 - ``internal``: service-to-service routes (identity's service tokens and channel consents,
   notification's send, preferences and WhatsApp receipts, the rulebook's pipeline writes, the
   gateway's model calls, the engine's evaluations, which call the profile and the rulebook) and
@@ -126,6 +126,12 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "GET /v1/applicability-engine/decisions/{decision_id}": PUBLIC,
         # Evaluating reads the profile and the rulebook over the internal listener.
         "POST /v1/applicability-engine/businesses/{business_id}/decisions": INTERNAL,
+        # The review queue: the regulatory team reads any tenant's items and settles them, which
+        # appends a decision that makes or closes obligations. The routes require an analyst
+        # (reading) or a reviewer or admin (settling) a verified token names, so the public
+        # listener serves them in token mode only.
+        "GET /v1/applicability-engine/review-items": ADMIN,
+        "POST /v1/applicability-engine/review-items/{item_id}/resolve": ADMIN,
     },
     "obligation": {
         "GET /v1/obligation/ping": PUBLIC,

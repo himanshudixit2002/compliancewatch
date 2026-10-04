@@ -1,13 +1,15 @@
 """The routes on the memory store: evaluating with an Idempotency-Key, the problems, the
 paginated listing of a business's decisions and reading one."""
 
+from collections.abc import Sequence
+from datetime import date
 from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from applicability_engine.domain.errors import DependencyUnavailableError
-from applicability_engine.domain.model import RuleVersionSpec
+from applicability_engine.domain.model import RuleInForce, RuleVersionSpec
 from applicability_engine.main import build_app
 from applicability_engine.settings import ApplicabilityEngineSettings
 from applicability_engine.testing import (
@@ -20,6 +22,7 @@ from applicability_engine.testing import (
 )
 from applicability_engine.wiring import Readers
 from domain_kernel.ids import RuleVersionId
+from domain_kernel.ontology import AttributeLevel
 from domain_kernel.status import RuleVersionStatus
 
 DECISIONS = f"/v1/applicability-engine/businesses/{BUSINESS}/decisions"
@@ -155,6 +158,9 @@ def test_the_problems_of_evaluating(
 
 class Unavailable:
     def rule_version(self, rule_version_id: RuleVersionId) -> RuleVersionSpec | None:
+        raise DependencyUnavailableError("rulebook answered 502: bad gateway")
+
+    def rules_in_force(self, as_of: date, level: AttributeLevel) -> Sequence[RuleInForce]:
         raise DependencyUnavailableError("rulebook answered 502: bad gateway")
 
 

@@ -1558,7 +1558,14 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [
+      uses("applicability-engine", "GET", "/v1/applicability-engine/review-items"),
+      uses(
+        "applicability-engine",
+        "POST",
+        "/v1/applicability-engine/review-items/{item_id}/resolve",
+      ),
+    ],
     awaits: [
       servicesTrack("WP22", "applicability-engine", "GET", "/v1/applicability-engine/review-items"),
       servicesTrack(
@@ -1568,7 +1575,7 @@ const SCREEN_LIST = [
         "/v1/applicability-engine/review-items/{item_id}/resolve",
       ),
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "8; F7; ADR-007",
     nav: { group: "review", order: 4 },

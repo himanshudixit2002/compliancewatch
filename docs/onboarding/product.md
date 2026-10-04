@@ -4,13 +4,14 @@
 (`composition/mvp`, its app and worker processes) with Kafka and Temporal on, on the dev stack,
 and the web app. `make product-seed` fills it with two synthetic tenants and a synthetic
 publication of the seed rules the golden world cites, and `make product-check` proves that a
-published rule becomes decisions, obligations with citations and a change card.
+published rule becomes decisions, obligations with citations and a change card, and that a
+business made or changed in the profile is decided again by itself.
 
 ```bash
 make product                 # make dev, make migrate, make product-role, the seed calendar, then
                              # cw-mvp serve, cw-mvp worker and next dev; waits until all answer
 make product-seed            # synthetic tenants, the demo publication, the first decisions
-make product-check           # health, honesty, loop, isolation: exit 0 means accepted
+make product-check           # health, honesty, loop, isolation, recompute: exit 0 means accepted
 make product-logs PROC=worker   # app, worker or web; FOLLOW=0 prints the end and returns
 make product-down            # stops only what make product started
 ```
@@ -24,7 +25,7 @@ in the dev database until `make dev-reset`.
 | Process | Where | What |
 | --- | --- | --- |
 | app | public listener `127.0.0.1:8000`, internal listener `127.0.0.1:8080` | `cw-mvp serve`: every service's API in one process ([composition/mvp/README.md](../../composition/mvp/README.md)). The internal listener serves every route; the web app and `cw-product` call it |
-| worker | health `127.0.0.1:8081` (`/health`, `/loops`) | `cw-mvp worker` with `CW_WORKER_KAFKA_ENABLED` and `CW_WORKER_TEMPORAL_ENABLED` on: the outbox relay of every schema, obligation's consumer of applicability.decided (group `obligation.decisions`), notification's consumer of the obligation events (group `notification.obligations`), the notification dispatcher and retention sweep, obligation's reminder sweep, the rulebook's transition sweep and the pipeline's Temporal task queue |
+| worker | health `127.0.0.1:8081` (`/health`, `/loops`) | `cw-mvp worker` with `CW_WORKER_KAFKA_ENABLED` and `CW_WORKER_TEMPORAL_ENABLED` on: the outbox relay of every schema, the engine's consumer of profile.updated (group `applicability-engine.profiles`, recompute on), obligation's consumer of applicability.decided (group `obligation.decisions`), notification's consumer of the obligation events (group `notification.obligations`), the notification dispatcher and retention sweep, obligation's reminder sweep, the rulebook's transition sweep and the pipeline's Temporal task queue |
 | web | `WEB_PORT` (3000) | `next dev` with every `CW_WEB_*_URL` at the internal listener, building into `apps/web/.next/product` |
 
 Before starting them, `make product` runs `make dev` (the compose stack; nothing happens when it
@@ -41,7 +42,9 @@ creates the role on the running stack and grants it the service schemas
 The settings that make this the product are passed by the make targets, never as a default in a
 settings class or the flag registry: header auth, both listeners on `127.0.0.1`, the worker's
 health on `PRODUCT_WORKER_PORT` (8081, since 8001 is identity's under `make run` and
-`make web-stack`), the worker's two switches and the reminder sweep on, rule publishing on with
+`make web-stack`), the worker's two switches and the reminder sweep on, the engine's recompute on
+profile.updated on (`CW_APPLICABILITY_RECOMPUTE_ENABLED`) with the rulebook's in-force listing
+cached for five seconds (`CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS`), rule publishing on with
 the placeholder tokens `local-write-token` and `local-review-token` (not secrets; values in
 `.env` win), the profile's static GSTIN lookup, the notification sink in place of the real
 channels with a five-second batching window, and message links to the product's web app.
@@ -51,9 +54,10 @@ channels with a five-second batching window, and message links to the product's 
 1. `cw-product publish` takes a seed rule from draft to published as synthetic analysts (below);
    `rule.published` goes to the rulebook's outbox.
 2. `cw-product evaluate` asks the engine to decide every published rule for every seeded
-   registration. Nothing else triggers the engine yet: a later package lets it consume
-   profile.updated and rule.published. The decision and its applicability.decided event are
-   stored together.
+   registration; it stays as an operator tool. The engine also decides by itself whenever a
+   profile changes (below); a rule published later reaches the businesses that exist only
+   through this tool until the rule.published fan-out lands. The decision and its
+   applicability.decided event are stored together.
 3. The worker's relay publishes the event; obligation's consumer materialises two periods of an
    applying rule (obligation.created each) and closes nothing for one that does not apply.
 4. Notification's consumer queues one change card per rule version, business, recipient and
@@ -66,6 +70,41 @@ channels with a five-second batching window, and message links to the product's 
 
 The whole chain takes about ten seconds; `make product-logs PROC=worker` shows each step
 (`obligation.decision_applied`, `notification.event_queued`, `notification.dispatched`).
+
+## From a profile change to new decisions
+
+Every change to a business in the profile (the owner's answers, the GSTIN pre-fill, a business
+created through `POST /v1/businesses` or changed with `PATCH /v1/businesses/{id}`) writes
+profile.updated to profile's outbox. The worker's relay publishes it and the engine's consumer
+(group `applicability-engine.profiles`) recomputes:
+
+1. It reads, with no database transaction open, the changed node's snapshot and, for a legal
+   entity, the registrations under it, then each node's snapshot and the rule versions in force
+   for the node's level (today in India, and those taking effect within 92 days).
+2. In one transaction with the event's inbox row it records the nodes in the business directory
+   and stores a decision of every rule version for every node, with the trigger
+   `profile_updated`. A decision publishes applicability.decided when it applies, or when its
+   result differs from the previous decision of its business and rule version; an unchanged
+   not_applicable or unsure one is stored quietly. Handling the same event again stores nothing.
+3. Obligation's consumer makes the obligations of a rule that applies and closes, with
+   `profile_changed`, the open ones of a rule that no longer applies.
+
+A decision the engine cannot settle on a free-text predicate opens a review item for the
+regulatory team (`GET /v1/applicability-engine/review-items` and
+`POST /v1/applicability-engine/review-items/{item_id}/resolve` on the internal listener, the
+tenant in `x-tenant-id`). An unanswered question makes a decision unsure without a review item:
+the owner answers it and the next change decides again. None of the four seed rules has a
+free-text predicate.
+
+The engine's consumer is a new consumer group, and a new group reads a topic from its earliest
+offset: its first run recomputes every profile.updated the broker still holds, those of the web
+stack's tenants included (with `make web-stack STORE=postgres`, which shares the database). To
+start it at the end of the topic instead, before the first `make product` with it:
+
+```bash
+docker compose exec -T redpanda rpk group seek applicability-engine.profiles --to end \
+  --topics profile.updated --allow-new-topics
+```
 
 ### The sink
 
@@ -139,10 +178,11 @@ the worker does a few seconds after the API answers, and a failed step does not 
 
 | Step | Proves |
 | --- | --- |
-| health | `/ready` on the internal listener lists every service's checks as ok, the public listener answers, and the worker's `/loops` runs both consumer groups, the outbox relays, the dispatcher, the reminder sweep and the `pipeline` task queue |
+| health | `/ready` on the internal listener lists every service's checks as ok, the public listener answers, and the worker's `/loops` runs the three consumer groups, the outbox relays, the dispatcher, the reminder sweep and the `pipeline` task queue |
 | honesty | every published seed rule is one the world cites and reads needs_review, every other seed rule is a draft, nothing is marked reviewed, and the golden world and its cases are drafts |
 | loop | evaluates the business tenant, then waits for the decisions its answers call for, an obligation of each rule that applies whose version cites a verified clause, and a change card about the business sent through the sink (with its line in the sink file) |
 | isolation | the CA firm reads none of the business tenant's decisions, obligations, notifications or business, and the other way round |
+| recompute | makes a new synthetic business in the business tenant with `POST /v1/businesses` (a monthly GSTR-3B filer in Karnataka with a made-up GSTIN, named with the time it was made), then waits for its gstr3b_monthly decision `applies` with the trigger profile_updated and its obligations; changes its registration to the quarterly scheme with `PATCH /v1/businesses/{id}` and waits for the decision `not_applicable`, the monthly obligations closed with `profile_changed` and the quarterly group A obligations. It never calls `cw-product evaluate`; every decision of the business comes from profile.updated, and no review item opens for it. Each run makes one more business, since a closed obligation stays closed and only a new business shows the whole change again |
 
 `ARGS="--json"` prints the result as JSON, `ARGS="--step loop"` runs one step. A later package
 appends its steps to `STEPS` in `tools/demo/src/cw_demo/product/check.py`.
@@ -169,6 +209,10 @@ keys). The web stack connects as the superuser and so reads across tenants; the 
 - **The loop waits for obligations.** The worker's `/loops` must run
   `obligation/consumer:obligation.decisions` and the relays; `make dev-logs SERVICE=redpanda`
   shows the broker. A new consumer group reads from the earliest offset.
+- **The recompute step waits for a decision.** The worker's `/loops` must run
+  `applicability-engine/consumer:applicability-engine.profiles`; `make product-logs PROC=worker`
+  shows `applicability.profile_recomputed` for each event with what it decided and published.
+  `evaluated=False` there means `CW_APPLICABILITY_RECOMPUTE_ENABLED` is not on for the worker.
 - **The loop waits for the change card.** `tail var/product/sink.jsonl` shows what the sink got;
   `GET /v1/notification/notifications?business_id=<registration id>` for the tenant shows each
   notification's state and error.

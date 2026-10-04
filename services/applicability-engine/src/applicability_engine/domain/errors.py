@@ -57,3 +57,24 @@ class DependencyUnavailableError(DomainError):
 
     type_slug = "applicability-dependency-unavailable"
     title = "A service the decision needs is unavailable"
+
+
+class ReviewItemNotFoundError(DomainError, LookupError):
+    type_slug = "applicability-review-item-not-found"
+    title = "Review item not found"
+
+    def __init__(self, item_id: str) -> None:
+        super().__init__(f"review item {item_id} does not exist for this tenant")
+        self.item_id = item_id
+
+
+class ReviewItemResolvedError(DomainError, ValueError):
+    """An item is resolved once; a later decision of its business and rule version opens a new
+    one when it needs review."""
+
+    type_slug = "applicability-review-item-resolved"
+    title = "Review item is already resolved"
+
+    def __init__(self, item_id: str) -> None:
+        super().__init__(f"review item {item_id} is already resolved")
+        self.item_id = item_id

@@ -41,7 +41,12 @@ The services whose routes do more than read their own store:
   `POST /v1/applicability-engine/businesses/{business_id}/decisions`, is internal: it reads the
   profile snapshot and the rule version over the internal listener, and outside `header` mode
   with the token of the `applicability-engine` dev client, whose tenant:act lets it read the
-  tenant's profile.
+  tenant's profile. The review queue (`GET /v1/applicability-engine/review-items` and
+  `POST /v1/applicability-engine/review-items/{item_id}/resolve`) is admin: the regulatory team
+  reads any tenant's items, naming the tenant in `x-tenant-id`, and a reviewer or admin settles
+  one, which appends a decision that makes or closes obligations. Each route requires a
+  regulatory role a verified token names, so the public listener serves them in token mode
+  only. The engine's worker recomputes a business on profile.updated (below).
 - **eval**: the regulatory team reads the stored runs (`GET /v1/eval/runs`, admin). Starting
   one, `POST /v1/eval/runs`, is internal: it runs the harness in a child process, which spends
   compute and, under the nightly profile, model budget. That profile reaches the gateway at
@@ -71,14 +76,19 @@ service's settings:
 
 | What | When |
 | --- | --- |
-| each service's worker components (`<pkg>.worker.components`): notification's consumer, dispatcher and retention sweep, obligation's consumer of applicability.decided and reminder sweep, the rulebook's daily transitions sweep, the pipeline's Temporal worker | consumers with `CW_WORKER_KAFKA_ENABLED`, Temporal workers with `CW_WORKER_TEMPORAL_ENABLED` (one client for all), periodic jobs always, behind their service's own switch: the reminder sweep with `CW_OBLIGATION_SWEEP_ENABLED`, the transitions with `CW_RULEBOOK_PUBLISH_ENABLED` |
+| each service's worker components (`<pkg>.worker.components`): the engine's consumer of profile.updated, notification's consumer, dispatcher and retention sweep, obligation's consumer of applicability.decided and reminder sweep, the rulebook's daily transitions sweep, the pipeline's Temporal worker | consumers with `CW_WORKER_KAFKA_ENABLED`, Temporal workers with `CW_WORKER_TEMPORAL_ENABLED` (one client for all), periodic jobs always, behind their service's own switch: the reminder sweep with `CW_OBLIGATION_SWEEP_ENABLED`, the transitions with `CW_RULEBOOK_PUBLISH_ENABLED`; the engine's consumer runs with Kafka and evaluates only with `CW_APPLICABILITY_RECOMPUTE_ENABLED` (it keeps the business directory either way) |
 | one outbox relay per schema that has an `outbox_event` table | `CW_WORKER_KAFKA_ENABLED` |
 | the daily idempotency purge of every schema that has an `idempotency_key` table | always |
 
-Both switches are off by default. With Kafka on, a decision the engine stores reaches
-obligation's consumer through the engine's relay; the obligations it makes reach notification's
-consumer through obligation's relay. The reminder sweep writes its reminders to obligation's
-outbox, so they go out once a relay runs.
+Both switches are off by default. With Kafka on, a profile change reaches the engine's consumer
+(group `applicability-engine.profiles`) through profile's relay; with recompute on, the engine
+evaluates the changed business and the registrations under it against every rule in force,
+reading the profile and the rulebook over the internal listener with no transaction open, and
+the decisions it stores reach obligation's consumer through the engine's relay; the obligations
+it makes reach notification's consumer through obligation's relay. The reminder sweep writes its
+reminders to obligation's outbox, so they go out once a relay runs. A new consumer group reads a
+topic from its earliest offset, so the engine's first run recomputes every profile.updated the
+broker still holds.
 
 The worker shares the services' state through Postgres. A service on its memory store
 (`CW_OBLIGATION_STORE=memory` and the like) keeps its state in the app process, out of the
@@ -130,10 +140,11 @@ port under `make run` and `make web-stack`. Outside `header` mode the worker sen
 with `CW_SERVICE_CLIENT_SECRET` set: locally the `CW_IDENTITY_DEV_CLIENT_SECRET` identity creates
 its dev clients, `worker` among them, with.
 
-`make product` does all of this on the dev stack with Kafka and Temporal on, the worker's health
-on 8081, the services connecting as `cw_app` so row-level security applies, the notification sink
-in place of the real channels, and the web app beside them; `make product-seed` and
-`make product-check` fill it and prove the chain from a published rule to a change card
+`make product` does all of this on the dev stack with Kafka and Temporal on, recompute on, the
+worker's health on 8081, the services connecting as `cw_app` so row-level security applies, the
+notification sink in place of the real channels, and the web app beside them;
+`make product-seed` and `make product-check` fill it and prove the chain from a published rule
+to a change card, and from a profile change to new decisions and obligations
 ([docs/onboarding/product.md](../../docs/onboarding/product.md)).
 
 ## Adding to a service

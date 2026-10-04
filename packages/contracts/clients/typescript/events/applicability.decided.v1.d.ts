@@ -37,7 +37,7 @@ export interface ApplicabilityDecided {
    */
   needs_review: boolean;
   /**
-   * What caused the evaluation.
+   * What caused the evaluation; review is a person's resolution of a review item, with confidence 1.
    */
-  trigger: "rule_published" | "profile_updated" | "manual";
+  trigger: "rule_published" | "profile_updated" | "manual" | "review";
 }

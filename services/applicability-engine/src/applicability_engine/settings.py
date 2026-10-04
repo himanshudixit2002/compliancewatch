@@ -19,9 +19,20 @@ class ApplicabilityEngineSettings(Settings):
     ``CW_SERVICE_CLIENT_SECRET`` set, every call to them carries this service's own access token
     from the identity service; its client needs tenant:act to read a tenant's profile. Reads
     time out after ``applicability_engine_http_timeout_seconds``.
+
+    The worker's profile.updated consumer (``applicability_engine.worker``) records every node
+    it hears of in the business directory; with ``applicability_recompute_enabled`` (flag
+    ``applicability.recompute``, off by default) it also evaluates the node and the
+    registrations under it against the rule versions in force today and, with
+    ``applicability_engine_recompute_lookahead_days``, the ones taking effect within that many
+    days. The rulebook's listing of a day is cached for
+    ``applicability_engine_rules_cache_seconds`` (0 turns the cache off).
     """
 
     applicability_engine_store: Store = "postgres"
     profile_url: str = "http://localhost:8002"
     rulebook_url: str = "http://localhost:8003"
     applicability_engine_http_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+    applicability_recompute_enabled: bool = False
+    applicability_engine_rules_cache_seconds: float = Field(default=60.0, ge=0, le=3600)
+    applicability_engine_recompute_lookahead_days: int = Field(default=92, ge=0, le=366)

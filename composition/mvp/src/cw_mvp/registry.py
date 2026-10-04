@@ -33,6 +33,7 @@ from fastapi import FastAPI
 
 from applicability_engine.main import build_app as build_applicability_engine
 from applicability_engine.settings import ApplicabilityEngineSettings
+from applicability_engine.worker import components as applicability_engine_components
 from eval_service.main import build_app as build_eval
 from eval_service.settings import EvalSettings
 from identity.main import build_app as build_identity
@@ -114,6 +115,7 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         "applicability",
         ApplicabilityEngineSettings,
         build_applicability_engine,
+        components=applicability_engine_components,
         url_fields=("profile_url", "rulebook_url"),
         loopback_routes=("POST /v1/applicability-engine/businesses/{business_id}/decisions",),
         takes_token_source=True,

@@ -24,7 +24,7 @@ export type { UserRoleChanged } from "./user.role.changed.v1";
 export const ENVELOPE_VERSION = "1.0.0";
 
 export const EVENT_TOPICS = {
-  "applicability.decided": { version: "1.0.0", tenantScoped: true },
+  "applicability.decided": { version: "1.1.0", tenantScoped: true },
   "document.discovered": { version: "1.0.0", tenantScoped: false },
   "document.parsed": { version: "1.0.0", tenantScoped: false },
   "eval.run.completed": { version: "1.0.0", tenantScoped: false },

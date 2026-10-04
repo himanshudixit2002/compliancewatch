@@ -121,3 +121,13 @@ The tenants that have obligations, which the reminder sweep reads before it know
 then visits one tenant unit of work at a time. Every session may read the ids; every write must
 pass the tenant policy. It holds tenant ids only (migration 0003 of obligation).
 """
+
+[[exemptions]]
+table = "applicability.business_directory"
+kind = "routing_directory"
+reason = """
+Every business node the applicability engine heard of, with its tenant, level and parent, which a
+fan-out over every business reads before it knows a tenant and then visits one tenant unit of work
+at a time. Every session may read the ids; every write must pass the tenant policy. It holds ids
+and levels only (migration 0002 of applicability-engine).
+"""
