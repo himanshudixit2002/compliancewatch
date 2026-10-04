@@ -6,7 +6,9 @@
 # example replay and by the Redpanda schema registry; the migration lint's file rules in the ops
 # job and its catalog rules in the dev-stack job), 4 integration tests (testcontainers) for the
 # packages a change affects, an ops job (runbook links, promtool rules, actionlint), a compose
-# dev-stack smoke, secrets scanning, SAST (semgrep) and a dependency and config scan (trivy), both
+# dev-stack smoke that also runs the local product (make product, product-seed, product-check:
+# a published rule becomes decisions, obligations and a change card through the one deployable's
+# worker), secrets scanning, SAST (semgrep) and a dependency and config scan (trivy), both
 # reported to code scanning, and the web e2e job (Playwright with axe against the built Next.js
 # app, with every service running on memory stores and seeded with the demo tenant). The job
 # "CI gate" needs every other job and is the one check branch protection requires;
@@ -142,6 +144,12 @@ jobs:
               - 'uv.lock'
               - '.python-version'
               - '.github/workflows/ci.yml'
+              # make product-check runs every service through the deployable and its worker, with
+              # cw-product (tools/demo) publishing from the golden world (evals)
+              - 'services/**'
+              - 'composition/**'
+              - 'tools/demo/**'
+              - 'evals/**'
             ops:
               - 'infra/**'
               - 'docs/runbooks/**'
@@ -389,7 +397,7 @@ jobs:
         run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
 
   dev-stack:
-    name: Dev stack (docker compose smoke + migrations)
+    name: Dev stack (docker compose smoke, migrations, the local product)
     needs: changes
     if: needs.changes.outputs.devstack == 'true'
     runs-on: ubuntu-latest # has docker + compose v2
@@ -452,6 +460,23 @@ jobs:
           make migrate
       - name: Tenant tables have forced row-level security (migration lint, catalog rules)
         run: make migrations-catalog
+      # The local product on this stack: the deployable's app and worker with Kafka and Temporal on
+      # (no web app), synthetic tenants and the demo publication, then the check that a published
+      # rule becomes decisions, obligations with citations and a change card through the sink.
+      - name: The local product (make product WEB=0, make product-seed, make product-check)
+        run: |
+          make product WEB=0
+          make product-seed
+          make product-check
+      - name: Product logs
+        if: failure()
+        run: |
+          make product-logs PROC=app FOLLOW=0 || true
+          make product-logs PROC=worker FOLLOW=0 || true
+          tail -n 50 var/product/sink.jsonl || true
+      - name: Stop the product
+        if: always()
+        run: make product-down
       - name: Observability profile starts and answers (collector, Prometheus, Tempo, Grafana)
         run: |
           docker compose --profile observability up -d --wait --wait-timeout 180 otel-collector prometheus tempo grafana
