@@ -114,6 +114,7 @@ def _log_recomputed(message: EventMessage, done: Recomputed) -> None:
     log.info(
         "applicability.profile_recomputed",
         event_id=str(message.event_id),
+        tenant_id=str(plan.update.tenant_id),
         business_id=str(plan.update.business_id),
         found=plan.found,
         evaluated=plan.evaluated,
