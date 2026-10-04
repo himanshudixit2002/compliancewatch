@@ -10,6 +10,8 @@ from pydantic import ValidationError
 from starlette.testclient import TestClient
 from structlog.testing import capture_logs
 
+from applicability_engine.settings import ApplicabilityEngineSettings
+from applicability_engine.worker import GROUP_ID as PROFILES_GROUP
 from cw_mvp import worker as worker_module
 from cw_mvp.cli import main as cli_main
 from cw_mvp.registry import REGISTRY, entry_named
@@ -80,7 +82,11 @@ async def test_relays_start_only_for_schemas_with_an_outbox() -> None:
     hosted = await build_registry(_root(worker_kafka_enabled=True), probe=_inspector())
     relaying = {entry.service for entry in hosted.hosted if entry.components.relays}
     assert relaying == OUTBOX_SCHEMAS
-    assert hosted.consumer_groups() == (DECISIONS_GROUP, "notification.obligations")
+    assert hosted.consumer_groups() == (
+        PROFILES_GROUP,
+        DECISIONS_GROUP,
+        "notification.obligations",
+    )
     assert "profile/outbox-relay" in hosted.loops()
     assert hosted.task_queues() == ()
 
@@ -98,6 +104,26 @@ async def test_obligation_consumes_decisions_with_kafka_and_sweeps_behind_its_ow
     (obligation,) = [entry for entry in sweep.hosted if entry.service == "obligation"]
     assert isinstance(obligation.settings, ObligationSettings)
     assert obligation.settings.rulebook_url == _root().mvp_internal_url
+
+
+async def test_the_engine_consumes_profile_updates_with_kafka_whatever_its_recompute_switch() -> (
+    None
+):
+    off = await build_registry(_root(worker_kafka_enabled=True), probe=_inspector())
+    on = await build_registry(
+        _root(worker_kafka_enabled=True),
+        probe=_inspector(),
+        service_overrides={"applicability-engine": {"applicability_recompute_enabled": True}},
+    )
+    for hosted in (off, on):
+        assert PROFILES_GROUP in hosted.consumer_groups()
+        assert f"applicability-engine/consumer:{PROFILES_GROUP}" in hosted.loops()
+    (engine,) = [entry for entry in on.hosted if entry.service == "applicability-engine"]
+    assert isinstance(engine.settings, ApplicabilityEngineSettings)
+    assert engine.settings.applicability_recompute_enabled
+    assert engine.settings.profile_url == _root().mvp_internal_url
+    neither = await build_registry(_root(), probe=_inspector())
+    assert PROFILES_GROUP not in neither.consumer_groups()
 
 
 async def test_a_service_on_its_memory_store_is_left_to_the_app_process() -> None:
@@ -320,6 +346,7 @@ def test_the_health_app_answers_on_its_own_thread(health_server: HealthServer) -
 
 def test_every_service_with_background_work_is_hosted_by_the_worker() -> None:
     assert {entry.name for entry in REGISTRY if entry.components is not None} == {
+        "applicability-engine",
         "notification",
         "obligation",
         "pipeline",

@@ -78,6 +78,15 @@ def test_tenants_read_their_decisions_and_operators_their_eval_runs() -> None:
     assert runs["GET /v1/eval/runs/{run_id}"] is ADMIN
 
 
+def test_the_review_queue_is_the_regulatory_teams_and_public_only_in_token_mode() -> None:
+    engine = EXPOSURE["applicability-engine"]
+    for key in (f"GET {ENGINE}/review-items", f"POST {ENGINE}/review-items/{{item_id}}/resolve"):
+        assert engine[key] is ADMIN, key
+        assert served_publicly(engine[key], "token")
+        assert not served_publicly(engine[key], "dual")
+        assert not served_publicly(engine[key], "header")
+
+
 @pytest.mark.parametrize(
     ("exposure", "mode", "served"),
     [
