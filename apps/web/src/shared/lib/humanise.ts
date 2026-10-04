@@ -9,6 +9,7 @@ const SPELLINGS: Readonly<Record<string, string>> = {
   gst: "GST",
   gstr: "GSTR",
   hsn: "HSN",
+  sac: "SAC",
   sez: "SEZ",
   llp: "LLP",
   huf: "HUF",

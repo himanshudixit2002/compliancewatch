@@ -27,3 +27,52 @@ export function highlightSpan(text: string, start: number, end: number): Highlig
 export function codePointLength(text: string): number {
   return Array.from(text).length;
 }
+
+/** A run of text, marked or not, in the order it reads. */
+export interface TextSegment {
+  text: string;
+  mark: boolean;
+}
+
+/**
+ * The text cut into plain and marked runs at [start, end) ranges counted in code points, such
+ * as the spans of an entity's mentions in a clause. The ranges are sorted, overlapping ones are
+ * merged, and a range that does not fit the text is left out, so the runs always join back into
+ * the text.
+ */
+export function markSpans(
+  text: string,
+  spans: readonly { start: number; end: number }[],
+): TextSegment[] {
+  const points = Array.from(text);
+  const valid = spans
+    .filter(
+      (span) =>
+        Number.isInteger(span.start) &&
+        Number.isInteger(span.end) &&
+        span.start >= 0 &&
+        span.end > span.start &&
+        span.end <= points.length,
+    )
+    .map((span) => ({ start: span.start, end: span.end }))
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: { start: number; end: number }[] = [];
+  for (const span of valid) {
+    const last = merged.at(-1);
+    if (last !== undefined && span.start <= last.end) last.end = Math.max(last.end, span.end);
+    else merged.push(span);
+  }
+  const segments: TextSegment[] = [];
+  let cursor = 0;
+  for (const span of merged) {
+    if (span.start > cursor) {
+      segments.push({ text: points.slice(cursor, span.start).join(""), mark: false });
+    }
+    segments.push({ text: points.slice(span.start, span.end).join(""), mark: true });
+    cursor = span.end;
+  }
+  if (cursor < points.length || segments.length === 0) {
+    segments.push({ text: points.slice(cursor).join(""), mark: false });
+  }
+  return segments;
+}
