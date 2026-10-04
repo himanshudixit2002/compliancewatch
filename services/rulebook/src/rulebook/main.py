@@ -3,14 +3,17 @@
 Guide section 11: wiring of interfaces to implementations happens here, never inside the layers.
 The engine behind the Postgres store connects lazily, so importing the module (``make openapi``)
 needs no database. With telemetry on, the entity review queue gauges are registered on the
-app's meter provider.
+app's meter provider. With ``CW_RULEBOOK_SEED_ON_START`` (local and test, memory store only)
+the memory store starts with the seed calendar's drafts.
 """
 
+import logging
 from collections.abc import Callable
 
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
+import ontology as ontology_package
 from domain_kernel.errors import DomainError, InvalidRelationError, InvalidTransitionError
 from domain_kernel.events import utc_now
 from py_common.app import create_app, module_app
@@ -56,6 +59,7 @@ from rulebook.application.rule_versions import (
     ReadRuleVersion,
 )
 from rulebook.application.search import ListUnembeddedClauses, SearchClauses, StoreEmbeddings
+from rulebook.application.seed_loader import load_calendar
 from rulebook.domain.errors import (
     ApprovalsMissingError,
     CandidateClosedError,
@@ -95,6 +99,7 @@ from rulebook.domain.errors import (
     WriteTokenInvalidError,
 )
 from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
+from rulebook.domain.seed import SeedOutcome
 from rulebook.infrastructure.knowledge_repository import PostgresKnowledgeUnitOfWorkFactory
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 from rulebook.infrastructure.review_metrics import register_review_queue_gauges
@@ -102,6 +107,8 @@ from rulebook.settings import RulebookSettings
 from rulebook.wiring import Wiring
 
 SERVICE_NAME = "rulebook"
+
+log = logging.getLogger(__name__)
 
 PROBLEM_STATUS: dict[type[DomainError], int] = {
     DocumentIdMismatchError: 422,
@@ -145,11 +152,27 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
 }
 
 
+def seed_memory_store(memory: MemoryKnowledgeStore) -> SeedOutcome:
+    """``CW_RULEBOOK_SEED_ON_START``: the packaged seed calendar, checked against the packaged
+    ontology as ``rulebook-seed`` checks it, loaded into the memory store as draft versions that
+    need review. A calendar that does not parse stops the app from starting."""
+    calendar = load_calendar(ontology_package.load())
+    outcome = memory.apply_seed(calendar)
+    log.info(
+        "seed calendar %s loaded into the memory store at start: %s",
+        calendar.version,
+        outcome.summary,
+    )
+    return outcome
+
+
 def build_wiring(settings: RulebookSettings) -> Wiring:
     unit_of_work: KnowledgeUnitOfWorkFactory
     ping: Callable[[], bool]
     if settings.rulebook_store == "memory":
         memory = MemoryKnowledgeStore()
+        if settings.rulebook_seed_on_start:
+            seed_memory_store(memory)
         unit_of_work, ping = memory, memory.ping
     else:
         postgres = PostgresKnowledgeUnitOfWorkFactory.from_url(settings.database_url)
