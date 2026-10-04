@@ -224,6 +224,20 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
+# Application layers may name the actor and the correlation id of an audit entry with
+# py_common.audit; import-linter follows indirect imports, so one import of SQLAlchemy or of the
+# request middleware from these modules would break the application-layer contract above. Only
+# py_common.audit.schema, .writer and .testing may.
+name = "py_common.audit imports no web or database framework outside its schema, writer and testing"
+type = "forbidden"
+source_modules = ["py_common.audit.context", "py_common.audit.memory"]
+forbidden_modules = [
+  "fastapi", "starlette", "sqlalchemy", "alembic", "psycopg",
+  "py_common.audit.schema", "py_common.audit.writer", "py_common.audit.testing",
+  "py_common.request_context", "py_common.app", "py_common.problems", "py_common.telemetry",
+]
+
+[[tool.importlinter.contracts]]
 name = "Generated contracts (event and REST models) depend on pydantic only, never on our packages"
 type = "forbidden"
 source_modules = ["cw_contracts"]
