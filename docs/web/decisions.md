@@ -578,3 +578,21 @@ the foundation never used, and #41 leftovers in the parked namespaces). Conseque
 folder arrives with its page or with a map entry, and the map is empty once every parked screen is
 built; a screen brings its message keys with it; a dynamic family is listed with the module that
 builds it; test data stays obviously invented ("Example return 1", dates in the year 2000).
+
+## D-039: A part of a built page that waits for a backend is its own registry entry
+
+2026-10-04. The ontology browser needs only `GET /v1/ontology`, which is on `main`, but its entry
+also awaited the usage counts per attribute (`GET /v1/profile/admin/attribute-usage`, services
+track WP30), so the whole screen stayed waiting for the part it could not show. Keeping it waiting
+would hide a working browser for a package or two; listing the counts route under a live entry
+would make the entry claim a call the page does not make. The registry splits the screen instead:
+`admin.ontology` is a live page with the one route it calls, and `admin.ontology.usage` is a
+`component` hosted on `/admin/ontology` that stays `waiting` on the WP30 route, with the rule
+versions it will read (which rules read an attribute) under its `uses`. The page renders a note
+built from that entry, its title and its awaited routes with their owner, so what is missing is
+said in the registry's words rather than in copy that can drift. Consequences: when the route
+lands, `screens.test.ts` fails with `backend merged: flip admin.ontology.usage`, and the change
+that builds the counts adds them to the page that already exists; the admin tool list and
+`screens.md` show the component under the ontology; a later screen with the same shape (a built
+page with one panel or action still waiting) registers the waiting part as a `component` or
+`capability` rather than holding the page back.
