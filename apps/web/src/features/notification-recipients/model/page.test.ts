@@ -125,9 +125,10 @@ describe("recipientsPageView", () => {
     ]);
     expect(view.form?.addressRows).toBe(3);
     expect(view.rows[0]?.deliveryLabel).toBe("Daily digest, as for every CA firm recipient");
+    // Sorted by name for the page; the service lists them by id.
     expect(view.rows[0]?.businesses).toEqual([
-      "Example business",
       "00000000-0000-4000-8000-0000000000b9",
+      "Example business",
     ]);
   });
 
