@@ -102,7 +102,8 @@ stack's tenants included (with `make web-stack STORE=postgres`, which shares the
 start it at the end of the topic instead, before the first `make product` with it:
 
 ```bash
-docker compose exec -T redpanda rpk group seek applicability-engine.profiles --to end --topics profile.updated
+docker compose exec -T redpanda rpk group seek applicability-engine.profiles --to end \
+  --topics profile.updated --allow-new-topics
 ```
 
 ### The sink
