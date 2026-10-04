@@ -1,6 +1,7 @@
 """The Postgres unit of work: one transaction with the tenant setting for row-level security,
-the repositories on it and the outbox writer as the event sink, so a decision commits or rolls
-back with its ``applicability.decided`` row, its review item and its directory entries.
+the repositories on it, the outbox writer as the event sink and ``py_common.audit``'s writer as
+the audit sink, so a decision commits or rolls back with its ``applicability.decided`` row, its
+review item and its directory entries, and a resolution with its ``audit.event`` row.
 
 ``PostgresUnitOfWorkFactory.on_connection(connection)`` makes units inside a transaction someone
 else owns, such as the profile.updated consumer's inbox transaction (``py_common.outbox.sync``):
@@ -51,6 +52,7 @@ from domain_kernel.predicates import (
     specification_from_mapping,
     specification_to_mapping,
 )
+from py_common.audit.writer import PostgresAuditSink
 from py_common.outbox import OutboxWriter
 
 
@@ -223,6 +225,7 @@ class SqlAlchemyUnitOfWork:
         self.directory = SqlAlchemyDirectoryRepository(session)
         self.reviews = SqlAlchemyReviewItemRepository(session)
         self.events = OutboxSink(connection, writer)
+        self.audit = PostgresAuditSink(connection)
 
 
 class ConnectionUnitOfWorkFactory:

@@ -17,7 +17,7 @@ from collections.abc import Callable
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
-from applicability_engine import __version__
+from applicability_engine import SERVICE_NAME, __version__
 from applicability_engine.api.router import router
 from applicability_engine.application.evaluate import EvaluateRule
 from applicability_engine.application.queries import ListDecisions, ReadDecision
@@ -48,7 +48,6 @@ from py_common.auth.fastapi import Authenticator
 from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
 from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
 
-SERVICE_NAME = "applicability-engine"
 PROBLEM_STATUS: dict[type[DomainError], int] = {
     ApplicabilityTenantRequiredError: 401,
     BusinessNotFoundError: 404,

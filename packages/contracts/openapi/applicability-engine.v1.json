@@ -1171,7 +1171,7 @@
     },
     "/v1/applicability-engine/review-items/{item_id}/resolve": {
       "post": {
-        "description": "applies and not_applicable append a decision with trigger review, the reviewer's result\nand confidence 1, made from the decision under review, and publish applicability.decided;\nthe obligation service then makes or closes the obligations. dismiss appends nothing. A\nsigned-in reviewer is the one recorded; without a token the body's resolved_by is. 404 when\nthe tenant has no such item, 409 when it is already resolved.",
+        "description": "applies and not_applicable append a decision with trigger review, the reviewer's result\nand confidence 1, made from the decision under review, and publish applicability.decided;\nthe obligation service then makes or closes the obligations. dismiss appends nothing. A\nsigned-in reviewer is the one recorded; without a token the body's resolved_by is. Every\nresolution writes an audit entry, applicability.review.resolve, with the note as its reason.\n404 when the tenant has no such item, 409 when it is already resolved.",
         "operationId": "resolve_review_item_v1_applicability_engine_review_items__item_id__resolve_post",
         "parameters": [
           {

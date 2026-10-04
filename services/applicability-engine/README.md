@@ -61,9 +61,10 @@ Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
   `None`, anything else unexpected is `DependencyUnavailableError`, 503); the rulebook's in-force
   listing is paged by rule key and cached per day for `CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS`
   (60; 0 turns it off). The Postgres unit of work sets `app.tenant_id` per transaction and writes
-  events to the outbox on the same connection; `PostgresUnitOfWorkFactory.on_connection` makes
-  units inside the consumer's transaction, and `PostgresBusinessDirectory` reads the directory
-  across tenants (for the fan-out). `memory.py` is the in-memory twin, with the same rules.
+  events to the outbox and audit entries to `audit.event` on the same connection;
+  `PostgresUnitOfWorkFactory.on_connection` makes units inside the consumer's transaction, and
+  `PostgresBusinessDirectory` reads the directory across tenants (for the fan-out). `memory.py`
+  is the in-memory twin, with the same rules.
   `applicability_engine.testing` has in-memory readers and builders.
 - `worker.py`: `python -m applicability_engine.worker` (`make worker SERVICE=applicability-engine`,
   needs `CW_APPLICABILITY_ENGINE_STORE=postgres`), and the combined worker (`cw-mvp worker`). The
@@ -114,8 +115,12 @@ whose people review every tenant's decisions, so on these two routes alone the h
 tenant reviewed rather than the user's own; tenant members and services are a 403. In `header`
 mode the anonymous caller passes and the body's `resolved_by` is recorded; in `dual` mode a
 resolution without a token is a 401. The one deployable classes both routes `admin`: the public
-listener serves them in token mode only (`composition/mvp`). M1-4's audit writer will record each
-resolution.
+listener serves them in token mode only (`composition/mvp`). Every resolution writes an audit
+entry, `applicability.review.resolve`, in its unit of work (`audit.event` through
+`py_common.audit`; `MemoryStore.audit` in memory): the reviewer a token names as the actor, else
+`system:applicability-engine`, the note as the reason, the item's state before and after, and the
+request's correlation id. An item a later decision settles by itself is not audited: no person
+acted, and the item names the decision that settled it.
 
 Not built yet (WP22 and WP26): the LLM evaluator for free-text predicates, the golden set, the
 consumer of `rule.published` with the coarse filter and the fan-out over the business directory.

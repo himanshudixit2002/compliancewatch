@@ -9,7 +9,7 @@ listener with no transaction open, recompute on), and every applicability.decide
 stored to obligation's handler, each through an ``IdempotentConsumer`` on a SQLite inbox, as the
 relays and Kafka do in the product. The recompute step of ``cw-product check`` then runs against
 it unchanged. A second journey settles a review item through the engine's admin routes, which the
-public listener does not serve outside token mode.
+public listener does not serve outside token mode, and finds the resolution in the audit log.
 """
 
 import asyncio
@@ -26,6 +26,7 @@ from sqlalchemy import Connection, Engine, create_engine
 from sqlalchemy.pool import NullPool
 
 from applicability_engine import worker as engine_worker
+from applicability_engine.application.review import RESOLVE_ACTION
 from applicability_engine.domain.model import Decision, Trigger
 from applicability_engine.infrastructure.memory import MemoryStore as EngineStore
 from applicability_engine.settings import ApplicabilityEngineSettings
@@ -35,8 +36,9 @@ from cw_demo.product.client import Product, ProductSettings
 from cw_demo.product.tenants import BUSINESS_TENANT
 from cw_mvp.app import CombinedApp
 from cw_mvp.testing import LOCALHOST, running_app
+from domain_kernel.audit import AuditActor
 from domain_kernel.events import DomainEvent
-from domain_kernel.ids import RuleVersionId
+from domain_kernel.ids import RuleVersionId, TenantId
 from domain_kernel.predicates import specification_from_mapping, specification_to_mapping
 from domain_kernel.status import ObligationStatus, RuleVersionStatus
 from obligation import worker as obligation_worker
@@ -324,3 +326,15 @@ def test_a_review_item_is_settled_through_the_admin_routes_and_makes_obligations
         (review,) = [d for d in pump.engine.decisions.values() if str(d.decision_id) == decision_id]
         assert (review.trigger, review.result.value) == (Trigger.REVIEW, "applies")
         assert Outcome.DEAD not in pump.outcomes
+
+        (audited,) = pump.engine.audit
+        assert (audited.action, audited.tenant_id, audited.subject_id) == (
+            RESOLVE_ACTION,
+            TenantId(BUSINESS_TENANT.tenant_id),
+            item["item_id"],
+        )
+        assert audited.actor == AuditActor.system("applicability-engine"), "no token, no person"
+        assert audited.reason == "Example premises checked against the clause (synthetic)"
+        assert audited.correlation_id == settled.headers["x-request-id"]
+        assert audited.after is not None
+        assert audited.after["resolution_decision_id"] == decision_id
