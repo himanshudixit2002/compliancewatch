@@ -71,9 +71,11 @@ test.describe("notification recipients", () => {
     const add = page.getByRole("form", { name: "Add a recipient" });
     await add.getByLabel(/^Role/).selectOption("staff");
     await add.getByLabel(/^Organisation/).fill("Example desk");
-    await add.getByLabel("Address 1").fill(`${number.slice(0, 3)} ${number.slice(3)}`);
+    await add
+      .getByLabel("Address 1", { exact: true })
+      .fill(`${number.slice(0, 3)} ${number.slice(3)}`);
     await add.getByLabel("Channel of address 2").selectOption("email");
-    await add.getByLabel("Address 2").fill(email.toUpperCase());
+    await add.getByLabel("Address 2", { exact: true }).fill(email.toUpperCase());
     await add.getByLabel(/^Delivery/).selectOption("daily");
     await add.getByRole("checkbox", { name: "Example Second Ltd" }).check();
     await add.getByRole("button", { name: "Add the recipient" }).click();
@@ -109,8 +111,8 @@ test.describe("notification recipients", () => {
 
     await row.getByRole("link", { name: "Change Example desk" }).click();
     const change = page.getByRole("form", { name: "Change Example desk" });
-    await expect(change.getByLabel("Address 1")).toHaveValue(number);
-    await expect(change.getByLabel("Address 2")).toHaveValue(email);
+    await expect(change.getByLabel("Address 1", { exact: true })).toHaveValue(number);
+    await expect(change.getByLabel("Address 2", { exact: true })).toHaveValue(email);
     await change.getByLabel(/^Language/).selectOption("hi");
     await change.getByRole("button", { name: "Save the recipient" }).click();
     await expect(page.getByText("Saved: Example desk.")).toBeVisible();
@@ -120,13 +122,13 @@ test.describe("notification recipients", () => {
     expect(changed?.language).toBe("hi");
 
     const again = page.getByRole("form", { name: "Add a recipient" });
-    await again.getByLabel("Address 1").fill("12345");
+    await again.getByLabel("Address 1", { exact: true }).fill("12345");
     await again.getByRole("button", { name: "Add the recipient" }).click();
     await expect(again.getByText("The recipient was not saved")).toBeVisible();
     await expect(
       again.getByText("Enter a WhatsApp number with its country code, starting with +."),
     ).toBeVisible();
-    await expect(again.getByLabel("Address 1")).toHaveValue("12345");
+    await expect(again.getByLabel("Address 1", { exact: true })).toHaveValue("12345");
     await expect(again.locator("[data-slot='recipient-form-summary']")).toBeFocused();
     await checkA11y();
 
