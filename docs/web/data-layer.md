@@ -234,6 +234,8 @@ Tenant data is never cached; a handful of records every tenant sees the same way
 | billing plans                                                 | `cachedRead([tags.identity.plans()])`               | `identity:plans`                                                                      |
 | rulebook rules                                                | `cachedRead([tags.rulebook.rules()])`               | `rulebook:rules`                                                                      |
 | a rulebook document                                           | `cachedRead([tags.rulebook.document(id)])`          | `rulebook:document:<id>`                                                              |
+| a rulebook clause                                             | `cachedRead([tags.rulebook.clause(id)])`            | `rulebook:clause:<id>`                                                                |
+| rule versions, citations, relations, entities                 | `uncachedRead()`                                    | none: versions move through review outside this server, and an action renders the page again |
 | the entity and relation review queues                         | `cachedRead([tags.rulebook.reviewEntities()])`, ... | `rulebook:review-entities`, `rulebook:review-relations`                               |
 | notification templates                                        | `cachedRead([tags.notification.templates()])`       | `notification:templates`                                                              |
 | the ontology (`server/ontology.ts`)                           | `cachedRead([tags.profile.ontology()], 3600)`       | `profile:ontology`                                                                    |
@@ -474,6 +476,21 @@ lookup names (`ClientContext.tenantId`). `entities/notification` maps `Notificat
 generated type has it, with no subject or body. [business-pages.md](business-pages.md) has the
 reminders pages and [admin-tools.md](admin-tools.md) the console.
 
+## Rule versions, citations and the publish workflow
+
+`features/rule-versions/gateway.ts` reads the rulebook's rules (`GET /v1/rulebook/rules`), each
+rule's versions in any status (`GET /v1/rulebook/rules/{rule_key}/versions`), the versions in
+force on a date (`GET /v1/rulebook/rule-versions?as_of=&rule_key=&limit=&after=`), one version
+(`GET .../rule-versions/{id}`), its citations (`GET .../citations`), a clause with its document's
+facts (`GET /v1/rulebook/clauses/{id}`, cached under its tag) and the relations from and to a
+version (`GET /v1/rulebook/relations?published_only=false`), with no tenant header and no token.
+The writes go through `server/api/rulebook-write.ts` only: `saveCitations` sends `PUT
+.../citations` and `takeStep` the step's POST, each after the gate, the form's shape, the role, the
+flag and the review token, and each renders the version and the list again on success
+(`afterMutation({ paths })`). The citation rows travel as `citations.<n>.clause_id` and
+`citations.<n>.quote`, the paths a 422's `errors[].loc` gives them. [admin-tools.md](admin-tools.md)
+has the pages.
+
 ## Notification recipients
 
 `features/notification-recipients/gateway.ts` lists a business's recipients (`GET
@@ -548,15 +565,18 @@ component handles one.
   use the placeholder `local-write-token`, which is not a secret.
 - **Rulebook review token** (`CW_WEB_RULEBOOK_REVIEW_TOKEN`, the rulebook's
   `CW_RULEBOOK_REVIEW_TOKEN`): the rulebook's analyst routes (entity decisions, relation
-  approvals and rejections; later citations and the version lifecycle) need
-  `x-cw-review-token` (ADR-018), and the write token does not open them.
+  approvals and rejections, a rule version's citations and the steps of its publish workflow)
+  need `x-cw-review-token` (ADR-018), and the write token does not open them.
   `server/api/rulebook-write.ts` is the only module that sends it. `rulebookReviewClient(ctx)`
   (and `rulebookWriteClient(ctx)`, the same over the write token) refuses a session without a
   regulatory role and an unset token as `rulebookAdmin` does. `rulebookWrites(ctx)` gives an
   admin action the decisions port only for a regulatory role, with `web.admin_rulebook_writes`
   on for the session's tenant and the review token set, checked in that order; otherwise every
   method of the port answers that refusal without a request, and `rulebookWriteAccess(ctx)` tells
-  a form which one applies. `decided_by` in each body is the session's user id. A rulebook 401
+  a form which one applies. `rulebookWorkflow(ctx)` and `rulebookWorkflowAccess(ctx)` do the same
+  for the rule version page (citations, submit, return, approve, publish, withdraw) behind
+  `web.publish_actions`. `decided_by` and `actor_id` in each body are the session's user id, and an
+  approval never carries `synthetic` (D-043). A rulebook 401
   or 503 about either token is reworded to name the variable to set and the side that needs it,
   never its value. `make web-stack` gives the rulebook the placeholder `local-review-token`, and
   `make web-e2e` and the e2e config give the web app the same; under `next dev` the web app needs

@@ -25,9 +25,11 @@ src/app/            route files only: page.tsx is gate, query, render; layouts, 
                     loading.tsx; [...slug] serves
                     unbuilt tenant screens behind the entry's roles
   admin/            /admin home and layout under AdminShell, behind requireAdmin; rulebook/documents and the
-                    viewer, flags (the flag console), ontology (the browser), notifications (the console
-                    by tenant and business, a notification, the message templates); [...slug] serves
-                    unbuilt tools
+                    viewer, rulebook/versions (the list and a version's page with its citations and the
+                    publish workflow), rulebook/entities/canonical (the resolve tool and an entity's
+                    page), rulebook/search, rulebook/relations/graph, flags (the flag console), ontology
+                    (the browser), notifications (the console by tenant and business, a notification,
+                    the message templates); [...slug] serves unbuilt tools
   sign-out/         POST handler: clears the session cookie and returns to /sign-in (GET is a 405)
   api/health/       liveness handler {status, version, commit}
 src/features/       one directory per screen family: model/, ui/, index.ts (ports, gateway, queries and
@@ -45,8 +47,12 @@ src/features/       one directory per screen family: model/, ui/, index.ts (port
                     over the registry and the web server's reader), admin-ontology (the ontology
                     browser), notification-recipients (a business's recipients: the gateway, the form
                     and the save and remove actions), notifications (the notification history of a
-                    business and of the admin console, named by template, addresses masked); and the
-                    parked folders of screens
+                    business and of the admin console, named by template, addresses masked),
+                    rule-versions (the version list over two reads, a version's condition in words, its
+                    citations and the publish workflow through server/api/rulebook-write.ts),
+                    rulebook-entities (the resolve tool and an entity's page), clause-search (posted,
+                    each leg's rank, the words marked), relations-graph (the walk, an inline SVG and the
+                    table beside it); and the parked folders of screens
                     not built yet, which no page imports (docs/web/architecture.md, "Parked feature folders")
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
                     problem/ types the RFC 9457 body every service returns (from the generated contracts);
@@ -55,7 +61,9 @@ src/entities/       pure domain types and DTO-to-view mappers (no React, no fetc
                     GET /v1/ontology, and the lookups over them (by key, by level, answerable, labels);
                     business/ a business, its registrations and nodes, stored values, onboarding, prefill,
                     review tasks and snapshots, with the mappers both ways; consent/ consent records,
-                    states and purposes; notification/ a channel preference
+                    states and purposes; notification/ a channel preference; rulebook/ documents,
+                    decisions, entities, relations, clauses and search hits; rule-version/ rules, rule
+                    versions with their condition tree, citations and a step's lifecycle
 src/server/         server-only modules; every file starts with `import "server-only"`
                     env.ts validates every CW_WEB_* variable (zod; parsed at the first request, never at build)
                     session.ts: the encrypted cw_session cookie (jose), its options, set and clear (actions only)
@@ -70,9 +78,10 @@ src/server/         server-only modules; every file starts with `import "server-
                     api/problem.ts: RFC 9457 parsing to ApiError kinds and field errors
                     api/services.ts: the client factories (tenant header from the session; rulebookAdmin() adds
                     the write token after a regulatory-role check)
-                    api/rulebook-write.ts: the rulebook's write and review tokens and the analyst decisions
+                    api/rulebook-write.ts: the rulebook's write and review tokens, the analyst decisions
                     (entity groups, relation candidates) behind the role, web.admin_rulebook_writes and the
-                    review token
+                    review token, and a rule version's citations and workflow steps behind
+                    web.publish_actions
                     api/idempotency.ts: the per-render Idempotency-Key input and header (sent only for the routes
                     that require it, the business API's two creating POSTs; the natural keys are listed in the module)
                     cache.ts: the cache tags, cachedRead() for global reads (five minutes under tags), uncachedRead()
@@ -90,7 +99,8 @@ src/shared/lib/     IST dates, financial years, money and decimal strings, human
                     action-state (what a server action returns to a form)
 src/shared/i18n/    messages/en.json and the typed t(); another locale falls back key by key
 src/shared/ui/      app-level compositions over the UI kit: the two shells over next/link, breadcrumbs, the status chip,
-                    the session menu and the sign-out form, ServiceError (a failed read with its correlation id)
+                    the session menu and the sign-out form, ServiceError (a failed read with its correlation id),
+                    the rule version and seed status chips
 src/test/           vitest setup, the architecture rules and test (with PARKED_FEATURES, the feature folders no
                     page imports yet and the screens each will serve), the docs/web/screens.md drift test,
                     synthetic-fixtures.test.ts (no realistic return, regulator, business or person name in a

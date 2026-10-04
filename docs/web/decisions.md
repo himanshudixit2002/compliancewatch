@@ -666,3 +666,42 @@ sign-in, and only their steps through the web app move a version; the e2e specs 
 versions take a different seeded draft each and return it to draft first when an earlier run
 left it under review, and none publishes or withdraws, which the memory store could not undo;
 a fresh `make web-stack` starts every draft over.
+
+## D-043: Rule versions are listed from two reads, and the workflow speaks through one panel
+
+2026-10-04. The rule version list was registered on `GET /v1/rulebook/rule-versions`, which answers
+only the versions in force on a date: published or superseded ones. An analyst comes to the list
+for the drafts and the versions under review, which only `GET /v1/rulebook/rules/{rule_key}/versions`
+returns, one rule at a time. The list keeps the as-of read for its default chip ("In force", keyset
+paged by rule key as the route pages) and reads each rule's versions for the other status chips,
+eight rules at a time from the cursor until a page holds 25 rows, continuing after the last rule
+read; both reads join the entry's `uses`. Nothing is cached, since versions move through review
+outside this server. The version page gives the publish workflow one client panel over one server
+action (`takeStep`, the step a form field the action checks): the panel keeps the rulebook's last
+answer (the round's approvers, how many the round needs) across a later refusal and shows each
+refusal under the step it refused, while the page renders again in the new status. The approvers
+come only from a step's answer, because the version read does not carry them yet; the panel says so
+rather than guessing. The acting analyst is the session's user, set by `server/api/rulebook-write.ts`
+as `decided_by` is for the review decisions, and an approval never carries `synthetic`, which only
+the local product's demo tool sends. Citations and every step sit behind `web.publish_actions` and
+the review token, checked in that order after the role, as the decisions sit behind
+`web.admin_rulebook_writes`. A citation refusal comes back with every failure the rulebook listed,
+put on its row only when no other row cites the same clause, since the rulebook's failure lines
+name the clause but not the quote. Consequences: a status list costs one read per rule it walks; a
+chip with few versions may walk many rules for one page; when the version read gains the
+approvers, the panel shows them on arrival as well.
+
+## D-044: The search sends words only, and the graph is plain SVG with a table beside it
+
+2026-10-04. The clause search posts the words to a server action (the registry's note: never in an
+address) and the rulebook answers each hit with its rank in the full-text leg and in the vector
+leg. The vector leg needs a query embedding from the model that embedded the clauses, which only the
+LLM gateway makes; the page does not ask for one, so every vector rank is empty, and the page says
+that the vector search does not run from here instead of hiding the column. The searched words are
+marked where a clause word starts with one (`HighlightMark`), since the full-text leg matches stems.
+The relations graph needs no library (none is in the lockfile): a walk of one or two relations out
+from a version, at most 40 nodes, laid out in columns by plain arithmetic, drawn as an inline SVG
+with token colours. The SVG is `aria-hidden` with nothing focusable in it, and a table beside it
+lists the same relations with their links and evidence, which is what assistive technology reads.
+Consequences: a vector rank appears once the page sends an embedding; a graph past 40 nodes is cut
+short with a notice, and starting from another node shows its part.

@@ -85,7 +85,9 @@ apps/web/
                                catch-all [...slug]
     admin/                     (home)/ for /admin (the counts, the services summary and the tool list, with its
                                loading skeleton), the admin layout behind requireAdmin, its error and not-found
-                               boundaries, rulebook/documents (open by id) and its [documentId] viewer, the
+                               boundaries, rulebook/documents (open by id) and its [documentId] viewer,
+                               rulebook/versions ((list) and [ruleVersionId]), rulebook/entities/canonical
+                               ((resolve) and [entityId]), rulebook/search, rulebook/relations/graph, the
                                catch-all [...slug]
     sign-out/route.ts          POST: clears the session cookie
     api/health/route.ts        {status, version, commit}
@@ -94,12 +96,18 @@ apps/web/
                                auth (sign-in form, action, seed state), account, business (the business API and
                                profile node gateway, the attribute view models and controls), consents (the
                                consent step), rulebook-documents (open a document, the viewer with clause
-                               anchors and marked spans); the parked folders above, which no page imports yet
+                               anchors and marked spans), rule-versions (the version list, a version's page
+                               with its citations and the publish workflow), rulebook-entities (the resolve
+                               tool and an entity's page), clause-search, relations-graph (the walk, the SVG
+                               layout and the table); the parked folders above, which no page imports yet
   src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims),
                                ontology/ (the attributes and their wording from GET /v1/ontology),
                                business/ (a business, its nodes and values, onboarding, review tasks, snapshots),
                                consent/ (consent records), notification/ (a channel preference),
-                               rulebook/ (a rulebook document and its clauses)
+                               rulebook/ (a rulebook document and its clauses, the review decisions, entities,
+                               resolutions, relations, clauses with their document, search hits),
+                               rule-version/ (rules, rule versions with their condition tree, citations, a
+                               step's lifecycle and a publication)
   src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError, webError),
                                api/ (typed clients, problem parsing, idempotency), cache.ts (tags and revalidation),
                                session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a
@@ -111,7 +119,8 @@ apps/web/
   src/shared/lib/              dates, financial years, decimal money, humanise, identifiers, pagination, urls, assert
   src/shared/i18n/             messages/en.json and t()
   src/shared/ui/               TenantShell, InternalShell, RouterLink, Breadcrumbs, ScreenStatusChip, SessionMenu,
-                               SignOutButton, ServiceError, RefreshButton
+                               SignOutButton, ServiceError, RefreshButton, RuleVersionStatusChip and
+                               SeedStatusChip
   src/test/                    vitest setup, the architecture rules and their test with the parked folder map,
                                the screens.md drift test, the synthetic fixtures guard, fake-fetch.ts and
                                fake-cookies.ts
