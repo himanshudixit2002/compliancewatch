@@ -1,14 +1,16 @@
 # Business pages
 
 The list of a tenant's businesses and the pages of one business: its hierarchy, its answers per
-financial year, the snapshot the applicability engine evaluates, and the review tasks the
-answers opened. They are the registry entries `owner.businesses`, `owner.business`,
-`owner.business.profile`, `owner.business.attributes`, `owner.business.snapshot` and
-`owner.business.review-tasks`, readable by every tenant member role (`owner`, `staff`,
+financial year, the snapshot the applicability engine evaluates, the review tasks the answers
+opened, and the notifications sent about it. They are the registry entries `owner.businesses`,
+`owner.business`, `owner.business.profile`, `owner.business.attributes`,
+`owner.business.snapshot`, `owner.business.review-tasks`, `owner.reminders` and
+`owner.reminder`, readable by every tenant member role (`owner`, `staff`,
 `ca_admin`, `ca_staff`, `compliance_lead`) in a business or CA-firm tenant; changing an answer,
 adding a location or adding a GSTIN needs the `profile.edit` capability, which a compliance lead
 does not have.
-The calls are listed in [data-layer.md](data-layer.md) under "Businesses".
+The calls are listed in [data-layer.md](data-layer.md) under "Businesses" and "Notification
+history".
 
 ## The list: `/businesses`
 
@@ -31,8 +33,8 @@ PAN, the registrations' GSTINs and when the business last changed.
 
 The business id is the id of its legal entity node, as the business API returns it. Every page
 of a business shares one header (breadcrumbs with the business's name, then a row of tabs built
-from the registry's business group), so the screens not built yet (Changes, Reminders) appear as
-tabs that lead to their "not available yet" notices.
+from the registry's business group), so the screens not built yet (Changes, Obligations, Ask)
+appear as tabs that lead to their "not available yet" notices.
 
 A business that does not exist, belongs to another tenant (the service answers 404 for it), or
 whose id is not a UUID is the not-found page. The pages stream behind their `loading.tsx`, so
@@ -121,10 +123,39 @@ each with its reason in words:
 The page is read-only: resolving a task waits for a profile route nobody has designed yet
 (the registry entry names it as unplanned).
 
+## Reminders: `/b/[businessId]/reminders`
+
+What the notification service recorded for the business (`GET
+/v1/notification/notifications?business_id=`), newest first, 25 to a page with the service's
+opaque cursor ("Older notifications", and "Back to the newest" from a later page), and filtered
+by delivery state with a GET form (`?state=failed`). The business is read from the profile service
+first: the notification service lists nothing, rather than refusing, for a business it holds no
+notification about, so the profile's 404 is what makes another tenant's business the not-found
+page.
+
+The service keeps no subject and no body: a message is rendered from its template when it goes
+out and is not stored. A row is therefore named by its template (`opt_in_confirmed` reads "Opt in
+confirmed", with the key under it) and shows the occasion (change card, reminder, closure, due
+date change, or sent directly), the channel and the address it went to, the delivery state, the
+attempts, and when it was queued and last changed. The address is masked everywhere in the
+history (the last four digits of a number, the first letter and the domain of a mailbox): every
+member of the tenant reads these pages, and a recipient may be a colleague or a CA firm's person
+(D-040).
+
+`/b/[businessId]/reminders/[notificationId]` is one notification (`GET
+/v1/notification/notifications/{id}`): the channel's last error first (a failed attempt's
+reason), then the delivery state, channel, masked address, occasion, template, language and
+attempts, every time it moved (queued, may go out from, sent, delivered, read, failed, last
+change), the notification it falls back from when it is a fallback, its id, and the values the
+message was filled with (emptied by the service 30 days after the notification ended). A
+notification of another business of the tenant, an unknown id or a malformed one is the not-found
+page. The demo business has one notification after `make web-seed`, the opt-in confirmation sent
+to the owner's number.
+
 ## What waits
 
 - Listing a registration's locations: a children route on the profile service.
-- The changes and reminders of a business: their tabs lead to "not available yet" notices that
-  name the routes they wait for. The obligation list, the calendar and ask arrive with the
+- The changes of a business: its tab leads to the "not available yet" notice that names the routes
+  it waits for. The obligation list, the calendar and ask arrive with the
   obligation and qa routes, and the obligation dashboard on the home page with them.
 - Resolving a review task from these pages: an unplanned profile route.

@@ -168,6 +168,11 @@ const NOTIFICATIONS_LIST = servicesTrack(
   "/v1/notification/notifications",
 );
 const NOTIFICATIONS = uses("notification", "GET", "/v1/notification/notifications");
+const NOTIFICATION = uses(
+  "notification",
+  "GET",
+  "/v1/notification/notifications/{notification_id}",
+);
 const BUDGET_ALARMS = servicesTrack("WP27", "eval", "GET", "/v1/eval/budget-alarms");
 const QA_COVERAGE = servicesTrack("WP28", "eval", "GET", "/v1/eval/qa-coverage");
 const REVIEW_STATS = servicesTrack("WP21", "rulebook", "GET", "/v1/rulebook/review/stats");
@@ -796,12 +801,15 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [NOTIFICATIONS],
-    awaits: [NOTIFICATIONS_LIST],
-    status: "ready",
-    e2e: [],
+    uses: [BUSINESS, NOTIFICATIONS],
+    awaits: [],
+    status: "live",
+    e2e: ["owner-reminders.spec.ts"],
     guideRef: "9, F9",
     nav: { group: "business", order: 8 },
+    parent: "owner.business",
+    notes:
+      "The notifications the service recorded for the business, newest first, by delivery state: template, channel, masked address, state, attempts and times. The service keeps no message text.",
   },
   {
     id: "owner.reminder",
@@ -811,19 +819,14 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [uses("notification", "GET", "/v1/notification/notifications/{notification_id}")],
-    awaits: [
-      servicesTrack(
-        "WP13",
-        "notification",
-        "GET",
-        "/v1/notification/notifications/{notification_id}",
-      ),
-    ],
-    status: "ready",
-    e2e: [],
+    uses: [BUSINESS, NOTIFICATION],
+    awaits: [],
+    status: "live",
+    e2e: ["owner-reminders.spec.ts"],
     guideRef: "9, F9",
     parent: "owner.reminders",
+    notes:
+      "One notification's delivery record: the channel's last error, every time it moved, and the values the message was filled with.",
   },
   {
     id: "owner.report-error",

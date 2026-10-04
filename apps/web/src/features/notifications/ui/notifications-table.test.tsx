@@ -1,44 +1,51 @@
-import type { Route } from "next";
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen, within } from "@testing-library/react";
+import { runAxe } from "@compliancewatch/ui/test/axe";
 import { describe, expect, it } from "vitest";
-import type { NotificationRow } from "./notification-rows";
+import { notificationFromDto } from "@/entities/notification/mappers";
+import { formatDateTime } from "@/shared/lib/dates";
+import { NOTIFICATION_ID, notificationDto } from "@/test/notification-fixture";
+import { notificationRows } from "../model/notifications";
 import { NotificationsTable } from "./notifications-table";
 
-const ROWS: NotificationRow[] = [
-  {
-    id: "n1",
-    subject: "Example return due on 20 Oct",
-    href: "/n/n1" as Route,
-    channelLabel: "WhatsApp",
-    state: "sent",
-    stateLabel: "Sent",
-    tone: "info",
-    recipient: "+910000000001",
-    sentLabel: "1 Oct 2000, 10:30 am IST",
-  },
-];
-
 describe("NotificationsTable", () => {
-  it("renders the prepared row as given", () => {
-    const { container } = render(<NotificationsTable rows={ROWS} />);
-    const row = container.querySelector("[data-notification='n1']") as HTMLElement;
-    expect(row.textContent).toContain("1 Oct 2000, 10:30 am IST");
-    const chip = row.querySelector("[data-slot='status-chip']");
-    expect(chip?.getAttribute("data-status")).toBe("sent");
-    expect(chip?.getAttribute("data-tone")).toBe("info");
+  it("names each notification by its template and shows where it went and how far it got", async () => {
+    const rows = notificationRows(
+      [
+        notificationFromDto(notificationDto({ template_key: "example_due_soon" })),
+        notificationFromDto(
+          notificationDto({
+            id: "00000000-0000-4000-8000-0000000000f2",
+            channel: "email",
+            address: "owner@example.com",
+            state: "delivered",
+            occasion: "reminder",
+            updated_at: "2000-01-02T05:00:00Z",
+          }),
+        ),
+      ],
+      (id) => `/n/${id}`,
+    );
+    const { container } = render(<NotificationsTable rows={rows} />);
+    const table = screen.getByRole("table");
+    expect(within(table).getAllByRole("row")).toHaveLength(3);
+    expect(screen.getByText("2 notifications on this page, newest first")).toBeDefined();
+    const failed = container.querySelector(
+      `[data-notification='${NOTIFICATION_ID}']`,
+    ) as HTMLElement;
     expect(
-      screen.getByRole("link", { name: "Example return due on 20 Oct" }).getAttribute("href"),
-    ).toBe("/n/n1");
-  });
-
-  it("describes the search box and keeps what was typed", async () => {
-    const user = userEvent.setup();
-    render(<NotificationsTable rows={ROWS} />);
-    const search = screen.getByRole("searchbox", { name: "Search notifications" });
-    expect(search.getAttribute("aria-describedby")).not.toBeNull();
-    await user.type(search, "sent");
-    expect((search as HTMLInputElement).value).toBe("sent");
-    expect(screen.getByText("Showing 1 of 1 notifications.")).toBeDefined();
+      within(failed).getByRole("link", { name: "Example due soon" }).getAttribute("href"),
+    ).toBe(`/n/${NOTIFICATION_ID}`);
+    expect(failed.textContent).toContain("example_due_soon");
+    expect(failed.textContent).toContain("Sent directly");
+    expect(failed.textContent).toContain("*********0000");
+    expect(failed.querySelector("[data-slot='status-chip']")?.getAttribute("data-tone")).toBe(
+      "danger",
+    );
+    expect(failed.textContent).toContain(formatDateTime("2000-01-01T05:00:00Z"));
+    const delivered = container.querySelector("[data-state='delivered']") as HTMLElement;
+    expect(delivered.textContent).toContain("o****@example.com");
+    expect(delivered.textContent).toContain("Reminder");
+    expect(delivered.textContent).toContain(formatDateTime("2000-01-02T05:00:00Z"));
+    expect(await runAxe(container)).toHaveNoViolations();
   });
 });

@@ -1,6 +1,11 @@
 import { isE164, isEmailAddress } from "@/shared/lib/identifiers";
 import type {
   Channel,
+  DeliveryState,
+  NotificationDto,
+  NotificationPage,
+  NotificationPageDto,
+  NotificationRecord,
   Preference,
   PreferenceChange,
   PreferenceDto,
@@ -117,4 +122,51 @@ export function recipientInputToDto(input: RecipientInput): RecipientInDto {
       label: link.label,
     })),
   };
+}
+
+/** The delivery states, in the order a notification moves through them, then the dead ends. */
+export const DELIVERY_STATES: readonly DeliveryState[] = [
+  "queued",
+  "digest_pending",
+  "sent",
+  "delivered",
+  "read",
+  "failed",
+  "suppressed",
+];
+
+export function isDeliveryState(value: string): value is DeliveryState {
+  return (DELIVERY_STATES as readonly string[]).includes(value);
+}
+
+export function notificationFromDto(dto: NotificationDto): NotificationRecord {
+  return {
+    id: dto.id,
+    businessId: dto.business_id,
+    obligationId: dto.obligation_id,
+    recipientId: dto.recipient_id ?? null,
+    channel: dto.channel,
+    address: dto.address,
+    occasion: dto.occasion,
+    templateKey: dto.template_key,
+    language: dto.language,
+    params: { ...dto.params },
+    state: dto.state,
+    attempts: dto.attempts,
+    availableAt: dto.available_at,
+    dispatchId: dto.dispatch_id ?? null,
+    providerMessageId: dto.provider_message_id,
+    error: dto.error,
+    fallbackOf: dto.fallback_of ?? null,
+    createdAt: dto.created_at,
+    updatedAt: dto.updated_at,
+    sentAt: dto.sent_at ?? null,
+    deliveredAt: dto.delivered_at ?? null,
+    readAt: dto.read_at ?? null,
+    failedAt: dto.failed_at ?? null,
+  };
+}
+
+export function notificationPageFromDto(dto: NotificationPageDto): NotificationPage {
+  return { items: dto.items.map(notificationFromDto), nextCursor: dto.next_cursor ?? null };
 }

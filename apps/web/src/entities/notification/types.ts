@@ -106,3 +106,55 @@ export interface RecipientInput {
   addresses: readonly RecipientAddress[];
   businesses: readonly BusinessLink[];
 }
+
+/**
+ * A notification as the notification service records it (`NotificationOut`): to whom (a channel
+ * and a normalised address, the recipient when it came from one), about what (the business, the
+ * obligation, the occasion and the template with its language and the values it was filled
+ * with), and how far it got (its delivery state, the attempts, the times it was sent, delivered,
+ * read or failed, the channel's last error). The service keeps no subject or body: the message is
+ * rendered from the template when it goes out and not stored.
+ */
+export type NotificationDto = Schemas["NotificationOut"];
+export type NotificationPageDto = Schemas["Page_NotificationOut_"];
+export type DeliveryState = Schemas["DeliveryState"];
+export type OccasionKind = Schemas["OccasionKind"];
+
+export interface NotificationRecord {
+  id: string;
+  businessId: string;
+  obligationId: string;
+  /** Null for a send addressed straight to a number. */
+  recipientId: string | null;
+  channel: Channel;
+  /** +digits for WhatsApp, lower case for email. */
+  address: string;
+  occasion: OccasionKind;
+  templateKey: string;
+  language: string;
+  /** The values the message was filled with; emptied 30 days after the notification ended. */
+  params: Readonly<Record<string, unknown>>;
+  state: DeliveryState;
+  attempts: number;
+  /** When it may go out, or when it is tried again. */
+  availableAt: string;
+  dispatchId: string | null;
+  /** Empty until the provider took it. */
+  providerMessageId: string;
+  /** The channel's last error; empty when there was none. */
+  error: string;
+  /** The notification this one falls back from, on another channel. */
+  fallbackOf: string | null;
+  createdAt: string;
+  updatedAt: string;
+  sentAt: string | null;
+  deliveredAt: string | null;
+  readAt: string | null;
+  failedAt: string | null;
+}
+
+export interface NotificationPage {
+  items: readonly NotificationRecord[];
+  /** Send as the cursor for the next page; null on the last page. */
+  nextCursor: string | null;
+}

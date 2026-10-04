@@ -462,6 +462,17 @@ does not check it; opting out and changing the language or the window need no co
 email section says that the service's email channel is not connected on `main`: a preference is
 recorded all the same.
 
+## Notification history
+
+`features/notifications/gateway.ts` reads a business's notifications (`GET
+/v1/notification/notifications?business_id=&state=&limit=&cursor=`) and one notification (`GET
+.../{notification_id}`) over the typed notification client, and names the business from the
+profile service (`GET /v1/businesses/{business_id}`), all tenant-scoped and uncached. The tenant
+is the session's on the reminders pages; the admin console builds the gateway with the tenant its
+lookup names (`ClientContext.tenantId`). `entities/notification` maps `NotificationOut` as the
+generated type has it, with no subject or body. [business-pages.md](business-pages.md) has the
+reminders pages and [admin-tools.md](admin-tools.md) the console.
+
 ## Notification recipients
 
 `features/notification-recipients/gateway.ts` lists a business's recipients (`GET

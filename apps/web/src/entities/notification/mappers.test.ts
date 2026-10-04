@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { BUSINESS_ID, RECIPIENT_ID, recipientDto } from "@/test/notification-fixture";
+import {
+  BUSINESS_ID,
+  NOTIFICATION_ID,
+  OBLIGATION_ID,
+  RECIPIENT_ID,
+  notificationDto,
+  recipientDto,
+} from "@/test/notification-fixture";
 import {
   CHANNELS,
+  DELIVERY_STATES,
+  isDeliveryState,
+  notificationFromDto,
+  notificationPageFromDto,
   emailKeyOf,
   isChannel,
   isRecipientKey,
@@ -160,5 +171,53 @@ describe("recipient mappers", () => {
       addresses: [{ channel: "email", address: "desk@example.com" }],
       businesses: [{ business_id: BUSINESS_ID, label: "Example client" }],
     });
+  });
+});
+
+describe("notification mappers", () => {
+  it("maps what the service records of a notification", () => {
+    expect(
+      notificationFromDto(
+        notificationDto({
+          recipient_id: RECIPIENT_ID,
+          params: { example: "Example value" },
+          dispatch_id: "00000000-0000-4000-8000-0000000000d1",
+          fallback_of: "00000000-0000-4000-8000-0000000000f0",
+        }),
+      ),
+    ).toEqual({
+      id: NOTIFICATION_ID,
+      businessId: BUSINESS_ID,
+      obligationId: OBLIGATION_ID,
+      recipientId: RECIPIENT_ID,
+      channel: "whatsapp",
+      address: "+910000000000",
+      occasion: "manual",
+      templateKey: "example_template",
+      language: "en",
+      params: { example: "Example value" },
+      state: "failed",
+      attempts: 1,
+      availableAt: "2000-01-01T05:00:00Z",
+      dispatchId: "00000000-0000-4000-8000-0000000000d1",
+      providerMessageId: "",
+      error: "Example channel error",
+      fallbackOf: "00000000-0000-4000-8000-0000000000f0",
+      createdAt: "2000-01-01T05:00:00Z",
+      updatedAt: "2000-01-01T05:00:00Z",
+      sentAt: null,
+      deliveredAt: null,
+      readAt: null,
+      failedAt: "2000-01-01T05:00:00Z",
+    });
+  });
+
+  it("maps a page and knows the delivery states", () => {
+    const page = notificationPageFromDto({ items: [notificationDto()], next_cursor: null });
+    expect(page.items[0]?.recipientId).toBeNull();
+    expect(page.nextCursor).toBeNull();
+    expect(DELIVERY_STATES).toHaveLength(7);
+    expect(isDeliveryState("digest_pending")).toBe(true);
+    expect(isDeliveryState("lost")).toBe(false);
   });
 });

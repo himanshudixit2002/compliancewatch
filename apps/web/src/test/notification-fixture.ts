@@ -1,4 +1,9 @@
-import type { PreferenceDto, RecipientDto, TemplateDto } from "@/entities/notification/types";
+import type {
+  NotificationDto,
+  PreferenceDto,
+  RecipientDto,
+  TemplateDto,
+} from "@/entities/notification/types";
 
 /**
  * Notification service bodies for unit tests: an obviously synthetic number and address, and
@@ -67,6 +72,39 @@ export function recipientDto(overrides: Partial<RecipientDto> = {}): RecipientDt
     businesses: [{ business_id: BUSINESS_ID, label: "Example business" }],
     created_at: "2000-01-01T05:00:00Z",
     updated_at: "2000-01-02T05:00:00Z",
+    ...overrides,
+  };
+}
+
+export const NOTIFICATION_ID = "00000000-0000-4000-8000-0000000000f1";
+export const OBLIGATION_ID = "00000000-0000-4000-8000-0000000000c1";
+
+/** A notification as `GET /v1/notification/notifications/{id}` returns it: failed on WhatsApp. */
+export function notificationDto(overrides: Partial<NotificationDto> = {}): NotificationDto {
+  return {
+    id: NOTIFICATION_ID,
+    business_id: BUSINESS_ID,
+    obligation_id: OBLIGATION_ID,
+    recipient_id: null,
+    channel: "whatsapp",
+    address: `+${WHATSAPP_KEY}`,
+    occasion: "manual",
+    template_key: "example_template",
+    language: "en",
+    params: {},
+    state: "failed",
+    attempts: 1,
+    available_at: "2000-01-01T05:00:00Z",
+    dispatch_id: null,
+    provider_message_id: "",
+    error: "Example channel error",
+    fallback_of: null,
+    created_at: "2000-01-01T05:00:00Z",
+    updated_at: "2000-01-01T05:00:00Z",
+    sent_at: null,
+    delivered_at: null,
+    read_at: null,
+    failed_at: "2000-01-01T05:00:00Z",
     ...overrides,
   };
 }

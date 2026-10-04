@@ -24,7 +24,6 @@ describe("laterScreens", () => {
       "owner.obligations",
       "owner.calendar",
       "owner.changes",
-      "owner.reminders",
       "owner.ask",
     ]);
     expect(later[0]).toMatchObject({ status: "ready", href: "/b/b1/obligations" });

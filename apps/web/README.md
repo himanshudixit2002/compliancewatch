@@ -21,7 +21,8 @@ src/app/            route files only: page.tsx is gate, query, render; layouts, 
   (app)/            tenant screens under the session-aware shell: /account, /onboarding (the consent step),
                     /onboarding/business (the business step), /onboarding/[businessId]/questions and
                     /onboarding/[businessId]/done, /businesses and /b/[businessId] with /profile,
-                    /attributes, /snapshot and /review-tasks, each with loading.tsx; [...slug] serves
+                    /attributes, /snapshot, /review-tasks, /reminders and /reminders/[notificationId], each with
+                    loading.tsx; [...slug] serves
                     unbuilt tenant screens behind the entry's roles
   admin/            /admin home and layout under AdminShell, behind requireAdmin; rulebook/documents and the
                     viewer, flags (the flag console), ontology (the browser); [...slug] serves unbuilt tools
@@ -41,7 +42,9 @@ src/features/       one directory per screen family: model/, ui/, index.ts (port
                     the step's view, the form and the recordConsents action), flags (the flag console
                     over the registry and the web server's reader), admin-ontology (the ontology
                     browser), notification-recipients (a business's recipients: the gateway, the form
-                    and the save and remove actions); and the parked folders of screens
+                    and the save and remove actions), notifications (the notification history of a
+                    business and of the admin console, named by template, addresses masked); and the
+                    parked folders of screens
                     not built yet, which no page imports (docs/web/architecture.md, "Parked feature folders")
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
                     problem/ types the RFC 9457 body every service returns (from the generated contracts);

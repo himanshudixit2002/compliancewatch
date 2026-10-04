@@ -596,3 +596,26 @@ that builds the counts adds them to the page that already exists; the admin tool
 `screens.md` show the component under the ontology; a later screen with the same shape (a built
 page with one panel or action still waiting) registers the waiting part as a `component` or
 `capability` rather than holding the page back.
+
+## D-040: The notification history shows the service's record, named by template, addresses masked
+
+2026-10-04. The parked notifications folder drew each notification with a subject and a body, but
+the notification service keeps neither: a message is rendered from its template when it goes out
+and the text is not stored (`NotificationOut` has the template, its language and the values it
+was filled with). The reminders pages and the admin console show the record as the service keeps
+it: a row is named by its template (`opt_in_confirmed` reads "Opt in confirmed", with the key
+under it), and the page gives the occasion, the channel and the address, the delivery state, the
+attempts, every time the notification moved and the channel's last error. The mapper is built on
+the generated type in `entities/notification`. The address is masked wherever the history shows
+it (the last four digits of a number, the first letter and the domain of a mailbox): every member
+of a tenant reads its reminders, and a recipient can be a colleague or a CA firm's person, while
+the console reads another tenant's records; the recipients settings page, which only the tenant's
+admins open and which edits addresses, shows them in full. The history pages are filtered by
+delivery state in the query string and paged with the service's opaque cursor; there is no
+client-side search, since a page is only part of the history. The demo business gets its one
+notification from the seed: the opt-in confirmation through `POST /v1/notification/send`, with the
+nil UUID as its obligation, because nothing else on the web stack creates a notification without
+the workers; the stack's WhatsApp channel is not wired, so the record shows a failed attempt and
+its reason. Consequences: when the service starts storing a rendered message, the detail page
+gains it from the generated type; a support question about one message is answered from the
+template key, the values and the times, with the full address only on the service.
