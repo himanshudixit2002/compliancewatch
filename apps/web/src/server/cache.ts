@@ -72,6 +72,8 @@ export const tags = {
     rules: () => cacheTag("rulebook", "rules"),
     /** GET /v1/rulebook/documents/{document_id} */
     document: (documentId: string) => cacheTag("rulebook", "document", documentId),
+    /** GET /v1/rulebook/clauses/{clause_id}: a clause never changes under its id */
+    clause: (clauseId: string) => cacheTag("rulebook", "clause", clauseId),
     /** GET /v1/rulebook/review/entities and its items */
     reviewEntities: () => cacheTag("rulebook", "review-entities"),
     /** GET /v1/rulebook/review/relations */

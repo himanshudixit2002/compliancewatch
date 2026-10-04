@@ -14,16 +14,27 @@ import { resetFlagReader } from "../flags";
 import { webError, type ApiError } from "../result";
 import { REQUEST_ID_HEADER, TENANT_HEADER, WRITE_TOKEN_HEADER } from "./client";
 import {
+  PUBLISH_ACTIONS_FLAG,
   REVIEW_TOKEN_HEADER,
   RULEBOOK_WRITES_FLAG,
+  RefusedWorkflowGateway,
   RefusedWriteGateway,
+  RuleVersionWorkflowGateway,
   RulebookWriteGateway,
   explainTokenProblem,
   rulebookReviewClient,
+  rulebookWorkflow,
+  rulebookWorkflowAccess,
   rulebookWriteAccess,
   rulebookWriteClient,
   rulebookWrites,
 } from "./rulebook-write";
+import {
+  EXAMPLE_VERSION_ID,
+  citationDto,
+  lifecycleDto,
+  publicationDto,
+} from "@/test/rule-version-fixture";
 import type { ClientContext, ClientPrincipal } from "./services";
 
 // Obviously fake values: the module must never put either one in an error or another call.
@@ -564,5 +575,175 @@ describe("explainTokenProblem", () => {
     expect(explainTokenProblem(local)).toBe(local);
     const network: ApiError = { kind: "network", requestId: "", message: "Example message" };
     expect(explainTokenProblem(network)).toBe(network);
+  });
+});
+
+describe("rulebookWorkflow", () => {
+  const VERSION = `/v1/rulebook/rule-versions/${EXAMPLE_VERSION_ID}`;
+
+  /** web.publish_actions on through its override and the review token configured. */
+  function allowWorkflow(): void {
+    vi.stubEnv("CW_WEB_ENV", "test");
+    vi.stubEnv("CW_WEB_FLAG_PUBLISH_ACTIONS", "true");
+    vi.stubEnv("CW_WEB_RULEBOOK_REVIEW_TOKEN", REVIEW_TOKEN);
+  }
+
+  it("refuses every step, naming web.publish_actions, without a request while the flag is off", async () => {
+    vi.stubEnv("CW_WEB_ENV", "test");
+    vi.stubEnv("CW_WEB_FLAG_ADMIN_RULEBOOK_WRITES", "true");
+    vi.stubEnv("CW_WEB_RULEBOOK_REVIEW_TOKEN", REVIEW_TOKEN);
+    const fake = fakeFetch([]);
+    const port = await rulebookWorkflow(ctx(analyst, fake));
+    expect(port).toBeInstanceOf(RefusedWorkflowGateway);
+    const results = [
+      await port.cite(EXAMPLE_VERSION_ID, [{ clauseId: CLAUSE_ID, quote: "Example quote" }]),
+      await port.submit(EXAMPLE_VERSION_ID, { highImpact: false, note: "" }),
+      await port.returnToDraft(EXAMPLE_VERSION_ID, "Example reason text"),
+      await port.approve(EXAMPLE_VERSION_ID, ""),
+      await port.publish(EXAMPLE_VERSION_ID, ""),
+      await port.withdraw(EXAMPLE_VERSION_ID, "Example reason text"),
+    ];
+    for (const result of results) {
+      if (result.ok) throw new Error("expected a refusal");
+      expect(problemSlug(result.error)).toBe("web-publish-actions-off");
+      expect(result.error.message).toBe("The web.publish_actions flag is off");
+    }
+    expect(fake.requests).toHaveLength(0);
+    const access = await rulebookWorkflowAccess(ctx(analyst));
+    expect(access).toMatchObject({ allowed: false, refusal: "flag", flag: PUBLISH_ACTIONS_FLAG });
+  });
+
+  it("refuses a tenant role first, and a missing review token after the flag", async () => {
+    allowWorkflow();
+    expect(await rulebookWorkflowAccess(ctx(owner))).toMatchObject({ refusal: "role" });
+    vi.stubEnv("CW_WEB_RULEBOOK_REVIEW_TOKEN", "");
+    resetEnvCache();
+    vi.stubEnv("CW_WEB_RULEBOOK_WRITE_TOKEN", WRITE_TOKEN);
+    const access = await rulebookWorkflowAccess(ctx(reviewer));
+    expect(access).toMatchObject({ allowed: false, refusal: "token" });
+    if (access.allowed) throw new Error("expected a refusal");
+    expect(problemSlug(access.error)).toBe("web-review-token-missing");
+    expectNoToken(access.error);
+  });
+
+  it("allows every regulatory role with the flag on and the review token configured", async () => {
+    allowWorkflow();
+    for (const session of [analyst, reviewer, admin]) {
+      expect(await rulebookWorkflowAccess(ctx(session))).toEqual({ allowed: true });
+    }
+  });
+
+  it("cites clauses with the review token and maps what the rulebook stored", async () => {
+    allowWorkflow();
+    const fake = fakeFetch([
+      {
+        method: "PUT",
+        path: `${VERSION}/citations`,
+        body: { added: 1, unchanged: 0, citations: [citationDto()] },
+      },
+    ]);
+    const port = await rulebookWorkflow(ctx(analyst, fake));
+    expect(port).toBeInstanceOf(RuleVersionWorkflowGateway);
+    const result = await port.cite(EXAMPLE_VERSION_ID, [
+      { clauseId: CLAUSE_ID, quote: "Example quote" },
+    ]);
+    expect(result).toMatchObject({
+      ok: true,
+      value: { added: 1, unchanged: 0, citations: [{ verified: true, matchScore: 0.97 }] },
+    });
+    const [request] = fake.requests;
+    expect(request?.method).toBe("PUT");
+    expect(request?.url).toBe(`${RULEBOOK}${VERSION}/citations`);
+    expect(request?.headers[REVIEW_TOKEN_HEADER]).toBe(REVIEW_TOKEN);
+    expect(request?.headers[WRITE_TOKEN_HEADER]).toBeUndefined();
+    expect(request?.headers[TENANT_HEADER]).toBeUndefined();
+    expect(request?.body).toEqual({
+      citations: [{ clause_id: CLAUSE_ID, quote: "Example quote" }],
+    });
+  });
+
+  it("sends each step with the session's user as the actor, and an approval never synthetic", async () => {
+    allowWorkflow();
+    const fake = fakeFetch([
+      { method: "POST", path: `${VERSION}/submit`, body: lifecycleDto({ approved_by: [] }) },
+      { method: "POST", path: `${VERSION}/approve`, body: lifecycleDto() },
+      {
+        method: "POST",
+        path: `${VERSION}/return`,
+        body: lifecycleDto({ status: "draft", approved_by: [], submitted_at: null }),
+      },
+      { method: "POST", path: `${VERSION}/publish`, body: publicationDto() },
+      { method: "POST", path: `${VERSION}/withdraw`, body: lifecycleDto({ status: "withdrawn" }) },
+    ]);
+    const port = await rulebookWorkflow(ctx(reviewer, fake));
+    const submitted = await port.submit(EXAMPLE_VERSION_ID, { highImpact: true, note: "Example" });
+    expect(submitted).toMatchObject({ ok: true, value: { status: "in_review", approvedBy: [] } });
+    const approved = await port.approve(EXAMPLE_VERSION_ID, "");
+    expect(approved).toMatchObject({ ok: true, value: { requiredApprovals: 2 } });
+    await port.returnToDraft(EXAMPLE_VERSION_ID, "Example reason text");
+    const published = await port.publish(EXAMPLE_VERSION_ID, "Example note");
+    expect(published).toMatchObject({
+      ok: true,
+      value: { status: "published", replacements: [{}] },
+    });
+    await port.withdraw(EXAMPLE_VERSION_ID, "Example reason text");
+    expect(fake.requests.map((request) => request.pathname)).toEqual([
+      `${VERSION}/submit`,
+      `${VERSION}/approve`,
+      `${VERSION}/return`,
+      `${VERSION}/publish`,
+      `${VERSION}/withdraw`,
+    ]);
+    expect(fake.requests.map((request) => request.body)).toEqual([
+      { actor_id: reviewer.userId, high_impact: true, note: "Example" },
+      { actor_id: reviewer.userId, note: "" },
+      { actor_id: reviewer.userId, note: "Example reason text" },
+      { actor_id: reviewer.userId, note: "Example note" },
+      { actor_id: reviewer.userId, note: "Example reason text" },
+    ]);
+    for (const request of fake.requests) {
+      expect(request.headers[REVIEW_TOKEN_HEADER]).toBe(REVIEW_TOKEN);
+      expect(JSON.stringify(request.body)).not.toContain("synthetic");
+    }
+  });
+
+  it("passes a guard of the publish flow through with its title and detail", async () => {
+    allowWorkflow();
+    const fake = fakeFetch([
+      {
+        method: "POST",
+        path: `${VERSION}/approve`,
+        status: 409,
+        problem: {
+          type: `${PROBLEM_TYPE_PREFIX}rulebook-duplicate-approver`,
+          title: "Example approver already approved",
+          detail: "Example detail of the round",
+        },
+      },
+      {
+        method: "PUT",
+        path: `${VERSION}/citations`,
+        status: 401,
+        problem: {
+          type: `${PROBLEM_TYPE_PREFIX}rulebook-review-token-invalid`,
+          title: "Review token missing or wrong",
+        },
+      },
+    ]);
+    const port = await rulebookWorkflow(ctx(analyst, fake));
+    const twice = await port.approve(EXAMPLE_VERSION_ID, "");
+    expect(twice).toMatchObject({
+      ok: false,
+      error: {
+        kind: "conflict",
+        status: 409,
+        message: "Example approver already approved",
+        problem: { detail: "Example detail of the round" },
+      },
+    });
+    const wrong = await port.cite(EXAMPLE_VERSION_ID, [{ clauseId: CLAUSE_ID, quote: "Example" }]);
+    if (wrong.ok) throw new Error("expected a refusal");
+    expect(wrong.error.message).toBe(t("rulebookWrites.reviewTokenInvalid"));
+    expectNoToken(wrong.error);
   });
 });

@@ -3,14 +3,21 @@ import { documentDto } from "@/test/rulebook-fixture";
 import {
   approvalToDto,
   approvedFromDto,
+  clauseDetailFromDto,
   clauseFromDto,
   documentFromDto,
   entityDecidedFromDto,
   entityDecisionToDto,
+  entityFromDto,
+  mentionedClauseFromDto,
   rejectionToDto,
   relationCandidateFromDto,
+  relationFromDto,
+  resolutionFromDto,
+  searchHitFromDto,
+  searchToDto,
 } from "./mappers";
-import type { RelationCandidateDto } from "./types";
+import type { ClauseDetailDto, EntityDto, RelationCandidateDto, RelationDto } from "./types";
 
 describe("documentFromDto", () => {
   it("maps every field and puts the clauses in reading order", () => {
@@ -123,6 +130,172 @@ describe("the decision mappers", () => {
     expect(approvedFromDto({ candidate_id: "c", rule_relation_id: "r" })).toEqual({
       candidateId: "c",
       ruleRelationId: "r",
+    });
+  });
+});
+
+const ENTITY: EntityDto = {
+  entity_id: "00000000-0000-4000-8000-0000000000e1",
+  entity_type: "form",
+  canonical_name: "example form",
+  aliases: ["example form 1"],
+};
+
+const CLAUSE_DETAIL: ClauseDetailDto = {
+  clause_id: "00000000-0000-5000-8000-0000000000c1",
+  document_id: "00000000-0000-0000-0000-00000000d0c1",
+  clause_ref: "en.p1",
+  ordinal: 1,
+  page: null,
+  text: "Example clause text",
+  regulator: "Example regulator",
+  doc_type: "circular",
+  external_ref: "Example 1/2000",
+  title: "Example document title",
+  url: "https://example.com/example-document.pdf",
+  language: "en",
+  published_at: null,
+};
+
+describe("the knowledge graph mappers", () => {
+  it("map an entity and each resolution with its entity or candidates", () => {
+    expect(entityFromDto(ENTITY)).toEqual({
+      entityId: "00000000-0000-4000-8000-0000000000e1",
+      entityType: "form",
+      canonicalName: "example form",
+      aliases: ["example form 1"],
+    });
+    expect(
+      resolutionFromDto({
+        status: "resolved",
+        entity_type: "form",
+        name: "Example Form",
+        normalised: "example form",
+        entity: ENTITY,
+        candidates: [],
+      }),
+    ).toMatchObject({ status: "resolved", entity: { canonicalName: "example form" } });
+    expect(
+      resolutionFromDto({
+        status: "ambiguous",
+        entity_type: "form",
+        name: "Example",
+        normalised: "example",
+        entity: null,
+        candidates: [ENTITY, { ...ENTITY, entity_id: "00000000-0000-4000-8000-0000000000e2" }],
+      }),
+    ).toMatchObject({ status: "ambiguous", entity: null, candidates: [{}, {}] });
+  });
+
+  it("map a clause with its document's facts, and a mentioned clause with its spans", () => {
+    expect(clauseDetailFromDto(CLAUSE_DETAIL)).toMatchObject({
+      clauseRef: "en.p1",
+      page: null,
+      docType: "circular",
+      externalRef: "Example 1/2000",
+      publishedAt: null,
+    });
+    expect(
+      mentionedClauseFromDto({
+        ...CLAUSE_DETAIL,
+        published_at: "2000-01-15",
+        mentions: [{ text: "Example", span_start: 0, span_end: 7 }],
+        out_of_force: true,
+      }),
+    ).toMatchObject({
+      publishedAt: "2000-01-15",
+      mentions: [{ text: "Example", start: 0, end: 7 }],
+      outOfForce: true,
+    });
+  });
+
+  it("maps a relation to a version and to an entity", () => {
+    const relation: RelationDto = {
+      relation_id: "00000000-0000-4000-8000-0000000000b1",
+      from_rule_version_id: "00000000-0000-4000-8000-0000000000f1",
+      relation: "extends_deadline",
+      to_kind: "rule_version",
+      to_ref: "00000000-0000-4000-8000-0000000000f2",
+      to_rule_version_id: "00000000-0000-4000-8000-0000000000f2",
+      to_entity_id: null,
+      evidence_clause_id: "00000000-0000-5000-8000-0000000000c1",
+      evidence_clause_ref: "en.p1",
+      evidence_document_id: "00000000-0000-0000-0000-00000000d0c1",
+      candidate_id: null,
+      period_label: "2000-03",
+      new_due_on: "2000-04-21",
+    };
+    expect(relationFromDto(relation)).toEqual({
+      relationId: "00000000-0000-4000-8000-0000000000b1",
+      fromRuleVersionId: "00000000-0000-4000-8000-0000000000f1",
+      relation: "extends_deadline",
+      toKind: "rule_version",
+      toRef: "00000000-0000-4000-8000-0000000000f2",
+      toRuleVersionId: "00000000-0000-4000-8000-0000000000f2",
+      toEntityId: null,
+      evidenceClauseId: "00000000-0000-5000-8000-0000000000c1",
+      evidenceClauseRef: "en.p1",
+      evidenceDocumentId: "00000000-0000-0000-0000-00000000d0c1",
+      candidateId: null,
+      periodLabel: "2000-03",
+      newDueOn: "2000-04-21",
+    });
+    expect(
+      relationFromDto({
+        ...relation,
+        relation: "refers_to",
+        to_kind: "form",
+        to_ref: "example form",
+        to_rule_version_id: null,
+        to_entity_id: "00000000-0000-4000-8000-0000000000e1",
+        period_label: null,
+        new_due_on: null,
+      }),
+    ).toMatchObject({ toKind: "form", toEntityId: "00000000-0000-4000-8000-0000000000e1" });
+  });
+});
+
+describe("the search mappers", () => {
+  it("send the text with the filters given, and no vector", () => {
+    expect(searchToDto({ text: "Example words", docTypes: [], k: 8 })).toEqual({
+      text: "Example words",
+      k: 8,
+      doc_types: [],
+    });
+    expect(
+      searchToDto({
+        text: "Example words",
+        docTypes: ["circular"],
+        k: 20,
+        regulator: "Example regulator",
+        asOf: "2000-06-30",
+      }),
+    ).toEqual({
+      text: "Example words",
+      k: 20,
+      doc_types: ["circular"],
+      regulator: "Example regulator",
+      as_of: "2000-06-30",
+    });
+  });
+
+  it("map a hit with the rank of each leg", () => {
+    expect(
+      searchHitFromDto({
+        ...CLAUSE_DETAIL,
+        score: 0.0328,
+        lexical_rank: 1,
+        vector_rank: null,
+        cited_by: ["00000000-0000-4000-8000-0000000000f1"],
+        out_of_force: false,
+      }),
+    ).toMatchObject({
+      clauseRef: "en.p1",
+      score: 0.0328,
+      lexicalRank: 1,
+      vectorRank: null,
+      citedBy: ["00000000-0000-4000-8000-0000000000f1"],
+      outOfForce: false,
     });
   });
 });
