@@ -9,12 +9,13 @@ are built: what each shows, what it calls and what waits.
 The admin layout runs `requireAdmin()` before anything renders, so a tenant role gets the root
 404 with no admin markup; each page calls its gate again on its first line
 (`requireScreenSession`), and a regulatory role a tool's entry does not list gets the not-found
-page as well ([auth-and-roles.md](auth-and-roles.md)). Each built tool below has a sibling
-`loading.tsx` with a skeleton (the console's sits in the route group `(console)`, so it wraps the
-console alone); under it a not-found answer (an unknown id, a regulatory role the tool does not
-list) is streamed with status 200 and a `noindex` tag rather than a 404 status, as on the business
-pages (D-029 in [decisions.md](decisions.md)). A tenant role still gets the real 404 from the
-layout's gate.
+page as well ([auth-and-roles.md](auth-and-roles.md)). The flags, ontology, notification and
+template pages each have a sibling `loading.tsx` with a skeleton (the console's sits in the route
+group `(console)`, so it wraps the console alone, as the home's sits in `(home)`); under one, a
+not-found answer (an unknown id, a regulatory role the tool does not list) is streamed with status
+200 and a `noindex` tag rather than a 404 status, as on the business pages (D-029 in
+[decisions.md](decisions.md)). A tenant role still gets the real 404 from the layout's gate. The
+document tool has no loading boundary, so its unknown ids stay real 404s (D-037).
 
 | Tool                | Route                                    | Who                     | Calls                                                                 |
 | ------------------- | ---------------------------------------- | ----------------------- | --------------------------------------------------------------------- |
