@@ -57,6 +57,7 @@ jobs:
           filters: |
             python:
               - 'services/**'
+              - 'composition/**' # the one deployable (ADR-013): composition/mvp hosts every service
               - 'packages/domain-kernel/**'
               - 'packages/ontology/**'
               - 'packages/py-common/**'
@@ -151,6 +152,7 @@ jobs:
               - 'docker-compose.yml' # alerts-check runs promtool from the compose Prometheus image
             sast: # code the semgrep packs and the rules in .semgrep read
               - 'services/**'
+              - 'composition/**'
               - 'packages/**'
               - 'apps/**'
               - 'evals/**'
