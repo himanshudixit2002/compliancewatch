@@ -9,11 +9,11 @@ Every route a hosted service serves has one class:
   ``CW_AUTH_MODE=token``, where each route itself requires an analyst, reviewer or admin a
   verified token names; in ``header`` and ``dual`` mode a request without a token could reach
   them, so they stay internal;
-- ``internal``: service-to-service routes (identity's service tokens and channel consents,
-  notification's send, preferences and WhatsApp receipts, the rulebook's pipeline writes, the
-  gateway's model calls, the engine's evaluations, which call the profile and the rulebook) and
-  starting an eval run, which spends compute and model budget, served on the internal listener
-  only.
+- ``internal``: service-to-service routes (identity's service tokens, channel consents and the
+  memberships services check, notification's send, preferences and WhatsApp receipts, the
+  rulebook's pipeline writes, the gateway's model calls, the engine's evaluations, which call the
+  profile and the rulebook) and starting an eval run, which spends compute and model budget,
+  served on the internal listener only.
 
 The internal listener, on the private network, serves every route. The public listener answers
 any route without a class, and any path no service serves, with the same 404
@@ -63,6 +63,8 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "POST /v1/identity/users": PUBLIC,
         "PUT /v1/identity/users/{user_id}/roles": PUBLIC,
         "POST /v1/identity/users/{user_id}/disable": PUBLIC,
+        # Whether a user belongs to a tenant, for a service acting for it (tenant:act).
+        "GET /v1/identity/users/{user_id}/membership": INTERNAL,
     },
     "profile": {
         "GET /v1/profile/ping": PUBLIC,

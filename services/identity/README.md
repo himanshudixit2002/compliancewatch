@@ -19,6 +19,7 @@ Design reference: Project Foundation guide, sections 7, 14 and 16.
 | `POST /v1/identity/users` | Invite a user by email address or phone number with roles the tenant's kind allows: their account at the identity provider, then the user (tenant admins) |
 | `PUT /v1/identity/users/{user_id}/roles` | Change a user's roles; the user's older sessions are revoked (tenant admins) |
 | `POST /v1/identity/users/{user_id}/disable` | Disable a user: no more sign-ins, sessions revoked (tenant admins) |
+| `GET /v1/identity/users/{user_id}/membership` | Whether a user belongs to the tenant, with their roles and status and no contact details, for a service acting for it with tenant:act (the obligation service checks an assignee); a person's token is refused, and 404 names no such user or tenant |
 | `POST /v1/identity/service-tokens` | Exchange a service client's id and secret for a service token with the client's scopes |
 | `GET /v1/identity/.well-known/jwks.json` | The public keys every service verifies access tokens with |
 | `POST /v1/identity/dev/provider-tokens` | Development sign-in: a fake provider token for a phone number or an email address; only with `CW_AUTH_PROVIDER=fake` in local and test, 404 elsewhere |
@@ -153,7 +154,7 @@ steps, in order:
    `CW_IDENTITY_SIGNING_KEYS`. Every environment gets its own key.
 6. For each environment, create the service clients with `identity-admin service-client create`,
    with the scopes `src/identity/identity_dev_clients.toml` gives each caller (today notification,
-   pipeline, qa and the WhatsApp bot). Store each printed secret on its caller as
+   obligation, pipeline, qa and the WhatsApp bot). Store each printed secret on its caller as
    `CW_SERVICE_CLIENT_SECRET` and the client id as `CW_SERVICE_CLIENT_ID` (the bot's are
    `BOT_SERVICE_CLIENT_SECRET` and `BOT_SERVICE_CLIENT_ID`). A secret is printed once.
 7. Create the internal tenant and its first admin with
@@ -176,7 +177,7 @@ The secrets these steps create rotate as `docs/runbooks/secret-rotation.md` desc
 src/identity/
   api/             # routers, request/response schemas, auth dependencies
   domain/          # tenancy.py: Tenant, User, roles by tenant kind; provider.py: IdentityProvider; sessions.py: TokenMinter; service_clients.py; events.py; repository.py: the unit of work; consent.py, channel_consent.py, billing.py
-  application/     # tenancy.py: CreateTenant, CurrentUser, InviteUser, ChangeRoles, DisableUser, ListUsers; sessions.py: ExchangeSession, IssueServiceToken; bootstrap.py: BootstrapInternalTenant, service clients; consents.py, channel_consents.py, billing.py
+  application/     # tenancy.py: CreateTenant, CurrentUser, InviteUser, ChangeRoles, DisableUser, ListUsers, ReadMembership; sessions.py: ExchangeSession, IssueServiceToken; bootstrap.py: BootstrapInternalTenant, service clients; consents.py, channel_consents.py, billing.py
   infrastructure/  # memory.py, models.py, repository.py (Postgres, RLS, outbox); minter.py; providers/{fake,supabase}.py; billing/{memory,razorpay}.py
   admin.py         # identity-admin: signing keys, service clients, the internal tenant
   composition.py   # the identity provider CW_AUTH_PROVIDER names

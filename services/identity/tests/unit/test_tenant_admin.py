@@ -19,6 +19,7 @@ from identity.application.tenancy import (
     DisableUser,
     InviteUser,
     ListUsers,
+    ReadMembership,
 )
 from identity.domain.errors import (
     LastAdminError,
@@ -254,6 +255,9 @@ def test_admins_reach_only_their_own_tenants_users_whatever_the_store_returns() 
         ChangeRoles(store).run(acme.tenant.id, as_acme, other.user.id, [Role.STAFF])
     with pytest.raises(UserNotFoundError):
         DisableUser(store).run(acme.tenant.id, as_acme, other.user.id)
+    with pytest.raises(UserNotFoundError):
+        ReadMembership(store).run(acme.tenant.id, other.user.id)
+    assert ReadMembership(store).run(acme.tenant.id, acme.user.id) == acme.user
     assert store.users[other.user.id] == other.user
 
 
@@ -436,3 +440,93 @@ def test_a_service_principal_is_refused_by_the_use_cases(team: Team) -> None:
     service = Principal.service("qa", [Scope.TENANT_ACT])
     with pytest.raises(SessionRevokedError):
         team.list.run(team.tenant.id, service)
+
+
+# ---------------------------------------------------------------- memberships
+
+
+MEMBERSHIP = USERS + "/{user_id}/membership"
+
+
+def service_bearer(client: TestClient, client_id: str) -> dict[str, str]:
+    issued = client.post(
+        "/v1/identity/service-tokens",
+        json={"client_id": client_id, "client_secret": DEV_CLIENT_SECRET},
+    )
+    assert issued.status_code == 200, issued.text
+    return bearer(issued.json()["access_token"])
+
+
+def test_a_service_acting_for_the_tenant_reads_a_membership(token_mode: TestClient) -> None:
+    created = signed_up(token_mode)
+    owner = bearer(created["session"]["access_token"])
+    tenant = created["tenant"]["id"]
+    staff = token_mode.post(
+        USERS, json={"phone": STAFF_PHONE, "roles": ["staff"]}, headers=owner
+    ).json()
+    acting = {**service_bearer(token_mode, "obligation"), "x-tenant-id": tenant}
+    path = MEMBERSHIP.format(user_id=staff["id"])
+    read = token_mode.get(path, headers=acting)
+    assert read.status_code == 200, read.text
+    assert read.json() == {
+        "user_id": staff["id"],
+        "tenant_id": tenant,
+        "roles": ["staff"],
+        "status": "active",
+    }
+    token_mode.post(f"{USERS}/{staff['id']}/disable", headers=owner)
+    assert token_mode.get(path, headers=acting).json()["status"] == "disabled"
+    unknown = token_mode.get(MEMBERSHIP.format(user_id=uuid4()), headers=acting)
+    assert (unknown.status_code, unknown.json()["type"].rsplit(":", 1)[-1]) == (
+        404,
+        "identity-user-not-found",
+    )
+
+
+def test_a_membership_stays_inside_its_tenant(token_mode: TestClient) -> None:
+    created = signed_up(token_mode)
+    other = token_mode.post(
+        "/v1/identity/tenants",
+        json={
+            "kind": "business",
+            "name": "Other Traders",
+            "provider_token": provider_token(token_mode, STAFF_PHONE),
+        },
+    ).json()
+    acting = service_bearer(token_mode, "obligation")
+    path = MEMBERSHIP.format(user_id=created["user"]["id"])
+    theirs = token_mode.get(path, headers={**acting, "x-tenant-id": other["tenant"]["id"]})
+    assert theirs.status_code == 404
+    assert theirs.json()["type"].endswith(":identity-user-not-found")
+    nowhere = token_mode.get(path, headers={**acting, "x-tenant-id": str(uuid4())})
+    assert nowhere.json()["type"].endswith(":identity-tenant-not-found")
+
+
+def test_a_membership_is_read_by_a_service_with_tenant_act_only(token_mode: TestClient) -> None:
+    created = signed_up(token_mode)
+    tenant = {"x-tenant-id": created["tenant"]["id"]}
+    path = MEMBERSHIP.format(user_id=created["user"]["id"])
+    owner = token_mode.get(path, headers=bearer(created["session"]["access_token"]))
+    assert (owner.status_code, owner.json()["type"].rsplit(":", 1)[-1]) == (403, "auth-forbidden")
+    without_scope = token_mode.get(
+        path, headers={**service_bearer(token_mode, "notification"), **tenant}
+    )
+    assert without_scope.status_code == 403
+    no_tenant = token_mode.get(path, headers=service_bearer(token_mode, "obligation"))
+    assert no_tenant.json()["type"].endswith(":identity-tenant-required")
+    anonymous = token_mode.get(path, headers=tenant)
+    assert anonymous.json()["type"].endswith(":auth-token-required")
+
+
+def test_a_membership_without_a_token_in_header_and_dual_mode() -> None:
+    with TestClient(build_app(identity_settings())) as client:
+        created = signed_up(client)
+        path = MEMBERSHIP.format(user_id=created["user"]["id"])
+        read = client.get(path, headers={"x-tenant-id": created["tenant"]["id"]})
+        assert (read.status_code, read.json()["roles"]) == (200, ["owner"])
+    with TestClient(build_app(identity_settings(auth_mode="dual"))) as client:
+        created = signed_up(client)
+        path = MEMBERSHIP.format(user_id=created["user"]["id"])
+        anonymous = client.get(path, headers={"x-tenant-id": created["tenant"]["id"]})
+        assert anonymous.status_code == 401
+        assert anonymous.json()["type"].endswith(":auth-token-required")

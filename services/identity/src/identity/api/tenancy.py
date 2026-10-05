@@ -1,4 +1,4 @@
-"""Tenants and their users: sign-up, and what tenant admins do.
+"""Tenants and their users: sign-up, what tenant admins do, and the membership a service reads.
 
 ``POST /tenants`` creates a business or a CA firm from the provider token of the person signing
 up, who becomes its first user with the kind's admin role, and answers the tenant, the user and a
@@ -11,6 +11,11 @@ one is a 401, not the anonymous caller other tenant routes still serve, because 
 roles it would store outlive the switch to token mode. In header mode the tenant header names the
 tenant, as on every tenant route, and an anonymous caller grants no admin or regulatory role;
 production runs token mode.
+
+``GET /users/{user_id}/membership`` is for a service acting for the tenant (tenant:act, the tenant
+in ``x-tenant-id``), such as the obligation service checking an assignee: the user's roles and
+status, no contact details. A person's token is refused, and outside header mode so is a request
+without a token.
 """
 
 from typing import Annotated
@@ -18,12 +23,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, status
 
-from domain_kernel.access import TENANT_ADMIN_ROLES, Principal, Role
+from domain_kernel.access import TENANT_ADMIN_ROLES, Principal, Role, Scope
 from domain_kernel.ids import UserId
 from identity.api.deps import Tenant, Wired
 from identity.api.schemas import (
     CreatedTenantOut,
     InviteIn,
+    MembershipOut,
     RolesIn,
     TenantIn,
     UserOut,
@@ -55,6 +61,24 @@ async def tenant_admin(
 TenantAdmin = Depends(tenant_admin)
 """The guard of the user routes (``tenant_admin``)."""
 
+acting_services = require_roles(scopes={Scope.TENANT_ACT})
+
+
+async def acting_service(
+    request: Request, principal: Annotated[Principal, Depends(acting_services)]
+) -> Principal:
+    """A service with tenant:act; a person is refused. Only header mode lets the anonymous
+    caller through, as on the user routes."""
+    if not principal.is_authenticated and authenticator_of(request).mode != "header":
+        raise AuthTokenRequiredError(
+            "Reading a membership needs a service's access token as Authorization: Bearer <token>"
+        )
+    return principal
+
+
+ActingService = Depends(acting_service)
+"""The guard of the membership route (``acting_service``)."""
+
 
 @router.post(
     "/tenants",
@@ -78,6 +102,20 @@ def create_tenant(body: TenantIn, wired: Wired) -> CreatedTenantOut:
 def list_users(tenant: Tenant, principal: CurrentPrincipal, wired: Wired) -> UsersOut:
     users = wired.list_users.run(tenant, principal)
     return UsersOut(items=[UserOut.from_user(user) for user in users])
+
+
+@router.get(
+    "/users/{user_id}/membership",
+    summary="Whether a user belongs to the tenant, with their roles and status (services)",
+    responses=problem_responses(401, 403, 404, 422),
+    dependencies=[ActingService],
+)
+def read_membership(user_id: UUID, tenant: Tenant, wired: Wired) -> MembershipOut:
+    """For a service acting for the tenant it names in x-tenant-id, with the tenant:act scope:
+    the user's roles and whether they may still sign in (status active or disabled), and no
+    contact details. 404 when the tenant has no such user, a user of another tenant included,
+    or when identity has no such tenant."""
+    return MembershipOut.from_user(wired.read_membership.run(tenant, UserId(user_id)))
 
 
 @router.post(
