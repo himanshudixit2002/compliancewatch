@@ -320,19 +320,19 @@ async def test_the_decision_consumer_commits_with_its_inbox_row(app_engine: Engi
 
     applies = record("applies-after-rule-published")
     assert await consumer.process(applies) is Outcome.PROCESSED
-    assert counts() == (2, 2, 1)
+    assert counts() == (3, 3, 1), "September, still due on 1 October, October and November"
     assert tenant in PostgresTenantDirectory(app_engine).tenants()
     assert await consumer.process(applies) is Outcome.SKIPPED
-    assert counts() == (2, 2, 1)
+    assert counts() == (3, 3, 1)
 
     flipped = record("applies-after-rule-published", offset=1, result="not_applicable")
     assert await consumer.process(flipped) is Outcome.PROCESSED
-    assert counts() == (2, 4, 2), "two obligation.closed rows with the inbox row"
+    assert counts() == (3, 6, 2), "three obligation.closed rows with the inbox row"
 
     rules.down = True
     other_rule = record("applies-after-rule-published", offset=2, decision_id=str(uuid4()))
     assert await consumer.process(other_rule) is Outcome.DEAD
-    assert counts()[:2] == (2, 4), "a failed decision leaves nothing behind"
+    assert counts()[:2] == (3, 6), "a failed decision leaves nothing behind"
 
 
 def test_a_unit_on_a_connection_begins_a_transaction_its_owner_ends(app_engine: Engine) -> None:

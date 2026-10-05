@@ -158,7 +158,7 @@ async def test_an_applying_decision_materialises_once(inbox: Engine) -> None:
     assert await setup.consumer.process(applies) is Outcome.PROCESSED
     assert await setup.consumer.process(applies) is Outcome.SKIPPED, "a redelivery"
     created = setup.created()
-    assert len(created) == 2
+    assert len(created) == 3, "September, still due on 1 October, then October and November"
     assert {e.tenant_id for e in created} == {TENANT}
     assert {str(e.decision_id) for e in created} == {"7b8c9d0e-1f2a-4b3c-8d4e-5f6a7b8c9d0e"}
     assert setup.rules.reads == [RULE_VERSION]
@@ -300,7 +300,8 @@ def test_rule_events_are_read_from_their_contracts() -> None:
 
 
 def seed_two_tenants(setup: Setup, other: TenantId) -> None:
-    """Both periods of the rule for one business in ``TENANT`` and one in ``other``."""
+    """The window of 1 October (September, still due, October and November) for one business in
+    ``TENANT`` and one in ``other``."""
     for tenant in (TENANT, other):
         MaterialiseObligations(setup.store, clock=lambda: NOW).run(
             MaterialiseRequest(tenant, BusinessId.new(), DecisionId.new(), setup.rule, NOW.date())
@@ -353,6 +354,8 @@ async def test_a_supersession_closes_the_periods_the_newer_version_takes_over(
         for o in setup.store.obligations.values()
     )
     assert by_period == [
+        ("2026-09", False, None),
+        ("2026-09", True, None),
         ("2026-10", False, None),
         ("2026-10", True, None),
         ("2026-11", False, ClosureReason.RULE_SUPERSEDED),

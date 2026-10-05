@@ -59,10 +59,13 @@ def test_applies_materialises_once_as_of_the_day_in_india() -> None:
 
     first = apply.run(applies, store)
     assert first.outcome is DecisionOutcome.MATERIALISED
-    assert len(first.created) == 2
+    assert len(first.created) == 3
     assert (first.refusal, first.cached) == (None, True), "the miss filled the cache"
     labels = sorted(o.period_label or "" for o in store.of_tenant(tenant))
-    assert labels == ["2026-10", "2026-11"], "the period of 1 October and the next one"
+    assert labels == ["2026-09", "2026-10", "2026-11"], (
+        "September, due 20 October and so still ahead on 1 October, then the period of 1 October "
+        "and the next one"
+    )
     assert {o.decision_id for o in store.of_tenant(tenant)} == {applies.decision_id}
     assert store.rule_versions[the_rule.rule_version_id] == ref_of(the_rule)
     assert store.decisions[business, the_rule.rule_version_id] == AppliedDecision(
@@ -72,7 +75,7 @@ def test_applies_materialises_once_as_of_the_day_in_india() -> None:
     again = apply.run(applies, store)
     assert again.created == ()
     assert again.cached is False, "a hit"
-    assert len([e for e in store.events if isinstance(e, ObligationCreated)]) == 2
+    assert len([e for e in store.events if isinstance(e, ObligationCreated)]) == 3
 
 
 def test_not_applicable_closes_only_that_business_and_rule_version() -> None:
@@ -88,7 +91,7 @@ def test_not_applicable_closes_only_that_business_and_rule_version() -> None:
     assert apply.plan(flipped) == DecisionPlan(flipped), "nothing to read for a closure"
     closed = apply.run(flipped, store)
     assert closed.outcome is DecisionOutcome.CLOSED
-    assert len(closed.closed) == 2
+    assert len(closed.closed) == 3
     for obligation in store.of_tenant(tenant):
         hit = obligation.business_id == business and obligation.rule_version_id == (
             the_rule.rule_version_id
@@ -98,8 +101,8 @@ def test_not_applicable_closes_only_that_business_and_rule_version() -> None:
             assert obligation.status is ObligationStatus.CLOSED_NOT_APPLICABLE
             assert obligation.closed_reason is ClosureReason.PROFILE_CHANGED
     closures = [e for e in store.events if isinstance(e, ObligationClosed)]
-    assert len(closures) == 2
-    assert len(store.changes) == 6 + 2, "every closure writes its change row"
+    assert len(closures) == 3
+    assert len(store.changes) == 9 + 3, "every closure writes its change row"
     assert store.decisions[business, the_rule.rule_version_id].applies is False
 
     assert apply.run(flipped, store).closed == (), "a redelivery closes nothing more"
@@ -190,7 +193,7 @@ def test_a_decision_before_the_withdrawal_is_closed_by_it() -> None:
     applied = ApplyDecision(reader, clock=lambda: NOW).run(
         decision(the_rule, tenant=tenant, business=business), store
     )
-    assert len(applied.created) == 2
+    assert len(applied.created) == 3
     reader.end(the_rule.rule_version_id, RuleVersionStatus.WITHDRAWN)
     closed = WithdrawRule(store, clock=lambda: NOW).run(tenant, the_rule.rule_version_id)
     assert set(closed.changed) == set(applied.created)
@@ -245,7 +248,8 @@ def test_a_version_without_a_verified_citation_makes_nothing() -> None:
 
 
 def test_a_superseded_version_makes_only_the_periods_before_its_replacement() -> None:
-    """Superseded from 1 November: October is still its own, November is the newer version's."""
+    """Superseded from 1 November: September (still due on 1 October) and October are still its
+    own, November is the newer version's."""
     store, tenant, business, the_rule = MemoryStore(), TenantId.new(), BusinessId.new(), rule()
     reader = FakeRuleVersionReader([the_rule])
     plan = ApplyDecision(reader, clock=lambda: NOW).plan(
@@ -260,7 +264,7 @@ def test_a_superseded_version_makes_only_the_periods_before_its_replacement() ->
     applied = ApplyDecision(reader, clock=lambda: NOW).apply(plan, store)
     assert applied.outcome is DecisionOutcome.MATERIALISED
     assert (applied.refusal, applied.refused_periods) == (Refusal.RULE_SUPERSEDED, ("2026-11",))
-    assert [o.period_label for o in store.of_tenant(tenant)] == ["2026-10"]
+    assert [o.period_label for o in store.of_tenant(tenant)] == ["2026-09", "2026-10"]
 
 
 def test_a_one_off_due_after_the_replacement_is_refused() -> None:
