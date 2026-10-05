@@ -45,6 +45,8 @@ TABLES = {
     "processed_event",
     "business_directory",
     "review_item",
+    "fanout_run",
+    "fanout_hold",
 }
 APP_ROLE = "applicability_app"
 APP_PASSWORD = "app-role-for-tests"

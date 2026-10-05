@@ -6,7 +6,8 @@ per-year attributes were read for. Decisions are append-only: recomputing writes
 the latest for a (business, rule version) pair is the one in force.
 
 A decision something other than a person's request caused carries a ``trigger_ref``: the event
-or the review item behind it (``profile.updated:<event id>``, ``review:<item id>``). Its id is
+or the review item behind it (``profile.updated:<event id>``, ``rule.published:<event id>`` for a
+fan-out, ``review:<item id>``). Its id is
 derived from the reference, the business and the rule version (``decision_id_for``), and the
 store keeps one decision per (trigger_ref, business, rule version), so handling the same event
 again stores nothing new.
@@ -52,11 +53,15 @@ def decision_id_for(
 
 @dataclass(frozen=True, slots=True)
 class RuleVersionSpec:
-    """The part of a rule version the engine evaluates: its status and its specification."""
+    """The part of a rule version the engine evaluates: its status and its specification, and
+    when the reader knows them its rule key and the level of the nodes it is evaluated against
+    (a fan-out pages the directory by that level)."""
 
     rule_version_id: RuleVersionId
     status: RuleVersionStatus
     specification: Specification
+    rule_key: str | None = None
+    level: AttributeLevel | None = None
 
     def __post_init__(self) -> None:
         require_instance(self.rule_version_id, RuleVersionId, "rule_version_id")
@@ -65,6 +70,10 @@ class RuleVersionSpec:
             raise InvariantViolationError(
                 f"specification must be a Specification, got {type(self.specification).__name__}"
             )
+        if self.rule_key is not None:
+            require_text(self.rule_key, "rule_key")
+        if self.level is not None:
+            require_instance(self.level, AttributeLevel, "level")
 
 
 @dataclass(frozen=True, slots=True)

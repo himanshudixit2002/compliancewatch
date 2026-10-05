@@ -4,14 +4,15 @@
 (`composition/mvp`, its app and worker processes) with Kafka and Temporal on, on the dev stack,
 and the web app. `make product-seed` fills it with two synthetic tenants and a synthetic
 publication of the seed rules the golden world cites, and `make product-check` proves that a
-published rule becomes decisions, obligations with citations and a change card, and that a
-business made or changed in the profile is decided again by itself.
+published rule becomes decisions, obligations with citations and a change card, that a
+business made or changed in the profile is decided again by itself, and that a rule published
+behind the fan-out hold reaches every business once the hold is released.
 
 ```bash
 make product                 # make dev, make migrate, make product-role, the seed calendar, then
                              # cw-mvp serve, cw-mvp worker and next dev; waits until all answer
 make product-seed            # synthetic tenants, the demo publication, the first decisions
-make product-check           # health, honesty, loop, isolation, recompute: exit 0 means accepted
+make product-check           # health, honesty, loop, isolation, recompute, fanout: exit 0 means accepted
 make product-logs PROC=worker   # app, worker or web; FOLLOW=0 prints the end and returns
 make product-down            # stops only what make product started
 ```
@@ -25,7 +26,7 @@ in the dev database until `make dev-reset`.
 | Process | Where | What |
 | --- | --- | --- |
 | app | public listener `127.0.0.1:8000`, internal listener `127.0.0.1:8080` | `cw-mvp serve`: every service's API in one process ([composition/mvp/README.md](../../composition/mvp/README.md)). The internal listener serves every route; the web app and `cw-product` call it |
-| worker | health `127.0.0.1:8081` (`/health`, `/loops`) | `cw-mvp worker` with `CW_WORKER_KAFKA_ENABLED` and `CW_WORKER_TEMPORAL_ENABLED` on: the outbox relay of every schema, the engine's consumer of profile.updated (group `applicability-engine.profiles`, recompute on), obligation's consumer of applicability.decided (group `obligation.decisions`), notification's consumer of the obligation events (group `notification.obligations`), the notification dispatcher and retention sweep, obligation's reminder sweep, the rulebook's transition sweep and the pipeline's Temporal task queue |
+| worker | health `127.0.0.1:8081` (`/health`, `/loops`) | `cw-mvp worker` with `CW_WORKER_KAFKA_ENABLED` and `CW_WORKER_TEMPORAL_ENABLED` on: the outbox relay of every schema, the engine's consumers of profile.updated (group `applicability-engine.profiles`, recompute on) and of rule.published and rule.withdrawn (group `applicability-engine.rules`, fan-out on), obligation's consumer of applicability.decided (group `obligation.decisions`), notification's consumer of the obligation events (group `notification.obligations`), the notification dispatcher and retention sweep, obligation's reminder sweep, the rulebook's transition sweep, and the Temporal task queues of the engine's fan-out (`applicability`) and the pipeline |
 | web | `WEB_PORT` (3000) | `next dev` with every `CW_WEB_*_URL` at the internal listener, building into `apps/web/.next/product` |
 
 Before starting them, `make product` runs `make dev` (the compose stack; nothing happens when it
@@ -44,7 +45,8 @@ settings class or the flag registry: header auth, both listeners on `127.0.0.1`,
 health on `PRODUCT_WORKER_PORT` (8081, since 8001 is identity's under `make run` and
 `make web-stack`), the worker's two switches and the reminder sweep on, the engine's recompute on
 profile.updated on (`CW_APPLICABILITY_RECOMPUTE_ENABLED`) with the rulebook's in-force listing
-cached for five seconds (`CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS`), rule publishing on with
+cached for five seconds (`CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS`), the engine's fan-out of
+rule.published on (`CW_APPLICABILITY_FANOUT_ENABLED`), rule publishing on with
 the placeholder tokens `local-write-token` and `local-review-token` (not secrets; values in
 `.env` win), the profile's static GSTIN lookup, the notification sink in place of the real
 channels with a five-second batching window, and message links to the product's web app.
@@ -53,10 +55,10 @@ channels with a five-second batching window, and message links to the product's 
 
 1. `cw-product publish` takes a seed rule from draft to published as synthetic analysts (below);
    `rule.published` goes to the rulebook's outbox.
-2. `cw-product evaluate` asks the engine to decide every published rule for every seeded
-   registration; it stays as an operator tool. The engine also decides by itself whenever a
-   profile changes (below); a rule published later reaches the businesses that exist only
-   through this tool until the rule.published fan-out lands. The decision and its
+2. The engine's rules consumer starts the version's fan-out, which decides it for every business
+   its directory lists (below); `cw-product evaluate` also asks the engine to decide every
+   published rule for every seeded registration, and stays as an operator tool. The engine also
+   decides by itself whenever a profile changes (below). Each decision and its
    applicability.decided event are stored together.
 3. The worker's relay publishes the event; obligation's consumer materialises two periods of an
    applying rule (obligation.created each) and closes nothing for one that does not apply.
@@ -106,6 +108,33 @@ docker compose exec -T redpanda rpk group seek applicability-engine.profiles --t
   --topics profile.updated --allow-new-topics
 ```
 
+## From a publication to every business: the fan-out
+
+`rule.published` reaches the engine's consumer (group `applicability-engine.rules`). It drops the
+rulebook client's in-force cache, reads the version, starts the workflow
+`applicability-fan-out-<rule version id>` on the Temporal task queue `applicability` and records
+the run (`GET /v1/applicability-engine/fan-outs/{rule_version_id}` on the internal listener). The
+workflow decides the version for every node of its level in the business directory, 1,000 at a
+time, one tenant group at a time, with the trigger `rule_published`; obligation's consumer then
+makes the obligations of each decision that applies. A version fans out once.
+
+At every batch boundary the run obeys the global hold (`PUT /v1/applicability-engine/fan-out-hold`
+with `held` and a reason) and its own pause, resume and cancel routes; each control is audited in
+`audit.event`, of no tenant. A superseding version that flips more than 2% of at least 200
+compared businesses pauses itself. [docs/runbooks/fan-out-control.md](../runbooks/fan-out-control.md)
+has the controls and what to do when a run is held, paused or failed.
+
+The directory lists the nodes the engine heard of through profile.updated since its consumer
+group started, so a fan-out reaches those. A new consumer group reads its topics from the earliest
+offset: the first run of `applicability-engine.rules` fans out every version the broker still
+holds a rule.published for (on the dev stack, the GSTR-3B rules published before). To start it at
+the end instead, before the first `make product` with it:
+
+```bash
+docker compose exec -T redpanda rpk group seek applicability-engine.rules --to end \
+  --topics rule.published,rule.withdrawn --allow-new-topics
+```
+
 ### The sink
 
 `CW_NOTIFICATION_CHANNELS=sink` replaces both channels with
@@ -126,7 +155,7 @@ finds it again:
 | Tenant | Id | Businesses | Applies (of the four cited seed rules) |
 | --- | --- | --- | --- |
 | Demo Traders (synthetic), a business | `00000000-0000-4000-8000-0000000d0001` | Demo Traders Bengaluru (synthetic), the demo GSTIN 29ABCDE1234F1Z5, a monthly filer | gstr3b_monthly, gstr9_annual |
-| Demo CA Associates (synthetic), a CA firm | `00000000-0000-4000-8000-0000000d0002` | Demo Client One Bengaluru (synthetic), the demo GSTIN, quarterly; Demo Client Two Delhi (synthetic), the made-up 07ZZZZZ9999Z1Z5, quarterly | group A of the quarterly GSTR-3B; group B |
+| Demo CA Associates (synthetic), a CA firm | `00000000-0000-4000-8000-0000000d0002` | Demo Client One Bengaluru (synthetic), the demo GSTIN, quarterly, a turnover of 2 to 5 crore; Demo Client Two Delhi (synthetic), the made-up 07ZZZZZ9999Z1Z5, quarterly | group A of the quarterly GSTR-3B and gstr9_annual; group B |
 
 For each tenant the seed records the consents of its owner (or the firm's admin) through the API,
 registers the GSTINs with the pre-fill and the answers, and registers a recipient with a phone
@@ -139,7 +168,8 @@ at any hour. The firm's admin hears by the daily digest (09:00 IST), as every CA
 - Only the four seed rules `evals/golden/qa/kag/world.yaml` cites from recorded quotes can be
   published: gstr3b_monthly, gstr3b_quarterly_group_a, gstr3b_quarterly_group_b (the default)
   and gstr9_annual (`make product-seed ARGS="--rule gstr9_annual"`, or
-  `cw-product publish --rule gstr9_annual`). The other nine stay drafts.
+  `cw-product publish --rule gstr9_annual`, which the check's fanout step runs once behind the
+  hold). The other nine stay drafts.
 - The recorded CBIC notifications the world uses are registered through the rulebook's pipeline
   write route, and the rulebook verifies every quote against the stored clause.
 - Each version is submitted by "Demo analyst (synthetic)", tagged high impact, approved by "Demo
@@ -178,11 +208,18 @@ the worker does a few seconds after the API answers, and a failed step does not 
 
 | Step | Proves |
 | --- | --- |
-| health | `/ready` on the internal listener lists every service's checks as ok, the public listener answers, and the worker's `/loops` runs the three consumer groups, the outbox relays, the dispatcher, the reminder sweep and the `pipeline` task queue |
+| health | `/ready` on the internal listener lists every service's checks as ok, the public listener answers, and the worker's `/loops` runs the four consumer groups, the outbox relays, the dispatcher, the reminder sweep and the `applicability` and `pipeline` task queues |
 | honesty | every published seed rule is one the world cites and reads needs_review, every other seed rule is a draft, nothing is marked reviewed, and the golden world and its cases are drafts |
 | loop | evaluates the business tenant, then waits for the decisions its answers call for, an obligation of each rule that applies whose version cites a verified clause, and a change card about the business sent through the sink (with its line in the sink file) |
 | isolation | the CA firm reads none of the business tenant's decisions, obligations, notifications or business, and the other way round |
 | recompute | makes a new synthetic business in the business tenant with `POST /v1/businesses` (a monthly GSTR-3B filer in Karnataka with a made-up GSTIN, named with the time it was made), then waits for its gstr3b_monthly decision `applies` with the trigger profile_updated and its obligations; changes its registration to the quarterly scheme with `PATCH /v1/businesses/{id}` and waits for the decision `not_applicable`, the monthly obligations closed with `profile_changed` and the quarterly group A obligations. It never calls `cw-product evaluate`; every decision of the business comes from profile.updated, and no review item opens for it. Each run makes one more business, since a closed obligation stays closed and only a new business shows the whole change again |
+
+| fanout | while gstr9_annual is not published: sets the fan-out hold, publishes gstr9_annual as `cw-product publish --rule gstr9_annual` does, waits for its run to stand `held` with nothing decided, releases the hold and waits for the run to complete. Once it is published (a second check on the same database): finds that run completed, resuming it first if an earlier check left it paused, and sets and releases the hold again. Then the run's counters must match the directory entries of the level, each synthetic registration the directory lists must have its gstr9_annual decision from the fan-out with the result its answers call for, the registrations it applies to must have GSTR-9 obligations in both synthetic tenants, and `audit.event` must hold the hold, the release and any resume the step made. A hold an interrupted check left is lifted first; anyone else's fails the step |
+
+The fanout step reads the business directory and the audit rows of no tenant, which no route
+serves and no policy lets `cw_app` read. `make product-check` gives it `CW_PRODUCT_RECORDS_URL`,
+the database owner's URL, and the tool opens it read only (`default_transaction_read_only`), so the
+session can run nothing but queries.
 
 `ARGS="--json"` prints the result as JSON, `ARGS="--step loop"` runs one step. A later package
 appends its steps to `STEPS` in `tools/demo/src/cw_demo/product/check.py`.
@@ -213,6 +250,12 @@ keys). The web stack connects as the superuser and so reads across tenants; the 
   `applicability-engine/consumer:applicability-engine.profiles`; `make product-logs PROC=worker`
   shows `applicability.profile_recomputed` for each event with what it decided and published.
   `evaluated=False` there means `CW_APPLICABILITY_RECOMPUTE_ENABLED` is not on for the worker.
+- **The fanout step waits for the run.** The worker's `/loops` must run
+  `applicability-engine/consumer:applicability-engine.rules` and the `applicability` task queue,
+  and `make product-logs PROC=worker` shows `applicability.rule_event` for the publication. A run
+  that reads `disabled` means `CW_APPLICABILITY_FANOUT_ENABLED` was off for the worker when the
+  version was published; the Temporal UI (http://localhost:8233) shows the workflow
+  `applicability-fan-out-<rule version id>`.
 - **The loop waits for the change card.** `tail var/product/sink.jsonl` shows what the sink got;
   `GET /v1/notification/notifications?business_id=<registration id>` for the tenant shows each
   notification's state and error.

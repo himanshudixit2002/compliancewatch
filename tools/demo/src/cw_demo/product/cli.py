@@ -7,7 +7,8 @@
   ``--rule gstr9_annual``, the fourth rule the golden world cites;
 - ``cw-product evaluate [--tenant KEY]... [--fresh]``: a decision of every published rule for
   every seeded registration;
-- ``cw-product check [--step NAME]... [--timeout SECONDS]``: the check's steps in order.
+- ``cw-product check [--step NAME]... [--timeout SECONDS]``: the check's steps in order; the
+  fanout step also reads the database at ``CW_PRODUCT_RECORDS_URL``, read only.
 
 Each takes ``--json``. The tool reads ``CW_*`` as the services do and refuses to run unless
 ``CW_ENV`` is local or test and ``CW_AUTH_MODE`` header or dual (exit 2). A step that fails
@@ -35,6 +36,7 @@ from cw_demo.product.client import (
 )
 from cw_demo.product.evaluate import Decision, evaluate
 from cw_demo.product.publish import DEFAULT_RULES, Publication, publish
+from cw_demo.product.records import PostgresRecords
 from cw_demo.product.seed import SeedReport, seed
 from cw_demo.product.tenants import TENANTS, tenant_named
 
@@ -136,7 +138,14 @@ def run_evaluate(product: Product, args: argparse.Namespace) -> int:
 
 def run_check(product: Product, args: argparse.Namespace) -> int:
     steps = checks.select(args.step)
-    results = checks.run_checks(checks.CheckContext(product, timeout=args.timeout), steps)
+    url = product.settings.product_records_url
+    records = PostgresRecords(url) if url else None
+    try:
+        context = checks.CheckContext(product, timeout=args.timeout, records=records)
+        results = checks.run_checks(context, steps)
+    finally:
+        if records is not None:
+            records.close()
     if args.json:
         sys.stdout.write(json.dumps(checks.as_json(results), indent=2) + "\n")
     else:

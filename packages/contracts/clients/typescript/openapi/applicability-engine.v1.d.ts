@@ -78,6 +78,137 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/applicability-engine/fan-out-hold": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The global fan-out hold */
+    get: operations["read_fan_out_hold_v1_applicability_engine_fan_out_hold_get"];
+    /**
+     * Set or release the global fan-out hold
+     * @description held true stops every fan-out at its next batch boundary (held) until the hold is
+     *     released; a reason of at least ten characters is required, and setting it again replaces
+     *     the reason. held false releases it, and every run it held carries on by itself; a paused run
+     *     stays paused. Audited as applicability.fanout.hold or applicability.fanout.release, of no
+     *     tenant; releasing a hold that is not set changes nothing.
+     */
+    put: operations["put_fan_out_hold_v1_applicability_engine_fan_out_hold_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/applicability-engine/fan-outs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Every rule version's fan-out, newest first, a page at a time
+     * @description One fan-out per published rule version: the engine decides the version for every
+     *     business of its level in the business directory, in batches of 1,000, behind the global
+     *     hold. Newest first (started_at, then rule version id).
+     */
+    get: operations["list_fan_outs_v1_applicability_engine_fan_outs_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/applicability-engine/fan-outs/{rule_version_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** One rule version's fan-out: its status, counters and last change */
+    get: operations["read_fan_out_v1_applicability_engine_fan_outs__rule_version_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/applicability-engine/fan-outs/{rule_version_id}/cancel": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancel a fan-out that has not finished; its decisions stay
+     * @description The run stops at its next batch boundary for good. To take back what it decided, withdraw
+     *     the rule version in the rulebook. Audited as applicability.fanout.cancel with the reason. 404
+     *     when the version has no fan-out, 409 when it has finished.
+     */
+    post: operations["cancel_fan_out_v1_applicability_engine_fan_outs__rule_version_id__cancel_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/applicability-engine/fan-outs/{rule_version_id}/pause": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Pause a running or held fan-out at its next batch boundary
+     * @description The run stops at its next batch boundary and waits until an admin resumes it; the global
+     *     hold's release does not. Audited as applicability.fanout.pause with the reason. 404 when the
+     *     version has no fan-out, 409 when it is not running or held.
+     */
+    post: operations["pause_fan_out_v1_applicability_engine_fan_outs__rule_version_id__pause_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/applicability-engine/fan-outs/{rule_version_id}/resume": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Resume a paused fan-out
+     * @description The run decides its next batch at once; while the global hold is set it is held again
+     *     instead. Resuming a run that paused itself on flips turns the flip check off for the rest of
+     *     the run. Audited as applicability.fanout.resume. 404 when the version has no fan-out, 409
+     *     when it is not paused.
+     */
+    post: operations["resume_fan_out_v1_applicability_engine_fan_outs__rule_version_id__resume_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/applicability-engine/ping": {
     parameters: {
       query?: never;
@@ -154,6 +285,13 @@ export type components = {
      */
     Applicability: "applies" | "not_applicable" | "unsure";
     /**
+     * AttributeLevel
+     * @description Which node of the business hierarchy holds the value: the legal entity (PAN), one
+     *     registration (GSTIN) or one place of business. Values are inherited downward.
+     * @enum {string}
+     */
+    AttributeLevel: "entity" | "registration" | "location";
+    /**
      * DecisionOut
      * @description One decision: the result of one rule version for one version of a business's profile.
      *     ``needs_review`` is true when the result is unsure or the confidence is below the review
@@ -207,6 +345,117 @@ export type components = {
        */
       rule_version_id: string;
     };
+    /**
+     * FanOutHoldIn
+     * @description ``held`` true sets the hold (a reason of at least ten characters is required), or
+     *     replaces the reason of the one that is set; false releases it, with a reason if you say.
+     */
+    FanOutHoldIn: {
+      /** Held */
+      held: boolean;
+      /**
+       * Reason
+       * @description Why, if you say; kept in the audit log
+       * @default
+       */
+      reason?: string;
+    };
+    /**
+     * FanOutHoldOut
+     * @description The global hold: while ``held`` no fan-out starts its next batch. ``set_by`` is a user
+     *     id, ``system:applicability-engine`` or ``service:<client>``.
+     */
+    FanOutHoldOut: {
+      /** Held */
+      held: boolean;
+      /** Reason */
+      reason: string | null;
+      /** Set At */
+      set_at: string | null;
+      /** Set By */
+      set_by: string | null;
+    };
+    /** FanOutReasonIn */
+    FanOutReasonIn: {
+      /**
+       * Reason
+       * @description Why, in at least 10 characters; kept in the audit log
+       */
+      reason: string;
+    };
+    /** FanOutResumeIn */
+    FanOutResumeIn: {
+      /**
+       * Reason
+       * @description Why, if you say; kept in the audit log
+       * @default
+       */
+      reason?: string;
+    };
+    /**
+     * FanOutRunOut
+     * @description One rule version's fan-out over the business directory. ``status`` is running, held (the
+     *     global hold stopped it at a batch boundary), paused (a person, or the run itself on flips),
+     *     completed, cancelled, disabled (published while the flag was off) or failed (``last_error``
+     *     says why). ``businesses_total`` is the directory entries of the level when the run began and
+     *     ``evaluated`` the businesses decided so far; ``flip_rate`` is ``flips`` over
+     *     ``flips_compared``, the businesses compared with the version it supersedes, or null before
+     *     any comparison. ``status_reason`` and ``status_by`` say why and by whom the status last
+     *     changed: a user id, ``system:applicability-engine`` or ``service:<client>``.
+     */
+    FanOutRunOut: {
+      /** Applies */
+      applies: number;
+      /** Businesses Total */
+      businesses_total: number;
+      /** Evaluated */
+      evaluated: number;
+      /** Finished At */
+      finished_at: string | null;
+      /** Flip Rate */
+      flip_rate: number | null;
+      /** Flips */
+      flips: number;
+      /** Flips Compared */
+      flips_compared: number;
+      /** Last Error */
+      last_error: string;
+      level: components["schemas"]["AttributeLevel"];
+      /** Rule Key */
+      rule_key: string;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+      /**
+       * Started At
+       * Format: date-time
+       */
+      started_at: string;
+      status: components["schemas"]["FanOutStatus"];
+      /** Status By */
+      status_by: string;
+      /** Status Reason */
+      status_reason: string;
+      /** Supersedes */
+      supersedes: string[];
+      /**
+       * Trigger Event Id
+       * Format: uuid
+       */
+      trigger_event_id: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * FanOutStatus
+     * @enum {string}
+     */
+    FanOutStatus: "running" | "paused" | "held" | "completed" | "cancelled" | "disabled" | "failed";
     /** HealthResponse */
     HealthResponse: {
       /** Service */
@@ -220,6 +469,16 @@ export type components = {
     Page_DecisionOut_: {
       /** Items */
       items: components["schemas"]["DecisionOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
+    /** Page[FanOutRunOut] */
+    Page_FanOutRunOut_: {
+      /** Items */
+      items: components["schemas"]["FanOutRunOut"][];
       /**
        * Next Cursor
        * @description Send as cursor to read the next page; null on the last page
@@ -662,6 +921,454 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  read_fan_out_hold_v1_applicability_engine_fan_out_hold_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FanOutHoldOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  put_fan_out_hold_v1_applicability_engine_fan_out_hold_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FanOutHoldIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FanOutHoldOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  list_fan_outs_v1_applicability_engine_fan_outs_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_FanOutRunOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  read_fan_out_v1_applicability_engine_fan_outs__rule_version_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        rule_version_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FanOutRunOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  cancel_fan_out_v1_applicability_engine_fan_outs__rule_version_id__cancel_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        rule_version_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FanOutReasonIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FanOutRunOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  pause_fan_out_v1_applicability_engine_fan_outs__rule_version_id__pause_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        rule_version_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FanOutReasonIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FanOutRunOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  resume_fan_out_v1_applicability_engine_fan_outs__rule_version_id__resume_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        rule_version_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["FanOutResumeIn"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FanOutRunOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

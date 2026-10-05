@@ -12,6 +12,7 @@ from sqlalchemy import (
     Index,
     Integer,
     PrimaryKeyConstraint,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -22,6 +23,11 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from applicability_engine.domain.fanout import (
+    MAX_ACTOR_CHARS,
+    MAX_RULE_KEY_CHARS,
+    FanOutStatus,
+)
 from applicability_engine.domain.model import TRIGGER_REF_MAX_CHARS, Trigger
 from applicability_engine.domain.review import Resolution, ReviewReason, ReviewStatus
 from domain_kernel.ontology import AttributeLevel
@@ -33,6 +39,12 @@ LEVELS: Final[tuple[str, ...]] = tuple(level.value for level in AttributeLevel)
 REASONS: Final[tuple[str, ...]] = tuple(reason.value for reason in ReviewReason)
 STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in ReviewStatus)
 RESOLUTIONS: Final[tuple[str, ...]] = tuple(resolution.value for resolution in Resolution)
+FAN_OUT_STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in FanOutStatus)
+ACTIVE_FAN_OUT: Final[tuple[str, ...]] = tuple(
+    status.value for status in FanOutStatus if status.is_active
+)
+GLOBAL_HOLD: Final = 1
+"""The id of the one hold row."""
 TENANT_SETTING: Final[str] = "app.tenant_id"
 """The session setting the row-level security policy reads; set per transaction."""
 
@@ -220,3 +232,98 @@ class ReviewItemRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class FanOutRunRow(Base):
+    """One rule version's fan-out over the business directory; rule-level, of no tenant
+    (migration 0003, exempt in infra/scripts/migration_lint.toml)."""
+
+    __tablename__ = "fanout_run"
+    __table_args__ = (
+        PrimaryKeyConstraint("rule_version_id", name="pk_fanout_run"),
+        CheckConstraint(sql_in_list("status", FAN_OUT_STATUSES), name="ck_fanout_run_status"),
+        CheckConstraint(sql_in_list("level", LEVELS), name="ck_fanout_run_level"),
+        CheckConstraint(
+            "businesses_total >= 0 AND evaluated >= 0 AND applies >= 0 AND flips_compared >= 0 "
+            "AND flips >= 0 AND applies <= evaluated AND flips <= flips_compared",
+            name="ck_fanout_run_counters",
+        ),
+        CheckConstraint(
+            f"(finished_at IS NULL) = ({sql_in_list('status', ACTIVE_FAN_OUT)})",
+            name="ck_fanout_run_finished",
+        ),
+        Index("ix_fanout_run_started", "started_at", "rule_version_id"),
+        Index("ix_fanout_run_status", "status"),
+        {
+            "comment": (
+                "One fan-out per published rule version: its status, counters, and the reason "
+                "and author of its last change of status. Rule-level, of no tenant: no row-level "
+                "security."
+            )
+        },
+    )
+
+    rule_version_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    rule_key: Mapped[str] = mapped_column(String(MAX_RULE_KEY_CHARS), nullable=False)
+    level: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    trigger_event_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, nullable=False, comment="The rule.published event that started the fan-out"
+    )
+    supersedes: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+        comment="Rule version ids it supersedes; flips count against their decisions",
+    )
+    businesses_total: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        comment="Directory entries of the level when the run began",
+    )
+    evaluated: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    applies: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    flips_compared: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    flips: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status_reason: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="", comment="Why the status last changed"
+    )
+    status_by: Mapped[str] = mapped_column(
+        String(MAX_ACTOR_CHARS),
+        nullable=False,
+        server_default="",
+        comment="Who changed it: a user id, system:<service> or service:<client>; never a name",
+    )
+    last_error: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="", comment="Why the run failed"
+    )
+
+
+class FanOutHoldRow(Base):
+    """The global hold: one row while it is set (migration 0003)."""
+
+    __tablename__ = "fanout_hold"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_fanout_hold"),
+        CheckConstraint(f"id = {GLOBAL_HOLD}", name="ck_fanout_hold_single"),
+        CheckConstraint("length(btrim(reason)) >= 10", name="ck_fanout_hold_reason"),
+        {
+            "comment": (
+                "The global fan-out hold: while its one row exists no fan-out starts its next "
+                "batch. Rule-level, of no tenant: no row-level security."
+            )
+        },
+    )
+
+    id: Mapped[int] = mapped_column(SmallInteger, nullable=False, autoincrement=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    set_by: Mapped[str] = mapped_column(
+        String(MAX_ACTOR_CHARS),
+        nullable=False,
+        comment="A user id, system:<service> or service:<client>; never a name",
+    )
+    set_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

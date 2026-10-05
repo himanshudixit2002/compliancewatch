@@ -9,29 +9,51 @@ The review routes act for the tenant ``x-tenant-id`` names (``deps.ReviewTenant`
 regulatory team: an analyst, a reviewer or an admin reads the queue, and a reviewer or an admin
 settles an item (``deps.Resolver``). A resolution is audited: the reviewer a token names is the
 actor (``py_common.audit.audit_actor``), else the system, with the request's correlation id.
+
+The fan-out routes name no tenant: a fan-out runs over every tenant. The regulatory team reads the
+runs and the global hold (``deps.FanOutReader``); an admin pauses, resumes and cancels a run and
+sets and releases the hold (``deps.FanOutAdmin``). Every control is audited the same way, of no
+tenant, and then signals the run's workflow.
 """
 
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Body, Query, status
 from fastapi.responses import JSONResponse
 
 from applicability_engine import SERVICE_NAME
-from applicability_engine.api.deps import Resolver, ReviewTenant, Tenant, Wired, resolved_by
+from applicability_engine.api.deps import (
+    FanOutAdmin,
+    FanOutReader,
+    Resolver,
+    ReviewTenant,
+    Tenant,
+    Wired,
+    resolved_by,
+)
 from applicability_engine.api.schemas import (
     DecisionCursor,
     DecisionOut,
     EvaluateIn,
+    FanOutCursor,
+    FanOutHoldIn,
+    FanOutHoldOut,
+    FanOutReasonIn,
+    FanOutResumeIn,
+    FanOutRunOut,
     ResolveIn,
     ReviewItemCursor,
     ReviewItemOut,
 )
 from applicability_engine.application.evaluate import EvaluateRequest
+from applicability_engine.application.fanout import FanOutControl, FanOutQuery, HoldControl
 from applicability_engine.application.queries import DecisionQuery
 from applicability_engine.application.review import ResolveRequest, ReviewQuery
+from applicability_engine.domain.fanout import FanOutRunKey
 from applicability_engine.domain.model import DecisionKey, Trigger
 from applicability_engine.domain.review import ReviewItemId, ReviewItemKey, ReviewStatus
+from domain_kernel.access import Principal
 from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId
 from py_common.audit import audit_actor, current_correlation_id
@@ -43,6 +65,7 @@ router = APIRouter(prefix="/v1/applicability-engine", tags=["applicability-engin
 
 LIST_SCOPE = "applicability-engine.decisions"
 REVIEW_SCOPE = "applicability-engine.review-items"
+FAN_OUT_SCOPE = "applicability-engine.fan-outs"
 
 
 @router.get("/ping")
@@ -194,3 +217,133 @@ def resolve_review_item(
         )
     )
     return ReviewItemOut.from_entry(entry)
+
+
+@router.get(
+    "/fan-outs",
+    summary="Every rule version's fan-out, newest first, a page at a time",
+    responses=problem_responses(401, 403, 422),
+)
+def list_fan_outs(reader: FanOutReader, wired: Wired, page: Pagination) -> Page[FanOutRunOut]:
+    """One fan-out per published rule version: the engine decides the version for every
+    business of its level in the business directory, in batches of 1,000, behind the global
+    hold. Newest first (started_at, then rule version id)."""
+    after = page.after(FAN_OUT_SCOPE, FanOutCursor)
+    found = wired.list_fan_outs.run(
+        FanOutQuery(
+            limit=page.limit + 1,
+            after=None
+            if after is None
+            else FanOutRunKey(after.started_at, RuleVersionId(after.rule_version_id)),
+        )
+    )
+    items, next_cursor = page_of(
+        found,
+        page.limit,
+        FAN_OUT_SCOPE,
+        lambda run: FanOutCursor(
+            started_at=run.started_at, rule_version_id=run.rule_version_id.value
+        ),
+    )
+    return Page[FanOutRunOut](
+        items=[FanOutRunOut.from_run(run) for run in items], next_cursor=next_cursor
+    )
+
+
+@router.get(
+    "/fan-outs/{rule_version_id}",
+    summary="One rule version's fan-out: its status, counters and last change",
+    responses=problem_responses(401, 403, 404, 422),
+)
+def read_fan_out(rule_version_id: UUID, reader: FanOutReader, wired: Wired) -> FanOutRunOut:
+    return FanOutRunOut.from_run(wired.read_fan_out.run(RuleVersionId(rule_version_id)))
+
+
+def _control(principal: Principal, rule_version_id: UUID, reason: str) -> FanOutControl:
+    return FanOutControl(
+        rule_version_id=RuleVersionId(rule_version_id),
+        actor=audit_actor(SERVICE_NAME, principal),
+        reason=reason,
+        correlation_id=current_correlation_id(),
+    )
+
+
+@router.post(
+    "/fan-outs/{rule_version_id}/pause",
+    summary="Pause a running or held fan-out at its next batch boundary",
+    responses=problem_responses(401, 403, 404, 409, 422),
+)
+def pause_fan_out(
+    rule_version_id: UUID, body: FanOutReasonIn, admin: FanOutAdmin, wired: Wired
+) -> FanOutRunOut:
+    """The run stops at its next batch boundary and waits until an admin resumes it; the global
+    hold's release does not. Audited as applicability.fanout.pause with the reason. 404 when the
+    version has no fan-out, 409 when it is not running or held."""
+    run = wired.pause_fan_out.run(_control(admin, rule_version_id, body.reason))
+    return FanOutRunOut.from_run(run)
+
+
+@router.post(
+    "/fan-outs/{rule_version_id}/resume",
+    summary="Resume a paused fan-out",
+    responses=problem_responses(401, 403, 404, 409, 422),
+)
+def resume_fan_out(
+    rule_version_id: UUID,
+    admin: FanOutAdmin,
+    wired: Wired,
+    body: Annotated[FanOutResumeIn | None, Body()] = None,
+) -> FanOutRunOut:
+    """The run decides its next batch at once; while the global hold is set it is held again
+    instead. Resuming a run that paused itself on flips turns the flip check off for the rest of
+    the run. Audited as applicability.fanout.resume. 404 when the version has no fan-out, 409
+    when it is not paused."""
+    reason = "" if body is None else body.reason
+    run = wired.resume_fan_out.run(_control(admin, rule_version_id, reason))
+    return FanOutRunOut.from_run(run)
+
+
+@router.post(
+    "/fan-outs/{rule_version_id}/cancel",
+    summary="Cancel a fan-out that has not finished; its decisions stay",
+    responses=problem_responses(401, 403, 404, 409, 422),
+)
+def cancel_fan_out(
+    rule_version_id: UUID, body: FanOutReasonIn, admin: FanOutAdmin, wired: Wired
+) -> FanOutRunOut:
+    """The run stops at its next batch boundary for good. To take back what it decided, withdraw
+    the rule version in the rulebook. Audited as applicability.fanout.cancel with the reason. 404
+    when the version has no fan-out, 409 when it has finished."""
+    run = wired.cancel_fan_out.run(_control(admin, rule_version_id, body.reason))
+    return FanOutRunOut.from_run(run)
+
+
+@router.get(
+    "/fan-out-hold",
+    summary="The global fan-out hold",
+    responses=problem_responses(401, 403),
+)
+def read_fan_out_hold(reader: FanOutReader, wired: Wired) -> FanOutHoldOut:
+    return FanOutHoldOut.from_hold(wired.read_hold.run())
+
+
+@router.put(
+    "/fan-out-hold",
+    summary="Set or release the global fan-out hold",
+    responses=problem_responses(401, 403, 422),
+)
+def put_fan_out_hold(body: FanOutHoldIn, admin: FanOutAdmin, wired: Wired) -> FanOutHoldOut:
+    """held true stops every fan-out at its next batch boundary (held) until the hold is
+    released; a reason of at least ten characters is required, and setting it again replaces
+    the reason. held false releases it, and every run it held carries on by itself; a paused run
+    stays paused. Audited as applicability.fanout.hold or applicability.fanout.release, of no
+    tenant; releasing a hold that is not set changes nothing."""
+    control = HoldControl(
+        actor=audit_actor(SERVICE_NAME, admin),
+        reason=body.reason,
+        correlation_id=current_correlation_id(),
+    )
+    if body.held:
+        return FanOutHoldOut.from_hold(wired.set_hold.run(control))
+    wired.release_hold.run(control)
+    return FanOutHoldOut.from_hold(None)

@@ -5,8 +5,10 @@ Two tenants with fixed ids, so seeding again finds what it made the first time:
 - ``BUSINESS_TENANT``, a business with one registration that files GSTR-3B monthly, made from
   the profile service's demo GSTIN (the static lookup pre-fills it);
 - ``CA_FIRM_TENANT``, a CA firm with two clients that file quarterly, one in Karnataka (group A
-  of the quarterly return) from the same demo GSTIN, one in Delhi (group B) from a made-up GSTIN
-  the lookup does not know, which opens a verify_registration task as any unknown GSTIN does.
+  of the quarterly return) from the same demo GSTIN, with a turnover of 2 to 5 crore, so the
+  annual return applies to it as it does to the business tenant, one in Delhi (group B) from a
+  made-up GSTIN the lookup does not know, which opens a verify_registration task as any unknown
+  GSTIN does.
 
 Every name says it is synthetic. The phone numbers are +91 followed by zeros, which no Indian
 mobile number starts with, and the mailboxes are on ``.invalid``, a domain reserved never to
@@ -149,8 +151,8 @@ CA_FIRM_TENANT: Final = SyntheticTenant(
                 {
                     "state_codes": ["29"],
                     "business_category": "retail_trade",
-                    "turnover_band": "75_lakh_to_1_5_crore",
-                    "peak_turnover_band": "75_lakh_to_1_5_crore",
+                    "turnover_band": "2_crore_to_5_crore",
+                    "peak_turnover_band": "2_crore_to_5_crore",
                     "employee_count": 4,
                 }
             ),
@@ -166,7 +168,7 @@ CA_FIRM_TENANT: Final = SyntheticTenant(
                     "gstr3b_monthly": NOT_APPLICABLE,
                     "gstr3b_quarterly_group_a": APPLIES,
                     "gstr3b_quarterly_group_b": NOT_APPLICABLE,
-                    "gstr9_annual": NOT_APPLICABLE,
+                    "gstr9_annual": APPLIES,
                 }
             ),
         ),

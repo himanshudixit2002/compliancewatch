@@ -1,11 +1,11 @@
 # applicability-engine service
 
-Part of the ComplianceWatch monorepo. **Deterministic evaluation of one rule version against one business, stored append-only with its event; recompute on profile.updated (behind the flag `applicability.recompute`), the business directory and the review queue; no LLM judge and no rule.published fan-out yet.**
+Part of the ComplianceWatch monorepo. **Deterministic evaluation of one rule version against one business, stored append-only with its event; recompute on profile.updated (behind the flag `applicability.recompute`), the business directory, the review queue, and the rule.published fan-out over the directory as a Temporal workflow with its hold and controls (behind the flag `applicability.fanout`); no LLM judge yet.**
 Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
 
 - **Owns:** ApplicabilityDecisions: coarse filter by regulator and attribute index, per-business predicate evaluation, LLM-judged free-text predicates with confidence, Temporal fan-out in batches of 1,000
 - **Owning team:** Core Product (deterministic path and fan-out); AI Platform owns the LLM evaluator (guide section 14)
-- **Consumes:** profile.updated (the business and the registrations under it; group `applicability-engine.profiles`); rule.published (fan-out, not built yet); profile and rulebook read APIs; LLM gateway API (not yet)
+- **Consumes:** profile.updated (the business and the registrations under it; group `applicability-engine.profiles`); rule.published and rule.withdrawn (the fan-out; group `applicability-engine.rules`); profile and rulebook read APIs; LLM gateway API (not yet)
 - **Emits / publishes:** applicability.decided
 
 ## What is here
@@ -57,18 +57,55 @@ Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
   `dismiss` appends nothing. Every stored decision, the manual ones included, keeps the queue in
   step in its own transaction (`track_review`). A person's resolution is not carried over: a
   later profile change that leaves the rule unsure on its free-text predicate opens a new item.
+- `domain/fanout.py`, `application/fanout*.py`, `application/rule_events.py`,
+  `workflows/fan_out.py`: the fan-out of a published version over the business directory
+  (ADR-004 and its 2026-10-05 addendum; [the runbook](../../docs/runbooks/fan-out-control.md)).
+  - `RuleEvents` is what the consumer of group `applicability-engine.rules` does, in the same
+    two phases as the recompute. On rule.published it drops the rulebook client's in-force cache,
+    reads the version (status, rule key, level) and, with the flag `applicability.fanout` on
+    (`CW_APPLICABILITY_FANOUT_ENABLED`, off by default), starts its workflow, all with no
+    transaction open; then it records the run in `fanout_run` (`running`, or `disabled` with the
+    flag off, which never runs). On rule.withdrawn it drops the cache and cancels the version's run
+    that has not finished, audited as the system.
+  - `FanOutWorkflow` runs `fanout_flow.drive` on the task queue `applicability`, workflow id
+    `applicability-fan-out-<rule version id>`, a duplicate start refused (`REJECT_DUPLICATE`).
+    `EvaluateBatch` decides 1,000 directory entries of the version's level per batch, one tenant
+    group at a time: the profiles over HTTP with no transaction open, then the group's decisions
+    (trigger `rule_published`, `trigger_ref` `rule.published:<event id>`) with their events by the
+    recompute's emit rule and `track_review`, in one unit of work of the tenant. It counts flips
+    against the latest decision of the versions the event's `supersedes` names. After 100
+    batches the workflow continues as new with its cursor.
+  - At every batch boundary it reads the global hold (`fanout_hold`) and its row: held while the
+    hold is set, waiting while paused, ended when cancelled. Once 200 businesses were compared, a
+    flip rate above 2% pauses it, audited as `system:applicability-engine`. Signals `pause`,
+    `resume` and `cancel` wake it, and the query `progress` says where it stands.
+  - The activities (`fanout_activities.py`) are idempotent: begin inserts the run once, the
+    counters and statuses are written whole, a status already reached is not moved or audited
+    again. The database steps retry until it answers; a batch for about 40 minutes, then the run
+    fails with `last_error`.
+  - `PauseFanOut`, `ResumeFanOut`, `CancelFanOut`, `SetHold` and `ReleaseHold` (`fanout.py`)
+    change the row and write the audit entry (`applicability.fanout.pause`, `.resume`,
+    `.cancel`, `.hold`, `.release`, of no tenant, the actor from the request's principal) in one
+    unit of work, then signal the workflow (`infrastructure/temporal.py`). Pausing, cancelling and
+    holding need a reason of at least ten characters.
+  - `applicability_engine.testing.LocalFanOuts` runs the same loop and activities on a thread
+    for tests and demos without Temporal.
 - `infrastructure/`: the HTTP clients (`profile_client.py`, `rulebook_client.py`; a 404 is
   `None`, anything else unexpected is `DependencyUnavailableError`, 503); the rulebook's in-force
   listing is paged by rule key and cached per day for `CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS`
-  (60; 0 turns it off). The Postgres unit of work sets `app.tenant_id` per transaction and writes
-  events to the outbox and audit entries to `audit.event` on the same connection;
-  `PostgresUnitOfWorkFactory.on_connection` makes units inside the consumer's transaction, and
-  `PostgresBusinessDirectory` reads the directory across tenants (for the fan-out). `memory.py`
-  is the in-memory twin, with the same rules.
+  (60; 0 turns it off), and dropped at once on every rule event (`forget_in_force`). The Postgres
+  unit of work sets `app.tenant_id` per transaction and writes events to the outbox and audit
+  entries to `audit.event` on the same connection; `PostgresUnitOfWorkFactory.on_connection`
+  makes units inside the consumer's transaction, and `PostgresBusinessDirectory` reads the
+  directory across tenants (for the fan-out). `PostgresFanOutUnitOfWorkFactory` opens units of no
+  tenant over `fanout_run`, `fanout_hold` and the audit log. `temporal.py` starts and signals the
+  workflows. `memory.py` is the in-memory twin, with the same rules.
   `applicability_engine.testing` has in-memory readers and builders.
 - `worker.py`: `python -m applicability_engine.worker` (`make worker SERVICE=applicability-engine`,
-  needs `CW_APPLICABILITY_ENGINE_STORE=postgres`), and the combined worker (`cw-mvp worker`). The
-  consumer group `applicability-engine.profiles` reads profile.updated through
+  needs `CW_APPLICABILITY_ENGINE_STORE=postgres`), and the combined worker (`cw-mvp worker`): the
+  two consumers and the Temporal worker of the queue `applicability`. The consumer group
+  `applicability-engine.rules` reads rule.published and rule.withdrawn (above); the consumer group
+  `applicability-engine.profiles` reads profile.updated through
   `py_common.outbox.read_then_write`: the reads run with no transaction open, then the
   directory, the decisions with their outbox rows, the review items and the `processed_event`
   row commit together. What it cannot read or handle goes to
@@ -87,6 +124,13 @@ Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
   erasure; `trigger_ref` on the decisions with `uq_applicability_decision_trigger_ref`, and the
   trigger `review`. Expand-only; the downgrade deletes no decision (the narrowed trigger CHECK is
   `NOT VALID`). `make product-role` grants the new tables to `cw_app` like every other.
+
+- `migrations/versions/20261005_0003_fan_out.py`: `fanout_run` (one row per published version:
+  rule key, level, status, the counters, the trigger event, when it started, changed and finished,
+  why and by whom its status last changed, its last error) and `fanout_hold` (one row while the
+  global hold is set). Rule-level, of no tenant and without row-level security, so both are exempt
+  in `infra/scripts/migration_lint.toml`; `make product-role` grants them to `cw_app` like every
+  table of the schema.
 
 Routes, for the request's tenant (`api/deps.py`):
 
@@ -122,8 +166,25 @@ entry, `applicability.review.resolve`, in its unit of work (`audit.event` throug
 request's correlation id. An item a later decision settles by itself is not audited: no person
 acted, and the item names the decision that settled it.
 
-Not built yet (WP22 and WP26): the LLM evaluator for free-text predicates, the golden set, the
-consumer of `rule.published` with the coarse filter and the fan-out over the business directory.
+The fan-outs, for the regulatory team; they run over every tenant, so no route names one
+(`api/deps.py`: `FanOutReader`, `FanOutAdmin`):
+
+- `GET /v1/applicability-engine/fan-outs?limit=&cursor=`: every run, newest first (started_at,
+  then rule version id), keyset paged; `GET /v1/applicability-engine/fan-outs/{rule_version_id}`:
+  one run (404 `applicability-fan-out-not-found`).
+- `POST /v1/applicability-engine/fan-outs/{rule_version_id}/pause` with a `reason` (running or
+  held), `.../resume` (paused; an optional `reason`) and `.../cancel` with a `reason` (not
+  finished): 409 `applicability-fan-out-state` otherwise, 422 for a reason under ten characters.
+- `GET /v1/applicability-engine/fan-out-hold` and `PUT` with `held` and a `reason` (required to
+  set it): releasing wakes every run the hold stopped.
+
+Who may call them, by `CW_AUTH_MODE`: a user a token names needs a regulatory role (analyst,
+reviewer or admin) to read and the admin role to control; tenant members and services are a 403.
+In `header` mode the anonymous caller passes, audited as `system:applicability-engine`; in `dual`
+mode a control without a token is a 401. The one deployable classes every fan-out route `admin`.
+
+Not built yet: the LLM evaluator for free-text predicates, the golden set, and the coarse filter
+over indexed profile attributes that lets a fan-out skip businesses a version cannot apply to.
 
 ## Layout
 
@@ -151,7 +212,7 @@ From the repo root:
 make dev                          # infrastructure (Docker Compose)
 make migrate SERVICE=applicability-engine
 make run SERVICE=applicability-engine           # http://localhost:8004/health, /ready, /v1/applicability-engine/ping
-make worker SERVICE=applicability-engine        # the profile.updated consumer (CW_APPLICABILITY_RECOMPUTE_ENABLED=true to evaluate)
+make worker SERVICE=applicability-engine        # both consumers and the fan-out's Temporal worker (CW_APPLICABILITY_RECOMPUTE_ENABLED, CW_APPLICABILITY_FANOUT_ENABLED)
 make test                         # unit + contract tests with the coverage gate
 docker build -f services/applicability-engine/Dockerfile -t compliancewatch-applicability-engine .
 ```

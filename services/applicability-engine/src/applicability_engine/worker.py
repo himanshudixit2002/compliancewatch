@@ -2,8 +2,9 @@
 ``make worker SERVICE=applicability-engine``.
 
 ``components(settings)`` is what it runs (``py_common.runtime.WorkerComponents``), and what a
-process that hosts several services adds to its own: a consumer in group
-``applicability-engine.profiles`` of profile.updated. Each event becomes
+process that hosts several services adds to its own: two consumers and a Temporal worker.
+
+The consumer in group ``applicability-engine.profiles`` of profile.updated: each event becomes
 ``ApplyProfileUpdate`` in two steps, so no HTTP call is made inside a database transaction
 (``py_common.outbox.sync.read_then_write``):
 
@@ -21,47 +22,89 @@ With the flag off the consumer still keeps the business directory, and evaluates
 message the handler cannot read, or an event whose reads fail after the consumer's retries,
 goes to ``profile.updated.applicability-engine.profiles.dlq``.
 
-The consumer writes through Postgres, so the worker needs ``CW_APPLICABILITY_ENGINE_STORE=
-postgres``. The outbox relay that publishes the decisions runs on its own
-(``make relay SERVICE=applicability-engine``), or in the combined worker.
+The consumer in group ``applicability-engine.rules`` of rule.published and rule.withdrawn
+(``application.rule_events``), with the same inbox pattern: the reads first, with no transaction
+open (the version at the rulebook and, with ``CW_APPLICABILITY_FANOUT_ENABLED``, flag
+``applicability.fanout``, the start of its fan-out workflow; both events also drop the cached
+listing of the versions in force), then the run's row in the consumer's transaction. With the flag
+off a publication records a ``disabled`` run and starts nothing. A withdrawal cancels the run of
+its version that has not finished. A message it cannot handle goes to
+``<topic>.applicability-engine.rules.dlq``.
+
+The Temporal worker on task queue ``applicability`` runs ``FanOutWorkflow`` and its activities
+(``application.fanout_activities``) on the same stores and readers.
+
+Both consumers and the activities write through Postgres, so the worker needs
+``CW_APPLICABILITY_ENGINE_STORE=postgres``. The outbox relay that publishes the decisions runs on
+its own (``make relay SERVICE=applicability-engine``), or in the combined worker.
 """
 
 from collections.abc import Callable
-from typing import Final
+from typing import Any, Final
 
-from sqlalchemy import Connection
+from sqlalchemy import Connection, create_engine
+from sqlalchemy.pool import NullPool
 
 from applicability_engine import __version__
+from applicability_engine.application.fanout_activities import fanout_activities
 from applicability_engine.application.recompute import (
     ApplyProfileUpdate,
     ProfileUpdate,
     Recomputed,
     RecomputePlan,
 )
-from applicability_engine.domain.repository import UnitOfWorkFactory
-from applicability_engine.infrastructure.repository import PostgresUnitOfWorkFactory
+from applicability_engine.application.rule_events import (
+    RuleEvents,
+    RulePlan,
+    RulePublished,
+    RuleWithdrawn,
+)
+from applicability_engine.domain.fanout import FAN_OUT_TASK_QUEUE, FanOutRun
+from applicability_engine.domain.ports import FanOutWorkflows
+from applicability_engine.domain.repository import FanOutUnitOfWorkFactory, UnitOfWorkFactory
+from applicability_engine.infrastructure.repository import (
+    PostgresBusinessDirectory,
+    PostgresFanOutUnitOfWorkFactory,
+    PostgresUnitOfWorkFactory,
+)
+from applicability_engine.infrastructure.temporal import TemporalFanOuts
 from applicability_engine.main import http_readers
 from applicability_engine.settings import ApplicabilityEngineSettings
 from applicability_engine.wiring import Readers
+from applicability_engine.workflows import FanOutWorkflow
 from cw_contracts.events.profile_updated_v1 import ProfileUpdatedV1
-from domain_kernel.ids import BusinessId, CorrelationId, EventId, TenantId
+from cw_contracts.events.rule_published_v1 import RulePublishedV1
+from cw_contracts.events.rule_withdrawn_v1 import RuleWithdrawnV1
+from domain_kernel.ids import BusinessId, CorrelationId, EventId, RuleVersionId, TenantId
 from domain_kernel.ontology import Ontology
 from ontology import load as load_ontology
 from py_common.events import EventMessage
 from py_common.logging import get_logger
 from py_common.outbox import read_first_store, read_then_write
 from py_common.outbox.consumer import Handler
-from py_common.runtime import ConsumerComponent, WorkerComponents, run_worker_process
+from py_common.runtime import (
+    ConsumerComponent,
+    TemporalComponent,
+    WorkerComponents,
+    run_worker_process,
+)
+from py_common.temporal import WorkerConfig
 
 GROUP_ID: Final = "applicability-engine.profiles"
 PROFILE_TOPIC: Final = "profile.updated"
 TOPICS: Final = (PROFILE_TOPIC,)
+RULES_GROUP_ID: Final = "applicability-engine.rules"
+PUBLISHED_TOPIC: Final = "rule.published"
+WITHDRAWN_TOPIC: Final = "rule.withdrawn"
+RULE_TOPICS: Final = (PUBLISHED_TOPIC, WITHDRAWN_TOPIC)
 SERVICE_NAME: Final = "applicability-engine-worker"
 
 log = get_logger(__name__)
 
 UnitsOnConnection = Callable[[Connection], UnitOfWorkFactory]
 """Units of work inside the consumer's transaction on the connection."""
+FanOutUnitsOnConnection = Callable[[Connection], FanOutUnitOfWorkFactory]
+"""Fan-out units inside the consumer's transaction on the connection."""
 
 
 class MissingTenantError(ValueError):
@@ -142,15 +185,107 @@ def recompute_of(
     )
 
 
+def published_from(message: EventMessage) -> RulePublished:
+    """The publication a rule.published message carries; a payload its contract refuses
+    raises."""
+    payload = RulePublishedV1.model_validate(message.payload)
+    return RulePublished(
+        event_id=EventId(message.event_id),
+        rule_version_id=RuleVersionId(payload.rule_version_id),
+        supersedes=tuple(RuleVersionId(item) for item in payload.supersedes),
+        correlation_id=CorrelationId(message.correlation_id),
+    )
+
+
+def withdrawn_from(message: EventMessage) -> RuleWithdrawn:
+    """The withdrawal a rule.withdrawn message carries; a payload its contract refuses raises."""
+    payload = RuleWithdrawnV1.model_validate(message.payload)
+    return RuleWithdrawn(
+        event_id=EventId(message.event_id),
+        rule_version_id=RuleVersionId(payload.rule_version_id),
+        correlation_id=CorrelationId(message.correlation_id),
+    )
+
+
+def rules_handler(
+    events: RuleEvents,
+    *,
+    units_on: FanOutUnitsOnConnection = PostgresFanOutUnitOfWorkFactory.on_connection,
+) -> Handler:
+    """The handler of rule.published and rule.withdrawn: read (and start the workflow) with no
+    transaction open, then write the run on the consumer's connection. ``units_on`` makes the
+    fan-out units there; tests pass the memory store's."""
+
+    def read(message: EventMessage) -> RulePlan | None:
+        if message.topic == PUBLISHED_TOPIC:
+            return events.plan_published(published_from(message))
+        if message.topic == WITHDRAWN_TOPIC:
+            return events.plan_withdrawn(withdrawn_from(message))
+        log.info("applicability.event_ignored", topic=message.topic, event_id=str(message.event_id))
+        return None
+
+    def write(message: EventMessage, plan: RulePlan | None, connection: Connection) -> None:
+        if plan is None:
+            return
+        run = events.apply(plan, units_on(connection))
+        _log_rule_event(message, plan, run)
+
+    return read_then_write(read, write)
+
+
+def _log_rule_event(message: EventMessage, plan: RulePlan, run: FanOutRun | None) -> None:
+    subject = plan.published or plan.withdrawn
+    log.info(
+        "applicability.rule_event",
+        topic=message.topic,
+        event_id=str(message.event_id),
+        rule_version_id=None if subject is None else str(subject.rule_version_id),
+        run_status=None if run is None else run.status.value,
+        started=plan.started,
+        disabled=plan.disabled,
+        skipped=plan.skipped or None,
+    )
+
+
+def rule_events_of(
+    settings: ApplicabilityEngineSettings,
+    readers: Readers,
+    workflows: FanOutWorkflows | None = None,
+) -> RuleEvents:
+    """The rule events handling the settings describe: Temporal unless ``workflows`` is given."""
+    return RuleEvents(
+        readers.rulebook,
+        workflows or TemporalFanOuts(settings),
+        enabled=settings.applicability_fanout_enabled,
+    )
+
+
 def components(
-    settings: ApplicabilityEngineSettings, *, readers: Readers | None = None
+    settings: ApplicabilityEngineSettings,
+    *,
+    readers: Readers | None = None,
+    workflows: FanOutWorkflows | None = None,
+    ontology: Ontology | None = None,
 ) -> WorkerComponents:
-    """The profile.updated consumer; ``readers`` replaces the profile and rulebook clients."""
+    """The two consumers and the fan-out's Temporal worker; ``readers`` replaces the profile and
+    rulebook clients and ``workflows`` the Temporal client that starts fan-outs. Both consumers
+    share the readers, so a rule event drops the listing the recompute caches."""
     if settings.applicability_engine_store != "postgres":
         raise ValueError(
             "the applicability-engine worker needs CW_APPLICABILITY_ENGINE_STORE=postgres"
         )
-    recompute = recompute_of(settings, readers)
+    readers = readers or http_readers(settings)
+    ontology = ontology or load_ontology()
+    recompute = recompute_of(settings, readers, ontology)
+    engine = create_engine(settings.database_url, poolclass=NullPool)
+    activities: list[Any] = fanout_activities(
+        fanouts=PostgresFanOutUnitOfWorkFactory(engine),
+        directory=PostgresBusinessDirectory(engine),
+        unit_of_work=PostgresUnitOfWorkFactory(engine),
+        profiles=readers.profiles,
+        rulebook=readers.rulebook,
+        ontology=ontology,
+    )
     return WorkerComponents(
         consumers=(
             ConsumerComponent(
@@ -158,6 +293,17 @@ def components(
                 topics=TOPICS,
                 handler=profile_handler(recompute),
                 store_factory=read_first_store,
+            ),
+            ConsumerComponent(
+                group_id=RULES_GROUP_ID,
+                topics=RULE_TOPICS,
+                handler=rules_handler(rule_events_of(settings, readers, workflows)),
+                store_factory=read_first_store,
+            ),
+        ),
+        temporal=(
+            TemporalComponent(
+                WorkerConfig(task_queue=FAN_OUT_TASK_QUEUE), (FanOutWorkflow,), activities
             ),
         ),
     )

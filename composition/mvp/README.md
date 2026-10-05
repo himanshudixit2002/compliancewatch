@@ -44,9 +44,14 @@ The services whose routes do more than read their own store:
   tenant's profile. The review queue (`GET /v1/applicability-engine/review-items` and
   `POST /v1/applicability-engine/review-items/{item_id}/resolve`) is admin: the regulatory team
   reads any tenant's items, naming the tenant in `x-tenant-id`, and a reviewer or admin settles
-  one, which appends a decision that makes or closes obligations. Each route requires a
-  regulatory role a verified token names, so the public listener serves them in token mode
-  only. The engine's worker recomputes a business on profile.updated (below).
+  one, which appends a decision that makes or closes obligations. The fan-out routes
+  (`GET /v1/applicability-engine/fan-outs`, one run, its pause, resume and cancel, and
+  `GET`/`PUT /v1/applicability-engine/fan-out-hold`) are admin too: the regulatory team reads the
+  runs, and an admin controls them, each control audited and then signalled to the run's
+  Temporal workflow (`CW_TEMPORAL_*`, with `CW_APPLICABILITY_FANOUT_ENABLED`). Each route
+  requires a regulatory role a verified token names, so the public listener serves them in token
+  mode only. The engine's worker recomputes a business on profile.updated and fans a published
+  version out over the business directory (below).
 - **eval**: the regulatory team reads the stored runs (`GET /v1/eval/runs`, admin). Starting
   one, `POST /v1/eval/runs`, is internal: it runs the harness in a child process, which spends
   compute and, under the nightly profile, model budget. That profile reaches the gateway at
@@ -76,7 +81,7 @@ service's settings:
 
 | What | When |
 | --- | --- |
-| each service's worker components (`<pkg>.worker.components`): the engine's consumer of profile.updated, notification's consumer, dispatcher and retention sweep, obligation's consumer of applicability.decided and reminder sweep, the rulebook's daily transitions sweep, the pipeline's Temporal worker | consumers with `CW_WORKER_KAFKA_ENABLED`, Temporal workers with `CW_WORKER_TEMPORAL_ENABLED` (one client for all), periodic jobs always, behind their service's own switch: the reminder sweep with `CW_OBLIGATION_SWEEP_ENABLED`, the transitions with `CW_RULEBOOK_PUBLISH_ENABLED`; the engine's consumer runs with Kafka and evaluates only with `CW_APPLICABILITY_RECOMPUTE_ENABLED` (it keeps the business directory either way) |
+| each service's worker components (`<pkg>.worker.components`): the engine's consumers of profile.updated and of rule.published and rule.withdrawn and its fan-out's Temporal worker (queue `applicability`), notification's consumer, dispatcher and retention sweep, obligation's consumer of applicability.decided and reminder sweep, the rulebook's daily transitions sweep, the pipeline's Temporal worker | consumers with `CW_WORKER_KAFKA_ENABLED`, Temporal workers with `CW_WORKER_TEMPORAL_ENABLED` (one client for all), periodic jobs always, behind their service's own switch: the reminder sweep with `CW_OBLIGATION_SWEEP_ENABLED`, the transitions with `CW_RULEBOOK_PUBLISH_ENABLED`; the engine's profile consumer runs with Kafka and evaluates only with `CW_APPLICABILITY_RECOMPUTE_ENABLED` (it keeps the business directory either way), and its rules consumer starts fan-outs only with `CW_APPLICABILITY_FANOUT_ENABLED` (it records a disabled run otherwise) |
 | one outbox relay per schema that has an `outbox_event` table | `CW_WORKER_KAFKA_ENABLED` |
 | the daily idempotency purge of every schema that has an `idempotency_key` table | always |
 

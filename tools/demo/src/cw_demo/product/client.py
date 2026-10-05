@@ -48,9 +48,14 @@ class ProductError(RuntimeError):
 
 
 class ProductSettings(MvpSettings):
+    """``product_records_url`` is the database the check reads what no route serves (the
+    business directory, the audit rows of no tenant) on a read-only session; empty, the steps
+    that need it fail (``records``)."""
+
     rulebook_write_token: SecretStr | None = None
     rulebook_review_token: SecretStr | None = None
     notification_sink_path: str = "var/notification/sink.jsonl"
+    product_records_url: str = ""
 
 
 def refusal(settings: Settings) -> str | None:
