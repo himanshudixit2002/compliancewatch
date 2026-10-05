@@ -1055,7 +1055,8 @@ def reminders(context: CheckContext) -> list[str]:
                 f"obligation-sweep --once --now {now.isoformat()} --tenant {BUSINESS_TENANT.key}: "
                 f"{len(report['reminded'])} reminders, {len(report['created'])} obligations made "
                 "by the window",
-                f"reminded: {obligation['title']}, due {obligation['due_at']}, {lead} before it",
+                f"reminded: {obligation['title']}, due {obligation['due_at']}, swept "
+                f"{_lead(lead)} before",
                 f"reminder: {notice['channel']} {notice['state']} through the sink "
                 f"({notice['provider_message_id']})",
                 sink_line(product.sink_path, str(notice["provider_message_id"])),
@@ -1064,6 +1065,13 @@ def reminders(context: CheckContext) -> list[str]:
         f"{swept} sweeps reminded none of {registration.business.name}'s {len(due)} open "
         "obligations: each was reminded at every threshold already"
     )
+
+
+def _lead(lead: timedelta) -> str:
+    """``5 days`` or ``12 hours``."""
+    if lead % timedelta(days=1):
+        return f"{lead // timedelta(hours=1)} hours"
+    return f"{lead.days} days"
 
 
 def reminder_notices(context: CheckContext, business_id: str) -> list[dict[str, Any]]:
