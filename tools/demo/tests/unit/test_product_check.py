@@ -3,7 +3,7 @@ for, what it reports, and how it fails. ``test_product_seed.py`` runs the honest
 steps against the real app; ``make product-check`` runs every step against the dev stack."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, Final
 from uuid import uuid4
@@ -301,6 +301,8 @@ def test_steps_are_chosen_by_name_in_the_check_order() -> None:
         "isolation",
         "recompute",
         "fanout",
+        "reminders",
+        "rollback",
     ]
     assert [step.name for step in select(["isolation", "health"])] == ["health", "isolation"]
     assert select(None) == check.STEPS
@@ -382,3 +384,93 @@ def test_a_missing_token_is_named(product: Product) -> None:
 def test_the_fanout_step_needs_the_records_it_reads(product: Product) -> None:
     with pytest.raises(StepFailedError, match="CW_PRODUCT_RECORDS_URL"):
         check.fanout(context_of(product))
+
+
+def test_the_rollback_step_is_skipped_unless_destructive(product: Product) -> None:
+    (rollback,) = select(["rollback"])
+    (result,) = run_checks(context_of(product), [rollback])
+    assert (result.ok, result.skipped, result.details) == (
+        True,
+        True,
+        ["skipped (destructive; CI runs it)"],
+    )
+    text = render([result])
+    assert "skip    rollback" in text
+    assert text.endswith("1 of 1 steps passed.\n")
+    assert as_json([result])["steps"][0]["skipped"] is True
+
+
+OBLIGATION: Final = str(uuid4())
+DUE_AT: Final = "2026-11-20T18:29:59Z"
+
+
+class Reminding(Scripted):
+    """The business tenant's open obligation, and a reminder about it once the sweep sent one."""
+
+    def __init__(self, *, reminded: bool = True) -> None:
+        super().__init__()
+        self.reminded = reminded
+        self.swept: list[list[str]] = []
+
+    def sweep(self, arguments: Sequence[str]) -> tuple[int, dict[str, Any]]:
+        self.swept.append(list(arguments))
+        reminded = [OBLIGATION] if self.reminded and len(self.swept) == 2 else []
+        return 0, {"reminded": reminded, "created": [], "tenants": 1}
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        path = request.url.path
+        if path == "/v1/obligation/obligations":
+            obligation = {
+                "obligation_id": OBLIGATION,
+                "title": "File GSTR-3B (2026-10)",
+                "status": "open",
+                "due_at": DUE_AT,
+            }
+            return httpx2.Response(200, json=[obligation])
+        if path == "/v1/notification/notifications":
+            items = []
+            if len(self.swept) >= 2 and self.reminded:
+                items = [
+                    {
+                        "id": "n1",
+                        "obligation_id": OBLIGATION,
+                        "occasion": "reminder",
+                        "channel": "email",
+                        "state": "sent",
+                        "provider_message_id": SINK_ID,
+                    }
+                ]
+            return httpx2.Response(200, json={"items": items, "next_cursor": None})
+        return super().__call__(request)
+
+
+def test_the_reminders_step_sweeps_before_the_due_date_until_a_reminder_goes(sink: Path) -> None:
+    script = Reminding()
+    product = scripted_product(script, sink)
+    context = CheckContext(product, timeout=2.0, interval=0.01, sweep=script.sweep)
+    lines = check.reminders(context)
+    assert [arguments[1] for arguments in script.swept] == [
+        "2026-11-15T18:29:59+00:00",
+        "2026-11-18T18:29:59+00:00",
+    ], "5 days before, then 2"
+    assert all(
+        arguments[2:] == ["--tenant", str(BUSINESS_TENANT.tenant_id)] for arguments in script.swept
+    )
+    assert lines[1].startswith("reminded: File GSTR-3B (2026-10), due 2026-11-20T18:29:59Z")
+    assert lines[2] == f"reminder: email sent through the sink ({SINK_ID})"
+    assert lines[3].endswith("holds the message")
+
+
+def test_the_reminders_step_fails_when_nothing_is_reminded(sink: Path) -> None:
+    script = Reminding(reminded=False)
+    product = scripted_product(script, sink)
+    context = CheckContext(product, timeout=2.0, interval=0.01, sweep=script.sweep)
+    with pytest.raises(StepFailedError, match="each was reminded at every threshold"):
+        check.reminders(context)
+    assert len(script.swept) == 3
+
+    def refused(arguments: Sequence[str]) -> tuple[int, dict[str, Any]]:
+        return 2, {"error": "obligation-sweep: refused: --now ..."}
+
+    with pytest.raises(StepFailedError, match="exited 2"):
+        check.reminders(CheckContext(product, timeout=2.0, interval=0.01, sweep=refused))

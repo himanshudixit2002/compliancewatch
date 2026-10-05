@@ -463,11 +463,13 @@ jobs:
       # The local product on this stack: the deployable's app and worker with Kafka and Temporal on
       # (no web app), synthetic tenants and the demo publication, then the check that a published
       # rule becomes decisions, obligations with citations and a change card through the sink.
+      # The database is fresh, so the check also runs its destructive rollback step, which
+      # withdraws gstr9_annual and sees its obligations closed and the withdrawal notices sent.
       - name: The local product (make product WEB=0, make product-seed, make product-check)
         run: |
           make product WEB=0
           make product-seed
-          make product-check
+          make product-check ARGS="--destructive"
       - name: Product logs
         if: failure()
         run: |
