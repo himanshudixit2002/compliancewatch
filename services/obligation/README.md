@@ -1,6 +1,6 @@
 # obligation service
 
-Part of the ComplianceWatch monorepo. **Domain, use cases, the Postgres unit of work, the read routes, the tracking routes (status, assignee, comments, each with an Idempotency-Key and an audit row) and the worker (the applicability.decided consumer, the rule events consumer, the reminder sweep and the rolling window) exist.**
+Part of the ComplianceWatch monorepo. **Domain, use cases, the Postgres unit of work, the read routes, the public API's list of a business's obligations, the tracking routes (status, assignee, comments, each with an Idempotency-Key and an audit row) and the worker (the applicability.decided consumer, the rule events consumer, the reminder sweep and the rolling window) exist.**
 Design reference: Project Foundation guide, sections 7 and 14.
 
 - **Owns:** Obligations, evidence metadata, the append-only change log of every obligation (`obligation_change`); builds obligations from the RuleVersion template, computes due dates, schedules reminders
@@ -109,7 +109,17 @@ Design reference: Project Foundation guide, sections 7 and 14.
 - `application/queries.py`: `ListObligations` reads one business's obligations in any status,
   optionally due inside a `DueWindow` (days in India, both ends included, at most 366 days) and
   of one rule version; due date first (undated last), then period start, creation and id; at
-  most 500.
+  most 500. `ListBusinessObligations` serves the public list a page at a time: the obligations of
+  some statuses (any when none is named) in a `DueWindow`, by due date (undated last) and id,
+  after a keyset (`domain/repository.py` `ListingAfter`, the due date and id of the last one on
+  the previous page), each with the cached facts of its rule version (`rule_version_ref`; none for
+  a version not cached yet, which the detail reads from the rulebook). Its unit of work reads
+  under row-level security, so another tenant's obligations never come back; a page with nothing
+  on it then asks the profile service, with no unit of work open, whether the business is a node
+  of the tenant at all (`domain/ports.py` `ProfileNodes`, `infrastructure/profile_client.py`,
+  `GET /v1/profile/nodes/{node_id}` with this service's token): 404
+  `obligation-business-not-found` when it is not, 503 `profile-unavailable` when profile cannot
+  say. A business with obligations on the page is the tenant's, so profile is not asked then.
 - `infrastructure/repository.py`: `PostgresUnitOfWorkFactory` opens one transaction per call
   with the `app.tenant_id` setting that the row-level security policy reads, and writes events
   to the outbox on the same connection. `infrastructure/memory.py` is the in-memory twin for
@@ -189,8 +199,14 @@ own due date.
 | `PUT /v1/obligation/obligations/{obligation_id}/assignee` | `{"assignee_id": "<user>" \| null}`: the obligation after the change; the assignee it has already changes nothing. 409 `obligation-closed`; with a verified caller 422 `obligation-assignee-unknown` and 503 `identity-unavailable` |
 | `POST /v1/obligation/obligations/{obligation_id}/comments` | `{"body": "..."}` (1 to 2,000 characters once trimmed): 201 with the comment, its author and their label |
 
-The four tracking routes are in the public API too (tag `public`, with `x-roles`, in
-`packages/contracts/openapi/public.v1.json` from 0.2.0): `GET /v1/obligations/{obligation_id}`,
+The public API (tag `public`, with `x-roles` naming every tenant member role, in
+`packages/contracts/openapi/public.v1.json`) lists a business's obligations from 0.4.0:
+
+| Route | What it does |
+| --- | --- |
+| `GET /v1/businesses/{business_id}/obligations?status=&due_from=&due_to=&limit=&cursor=` | One page (`limit` 1 to 200, 50 by default, and the `next_cursor` of the page before) of the obligations kept for `business_id`, any profile node of the tenant: the business (its legal entity, the id of `/v1/businesses`), one of its registrations (where a GSTIN's returns are kept) or a location; the web app merges the nodes of a business. By due date, undated last, then by id. `status` keeps the statuses named (repeat it for several); `due_from` and `due_to` keep the obligations due on those days in India, as above (422 `obligation-window-invalid`). Each item is an obligation with `rule_version` (as in the detail; null for a version not cached yet) and `citations` (verified), without history or comments. 404 `obligation-business-not-found` when the tenant has no such node, 503 `profile-unavailable` when the profile service cannot say; a cursor of another list is 422 `pagination-cursor-invalid` |
+
+The four tracking routes are in the public API too (from 0.2.0): `GET /v1/obligations/{obligation_id}`,
 `POST /v1/obligations/{obligation_id}/status`, `PUT /v1/obligations/{obligation_id}/assignee` and
 `POST /v1/obligations/{obligation_id}/comments` run the same handlers. Every change requires an
 `Idempotency-Key` header (8 to 128 printable characters; 428 `idempotency-key-required` without
@@ -214,7 +230,8 @@ Who calls and for which tenant comes from `py_common.auth` by `CW_AUTH_MODE` (`a
 The changes record who made them: the user a token names (`closed_by`, the change's `actor`, the
 comment's `author_id`) labelled with their roles in the audit row and the comment, or nobody,
 labelled `system:obligation`, when no token named the caller. Outside `header` mode the service
-calls identity with its own token: `CW_SERVICE_CLIENT_ID` (obligation) and
+calls identity (an assignee's membership) and profile (whether a business is the tenant's, at
+`CW_PROFILE_URL`) with its own token: `CW_SERVICE_CLIENT_ID` (obligation) and
 `CW_SERVICE_CLIENT_SECRET`, a client with the tenant:act scope (`identity_dev_clients.toml` makes
 it in local and test runs), or the token the one deployable mints in its process.
 
@@ -238,7 +255,7 @@ src/obligation/
   api/             # router.py (the read and tracking routes, and the public API's), schemas.py, deps.py (caller and tenant, wiring)
   application/     # materialise.py, changes.py, decisions.py, guard.py, rule_events.py, window.py, reminders.py, queries.py, tracking.py
   domain/          # model.py (Obligation, DueWindow), events.py, errors.py, history.py, comments.py, reminders.py, rule_versions.py, ports.py, repository.py (protocols)
-  infrastructure/  # models.py, repository.py (Postgres unit of work with the outbox and the audit), memory.py, rulebook_client.py, identity_client.py, metrics.py
+  infrastructure/  # models.py, repository.py (Postgres unit of work with the outbox and the audit), memory.py, rulebook_client.py, identity_client.py, profile_client.py, metrics.py
   wiring.py        # what the api layer gets from the composition root
   main.py          # composition root: wire(settings), build_app(settings), problem statuses
   worker.py        # the worker's composition root: components(settings), both handlers, the sweep and window jobs

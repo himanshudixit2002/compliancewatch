@@ -31,9 +31,15 @@ Anything else on the public listener, and any path no service owns, is a 404
 - **Calls between services** go over the internal listener. Their routes are sync and hold a
   thread while they wait, so the app raises the thread pool to `CW_MVP_THREAD_TOKENS` (200) and
   runs at most `CW_MVP_LOOPBACK_LIMIT` (32) of the routes that make such calls at once: qa's
-  `POST /v1/qa/ask`, the engine's evaluation and its dry run, and obligation's detail and
-  assignee routes. The routes they call make none themselves: qa reads obligation's list, which
-  calls nothing (`called_routes` in the registry).
+  `POST /v1/qa/ask` and the public `POST /v1/qa`, the engine's evaluation and its dry run,
+  obligation's detail and assignee routes and the public list of a business's obligations, and
+  notification's bulk change card. The routes they call make none themselves: qa and
+  notification read obligation's list, which calls nothing (`called_routes` in the registry), and
+  obligation's public list asks profile's node read.
+- **Dispatch**: a public path outside every service's prefix, such as `/v1/businesses` (profile)
+  or `/v1/businesses/{business_id}/obligations` (obligation), is matched longest template first;
+  any other path goes to the service its first segment names, so `/v1/qa` is qa's and
+  `/v1/notification/bulk` notification's.
 
 The services whose routes do more than read their own store:
 
@@ -70,9 +76,18 @@ The services whose routes do more than read their own store:
   change with an Idempotency-Key and an audit row. The detail reads the rulebook over the internal
   listener when its cache lacks the rule version, and outside `header` mode an assignment asks
   identity's internal `GET /v1/identity/users/{user_id}/membership` whether the assignee belongs
-  to the tenant, with the token of the `obligation` dev client (tenant:act). The worker makes
-  obligations from applicability decisions, closes or moves them on the rule events, and rolls
-  their window (below).
+  to the tenant, with the token of the `obligation` dev client (tenant:act). The public API's
+  `GET /v1/businesses/{business_id}/obligations` lists one node's obligations a page at a time;
+  when a page is empty it asks profile's `GET /v1/profile/nodes/{node_id}` whether the node is
+  the tenant's (404 otherwise). The worker makes obligations from applicability decisions,
+  closes or moves them on the rule events, and rolls their window (below).
+- **notification**: the public `POST /v1/notification/bulk` sends a CA firm's change card to the
+  clients a change affects (behind `CW_NOTIFICATION_BULK_ENABLED`); it reads each client's open
+  obligations of the change from obligation's list over the internal listener, with the token of
+  the `notification` dev client (tenant:act) outside `header` mode, queues the cards and writes
+  its `notification.bulk` audit row.
+- **qa**: `POST /v1/qa/ask` and the public `POST /v1/qa` run one handler, reading the profile, the
+  business's obligations and the rulebook and calling the gateway over the internal listener.
 
 The process must stay one process: notification preferences, the gateway's response cache and
 its budget-alarm markers are still held in memory.

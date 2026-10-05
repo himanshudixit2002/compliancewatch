@@ -1,6 +1,6 @@
 # notification service
 
-Part of the ComplianceWatch monorepo. **Recipients per business, a Postgres store under row-level security, a worker that turns obligation events into change cards, reminders, deadline changes and closures (batching, quiet hours, retries, a fallback channel, daily digests for owners and CA firms, a retention sweep), delivery receipts with WhatsApp's 24-hour window, the WhatsApp Cloud API channel and an SMTP email channel, each behind a flag.**
+Part of the ComplianceWatch monorepo. **Recipients per business, a Postgres store under row-level security, a worker that turns obligation events into change cards, reminders, deadline changes and closures (batching, quiet hours, retries, a fallback channel, daily digests for owners and CA firms, a retention sweep), a CA firm's bulk change card to its clients behind a flag, delivery receipts with WhatsApp's 24-hour window, the WhatsApp Cloud API channel and an SMTP email channel, each behind a flag.**
 Design reference: Project Foundation guide, sections 7, 9 and 14.
 
 - **Owns:** Recipients and their addresses, notifications and their delivery state, channel adapters (WhatsApp, email over SMTP), preferences and suppressions; dedupe by occasion, batching, digests, quiet hours, template rendering per channel and language
@@ -24,8 +24,9 @@ Design reference: Project Foundation guide, sections 7, 9 and 14.
 | `POST /v1/notification/receipts/whatsapp` | Statuses and inbound times the WhatsApp bot forwards, with `x-cw-bot-token` (`CW_NOTIFICATION_BOT_TOKEN`; unset, 503; missing or wrong, 401) or its service token (see Authentication) |
 | `POST /v1/notification/receipts/email` | SES bounces, complaints and deliveries that SNS posts, with HTTP basic credentials whose password is `CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN`, and the SNS signature verified |
 | `GET /v1/notification/templates` | Every template with its Meta approval status |
+| `POST /v1/notification/bulk` | A CA firm's change card to the clients a change affects, in the public API from 0.4.0 (below); 201 with the businesses by outcome, with an Idempotency-Key; 503 `notification-bulk-disabled` while `CW_NOTIFICATION_BULK_ENABLED` is off |
 
-The recipient, send and notification routes act for one tenant, checked before the body (a
+The recipient, send, notification and bulk routes act for one tenant, checked before the body (a
 request without one is a 401 `notification-tenant-required` problem). The spec is
 committed at `packages/contracts/openapi/notification.v1.json`
 (`make openapi SERVICE=notification`) and pinned by `tests/contract/test_openapi.py`; the
@@ -47,12 +48,55 @@ as in `token` mode and one without it as in `header` mode; in `token` mode a bea
 | recipients, notifications | a user with a tenant member role, whose token names the tenant (an `x-tenant-id` naming another is a 403 `auth-tenant-mismatch`), or a service with `tenant:act` naming it |
 | `POST /receipts/whatsapp` | a service with `notification:receipts`; `x-cw-bot-token` is accepted only in `header` and `dual` mode |
 | `POST /receipts/email`, `GET /templates` | read no token: SNS posts with basic credentials, and the templates are the same for everyone |
+| `POST /bulk` | a user of a CA firm (`ca_admin` or `ca_staff`) whose token names the tenant; no service |
 
 A caller without the role or scope gets a 403 `auth-forbidden`. The dispatcher reads rule versions
-from the rulebook with the service's own access token once `CW_SERVICE_CLIENT_SECRET` is set (its
-client is `notification`, with no scope; `CW_SERVICE_CLIENT_ID` defaults to it under `make run` and
-`make worker`); identity refusing the client is an outage of the rulebook, retried later.
+from the rulebook, and a bulk notification reads the clients' obligations from the obligation
+service, with the service's own access token once `CW_SERVICE_CLIENT_SECRET` is set (its client is
+`notification`, with tenant:act, since the obligations are read for the firm's tenant;
+`CW_SERVICE_CLIENT_ID` defaults to it under `make run` and `make worker`); identity refusing the
+client is an outage of the rulebook, retried later, or of the obligation service, a 503.
 `tests/unit/test_auth_mode.py` covers the three modes.
+
+### A CA firm's bulk change card
+
+`POST /v1/notification/bulk` (`api/bulk.py`, `application/bulk.py`) lets a CA firm tell the clients
+a published change affects about it in one request (guide use case 5):
+
+```json
+{"rule_version_id": "<the change>", "business_ids": ["<client registration>", "..."],
+ "kind": "change_card"}
+```
+
+`business_ids` are 1 to 500 businesses, each once: the ones the change's impact lists
+(`GET /v1/changes/{rule_version_id}/impact`), the profile nodes the obligations and recipients are
+kept for. For each, with no unit of work open, the obligation service lists its open obligations
+of the change for the firm's tenant (`CW_OBLIGATION_URL`, `infrastructure/obligation_client.py`);
+the card is about the first one due and states its title, steps and due date, as
+`obligation.created` would. A business with none is `not_affected`: the change does not apply to
+it, asks nothing of it now, or the business is another tenant's, whose obligations row-level
+security hides. In one unit of work the cards are then queued through `EnqueueNotifications` with
+the route of `obligation.created` (template and occasion `change_card`) for the client's own
+people: the recipients that follow the business as an owner or staff. The firm's own people
+(`ca_admin`, `ca_staff`) are left out, since they hear about every client in their daily digest.
+The change card's dedupe key names the rule version, the business, the channel and the recipient,
+so a person who has the card of that change already, from the change itself or an earlier
+request, gets nothing more: one card per change, business and person (F9). The cards then go out
+like every other, through quiet hours and the batching window.
+
+The answer (201) counts the businesses by outcome, each once: `queued` (at least one person got
+the card now), `skipped_duplicate` (everyone who can be reached had it), `skipped_no_recipient`
+(no client recipient follows it, or none has an open address) and `skipped_not_affected`, with
+`notifications_queued` and each business's outcome, obligation and counts. The same unit of work
+writes the audit entry `notification.bulk` of the tenant: the caller (the user a token names, with
+their roles, else `system:notification`), the change, and the counts with the businesses by
+outcome. The request needs an `Idempotency-Key`: a retry with the same key and body gets the
+first answer back for 24 hours (`Idempotent-Replayed: true`), the same key with another body is
+422, and a retry while the first runs is 409; keys are kept per tenant in `idempotency_key`
+(migration 0003). With `CW_NOTIFICATION_BULK_ENABLED` (flag `notification.bulk`, default off,
+owner core-product) off the route answers 503 `notification-bulk-disabled` before it looks at the
+key; an obligation service that cannot answer is 503 `notification-dependency-unavailable`, and
+the key is released so the retry runs.
 
 ### From an obligation event to a message
 
@@ -181,7 +225,11 @@ and four tables without it, each with its reason in the table comment and in
 tenant link, and the last inbound time), `suppression` (bounced or complained mailboxes, for
 every tenant), `address_directory` (which tenant an address belongs to) and `work_index` (the
 dispatcher's queue across tenants, and the provider message id a receipt finds its tenant by).
-The same migration creates the outbox and the consumer inbox.
+The same migration creates the outbox and the consumer inbox. Migration
+`20261006_0003_bulk_idempotency.py` adds py-common's `idempotency_key` (forced row-level security,
+plus the purge policy of the daily purge the deployable's worker runs) for the bulk route. Audit
+entries go to identity's `audit.event` in the unit of work's transaction
+(`py_common.audit.writer`); the memory store keeps them in `MemoryStore.audit`.
 
 The retention sweep runs daily at 03:00 IST: it deletes notifications older than two years and
 empties the template values of those older than 30 days that are no longer pending (guide
@@ -219,17 +267,18 @@ The `notification` alert group (`NotificationDeliveryFailures`, `NotificationDup
 
 ```
 src/notification/
-  api/             # router.py (preferences, send, templates), recipients.py, notifications.py, receipts.py, schemas, deps
+  api/             # router.py (preferences, send, templates), recipients.py, notifications.py, receipts.py,
+                   # bulk.py (the public bulk change card), schemas, deps
   application/     # enqueue.py, dispatch.py, send.py (SendNow), fallback.py, receipts.py, email_feedback.py,
-                   # resend.py, history.py, recipients.py, preferences.py, retention.py, consent.py
+                   # resend.py, history.py, recipients.py, preferences.py, retention.py, consent.py, bulk.py
   domain/          # notification.py (states and transitions), occasions.py (dedupe keys), routing.py (EVENT_ROUTES),
                    # recipients.py, addresses.py, digest.py, policy.py, receipts.py, channels.py, templates.py,
                    # values.py, preferences.py, repository.py and ports.py (protocols), events.py, errors.py
   infrastructure/  # repository.py and work_index.py (Postgres), memory.py, whatsapp.py, email.py, sink.py,
-                   # ses_feedback.py, rulebook_client.py, events_in.py, metrics.py, models.py
+                   # ses_feedback.py, rulebook_client.py, obligation_client.py, events_in.py, metrics.py, models.py
   composition.py   # wire(settings): the use cases on the configured store, channels and rulebook reader
   worker.py        # components(settings): consumer, dispatcher, retention sweep (python -m notification.worker)
-  testing.py       # fake channel, clock, rulebook reader, metrics and SNS, and a settings builder for tests
+  testing.py       # fake channel, clock, rulebook and obligation readers, metrics and SNS, and a settings builder
   main.py          # composition root of the HTTP app: build_app(settings, channels=...)
 migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA)
 tests/

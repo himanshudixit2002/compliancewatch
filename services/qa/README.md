@@ -108,7 +108,16 @@ when ADR-017 is Accepted. Off, or for a tenant not listed, there is no planner c
  "plan": {"as_of": null, "steps": ["..."]}, "reason": null, "as_of": "2026-04-10"}
 ```
 
-`plan` is the validated plan whenever there was one, even when hybrid answered. Problems: 401
+`plan` is the validated plan whenever there was one, even when hybrid answered. A cited clause is
+`AnswerCitationOut` in the spec, so the public API's merged spec keeps it apart from the
+obligation service's `CitationOut`.
+
+The public API serves the same handler as `POST /v1/qa` (tag `public`, with `x-roles` naming
+every tenant member role, in `packages/contracts/openapi/public.v1.json` from 0.4.0), with the
+same body, answer and problems. Asking creates nothing, so neither route takes an
+Idempotency-Key. With the KAG layer off, as in the local product, "When is my GSTR-3B due?" about
+a monthly filer's registration is answered by the structured layer from its obligations, with
+the rule's verified citations. Problems: 401
 `qa-tenant-required` (no tenant), 401 `auth-token-required` or `auth-token-invalid` and 403
 `auth-forbidden` or `auth-tenant-mismatch` (see below), 404 `qa-business-not-found` (a `business_node_id` the tenant does not
 have), 422 `qa-question-invalid` or `request-invalid`, 429 `qa-model-budget-exceeded` (the

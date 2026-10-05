@@ -11,7 +11,9 @@ few days before a due date sends a reminder, that a member can start, assign, co
 comment on an obligation, a change sent twice with one Idempotency-Key made once, and that the
 changes feed lists the publication with its synthetic approvers, the impact of the change lists
 the CA firm's affected client, and a dry run counts what the fan-out decided while writing
-nothing but its audit row. On a database made for the run (CI), it also proves that a withdrawn
+nothing but its audit row, and that the public listener lists a business's obligations a page
+at a time, answers a question from them with citations, and sends a CA firm's bulk change card
+once per change and person. On a database made for the run (CI), it also proves that a withdrawn
 rule closes its obligations in both tenants and sends withdrawal notices.
 
 ```bash
@@ -19,8 +21,8 @@ make product                 # make dev, make migrate, make product-role, the se
                              # cw-mvp serve, cw-mvp worker and next dev; waits until all answer
 make product-seed            # synthetic tenants, the demo publication, the first decisions
 make product-check           # health, honesty, loop, isolation, recompute, fanout, reminders,
-                             # tracking, changes: exit 0 means accepted (rollback reports itself
-                             # skipped; CI runs it with ARGS="--destructive")
+                             # tracking, changes, public: exit 0 means accepted (rollback reports
+                             # itself skipped; CI runs it with ARGS="--destructive")
 make product-logs PROC=worker   # app, worker or web; FOLLOW=0 prints the end and returns
 make product-down            # stops only what make product started
 ```
@@ -55,10 +57,11 @@ health on `PRODUCT_WORKER_PORT` (8081, since 8001 is identity's under `make run`
 engine's recompute on profile.updated on (`CW_APPLICABILITY_RECOMPUTE_ENABLED`) with the
 rulebook's in-force listing cached for five seconds (`CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS`),
 the engine's fan-out of rule.published on (`CW_APPLICABILITY_FANOUT_ENABLED`), obligation's
-consumer of the rule events on (`CW_OBLIGATION_RULE_EVENTS_ENABLED`), rule publishing on with
-the placeholder tokens `local-write-token` and `local-review-token` (not secrets; values in
-`.env` win), the profile's static GSTIN lookup, the notification sink in place of the real
-channels with a five-second batching window, and message links to the product's web app.
+consumer of the rule events on (`CW_OBLIGATION_RULE_EVENTS_ENABLED`), a CA firm's bulk change
+card on (`CW_NOTIFICATION_BULK_ENABLED`), rule publishing on with the placeholder tokens
+`local-write-token` and `local-review-token` (not secrets; values in `.env` win), the profile's
+static GSTIN lookup, the notification sink in place of the real channels with a five-second
+batching window, and message links to the product's web app.
 
 ## From a published rule to a change card
 
@@ -234,6 +237,45 @@ curl -s -X POST http://127.0.0.1:8080/v1/applicability-engine/dry-runs \
   -d '{"rule_version_id": "<version id>", "scope": {"tenant_id": "00000000-0000-4000-8000-0000000d0002"}}'
 ```
 
+## The public API
+
+The public listener (`127.0.0.1:8000`) serves the routes `composition/mvp` classes public, the
+public API (`packages/contracts/openapi/public.v1.json`, 0.4.0) among them, and answers an
+internal route 404 `route-not-found` (admin routes too, in header mode). Besides the businesses,
+the tracking routes and the changes feed, the public API lists one profile node's obligations a
+page at a time, with each one's rule title, review state and verified citations (a GSTIN's
+returns are kept for its registration; `status` and `due_from`/`due_to` filter, a window of at
+most 366 days):
+
+```bash
+curl -s 'http://127.0.0.1:8000/v1/businesses/<registration id>/obligations?status=open&limit=20' \
+  -H 'x-tenant-id: 00000000-0000-4000-8000-0000000d0001'
+```
+
+`POST /v1/qa` answers a question about one node. With the knowledge graph off, as here, the
+structured layer answers "When is my GSTR-3B due?" from the registration's obligations, with the
+rule's verified citations; a question it cannot answer goes to the clause search, which runs on the
+gateway's fake model here:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/v1/qa -H 'content-type: application/json' \
+  -H 'x-tenant-id: 00000000-0000-4000-8000-0000000d0001' \
+  -d '{"question": "When is my GSTR-3B due?", "business_node_id": "<registration id>"}'
+```
+
+`POST /v1/notification/bulk` sends a CA firm's change card to the clients a change affects, for
+the clients' own people (an owner or staff who follows the client; the firm's own people hear in
+their daily digest), once per change, business and person, with an `Idempotency-Key`.
+`make product` turns its flag on (`CW_NOTIFICATION_BULK_ENABLED=true`); the seeded firm has no
+client contact, so a bulk notification of its own answers `skipped_no_recipient` until one is
+registered, as the check's public step does for its run:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/v1/notification/bulk -H 'content-type: application/json' \
+  -H 'x-tenant-id: 00000000-0000-4000-8000-0000000d0002' -H "Idempotency-Key: $(uuidgen)" \
+  -d '{"rule_version_id": "<gstr9_annual version id>", "business_ids": ["<client registration id>"], "kind": "change_card"}'
+```
+
 ### The sink
 
 `CW_NOTIFICATION_CHANNELS=sink` replaces both channels with
@@ -320,9 +362,11 @@ the worker does a few seconds after the API answers, and a failed step does not 
 | rollback | only with `--destructive` (CI), skipped otherwise: withdraws gstr9_annual through the rulebook's withdraw route as the first synthetic reviewer, then waits for every GSTR-9 obligation of both synthetic tenants to close with `rule_withdrawn`, and for the withdrawal notices: sent through the sink for the business tenant, held for the daily digest (or sent) for the CA firm. On a database where it was withdrawn already, it checks what followed |
 | tracking | makes a new synthetic business in the business tenant with `POST /v1/businesses` (a monthly GSTR-3B filer, named "Tracking probe" with the time it was made) and waits for its gstr3b_monthly obligations from profile.updated; starts the first one due, assigns it to the tenant's synthetic owner, and sends the same complete twice with one Idempotency-Key: one closure, and the second answer is the first with `Idempotent-Replayed: true`. The detail must show the history created, started, assigned, closed, both synthetic reviewers in `approved_by` while the seed status stays needs_review, and verified citations; then a comment is added and listed. Each run spends a business of its own, so the seeded registration's obligations stay open for the reminders step and a later check passes again |
 | changes | on the gstr9_annual version the fanout step published: `GET /v1/changes` (read from its `published_at`) must list its publication with both synthetic reviewers in `approved_by`, the seed status needs_review and verified citations; `GET /v1/changes/{id}/impact?result=applies` as the CA firm must list exactly the firm's registrations the answers call for, each under its client, with the fan-out completed; and a dry run of the version scoped to the CA firm must count what the firm's latest decisions of it count for the registrations the directory lists, every one decided and none skipped, write one `applicability.dry_run` row of no tenant (found by the request's correlation id) and not one decision, review item or outbox row of the firm. After the rollback step (CI) the publication stays in the feed and the dry run reads the withdrawn version |
+| public | through the public listener: as the business tenant, `GET /v1/businesses/{id}/obligations` lists the seeded registration's obligations by due date, pages of one follow one another, each carries its rule's title, `status=open&status=in_progress` keeps those, a window of 367 days is a 422, and the CA firm reading it gets a 404. `POST /v1/qa` asks "When is my GSTR-3B due?" and must be answered by the structured layer with the first open monthly return due from today and verified citations; the CA firm asking gets a 404. As the CA firm, it registers a synthetic client contact (an owner on a `public-check-…@demo-ca-associates.invalid` mailbox, opted in, following the clients the change affects) and sends `POST /v1/notification/bulk` of gstr9_annual (of gstr3b_quarterly_group_a once the rollback step withdrew it) to the clients its impact lists: one card per client to the contact and none to the firm's admin; the same Idempotency-Key answers the same with `Idempotent-Replayed: true`, and a new key finds every card queued already. Each request that ran wrote one `notification.bulk` row of the firm (found by its correlation id), the contact's card goes through the sink, and the contact is removed (with any an interrupted check left). `POST /v1/notification/send` answers 404 on the public listener |
 
-The fanout and changes steps read the business directory, the audit rows of no tenant and the
-engine's row counts of a tenant, which no route serves and no policy lets `cw_app` read.
+The fanout, changes and public steps read the business directory, the audit rows (of no tenant,
+and the CA firm's bulk notifications) and the engine's row counts of a tenant, which no route
+serves and no policy lets `cw_app` read across tenants.
 `make product-check` gives them `CW_PRODUCT_RECORDS_URL`, the database owner's URL, and the tool
 opens it read only (`default_transaction_read_only`), so the session can run nothing but
 queries.
