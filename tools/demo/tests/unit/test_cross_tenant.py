@@ -16,6 +16,7 @@ integration tests.
 """
 
 from collections.abc import Callable, Iterator
+from datetime import date
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -26,15 +27,17 @@ from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
 
 from domain_kernel.access import Role, Scope
-from domain_kernel.ids import TenantId
+from domain_kernel.ids import BusinessId, DecisionId, TenantId
 from identity.main import build_app as build_identity
 from identity.testing import identity_settings
 from llm_gateway.main import build_app as build_gateway
 from llm_gateway.settings import GatewaySettings
 from notification.main import build_app as build_notification
 from notification.testing import notification_settings
+from obligation.application.materialise import MaterialiseRequest
 from obligation.main import build_app as build_obligation
 from obligation.settings import ObligationSettings
+from obligation.testing import FakeRuleVersionReader, FakeTenantMembers, rule
 from profile_service.main import build_app as build_profile
 from profile_service.settings import ProfileSettings
 from py_common.auth.testing import TestIssuer, bearer
@@ -63,7 +66,9 @@ BUILDERS: dict[str, Callable[[], FastAPI]] = {
         )
     ),
     "obligation": lambda: build_obligation(
-        ObligationSettings(_env_file=None, service_name="obligation", obligation_store="memory")
+        ObligationSettings(_env_file=None, service_name="obligation", obligation_store="memory"),
+        rules=FakeRuleVersionReader(),
+        members=FakeTenantMembers(),
     ),
     "notification": lambda: build_notification(notification_settings()),
     "qa": lambda: build_qa(qa_settings(), ports=memory_ports()),
@@ -83,6 +88,7 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "POST /v1/identity/users",
             "PUT /v1/identity/users/{user_id}/roles",
             "POST /v1/identity/users/{user_id}/disable",
+            "GET /v1/identity/users/{user_id}/membership",
         }
     ),
     "profile": frozenset(
@@ -105,7 +111,21 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "POST /v1/businesses/{business_id}/registrations",
         }
     ),
-    "obligation": frozenset({"GET /v1/obligation/obligations"}),
+    "obligation": frozenset(
+        {
+            "GET /v1/obligation/obligations",
+            *(
+                f"{method} {base}/{{obligation_id}}{suffix}"
+                for base in ("/v1/obligation/obligations", "/v1/obligations")
+                for method, suffix in (
+                    ("GET", ""),
+                    ("POST", "/status"),
+                    ("PUT", "/assignee"),
+                    ("POST", "/comments"),
+                )
+            ),
+        }
+    ),
     "notification": frozenset(
         {
             "POST /v1/notification/send",
@@ -464,6 +484,36 @@ def test_tenant_b_cannot_read_or_resend_a_notification_of_tenant_a(
     )
     assert listed.status_code == 200
     assert listed.json()["items"] == []
+
+
+def test_tenant_b_cannot_read_or_change_an_obligation_of_tenant_a(
+    clients: dict[str, TestClient],
+) -> None:
+    obligation = clients["obligation"]
+    made = obligation.app.state.wiring.materialise.run(  # type: ignore[attr-defined]
+        MaterialiseRequest(
+            TenantId(TENANT_A), BusinessId.new(), DecisionId.new(), rule(), date(2026, 9, 28)
+        )
+    )
+    route = f"/v1/obligation/obligations/{made.created[0]}"
+    for public in (False, True):
+        path = route.replace("/v1/obligation/obligations", "/v1/obligations") if public else route
+        assert obligation.get(path, headers=AS_B).status_code == 404, path
+        for method, suffix, body in (
+            ("POST", "/status", {"action": "complete"}),
+            ("PUT", "/assignee", {"assignee_id": DUMMY_ID}),
+            ("POST", "/comments", {"body": "Example comment (synthetic)"}),
+        ):
+            refused = obligation.request(
+                method, path + suffix, json=body, headers={**AS_B, "Idempotency-Key": str(uuid4())}
+            )
+            assert refused.status_code == 404, (path + suffix, refused.text)
+    started = obligation.post(
+        f"{route}/status",
+        json={"action": "start"},
+        headers={**AS_A, "Idempotency-Key": str(uuid4())},
+    )
+    assert started.json()["status"] == "in_progress", "tenant A's own change still works"
 
 
 def test_tenant_b_cannot_read_the_consents_of_tenant_a(clients: dict[str, TestClient]) -> None:

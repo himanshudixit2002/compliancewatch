@@ -14,9 +14,10 @@ import { isUuid } from "@/shared/lib/identifiers";
  * turns it into the header with `idempotencyHeaders(formData, operation)`. The header is sent
  * only for an operation in `IDEMPOTENT_OPERATIONS`: the routes that read it, which answer 428
  * without it and replay the first response for 24 hours (py-common's idempotency module): the
- * business API's two creating POSTs and the applicability engine's evaluate, which appends a
- * decision each time. The other creating writes are safe to repeat without it because each has
- * a natural key on the service:
+ * business API's two creating POSTs, the applicability engine's evaluate, which appends a
+ * decision each time, and the obligation service's status, assignee and comment writes, which
+ * the public API serves under `/v1/obligations` as well. The other creating writes are safe to
+ * repeat without it because each has a natural key on the service:
  *
  *   profile registration     the GSTIN: a second POST returns the existing node, created false
  *   profile entity           the PAN, the same way
@@ -53,6 +54,36 @@ export const IDEMPOTENT_ROUTES = {
     service: "applicability-engine",
     method: "POST",
     path: "/v1/applicability-engine/businesses/{business_id}/decisions",
+  },
+  "obligation.change-status": {
+    service: "obligation",
+    method: "POST",
+    path: "/v1/obligation/obligations/{obligation_id}/status",
+  },
+  "obligation.assign": {
+    service: "obligation",
+    method: "PUT",
+    path: "/v1/obligation/obligations/{obligation_id}/assignee",
+  },
+  "obligation.comment": {
+    service: "obligation",
+    method: "POST",
+    path: "/v1/obligation/obligations/{obligation_id}/comments",
+  },
+  "obligation.public-change-status": {
+    service: "obligation",
+    method: "POST",
+    path: "/v1/obligations/{obligation_id}/status",
+  },
+  "obligation.public-assign": {
+    service: "obligation",
+    method: "PUT",
+    path: "/v1/obligations/{obligation_id}/assignee",
+  },
+  "obligation.public-comment": {
+    service: "obligation",
+    method: "POST",
+    path: "/v1/obligations/{obligation_id}/comments",
   },
 } as const satisfies Readonly<Record<string, RouteRef>>;
 

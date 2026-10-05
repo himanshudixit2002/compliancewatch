@@ -78,9 +78,18 @@ def request_bodies() -> set[str]:
 
 
 def test_request_models_refuse_unknown_fields_and_responses_ignore_them() -> None:
-    assert request_bodies() == {"BusinessIn", "BusinessPatchIn", "RegistrationAddIn"}
+    assert request_bodies() == {
+        "AssigneeIn",
+        "BusinessIn",
+        "BusinessPatchIn",
+        "CommentIn",
+        "RegistrationAddIn",
+        "StatusIn",
+    }
     with pytest.raises(ValidationError):
         public_v1.BusinessPatchIn.model_validate({"name": "Acme", "added_later": True})
+    with pytest.raises(ValidationError):
+        public_v1.StatusIn.model_validate({"action": "start", "added_later": True})
     summary = public_v1.BusinessSummaryOut.model_validate(
         {
             "id": str(uuid4()),
