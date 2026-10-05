@@ -126,7 +126,8 @@ const RULEBOOK_DOCUMENT = uses("rulebook", "GET", "/v1/rulebook/documents/{docum
 const CLAUSE = uses("rulebook", "GET", "/v1/rulebook/clauses/{clause_id}");
 const ENTITY = uses("rulebook", "GET", "/v1/rulebook/entities/{entity_id}");
 const REVIEW_RELATIONS = uses("rulebook", "GET", "/v1/rulebook/review/relations");
-const OBLIGATIONS_LIST = uses("obligation", "GET", "/v1/obligation/obligations");
+/** The public API's list of one profile node's obligations, a page at a time. */
+const BUSINESS_OBLIGATIONS = uses("obligation", "GET", "/v1/businesses/{business_id}/obligations");
 const CHANGES = uses("rulebook", "GET", "/v1/changes");
 const CHANGE_IMPACT = uses("applicability-engine", "GET", "/v1/changes/{rule_version_id}/impact");
 /** py-common's liveness and readiness routes, which every committed spec carries. */
@@ -692,14 +693,15 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [OBLIGATIONS_LIST],
+    uses: [BUSINESS, BUSINESS_OBLIGATIONS],
     awaits: [],
     status: "ready",
     e2e: [],
     guideRef: "F8",
     nav: { group: "business", order: 9 },
     parent: "owner.business",
-    notes: "The business's obligations with status and due-window filters, sorted by due date.",
+    notes:
+      "The obligations of the business and its registrations (the public list of each node, a page at a time, merged) with status and due-window filters, by due date; each with its rule's title, the reviewed-by line or a not-yet-reviewed notice, and the verified citations.",
   },
   {
     id: "owner.calendar",
@@ -709,14 +711,15 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [OBLIGATIONS_LIST],
+    uses: [BUSINESS, BUSINESS_OBLIGATIONS],
     awaits: [],
     status: "ready",
     e2e: [],
     guideRef: "F8",
     nav: { group: "business", order: 10 },
     parent: "owner.business",
-    notes: "A month of obligations by due day in India, as a keyboard-operable grid.",
+    notes:
+      "A month of obligations by due day in India, as a keyboard-operable grid: the public list of each node of the business with the month as its due window.",
   },
   {
     id: "owner.obligation",
@@ -847,14 +850,15 @@ const SCREEN_LIST = [
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
     flag: "web.qa_enabled",
-    uses: [uses("qa", "POST", "/v1/qa/ask"), CLAUSE, RULEBOOK_DOCUMENT],
+    uses: [uses("qa", "POST", "/v1/qa"), CLAUSE, RULEBOOK_DOCUMENT],
     awaits: [],
     status: "ready",
     e2e: [],
     guideRef: "2 uc3, F10; ADR-012",
     nav: { group: "business", order: 11 },
     parent: "owner.business",
-    notes: "A question about the business, answered with citations to clauses or as not covered.",
+    notes:
+      "A question about the business (one of its nodes, a registration for its returns), answered through the public API's ask with citations to clauses or as not covered, with the layer that decided.",
   },
   {
     id: "owner.answer-feedback",
@@ -1063,11 +1067,13 @@ const SCREEN_LIST = [
     section: "ca",
     roles: CA,
     tenantKinds: ["ca_firm"],
-    uses: [CHANGE_IMPACT],
-    awaits: [servicesTrack("WP26", "notification", "POST", "/v1/notification/bulk")],
-    status: "waiting",
+    uses: [CHANGE_IMPACT, uses("notification", "POST", "/v1/notification/bulk")],
+    awaits: [],
+    status: "ready",
     e2e: [],
     guideRef: "2 uc5, 10, 15; G75",
+    notes:
+      "The clients a change affects, by client with each registration's result, and one bulk change card to the affected clients' own people with an Idempotency-Key; the answer counts the businesses told, already told, with no one to tell and not affected. The route answers 503 while notification.bulk is off.",
   },
   {
     id: "ca.clients",
