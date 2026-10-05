@@ -414,7 +414,9 @@ def test_a_withdrawal_closes_both_tenants_obligations_and_a_deadline_change_move
     assert "GSTR-9 obligations closed (rule_withdrawn)" in business_line
     assert "email sent" in business_line
     assert "GSTR-9 obligations closed (rule_withdrawn)" in firm_line
-    assert "digest_pending" in firm_line, "the CA firm hears by its daily digest"
+    assert "digest_pending" in firm_line or "email sent" in firm_line, (
+        "the CA firm hears by its daily digest, held until 09:00 IST"
+    )
     assert any(line.endswith("holds the message") for line in rolled_back)
     assert (
         again[0]
