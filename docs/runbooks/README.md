@@ -15,6 +15,7 @@ Flat; one markdown file per alert or operational procedure.
 - [api-slo-burn.md](api-slo-burn.md): the availability and latency SLO alerts on the product APIs.
 - [backup-restore.md](backup-restore.md): what holds state, dev backups, the quarterly restore drill.
 - [entity-review-queue.md](entity-review-queue.md): mentions waiting too long or piling up in the rulebook's entity review queue (EntityReviewQueueStale, EntityReviewQueueBacklog).
+- [fan-out-control.md](fan-out-control.md): the rule.published fan-out over every business: the global hold, pausing, resuming and cancelling a run, a run that paused itself on flips, one that stays held, paused or failed, a publication with no run, and rolling a version back.
 - [notification-delivery.md](notification-delivery.md): notifications that fail for good, are delivered twice or wait past the 15-minute objective, and email bounces and complaints (NotificationDeliveryFailures, NotificationDuplicateSent, NotificationPendingOverdue, NotificationEmailBounces), the delivery metrics and receipts, the SES feedback subscription, and where a failure's cause shows.
 - [outbox-relay.md](outbox-relay.md): events not reaching Kafka, `dead` outbox rows (OutboxDeadLetters, OutboxBacklog), replay by hand, pruning.
 - [rulebook-data-quality.md](rulebook-data-quality.md): the nightly data-quality checks over rule versions, citations and relations, what each violation means, and the read-only role for a deployed database.
@@ -37,5 +38,6 @@ Wired now: `ApiErrorBurnRate`, `ApiLatencyBurnRate`, `OutboxDeadLetters`, `Outbo
 `NotificationDeliveryFailures`, `NotificationDuplicateSent`, `NotificationPendingOverdue`,
 `NotificationEmailBounces`.
 Pending their metrics: source
-freshness (two missed cadences), decision-flip rate after a deploy, LLM spend past 80% of the
-monthly budget before the 20th.
+freshness (two missed cadences), decision-flip rate after a deploy (the fan-out already pauses
+itself on flips, [fan-out-control.md](fan-out-control.md)), LLM spend past 80% of the monthly
+budget before the 20th.

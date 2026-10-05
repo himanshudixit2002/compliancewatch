@@ -39,3 +39,37 @@ its UI on port 8233.
   (ADR-005) so other services can react without knowing about Temporal.
 - Revisit if self-hosting costs more than Temporal Cloud would, or if the work turns out to be
   short and stateless enough that a plain queue would do.
+
+## Addendum (2026-10-05): the rule.published fan-out as built
+
+The fan-out the decision describes now runs, behind the flag `applicability.fanout`. What the
+build settled that the decision left open:
+
+- **One workflow per version, ever.** `FanOutWorkflow` (type `applicability.fan_out`) runs on the
+  task queue `applicability` with the workflow id `applicability-fan-out-<rule version id>` and the
+  id reuse policy `REJECT_DUPLICATE`: a redelivered `rule.published` cannot start a second run,
+  finished or not. The engine's rules consumer starts it in the read phase of its inbox handler,
+  with no transaction open, and records the run in `applicability.fanout_run` in the write phase;
+  the workflow's first activity inserts the same row if it is absent, so neither order loses it.
+- **The checkpoint is the batch.** A batch is 1,000 directory entries (`business_directory`, read
+  across tenants), decided one tenant group at a time: the profiles are read over HTTP with no
+  transaction open, then the group's decisions are written in one unit of work of the tenant.
+  Decision ids derive from the `rule.published` event, the business and the version, so a retried
+  batch stores nothing twice. After 100 batches, or when its history grows long while it waits, the
+  workflow continues as new, carrying the cursor and the counters.
+- **The row decides, signals wake.** The global hold (`fanout_hold`) and the run's row are read at
+  every batch boundary. The controls (pause, resume, cancel, hold, release) change the row and write
+  their audit entry in one transaction, and only then signal the workflow, so a lost signal costs
+  one poll (30 seconds) and never a wrong state. A cancel signal is final on its own.
+- **The run pauses itself on flips.** Once 200 businesses have been compared with the version it
+  supersedes, a flip rate above 2% pauses the run, audited as the system; a person resumes it (the
+  check is then off for the run) or cancels it and withdraws the version.
+- **Activities are idempotent and retried by kind.** The database steps retry until the database
+  answers; a batch retries for about an hour with backoff and then fails the run, except when the
+  version is no longer published, which no retry fixes.
+- **No time-skipping server in tests.** The workflow is tested on `WorkflowEnvironment.start_local`
+  (the time-skipping server needs Rosetta on Apple Silicon), and its control loop runs in-process
+  too, so the journey tests drive it without Temporal.
+
+Not built yet: the coarse filter over indexed profile attributes and the load test of 100,000
+businesses in an hour (both with the fan-out at scale), and the flip-rate alert.
