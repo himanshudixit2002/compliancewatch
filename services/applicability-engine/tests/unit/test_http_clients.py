@@ -104,6 +104,7 @@ def test_the_rule_version_is_read_with_its_status_and_specification() -> None:
     assert spec is not None
     assert (spec.rule_version_id, spec.status) == (RULE_VERSION, RuleVersionStatus.PUBLISHED)
     assert spec.specification == AllOf((Predicate("registration_type", Operator.EQ, "regular"),))
+    assert (spec.rule_key, spec.level) == ("gst.gstr3b.monthly", AttributeLevel.REGISTRATION)
 
 
 def test_a_404_is_none() -> None:
@@ -248,6 +249,10 @@ def test_the_listing_of_a_day_is_cached_for_its_ttl() -> None:
     now[0] += 5.0
     rulebook.rules_in_force(day, AttributeLevel.REGISTRATION)
     assert asked == ["2026-10-01", "2026-10-02", "2026-10-01"], "read again once expired"
+    rulebook.forget_in_force()
+    rulebook.rules_in_force(day, AttributeLevel.REGISTRATION)
+    assert asked[-1] == "2026-10-01", "a rule event drops the listing at once"
+    assert len(asked) == 4
     with pytest.raises(ValueError, match="negative"):
         HttpRulebook(client=answering(answer), cache_seconds=-1)
 

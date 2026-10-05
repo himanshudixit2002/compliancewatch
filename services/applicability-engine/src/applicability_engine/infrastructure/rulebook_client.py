@@ -3,10 +3,13 @@
 status and specification, the kernel's predicate tree mapping, and the versions in force on a
 day.
 
-``rules_in_force(as_of, level)`` pages the in-force listing by rule key (``limit`` 500 and
-``after``), keeps the published versions and answers those of the level. The listing of a day
-is cached for ``cache_seconds`` (0 turns the cache off), so a burst of profile.updated events
-reads the rulebook once; a version published meanwhile is evaluated once the entry expires.
+``rule_version`` answers the version in any status with its rule key and level, which a fan-out
+pages the directory by. ``rules_in_force(as_of, level)`` pages the in-force listing by rule key
+(``limit`` 500 and ``after``), keeps the published versions and answers those of the level. The
+listing of a day is cached for ``cache_seconds`` (0 turns the cache off), so a burst of
+profile.updated events reads the rulebook once; a version published meanwhile is evaluated once
+the entry expires, or at once after ``forget_in_force``, which the rule events consumer calls on
+every rule.published and rule.withdrawn.
 """
 
 import threading
@@ -60,14 +63,21 @@ class HttpRulebook:
         if data is None:
             return None
         with reading(SERVICE):
+            rule_key, level = data.get("rule_key"), data.get("level")
             return RuleVersionSpec(
                 rule_version_id=RuleVersionId(UUID(str(data["rule_version_id"]))),
                 status=RuleVersionStatus(data["status"]),
                 specification=specification_from_mapping(data["specification"]),
+                rule_key=None if rule_key is None else str(rule_key),
+                level=None if level is None else AttributeLevel(level),
             )
 
     def rules_in_force(self, as_of: date, level: AttributeLevel) -> Sequence[RuleInForce]:
         return tuple(rule for rule in self._in_force(as_of) if rule.level is level)
+
+    def forget_in_force(self) -> None:
+        with self._lock:
+            self._cached = {}
 
     def _in_force(self, as_of: date) -> tuple[RuleInForce, ...]:
         now = self._monotonic()
@@ -107,14 +117,17 @@ class HttpRulebook:
 
 def _in_force(version: dict[str, Any]) -> RuleInForce:
     effective_to = version.get("effective_to")
+    rule_key, level = str(version["rule_key"]), AttributeLevel(version["level"])
     return RuleInForce(
         spec=RuleVersionSpec(
             rule_version_id=RuleVersionId(UUID(str(version["rule_version_id"]))),
             status=RuleVersionStatus(version["status"]),
             specification=specification_from_mapping(version["specification"]),
+            rule_key=rule_key,
+            level=level,
         ),
-        rule_key=str(version["rule_key"]),
-        level=AttributeLevel(version["level"]),
+        rule_key=rule_key,
+        level=level,
         effective_from=date.fromisoformat(str(version["effective_from"])),
         effective_to=None if effective_to is None else date.fromisoformat(str(effective_to)),
     )

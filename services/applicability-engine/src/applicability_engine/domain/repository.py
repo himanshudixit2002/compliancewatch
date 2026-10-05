@@ -4,12 +4,14 @@ from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from typing import Protocol
 
-from applicability_engine.domain.directory import DirectoryEntry
+from applicability_engine.domain.directory import DirectoryEntry, DirectoryKey
+from applicability_engine.domain.fanout import FanOutHold, FanOutRun, FanOutRunKey, FanOutStatus
 from applicability_engine.domain.model import Decision, DecisionKey
 from applicability_engine.domain.review import ReviewItem, ReviewItemId, ReviewItemKey, ReviewStatus
 from domain_kernel.audit import AuditSink
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId
+from domain_kernel.ontology import AttributeLevel
 
 
 class DecisionRepository(Protocol):
@@ -114,3 +116,75 @@ class UnitOfWork(Protocol):
 
 class UnitOfWorkFactory(Protocol):
     def __call__(self, tenant_id: TenantId) -> AbstractContextManager[UnitOfWork]: ...
+
+
+class BusinessDirectoryReader(Protocol):
+    """The business directory across tenants: ids and levels only, read with no tenant
+    setting and outside any unit of work (``business_directory_read``)."""
+
+    def entries(
+        self, *, level: AttributeLevel, after: DirectoryKey | None, limit: int
+    ) -> Sequence[DirectoryEntry]:
+        """Entries of ``level`` by tenant then node, after ``after``, at most ``limit``."""
+        ...
+
+    def count(self, *, level: AttributeLevel) -> int:
+        """How many entries of ``level`` the directory lists."""
+        ...
+
+
+class FanOutRunRepository(Protocol):
+    """One row per rule version's fan-out; rule-level, of no tenant."""
+
+    def add_if_absent(self, run: FanOutRun) -> bool:
+        """Store ``run`` unless its rule version has one; True when it was stored."""
+        ...
+
+    def get(self, rule_version_id: RuleVersionId, *, for_update: bool = False) -> FanOutRun | None:
+        """The run; ``for_update`` holds it until the unit of work ends."""
+        ...
+
+    def save(self, run: FanOutRun) -> None:
+        """Store the new state of a run already stored."""
+        ...
+
+    def list(self, *, after: FanOutRunKey | None, limit: int) -> Sequence[FanOutRun]:
+        """Runs newest first (started_at, then rule version, both descending), after
+        ``after``, at most ``limit``."""
+        ...
+
+    def with_status(self, status: FanOutStatus) -> Sequence[FanOutRun]:
+        """Every run in ``status``."""
+        ...
+
+
+class FanOutHoldRepository(Protocol):
+    """The global hold: a row while it is set, none once it is released."""
+
+    def get(self, *, for_update: bool = False) -> FanOutHold | None: ...
+
+    def put(self, hold: FanOutHold) -> None:
+        """Set the hold, or replace the one that is set."""
+        ...
+
+    def clear(self) -> bool:
+        """Release the hold; True when one was set."""
+        ...
+
+
+class FanOutUnitOfWork(Protocol):
+    """One transaction over the fan-out tables and the audit sink, with no tenant setting:
+    the runs and the hold are rule-level, and their audit entries belong to no tenant."""
+
+    @property
+    def runs(self) -> FanOutRunRepository: ...
+
+    @property
+    def hold(self) -> FanOutHoldRepository: ...
+
+    @property
+    def audit(self) -> AuditSink: ...
+
+
+class FanOutUnitOfWorkFactory(Protocol):
+    def __call__(self) -> AbstractContextManager[FanOutUnitOfWork]: ...

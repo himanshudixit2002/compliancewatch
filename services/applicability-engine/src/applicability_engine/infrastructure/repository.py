@@ -10,22 +10,40 @@ the decisions, their outbox rows and the ``processed_event`` row then commit tog
 ``business_directory`` is a routing directory (migration 0002): the unit writes its tenant's
 entries under the tenant setting, which the write policy checks, and ``PostgresBusinessDirectory``
 reads the ids across tenants for a fan-out that then opens one tenant's unit at a time.
+
+``PostgresFanOutUnitOfWorkFactory`` opens units over ``fanout_run`` and ``fanout_hold``
+(migration 0003) with no tenant setting: both tables are rule-level, and the audit entries of
+their controls are of no tenant, which ``audit.event``'s platform insert admits.
+``PostgresFanOutUnitOfWorkFactory.on_connection(connection)`` makes them inside the rule events
+consumer's inbox transaction.
 """
 
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass
 from datetime import UTC
 from typing import Any, Self
+from uuid import UUID
 
-from sqlalchemy import Connection, Engine, create_engine, select, text, tuple_, update
+from sqlalchemy import Connection, Engine, create_engine, delete, func, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
-from applicability_engine.domain.directory import DirectoryEntry
+from applicability_engine.domain.directory import DirectoryEntry, DirectoryKey
+from applicability_engine.domain.fanout import (
+    FanOutCounters,
+    FanOutHold,
+    FanOutRun,
+    FanOutRunKey,
+    FanOutStatus,
+)
 from applicability_engine.domain.model import Decision, DecisionKey, Trigger
-from applicability_engine.domain.repository import UnitOfWork, UnitOfWorkFactory
+from applicability_engine.domain.repository import (
+    FanOutUnitOfWork,
+    FanOutUnitOfWorkFactory,
+    UnitOfWork,
+    UnitOfWorkFactory,
+)
 from applicability_engine.domain.review import (
     Resolution,
     ReviewItem,
@@ -35,15 +53,18 @@ from applicability_engine.domain.review import (
     ReviewStatus,
 )
 from applicability_engine.infrastructure.models import (
+    GLOBAL_HOLD,
     TENANT_SETTING,
     BusinessDirectoryRow,
     DecisionRow,
+    FanOutHoldRow,
+    FanOutRunRow,
     ReviewItemRow,
 )
 from domain_kernel.confidence import Confidence
 from domain_kernel.events import DomainEvent
 from domain_kernel.financial_year import FinancialYear
-from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId, UserId
+from domain_kernel.ids import BusinessId, DecisionId, EventId, RuleVersionId, TenantId, UserId
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.predicates import (
     Applicability,
@@ -291,17 +312,11 @@ class PostgresUnitOfWorkFactory:
         return True
 
 
-@dataclass(frozen=True, slots=True)
-class DirectoryKey:
-    """Where a page of the directory ends: by tenant, then by node."""
-
-    tenant_id: TenantId
-    business_id: BusinessId
-
-
 class PostgresBusinessDirectory:
     """The ``business_directory`` entries across tenants, read without a tenant setting: the
-    table's read policy admits every row, and it holds nothing but ids and levels."""
+    table's read policy admits every row, and it holds nothing but ids and levels. Each read is
+    a session of its own that ends before the call returns, so no transaction stays open while
+    a fan-out reads profiles over HTTP."""
 
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
@@ -329,6 +344,146 @@ class PostgresBusinessDirectory:
             )
         with Session(self._engine) as session:
             return [_to_entry(row) for row in session.scalars(statement).all()]
+
+    def count(self, *, level: AttributeLevel) -> int:
+        statement = select(func.count()).where(BusinessDirectoryRow.level == level.value)
+        with Session(self._engine) as session:
+            return int(session.execute(statement).scalar_one())
+
+
+class SqlAlchemyFanOutRunRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add_if_absent(self, run: FanOutRun) -> bool:
+        statement = (
+            insert(FanOutRunRow)
+            .values(_run_values(run))
+            .on_conflict_do_nothing(index_elements=["rule_version_id"])
+            .returning(FanOutRunRow.rule_version_id)
+        )
+        return self._session.execute(statement).first() is not None
+
+    def get(self, rule_version_id: RuleVersionId, *, for_update: bool = False) -> FanOutRun | None:
+        statement = select(FanOutRunRow).where(
+            FanOutRunRow.rule_version_id == rule_version_id.value
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        found = self._session.scalars(statement.execution_options(populate_existing=True)).first()
+        return None if found is None else _to_run(found)
+
+    def save(self, run: FanOutRun) -> None:
+        values = _run_values(run)
+        values.pop("rule_version_id")
+        self._session.execute(
+            update(FanOutRunRow)
+            .where(FanOutRunRow.rule_version_id == run.rule_version_id.value)
+            .values(values)
+        )
+
+    def list(self, *, after: FanOutRunKey | None, limit: int) -> Sequence[FanOutRun]:
+        statement = (
+            select(FanOutRunRow)
+            .order_by(FanOutRunRow.started_at.desc(), FanOutRunRow.rule_version_id.desc())
+            .limit(limit)
+            .execution_options(populate_existing=True)
+        )
+        if after is not None:
+            statement = statement.where(
+                tuple_(FanOutRunRow.started_at, FanOutRunRow.rule_version_id)
+                < tuple_(after.started_at, after.rule_version_id.value)
+            )
+        return [_to_run(row) for row in self._session.scalars(statement).all()]
+
+    def with_status(self, status: FanOutStatus) -> Sequence[FanOutRun]:
+        statement = (
+            select(FanOutRunRow)
+            .where(FanOutRunRow.status == status.value)
+            .order_by(FanOutRunRow.started_at, FanOutRunRow.rule_version_id)
+            .execution_options(populate_existing=True)
+        )
+        return [_to_run(row) for row in self._session.scalars(statement).all()]
+
+
+class SqlAlchemyFanOutHoldRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, *, for_update: bool = False) -> FanOutHold | None:
+        statement = select(FanOutHoldRow).where(FanOutHoldRow.id == GLOBAL_HOLD)
+        if for_update:
+            statement = statement.with_for_update()
+        found = self._session.scalars(statement.execution_options(populate_existing=True)).first()
+        if found is None:
+            return None
+        return FanOutHold(
+            reason=found.reason, set_by=found.set_by, set_at=found.set_at.astimezone(UTC)
+        )
+
+    def put(self, hold: FanOutHold) -> None:
+        values = {"reason": hold.reason, "set_by": hold.set_by, "set_at": hold.set_at}
+        statement = (
+            insert(FanOutHoldRow)
+            .values(id=GLOBAL_HOLD, **values)
+            .on_conflict_do_update(index_elements=["id"], set_=values)
+        )
+        self._session.execute(statement)
+
+    def clear(self) -> bool:
+        statement = (
+            delete(FanOutHoldRow).where(FanOutHoldRow.id == GLOBAL_HOLD).returning(FanOutHoldRow.id)
+        )
+        return self._session.execute(statement).first() is not None
+
+
+class SqlAlchemyFanOutUnitOfWork:
+    """The fan-out tables and the audit sink on one transaction, with no tenant setting."""
+
+    def __init__(self, session: Session) -> None:
+        self.runs = SqlAlchemyFanOutRunRepository(session)
+        self.hold = SqlAlchemyFanOutHoldRepository(session)
+        self.audit = PostgresAuditSink(session.connection())
+
+
+class ConnectionFanOutUnitOfWorkFactory:
+    """Fan-out units inside the transaction of ``connection``, which its owner commits or rolls
+    back, as ``ConnectionUnitOfWorkFactory`` does for tenant units."""
+
+    def __init__(self, connection: Connection) -> None:
+        self._connection = connection
+
+    def __call__(self) -> AbstractContextManager[FanOutUnitOfWork]:
+        return self._open()
+
+    @contextmanager
+    def _open(self) -> Iterator[FanOutUnitOfWork]:
+        if not self._connection.in_transaction():
+            self._connection.begin()
+        with Session(bind=self._connection, expire_on_commit=False) as session:
+            yield SqlAlchemyFanOutUnitOfWork(session)
+            session.flush()
+
+
+class PostgresFanOutUnitOfWorkFactory:
+    """``factory()`` opens a transaction over the fan-out tables and the audit log;
+    ``PostgresFanOutUnitOfWorkFactory.on_connection(connection)`` makes units inside a
+    transaction the caller owns."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    @staticmethod
+    def on_connection(connection: Connection) -> FanOutUnitOfWorkFactory:
+        return ConnectionFanOutUnitOfWorkFactory(connection)
+
+    def __call__(self) -> AbstractContextManager[FanOutUnitOfWork]:
+        return self._open()
+
+    @contextmanager
+    def _open(self) -> Iterator[FanOutUnitOfWork]:
+        with Session(self._engine, expire_on_commit=False) as session, session.begin():
+            yield SqlAlchemyFanOutUnitOfWork(session)
 
 
 def evaluated_to_json(evaluated: Sequence[PredicateResult]) -> list[dict[str, Any]]:
@@ -447,4 +602,51 @@ def _to_entry(row: BusinessDirectoryRow) -> DirectoryEntry:
         level=AttributeLevel(row.level),
         parent_id=None if row.parent_id is None else BusinessId(row.parent_id),
         entity_id=BusinessId(row.entity_id),
+    )
+
+
+def _run_values(run: FanOutRun) -> dict[str, Any]:
+    counters = run.counters
+    return {
+        "rule_version_id": run.rule_version_id.value,
+        "rule_key": run.rule_key,
+        "level": run.level.value,
+        "status": run.status.value,
+        "trigger_event_id": run.trigger_event_id.value,
+        "supersedes": [str(superseded) for superseded in run.supersedes],
+        "businesses_total": counters.businesses_total,
+        "evaluated": counters.evaluated,
+        "applies": counters.applies,
+        "flips_compared": counters.flips_compared,
+        "flips": counters.flips,
+        "started_at": run.started_at,
+        "updated_at": run.updated_at,
+        "finished_at": run.finished_at,
+        "status_reason": run.status_reason,
+        "status_by": run.status_by,
+        "last_error": run.last_error,
+    }
+
+
+def _to_run(row: FanOutRunRow) -> FanOutRun:
+    return FanOutRun(
+        rule_version_id=RuleVersionId(row.rule_version_id),
+        rule_key=row.rule_key,
+        level=AttributeLevel(row.level),
+        status=FanOutStatus(row.status),
+        trigger_event_id=EventId(row.trigger_event_id),
+        started_at=row.started_at.astimezone(UTC),
+        updated_at=row.updated_at.astimezone(UTC),
+        supersedes=tuple(RuleVersionId(UUID(str(item))) for item in row.supersedes),
+        counters=FanOutCounters(
+            businesses_total=row.businesses_total,
+            evaluated=row.evaluated,
+            applies=row.applies,
+            flips_compared=row.flips_compared,
+            flips=row.flips,
+        ),
+        finished_at=None if row.finished_at is None else row.finished_at.astimezone(UTC),
+        status_reason=row.status_reason,
+        status_by=row.status_by,
+        last_error=row.last_error,
     )

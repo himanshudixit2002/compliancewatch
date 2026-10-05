@@ -3,8 +3,9 @@
 A profile.updated event names a node (a legal entity, a registration or a location); the engine
 records it, and the registrations it finds under an entity, with the node's level, its parent
 and the entity at the top of its lineage. The ids are what a fan-out over every business
-(rule.published, a later package) reads across tenants before it opens one tenant's unit of work
-at a time; a node's place in the hierarchy never changes, so an entry is written once.
+(rule.published, ``domain.fanout``) reads across tenants, by tenant then node, before it opens one
+tenant's unit of work at a time; a node's place in the hierarchy never changes, so an entry is
+written once.
 """
 
 from dataclasses import dataclass
@@ -36,3 +37,19 @@ class DirectoryEntry:
                 raise InvariantViolationError("a legal entity has no parent and is its own entity")
         else:
             require_instance(self.parent_id, BusinessId, "parent_id")
+
+
+@dataclass(frozen=True, slots=True)
+class DirectoryKey:
+    """Where a page of the directory ends: by tenant, then by node."""
+
+    tenant_id: TenantId
+    business_id: BusinessId
+
+    def __post_init__(self) -> None:
+        require_instance(self.tenant_id, TenantId, "tenant_id")
+        require_instance(self.business_id, BusinessId, "business_id")
+
+    @classmethod
+    def of(cls, entry: DirectoryEntry) -> "DirectoryKey":
+        return cls(entry.tenant_id, entry.business_id)

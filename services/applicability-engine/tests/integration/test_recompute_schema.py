@@ -35,12 +35,11 @@ from applicability_engine.application.review import (
     ResolveReviewItem,
     ReviewQuery,
 )
-from applicability_engine.domain.directory import DirectoryEntry
+from applicability_engine.domain.directory import DirectoryEntry, DirectoryKey
 from applicability_engine.domain.errors import ReviewItemResolvedError
 from applicability_engine.domain.review import Resolution, ReviewStatus
 from applicability_engine.infrastructure.models import Base
 from applicability_engine.infrastructure.repository import (
-    DirectoryKey,
     PostgresBusinessDirectory,
     PostgresUnitOfWorkFactory,
 )

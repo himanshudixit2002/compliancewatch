@@ -6,8 +6,12 @@ store-level lock held from open to commit or rollback), like the obligation serv
 rules the Postgres tables enforce hold here too: a write of another tenant's row is refused
 (row-level security), a decision is stored once per id and per (trigger_ref, business, rule
 version), and at most one review item is open per business and rule version. The directory is
-the one table whose reads cross tenants (``MemoryStore.directory``). Audit entries go to
-``MemoryStore.audit`` through ``py_common.audit``'s twin of the audit table, with the unit.
+the one table whose reads cross tenants (``MemoryStore.directory``; ``MemoryBusinessDirectory``
+reads it as ``PostgresBusinessDirectory`` does). Audit entries go to ``MemoryStore.audit`` through
+``py_common.audit``'s twin of the audit table, with the unit.
+
+``MemoryStore.fanouts`` makes the units over the fan-out runs and the global hold, of no tenant,
+like ``PostgresFanOutUnitOfWorkFactory``; their audit entries are of no tenant too.
 """
 
 import threading
@@ -16,9 +20,10 @@ from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
 from uuid import UUID
 
-from applicability_engine.domain.directory import DirectoryEntry
+from applicability_engine.domain.directory import DirectoryEntry, DirectoryKey
+from applicability_engine.domain.fanout import FanOutHold, FanOutRun, FanOutRunKey, FanOutStatus
 from applicability_engine.domain.model import Decision, DecisionKey
-from applicability_engine.domain.repository import UnitOfWork
+from applicability_engine.domain.repository import FanOutUnitOfWork, UnitOfWork
 from applicability_engine.domain.review import (
     ReviewItem,
     ReviewItemId,
@@ -28,6 +33,7 @@ from applicability_engine.domain.review import (
 from domain_kernel.audit import AuditEntry
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId
+from domain_kernel.ontology import AttributeLevel
 from py_common.audit import MemoryAuditSink
 
 
@@ -229,9 +235,140 @@ class MemoryUnitOfWork:
             self.audit.commit()
 
 
+class MemoryFanOutRunRepository:
+    def __init__(self, committed: dict[RuleVersionId, FanOutRun]) -> None:
+        self._committed = committed
+        self.pending: dict[RuleVersionId, FanOutRun] = {}
+
+    def _current(self) -> dict[RuleVersionId, FanOutRun]:
+        return {**self._committed, **self.pending}
+
+    def add_if_absent(self, run: FanOutRun) -> bool:
+        if run.rule_version_id in self._current():
+            return False
+        self.pending[run.rule_version_id] = run
+        return True
+
+    def get(self, rule_version_id: RuleVersionId, *, for_update: bool = False) -> FanOutRun | None:
+        return self._current().get(rule_version_id)
+
+    def save(self, run: FanOutRun) -> None:
+        if run.rule_version_id not in self._current():
+            raise ValueError(f"no fan-out of {run.rule_version_id} is stored")
+        self.pending[run.rule_version_id] = run
+
+    def list(self, *, after: FanOutRunKey | None, limit: int) -> Sequence[FanOutRun]:
+        bound = None if after is None else (after.started_at, after.rule_version_id.value)
+        found = [
+            run
+            for run in self._current().values()
+            if bound is None or (run.started_at, run.rule_version_id.value) < bound
+        ]
+        found.sort(key=lambda run: (run.started_at, run.rule_version_id.value), reverse=True)
+        return found[:limit]
+
+    def with_status(self, status: FanOutStatus) -> Sequence[FanOutRun]:
+        found = [run for run in self._current().values() if run.status is status]
+        return sorted(found, key=lambda run: (run.started_at, run.rule_version_id.value))
+
+    def commit(self) -> None:
+        self._committed.update(self.pending)
+        self.pending.clear()
+
+
+class MemoryFanOutHoldRepository:
+    """The hold as a one-element list: empty while released."""
+
+    def __init__(self, committed: list[FanOutHold]) -> None:
+        self._committed = committed
+        self._pending: list[FanOutHold] | None = None
+
+    def _current(self) -> list[FanOutHold]:
+        return self._committed if self._pending is None else self._pending
+
+    def get(self, *, for_update: bool = False) -> FanOutHold | None:
+        current = self._current()
+        return current[0] if current else None
+
+    def put(self, hold: FanOutHold) -> None:
+        self._pending = [hold]
+
+    def clear(self) -> bool:
+        held = bool(self._current())
+        self._pending = []
+        return held
+
+    def commit(self) -> None:
+        if self._pending is not None:
+            self._committed[:] = self._pending
+            self._pending = None
+
+
+class MemoryFanOutUnitOfWork:
+    def __init__(self, store: "MemoryStore") -> None:
+        self.runs = MemoryFanOutRunRepository(store.fanout_runs)
+        self.hold = MemoryFanOutHoldRepository(store.fanout_hold)
+        self.audit = MemoryAuditSink(store.audit, tenant_id=None)
+
+    def __enter__(self) -> "MemoryFanOutUnitOfWork":
+        return self
+
+    def __exit__(self, exc_type: object, *exc_info: object) -> None:
+        if exc_type is None:
+            self.runs.commit()
+            self.hold.commit()
+            self.audit.commit()
+
+
+class MemoryFanOutUnits:
+    """The ``FanOutUnitOfWorkFactory`` of a memory store: one unit at a time, under the store's
+    lock, like its tenant units."""
+
+    def __init__(self, store: "MemoryStore") -> None:
+        self._store = store
+
+    def __call__(self) -> AbstractContextManager[FanOutUnitOfWork]:
+        return self._unit()
+
+    @contextmanager
+    def _unit(self) -> Iterator[FanOutUnitOfWork]:
+        with self._store.lock, MemoryFanOutUnitOfWork(self._store) as uow:
+            yield uow
+
+
+class MemoryBusinessDirectory:
+    """The directory across tenants, as ``PostgresBusinessDirectory`` reads it: by tenant then
+    node."""
+
+    def __init__(self, store: "MemoryStore") -> None:
+        self._store = store
+
+    def entries(
+        self,
+        *,
+        level: AttributeLevel | None = None,
+        after: DirectoryKey | None = None,
+        limit: int = 1_000,
+    ) -> Sequence[DirectoryEntry]:
+        bound = None if after is None else (after.tenant_id.value, after.business_id.value)
+        with self._store.lock:
+            found = [
+                entry
+                for entry in self._store.directory.values()
+                if (level is None or entry.level is level)
+                and (bound is None or (entry.tenant_id.value, entry.business_id.value) > bound)
+            ]
+        found.sort(key=lambda entry: (entry.tenant_id.value, entry.business_id.value))
+        return found[:limit]
+
+    def count(self, *, level: AttributeLevel) -> int:
+        with self._store.lock:
+            return sum(1 for entry in self._store.directory.values() if entry.level is level)
+
+
 class MemoryStore:
     """Holds every tenant's decisions, directory entries, review items, published events and
-    audit entries; makes units of work."""
+    audit entries, and the fan-out runs and the hold; makes units of work."""
 
     def __init__(self) -> None:
         self.decisions: dict[DecisionId, Decision] = {}
@@ -239,7 +376,11 @@ class MemoryStore:
         self.reviews: dict[ReviewItemId, ReviewItem] = {}
         self.events: list[DomainEvent] = []
         self.audit: list[AuditEntry] = []
-        self._lock = threading.Lock()
+        self.fanout_runs: dict[RuleVersionId, FanOutRun] = {}
+        self.fanout_hold: list[FanOutHold] = []
+        self.lock = threading.Lock()
+        self.fanouts = MemoryFanOutUnits(self)
+        """The units over the fan-out runs and the hold."""
 
     def ping(self) -> bool:
         return True
@@ -249,5 +390,5 @@ class MemoryStore:
 
     @contextmanager
     def _unit(self, tenant_id: TenantId) -> Iterator[UnitOfWork]:
-        with self._lock, MemoryUnitOfWork(self, tenant_id) as uow:
+        with self.lock, MemoryUnitOfWork(self, tenant_id) as uow:
             yield uow

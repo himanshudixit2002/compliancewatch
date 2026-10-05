@@ -142,3 +142,22 @@ fan-out over every business reads before it knows a tenant and then visits one t
 at a time. Every session may read the ids; every write must pass the tenant policy. It holds ids
 and levels only (migration 0002 of applicability-engine).
 """
+
+[[exemptions]]
+table = "applicability.fanout_run"
+kind = "exempt"
+reason = """
+One row per published rule version's fan-out over every tenant's businesses: its status, counters
+and who last paused, resumed or cancelled it. The run belongs to the rule version, not to a
+tenant, so there is no tenant_id; it holds ids, counts and reasons, no tenant data (migration 0003
+of applicability-engine).
+"""
+
+[[exemptions]]
+table = "applicability.fanout_hold"
+kind = "exempt"
+reason = """
+The one global hold that stops every fan-out at its next batch boundary, with its reason, who set
+it and when. It belongs to no tenant, so there is no tenant_id (migration 0003 of
+applicability-engine).
+"""

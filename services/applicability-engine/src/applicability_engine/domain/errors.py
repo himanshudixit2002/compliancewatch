@@ -78,3 +78,26 @@ class ReviewItemResolvedError(DomainError, ValueError):
     def __init__(self, item_id: str) -> None:
         super().__init__(f"review item {item_id} is already resolved")
         self.item_id = item_id
+
+
+class FanOutNotFoundError(DomainError, LookupError):
+    type_slug = "applicability-fan-out-not-found"
+    title = "Fan-out not found"
+
+    def __init__(self, rule_version_id: str) -> None:
+        super().__init__(f"no fan-out of rule version {rule_version_id} exists")
+        self.rule_version_id = rule_version_id
+
+
+class FanOutStateError(DomainError, ValueError):
+    """A control the run's status does not allow: pausing a run that is not running or held,
+    resuming one that is not paused, or anything on a run that has finished."""
+
+    type_slug = "applicability-fan-out-state"
+    title = "Fan-out cannot do that now"
+
+    def __init__(self, rule_version_id: str, status: str, to: str) -> None:
+        super().__init__(f"the fan-out of {rule_version_id} is {status}; it cannot become {to}")
+        self.rule_version_id = rule_version_id
+        self.status = status
+        self.to = to

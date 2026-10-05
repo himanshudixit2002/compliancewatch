@@ -163,6 +163,9 @@ class Unavailable:
     def rules_in_force(self, as_of: date, level: AttributeLevel) -> Sequence[RuleInForce]:
         raise DependencyUnavailableError("rulebook answered 502: bad gateway")
 
+    def forget_in_force(self) -> None:
+        return None
+
 
 def test_an_unavailable_dependency_is_a_503_and_frees_the_key(profiles: MemoryProfiles) -> None:
     settings = ApplicabilityEngineSettings(
