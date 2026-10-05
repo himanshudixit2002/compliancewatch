@@ -143,11 +143,23 @@
       "type": "bool",
       "default": false,
       "owner": "core-product",
-      "description": "The obligation worker's reminder sweep: every CW_OBLIGATION_SWEEP_INTERVAL_SECONDS it publishes obligation.due_soon for open obligations due within 7, 3 and 1 days, once per obligation, due date and threshold. Off, the worker only consumes applicability.decided.",
+      "description": "The obligation worker's reminder sweep and rolling window: every CW_OBLIGATION_SWEEP_INTERVAL_SECONDS the sweep publishes obligation.due_soon for open obligations due within 7, 3 and 1 days, once per obligation, due date and threshold, and once a day the window makes the obligations of the periods that entered it for every business whose latest decision of a recurring rule applies. Off, the worker only consumes its events.",
       "removal": "Once reminders have gone out from the sweep in production for 30 days.",
       "expires": "2027-03-31",
       "targeting": "none",
       "env": "CW_OBLIGATION_SWEEP_ENABLED",
+      "services": ["obligation"]
+    },
+    {
+      "name": "obligation.rule_events",
+      "type": "bool",
+      "default": false,
+      "owner": "core-product",
+      "description": "The obligation worker's consumer of the rule events (group obligation.rules): rule.published refreshes the rule_version_ref cache, rule.withdrawn closes the version's open obligations in every tenant, rule.superseded closes the periods the newer version takes over, and rule.deadline_changed moves the period's open obligations to the new date. Off, the group still consumes, so its offsets keep up, and changes nothing.",
+      "removal": "Once withdrawals, supersessions and deadline changes have reached obligations in production for 30 days.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_OBLIGATION_RULE_EVENTS_ENABLED",
       "services": ["obligation"]
     },
     {

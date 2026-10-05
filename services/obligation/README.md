@@ -1,11 +1,11 @@
 # obligation service
 
-Part of the ComplianceWatch monorepo. **Domain, use cases, the Postgres unit of work, a read route and the worker (the applicability.decided consumer and the reminder sweep) exist; no write API yet.**
+Part of the ComplianceWatch monorepo. **Domain, use cases, the Postgres unit of work, a read route and the worker (the applicability.decided consumer, the rule events consumer, the reminder sweep and the rolling window) exist; no write API yet.**
 Design reference: Project Foundation guide, sections 7 and 14.
 
 - **Owns:** Obligations, evidence metadata, the append-only change log of every obligation (`obligation_change`); builds obligations from the RuleVersion template, computes due dates, schedules reminders
 - **Owning team:** Core Product (guide section 14)
-- **Consumes:** applicability.decided; user actions
+- **Consumes:** applicability.decided; rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed; user actions
 - **Emits / publishes:** obligation.created, obligation.rescheduled, obligation.closed and obligation.due_soon (through the outbox)
 
 ## What is here
@@ -18,7 +18,10 @@ Design reference: Project Foundation guide, sections 7 and 14.
   rolling window of periods; due dates are the end of the due day in India Standard Time.
 - `application/changes.py`: `ApplyDeadlineChange` moves open obligations of a period and
   publishes `obligation.rescheduled`; `WithdrawRule` closes them with `rule_withdrawn`;
-  `CloseObligation` closes one for a user's reason.
+  `CloseSupersededPeriods` closes, with `rule_superseded`, the open obligations a superseding
+  version takes over (a period that ends after its `effective_from`, a one-off due on that day
+  or later, or one without a date) and leaves the earlier ones; `CloseObligation` closes one for
+  a user's reason.
 - `domain/history.py` and `application/audit.py`: the change log (ADR-015, every change writes
   an audit row). Every use case above publishes through `audit.record(uow, event, after)`,
   which also appends an `ObligationChange` to `uow.history`: kind `created`, `rescheduled` or
@@ -29,13 +32,43 @@ Design reference: Project Foundation guide, sections 7 and 14.
   together. A use case that leaves an obligation unchanged, or skips a closed one, writes
   neither. This table is the single history of an obligation; later kinds (started, completed,
   assigned) widen `ChangeKind` and its CHECK constraint. The change log has no read route yet.
-- `application/decisions.py`: `ApplyDecision` acts on one applicability decision. `applies`
-  without `needs_review` materialises the business's obligations of the rule version, read from
-  the rulebook (`domain/ports.py` `RuleVersionReader`, `infrastructure/rulebook_client.py`), as of
-  the day of the decision in India; `not_applicable` without `needs_review` closes the business's
-  open obligations of the rule version with `profile_changed`; a decision that needs review
-  changes nothing. Both are idempotent under redelivery. A closed obligation stays closed: a
-  later `applies` only creates periods that have no obligation yet.
+- `application/decisions.py`: `ApplyDecision` acts on one applicability decision in two steps:
+  `plan` reads the rule version (`domain/ports.py` `RuleVersionReader`,
+  `infrastructure/rulebook_client.py`) with no transaction open, and `apply` writes. `applies`
+  without `needs_review` materialises the business's obligations of the rule version as of the
+  day of the decision in India, behind the guard (below); `not_applicable` without
+  `needs_review` closes the business's open obligations of the rule version with
+  `profile_changed`; a decision that needs review changes nothing. Each applies or
+  not_applicable decision is recorded as the business's latest for the version
+  (`obligation_decision`), and one made before the latest recorded changes nothing (`stale`).
+  Both are idempotent under redelivery. A closed obligation stays closed: a later `applies` only
+  creates periods that have no obligation yet.
+- `domain/rule_versions.py` and `application/guard.py`: the rule version cache and the guard.
+  `RuleVersionRef` is what the service keeps of a version (`rule_version_ref`): rule key, status,
+  title, effective dates, seed status, the approvers of the round it was published from, when it
+  was published, its verified citations and when the rulebook was read. A status only moves past
+  publication and an `effective_to` only moves earlier (`merge`). `guard.admit` merges the version
+  as the reader fetched it into the cache, filling it on a miss, and judges what the cache then
+  holds: a withdrawn version makes nothing (`rule_withdrawn`), nor does one without a verified
+  citation (`uncited`; every obligation carries at least one), and a version cut short by a
+  replacement makes only the periods it still governs, the ones whose last day it is in force on
+  (`rule_superseded` for the rest). The cache row stays locked until the transaction ends, so a
+  decision and a rule event about one version run one after the other: an `applicability.decided`
+  that arrives after the withdrawal (a fan-out batch in flight, a consumer behind on its topic,
+  a read kept from a minute ago) is refused, and one applied just before it is closed by it.
+- `application/rule_events.py`: `RuleEvents`, what the consumer of the rule events does.
+  `rule.published` refreshes the cache only (the engine fans the version out, and the obligations
+  arrive with its decisions); `rule.withdrawn` caches the version as withdrawn and runs
+  `WithdrawRule` for every tenant of the directory; `rule.superseded` caches it as superseded,
+  ending on the event's `effective_from`, and runs `CloseSupersededPeriods`; `rule.deadline_changed`
+  runs `ApplyDeadlineChange` for the event's period. A withdrawal or a supersession reads the
+  version fresh; when the rulebook cannot answer, the cached row is moved on its own, and with
+  neither the event fails and is retried. Every use case is idempotent, so a replayed event
+  changes nothing more.
+- `application/window.py`: `RollWindow`, the rolling window. For every tenant (or those named)
+  and every business whose latest decision of a recurring rule version applies, it materialises
+  the window as of today in India behind the guard, so the periods that entered the window since
+  a decision or a run last made them get their obligations; reads with no unit of work open.
 - `domain/reminders.py` and `application/reminders.py`: `SendDueReminders`, the reminder sweep.
   For every tenant in the tenant directory it opens one unit of work and publishes
   `obligation.due_soon` for each open obligation whose `days_left` falls in a threshold of
@@ -60,6 +93,12 @@ Design reference: Project Foundation guide, sections 7 and 14.
   always refused, and DELETE only in a transaction that has set `app.erasure` to `on`. A tenant
   erasure (not built yet; a later work package adds it) must set `app.erasure=on` and delete the
   change rows before the obligations.
+- `migrations/versions/20261006_0004_rule_version_cache.py`: `rule_version_ref`, the rule
+  version cache, rule-level and so without tenant_id or row-level security (exempt in
+  infra/scripts/migration_lint.toml), with the verified citations as JSON; and
+  `obligation_decision`, the latest applies or not_applicable decision per business and rule
+  version under the tenant policy, which the rolling window reads. No backfill: a business
+  decided before this release has its window rolled from its next decision on.
 - `migrations/versions/20261004_0003_obligation_reminders.py`: `obligation_reminder` (one row per
   reminder, unique per obligation, due date and threshold and per obligation and index, forced
   row-level security, cascades with its obligation) and `obligation_tenant`, the tenant
@@ -67,19 +106,41 @@ Design reference: Project Foundation guide, sections 7 and 14.
   may read while every write passes the tenant policy. The repository records the unit's tenant
   when it adds the tenant's first obligation; `PostgresTenantDirectory` reads it for the sweep.
 - `worker.py`: `python -m obligation.worker` (`make worker SERVICE=obligation`, needs
-  `CW_OBLIGATION_STORE=postgres`). The consumer group `obligation.decisions` reads
-  `applicability.decided` and applies each decision in the consumer's own transaction
-  (`PostgresUnitOfWorkFactory.on_connection`), so the obligations, their outbox and change rows
-  and the `processed_event` row commit together; what it cannot apply goes to
-  `applicability.decided.obligation.decisions.dlq` after the retries. The reminder sweep runs
-  every `CW_OBLIGATION_SWEEP_INTERVAL_SECONDS` (3600) when `CW_OBLIGATION_SWEEP_ENABLED` (flag
-  `obligation.reminder_sweep`, off by default) is on. The outbox relay runs on its own
-  (`make relay SERVICE=obligation`).
+  `CW_OBLIGATION_STORE=postgres`). Both consumers read with no transaction open and then write
+  in the consumer's own transaction (`py_common.outbox.read_then_write`,
+  `PostgresUnitOfWorkFactory.on_connection`), so everything they change commits with the
+  `processed_event` row:
+  - group `obligation.decisions` reads `applicability.decided` and applies each decision; a
+    guard refusal is logged as `obligation.decision_guarded` (reason, status, end, refused
+    periods) and counted in `obligation_guard_refusals_total{reason, source}`; what it cannot
+    apply goes to `applicability.decided.obligation.decisions.dlq` after the retries;
+  - group `obligation.rules` reads `rule.published`, `rule.superseded`, `rule.withdrawn` and
+    `rule.deadline_changed` (no tenant) and applies each to every tenant of the `obligation_tenant`
+    directory, one unit of work per tenant on the consumer's connection, each setting its own
+    tenant so row-level security holds, logged as `obligation.rule_event`. With
+    `CW_OBLIGATION_RULE_EVENTS_ENABLED` (flag `obligation.rule_events`, off by default) off it
+    still consumes, so its offsets keep up, and changes nothing. One transaction holds every
+    tenant's changes for an event: fine while the tenants are few; per-tenant transactions with
+    their own processed mark come later.
 
-The rulebook publishes `rule.deadline_changed`, `rule.withdrawn` and `rule.superseded` without a
-tenant; the consumer that turns them into `ApplyDeadlineChange` and `WithdrawRule` for every
-tenant's open obligations is not built yet. It can iterate the `obligation_tenant` directory one
-tenant unit at a time, the way the reminder sweep does, without relaxing row-level security.
+  With `CW_OBLIGATION_SWEEP_ENABLED` (flag `obligation.reminder_sweep`, off by default) the
+  reminder sweep runs every `CW_OBLIGATION_SWEEP_INTERVAL_SECONDS` (3600) and the rolling window
+  daily at 02:30 IST (`obligation.window_rolled`). Both consumers share one rulebook reader,
+  which keeps a read for a minute and is read fresh by a rule event, so the decision consumer of
+  the same process sees a withdrawal at once. The outbox relay runs on its own
+  (`make relay SERVICE=obligation`).
+- `sweep.py`: `obligation-sweep --once [--now ISO] [--tenant ID]... [--json]` runs the reminder
+  sweep and the rolling window once, with the worker's settings. `--now` runs them as of another
+  moment (with its offset) and is refused unless `CW_ENV` is local or test; `--tenant` limits
+  both to the tenants named, which is how the local product's check leaves the shared dev
+  database's other tenants alone. Exit 0, 1 when a tenant failed, 2 when refused.
+
+The rulebook's `GET /v1/rulebook/rule-versions/{id}` names the approvers of the round a version
+was published from (`approved_by`) and when (`published_at`), so the cache gets them from one
+read, whichever event reached the service first; the detail carries the citations too, so no
+second call to the citations route is needed. A deadline change of a period that has no
+obligation yet is not remembered: an obligation made later for that period takes the version's
+own due date.
 
 ## API
 
@@ -116,12 +177,13 @@ been used in a session.
 ```
 src/obligation/
   api/             # router.py (the read route), schemas.py (ObligationOut), deps.py (caller and tenant, wiring)
-  application/     # materialise.py, changes.py, decisions.py, reminders.py, queries.py
-  domain/          # model.py (Obligation, DueWindow), events.py, errors.py, reminders.py, ports.py, repository.py (protocols)
-  infrastructure/  # models.py, repository.py (Postgres unit of work with the outbox), memory.py, rulebook_client.py
+  application/     # materialise.py, changes.py, decisions.py, guard.py, rule_events.py, window.py, reminders.py, queries.py
+  domain/          # model.py (Obligation, DueWindow), events.py, errors.py, reminders.py, rule_versions.py, ports.py, repository.py (protocols)
+  infrastructure/  # models.py, repository.py (Postgres unit of work with the outbox), memory.py, rulebook_client.py, metrics.py
   wiring.py        # what the api layer gets from the composition root
   main.py          # composition root: wire(settings), build_app(settings), problem statuses
-  worker.py        # the worker's composition root: components(settings), the decision handler, the sweep job
+  worker.py        # the worker's composition root: components(settings), both handlers, the sweep and window jobs
+  sweep.py         # obligation-sweep --once: the reminder sweep and the rolling window, once
 migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA)
 tests/
   unit/            # domain and application with fakes; no I/O
@@ -138,7 +200,8 @@ From the repo root:
 make dev                          # infrastructure (Docker Compose)
 make migrate SERVICE=obligation
 make run SERVICE=obligation           # http://localhost:8005/health, /ready, /v1/obligation/obligations
-make worker SERVICE=obligation        # the applicability.decided consumer (and the sweep when enabled)
+make worker SERVICE=obligation        # both consumers (and the sweep and the window when enabled)
+uv run --package compliancewatch-obligation obligation-sweep --once --now 2026-11-15T10:00:00+05:30 --tenant <id>
 make test                         # unit + contract tests with the coverage gate
 docker build -f services/obligation/Dockerfile -t compliancewatch-obligation .
 ```

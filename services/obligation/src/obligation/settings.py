@@ -1,8 +1,11 @@
 """Process configuration of the obligation service: ``CW_*`` variables on top of py-common's.
 
 ``rulebook_url`` is where the worker reads the rule versions it materialises. The reminder sweep
-runs in the worker only when ``obligation_sweep_enabled`` (``CW_OBLIGATION_SWEEP_ENABLED``) is
-set, every ``obligation_sweep_interval_seconds`` (an hour by default).
+and the daily rolling window run in the worker only when ``obligation_sweep_enabled``
+(``CW_OBLIGATION_SWEEP_ENABLED``, flag ``obligation.reminder_sweep``) is set, the sweep every
+``obligation_sweep_interval_seconds`` (an hour by default). ``obligation_rule_events_enabled``
+(``CW_OBLIGATION_RULE_EVENTS_ENABLED``, flag ``obligation.rule_events``, off by default) lets the
+worker's consumer of the rule events act on them; off, it only keeps its offsets.
 """
 
 from typing import Literal
@@ -21,3 +24,4 @@ class ObligationSettings(Settings):
     rulebook_url: str = "http://localhost:8003"
     obligation_sweep_enabled: bool = False
     obligation_sweep_interval_seconds: float = Field(default=3600.0, gt=0)
+    obligation_rule_events_enabled: bool = False

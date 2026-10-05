@@ -93,7 +93,7 @@ export function citationDto(overrides: Partial<CitationDto> = {}): CitationDto {
 export function ruleVersionDetailDto(
   overrides: Partial<RuleVersionDetailDto> = {},
 ): RuleVersionDetailDto {
-  return { ...ruleVersionDto(), citations: [citationDto()], ...overrides };
+  return { ...ruleVersionDto(), approved_by: [], citations: [citationDto()], ...overrides };
 }
 
 export function lifecycleDto(overrides: Partial<LifecycleDto> = {}): LifecycleDto {

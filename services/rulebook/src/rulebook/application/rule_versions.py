@@ -1,5 +1,6 @@
 """Read rule versions: the ones in force on a date, every version of one rule in any status, one
-version in any status, its citations.
+version in any status with its citations (and, once published, its approvers), and the citations
+alone.
 
 The Q&A service answers from exactly what ``ListRulesInForce`` returns for the question's date,
 so a draft, a version under review or a withdrawn one never reaches an answer.
@@ -13,7 +14,7 @@ from datetime import date
 from domain_kernel.ids import RuleId, RuleVersionId
 from rulebook.domain.errors import UnknownRuleError, UnknownRuleVersionError
 from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
-from rulebook.domain.rule_versions import CitationRecord, RuleVersionRecord
+from rulebook.domain.rule_versions import CitationRecord, RuleVersionDetail, RuleVersionRecord
 
 MAX_VERSIONS = 500
 
@@ -56,17 +57,29 @@ class ListRuleVersions:
 
 
 class ReadRuleVersion:
+    """One version in any status with its citations. A version that has been published also
+    names the approvers of the round it was published from: the decision audit's approvals
+    since its ``submitted_at``, which publication froze, so the answer does not depend on which
+    event a reader saw first."""
+
     def __init__(self, unit_of_work: KnowledgeUnitOfWorkFactory) -> None:
         self._unit_of_work = unit_of_work
 
-    def run(
-        self, rule_version_id: RuleVersionId
-    ) -> tuple[RuleVersionRecord, tuple[CitationRecord, ...]]:
+    def run(self, rule_version_id: RuleVersionId) -> RuleVersionDetail:
         with self._unit_of_work() as uow:
             record = uow.rule_versions.get(rule_version_id)
             if record is None:
                 raise UnknownRuleVersionError(str(rule_version_id))
-            return record, uow.citations.for_version(rule_version_id)
+            approvers = (
+                uow.rule_versions.approvers(rule_version_id, record.submitted_at)
+                if record.published_at is not None and record.submitted_at is not None
+                else frozenset()
+            )
+            return RuleVersionDetail(
+                record,
+                uow.citations.for_version(rule_version_id),
+                tuple(sorted(approvers, key=str)),
+            )
 
 
 class ListCitations:

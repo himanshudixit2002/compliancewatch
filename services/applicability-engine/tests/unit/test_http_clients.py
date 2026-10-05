@@ -55,6 +55,7 @@ DETAIL: dict[str, Any] = {
     "todo": [],
     "published_at": "2026-04-01T00:00:00Z",
     "high_impact": False,
+    "approved_by": [str(uuid4())],
     "citations": [],
 }
 

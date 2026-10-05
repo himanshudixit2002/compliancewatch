@@ -135,6 +135,11 @@ export interface RuleVersion {
   /** The questions an analyst answers before publication. */
   todo: readonly string[];
   publishedAt: string | null;
+  /**
+   * The user ids of the approvers of the round the version was published from, as the detail
+   * route names them; empty until it is published, and for a version read from a list.
+   */
+  approvedBy: readonly string[];
   /** Publishing needs two different approvers (ADR-006). */
   highImpact: boolean;
   /** The four open mappings as stored, for the "as stored" view. */

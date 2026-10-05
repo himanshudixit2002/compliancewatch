@@ -22,7 +22,8 @@ from cw_mvp.worker import WORKER_CLIENT_ID, build_registry, run_worker, worker_s
 from cw_mvp.worker_health import HealthServer, WorkerHealth, health_app, heartbeat
 from obligation.settings import ObligationSettings
 from obligation.worker import GROUP_ID as DECISIONS_GROUP
-from obligation.worker import SWEEP_JOB
+from obligation.worker import RULES_GROUP_ID as OBLIGATION_RULES_GROUP
+from obligation.worker import SWEEP_JOB, WINDOW_JOB
 from pipeline.settings import PipelineSettings
 from py_common.idempotency.purge import JOB_NAME as PURGE_JOB
 from py_common.idempotency.schema import IDEMPOTENCY_TABLE
@@ -87,6 +88,7 @@ async def test_relays_start_only_for_schemas_with_an_outbox() -> None:
         PROFILES_GROUP,
         RULES_GROUP,
         DECISIONS_GROUP,
+        OBLIGATION_RULES_GROUP,
         "notification.obligations",
     )
     assert "profile/outbox-relay" in hosted.loops()
@@ -102,10 +104,25 @@ async def test_obligation_consumes_decisions_with_kafka_and_sweeps_behind_its_ow
     assert f"obligation/{SWEEP_JOB}" not in kafka.loops()
     sweep = await build_registry(_root(), probe=_inspector(), service_overrides=sweeping)
     assert f"obligation/{SWEEP_JOB}" in sweep.loops()
+    assert f"obligation/{WINDOW_JOB}" in sweep.loops()
     assert DECISIONS_GROUP not in sweep.consumer_groups()
     (obligation,) = [entry for entry in sweep.hosted if entry.service == "obligation"]
     assert isinstance(obligation.settings, ObligationSettings)
     assert obligation.settings.rulebook_url == _root().mvp_internal_url
+
+
+async def test_obligation_consumes_rule_events_with_kafka_whatever_its_flag() -> None:
+    for enabled in (False, True):
+        hosted = await build_registry(
+            _root(worker_kafka_enabled=True),
+            probe=_inspector(),
+            service_overrides={"obligation": {"obligation_rule_events_enabled": enabled}},
+        )
+        assert OBLIGATION_RULES_GROUP in hosted.consumer_groups()
+        assert f"obligation/consumer:{OBLIGATION_RULES_GROUP}" in hosted.loops()
+        (obligation,) = [entry for entry in hosted.hosted if entry.service == "obligation"]
+        assert isinstance(obligation.settings, ObligationSettings)
+        assert obligation.settings.obligation_rule_events_enabled is enabled
 
 
 async def test_the_engine_consumes_profile_updates_with_kafka_whatever_its_recompute_switch() -> (

@@ -18,7 +18,7 @@ from rulebook.domain.graph import (
     RelationRecord,
     ResolutionStatus,
 )
-from rulebook.domain.rule_versions import CitationRecord, RuleVersionRecord
+from rulebook.domain.rule_versions import CitationRecord, RuleVersionDetail, RuleVersionRecord
 from rulebook.domain.seed import SeedStatus
 
 
@@ -95,13 +95,20 @@ class CitationOut(BaseModel):
 
 
 class RuleVersionDetailOut(RuleVersionOut):
+    approved_by: list[UUID] = Field(
+        description=(
+            "Who approved the review round the version was published from, by user id; empty "
+            "until it is published"
+        )
+    )
     citations: list[CitationOut]
 
     @classmethod
-    def from_detail(cls, record: RuleVersionRecord, citations: tuple[CitationRecord, ...]) -> Self:
+    def from_detail(cls, detail: RuleVersionDetail) -> Self:
         return cls(
-            **RuleVersionOut.from_record(record).model_dump(),
-            citations=[CitationOut.from_record(citation) for citation in citations],
+            **RuleVersionOut.from_record(detail.record).model_dump(),
+            approved_by=[approver.value for approver in detail.approved_by],
+            citations=[CitationOut.from_record(citation) for citation in detail.citations],
         )
 
 

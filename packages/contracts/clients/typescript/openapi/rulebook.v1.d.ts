@@ -366,7 +366,12 @@ export type paths = {
       path?: never;
       cookie?: never;
     };
-    /** One rule version in any status, with its citations */
+    /**
+     * One rule version in any status, with its citations and, once published, approvers
+     * @description ``approved_by`` lists the approvers of the round the version was published from (two for
+     *     a high-impact one) and ``published_at`` when it was published, so a reader that shows who
+     *     reviewed a duty does not depend on having seen rule.published.
+     */
     get: operations["read_rule_version_v1_rulebook_rule_versions__rule_version_id__get"];
     put?: never;
     post?: never;
@@ -1563,6 +1568,11 @@ export type components = {
     };
     /** RuleVersionDetailOut */
     RuleVersionDetailOut: {
+      /**
+       * Approved By
+       * @description Who approved the review round the version was published from, by user id; empty until it is published
+       */
+      approved_by: string[];
       /** Citations */
       citations: components["schemas"]["CitationOut"][];
       /**

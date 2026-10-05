@@ -7,8 +7,10 @@
   ``--rule gstr9_annual``, the fourth rule the golden world cites;
 - ``cw-product evaluate [--tenant KEY]... [--fresh]``: a decision of every published rule for
   every seeded registration;
-- ``cw-product check [--step NAME]... [--timeout SECONDS]``: the check's steps in order; the
-  fanout step also reads the database at ``CW_PRODUCT_RECORDS_URL``, read only.
+- ``cw-product check [--step NAME]... [--timeout SECONDS] [--destructive]``: the check's steps
+  in order; the fanout step also reads the database at ``CW_PRODUCT_RECORDS_URL``, read only.
+  ``--destructive`` lets the rollback step withdraw gstr9_annual, which only a database made for
+  the run can afford (the CI dev-stack job); without it that step reports itself skipped.
 
 Each takes ``--json``. The tool reads ``CW_*`` as the services do and refuses to run unless
 ``CW_ENV`` is local or test and ``CW_AUTH_MODE`` header or dual (exit 2). A step that fails
@@ -141,7 +143,9 @@ def run_check(product: Product, args: argparse.Namespace) -> int:
     url = product.settings.product_records_url
     records = PostgresRecords(url) if url else None
     try:
-        context = checks.CheckContext(product, timeout=args.timeout, records=records)
+        context = checks.CheckContext(
+            product, timeout=args.timeout, records=records, destructive=args.destructive
+        )
         results = checks.run_checks(context, steps)
     finally:
         if records is not None:
@@ -205,6 +209,11 @@ def parser() -> argparse.ArgumentParser:
         type=float,
         default=checks.TIMEOUT_SECONDS,
         help=f"seconds each wait may take (default {checks.TIMEOUT_SECONDS:.0f})",
+    )
+    checking.add_argument(
+        "--destructive",
+        action="store_true",
+        help="also run the steps that withdraw seed rules (rollback); only on a throwaway database",
     )
     _json_option(checking)
     checking.set_defaults(run=run_check)

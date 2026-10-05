@@ -74,6 +74,7 @@ def test_a_rule_version_with_its_citations(client: TestClient, store: MemoryKnow
     assert detail.status_code == 200
     body = detail.json()
     assert (body["status"], body["title"], body["published_at"]) == ("draft", "Extension", None)
+    assert body["approved_by"] == [], "no approvers until it is published"
     assert [c["citation_id"] for c in body["citations"]] == [str(citation)]
     assert body["citations"][0]["clause_ref"] == "en.p1"
     assert body["citations"][0]["document_id"] == str(DOC)

@@ -59,7 +59,7 @@ The services whose routes do more than read their own store:
   the harness sends no token: a nightly run from the deployable needs that URL set to the
   internal listener, and a mode other than `token`.
 - **obligation**: the API only reads obligations; the worker makes them from applicability
-  decisions (below).
+  decisions, closes or moves them on the rule events, and rolls their window (below).
 
 The process must stay one process: notification preferences, the gateway's response cache and
 its budget-alarm markers are still held in memory.
@@ -81,7 +81,7 @@ service's settings:
 
 | What | When |
 | --- | --- |
-| each service's worker components (`<pkg>.worker.components`): the engine's consumers of profile.updated and of rule.published and rule.withdrawn and its fan-out's Temporal worker (queue `applicability`), notification's consumer, dispatcher and retention sweep, obligation's consumer of applicability.decided and reminder sweep, the rulebook's daily transitions sweep, the pipeline's Temporal worker | consumers with `CW_WORKER_KAFKA_ENABLED`, Temporal workers with `CW_WORKER_TEMPORAL_ENABLED` (one client for all), periodic jobs always, behind their service's own switch: the reminder sweep with `CW_OBLIGATION_SWEEP_ENABLED`, the transitions with `CW_RULEBOOK_PUBLISH_ENABLED`; the engine's profile consumer runs with Kafka and evaluates only with `CW_APPLICABILITY_RECOMPUTE_ENABLED` (it keeps the business directory either way), and its rules consumer starts fan-outs only with `CW_APPLICABILITY_FANOUT_ENABLED` (it records a disabled run otherwise) |
+| each service's worker components (`<pkg>.worker.components`): the engine's consumers of profile.updated and of rule.published and rule.withdrawn and its fan-out's Temporal worker (queue `applicability`), notification's consumer, dispatcher and retention sweep, obligation's consumers of applicability.decided and of the rule events, its reminder sweep and rolling window, the rulebook's daily transitions sweep, the pipeline's Temporal worker | consumers with `CW_WORKER_KAFKA_ENABLED`, Temporal workers with `CW_WORKER_TEMPORAL_ENABLED` (one client for all), periodic jobs always, behind their service's own switch: the reminder sweep and the rolling window with `CW_OBLIGATION_SWEEP_ENABLED`, the transitions with `CW_RULEBOOK_PUBLISH_ENABLED`; obligation's rules consumer acts on rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed only with `CW_OBLIGATION_RULE_EVENTS_ENABLED` (it keeps its offsets either way); the engine's profile consumer runs with Kafka and evaluates only with `CW_APPLICABILITY_RECOMPUTE_ENABLED` (it keeps the business directory either way), and its rules consumer starts fan-outs only with `CW_APPLICABILITY_FANOUT_ENABLED` (it records a disabled run otherwise) |
 | one outbox relay per schema that has an `outbox_event` table | `CW_WORKER_KAFKA_ENABLED` |
 | the daily idempotency purge of every schema that has an `idempotency_key` table | always |
 

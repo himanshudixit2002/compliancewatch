@@ -51,6 +51,7 @@ from domain_kernel.ids import BusinessId, RuleVersionId
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.predicates import specification_to_mapping
 from obligation import worker as obligation_worker
+from obligation.application.decisions import ApplyDecision
 from obligation.infrastructure.memory import MemoryStore as ObligationStore
 from obligation.infrastructure.rulebook_client import HttpRuleVersionReader
 from ontology import load as load_ontology
@@ -60,10 +61,8 @@ from py_common.outbox import (
     IdempotentConsumer,
     InboundRecord,
     Outcome,
-    SyncProcessedStore,
     processed_event,
     read_first_store,
-    sync_handler,
 )
 from py_common.outbox.testing import FakeProducer
 from rulebook.application.seed_loader import load_calendar
@@ -192,13 +191,11 @@ class Pump:
         )
         self.obligation_consumer = IdempotentConsumer(
             group_id=obligation_worker.GROUP_ID,
-            store=SyncProcessedStore(
-                inbox(tmp_path / "obligation.sqlite"), group_id=obligation_worker.GROUP_ID
+            store=read_first_store(
+                inbox(tmp_path / "obligation.sqlite"), obligation_worker.GROUP_ID
             ),
-            handler=sync_handler(
-                obligation_worker.decision_handler(
-                    HttpRuleVersionReader(url), units_on=self.obligation_units
-                )
+            handler=obligation_worker.decision_handler(
+                ApplyDecision(HttpRuleVersionReader(url)), units_on=self.obligation_units
             ),
             producer=self.producer,
             config=config,

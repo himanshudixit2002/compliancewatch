@@ -581,9 +581,10 @@ openapi-ts-check: check-pnpm ## The generated OpenAPI types match the committed 
 # The product's own settings are passed here and nowhere else, never as a registry or settings
 # default: header auth; both listeners on 127.0.0.1; the worker's health on PRODUCT_WORKER_PORT
 # (8081, since 8001 is identity's under make run and make web-stack); the worker's Kafka and
-# Temporal switches and the reminder sweep on; the engine's recompute on profile.updated on, with
-# the rulebook's in-force listing cached for five seconds, and its fan-out of rule.published on
-# (CW_APPLICABILITY_FANOUT_ENABLED); rule publishing on with the placeholder
+# Temporal switches, the reminder sweep and the rolling window on; the engine's recompute on
+# profile.updated on, with the rulebook's in-force listing cached for five seconds, and its
+# fan-out of rule.published on (CW_APPLICABILITY_FANOUT_ENABLED); obligation's consumer of the rule
+# events on (CW_OBLIGATION_RULE_EVENTS_ENABLED); rule publishing on with the placeholder
 # tokens local-write-token and local-review-token (not secrets; values in .env win); the profile's
 # static GSTIN lookup, so the demo GSTIN pre-fills; the notification sink in place of the real
 # channels, recording into var/product/sink.jsonl, with a five-second batching window so a change
@@ -605,7 +606,8 @@ PRODUCT_ENV = CW_AUTH_MODE=header CW_MVP_HOST=127.0.0.1 \
   CW_MVP_WORKER_HEALTH_PORT=$(PRODUCT_WORKER_PORT) \
   CW_WORKER_KAFKA_ENABLED=true CW_WORKER_TEMPORAL_ENABLED=true CW_OBLIGATION_SWEEP_ENABLED=true \
   CW_APPLICABILITY_RECOMPUTE_ENABLED=true CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS=5 \
-  CW_APPLICABILITY_FANOUT_ENABLED=true CW_RULEBOOK_PUBLISH_ENABLED=true \
+  CW_APPLICABILITY_FANOUT_ENABLED=true CW_OBLIGATION_RULE_EVENTS_ENABLED=true \
+  CW_RULEBOOK_PUBLISH_ENABLED=true \
   CW_RULEBOOK_WRITE_TOKEN="$${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}" \
   CW_RULEBOOK_REVIEW_TOKEN="$${CW_RULEBOOK_REVIEW_TOKEN:-local-review-token}" \
   CW_PROFILE_GSTIN_LOOKUP=static CW_NOTIFICATION_CHANNELS=sink \
@@ -680,8 +682,10 @@ product-seed: check-uv ## Fill the running product: synthetic tenants, the demo 
 
 # The fanout step reads the business directory and the audit rows of no tenant, which no route
 # serves and no policy lets cw_app read, at CW_PRODUCT_RECORDS_URL: the database owner's URL, on a
-# session cw-product opens read only (default_transaction_read_only), so it can only query.
-product-check: check-uv ## Prove the running product works, step by step (cw-product check; exit 0 means accepted): make product-check [ARGS="--step loop --json"]
+# session cw-product opens read only (default_transaction_read_only), so it can only query. The
+# rollback step withdraws gstr9_annual, so it runs only with ARGS="--destructive", which the CI
+# dev-stack job passes on its fresh database; never pass it against a database you keep.
+product-check: check-uv ## Prove the running product works, step by step (cw-product check; exit 0 means accepted): make product-check [ARGS="--step loop --json"] [ARGS="--destructive"] (CI only)
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	$(PRODUCT_ENV) CW_LOG_LEVEL=WARNING \
 	  CW_PRODUCT_RECORDS_URL="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}" \

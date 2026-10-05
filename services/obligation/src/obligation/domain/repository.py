@@ -10,6 +10,7 @@ from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId, TenantId
 from obligation.domain.history import ObligationChange
 from obligation.domain.model import Obligation
 from obligation.domain.reminders import Reminder
+from obligation.domain.rule_versions import AppliedDecision, RuleVersionRef
 
 
 class ObligationRepository(Protocol):
@@ -29,7 +30,8 @@ class ObligationRepository(Protocol):
         business_id: BusinessId | None = None,
     ) -> Sequence[Obligation]:
         """Open obligations of the rule version, of one period and one business when given,
-        by period start (none first), creation and id."""
+        by period start (none first), creation and id, locked until the transaction ends: the
+        callers close or move them."""
         ...
 
     def open_due_between(self, due_after: datetime, due_before: datetime) -> Sequence[Obligation]:
@@ -83,6 +85,34 @@ class ReminderLog(Protocol):
     def add(self, reminder: Reminder) -> None: ...
 
 
+class RuleVersionRefs(Protocol):
+    """The cached rule versions (``rule_version_ref``). Rule-level, not tenant data: every
+    tenant's units read and write the same rows."""
+
+    def get(self, rule_version_id: RuleVersionId, *, lock: bool = False) -> RuleVersionRef | None:
+        """The cached version; with ``lock`` its row stays locked until the transaction ends, so
+        a rule event and a decision about the version run one after the other."""
+        ...
+
+    def merge(self, ref: RuleVersionRef) -> RuleVersionRef:
+        """Store ``ref`` merged with the cached view (``RuleVersionRef.merge``) and return what
+        is cached now. The row stays locked until the transaction ends."""
+        ...
+
+
+class AppliedDecisions(Protocol):
+    """The tenant's latest decision per business and rule version (``obligation_decision``)."""
+
+    def record(self, decision: AppliedDecision) -> bool:
+        """Keep ``decision`` unless a later one of its business and rule version is kept; True
+        when it was kept."""
+        ...
+
+    def applying(self) -> Sequence[AppliedDecision]:
+        """The tenant's decisions that apply, by business and rule version."""
+        ...
+
+
 class TenantDirectory(Protocol):
     """The tenants that have obligations, read across tenants; each call is a transaction of
     its own. Only ids: what a sweep needs to open one unit of work per tenant."""
@@ -91,8 +121,9 @@ class TenantDirectory(Protocol):
 
 
 class UnitOfWork(Protocol):
-    """One transaction: the repository, the event sink and the change log commit or roll back
-    together. The factory returns it as a context manager; leaving the block cleanly commits."""
+    """One transaction: the repository, the event sink, the change log, the reminders, the
+    cached rule versions and the applied decisions commit or roll back together. The factory
+    returns it as a context manager; leaving the block cleanly commits."""
 
     @property
     def obligations(self) -> ObligationRepository: ...
@@ -105,6 +136,12 @@ class UnitOfWork(Protocol):
 
     @property
     def reminders(self) -> ReminderLog: ...
+
+    @property
+    def rule_versions(self) -> RuleVersionRefs: ...
+
+    @property
+    def decisions(self) -> AppliedDecisions: ...
 
 
 class UnitOfWorkFactory(Protocol):

@@ -13,13 +13,14 @@ public listener does not serve outside token mode, and finds the resolution in t
 """
 
 import asyncio
+import hashlib
 import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx2
 from sqlalchemy import Connection, Engine, create_engine
@@ -37,11 +38,13 @@ from cw_demo.product.tenants import BUSINESS_TENANT
 from cw_mvp.app import CombinedApp
 from cw_mvp.testing import LOCALHOST, running_app
 from domain_kernel.audit import AuditActor
+from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.events import DomainEvent
-from domain_kernel.ids import RuleVersionId, TenantId
+from domain_kernel.ids import RuleVersionId, SourceId, TenantId
 from domain_kernel.predicates import specification_from_mapping, specification_to_mapping
 from domain_kernel.status import ObligationStatus, RuleVersionStatus
 from obligation import worker as obligation_worker
+from obligation.application.decisions import ApplyDecision
 from obligation.infrastructure.memory import MemoryStore as ObligationStore
 from obligation.infrastructure.rulebook_client import HttpRuleVersionReader
 from ontology import load as load_ontology
@@ -51,17 +54,18 @@ from py_common.outbox import (
     IdempotentConsumer,
     InboundRecord,
     Outcome,
-    SyncProcessedStore,
     processed_event,
     read_first_store,
-    sync_handler,
 )
 from py_common.outbox.testing import FakeProducer
+from rulebook.application.documents import RegisterDocument
 from rulebook.application.seed_loader import load_calendar
+from rulebook.domain.documents import StoredDocument
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 
 ENGINE: Final = "/v1/applicability-engine"
 ROUTE_NOT_FOUND: Final = "urn:compliancewatch:problem:route-not-found"
+SYNTHETIC_CLAUSE: Final = "Example clause stating a monthly return (synthetic)"
 FREE_TEXT_RULE: Final = "example_judged_rule"
 FREE_TEXT_SPEC: Final = {
     "all_of": [
@@ -97,7 +101,31 @@ def publish(
         recurrence=seed.recurrence.to_mapping(),
         published_at=datetime.now(UTC),
     )
+    cite(store, version)
     return version
+
+
+def cite(store: MemoryKnowledgeStore, version: RuleVersionId) -> None:
+    """A verified citation of a synthetic clause: the obligation service makes no obligation of
+    a version that cites none."""
+    digest = hashlib.sha256(b"recompute flow (synthetic)").hexdigest()
+    document_id = document_id_for(digest)
+    RegisterDocument(store).run(
+        StoredDocument(
+            document_id=document_id,
+            source_id=SourceId(UUID(int=7)),
+            sha256=digest,
+            regulator="CBIC",
+            doc_type=DocumentType.NOTIFICATION,
+            url="https://example.invalid/recompute-flow.pdf",
+            language="en",
+            media_type="application/pdf",
+            parser_version="pdf@1",
+            fetched_at=datetime(2026, 9, 28, tzinfo=UTC),
+        ),
+        [Clause("en.p1", SYNTHETIC_CLAUSE)],
+    )
+    store.add_citation(version, clause_id_for(document_id, "en.p1"), SYNTHETIC_CLAUSE)
 
 
 def inbox(path: Path) -> Engine:
@@ -149,13 +177,11 @@ class Pump:
         )
         self.obligation_consumer = IdempotentConsumer(
             group_id=obligation_worker.GROUP_ID,
-            store=SyncProcessedStore(
-                inbox(tmp_path / "obligation.sqlite"), group_id=obligation_worker.GROUP_ID
+            store=read_first_store(
+                inbox(tmp_path / "obligation.sqlite"), obligation_worker.GROUP_ID
             ),
-            handler=sync_handler(
-                obligation_worker.decision_handler(
-                    HttpRuleVersionReader(url), units_on=self.obligation_units
-                )
+            handler=obligation_worker.decision_handler(
+                ApplyDecision(HttpRuleVersionReader(url)), units_on=self.obligation_units
             ),
             producer=self.producer,
             config=config,

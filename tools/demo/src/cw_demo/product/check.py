@@ -44,13 +44,28 @@ the API answers. One failed step does not stop the next.
   holds the hold, the release and any resume this step made. The directory and the audit rows of
   no tenant are read through ``records.PostgresRecords`` (``CW_PRODUCT_RECORDS_URL``, read only).
   A hold an interrupted check left is lifted first; anyone else's makes the step fail.
+- ``reminders``: ``obligation-sweep --once --now <moment> --tenant <business tenant>`` runs the
+  reminder sweep (and the rolling window) as of a few days before one of the business tenant's
+  open obligations is due, and its ``obligation.due_soon`` reaches the sink as a reminder about
+  that obligation. The moment is the obligation's due date less 5 days, 2 days or 12 hours, the
+  first one whose threshold (7, 3, 1 days) has not reminded it yet, so a later check on the same
+  database still sees a new reminder; the sweep touches no tenant but the business tenant.
+- ``rollback``: destructive, so it runs only with ``--destructive`` (the CI dev-stack job passes
+  it; it starts from a fresh database) and reports itself skipped otherwise. It withdraws
+  gstr9_annual through the rulebook's withdraw route as the first synthetic reviewer, then waits
+  for every GSTR-9 obligation of the registrations it applies to, in both synthetic tenants, to
+  close with ``rule_withdrawn``, and for the withdrawal notices: sent through the sink for the
+  business tenant, and queued for the CA firm's daily digest (or sent, once the digest went). On
+  a database where it was withdrawn already, it checks what followed. Never run it against a
+  database whose seed rules others rely on: only four seed rules can be published at all.
 """
 
+import io
 import json
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
 from typing import Any, Final
@@ -58,6 +73,7 @@ from uuid import UUID, uuid4
 
 import httpx2
 
+from cw_demo.product.analysts import FIRST_REVIEWER, NOTE
 from cw_demo.product.client import GOLDEN, Product, ProductError, as_tenant, ok
 from cw_demo.product.evaluate import (
     SeededRegistration,
@@ -77,7 +93,9 @@ from cw_demo.product.tenants import (
     SyntheticTenant,
 )
 from cw_evals.qa.world import load_world
+from cw_mvp.registry import entry_named, service_settings
 from notification.infrastructure.sink import MESSAGE_ID_PREFIX
+from obligation.sweep import main as sweep_main
 from ontology import load as load_ontology
 from rulebook.application.seed_loader import load_calendar
 
@@ -92,6 +110,7 @@ CONSUMER_GROUPS: Final = (
     "applicability-engine/consumer:applicability-engine.profiles",
     "applicability-engine/consumer:applicability-engine.rules",
     "obligation/consumer:obligation.decisions",
+    "obligation/consumer:obligation.rules",
     "notification/consumer:notification.obligations",
 )
 RELAYS: Final = (
@@ -101,7 +120,11 @@ RELAYS: Final = (
     "obligation/outbox-relay",
     "notification/outbox-relay",
 )
-JOBS: Final = ("notification/notification-dispatch", "obligation/obligation-reminder-sweep")
+JOBS: Final = (
+    "notification/notification-dispatch",
+    "obligation/obligation-reminder-sweep",
+    "obligation/obligation-window",
+)
 TASK_QUEUES: Final = ("applicability", "pipeline")
 REVIEWED: Final = "reviewed"
 BUSINESSES: Final = "/v1/businesses"
@@ -136,6 +159,18 @@ CHECK_MARK: Final = "cw-product check"
 HOLD_ACTION: Final = "applicability.fanout.hold"
 RELEASE_ACTION: Final = "applicability.fanout.release"
 RESUME_ACTION: Final = "applicability.fanout.resume"
+REMINDER: Final = "reminder"
+REMINDER_LEADS: Final = (timedelta(days=5), timedelta(days=2), timedelta(hours=12))
+"""How long before a due date the reminders step sweeps: inside the 7-, 3- and 1-day thresholds."""
+CLOSURE: Final = "closure"
+WITHDRAWN_NOTICE: Final = "obligation_withdrawn"
+RULE_WITHDRAWN: Final = "rule_withdrawn"
+PENDING_STATES: Final = frozenset({"queued", "digest_pending"})
+SKIPPED: Final = "skipped (destructive; CI runs it)"
+ROLLBACK_NOTE: Final = f"{NOTE}; withdrawn by the rollback check of cw-product"
+
+SweepRunner = Callable[[Sequence[str]], tuple[int, dict[str, Any]]]
+"""Runs ``obligation-sweep --once --json`` with more arguments: its exit code and its report."""
 
 
 class StepFailedError(Exception):
@@ -144,6 +179,10 @@ class StepFailedError(Exception):
 
 class NotYetError(Exception):
     """A condition does not hold yet; ``poll`` asks again until its timeout."""
+
+
+class StepSkippedError(Exception):
+    """The step did not run, and passes; the message says why."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +194,10 @@ class CheckContext:
     interval: float = POLL_SECONDS
     records: ProductRecords | None = None
     """The directory and the audit log, read where no route serves them (the fanout step)."""
+    destructive: bool = False
+    """Whether the steps that withdraw seed rules run (the rollback step); off, they skip."""
+    sweep: SweepRunner | None = None
+    """``obligation-sweep`` for the reminders step; None runs it on the product's settings."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +215,7 @@ class StepResult:
     seconds: float
     details: list[str] = field(default_factory=list)
     error: str = ""
+    skipped: bool = False
 
 
 def poll[T](
@@ -945,6 +989,268 @@ def audited(records: ProductRecords, since: datetime) -> list[str]:
     ]
 
 
+# ---------------------------------------------------------------- reminders
+
+
+def product_sweep(product: Product) -> SweepRunner:
+    """``obligation-sweep`` in this process, on the obligation settings the product's worker
+    has: the product's database role, the obligation schema first on the search path, the
+    rulebook at the internal listener."""
+    settings = service_settings(
+        entry_named("obligation"), product.settings, internal_url=product.internal_url
+    )
+
+    def run(arguments: Sequence[str]) -> tuple[int, dict[str, Any]]:
+        out, err = io.StringIO(), io.StringIO()
+        code = sweep_main(
+            ["--once", "--json", *arguments], settings=settings, stdout=out, stderr=err
+        )
+        if not out.getvalue().strip():
+            return code, {"error": err.getvalue().strip()}
+        report: dict[str, Any] = json.loads(out.getvalue())
+        return code, report
+
+    return run
+
+
+def reminders(context: CheckContext) -> list[str]:
+    product = context.product
+    registration = the_registration(context)
+    headers = as_tenant(BUSINESS_TENANT.tenant_id)
+    run = context.sweep or product_sweep(product)
+    listed: list[dict[str, Any]] = ok(
+        product.internal.get(
+            OBLIGATIONS, params={"business_id": registration.registration_id}, headers=headers
+        )
+    )
+    due = sorted(
+        (o for o in listed if o["status"] in ("open", "in_progress") and o["due_at"]),
+        key=lambda o: (str(o["due_at"]), str(o["obligation_id"])),
+    )
+    if not due:
+        raise StepFailedError(
+            f"{registration.business.name} has no open obligation with a due date: run the "
+            "loop step first"
+        )
+    before = {str(n["id"]) for n in reminder_notices(context, registration.registration_id)}
+    swept = 0
+    for obligation in due:
+        due_at = datetime.fromisoformat(str(obligation["due_at"]))
+        for lead in REMINDER_LEADS:
+            now = due_at - lead
+            code, report = run(
+                ["--now", now.isoformat(), "--tenant", str(BUSINESS_TENANT.tenant_id)]
+            )
+            swept += 1
+            if code != 0:
+                raise StepFailedError(f"obligation-sweep exited {code}: {report}")
+            if str(obligation["obligation_id"]) not in report["reminded"]:
+                continue
+            notice = poll(
+                partial(new_reminder, context, registration.registration_id, obligation, before),
+                timeout=context.timeout,
+                interval=context.interval,
+            )
+            return [
+                f"obligation-sweep --once --now {now.isoformat()} --tenant {BUSINESS_TENANT.key}: "
+                f"reminders sent {len(report['reminded'])}, obligations the window made "
+                f"{len(report['created'])}",
+                f"reminded: {obligation['title']}, due {obligation['due_at']}, swept "
+                f"{_lead(lead)} before",
+                f"reminder: {notice['channel']} {notice['state']} through the sink "
+                f"({notice['provider_message_id']})",
+                sink_line(product.sink_path, str(notice["provider_message_id"])),
+            ]
+    raise StepFailedError(
+        f"{swept} sweeps reminded none of {registration.business.name}'s {len(due)} open "
+        "obligations: each was reminded at every threshold already"
+    )
+
+
+def _lead(lead: timedelta) -> str:
+    """``5 days`` or ``12 hours``."""
+    if lead % timedelta(days=1):
+        return f"{lead // timedelta(hours=1)} hours"
+    return f"{lead.days} days"
+
+
+def reminder_notices(context: CheckContext, business_id: str) -> list[dict[str, Any]]:
+    page = ok(
+        context.product.internal.get(
+            NOTIFICATIONS,
+            params={"business_id": business_id, "limit": 200},
+            headers=as_tenant(BUSINESS_TENANT.tenant_id),
+        )
+    )
+    return [n for n in page["items"] if n["occasion"] == REMINDER]
+
+
+def new_reminder(
+    context: CheckContext, business_id: str, obligation: Mapping[str, Any], before: set[str]
+) -> dict[str, Any]:
+    """A reminder about ``obligation`` that was not there before the sweep, sent through the
+    sink."""
+    fresh = [
+        n
+        for n in reminder_notices(context, business_id)
+        if str(n["obligation_id"]) == str(obligation["obligation_id"])
+        and str(n["id"]) not in before
+    ]
+    sent = [
+        n
+        for n in fresh
+        if n["state"] in SENT_STATES and str(n["provider_message_id"]).startswith(MESSAGE_ID_PREFIX)
+    ]
+    if not sent:
+        states = ", ".join(f"{n['channel']} {n['state']}" for n in fresh) or "none queued"
+        raise NotYetError(f"no reminder sent through the sink yet ({states})")
+    return sent[0]
+
+
+# ---------------------------------------------------------------- rollback
+
+
+def rollback(context: CheckContext) -> list[str]:
+    if not context.destructive:
+        raise StepSkippedError(SKIPPED)
+    product = context.product
+    versions = rule_versions(product, GSTR9)
+    if not versions:
+        raise StepFailedError(f"{GSTR9} has no version: run make seed SERVICE=rulebook")
+    latest = versions[-1]
+    version_id, status = str(latest["rule_version_id"]), str(latest["status"])
+    if status not in ("published", "withdrawn"):
+        raise StepFailedError(f"{GSTR9} is {status}: the fanout step publishes it first")
+    holders = gstr9_holders(context, version_id)
+    missing = [tenant.name for tenant in TENANTS if tenant.key not in holders]
+    if missing:
+        raise StepFailedError(
+            f"{GSTR9} has no obligation in {', '.join(missing)}: run the fanout step first"
+        )
+    if status == "published":
+        body = {"actor_id": str(FIRST_REVIEWER.user_id), "note": ROLLBACK_NOTE}
+        ok(
+            product.internal.post(
+                f"{RULEBOOK}/rule-versions/{version_id}/withdraw",
+                json=body,
+                headers=product.review_headers(),
+            )
+        )
+        lines = [f"{GSTR9} v{latest['version']} withdrawn ({version_id}) as {FIRST_REVIEWER.name}"]
+    else:
+        lines = [f"{GSTR9} was withdrawn before ({version_id}): checking what followed"]
+    for key, found in holders.items():
+        tenant = found[0][0]
+        closed = poll(
+            partial(withdrawn_obligations, context, tenant, [r for _, r in found], version_id),
+            timeout=context.timeout,
+            interval=context.interval,
+        )
+        notices = poll(
+            partial(withdrawal_notices, context, tenant, [r for _, r in found], closed),
+            timeout=context.timeout,
+            interval=context.interval,
+        )
+        states = sorted({f"{n['channel']} {n['state']}" for n in notices})
+        lines.append(
+            f"{tenant.name}: {len(closed)} GSTR-9 obligations closed ({RULE_WITHDRAWN}); "
+            f"withdrawal notices {', '.join(states)}"
+        )
+        if key == BUSINESS_TENANT.key:
+            sent = next(n for n in notices if n["state"] in SENT_STATES)
+            lines.append(sink_line(product.sink_path, str(sent["provider_message_id"])))
+    return lines
+
+
+def gstr9_holders(
+    context: CheckContext, version_id: str
+) -> dict[str, list[tuple[SyntheticTenant, SeededRegistration]]]:
+    """The synthetic registrations GSTR-9 applies to that hold obligations of the version, by
+    tenant."""
+    found: dict[str, list[tuple[SyntheticTenant, SeededRegistration]]] = {}
+    for tenant in TENANTS:
+        for registration in registrations(context.product, tenant):
+            if registration.business.expected.get(GSTR9) != APPLIES:
+                continue
+            listed = ok(
+                context.product.internal.get(
+                    OBLIGATIONS,
+                    params={
+                        "business_id": registration.registration_id,
+                        "rule_version_id": version_id,
+                    },
+                    headers=as_tenant(tenant.tenant_id),
+                )
+            )
+            if listed:
+                found.setdefault(tenant.key, []).append((tenant, registration))
+    return found
+
+
+def withdrawn_obligations(
+    context: CheckContext,
+    tenant: SyntheticTenant,
+    held: Sequence[SeededRegistration],
+    version_id: str,
+) -> list[dict[str, Any]]:
+    """Every obligation of the version of ``held``, once each is closed as withdrawn."""
+    closed: list[dict[str, Any]] = []
+    for registration in held:
+        listed: list[dict[str, Any]] = answered(
+            context.product.internal.get(
+                OBLIGATIONS,
+                params={"business_id": registration.registration_id, "rule_version_id": version_id},
+                headers=as_tenant(tenant.tenant_id),
+            )
+        )
+        still = [o for o in listed if (o["status"], o["closed_reason"]) != (CLOSED, RULE_WITHDRAWN)]
+        if still:
+            raise NotYetError(
+                f"{len(still)} GSTR-9 obligations of {registration.business.name} are not closed "
+                f"as {RULE_WITHDRAWN} yet"
+            )
+        closed += listed
+    return closed
+
+
+def withdrawal_notices(
+    context: CheckContext,
+    tenant: SyntheticTenant,
+    held: Sequence[SeededRegistration],
+    closed: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """The withdrawal notices about the closed obligations: one sent through the sink, or for a
+    tenant that hears by digest, queued for it."""
+    wanted = {str(o["obligation_id"]) for o in closed}
+    notices: list[dict[str, Any]] = []
+    for registration in held:
+        page = answered(
+            context.product.internal.get(
+                NOTIFICATIONS,
+                params={"business_id": registration.registration_id, "limit": 200},
+                headers=as_tenant(tenant.tenant_id),
+            )
+        )
+        notices += [
+            n
+            for n in page["items"]
+            if n["occasion"] == CLOSURE
+            and n["template_key"] == WITHDRAWN_NOTICE
+            and str(n["obligation_id"]) in wanted
+        ]
+    sent = [
+        n
+        for n in notices
+        if n["state"] in SENT_STATES and str(n["provider_message_id"]).startswith(MESSAGE_ID_PREFIX)
+    ]
+    if tenant.kind == "business" and not sent:
+        states = ", ".join(f"{n['channel']} {n['state']}" for n in notices) or "none queued"
+        raise NotYetError(f"no withdrawal notice sent through the sink yet ({states})")
+    if not sent and not [n for n in notices if n["state"] in PENDING_STATES]:
+        raise NotYetError(f"no withdrawal notice queued for {tenant.name} yet")
+    return notices
+
+
 # ---------------------------------------------------------------- the command
 
 STEPS: list[Step] = [
@@ -962,6 +1268,16 @@ STEPS: list[Step] = [
         "a rule published behind the hold fans out to every business once it is released",
         fanout,
     ),
+    Step(
+        "reminders",
+        "the sweep run a few days before a due date sends a reminder through the sink",
+        reminders,
+    ),
+    Step(
+        "rollback",
+        "a withdrawn rule closes its obligations in both tenants and sends withdrawal notices",
+        rollback,
+    ),
 ]
 """The steps in the order they run. A later package appends its own."""
 
@@ -978,6 +1294,8 @@ def run_checks(
         result = StepResult(step.name, step.summary, ok=True, seconds=0.0)
         try:
             result.details = step.run(context)
+        except StepSkippedError as exc:
+            result.skipped, result.details = True, [str(exc)]
         except (StepFailedError, ProductError) as exc:
             result.ok, result.error = False, str(exc)
         except Exception as exc:
@@ -1007,7 +1325,7 @@ def render(results: Sequence[StepResult]) -> str:
     passed = sum(result.ok for result in results)
     lines = ["# cw-product check", ""]
     for result in results:
-        mark = "ok    " if result.ok else "FAILED"
+        mark = "skip  " if result.skipped else "ok    " if result.ok else "FAILED"
         lines.append(f"{mark}  {result.name:<10} {result.seconds:>5.1f} s  {result.summary}")
         lines += [f"        - {detail}" for detail in result.details]
         if result.error:
@@ -1027,6 +1345,7 @@ def as_json(results: Sequence[StepResult]) -> Mapping[str, Any]:
                 "seconds": result.seconds,
                 "details": result.details,
                 "error": result.error,
+                "skipped": result.skipped,
             }
             for result in results
         ],

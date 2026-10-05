@@ -66,3 +66,34 @@ date and status; only open obligations in affected periods move.
   falls behind, the freshness alert fires before a due date is missed.
 - Revisit if a regulator's duties are mostly event-driven (a filing within N days of an
   event) rather than periodic; the template's `due_in_days` still covers those.
+
+## Addendum (2026-10-06): the rule events, the window and the guard as built
+
+The obligation service now acts on the rulebook's events, behind the flag `obligation.rule_events`.
+What the build settled that the decision left open:
+
+- **One consumer, every tenant.** The rule events carry no tenant. The worker's consumer of group
+  `obligation.rules` applies each to every tenant of the `obligation_tenant` directory, one unit of
+  work per tenant in the consumer's own transaction, each under its own tenant setting, so
+  row-level security holds; everything commits with the inbox row. `withdraws` closes open
+  obligations with `rule_withdrawn`, `supersedes` and `corrects` close with `rule_superseded` the
+  ones whose period ends after the newer version takes effect (a version governs the periods whose
+  last day it is in force on; a one-off belongs to the version in force on its due day), and
+  `extends_deadline` reschedules the named period. One transaction per event is a ceiling: a rule
+  held by thousands of tenants needs per-tenant transactions with their own processed mark.
+- **The window is a daily job, not a workflow.** `RollWindow` runs at 02:30 IST in the worker
+  (with the reminder sweep's switch) and materialises the window as of the day for every business
+  whose latest decision of a recurring version applies; the service keeps that decision
+  (`obligation_decision`) as it applies each one. A Temporal workflow buys nothing yet: the job is
+  idempotent and a missed day is caught up by the next.
+- **A guard in front of materialisation.** The service caches the versions it makes obligations
+  from (`rule_version_ref`: status, effective dates, approvers, verified citations), filled when a
+  decision finds a version missing and kept current by the rule events, and moving only forward.
+  A decision that arrives after a version was withdrawn makes nothing, one after it was superseded
+  makes only the periods it still governs, and a version without a verified citation makes
+  nothing, whichever the cache or the rulebook says. The cache row is locked while a decision or
+  a rule event about the version is applied, so the two never miss each other.
+
+Not built yet: a deadline change of a period that has no obligation yet is not remembered, so an
+obligation made later for that period takes the version's own date; and `corrects` still closes
+rather than re-evaluating, as the rulebook publishes it as a replacement.
