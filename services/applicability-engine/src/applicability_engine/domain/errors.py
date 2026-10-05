@@ -101,3 +101,20 @@ class FanOutStateError(DomainError, ValueError):
         self.rule_version_id = rule_version_id
         self.status = status
         self.to = to
+
+
+class DryRunTooLargeError(DomainError, ValueError):
+    """A dry run reads every profile of its scope while the request waits, so it evaluates at
+    most ``CW_APPLICABILITY_DRY_RUN_MAX`` businesses; a wider scope names a tenant."""
+
+    type_slug = "applicability-dry-run-too-large"
+    title = "Dry run covers too many businesses"
+
+    def __init__(self, listed: int, limit: int, level: str) -> None:
+        super().__init__(
+            f"the business directory lists {listed} businesses of level {level} in this scope, "
+            f"more than the {limit} a dry run evaluates (CW_APPLICABILITY_DRY_RUN_MAX); name a "
+            "tenant in the scope"
+        )
+        self.listed = listed
+        self.limit = limit

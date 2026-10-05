@@ -126,9 +126,11 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
     },
     "applicability-engine": {
         "GET /v1/applicability-engine/ping": INTERNAL,
-        # A tenant's decisions, read by its members.
+        # A tenant's decisions, read by its members, and what a change means for its businesses
+        # (the public API's impact of a change).
         "GET /v1/applicability-engine/businesses/{business_id}/decisions": PUBLIC,
         "GET /v1/applicability-engine/decisions/{decision_id}": PUBLIC,
+        "GET /v1/changes/{rule_version_id}/impact": PUBLIC,
         # Evaluating reads the profile and the rulebook over the internal listener.
         "POST /v1/applicability-engine/businesses/{business_id}/decisions": INTERNAL,
         # The review queue: the regulatory team reads any tenant's items and settles them, which
@@ -148,6 +150,10 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "POST /v1/applicability-engine/fan-outs/{rule_version_id}/cancel": ADMIN,
         "GET /v1/applicability-engine/fan-out-hold": ADMIN,
         "PUT /v1/applicability-engine/fan-out-hold": ADMIN,
+        # A dry run reads every tenant's profiles for an admin and stores nothing but its audit
+        # entry; the route requires an admin a verified token names, so the public listener
+        # serves it in token mode only.
+        "POST /v1/applicability-engine/dry-runs": ADMIN,
     },
     "obligation": {
         "GET /v1/obligation/ping": PUBLIC,

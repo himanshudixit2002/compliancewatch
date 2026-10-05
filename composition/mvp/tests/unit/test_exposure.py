@@ -76,6 +76,8 @@ def test_tenants_read_their_decisions_and_operators_their_eval_runs() -> None:
     engine, runs = EXPOSURE["applicability-engine"], EXPOSURE["eval"]
     assert engine[f"GET {ENGINE}/businesses/{{business_id}}/decisions"] is PUBLIC
     assert engine[f"GET {ENGINE}/decisions/{{decision_id}}"] is PUBLIC
+    assert engine["GET /v1/changes/{rule_version_id}/impact"] is PUBLIC
+    assert engine[f"POST {ENGINE}/dry-runs"] is ADMIN
     assert runs["GET /v1/eval/runs"] is ADMIN
     assert runs["GET /v1/eval/runs/{run_id}"] is ADMIN
 

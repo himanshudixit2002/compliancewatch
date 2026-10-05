@@ -21,6 +21,16 @@ class AsOfFy(RootModel[str]):
     ]
 
 
+class Applicability(StrEnum):
+    """
+    Outcome of evaluating a specification against a profile.
+    """
+
+    applies = "applies"
+    not_applicable = "not_applicable"
+    unsure = "unsure"
+
+
 class AssigneeIn(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -181,6 +191,35 @@ class DeadlineExtensionOut(BaseModel):
     rule_version_id: Annotated[UUID, Field(title="Rule Version Id")]
 
 
+class FanOutStatus(StrEnum):
+    running = "running"
+    paused = "paused"
+    held = "held"
+    completed = "completed"
+    cancelled = "cancelled"
+    disabled = "disabled"
+    failed = "failed"
+
+
+class ImpactFanOutOut(BaseModel):
+    """
+    The fan-out of the version over every tenant's businesses: its status, the directory
+    entries of the level when it began (``businesses_total``), the businesses decided so far and
+    those it applies to.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    applies: Annotated[int, Field(title="Applies")]
+    businesses_total: Annotated[int, Field(title="Businesses Total")]
+    evaluated: Annotated[int, Field(title="Evaluated")]
+    finished_at: Annotated[AwareDatetime | None, Field(title="Finished At")]
+    started_at: Annotated[AwareDatetime, Field(title="Started At")]
+    status: FanOutStatus
+    updated_at: Annotated[AwareDatetime, Field(title="Updated At")]
+
+
 class ItemState(StrEnum):
     """
     Where one question stands: no value yet, an unsure answer, or an answer.
@@ -250,6 +289,30 @@ class PageBusinessSummaryOut(BaseModel):
     ]
 
 
+class PredicateKind(StrEnum):
+    structured = "structured"
+    free_text = "free_text"
+
+
+class PredicateResultOut(BaseModel):
+    """
+    One predicate of the rule's specification: its outcome, the confidence behind it and
+    why. ``predicate`` is the kernel's predicate mapping, as the rule version stores it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    attribute: Annotated[str, Field(title="Attribute")]
+    confidence: Annotated[float, Field(title="Confidence")]
+    description: Annotated[str, Field(title="Description")]
+    kind: PredicateKind
+    needs_review: Annotated[bool, Field(title="Needs Review")]
+    outcome: Applicability
+    predicate: Annotated[dict[str, Any], Field(title="Predicate")]
+    reason: Annotated[str, Field(title="Reason")]
+
+
 class PrefillOut(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -313,6 +376,19 @@ class RegistrationAddIn(BaseModel):
             title="Name",
         ),
     ] = ""
+
+
+class ResultCountsOut(BaseModel):
+    """
+    How many businesses have each result.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    applies: Annotated[int, Field(title="Applies")]
+    not_applicable: Annotated[int, Field(title="Not Applicable")]
+    unsure: Annotated[int, Field(title="Unsure")]
 
 
 class RuleChangeCitationOut(BaseModel):
@@ -410,6 +486,18 @@ class StatusIn(BaseModel):
             title="Reason",
         ),
     ] = ""
+
+
+class Trigger(StrEnum):
+    """
+    What caused an evaluation; the ``trigger`` of ``applicability.decided``. ``review`` is a
+    person's resolution of a review item.
+    """
+
+    manual = "manual"
+    rule_published = "rule_published"
+    profile_updated = "profile_updated"
+    review = "review"
 
 
 class ValidationIssue(BaseModel):
@@ -591,6 +679,43 @@ class ChangeOut(BaseModel):
     previous_due_at: Annotated[AwareDatetime | None, Field(title="Previous Due At")]
     reason: Annotated[str, Field(title="Reason")]
     status_after: ObligationStatus
+
+
+class ImpactBusinessOut(BaseModel):
+    """
+    One business with its latest decision of the version: the result, the confidence,
+    whether it needs review, when and why it was decided, and every predicate's outcome in words
+    (``evaluated``). ``level`` is the business's level in the hierarchy, null when the business
+    directory does not list it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    as_of_fy: Annotated[str | None, Field(title="As Of Fy")]
+    business_id: Annotated[UUID, Field(title="Business Id")]
+    confidence: Annotated[float, Field(title="Confidence")]
+    decided_at: Annotated[AwareDatetime, Field(title="Decided At")]
+    decision_id: Annotated[UUID, Field(title="Decision Id")]
+    evaluated: Annotated[list[PredicateResultOut], Field(title="Evaluated")]
+    level: AttributeLevel | None
+    needs_review: Annotated[bool, Field(title="Needs Review")]
+    profile_version: Annotated[int, Field(title="Profile Version")]
+    result: Applicability
+    trigger: Trigger
+
+
+class ImpactEntityOut(BaseModel):
+    """
+    One client of the tenant: the legal entity at the top of the businesses' lineage (a
+    business the directory does not list stands under itself), with its businesses.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    businesses: Annotated[list[ImpactBusinessOut], Field(title="Businesses")]
+    entity_id: Annotated[UUID, Field(title="Entity Id")]
 
 
 class NodeOut(BaseModel):
@@ -829,6 +954,30 @@ class BusinessOut(BaseModel):
     ]
     updated_at: Annotated[AwareDatetime, Field(title="Updated At")]
     version: Annotated[int, Field(title="Version")]
+
+
+class ChangeImpactOut(BaseModel):
+    """
+    A page of what a change means for the tenant: its clients (``items``), each with its
+    businesses and their latest decision of the version, in entity order. ``counts`` covers
+    every business of the tenant with a decision of the version, whatever the page and the
+    ``result`` filter; ``fan_out`` is the version's fan-out, or null when it had none.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    counts: ResultCountsOut
+    fan_out: ImpactFanOutOut | None
+    items: Annotated[list[ImpactEntityOut], Field(title="Items")]
+    next_cursor: Annotated[
+        str | None,
+        Field(
+            description="Send as cursor to read the next page; null on the last page",
+            title="Next Cursor",
+        ),
+    ]
+    rule_version_id: Annotated[UUID, Field(title="Rule Version Id")]
 
 
 class ObligationDetailOut(BaseModel):

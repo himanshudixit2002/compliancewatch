@@ -33,6 +33,10 @@ class ApplicabilityEngineSettings(Settings):
     directory, a Temporal workflow on the ``applicability`` task queue, and the fan-out controls
     signal it there (``CW_TEMPORAL_*``). Off, a publication records a ``disabled`` run and nothing
     else, and the controls signal nothing.
+
+    A dry run (``POST /v1/applicability-engine/dry-runs``) reads every profile of its scope while
+    the request waits, so it evaluates at most ``applicability_dry_run_max`` businesses and
+    refuses a wider scope.
     """
 
     applicability_engine_store: Store = "postgres"
@@ -43,3 +47,4 @@ class ApplicabilityEngineSettings(Settings):
     applicability_engine_rules_cache_seconds: float = Field(default=60.0, ge=0, le=3600)
     applicability_engine_recompute_lookahead_days: int = Field(default=92, ge=0, le=366)
     applicability_fanout_enabled: bool = False
+    applicability_dry_run_max: int = Field(default=2_000, ge=1, le=100_000)

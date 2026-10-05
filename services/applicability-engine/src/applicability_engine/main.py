@@ -23,7 +23,9 @@ from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
 from applicability_engine import SERVICE_NAME, __version__
+from applicability_engine.api.changes import public_router
 from applicability_engine.api.router import router
+from applicability_engine.application.dry_run import DryRun
 from applicability_engine.application.evaluate import EvaluateRule
 from applicability_engine.application.fanout import (
     CancelFanOut,
@@ -35,6 +37,7 @@ from applicability_engine.application.fanout import (
     ResumeFanOut,
     SetHold,
 )
+from applicability_engine.application.impact import ReadChangeImpact
 from applicability_engine.application.queries import ListDecisions, ReadDecision
 from applicability_engine.application.review import ListReviewItems, ResolveReviewItem
 from applicability_engine.domain.errors import (
@@ -42,6 +45,7 @@ from applicability_engine.domain.errors import (
     BusinessNotFoundError,
     DecisionNotFoundError,
     DependencyUnavailableError,
+    DryRunTooLargeError,
     FanOutNotFoundError,
     FanOutStateError,
     ReviewItemNotFoundError,
@@ -50,10 +54,15 @@ from applicability_engine.domain.errors import (
     RuleVersionNotPublishedError,
 )
 from applicability_engine.domain.ports import FanOutWorkflows
-from applicability_engine.domain.repository import FanOutUnitOfWorkFactory, UnitOfWorkFactory
-from applicability_engine.infrastructure.memory import MemoryStore
+from applicability_engine.domain.repository import (
+    BusinessDirectoryReader,
+    FanOutUnitOfWorkFactory,
+    UnitOfWorkFactory,
+)
+from applicability_engine.infrastructure.memory import MemoryBusinessDirectory, MemoryStore
 from applicability_engine.infrastructure.profile_client import HttpProfiles
 from applicability_engine.infrastructure.repository import (
+    PostgresBusinessDirectory,
     PostgresFanOutUnitOfWorkFactory,
     PostgresUnitOfWorkFactory,
 )
@@ -80,6 +89,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     RuleVersionNotPublishedError: 409,
     ReviewItemResolvedError: 409,
     FanOutStateError: 409,
+    DryRunTooLargeError: 422,
     DependencyUnavailableError: 503,
 }
 
@@ -112,20 +122,24 @@ def wire(
     are given, with the packaged ontology unless another is, signalling fan-outs through
     ``workflows`` when given."""
     readers = readers or http_readers(settings, token_source=token_source)
+    ontology = ontology or load_ontology()
     unit_of_work: UnitOfWorkFactory
     fanouts: FanOutUnitOfWorkFactory
+    directory: BusinessDirectoryReader
     ping: Callable[[], bool]
     idempotency: IdempotencyStore
     if settings.applicability_engine_store == "memory":
         memory = MemoryStore()
         unit_of_work, ping, idempotency = memory, memory.ping, MemoryIdempotencyStore()
         fanouts = memory.fanouts
+        directory = MemoryBusinessDirectory(memory)
         workflows = workflows or NoFanOutWorkflows()
     else:
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url)
         unit_of_work, ping = postgres, postgres.ping
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
         fanouts = PostgresFanOutUnitOfWorkFactory(postgres.engine)
+        directory = PostgresBusinessDirectory(postgres.engine)
         if workflows is None:
             enabled = settings.applicability_fanout_enabled
             workflows = TemporalFanOuts(settings) if enabled else NoFanOutWorkflows()
@@ -138,9 +152,7 @@ def wire(
         unit_of_work=unit_of_work,
         store_ready=store_ready,
         idempotency=idempotency,
-        evaluate=EvaluateRule(
-            unit_of_work, readers.profiles, readers.rulebook, ontology or load_ontology()
-        ),
+        evaluate=EvaluateRule(unit_of_work, readers.profiles, readers.rulebook, ontology),
         list_decisions=ListDecisions(unit_of_work),
         read_decision=ReadDecision(unit_of_work),
         list_review_items=ListReviewItems(unit_of_work),
@@ -153,6 +165,15 @@ def wire(
         read_hold=ReadHold(fanouts),
         set_hold=SetHold(fanouts),
         release_hold=ReleaseHold(fanouts, workflows),
+        read_change_impact=ReadChangeImpact(unit_of_work, fanouts),
+        dry_run=DryRun(
+            directory,
+            fanouts,
+            readers.profiles,
+            readers.rulebook,
+            ontology,
+            max_businesses=settings.applicability_dry_run_max,
+        ),
     )
 
 
@@ -173,7 +194,7 @@ def build_app(
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router],
+        routers=[router, public_router],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         problem_status=PROBLEM_STATUS,

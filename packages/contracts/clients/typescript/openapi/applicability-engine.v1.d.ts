@@ -78,6 +78,35 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/applicability-engine/dry-runs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * What a version or a specification would decide for the directory; stores nothing
+     * @description Evaluates a rule version in any status (a draft, one under review or approved, or a
+     *     published one), or a specification no version holds yet, the way a fan-out does: against
+     *     every business of the level the business directory lists, of one tenant when the scope
+     *     names one, for the current financial year in India. It answers the counts by result, the
+     *     counts by the attribute that decided each result, and up to ``sample_size`` decisions, a
+     *     result at a time. Nothing is stored and no event is published; the only write is the audit
+     *     entry applicability.dry_run, with the actor and the counts. 404 when the rulebook has no such
+     *     version; 422 for a malformed specification, a level that is not the version's, or a scope
+     *     wider than CW_APPLICABILITY_DRY_RUN_MAX businesses (2,000 by default; name a tenant); 503 when
+     *     the rulebook or the profile service cannot be read.
+     */
+    post: operations["dry_run_v1_applicability_engine_dry_runs_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/applicability-engine/fan-out-hold": {
     parameters: {
       query?: never;
@@ -274,6 +303,33 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/changes/{rule_version_id}/impact": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * What a change means for the tenant: each business's latest decision, by client
+     * @description For the change's rule version, each of the tenant's businesses with its latest decision
+     *     of the version (the fan-out of its publication, a profile change since, or a reviewer's
+     *     settlement): the result, confidence, whether it needs review, when it was decided and every
+     *     predicate's outcome in words. The businesses stand under their client, the legal entity at
+     *     the top of their lineage, so a CA firm sees each affected client with its registrations; a
+     *     page holds ``limit`` clients, in entity order. ``counts`` covers every business of the tenant
+     *     with a decision of the version, and ``fan_out`` says how far the version's fan-out got. A
+     *     version the engine never decided for the tenant has no clients and zero counts.
+     */
+    get: operations["read_change_impact_v1_changes__rule_version_id__impact_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 };
 export type webhooks = Record<string, never>;
 export type components = {
@@ -285,12 +341,50 @@ export type components = {
      */
     Applicability: "applies" | "not_applicable" | "unsure";
     /**
+     * AttributeCountsOut
+     * @description The businesses whose result one attribute decided, by result: what ruled the version out,
+     *     what made it apply, or what the profiles have not set yet.
+     */
+    AttributeCountsOut: {
+      /** Applies */
+      applies: number;
+      /** Attribute */
+      attribute: string;
+      /** Not Applicable */
+      not_applicable: number;
+      /** Unsure */
+      unsure: number;
+    };
+    /**
      * AttributeLevel
      * @description Which node of the business hierarchy holds the value: the legal entity (PAN), one
      *     registration (GSTIN) or one place of business. Values are inherited downward.
      * @enum {string}
      */
     AttributeLevel: "entity" | "registration" | "location";
+    /**
+     * ChangeImpactOut
+     * @description A page of what a change means for the tenant: its clients (``items``), each with its
+     *     businesses and their latest decision of the version, in entity order. ``counts`` covers
+     *     every business of the tenant with a decision of the version, whatever the page and the
+     *     ``result`` filter; ``fan_out`` is the version's fan-out, or null when it had none.
+     */
+    ChangeImpactOut: {
+      counts: components["schemas"]["ResultCountsOut"];
+      fan_out: components["schemas"]["ImpactFanOutOut"] | null;
+      /** Items */
+      items: components["schemas"]["ImpactEntityOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+    };
     /**
      * DecisionOut
      * @description One decision: the result of one rule version for one version of a business's profile.
@@ -330,6 +424,113 @@ export type components = {
        */
       rule_version_id: string;
       trigger: components["schemas"]["Trigger"];
+    };
+    /**
+     * DryRunIn
+     * @description A rule version in any status (``rule_version_id``), or a specification no version holds
+     *     yet: the kernel's predicate tree mapping, ``{"all_of": [...]}``, ``{"any_of": [...]}``,
+     *     ``{"not": {...}}`` or a predicate ``{"attribute", "operator", "value"}`` or
+     *     ``{"attribute", "free_text"}``. Exactly one of the two.
+     */
+    DryRunIn: {
+      /** Rule Version Id */
+      rule_version_id?: string | null;
+      scope?: components["schemas"]["DryRunScopeIn"];
+      /** Specification */
+      specification?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /**
+     * DryRunOut
+     * @description What the version or the specification would decide for the businesses in scope, for the
+     *     current financial year in India (``as_of_fy``). ``businesses_total`` is the directory entries
+     *     in scope, ``evaluated`` the businesses decided and ``skipped`` those the profile service no
+     *     longer has; ``counts`` and ``by_attribute`` count the evaluated ones, and ``needs_review``
+     *     those a person would have to look at. ``rule_key`` and ``status`` are the named version's.
+     *     Nothing is stored but the audit entry ``applicability.dry_run``.
+     */
+    DryRunOut: {
+      /** As Of Fy */
+      as_of_fy: string;
+      /** Businesses Total */
+      businesses_total: number;
+      /** By Attribute */
+      by_attribute: components["schemas"]["AttributeCountsOut"][];
+      counts: components["schemas"]["ResultCountsOut"];
+      /** Evaluated */
+      evaluated: number;
+      level: components["schemas"]["AttributeLevel"];
+      /**
+       * Max Businesses
+       * @description The most businesses a dry run evaluates
+       */
+      max_businesses: number;
+      /** Needs Review */
+      needs_review: number;
+      /**
+       * Ran At
+       * Format: date-time
+       */
+      ran_at: string;
+      /** Rule Key */
+      rule_key: string | null;
+      /** Rule Version Id */
+      rule_version_id: string | null;
+      /** Samples */
+      samples: components["schemas"]["DryRunSampleOut"][];
+      /** Skipped */
+      skipped: number;
+      status: components["schemas"]["RuleVersionStatus"] | null;
+      /** Tenant Id */
+      tenant_id: string | null;
+    };
+    /**
+     * DryRunSampleOut
+     * @description One business as the dry run decided it; nothing of it is stored.
+     */
+    DryRunSampleOut: {
+      /**
+       * Business Id
+       * Format: uuid
+       */
+      business_id: string;
+      /** Confidence */
+      confidence: number;
+      /**
+       * Deciding
+       * @description The attributes whose predicates decided the result
+       */
+      deciding: string[];
+      /** Evaluated */
+      evaluated: components["schemas"]["PredicateResultOut"][];
+      /** Needs Review */
+      needs_review: boolean;
+      /** Profile Version */
+      profile_version: number;
+      result: components["schemas"]["Applicability"];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+    };
+    /**
+     * DryRunScopeIn
+     * @description Which businesses a dry run evaluates: the directory entries of ``level`` (the version's
+     *     own when one is named; required with a specification), of ``tenant_id`` alone when given,
+     *     keeping up to ``sample_size`` of the decisions.
+     */
+    DryRunScopeIn: {
+      level?: components["schemas"]["AttributeLevel"] | null;
+      /**
+       * Sample Size
+       * @description Decisions to keep as samples, 0 to 50
+       * @default 10
+       */
+      sample_size?: number;
+      /** Tenant Id */
+      tenant_id?: string | null;
     };
     /** EvaluateIn */
     EvaluateIn: {
@@ -465,6 +666,84 @@ export type components = {
       /** Version */
       version: string;
     };
+    /**
+     * ImpactBusinessOut
+     * @description One business with its latest decision of the version: the result, the confidence,
+     *     whether it needs review, when and why it was decided, and every predicate's outcome in words
+     *     (``evaluated``). ``level`` is the business's level in the hierarchy, null when the business
+     *     directory does not list it.
+     */
+    ImpactBusinessOut: {
+      /** As Of Fy */
+      as_of_fy: string | null;
+      /**
+       * Business Id
+       * Format: uuid
+       */
+      business_id: string;
+      /** Confidence */
+      confidence: number;
+      /**
+       * Decided At
+       * Format: date-time
+       */
+      decided_at: string;
+      /**
+       * Decision Id
+       * Format: uuid
+       */
+      decision_id: string;
+      /** Evaluated */
+      evaluated: components["schemas"]["PredicateResultOut"][];
+      level: components["schemas"]["AttributeLevel"] | null;
+      /** Needs Review */
+      needs_review: boolean;
+      /** Profile Version */
+      profile_version: number;
+      result: components["schemas"]["Applicability"];
+      trigger: components["schemas"]["Trigger"];
+    };
+    /**
+     * ImpactEntityOut
+     * @description One client of the tenant: the legal entity at the top of the businesses' lineage (a
+     *     business the directory does not list stands under itself), with its businesses.
+     */
+    ImpactEntityOut: {
+      /** Businesses */
+      businesses: components["schemas"]["ImpactBusinessOut"][];
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+    };
+    /**
+     * ImpactFanOutOut
+     * @description The fan-out of the version over every tenant's businesses: its status, the directory
+     *     entries of the level when it began (``businesses_total``), the businesses decided so far and
+     *     those it applies to.
+     */
+    ImpactFanOutOut: {
+      /** Applies */
+      applies: number;
+      /** Businesses Total */
+      businesses_total: number;
+      /** Evaluated */
+      evaluated: number;
+      /** Finished At */
+      finished_at: string | null;
+      /**
+       * Started At
+       * Format: date-time
+       */
+      started_at: string;
+      status: components["schemas"]["FanOutStatus"];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
     /** Page[DecisionOut] */
     Page_DecisionOut_: {
       /** Items */
@@ -587,6 +866,18 @@ export type components = {
       resolved_by: string;
     };
     /**
+     * ResultCountsOut
+     * @description How many businesses have each result.
+     */
+    ResultCountsOut: {
+      /** Applies */
+      applies: number;
+      /** Not Applicable */
+      not_applicable: number;
+      /** Unsure */
+      unsure: number;
+    };
+    /**
      * ReviewItemOut
      * @description A decision waiting for a reviewer, or settled. ``decision`` is the decision under review:
      *     the latest of the business and the rule version while the item is open. ``resolved_by`` is
@@ -639,6 +930,12 @@ export type components = {
      * @enum {string}
      */
     ReviewStatus: "open" | "resolved";
+    /**
+     * RuleVersionStatus
+     * @enum {string}
+     */
+    RuleVersionStatus:
+      "draft" | "in_review" | "approved" | "published" | "superseded" | "withdrawn";
     /**
      * Trigger
      * @description What caused an evaluation; the ``trigger`` of ``applicability.decided``. ``review`` is a
@@ -930,6 +1227,84 @@ export interface operations {
       };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  dry_run_v1_applicability_engine_dry_runs_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DryRunIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DryRunOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -1531,6 +1906,65 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  read_change_impact_v1_changes__rule_version_id__impact_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Only the businesses whose latest decision has this result (applies: the affected clients); every business without */
+        result?: components["schemas"]["Applicability"] | null;
+      };
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        rule_version_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChangeImpactOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

@@ -9,8 +9,9 @@ while the version in `public.meta.json` has no section.
 
 ## 0.3.0
 
-The changes feed, from the rulebook. Every tenant member role and the regulatory team's roles
-(analyst, reviewer, admin) may call it, so `x-roles` may now name the regulatory roles too:
+The changes feed, from the rulebook, and the impact of a change, from the applicability engine.
+Every tenant member role and the regulatory team's roles (analyst, reviewer, admin) may read the
+feed, so `x-roles` may now name the regulatory roles too; the impact is for the tenant's members:
 
 - `GET /v1/changes` lists the published changes to the rulebook, newest first, a page at a time
   (`limit` up to 100 and `cursor`), optionally since a date (from the start of that day in India)
@@ -22,6 +23,13 @@ The changes feed, from the rulebook. Every tenant member role and the regulatory
   with `published_at`, its verified citations (clause, document and quote) and the versions it
   supersedes, corrects, withdraws or whose due dates it moves. The feed is the same for every
   tenant and needs no tenant.
+- `GET /v1/changes/{rule_version_id}/impact` answers what a change means for the caller's tenant:
+  each of its businesses with its latest decision of the version (result, confidence, whether it
+  needs review, when and why it was decided, and every predicate's outcome in words), grouped
+  under the client they belong to, the legal entity at the top of their lineage, a page of
+  clients at a time (`limit` and `cursor`); `result=applies` keeps the affected ones. It also
+  counts the tenant's businesses by result and gives the status and counters of the version's
+  fan-out over every tenant.
 
 ## 0.2.0
 

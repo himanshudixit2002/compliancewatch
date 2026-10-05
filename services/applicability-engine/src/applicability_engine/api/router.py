@@ -14,6 +14,10 @@ The fan-out routes name no tenant: a fan-out runs over every tenant. The regulat
 runs and the global hold (``deps.FanOutReader``); an admin pauses, resumes and cancels a run and
 sets and releases the hold (``deps.FanOutAdmin``). Every control is audited the same way, of no
 tenant, and then signals the run's workflow.
+
+A dry run names no tenant either, unless its scope does: an admin (``deps.DryRunAdmin``) asks
+what a version or a specification would decide for the directory's businesses, and only its
+audit entry is written.
 """
 
 from typing import Annotated
@@ -24,6 +28,7 @@ from fastapi.responses import JSONResponse
 
 from applicability_engine import SERVICE_NAME
 from applicability_engine.api.deps import (
+    DryRunAdmin,
     FanOutAdmin,
     FanOutReader,
     Resolver,
@@ -35,6 +40,8 @@ from applicability_engine.api.deps import (
 from applicability_engine.api.schemas import (
     DecisionCursor,
     DecisionOut,
+    DryRunIn,
+    DryRunOut,
     EvaluateIn,
     FanOutCursor,
     FanOutHoldIn,
@@ -46,6 +53,7 @@ from applicability_engine.api.schemas import (
     ReviewItemCursor,
     ReviewItemOut,
 )
+from applicability_engine.application.dry_run import DryRunRequest
 from applicability_engine.application.evaluate import EvaluateRequest
 from applicability_engine.application.fanout import FanOutControl, FanOutQuery, HoldControl
 from applicability_engine.application.queries import DecisionQuery
@@ -55,7 +63,8 @@ from applicability_engine.domain.model import DecisionKey, Trigger
 from applicability_engine.domain.review import ReviewItemId, ReviewItemKey, ReviewStatus
 from domain_kernel.access import Principal
 from domain_kernel.financial_year import FinancialYear
-from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId
+from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId
+from domain_kernel.predicates import specification_from_mapping
 from py_common.audit import audit_actor, current_correlation_id
 from py_common.idempotency.fastapi import IDEMPOTENCY_RESPONSES, IdempotencyKey, run_idempotent
 from py_common.pagination import Page, Pagination, page_of
@@ -347,3 +356,38 @@ def put_fan_out_hold(body: FanOutHoldIn, admin: FanOutAdmin, wired: Wired) -> Fa
         return FanOutHoldOut.from_hold(wired.set_hold.run(control))
     wired.release_hold.run(control)
     return FanOutHoldOut.from_hold(None)
+
+
+@router.post(
+    "/dry-runs",
+    summary="What a version or a specification would decide for the directory; stores nothing",
+    responses=problem_responses(401, 403, 404, 422, 503),
+)
+def dry_run(body: DryRunIn, admin: DryRunAdmin, wired: Wired) -> DryRunOut:
+    """Evaluates a rule version in any status (a draft, one under review or approved, or a
+    published one), or a specification no version holds yet, the way a fan-out does: against
+    every business of the level the business directory lists, of one tenant when the scope
+    names one, for the current financial year in India. It answers the counts by result, the
+    counts by the attribute that decided each result, and up to ``sample_size`` decisions, a
+    result at a time. Nothing is stored and no event is published; the only write is the audit
+    entry applicability.dry_run, with the actor and the counts. 404 when the rulebook has no such
+    version; 422 for a malformed specification, a level that is not the version's, or a scope
+    wider than CW_APPLICABILITY_DRY_RUN_MAX businesses (2,000 by default; name a tenant); 503 when
+    the rulebook or the profile service cannot be read."""
+    scope = body.scope
+    report = wired.dry_run.run(
+        DryRunRequest(
+            actor=audit_actor(SERVICE_NAME, admin),
+            rule_version_id=None
+            if body.rule_version_id is None
+            else RuleVersionId(body.rule_version_id),
+            specification=None
+            if body.specification is None
+            else specification_from_mapping(body.specification),
+            level=scope.level,
+            tenant_id=None if scope.tenant_id is None else TenantId(scope.tenant_id),
+            sample_size=scope.sample_size,
+            correlation_id=current_correlation_id(),
+        )
+    )
+    return DryRunOut.from_report(report)
