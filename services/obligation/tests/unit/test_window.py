@@ -35,6 +35,7 @@ def decided(
     business: BusinessId,
     result: Applicability = Applicability.APPLIES,
     at: datetime = DECIDED_AT,
+    profile_version: int | None = 7,
 ) -> None:
     ApplyDecision(reader, clock=lambda: at).run(
         Decision(
@@ -45,6 +46,7 @@ def decided(
             result=result,
             needs_review=False,
             decided_at=at,
+            profile_version=profile_version,
         ),
         store,
     )
@@ -72,6 +74,7 @@ def test_the_window_makes_the_period_that_entered_it_once() -> None:
     assert labels(store, other) == ["2026-10", "2026-11"], "no longer applies: nothing new"
     (made,) = [store.obligations[o] for o in rolled.created]
     assert made.business_id == business
+    assert made.profile_version == 7, "the profile version of the decision it rolls"
     assert roll.run().created == (), "a second run makes nothing"
     assert roll.run(only={other}).tenants == 1
 

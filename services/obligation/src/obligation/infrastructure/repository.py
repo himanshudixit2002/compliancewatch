@@ -1,7 +1,8 @@
 """The Postgres unit of work: one transaction with the tenant setting for row-level security,
 the obligation repository on it, the outbox writer as the event sink, and the change log, the
-reminder log, the cached rule versions and the applied decisions on the same session, so each of
-their rows commits or rolls back with the outbox rows.
+comments, the reminder log, the cached rule versions, the applied decisions and the audit entries
+(``py_common.audit.writer``, into ``audit.event``) on the same connection, so each of their rows
+commits or rolls back with the outbox rows.
 
 ``PostgresUnitOfWorkFactory.on_connection(connection)`` makes units inside a transaction someone
 else owns, such as a consumer's inbox transaction (``py_common.outbox.sync``): the handler's
@@ -45,6 +46,7 @@ from domain_kernel.ids import (
 )
 from domain_kernel.recurrence import Period
 from domain_kernel.status import ClosureReason, ObligationStatus, RuleVersionStatus
+from obligation.domain.comments import CommentId, ObligationComment
 from obligation.domain.history import ChangeKind, ObligationChange
 from obligation.domain.model import Obligation
 from obligation.domain.reminders import Reminder
@@ -53,12 +55,14 @@ from obligation.domain.rule_versions import AppliedDecision, Citation, RuleVersi
 from obligation.infrastructure.models import (
     TENANT_SETTING,
     ObligationChangeRow,
+    ObligationCommentRow,
     ObligationDecisionRow,
     ObligationReminderRow,
     ObligationRow,
     ObligationTenantRow,
     RuleVersionRefRow,
 )
+from py_common.audit.writer import PostgresAuditSink
 from py_common.outbox import OutboxWriter
 
 OPEN_STATUSES = ("open", "in_progress")
@@ -73,8 +77,13 @@ class SqlAlchemyObligationRepository:
         self._tenant_id = tenant_id
         self._tenant_listed = False
 
-    def get(self, obligation_id: ObligationId) -> Obligation | None:
-        row = self._session.get(ObligationRow, obligation_id.value)
+    def get(self, obligation_id: ObligationId, *, lock: bool = False) -> Obligation | None:
+        statement = select(ObligationRow).where(ObligationRow.id == obligation_id.value)
+        if lock:
+            statement = statement.with_for_update(of=ObligationRow)
+        row = self._session.scalars(
+            statement.execution_options(populate_existing=True)
+        ).one_or_none()
         return None if row is None else _to_obligation(row)
 
     def find(
@@ -192,9 +201,11 @@ class SqlAlchemyUnitOfWork:
         self.obligations = SqlAlchemyObligationRepository(session, tenant_id)
         self.events = OutboxSink(connection, writer)
         self.history = SqlAlchemyChangeLog(session)
+        self.comments = SqlAlchemyCommentLog(session)
         self.reminders = SqlAlchemyReminderLog(session)
         self.rule_versions = SqlAlchemyRuleVersionRefs(connection)
         self.decisions = SqlAlchemyAppliedDecisions(connection, tenant_id)
+        self.audit = PostgresAuditSink(connection)
 
 
 class ConnectionUnitOfWorkFactory:
@@ -281,6 +292,8 @@ def _to_row(obligation: Obligation) -> ObligationRow:
         closed_at=obligation.closed_at,
         closed_reason=None if obligation.closed_reason is None else obligation.closed_reason.value,
         closed_by=None if obligation.closed_by is None else obligation.closed_by.value,
+        profile_version=obligation.profile_version,
+        assignee_id=None if obligation.assignee_id is None else obligation.assignee_id.value,
     )
 
 
@@ -307,6 +320,8 @@ def _to_obligation(row: ObligationRow) -> Obligation:
         closed_at=None if row.closed_at is None else row.closed_at.astimezone(UTC),
         closed_reason=None if row.closed_reason is None else ClosureReason(row.closed_reason),
         closed_by=None if row.closed_by is None else UserId(row.closed_by),
+        profile_version=row.profile_version,
+        assignee_id=None if row.assignee_id is None else UserId(row.assignee_id),
     )
 
 
@@ -352,7 +367,18 @@ def _to_change_row(change: ObligationChange) -> ObligationChangeRow:
         else change.caused_by_rule_version_id.value,
         actor=None if change.actor is None else change.actor.value,
         correlation_id=change.correlation_id.value,
+        previous_assignee_id=_uuid(change.previous_assignee_id),
+        new_assignee_id=_uuid(change.new_assignee_id),
+        note=change.note,
     )
+
+
+def _uuid(user_id: UserId | None) -> UUID | None:
+    return None if user_id is None else user_id.value
+
+
+def _user(value: UUID | None) -> UserId | None:
+    return None if value is None else UserId(value)
 
 
 def _to_change(row: ObligationChangeRow) -> ObligationChange:
@@ -375,7 +401,51 @@ def _to_change(row: ObligationChangeRow) -> ObligationChange:
         else RuleVersionId(row.caused_by_rule_version_id),
         actor=None if row.actor is None else UserId(row.actor),
         correlation_id=CorrelationId(row.correlation_id),
+        previous_assignee_id=_user(row.previous_assignee_id),
+        new_assignee_id=_user(row.new_assignee_id),
+        note=row.note,
     )
+
+
+class SqlAlchemyCommentLog:
+    """The comments on the unit of work's session; row-level security scopes them to the
+    tenant, and the table's trigger refuses UPDATE and DELETE."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, comment: ObligationComment) -> None:
+        self._session.add(
+            ObligationCommentRow(
+                id=comment.id.value,
+                tenant_id=comment.tenant_id.value,
+                obligation_id=comment.obligation_id.value,
+                author_id=_uuid(comment.author_id),
+                author_label=comment.author_label,
+                body=comment.body,
+                created_at=comment.created_at,
+            )
+        )
+        self._session.flush()
+
+    def for_obligation(self, obligation_id: ObligationId) -> Sequence[ObligationComment]:
+        statement = (
+            select(ObligationCommentRow)
+            .where(ObligationCommentRow.obligation_id == obligation_id.value)
+            .order_by(ObligationCommentRow.created_at, ObligationCommentRow.id)
+        )
+        return [
+            ObligationComment(
+                id=CommentId(row.id),
+                tenant_id=TenantId(row.tenant_id),
+                obligation_id=ObligationId(row.obligation_id),
+                author_id=_user(row.author_id),
+                author_label=row.author_label,
+                body=row.body,
+                created_at=row.created_at.astimezone(UTC),
+            )
+            for row in self._session.scalars(statement).all()
+        ]
 
 
 class SqlAlchemyReminderLog:
@@ -559,6 +629,7 @@ class SqlAlchemyAppliedDecisions:
             decision_id=decision.decision_id.value,
             applies=decision.applies,
             decided_at=decision.decided_at,
+            profile_version=decision.profile_version,
         )
         statement = values.on_conflict_do_update(
             index_elements=["business_id", "rule_version_id"],
@@ -566,6 +637,7 @@ class SqlAlchemyAppliedDecisions:
                 "decision_id": values.excluded.decision_id,
                 "applies": values.excluded.applies,
                 "decided_at": values.excluded.decided_at,
+                "profile_version": values.excluded.profile_version,
                 "recorded_at": func.now(),
             },
             where=ObligationDecisionRow.decided_at <= values.excluded.decided_at,
@@ -589,6 +661,7 @@ class SqlAlchemyAppliedDecisions:
                 decision_id=DecisionId(row["decision_id"]),
                 applies=row["applies"],
                 decided_at=row["decided_at"].astimezone(UTC),
+                profile_version=row["profile_version"],
             )
             for row in self._connection.execute(statement).mappings()
         ]

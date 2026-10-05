@@ -37,12 +37,14 @@ SCHEMA = "obligation"
 TABLES = {
     "obligation",
     "obligation_change",
+    "obligation_comment",
     "obligation_decision",
     "obligation_reminder",
     "obligation_tenant",
     "rule_version_ref",
     "outbox_event",
     "processed_event",
+    "idempotency_key",
     "alembic_version",
 }
 APP_ROLE = "obligation_app"

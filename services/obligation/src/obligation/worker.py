@@ -135,6 +135,7 @@ def decision_from(message: EventMessage) -> Decision:
         result=Applicability(payload.result.value),
         needs_review=payload.needs_review,
         decided_at=payload.decided_at,
+        profile_version=payload.profile_version,
     )
 
 

@@ -35,7 +35,7 @@ from types import MappingProxyType
 from typing import Self
 from uuid import UUID
 
-from domain_kernel._validation import require_aware, require_instance, require_text
+from domain_kernel._validation import require_aware, require_instance, require_int, require_text
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId, UserId
 from domain_kernel.periods import EffectivePeriod
@@ -190,8 +190,9 @@ def taken_over(obligation: Obligation, effective_from: date, tz: tzinfo) -> bool
 @dataclass(frozen=True, slots=True)
 class AppliedDecision:
     """The latest applicability decision the service acted on for one business and rule
-    version: whether the rule applies, which decision said so and when it was made. The daily
-    rolling window makes the new periods of those that apply."""
+    version: whether the rule applies, which decision said so, when it was made and from which
+    profile version (None for one kept before the version was). The daily rolling window makes
+    the new periods of those that apply."""
 
     tenant_id: TenantId
     business_id: BusinessId
@@ -199,6 +200,7 @@ class AppliedDecision:
     decision_id: DecisionId
     applies: bool
     decided_at: datetime
+    profile_version: int | None = None
 
     def __post_init__(self) -> None:
         require_instance(self.tenant_id, TenantId, "tenant_id")
@@ -207,6 +209,8 @@ class AppliedDecision:
         require_instance(self.decision_id, DecisionId, "decision_id")
         require_instance(self.applies, bool, "applies")
         require_aware(self.decided_at, "decided_at")
+        if self.profile_version is not None:
+            require_int(self.profile_version, "profile_version", minimum=1)
 
     def supersedes(self, stored: "AppliedDecision | None") -> bool:
         """Whether this decision replaces ``stored``: there is none, or it was made no

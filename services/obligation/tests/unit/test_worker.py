@@ -54,6 +54,8 @@ DLQ = "applicability.decided.obligation.decisions.dlq"
 RULE_VERSION = RuleVersionId(UUID("4e5f6a7b-8c9d-4e0f-9a1b-2c3d4e5f6a7b"))
 TENANT = TenantId(UUID("5b1f3d2e-7c4a-4e0b-9a6d-1f2e3d4c5b6a"))
 NOW = datetime(2026, 10, 1, 4, 0, tzinfo=UTC)
+PROFILE_VERSION = 4
+"""The profile version of the example decision."""
 
 
 def obligation_settings(**overrides: Any) -> ObligationSettings:
@@ -163,6 +165,10 @@ async def test_an_applying_decision_materialises_once(inbox: Engine) -> None:
     assert setup.rules.fresh == [], "a decision may use a read made a short while ago"
     assert setup.producer.sent == []
     assert RULE_VERSION in setup.store.rule_versions, "the miss filled the cache"
+    made = setup.store.obligations.values()
+    assert {o.profile_version for o in made} == {PROFILE_VERSION}, "the decision's profile"
+    (applied,) = setup.store.decisions.values()
+    assert applied.profile_version == PROFILE_VERSION
 
 
 async def test_a_flip_to_not_applicable_closes_and_review_changes_nothing(inbox: Engine) -> None:

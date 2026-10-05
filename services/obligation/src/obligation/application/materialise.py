@@ -42,6 +42,8 @@ class MaterialiseRequest:
     as_of: date
     ref: RuleVersionRef | None = None
     """The version's cached facts; what it no longer governs is refused. None checks nothing."""
+    profile_version: int | None = None
+    """The profile version of the decision; every obligation made keeps it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +107,7 @@ def materialise_in(
             status=ObligationStatus.OPEN,
             created_at=created_at,
             updated_at=created_at,
+            profile_version=request.profile_version,
         )
         uow.obligations.add(obligation)
         record(uow, obligation.created_event(), obligation)

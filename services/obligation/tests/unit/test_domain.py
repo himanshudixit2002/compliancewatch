@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from domain_kernel.errors import InvalidTransitionError, InvariantViolationError
-from domain_kernel.ids import ObligationId, RuleVersionId, UserId
+from domain_kernel.ids import CorrelationId, ObligationId, RuleVersionId, UserId
 from domain_kernel.recurrence import Period, Recurrence
 from domain_kernel.status import ClosureReason, ObligationStatus, close_obligation
 from obligation.domain.errors import (
@@ -70,8 +70,32 @@ def test_start_reschedule_and_close_move_through_the_kernel_table() -> None:
     assert not done.is_open
 
 
+def test_an_open_obligation_is_assigned_and_unassigned() -> None:
+    user = UserId.new()
+    assigned = obligation(profile_version=3).assign(user, at=NOW + timedelta(hours=1))
+    assert (assigned.assignee_id, assigned.updated_at) == (user, NOW + timedelta(hours=1))
+    assert assigned.profile_version == 3
+    with pytest.raises(InvariantViolationError, match="has that assignee already"):
+        assigned.assign(user, at=NOW)
+    assert assigned.assign(None, at=NOW).assignee_id is None
+    with pytest.raises(InvariantViolationError, match="assignee must be UserId"):
+        assigned.assign("someone", at=NOW)  # type: ignore[arg-type]
+    started = assigned.start(NOW)
+    assert started.assign(None, at=NOW).status is ObligationStatus.IN_PROGRESS
+
+
+def test_a_closure_carries_the_correlation_id_it_is_given() -> None:
+    correlation = CorrelationId.new()
+    _, event = obligation().close(ClosureReason.COMPLETED, at=NOW, correlation_id=correlation)
+    assert event.correlation_id == correlation
+    _, other = obligation().close(ClosureReason.COMPLETED, at=NOW)
+    assert other.correlation_id != correlation
+
+
 def test_a_closed_obligation_never_changes_again() -> None:
     done, _ = obligation().close(ClosureReason.WAIVED_BY_USER, at=NOW)
+    with pytest.raises(ObligationClosedError):
+        done.assign(UserId.new(), at=NOW)
     with pytest.raises(ObligationClosedError, match="waived"):
         done.start(NOW)
     with pytest.raises(ObligationClosedError):
@@ -109,6 +133,9 @@ def test_closing_from_in_progress_to_not_applicable_is_allowed_and_terminal() ->
         ({"closed_at": NOW}, "exactly when the status is terminal"),
         ({"status": ObligationStatus.DONE}, "exactly when the status is terminal"),
         ({"period": "2026-09"}, "period must be Period"),
+        ({"profile_version": 0}, "profile_version must be at least 1"),
+        ({"profile_version": True}, "profile_version must be an integer"),
+        ({"assignee_id": "someone"}, "assignee_id must be UserId"),
     ],
 )
 def test_invariants(overrides: dict[str, object], message: str) -> None:

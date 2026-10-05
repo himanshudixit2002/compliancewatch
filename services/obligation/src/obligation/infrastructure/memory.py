@@ -1,11 +1,12 @@
 """In-memory repository and unit of work: the fakes for tests and the app before Postgres.
 
 A unit of work works on a copy of the obligations, the cached rule versions and the applied
-decisions, and replaces them when the block exits cleanly. Units run one at a time (a store-level
+decisions, and replaces them when the block exits cleanly; the events, changes, comments,
+reminders and audit entries it writes wait until then too. Units run one at a time (a store-level
 lock held from open to commit or rollback), so two overlapping requests, of one tenant or of two,
-cannot both start from the same copy and lose each other's writes. ``MemoryStore.rule_version_refs``
-reads and writes the cached versions outside a unit, under the same lock, as the rule events
-consumer does on its connection.
+cannot both start from the same copy and lose each other's writes, and a ``lock``ed read needs no
+lock of its own. ``MemoryStore.rule_version_refs`` reads and writes the cached versions outside a
+unit, under the same lock, as the rule events consumer does on its connection.
 """
 
 import threading
@@ -14,13 +15,16 @@ from contextlib import AbstractContextManager, contextmanager
 from datetime import date, datetime
 from uuid import UUID
 
+from domain_kernel.audit import AuditEntry
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId, TenantId
+from obligation.domain.comments import ObligationComment
 from obligation.domain.history import ObligationChange
 from obligation.domain.model import Obligation, period_matches
 from obligation.domain.reminders import Reminder
 from obligation.domain.repository import UnitOfWork
 from obligation.domain.rule_versions import AppliedDecision, RuleVersionRef
+from py_common.audit import MemoryAuditSink
 
 DecisionKey = tuple[BusinessId, RuleVersionId]
 
@@ -30,7 +34,7 @@ class MemoryObligationRepository:
         self._store = store
         self._tenant_id = tenant_id
 
-    def get(self, obligation_id: ObligationId) -> Obligation | None:
+    def get(self, obligation_id: ObligationId, *, lock: bool = False) -> Obligation | None:
         obligation = self._store.get(obligation_id)
         return obligation if obligation and obligation.tenant_id == self._tenant_id else None
 
@@ -204,6 +208,8 @@ class MemoryUnitOfWork:
         reminders: list[Reminder] | None = None,
         refs: dict[RuleVersionId, RuleVersionRef] | None = None,
         decisions: dict[DecisionKey, AppliedDecision] | None = None,
+        comments: list[ObligationComment] | None = None,
+        audit: list[AuditEntry] | None = None,
     ) -> None:
         self._committed = store
         self._working: dict[ObligationId, Obligation] = {}
@@ -214,9 +220,11 @@ class MemoryUnitOfWork:
         self.obligations = MemoryObligationRepository(self._working, tenant_id)
         self.events = MemoryEventSink(events)
         self.history = MemoryChangeLog([] if changes is None else changes, tenant_id)
+        self.comments = MemoryCommentLog([] if comments is None else comments, tenant_id)
         self.reminders = MemoryReminderLog([] if reminders is None else reminders, tenant_id)
         self.rule_versions = MemoryRuleVersionRefs(self._working_refs)
         self.decisions = MemoryAppliedDecisions(self._working_decisions, tenant_id)
+        self.audit = MemoryAuditSink([] if audit is None else audit, tenant_id=tenant_id)
 
     def __enter__(self) -> "MemoryUnitOfWork":
         self._working.clear()
@@ -237,21 +245,25 @@ class MemoryUnitOfWork:
             self._committed_decisions.update(self._working_decisions)
             self.events.commit()
             self.history.commit()
+            self.comments.commit()
             self.reminders.commit()
+            self.audit.commit()
 
 
 class MemoryStore:
-    """Holds every tenant's obligations, published events, changes, reminders and applied
-    decisions, and the cached rule versions; makes units of work, and is the tenant directory of
-    the sweeps (``tenants``)."""
+    """Holds every tenant's obligations, published events, changes, comments, reminders, applied
+    decisions and audit entries, and the cached rule versions; makes units of work, and is the
+    tenant directory of the sweeps (``tenants``)."""
 
     def __init__(self) -> None:
         self.obligations: dict[ObligationId, Obligation] = {}
         self.events: list[DomainEvent] = []
         self.changes: list[ObligationChange] = []
+        self.comments: list[ObligationComment] = []
         self.reminders: list[Reminder] = []
         self.rule_versions: dict[RuleVersionId, RuleVersionRef] = {}
         self.decisions: dict[DecisionKey, AppliedDecision] = {}
+        self.audit: list[AuditEntry] = []
         self._lock = threading.Lock()
 
     def ping(self) -> bool:
@@ -272,6 +284,8 @@ class MemoryStore:
                 self.reminders,
                 self.rule_versions,
                 self.decisions,
+                self.comments,
+                self.audit,
             ) as uow,
         ):
             yield uow
@@ -311,6 +325,36 @@ class MemoryChangeLog:
             if change.tenant_id == self._tenant_id and change.obligation_id == obligation_id
         ]
         return sorted(found, key=lambda change: change.occurred_at)
+
+    def commit(self) -> None:
+        self._committed.extend(self.pending)
+        self.pending.clear()
+
+
+class MemoryCommentLog:
+    """Adds wait in ``pending`` until the unit of work commits; reads see the committed comments
+    of the tenant and this unit's own adds. Refuses another tenant's comment and a second one
+    with an id already stored, as the table does."""
+
+    def __init__(self, committed: list[ObligationComment], tenant_id: TenantId) -> None:
+        self._committed = committed
+        self._tenant_id = tenant_id
+        self.pending: list[ObligationComment] = []
+
+    def add(self, comment: ObligationComment) -> None:
+        if comment.tenant_id != self._tenant_id:
+            raise ValueError(f"comment {comment.id} belongs to another tenant")
+        if any(c.id == comment.id for c in (*self._committed, *self.pending)):
+            raise ValueError(f"duplicate comment {comment.id}")
+        self.pending.append(comment)
+
+    def for_obligation(self, obligation_id: ObligationId) -> Sequence[ObligationComment]:
+        found = [
+            comment
+            for comment in (*self._committed, *self.pending)
+            if comment.tenant_id == self._tenant_id and comment.obligation_id == obligation_id
+        ]
+        return sorted(found, key=lambda comment: (comment.created_at, comment.id.value))
 
     def commit(self) -> None:
         self._committed.extend(self.pending)

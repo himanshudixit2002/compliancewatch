@@ -119,6 +119,7 @@ class RollWindow:
                         rule=read.snapshot,
                         as_of=as_of,
                         ref=admission.ref,
+                        profile_version=decision.profile_version,
                     ),
                     window=self._window,
                     now=now,
