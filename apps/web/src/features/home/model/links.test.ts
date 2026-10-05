@@ -34,7 +34,7 @@ describe("homeSectionsFor", () => {
       id: "owner.changes",
       title: "Changes",
       href: "/b/b1/changes",
-      status: "waiting",
+      status: "ready",
     });
   });
 });
