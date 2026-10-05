@@ -1,6 +1,6 @@
 # applicability-engine service
 
-Part of the ComplianceWatch monorepo. **Deterministic evaluation of one rule version against one business, stored append-only with its event; recompute on profile.updated (behind the flag `applicability.recompute`), the business directory, the review queue, and the rule.published fan-out over the directory as a Temporal workflow with its hold and controls (behind the flag `applicability.fanout`); no LLM judge yet.**
+Part of the ComplianceWatch monorepo. **Deterministic evaluation of one rule version against one business, stored append-only with its event; recompute on profile.updated (behind the flag `applicability.recompute`), the business directory, the review queue, the rule.published fan-out over the directory as a Temporal workflow with its hold and controls (behind the flag `applicability.fanout`), the impact of a change on a tenant (public API) and an admin's dry run of a version over the directory; no LLM judge yet.**
 Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
 
 - **Owns:** ApplicabilityDecisions: coarse filter by regulator and attribute index, per-business predicate evaluation, LLM-judged free-text predicates with confidence, Temporal fan-out in batches of 1,000
@@ -90,6 +90,29 @@ Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
     holding need a reason of at least ten characters.
   - `applicability_engine.testing.LocalFanOuts` runs the same loop and activities on a thread
     for tests and demos without Temporal.
+- `domain/impact.py`, `application/impact.py`: the impact of a change on one tenant,
+  `ReadChangeImpact`. It reads the engine's own tables only, with nothing over HTTP: the tenant's
+  latest decision of the version per business (decided_at, then id; a decision of any trigger),
+  each placed under the legal entity at the top of its lineage as the business directory records
+  it (the business itself, with no level, when the directory does not list it), a page of
+  entities at a time, optionally of one result; the counts of those latest decisions by result;
+  and the version's `fanout_run`, in a second short transaction of no tenant. The Postgres store
+  reads `DISTINCT ON (business_id)` from a backward scan of `ix_applicability_decision_impact`,
+  under the unit's row-level security, joining the directory on the decision's tenant.
+- `application/dry_run.py`: `DryRun`, what a rule version in any status, or a specification no
+  version holds, would decide for the businesses the directory lists at the level (the version's
+  own, or the scope's with a specification), of one tenant when the scope names one, for the
+  current financial year in India, as a fan-out evaluates it. The directory entries in scope are
+  counted first, and more than `CW_APPLICABILITY_DRY_RUN_MAX` (2,000) is refused (422
+  `applicability-dry-run-too-large`) before anything is read; then each profile snapshot is read
+  over HTTP with no transaction open and evaluated in the process. It stores no decision, opens
+  no review item, starts nothing and publishes no event; its one write is the audit entry
+  `applicability.dry_run`, of no tenant, with the actor, the subject (`rule_version` and the
+  version id, or `specification` and the first 32 hex digits of the SHA-256 of its mapping) and
+  in `after` the scope and the counts. The report counts the businesses by result and, for each
+  attribute that decided a result (`domain.evaluation.deciding_attributes`: the predicates that
+  made the result, those that ruled it out, made it apply or left it unsure), by result again,
+  and keeps up to `sample_size` (0 to 50, 10) decisions, a result at a time.
 - `infrastructure/`: the HTTP clients (`profile_client.py`, `rulebook_client.py`; a 404 is
   `None`, anything else unexpected is `DependencyUnavailableError`, 503); the rulebook's in-force
   listing is paged by rule key and cached per day for `CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS`
@@ -131,6 +154,9 @@ Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
   global hold is set). Rule-level, of no tenant and without row-level security, so both are exempt
   in `infra/scripts/migration_lint.toml`; `make product-role` grants them to `cw_app` like every
   table of the schema.
+- `migrations/versions/20261006_0004_impact_index.py`: `ix_applicability_decision_impact`
+  (tenant_id, rule_version_id, business_id, decided_at, id) on the decisions, for the impact of a
+  change. Expand-only.
 
 Routes, for the request's tenant (`api/deps.py`):
 
@@ -141,6 +167,15 @@ Routes, for the request's tenant (`api/deps.py`):
   `cursor` (py_common.pagination), optional `rule_version_id`.
 - `GET /v1/applicability-engine/decisions/{decision_id}`: one decision with every predicate's
   outcome, confidence and reason.
+- `GET /v1/changes/{rule_version_id}/impact?result=&limit=&cursor=`: in the public API (tag
+  `public`, `x-roles` the tenant member roles), beside the rulebook's `GET /v1/changes`. The
+  tenant's clients (`items`, by entity id, keyset paged a client at a time), each with its
+  businesses and their latest decision of the version: result, confidence, `needs_review`,
+  `decided_at`, the trigger and every predicate's outcome in words (`evaluated`); `result=applies`
+  keeps the affected ones, a CA firm's affected-clients list. `counts` covers every business of
+  the tenant with a decision of the version, and `fan_out` gives the status and counters of the
+  version's run (null when it had none). A version the engine never decided reads as one with no
+  clients.
 
 The review queue, for the regulatory team, acts for the tenant `x-tenant-id` names (401
 `applicability-tenant-required` without it):
@@ -182,6 +217,23 @@ Who may call them, by `CW_AUTH_MODE`: a user a token names needs a regulatory ro
 reviewer or admin) to read and the admin role to control; tenant members and services are a 403.
 In `header` mode the anonymous caller passes, audited as `system:applicability-engine`; in `dual`
 mode a control without a token is a 401. The one deployable classes every fan-out route `admin`.
+
+The dry run, for an admin, names no tenant unless its scope does:
+
+- `POST /v1/applicability-engine/dry-runs` with `rule_version_id` (a version in any status) or
+  `specification` (the kernel's predicate tree mapping), exactly one, and a `scope`: `level`
+  (required with a specification; with a version, its own, and another is a 422), `tenant_id`
+  and `sample_size`. 200 with the report: `businesses_total` (the directory entries in scope),
+  `evaluated`, `skipped` (no profile any more), `counts`, `needs_review`, `by_attribute`,
+  `samples`, `as_of_fy`, `max_businesses`; 404 for a version the rulebook lacks, 422 for a
+  malformed specification or a scope over `CW_APPLICABILITY_DRY_RUN_MAX`, 503 when the rulebook
+  or the profile service cannot be read. No Idempotency-Key: it creates nothing, and a repeat
+  writes another audit entry.
+
+It takes the fan-out controls' guard (`deps.DryRunAdmin`): an admin a token names, the anonymous
+caller in `header` mode only (audited as `system:applicability-engine`), and a 401 without a token
+in `dual` mode; it reads every tenant's profiles. The one deployable classes it `admin` and
+counts it among the routes that call other services while they serve (`loopback_routes`).
 
 Not built yet: the LLM evaluator for free-text predicates, the golden set, and the coarse filter
 over indexed profile attributes that lets a fan-out skip businesses a version cannot apply to.

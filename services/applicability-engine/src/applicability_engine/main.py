@@ -15,6 +15,12 @@ The fan-out routes run on units of work of no tenant over the runs and the hold,
 version's workflow once a control has committed: on Temporal (``TemporalFanOuts``) when the store
 is Postgres and the flag ``applicability.fanout`` is on, else nowhere (``NoFanOutWorkflows``), or
 on the ``workflows`` a test passes.
+
+The impact of a change reads the tenant's decisions and the directory in a unit of work of the
+tenant and the run in one of no tenant. A dry run reads the business directory across tenants
+(``PostgresBusinessDirectory``, or the memory store's), the profiles and the rule version through
+the same readers as an evaluation, at most ``CW_APPLICABILITY_DRY_RUN_MAX`` businesses, and writes
+its audit entry through a unit of no tenant.
 """
 
 from collections.abc import Callable
