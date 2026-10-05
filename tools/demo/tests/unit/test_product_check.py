@@ -12,6 +12,7 @@ import httpx2
 import pytest
 
 from cw_demo.product import check
+from cw_demo.product.analysts import REVIEWERS
 from cw_demo.product.check import (
     CheckContext,
     NotYetError,
@@ -303,6 +304,7 @@ def test_steps_are_chosen_by_name_in_the_check_order() -> None:
         "fanout",
         "reminders",
         "rollback",
+        "tracking",
     ]
     assert [step.name for step in select(["isolation", "health"])] == ["health", "isolation"]
     assert select(None) == check.STEPS
@@ -320,6 +322,80 @@ def test_the_recompute_step_needs_the_monthly_rule_published(sink: Path) -> None
     product = scripted_product(Unpublished(), sink)
     with pytest.raises(StepFailedError, match="gstr3b_monthly is not published"):
         check.recompute(context_of(product))
+
+
+def test_the_tracking_step_needs_the_monthly_rule_published(sink: Path) -> None:
+    class Unpublished(Scripted):
+        def __call__(self, request: httpx2.Request) -> httpx2.Response:
+            if request.url.path == "/v1/rulebook/rule-versions":
+                return httpx2.Response(200, json=[])
+            return super().__call__(request)
+
+    product = scripted_product(Unpublished(), sink)
+    with pytest.raises(StepFailedError, match="gstr3b_monthly is not published"):
+        check.tracking(context_of(product))
+
+
+def tracked(**overrides: Any) -> dict[str, Any]:
+    """A detail as the tracking step reads it after its changes, with ``overrides``."""
+    detail: dict[str, Any] = {
+        "history": [{"kind": kind} for kind in check.TRACKED_HISTORY],
+        "rule_version": {
+            "approved_by": [str(reviewer.user_id) for reviewer in REVIEWERS],
+            "seed_status": "needs_review",
+            "reviewed": False,
+            "published_at": "2026-10-01T04:00:00Z",
+        },
+        "citations": [{"clause_ref": "en.p1"}],
+        "comments": [{"comment_id": "c1"}],
+    }
+    detail.update(overrides)
+    return detail
+
+
+def test_the_tracked_detail_names_both_reviewers_and_refuses_what_is_missing() -> None:
+    comment = {"comment_id": "c1"}
+    assert check.tracked_detail(tracked(), comment) == (
+        "Demo reviewer one (synthetic) and Demo reviewer two (synthetic)"
+    )
+    review = tracked()["rule_version"]
+    for detail, problem in (
+        (tracked(history=[{"kind": "created"}]), "history reads created"),
+        (tracked(rule_version=None), "no facts"),
+        (tracked(rule_version={**review, "approved_by": [str(uuid4())]}), "not both"),
+        (tracked(rule_version={**review, "seed_status": "reviewed"}), "reviews nothing"),
+        (tracked(citations=[]), "no verified citation"),
+        (tracked(comments=[]), "does not list the comment"),
+    ):
+        with pytest.raises(StepFailedError, match=problem):
+            check.tracked_detail(detail, comment)
+
+
+class Completing(Scripted):
+    """Answers every request with an obligation of ``status``, the second one on replayed when
+    ``replayed``."""
+
+    def __init__(self, replayed: bool, status: str = "done") -> None:
+        super().__init__()
+        self.replayed, self.status, self.calls = replayed, status, 0
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        self.calls += 1
+        headers = {"Idempotent-Replayed": "true"} if self.replayed and self.calls > 1 else {}
+        return httpx2.Response(200, json={"status": self.status}, headers=headers)
+
+
+def test_completing_twice_needs_the_same_answer_replayed(sink: Path) -> None:
+    def answering(replayed: bool, status: str = "done") -> Product:
+        return scripted_product(Completing(replayed, status), sink)
+
+    keyed = check.keyed({"x-tenant-id": str(uuid4())}, "same-key-1")
+    completed, replayed = check.complete_twice(answering(True), "/x", keyed)
+    assert (completed["status"], replayed) == ("done", "true")
+    with pytest.raises(StepFailedError, match="not replayed"):
+        check.complete_twice(answering(False), "/x", keyed)
+    with pytest.raises(StepFailedError, match="is open"):
+        check.complete_twice(answering(True, "open"), "/x", keyed)
 
 
 def test_the_probe_gstins_are_made_up_karnataka_ones() -> None:

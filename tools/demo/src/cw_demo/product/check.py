@@ -58,6 +58,14 @@ the API answers. One failed step does not stop the next.
   business tenant, and queued for the CA firm's daily digest (or sent, once the digest went). On
   a database where it was withdrawn already, it checks what followed. Never run it against a
   database whose seed rules others rely on: only four seed rules can be published at all.
+- ``tracking``: a new synthetic business in the business tenant (``POST /v1/businesses``, a
+  monthly GSTR-3B filer) gets its obligations of the monthly rule from profile.updated; the step
+  starts the first one due, assigns it to the tenant's synthetic owner, and completes it twice with
+  one Idempotency-Key: one closure, and the second answer is the first, replayed. The detail then
+  shows the history (created, started, assigned, closed), the rule version's reviewed-by data
+  naming both synthetic reviewers while its seed status stays needs_review, and verified
+  citations; a comment is added and listed. Each run spends a business of its own, so the seeded
+  registration's obligations stay for the reminders step and a later check passes again.
 """
 
 import io
@@ -73,9 +81,11 @@ from uuid import UUID, uuid4
 
 import httpx2
 
-from cw_demo.product.analysts import FIRST_REVIEWER, NOTE
+from cw_demo.product.analysts import FIRST_REVIEWER, NOTE, REVIEWERS
 from cw_demo.product.client import GOLDEN, Product, ProductError, as_tenant, ok
 from cw_demo.product.evaluate import (
+    IDEMPOTENCY_HEADER,
+    REPLAYED_HEADER,
     SeededRegistration,
     evaluate,
     published_in_force,
@@ -168,6 +178,10 @@ RULE_WITHDRAWN: Final = "rule_withdrawn"
 PENDING_STATES: Final = frozenset({"queued", "digest_pending"})
 SKIPPED: Final = "skipped (destructive; CI runs it)"
 ROLLBACK_NOTE: Final = f"{NOTE}; withdrawn by the rollback check of cw-product"
+TRACKED_HISTORY: Final = ("created", "started", "assigned", "closed")
+"""What the tracking step's obligation went through, in order."""
+TRACKING_COMMENT: Final = "Acknowledgement filed on the example portal (synthetic)"
+NEEDS_REVIEW: Final = "needs_review"
 
 SweepRunner = Callable[[Sequence[str]], tuple[int, dict[str, Any]]]
 """Runs ``obligation-sweep --once --json`` with more arguments: its exit code and its report."""
@@ -578,13 +592,16 @@ def probe_gstin(token: int) -> str:
     return f"29ZZZ{letters}{digits:04d}Z1Z5"
 
 
-def make_probe(context: CheckContext, headers: Mapping[str, str]) -> Probe:
-    """A new business in the business tenant, through the profile's business API."""
+def make_probe(
+    context: CheckContext, headers: Mapping[str, str], purpose: str = "Recompute"
+) -> Probe:
+    """A new business in the business tenant, through the profile's business API, named for the
+    step that makes it."""
     stamp = context.now().astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
     answers = [{"key": key, "value": value} for key, value in PROBE_ANSWERS]
     for _ in range(3):
         gstin = probe_gstin(uuid4().int)
-        name = f"Recompute probe {stamp} (synthetic)"
+        name = f"{purpose} probe {stamp} (synthetic)"
         body = {"name": name, "gstin": gstin, "registration_name": name, "answers": answers}
         created = ok(
             context.product.internal.post(
@@ -1251,6 +1268,122 @@ def withdrawal_notices(
     return notices
 
 
+# ---------------------------------------------------------------- tracking
+
+
+def keyed(headers: Mapping[str, str], key: str | None = None) -> dict[str, str]:
+    """``headers`` with an Idempotency-Key: ``key``, or a new one."""
+    return {**headers, IDEMPOTENCY_HEADER: key or str(uuid4())}
+
+
+def tracking(context: CheckContext) -> list[str]:
+    product = context.product
+    headers = as_tenant(BUSINESS_TENANT.tenant_id)
+    versions = {
+        str(version["rule_key"]): str(version["rule_version_id"])
+        for version in published_in_force(product, today_in_india(context.now()))
+    }
+    if MONTHLY not in versions:
+        raise StepFailedError(f"{MONTHLY} is not published: run cw-product seed")
+    monthly = versions[MONTHLY]
+    probe = make_probe(context, headers, "Tracking")
+
+    def first_due() -> dict[str, Any]:
+        listed: list[dict[str, Any]] = answered(
+            product.internal.get(
+                OBLIGATIONS,
+                params={"business_id": probe.registration_id, "rule_version_id": monthly},
+                headers=headers,
+            )
+        )
+        due = sorted(
+            (o for o in listed if o["status"] == "open"),
+            key=lambda o: (str(o["due_at"]), str(o["obligation_id"])),
+        )
+        if not due:
+            raise NotYetError(f"no open obligation of {MONTHLY} yet for {probe.name}")
+        return due[0]
+
+    target = poll(first_due, timeout=context.timeout, interval=context.interval)
+    route = f"{OBLIGATIONS}/{target['obligation_id']}"
+    owner = str(BUSINESS_TENANT.owner_id)
+    started = ok(
+        product.internal.post(f"{route}/status", json={"action": "start"}, headers=keyed(headers))
+    )
+    assigned = ok(
+        product.internal.put(
+            f"{route}/assignee", json={"assignee_id": owner}, headers=keyed(headers)
+        )
+    )
+    if (started["status"], assigned["assignee_id"]) != ("in_progress", owner):
+        raise StepFailedError(
+            f"the obligation is {started['status']} and assigned to {assigned['assignee_id']}"
+        )
+    completed, replayed = complete_twice(product, route, keyed(headers))
+    comment = ok(
+        product.internal.post(
+            f"{route}/comments", json={"body": TRACKING_COMMENT}, headers=keyed(headers)
+        ),
+        201,
+    )
+    detail: dict[str, Any] = ok(product.internal.get(route, headers=headers))
+    review = tracked_detail(detail, comment)
+    return [
+        f"probe: {probe.name}, registration {probe.registration_id}; {MONTHLY} "
+        f"{target['period_label']} due {target['due_at']}",
+        f"started, assigned to {BUSINESS_TENANT.owner_name} and completed "
+        f"({completed['status']}); the same complete again with its Idempotency-Key was "
+        f"replayed ({REPLAYED_HEADER}: {replayed}) with the same answer",
+        f"history: {', '.join(c['kind'] for c in detail['history'])}; one closure",
+        f"reviewed by {review} on {detail['rule_version']['published_at']}, seed status "
+        f"{detail['rule_version']['seed_status']}; {len(detail['citations'])} verified citations",
+        f"comment by {comment['author_label']}: {comment['body']}",
+    ]
+
+
+def complete_twice(
+    product: Product, route: str, headers: Mapping[str, str]
+) -> tuple[dict[str, Any], str]:
+    """The same complete sent twice with one Idempotency-Key: the first answer, and the replay
+    header of the second, whose answer must be the first's."""
+    first = product.internal.post(f"{route}/status", json={"action": "complete"}, headers=headers)
+    second = product.internal.post(f"{route}/status", json={"action": "complete"}, headers=headers)
+    completed: dict[str, Any] = ok(first)
+    if ok(second) != completed:
+        raise StepFailedError("the second complete with the same key answered otherwise")
+    replayed = second.headers.get(REPLAYED_HEADER, "")
+    if completed["status"] != "done" or replayed != "true":
+        raise StepFailedError(
+            f"the obligation is {completed['status']}, and the second complete was "
+            f"{'replayed' if replayed == 'true' else 'not replayed'}"
+        )
+    return completed, replayed
+
+
+def tracked_detail(detail: Mapping[str, Any], comment: Mapping[str, Any]) -> str:
+    """Check the detail of the tracked obligation; the names of the approvers it shows."""
+    kinds = tuple(str(change["kind"]) for change in detail["history"])
+    if kinds != TRACKED_HISTORY:
+        raise StepFailedError(f"the history reads {', '.join(kinds)}")
+    review = detail["rule_version"]
+    if review is None:
+        raise StepFailedError("the detail has no facts of its rule version")
+    names = {str(analyst.user_id): analyst.name for analyst in REVIEWERS}
+    if set(review["approved_by"]) != set(names):
+        raise StepFailedError(
+            f"the reviewed-by data names {review['approved_by']}, not both synthetic reviewers"
+        )
+    if review["seed_status"] != NEEDS_REVIEW or review["reviewed"]:
+        raise StepFailedError(
+            f"the seed rule reads {review['seed_status']}: a synthetic approval reviews nothing"
+        )
+    if not detail["citations"]:
+        raise StepFailedError("the detail shows no verified citation")
+    if [c["comment_id"] for c in detail["comments"]] != [comment["comment_id"]]:
+        raise StepFailedError("the detail does not list the comment")
+    return " and ".join(names[approver] for approver in sorted(review["approved_by"]))
+
+
 # ---------------------------------------------------------------- the command
 
 STEPS: list[Step] = [
@@ -1277,6 +1410,11 @@ STEPS: list[Step] = [
         "rollback",
         "a withdrawn rule closes its obligations in both tenants and sends withdrawal notices",
         rollback,
+    ),
+    Step(
+        "tracking",
+        "a member starts, assigns, completes once with one key, reads and comments on a duty",
+        tracking,
     ),
 ]
 """The steps in the order they run. A later package appends its own."""
