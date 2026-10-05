@@ -81,7 +81,7 @@ Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
     `resume` and `cancel` wake it, and the query `progress` says where it stands.
   - The activities (`fanout_activities.py`) are idempotent: begin inserts the run once, the
     counters and statuses are written whole, a status already reached is not moved or audited
-    again. The database steps retry until it answers; a batch for about an hour, then the run
+    again. The database steps retry until it answers; a batch for about 40 minutes, then the run
     fails with `last_error`.
   - `PauseFanOut`, `ResumeFanOut`, `CancelFanOut`, `SetHold` and `ReleaseHold` (`fanout.py`)
     change the row and write the audit entry (`applicability.fanout.pause`, `.resume`,

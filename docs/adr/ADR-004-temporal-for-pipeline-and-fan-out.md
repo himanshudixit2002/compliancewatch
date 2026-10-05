@@ -65,7 +65,7 @@ build settled that the decision left open:
   supersedes, a flip rate above 2% pauses the run, audited as the system; a person resumes it (the
   check is then off for the run) or cancels it and withdraws the version.
 - **Activities are idempotent and retried by kind.** The database steps retry until the database
-  answers; a batch retries for about an hour with backoff and then fails the run, except when the
+  answers; a batch retries for about 40 minutes with backoff and then fails the run, except when the
   version is no longer published, which no retry fixes.
 - **No time-skipping server in tests.** The workflow is tested on `WorkflowEnvironment.start_local`
   (the time-skipping server needs Rosetta on Apple Silicon), and its control loop runs in-process

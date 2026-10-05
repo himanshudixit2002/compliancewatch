@@ -9,7 +9,7 @@ this package behind the wire models of ``application.fanout_flow``.
 
 Every one is idempotent, so Temporal may retry it: beginning inserts the run once, decisions
 derive their ids from the rule.published event, and counters and statuses are written whole. The
-three that only touch the database retry until it answers. A batch retries for about an hour
+three that only touch the database retry until it answers. A batch retries for about 40 minutes
 with backoff (a profile or rulebook outage), except when the version is gone or no longer
 published, which no retry fixes. The sync use cases run on a thread (``asyncio.to_thread``) so the
 worker's event loop, which also serves the consumers, never blocks.
@@ -69,7 +69,7 @@ BATCH_RETRIES: Final = RetryPolicy(
     maximum_attempts=15,
     non_retryable_error_types=["RuleVersionNotFoundError", "RuleVersionNotPublishedError"],
 )
-"""A batch: about an hour of retries, none when the version is gone or no longer published."""
+"""A batch: about 40 minutes of retries, none when the version is gone or no longer published."""
 HEARTBEAT_SECONDS: Final = 10.0
 
 
