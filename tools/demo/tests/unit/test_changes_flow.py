@@ -321,7 +321,8 @@ def test_the_feed_the_impact_and_a_dry_run_follow_a_publication(tmp_path: Path) 
         assert first[1].startswith(f"{CA_FIRM_TENANT.name}: {GSTR9} applies to ")
         assert first[1].endswith("the fan-out completed")
         assert first[2].startswith(f"dry run of {GSTR9} (published) for {CA_FIRM_TENANT.name}")
-        assert "as the firm's decisions count" in first[2]
+        assert "2 of 2 decided (1 applies, 1 not_applicable, 0 unsure)" in first[2]
+        assert "as the firm's decisions of the registrations the directory lists count" in first[2]
         assert first[3].startswith(f"wrote one {DRY_RUN_ACTION} row of no tenant")
         assert second[2] == first[2], "a second dry run counts the same"
         assert len(engine.decisions) == decisions, "the dry runs stored no decision"

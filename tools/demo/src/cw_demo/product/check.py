@@ -71,12 +71,14 @@ the API answers. One failed step does not stop the next.
   the seed status needs_review and verified citations. ``GET /v1/changes/{id}/impact`` as the CA
   firm, with ``result=applies``, lists exactly the firm's registrations the answers call for under
   the client they belong to, and the version's fan-out completed. A dry run of the version scoped
-  to the CA firm (``POST /v1/applicability-engine/dry-runs``) counts what the impact counts, the
-  firm's latest decisions of the version by result, with every listed registration decided and
-  none skipped; it wrote one ``applicability.dry_run`` row of no tenant, found by the request's
-  correlation id, and not one decision, review item or outbox row of the firm (counted before and
-  after through ``records.PostgresRecords``). On a database where the rollback step withdrew the
-  version, the publication is still in the feed and the dry run reads the withdrawn version.
+  to the CA firm (``POST /v1/applicability-engine/dry-runs``) counts what the firm's latest
+  decisions of the version count for the registrations the directory lists (the ones a fan-out
+  decides; a database whose consumer group began after a registration was made may lack it), with
+  every one decided and none skipped; it wrote one ``applicability.dry_run`` row of no tenant,
+  found by the request's correlation id, and not one decision, review item or outbox row of the
+  firm (counted before and after through ``records.PostgresRecords``). On a database where the
+  rollback step withdrew the version, the publication is still in the feed and the dry run reads
+  the withdrawn version.
 """
 
 import io
@@ -199,6 +201,7 @@ DRY_RUN_ACTION: Final = "applicability.dry_run"
 CHANGE_PAGES: Final = 20
 """Pages of the feed the changes step reads, newest first, looking for the publication."""
 WAS_PUBLISHED: Final = frozenset({"published", "superseded", "withdrawn"})
+RESULTS: Final = ("applies", "not_applicable", "unsure")
 
 SweepRunner = Callable[[Sequence[str]], tuple[int, dict[str, Any]]]
 """Runs ``obligation-sweep --once --json`` with more arguments: its exit code and its report."""
@@ -1521,6 +1524,10 @@ def dry_run_matches(context: CheckContext, records: ProductRecords, version_id: 
         for client in whole["items"]
         for business in client["businesses"]
     }
+    listed = records.listed(decided)
+    expected = {
+        result: sum(1 for business in listed if decided[business] == result) for result in RESULTS
+    }
     before = records.engine_rows(firm.tenant_id)
     since = context.now() - timedelta(minutes=1)
     request_id = uuid4().hex
@@ -1535,20 +1542,20 @@ def dry_run_matches(context: CheckContext, records: ProductRecords, version_id: 
         )
     )
     after = records.engine_rows(firm.tenant_id)
-    if report["counts"] != whole["counts"]:
+    if report["counts"] != expected:
         raise StepFailedError(
-            f"the dry run counts {report['counts']}; the firm's decisions of {GSTR9} count "
-            f"{whole['counts']}"
+            f"the dry run counts {report['counts']}; the firm's decisions of {GSTR9} for the "
+            f"{len(listed)} registrations the directory lists count {expected}"
         )
     if (report["businesses_total"], report["evaluated"], report["skipped"]) != (
-        len(decided),
-        len(decided),
+        len(listed),
+        len(listed),
         0,
     ):
         raise StepFailedError(
             f"the dry run read {report['businesses_total']} directory entries and decided "
-            f"{report['evaluated']} ({report['skipped']} skipped); the firm has {len(decided)} "
-            f"decisions of {GSTR9}"
+            f"{report['evaluated']} ({report['skipped']} skipped); the directory lists "
+            f"{len(listed)} of the firm's registrations with a decision of {GSTR9}"
         )
     differ = [
         sample["business_id"]
@@ -1572,7 +1579,8 @@ def dry_run_matches(context: CheckContext, records: ProductRecords, version_id: 
     counts = ", ".join(f"{count} {result}" for result, count in report["counts"].items())
     return [
         f"dry run of {GSTR9} ({report['status']}) for {firm.name}: {report['evaluated']} of "
-        f"{report['businesses_total']} decided ({counts}), as the firm's decisions count",
+        f"{report['businesses_total']} decided ({counts}), as the firm's decisions of the "
+        "registrations the directory lists count",
         f"wrote one {DRY_RUN_ACTION} row of no tenant by {rows[0].actor_label}; the firm's "
         + ", ".join(f"{table} {count}" for table, count in after.items())
         + " rows unchanged",
