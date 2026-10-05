@@ -12,6 +12,7 @@ from structlog.testing import capture_logs
 
 from applicability_engine.settings import ApplicabilityEngineSettings
 from applicability_engine.worker import GROUP_ID as PROFILES_GROUP
+from applicability_engine.worker import RULES_GROUP_ID as RULES_GROUP
 from cw_mvp import worker as worker_module
 from cw_mvp.cli import main as cli_main
 from cw_mvp.registry import REGISTRY, entry_named
@@ -84,6 +85,7 @@ async def test_relays_start_only_for_schemas_with_an_outbox() -> None:
     assert relaying == OUTBOX_SCHEMAS
     assert hosted.consumer_groups() == (
         PROFILES_GROUP,
+        RULES_GROUP,
         DECISIONS_GROUP,
         "notification.obligations",
     )
@@ -144,8 +146,24 @@ async def test_a_service_on_its_memory_store_is_left_to_the_app_process() -> Non
 
 async def test_temporal_workers_start_with_their_switch() -> None:
     hosted = await build_registry(_root(worker_temporal_enabled=True), probe=_inspector())
-    assert hosted.task_queues() == ("pipeline",)
+    assert hosted.task_queues() == ("applicability", "pipeline")
     assert hosted.consumer_groups() == ()
+
+
+async def test_the_engine_starts_fan_outs_from_rule_events_with_kafka_whatever_its_flag() -> None:
+    for enabled in (False, True):
+        hosted = await build_registry(
+            _root(worker_kafka_enabled=True, worker_temporal_enabled=True),
+            probe=_inspector(),
+            service_overrides={"applicability-engine": {"applicability_fanout_enabled": enabled}},
+        )
+        assert RULES_GROUP in hosted.consumer_groups()
+        assert f"applicability-engine/consumer:{RULES_GROUP}" in hosted.loops()
+        assert "applicability" in hosted.task_queues()
+        (engine,) = [entry for entry in hosted.hosted if entry.service == "applicability-engine"]
+        assert isinstance(engine.settings, ApplicabilityEngineSettings)
+        assert engine.settings.applicability_fanout_enabled is enabled
+        assert engine.settings.rulebook_url == _root().mvp_internal_url
 
 
 async def test_each_service_calls_the_others_at_the_internal_url_as_the_worker() -> None:

@@ -27,6 +27,12 @@ class ApplicabilityEngineSettings(Settings):
     ``applicability_engine_recompute_lookahead_days``, the ones taking effect within that many
     days. The rulebook's listing of a day is cached for
     ``applicability_engine_rules_cache_seconds`` (0 turns the cache off).
+
+    With ``applicability_fanout_enabled`` (flag ``applicability.fanout``, off by default) the
+    worker's consumer of rule.published starts a fan-out of the version over the business
+    directory, a Temporal workflow on the ``applicability`` task queue, and the fan-out controls
+    signal it there (``CW_TEMPORAL_*``). Off, a publication records a ``disabled`` run and nothing
+    else, and the controls signal nothing.
     """
 
     applicability_engine_store: Store = "postgres"
@@ -36,3 +42,4 @@ class ApplicabilityEngineSettings(Settings):
     applicability_recompute_enabled: bool = False
     applicability_engine_rules_cache_seconds: float = Field(default=60.0, ge=0, le=3600)
     applicability_engine_recompute_lookahead_days: int = Field(default=92, ge=0, le=366)
+    applicability_fanout_enabled: bool = False

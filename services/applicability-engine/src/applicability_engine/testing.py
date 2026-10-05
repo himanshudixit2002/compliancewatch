@@ -1,10 +1,30 @@
 """Fakes and builders for tests of this service and of services that consume its events: fixed
-ids, a fixed clock, a profile service and a rulebook held in memory."""
+ids, a fixed clock, a profile service and a rulebook held in memory, and ``LocalFanOuts``, which
+runs fan-outs on threads of the process instead of Temporal."""
 
+import asyncio
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from typing import Any
+from uuid import UUID
 
+from applicability_engine.application.fanout_flow import (
+    BatchFailedError,
+    BatchIn,
+    BatchOut,
+    Continued,
+    Controls,
+    FanOutRequest,
+    Finished,
+    RunChange,
+    RunRef,
+    RunState,
+    Wakeups,
+    drive,
+)
+from applicability_engine.domain.fanout import FanOutSignal, FanOutStart
 from applicability_engine.domain.model import RuleInForce, RuleVersionSpec
 from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ids import BusinessId, RuleVersionId, TenantId
@@ -12,6 +32,7 @@ from domain_kernel.ontology import AttributeLevel
 from domain_kernel.predicates import Specification, specification_from_mapping
 from domain_kernel.profiles import ProfileSnapshot
 from domain_kernel.status import RuleVersionStatus
+from py_common.temporal import ActivityBase
 
 TENANT = TenantId.new()
 OTHER_TENANT = TenantId.new()
@@ -30,6 +51,8 @@ def rule_version(
     *,
     status: RuleVersionStatus = RuleVersionStatus.PUBLISHED,
     rule_version_id: RuleVersionId | None = None,
+    rule_key: str | None = "example_rule",
+    level: AttributeLevel | None = AttributeLevel.REGISTRATION,
 ) -> RuleVersionSpec:
     return RuleVersionSpec(
         rule_version_id=rule_version_id or RuleVersionId.new(),
@@ -37,6 +60,8 @@ def rule_version(
         specification=specification
         if isinstance(specification, Specification)
         else specification_from_mapping(specification),
+        rule_key=rule_key,
+        level=level,
     )
 
 
@@ -51,7 +76,9 @@ def rule_in_force(
 ) -> RuleInForce:
     """A published version in force from ``effective_from`` for nodes of ``level``."""
     return RuleInForce(
-        spec=rule_version(specification, rule_version_id=rule_version_id),
+        spec=rule_version(
+            specification, rule_version_id=rule_version_id, rule_key=rule_key, level=level
+        ),
         rule_key=rule_key,
         level=level,
         effective_from=effective_from,
@@ -111,11 +138,12 @@ class MemoryProfiles:
 @dataclass
 class MemoryRulebook:
     """``RulebookReader`` over rule versions keyed by id, and the versions in force; records
-    the days asked for."""
+    the days asked for and how often the listing was forgotten."""
 
     versions: dict[RuleVersionId, RuleVersionSpec] = field(default_factory=dict)
     in_force: list[RuleInForce] = field(default_factory=list)
     asked: list[date] = field(default_factory=list)
+    forgotten: int = 0
 
     def put(self, version: RuleVersionSpec) -> RuleVersionSpec:
         self.versions[version.rule_version_id] = version
@@ -138,3 +166,123 @@ class MemoryRulebook:
             and rule.effective_from <= as_of
             and (rule.effective_to is None or as_of < rule.effective_to)
         )
+
+    def forget_in_force(self) -> None:
+        self.forgotten += 1
+
+
+class ThreadWakeups(Wakeups):
+    """``Wakeups`` a signal from another thread sets: a waiting fan-out wakes on the event."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.event = threading.Event()
+        self._lock = threading.Lock()
+
+    def signal(self, signal: FanOutSignal) -> None:
+        with self._lock:
+            super().signal(signal)
+        self.event.set()
+
+    def take(self) -> bool:
+        with self._lock:
+            self.event.clear()
+            return super().take()
+
+
+class LocalSteps:
+    """``FanOutSteps`` that call the fan-out's activities in the process, as Temporal would on
+    the worker, and wait on the run's ``ThreadWakeups``."""
+
+    def __init__(self, activities: Mapping[str, ActivityBase[Any, Any]], wakeups: ThreadWakeups):
+        self._activities = activities
+        self._wakeups = wakeups
+
+    async def _call(self, name: str, value: object) -> Any:
+        return await self._activities[name].execute(value)
+
+    async def begin(self, request: FanOutRequest) -> RunState:
+        begun: RunState = await self._call("applicability.fanout.begin", request)
+        return begun
+
+    async def controls(self, rule_version_id: UUID) -> Controls:
+        found: Controls = await self._call(
+            "applicability.fanout.controls", RunRef(rule_version_id=rule_version_id)
+        )
+        return found
+
+    async def evaluate(self, batch: BatchIn) -> BatchOut:
+        try:
+            decided: BatchOut = await self._call("applicability.fanout.evaluate_batch", batch)
+        except Exception as error:
+            raise BatchFailedError(f"{type(error).__name__}: {error}") from error
+        return decided
+
+    async def update(self, change: RunChange) -> RunState:
+        stored: RunState = await self._call("applicability.fanout.update", change)
+        return stored
+
+    async def wait(self, seconds: float) -> None:
+        if self._wakeups.take():
+            return
+        await asyncio.to_thread(self._wakeups.event.wait, seconds)
+        self._wakeups.take()
+
+    def history_is_long(self) -> bool:
+        return False
+
+
+class LocalFanOuts:
+    """``FanOutWorkflows`` for tests and demos without Temporal: each fan-out runs on a thread of
+    this process through the loop the workflow runs (``application.fanout_flow.drive``), calling
+    the same activities (``application.fanout_activities.fanout_activities``) directly, and
+    continues as new on the same thread. A version starts once; a signal wakes its loop.
+    ``options`` are ``FanOutRequest`` fields, such as ``poll_seconds`` or ``batch_size``."""
+
+    def __init__(self, activities: Sequence[ActivityBase[Any, Any]], **options: object) -> None:
+        self._activities = {activity.name: activity for activity in activities}
+        self._options = {"poll_seconds": 0.05, **options}
+        self._lock = threading.Lock()
+        self._runs: dict[RuleVersionId, tuple[threading.Thread, ThreadWakeups]] = {}
+        self.finished: dict[RuleVersionId, Finished] = {}
+        self.failures: dict[RuleVersionId, BaseException] = {}
+
+    def start(self, start: FanOutStart) -> bool:
+        request = FanOutRequest.of(start, **self._options)
+        wakeups = ThreadWakeups()
+        thread = threading.Thread(
+            target=self._run, args=(request, wakeups), name=f"fan-out-{start.rule_version_id}"
+        )
+        with self._lock:
+            if start.rule_version_id in self._runs:
+                return False
+            self._runs[start.rule_version_id] = (thread, wakeups)
+        thread.daemon = True
+        thread.start()
+        return True
+
+    def signal(self, rule_version_id: RuleVersionId, signal: FanOutSignal) -> None:
+        with self._lock:
+            found = self._runs.get(rule_version_id)
+        if found is not None:
+            found[1].signal(signal)
+
+    def join(self, rule_version_id: RuleVersionId, timeout: float = 30.0) -> Finished | None:
+        """Wait for the version's fan-out to finish; its outcome, or None if it has not."""
+        with self._lock:
+            found = self._runs.get(rule_version_id)
+        if found is not None:
+            found[0].join(timeout)
+        return self.finished.get(rule_version_id)
+
+    def _run(self, request: FanOutRequest, wakeups: ThreadWakeups) -> None:
+        rule_version_id = RuleVersionId(request.rule_version_id)
+        steps = LocalSteps(self._activities, wakeups)
+        try:
+            outcome = asyncio.run(drive(request, steps, wakeups))
+            while isinstance(outcome, Continued):
+                outcome = asyncio.run(drive(outcome.request, steps, wakeups))
+        except BaseException as error:  # a test reads it; the thread ends either way
+            self.failures[rule_version_id] = error
+            return
+        self.finished[rule_version_id] = outcome

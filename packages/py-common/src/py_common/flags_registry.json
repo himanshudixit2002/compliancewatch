@@ -2,6 +2,20 @@
   "_generated": "Generated from packages/flags/registry.json by make flags; do not edit.",
   "flags": [
     {
+      "name": "applicability.fanout",
+      "type": "bool",
+      "default": false,
+      "owner": "core-product",
+      "description": "The applicability engine's consumer of rule.published (group applicability-engine.rules) starts a fan-out of the published version: a Temporal workflow on the applicability task queue that decides the version for every business of its level in the business directory, in batches of 1,000, behind the global hold and its pause, resume and cancel controls. Off, a publication records a disabled run and nothing else.",
+      "removal": "Once fan-outs have run in production for 30 days, under the flip-rate alert.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_APPLICABILITY_FANOUT_ENABLED",
+      "services": [
+        "applicability-engine"
+      ]
+    },
+    {
       "name": "applicability.recompute",
       "type": "bool",
       "default": false,
