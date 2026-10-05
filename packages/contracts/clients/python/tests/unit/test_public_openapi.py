@@ -16,7 +16,17 @@ OPENAPI = CONTRACTS / "openapi"
 PUBLIC = json.loads((OPENAPI / "public.v1.json").read_text(encoding="utf-8"))
 META = json.loads((OPENAPI / "public.meta.json").read_text(encoding="utf-8"))
 METHODS = ("get", "put", "post", "delete", "patch")
-ROLES = {"owner", "staff", "ca_admin", "ca_staff", "compliance_lead"}
+ROLES = {
+    "owner",
+    "staff",
+    "ca_admin",
+    "ca_staff",
+    "compliance_lead",
+    "analyst",
+    "reviewer",
+    "admin",
+}
+"""The tenant members' roles and the regulatory team's (``domain_kernel.access``)."""
 PROBLEM_REF = "#/components/schemas/Problem"
 PROBLEM = {
     "properties": {"status": {"type": "integer"}, "title": {"type": "string"}},
@@ -354,6 +364,20 @@ def test_x_roles_must_name_known_tenant_roles(
     result, _ = build(workspace)
     assert result.returncode == 1
     assert message in result.stderr
+
+
+def test_x_roles_may_name_the_regulatory_team_beside_the_tenant_members(workspace: Path) -> None:
+    roles = ["owner", "ca_admin", "analyst", "reviewer", "admin"]
+    write(workspace, "alpha.v1.json", spec({"/v1/x": {"get": operation("x", roles=roles)}}))
+    result, document = build(workspace)
+    assert result.returncode == 0, result.stderr
+    assert document["paths"]["/v1/x"]["get"]["x-roles"] == roles
+
+
+def test_the_known_roles_are_the_kernels_member_and_regulatory_roles() -> None:
+    from domain_kernel.access import REGULATORY_ROLES, TENANT_MEMBER_ROLES
+
+    assert {role.value for role in TENANT_MEMBER_ROLES | REGULATORY_ROLES} == ROLES
 
 
 def test_error_responses_must_be_problem_documents(workspace: Path) -> None:

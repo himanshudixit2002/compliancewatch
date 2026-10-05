@@ -122,8 +122,10 @@ tenant from the `x-tenant-id` header instead.
 The build also holds each public operation to the API rules and fails with one line per
 operation that breaks one:
 
-- `x-roles` lists the tenant roles that may call it: `owner`, `staff`, `ca_admin`, `ca_staff`
-  or `compliance_lead` (the identity service will enforce them; until then they are metadata);
+- `x-roles` lists the roles that may call it: the tenant members' `owner`, `staff`, `ca_admin`,
+  `ca_staff` or `compliance_lead`, and the regulatory team's `analyst`, `reviewer` or `admin`,
+  which a read of the rulebook names beside the members (the identity service will enforce them;
+  until then they are metadata);
 - every documented 4xx and 5xx response is a problem document (`application/problem+json`), and
   there is at least one;
 - a POST that answers 201 declares the `Idempotency-Key` header (`py_common.idempotency`);

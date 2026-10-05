@@ -17,7 +17,8 @@ public API (guide section 10):
 The public operations must follow the API rules, and the build fails with one line per
 operation that does not:
 
-- ``x-roles`` names one or more of the tenant roles in ``ROLES``;
+- ``x-roles`` names one or more of the roles in ``ROLES``: the tenant members' and the
+  regulatory team's (a read of the rulebook, the same for every tenant, is for both);
 - every documented 4xx or 5xx response is a problem document (``application/problem+json``),
   and there is at least one;
 - a POST that answers 201 declares the ``Idempotency-Key`` header as required, since the
@@ -53,9 +54,19 @@ SERVICE_SPEC = re.compile(r"(?P<service>[a-z0-9][a-z0-9-]*)\.v1\.json")
 SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
 PROBLEM_MEDIA = "application/problem+json"
-# The tenant roles an operation may name in x-roles: TENANT_MEMBER_ROLES of domain_kernel.access,
-# listed here because this script uses the standard library only.
-ROLES = ("owner", "staff", "ca_admin", "ca_staff", "compliance_lead")
+# The roles an operation may name in x-roles: TENANT_MEMBER_ROLES and REGULATORY_ROLES of
+# domain_kernel.access, in the kernel's order, listed here because this script uses the standard
+# library only.
+ROLES = (
+    "owner",
+    "staff",
+    "ca_admin",
+    "ca_staff",
+    "compliance_lead",
+    "analyst",
+    "reviewer",
+    "admin",
+)
 SECURITY_SCHEME = "bearerAuth"
 BEARER_AUTH = {
     "type": "http",
