@@ -1,5 +1,5 @@
 """The identity client against a mock transport: the membership route answers whether a user
-belongs to the tenant, a 404 is nobody, and anything else the client cannot use is
+belongs to the tenant, identity's own 404 is nobody, and anything else the client cannot use is
 IdentityUnavailableError."""
 
 from collections.abc import Callable
@@ -55,8 +55,15 @@ def test_the_route_answers_an_active_or_disabled_member() -> None:
     assert gone.active is False
 
 
-def test_a_404_is_nobody_and_the_rest_is_unavailable() -> None:
-    assert members(lambda _: httpx2.Response(404, json={})).membership(TENANT, USER) is None
+def problem(slug: str) -> Callable[[httpx2.Request], httpx2.Response]:
+    """A handler answering identity's 404 problem ``slug``."""
+    body = {"type": f"urn:compliancewatch:problem:{slug}", "status": 404}
+    return lambda _: httpx2.Response(404, json=body)
+
+
+def test_identitys_404_is_nobody_and_the_rest_is_unavailable() -> None:
+    for slug in ("identity-user-not-found", "identity-tenant-not-found"):
+        assert members(problem(slug)).membership(TENANT, USER) is None
 
     def unreachable(request: httpx2.Request) -> httpx2.Response:
         raise httpx2.ConnectError("refused", request=request)
@@ -65,6 +72,8 @@ def test_a_404_is_nobody_and_the_rest_is_unavailable() -> None:
         raise ServiceTokenUnavailableError("identity down")
 
     for handler in (
+        problem("route-not-found"),
+        lambda _: httpx2.Response(404, text="not json"),
         lambda _: httpx2.Response(401, json={}),
         lambda _: httpx2.Response(403, json={}),
         lambda _: httpx2.Response(500, text="boom"),

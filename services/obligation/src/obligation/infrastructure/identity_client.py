@@ -6,10 +6,12 @@ no contact details. Identity serves it to a service acting for the tenant, so in
 ``token`` mode every call carries this service's own access token (``auth``, from
 ``py_common.auth.service_auth_from``), whose client needs the tenant:act scope.
 
-A 404 is None: the tenant has no such user (or identity has no such tenant). A 200 names the
-user's status, and only ``active`` counts as a member. Any other answer, a transport error, or a
-service token identity could not issue raises ``IdentityUnavailableError``: the assignee cannot be
-checked now, so the assignment is refused until it can.
+A 404 with identity's own problem, ``identity-user-not-found`` or ``identity-tenant-not-found``,
+is None: the tenant has no such user (or identity has no such tenant). A 200 names the user's
+status, and only ``active`` counts as a member. Any other answer (a 404 of another kind too, such
+as a URL that reaches something else than identity), a transport error, or a service token
+identity could not issue raises ``IdentityUnavailableError``: the assignee cannot be checked now,
+so the assignment is refused until it can.
 """
 
 from typing import Any, Final
@@ -24,6 +26,8 @@ from py_common.auth import ServiceTokenUnavailableError
 MEMBERSHIP_PATH: Final = "/v1/identity/users/{user_id}/membership"
 TENANT_HEADER: Final = "x-tenant-id"
 ACTIVE: Final = "active"
+NOT_MEMBERS: Final = frozenset({"identity-user-not-found", "identity-tenant-not-found"})
+"""The problems identity answers when the tenant has no such user."""
 DETAIL_CHARS: Final = 300
 
 
@@ -55,7 +59,7 @@ class HttpTenantMembers:
             raise IdentityUnavailableError(f"identity unreachable: {exc}") from exc
         except ServiceTokenUnavailableError as exc:
             raise IdentityUnavailableError(f"no service token for identity: {exc}") from exc
-        if response.status_code == 404:
+        if response.status_code == 404 and _problem_slug(response) in NOT_MEMBERS:
             return None
         if response.status_code != 200:
             raise IdentityUnavailableError(
@@ -76,3 +80,13 @@ class HttpTenantMembers:
 
     def close(self) -> None:
         self._client.close()
+
+
+def _problem_slug(response: httpx2.Response) -> str:
+    """The last part of a problem's type, ``identity-user-not-found``; '' for another body."""
+    try:
+        body: Any = response.json()
+    except ValueError:
+        return ""
+    kind = body.get("type") if isinstance(body, dict) else None
+    return kind.rsplit(":", 1)[-1] if isinstance(kind, str) else ""

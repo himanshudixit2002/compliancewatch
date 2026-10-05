@@ -229,7 +229,7 @@ def test_upgrade_downgrade_upgrade_keeps_a_persons_change(
     assert "note" not in columns(engine, "obligation_change")
     assert "profile_version" not in columns(engine, "obligation_decision")
     with engine.connect() as connection:
-        valid = connection.execute(
+        valid: object = connection.execute(
             text(
                 "SELECT convalidated FROM pg_constraint WHERE conname = 'ck_obligation_change_kind'"
             )
@@ -319,7 +319,7 @@ def test_tracking_writes_changes_the_closure_event_and_audit_rows_together(
     with app_engine.begin() as connection:
         as_tenant(connection, tracked.tenant)
         entries = read_audit_entries(connection)
-        topics = list(
+        topics: list[str] = list(
             connection.execute(
                 text("SELECT topic FROM outbox_event WHERE tenant_id = :t ORDER BY occurred_at"),
                 {"t": tracked.tenant.value},
