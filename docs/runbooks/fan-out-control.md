@@ -58,6 +58,24 @@ curl -s -X POST "$API/fan-outs/<id>/cancel" -H 'content-type: application/json' 
 In a deployment the same routes are admin routes: the public listener serves them only in
 `token` mode, with an admin's access token (`Authorization: Bearer <token>`).
 
+## Before publishing: a dry run
+
+A dry run says what a version would decide before it fans out: approved or still a draft, or a
+specification no version holds yet. It evaluates the version against the business directory of
+its level as a fan-out would, of one tenant when the scope names one, and answers the counts by
+result, the counts by the attribute that decided each result and sample decisions. It stores no
+decision and sends nothing; it writes one `applicability.dry_run` row to `audit.event` with the
+admin and the counts. A scope over `CW_APPLICABILITY_DRY_RUN_MAX` businesses (2,000) is refused:
+name a tenant.
+
+```bash
+curl -s -X POST "$API/dry-runs" -H 'content-type: application/json' \
+  -d '{"rule_version_id": "<id>", "scope": {"tenant_id": "<tenant id>", "sample_size": 10}}'
+```
+
+Many more `applies` or `unsure` results than the change should bring, or an attribute deciding
+results it should not touch, is the cue to return the version to draft instead of publishing it.
+
 ## Hold every fan-out
 
 Set the hold before anything that could make a whole fan-out wrong: a deploy of the engine or the

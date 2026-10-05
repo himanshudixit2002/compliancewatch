@@ -305,6 +305,7 @@ def test_steps_are_chosen_by_name_in_the_check_order() -> None:
         "reminders",
         "rollback",
         "tracking",
+        "changes",
     ]
     assert [step.name for step in select(["isolation", "health"])] == ["health", "isolation"]
     assert select(None) == check.STEPS
@@ -460,6 +461,29 @@ def test_a_missing_token_is_named(product: Product) -> None:
 def test_the_fanout_step_needs_the_records_it_reads(product: Product) -> None:
     with pytest.raises(StepFailedError, match="CW_PRODUCT_RECORDS_URL"):
         check.fanout(context_of(product))
+
+
+def test_the_changes_step_needs_the_records_it_reads(product: Product) -> None:
+    with pytest.raises(StepFailedError, match="CW_PRODUCT_RECORDS_URL"):
+        check.changes(context_of(product))
+
+
+def test_the_feed_item_names_both_reviewers_and_refuses_what_is_missing() -> None:
+    item = {
+        "rule_key": "gstr9_annual",
+        "approved_by": [str(analyst.user_id) for analyst in REVIEWERS],
+        "seed_status": "needs_review",
+        "citations": [{"quote": "an example quote (synthetic)"}],
+    }
+    names = check.feed_reviewers(item)
+    assert names == " and ".join(analyst.name for analyst in REVIEWERS)
+    for change, message in (
+        ({"approved_by": item["approved_by"][:1]}, "not both synthetic reviewers"),
+        ({"seed_status": "reviewed"}, "a synthetic approval reviews nothing"),
+        ({"citations": []}, "cites no verified clause"),
+    ):
+        with pytest.raises(StepFailedError, match=message):
+            check.feed_reviewers({**item, **change})
 
 
 def test_the_rollback_step_is_skipped_unless_destructive(product: Product) -> None:

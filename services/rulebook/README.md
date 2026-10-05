@@ -7,8 +7,8 @@ a read API over rule versions, entities, relations and clauses for the Q&A servi
 clause search index (full text and pgvector) whose hits say when their rule is out of force, and
 the citation, review and publish flow (analyst actions behind their own review token, separate
 from the pipeline's write token) with its rule events written through the transactional outbox
-(behind `CW_RULEBOOK_PUBLISH_ENABLED`), and data-quality checks over versions, citations and
-relations.
+(behind `CW_RULEBOOK_PUBLISH_ENABLED`), the public API's changes feed (`GET /v1/changes`) read
+back from the decision log, and data-quality checks over versions, citations and relations.
 Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architecture Reference 3.2, 5.2 and 6.2; ADR-017 and ADR-018.
 
 - **Owns:** Rules, RuleVersions, Documents, Clauses, Citations, embeddings; versioning, supersession graph, hybrid search index, as-of queries;
@@ -17,7 +17,8 @@ Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architectur
 - **Owning team:** Regulatory Intelligence
 - **Consumes:** parsed documents from the pipeline over `PUT /v1/rulebook/documents/{id}` (ADR-018); rule.published; rulebook read API (served to the engine, Q&A and review service)
 - **Emits / publishes:** rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed
-  through `outbox_event` (ADR-005); no service consumes them yet
+  through `outbox_event` (ADR-005); the applicability engine fans a publication out and cancels it
+  on a withdrawal, and the obligation service acts on all four
 
 ## What is in the database today
 
@@ -95,6 +96,7 @@ literal pairs to the kernel.
 | `POST /v1/rulebook/rule-versions/{id}/publish` | Approved to published, applying the version's relations and writing the rule events; see below. `{actor_id, note?}`. Needs the review token and the flag |
 | `POST /v1/rulebook/rule-versions/{id}/withdraw` | Published to withdrawn with `rule.withdrawn` (no withdrawing version, effective today); 409 `rulebook-replacements-pending` while a version it replaces has not moved yet. Needs the review token and the flag |
 | `POST /v1/rulebook/maintenance/transitions` | The daily sweep, `{as_of?}` (today in India when empty, never later); returns the versions it moved and the events. Needs the review token and the flag |
+| `GET /v1/changes?since=&regulator=&limit=&cursor=` | The public API's changes feed: one item per published change, newest first, `limit` 1 to 100 (50) with a keyset cursor; see Changes feed below |
 
 Nothing is aligned by fuzzy matching and nothing is created without an analyst (ADR-017). With
 telemetry on, the service reports the gauges `rulebook_entity_review_open_items{entity_type}` and
@@ -152,7 +154,7 @@ approvals of a high-impact version come from two people; a service, which is no 
 names the actor in the body. The review queues (`GET /v1/rulebook/review/entities`, `.../items`
 and `GET /v1/rulebook/review/relations`) need an `analyst`, `reviewer` or `admin` token in token
 mode, and such a token when a bearer is sent in dual mode; without a token they stay open. The
-rest of the read API needs no token in any mode. Sessions of regulatory
+rest of the read API, the changes feed included, needs no token in any mode. Sessions of regulatory
 roles carry a second factor, which identity enforces when it issues them.
 `tests/unit/test_auth_mode.py` covers the three modes.
 
@@ -216,8 +218,8 @@ Publishing checks, in order (`rulebook.domain.publication.plan_publication`):
 attributes the predicates reference. The events of one publication share a correlation id, the
 follow-on events name `rule.published` as their cause, every rule event has no tenant and the
 rule id as its Kafka key, and all of them are written to `outbox_event` in the publication's
-transaction; `python -m py_common.outbox` relays them. Nothing consumes the events yet; the
-obligation service's consumer is still to be built.
+transaction; `python -m py_common.outbox` relays them. The applicability engine and the
+obligation service consume them.
 
 A version cannot be withdrawn while a version it supersedes, corrects or withdraws is still
 published (409 `rulebook-replacements-pending`): that version was cut at publication and moves
@@ -236,6 +238,39 @@ CW_RULEBOOK_PUBLISH_ENABLED=true CW_DATABASE_URL=... uv run --package compliance
 `POST /v1/rulebook/maintenance/transitions` runs the same sweep. With the flag off the command
 prints that nothing moved and exits 0. Seed rules are never published by a migration or the seed
 command; only this flow publishes.
+
+## Changes feed
+
+`GET /v1/changes` is a path of the public API (tag `public`) outside the service's prefix, the
+same for every tenant: it needs no tenant and no token in any mode, like the rest of the read
+API, and its `x-roles` name every tenant member role and the regulatory roles. It is read back
+from `rule_version_decision` (`rulebook.domain.changes`), one item per change a rule event
+announced:
+
+| `kind` | From | About (`rule_version_id`) | `caused_by_rule_version_id` |
+| --- | --- | --- | --- |
+| `published` | a `published` decision | the version published | null |
+| `superseded` | a `superseded` decision, at the replacement's publication or in the sweep | the version replaced | the replacing version |
+| `withdrawn` | a `withdrawn` decision | the version withdrawn | the version that withdraws it, or null for an analyst's withdrawal |
+| `deadline_changed` | a `published` decision, once per `extends_deadline` relation from that version to a version | the version whose due date moved; `deadline` has the period, the new due date and the evidence clause | the extending version |
+
+Submissions, returns and approvals are not changes. Each item carries the version as it stands:
+its rule key, title, summary, number, regulator, level, status, effective dates and `seed_status`
+(needs_review until an analyst reviews it; a synthetic approval reviews nothing, so the web shows
+a not-yet-reviewed notice), `approved_by` and `published_at` (the approvers of the round it was
+published from, empty and null for a version never published), its verified citations (clause,
+document, clause ref and quote) and `relations`, the versions it supersedes, corrects or
+withdraws and the due dates it moves.
+
+The feed is newest first, by `changed_at` (the decision's time) then `change_id`, both
+descending, a page of `limit` (1 to 100, default 50) at a time with an opaque keyset `cursor`
+(`py_common.pagination`'s format, scope `rulebook.changes`). A change's id is its decision's id;
+a deadline change's is the first 32 hex digits of the SHA-256 of `<decision id>:<relation id>`,
+which the Postgres store computes in SQL and the domain in Python, so every read gives a change
+the same id. `since` keeps the changes at or after a moment: a date (from the start of that day
+in India) or a date-time with its offset; `regulator` keeps the versions of one regulator's rules.
+A page reads in one transaction: the changes, then each version's record, approvers, citations
+and relations, once per version.
 
 ## Known limitations
 
@@ -304,9 +339,9 @@ violation (exit code 1) also labels it `data-quality`. What to do about a violat
 
 ```
 src/rulebook/
-  api/             # routers (documents, review, rule_versions, publication, graph, search), request/response schemas, the write-token and review-token dependencies
-  application/     # use cases: documents.py, alignment.py, review.py, relations.py, rule_versions.py, publication.py, graph.py, search.py; seed_loader.py
-  domain/          # documents.py, alignment.py, review.py, relations.py, rule_versions.py, publication.py (the planner), events.py, graph.py, search.py, runs.py, ids.py, errors.py, repository.py, seed.py
+  api/             # routers (documents, review, rule_versions, publication, graph, search; changes, the public GET /v1/changes), request/response schemas, the write-token and review-token dependencies
+  application/     # use cases: documents.py, alignment.py, review.py, relations.py, rule_versions.py, publication.py, graph.py, search.py, changes.py; seed_loader.py
+  domain/          # documents.py, alignment.py, review.py, relations.py, rule_versions.py, publication.py (the planner), events.py, graph.py, search.py, changes.py (the feed), runs.py, ids.py, errors.py, repository.py, seed.py
   infrastructure/  # models.py (with the Vector column type), knowledge_repository.py (Postgres unit of work and outbox sink), memory.py, seed_repository.py, review_metrics.py (the review queue gauges)
   settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN, CW_RULEBOOK_REVIEW_TOKEN, CW_RULEBOOK_PUBLISH_ENABLED, CW_RULEBOOK_SEED_ON_START (local and test, memory store)
   testing.py       # rulebook_settings() for tests and demos: memory store, known tokens (WRITE_TOKEN, REVIEW_TOKEN)
@@ -326,7 +361,7 @@ migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and 
   versions/20260929_0007_publish_flow.py   # high_impact, submitted_at, rule_version_decision, the rule_version guard, outbox_event
 tests/
   unit/            # domain, use cases and API on the memory store; test_models_vocabulary.py: model CHECKs against the kernel enums
-  integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work and its reads; the search index; the publish guard, the outbox and the sweep
+  integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work and its reads; the search index; the publish guard, the outbox and the sweep; the changes feed read by a plain role
   contract/        # test_openapi.py: the served schema equals the committed spec; test_events.py: the rule events match their schemas
 alembic.ini, pyproject.toml, Dockerfile
 ```

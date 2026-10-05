@@ -85,6 +85,14 @@ class DecisionRow(Base):
             "rule_version_id",
             "decided_at",
         ),
+        Index(
+            "ix_applicability_decision_impact",
+            "tenant_id",
+            "rule_version_id",
+            "business_id",
+            "decided_at",
+            "id",
+        ),
         UniqueConstraint(
             "trigger_ref",
             "business_id",

@@ -27,20 +27,27 @@ from uuid import UUID
 
 from sqlalchemy import (
     ColumnElement,
+    CompoundSelect,
+    Date,
     Engine,
     Float,
     Select,
+    String,
     Text,
+    Uuid,
     and_,
     bindparam,
     cast,
     create_engine,
     func,
+    literal,
     literal_column,
+    null,
     or_,
     select,
     text,
     tuple_,
+    union_all,
     update,
 )
 from sqlalchemy.dialects.postgresql import TSQUERY, insert
@@ -63,6 +70,7 @@ from domain_kernel.status import RuleVersionStatus
 from domain_kernel.vectors import ClauseFilter, Vector
 from py_common.outbox import OutboxWriter
 from rulebook.domain.alignment import ReviewReason
+from rulebook.domain.changes import CHANGE_ACTIONS, ChangeEntry, ChangeQuery, RuleChangeKind
 from rulebook.domain.documents import StoredClause, StoredDocument
 from rulebook.domain.errors import UnknownRuleVersionError
 from rulebook.domain.events import RuleEvent
@@ -128,6 +136,7 @@ PUBLICATION_LOCK = 0x72756C657075626C
 PUBLISHED_STATUSES = sorted(status.value for status in IN_FORCE_STATUSES)
 CITING_STATUS_VALUES = sorted(status.value for status in CITING_STATUSES)
 REPLACING_KINDS = sorted(kind.value for kind in REPLACING)
+CHANGE_ACTION_VALUES = sorted(action.value for action in CHANGE_ACTIONS)
 ENGLISH: ColumnElement[str] = literal_column("'english'::regconfig")
 HNSW_EF_SEARCH = 100
 """Candidates the HNSW scan keeps (pgvector's default is 40): at least the largest pool."""
@@ -832,6 +841,40 @@ class SqlAlchemyRuleVersionRepository:
     def lock_publication(self) -> None:
         self._session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PUBLICATION_LOCK})
 
+    def changes(self, query: ChangeQuery) -> Sequence[ChangeEntry]:
+        changes = _changes().subquery("changes")
+        statement = (
+            select(changes)
+            .join(RuleVersionRow, RuleVersionRow.id == changes.c.rule_version_id)
+            .join(RuleRow, RuleRow.id == RuleVersionRow.rule_id)
+            .order_by(changes.c.changed_at.desc(), changes.c.change_id.desc())
+            .limit(query.limit)
+        )
+        if query.since is not None:
+            statement = statement.where(changes.c.changed_at >= query.since)
+        if query.regulator is not None:
+            statement = statement.where(RuleRow.regulator == query.regulator)
+        if query.after is not None:
+            statement = statement.where(
+                tuple_(changes.c.changed_at, changes.c.change_id)
+                < tuple_(query.after.changed_at, query.after.change_id)
+            )
+        return [
+            ChangeEntry(
+                change_id=row.change_id,
+                kind=RuleChangeKind(row.kind),
+                changed_at=row.changed_at.astimezone(UTC),
+                rule_version_id=RuleVersionId(row.rule_version_id),
+                caused_by=None if row.caused_by is None else RuleVersionId(row.caused_by),
+                period_label=row.period_label,
+                new_due_on=row.new_due_on,
+                evidence_clause_id=None
+                if row.evidence_clause_id is None
+                else ClauseId(row.evidence_clause_id),
+            )
+            for row in self._session.execute(statement).all()
+        ]
+
 
 class SqlAlchemyCitationRepository:
     def __init__(self, session: Session) -> None:
@@ -1228,6 +1271,50 @@ def _out_of_force(session: Session, clause_ids: Sequence[UUID], as_of: date | No
         .having(func.bool_or(_in_force_on(as_of)).is_(False))
     )
     return set(found)
+
+
+def _changes() -> CompoundSelect[Any]:
+    """Every change the decision log records (``rulebook.domain.changes``): the published,
+    superseded and withdrawn decisions, and one deadline change per extends_deadline relation to
+    a version from each published one, whose id is the first 32 hex digits of the SHA-256 of
+    ``<decision id>:<relation id>`` (``deadline_change_id``)."""
+    decision = aliased(RuleVersionDecisionRow)
+    logged = select(
+        decision.id.label("change_id"),
+        decision.action.label("kind"),
+        decision.decided_at.label("changed_at"),
+        decision.rule_version_id.label("rule_version_id"),
+        decision.caused_by_rule_version_id.label("caused_by"),
+        cast(null(), String).label("period_label"),
+        cast(null(), Date).label("new_due_on"),
+        cast(null(), Uuid).label("evidence_clause_id"),
+    ).where(decision.action.in_(CHANGE_ACTION_VALUES))
+    published = aliased(RuleVersionDecisionRow)
+    derived = func.concat(cast(published.id, Text), ":", cast(RuleRelationRow.id, Text))
+    digest = func.encode(func.sha256(func.convert_to(derived, "UTF8")), "hex")
+    extended = (
+        select(
+            cast(func.substr(digest, 1, 32), Uuid).label("change_id"),
+            literal(RuleChangeKind.DEADLINE_CHANGED.value, String).label("kind"),
+            published.decided_at.label("changed_at"),
+            RuleRelationRow.to_rule_version_id.label("rule_version_id"),
+            published.rule_version_id.label("caused_by"),
+            RelationCandidateRow.period_label.label("period_label"),
+            RelationCandidateRow.new_due_on.label("new_due_on"),
+            RuleRelationRow.clause_id.label("evidence_clause_id"),
+        )
+        .join(
+            RuleRelationRow,
+            and_(
+                RuleRelationRow.from_rule_version_id == published.rule_version_id,
+                RuleRelationRow.relation == RelationKind.EXTENDS_DEADLINE.value,
+                RuleRelationRow.to_rule_version_id.is_not(None),
+            ),
+        )
+        .outerjoin(RelationCandidateRow, RelationCandidateRow.id == RuleRelationRow.candidate_id)
+        .where(published.action == DecisionAction.PUBLISHED.value)
+    )
+    return union_all(logged, extended)
 
 
 def _versions() -> Select[RuleVersionRow, str, str, str]:

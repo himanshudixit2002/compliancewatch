@@ -1,6 +1,6 @@
 """``PostgresRecords`` on Postgres: it counts and finds directory entries by level and creation
-time, reads audit rows of no tenant, which the product's role cannot, and can write nothing.
-Needs Docker."""
+time, reads audit rows of no tenant with their correlation ids, which the product's role cannot,
+counts the engine's rows of one tenant, and can write nothing. Needs Docker."""
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -11,11 +11,16 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import InternalError, OperationalError
 from testcontainers.community.postgres import PostgresContainer
 
-from applicability_engine.infrastructure.models import BusinessDirectoryRow
-from cw_demo.product.records import PostgresRecords
+from applicability_engine.infrastructure.models import (
+    BusinessDirectoryRow,
+    DecisionRow,
+    ReviewItemRow,
+)
+from cw_demo.product.records import ENGINE_TABLES, PostgresRecords
 from domain_kernel.audit import AuditActor
 from py_common.audit.testing import audit_entry, install_audit_table
 from py_common.audit.writer import AuditWriter
+from py_common.outbox.schema import outbox_event
 
 pytestmark = pytest.mark.integration
 
@@ -34,8 +39,13 @@ def url() -> Iterator[str]:
             connection.execute(text("SET search_path TO applicability"))
             BusinessDirectoryRow.metadata.create_all(
                 connection,
-                tables=[BusinessDirectoryRow.__table__],  # type: ignore[list-item]
+                tables=[
+                    BusinessDirectoryRow.__table__,  # type: ignore[list-item]
+                    DecisionRow.__table__,  # type: ignore[list-item]
+                    ReviewItemRow.__table__,  # type: ignore[list-item]
+                ],
             )
+            outbox_event.create(connection)
             install_audit_table(connection)
         engine.dispose()
         yield base
@@ -76,6 +86,7 @@ def test_it_reads_the_directory_and_the_audit_rows_and_writes_nothing(url: str) 
                 actor=AuditActor.system("applicability-engine"),
                 reason="cw-product check: held for a test",
                 occurred_at=LATE,
+                correlation_id="check-request-1",
             ),
         )
     writer.dispose()
@@ -87,10 +98,11 @@ def test_it_reads_the_directory_and_the_audit_rows_and_writes_nothing(url: str) 
         assert records.listed([str(late)], as_of=EARLY) == set()
         assert records.listed([]) == set()
         (row,) = records.audit_entries(actions=["applicability.fanout.hold"], since=EARLY)
-        assert (row.subject_id, row.tenant_id, row.actor_label) == (
+        assert (row.subject_id, row.tenant_id, row.actor_label, row.correlation_id) == (
             "global",
             None,
             "system:applicability-engine",
+            "check-request-1",
         )
         assert (
             records.audit_entries(
@@ -103,5 +115,41 @@ def test_it_reads_the_directory_and_the_audit_rows_and_writes_nothing(url: str) 
             records._engine.connect() as connection,
         ):
             connection.execute(text("DELETE FROM applicability.business_directory"))
+    finally:
+        records.close()
+
+
+def test_it_counts_the_engine_rows_of_one_tenant(url: str) -> None:
+    writer = create_engine(url)
+    tenant, other = uuid4(), uuid4()
+    with writer.begin() as connection:
+        for owner in (tenant, tenant, other):
+            connection.execute(
+                text(
+                    "INSERT INTO applicability.applicability_decision (id, tenant_id, business_id,"
+                    " rule_version_id, result, confidence, profile_version, trigger, evaluated,"
+                    " decided_at) VALUES (:id, :t, :b, :v, 'applies', 1, 1, 'rule_published',"
+                    " '[]', :at)"
+                ),
+                {"id": uuid4(), "t": owner, "b": uuid4(), "v": uuid4(), "at": LATE},
+            )
+        connection.execute(
+            text(
+                "INSERT INTO applicability.outbox_event (id, topic, schema_version, partition_key,"
+                " tenant_id, occurred_at, message, available_at) VALUES (:id,"
+                " 'applicability.decided', '1.0.0', 'k', :t, :at, '{}', :at)"
+            ),
+            {"id": uuid4(), "t": tenant, "at": LATE},
+        )
+    writer.dispose()
+    records = PostgresRecords(url)
+    try:
+        assert tuple(records.engine_rows(tenant)) == ENGINE_TABLES
+        assert records.engine_rows(tenant) == {
+            "applicability_decision": 2,
+            "review_item": 0,
+            "outbox_event": 1,
+        }
+        assert records.engine_rows(uuid4()) == dict.fromkeys(ENGINE_TABLES, 0)
     finally:
         records.close()

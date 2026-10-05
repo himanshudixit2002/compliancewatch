@@ -66,6 +66,19 @@ the API answers. One failed step does not stop the next.
   naming both synthetic reviewers while its seed status stays needs_review, and verified
   citations; a comment is added and listed. Each run spends a business of its own, so the seeded
   registration's obligations stay for the reminders step and a later check passes again.
+- ``changes``: the version of gstr9_annual the fanout step published. ``GET /v1/changes`` lists its
+  publication (read from its ``published_at`` on) with both synthetic reviewers as its approvers,
+  the seed status needs_review and verified citations. ``GET /v1/changes/{id}/impact`` as the CA
+  firm, with ``result=applies``, lists exactly the firm's registrations the answers call for under
+  the client they belong to, and the version's fan-out completed. A dry run of the version scoped
+  to the CA firm (``POST /v1/applicability-engine/dry-runs``) counts what the firm's latest
+  decisions of the version count for the registrations the directory lists (the ones a fan-out
+  decides; a database whose consumer group began after a registration was made may lack it), with
+  every one decided and none skipped; it wrote one ``applicability.dry_run`` row of no tenant,
+  found by the request's correlation id, and not one decision, review item or outbox row of the
+  firm (counted before and after through ``records.PostgresRecords``). On a database where the
+  rollback step withdrew the version, the publication is still in the feed and the dry run reads
+  the withdrawn version.
 """
 
 import io
@@ -182,6 +195,13 @@ TRACKED_HISTORY: Final = ("created", "started", "assigned", "closed")
 """What the tracking step's obligation went through, in order."""
 TRACKING_COMMENT: Final = "Acknowledgement filed on the example portal (synthetic)"
 NEEDS_REVIEW: Final = "needs_review"
+CHANGES: Final = "/v1/changes"
+DRY_RUNS: Final = f"{ENGINE}/dry-runs"
+DRY_RUN_ACTION: Final = "applicability.dry_run"
+CHANGE_PAGES: Final = 20
+"""Pages of the feed the changes step reads, newest first, looking for the publication."""
+WAS_PUBLISHED: Final = frozenset({"published", "superseded", "withdrawn"})
+RESULTS: Final = ("applies", "not_applicable", "unsure")
 
 SweepRunner = Callable[[Sequence[str]], tuple[int, dict[str, Any]]]
 """Runs ``obligation-sweep --once --json`` with more arguments: its exit code and its report."""
@@ -1384,6 +1404,189 @@ def tracked_detail(detail: Mapping[str, Any], comment: Mapping[str, Any]) -> str
     return " and ".join(names[approver] for approver in sorted(review["approved_by"]))
 
 
+# ---------------------------------------------------------------- changes
+
+
+def changes(context: CheckContext) -> list[str]:
+    records = context.records
+    if records is None:
+        raise StepFailedError(
+            "the changes step reads audit.event and the engine's rows of a tenant: set "
+            "CW_PRODUCT_RECORDS_URL (make product-check passes it)"
+        )
+    product = context.product
+    published = [v for v in rule_versions(product, GSTR9) if v["status"] in WAS_PUBLISHED]
+    if not published:
+        raise StepFailedError(f"{GSTR9} was never published: run the fanout step first")
+    version = published[-1]
+    version_id = str(version["rule_version_id"])
+    item = publication_in_feed(product, version_id)
+    reviewers = feed_reviewers(item)
+    impact = poll(
+        partial(affected_clients, context, version_id),
+        timeout=context.timeout,
+        interval=context.interval,
+    )
+    lines = [
+        f"GET {CHANGES}: {GSTR9} v{version['version']} published {item['changed_at']}, approved "
+        f"by {reviewers}, seed status {item['seed_status']}, {len(item['citations'])} verified "
+        f"citations (now {item['status']})",
+        f"{CA_FIRM_TENANT.name}: {GSTR9} applies to "
+        + ", ".join(
+            f"{business['business_id']} of client {client['entity_id']}"
+            for client in impact["items"]
+            for business in client["businesses"]
+        )
+        + f"; the fan-out {impact['fan_out']['status']}",
+    ]
+    return lines + dry_run_matches(context, records, version_id)
+
+
+def publication_in_feed(product: Product, version_id: str) -> dict[str, Any]:
+    """The feed's item of the version's publication, read from its ``published_at`` on."""
+    detail = ok(product.internal.get(f"{RULEBOOK}/rule-versions/{version_id}"))
+    params: dict[str, str | int] = {"since": str(detail["published_at"]), "limit": 100}
+    for _ in range(CHANGE_PAGES):
+        page = ok(product.internal.get(CHANGES, params=params))
+        for item in page["items"]:
+            if (item["kind"], item["rule_version_id"]) == ("published", version_id):
+                found: dict[str, Any] = item
+                return found
+        if page["next_cursor"] is None:
+            break
+        params["cursor"] = str(page["next_cursor"])
+    raise StepFailedError(f"GET {CHANGES} does not list the publication of {GSTR9} {version_id}")
+
+
+def feed_reviewers(item: Mapping[str, Any]) -> str:
+    """Check the publication's item: both synthetic reviewers approved it, its seed status is
+    still needs_review and it cites verified clauses; the reviewers' names."""
+    names = {str(analyst.user_id): analyst.name for analyst in REVIEWERS}
+    if set(item["approved_by"]) != set(names):
+        raise StepFailedError(
+            f"the feed names {item['approved_by']} as approvers, not both synthetic reviewers"
+        )
+    if item["seed_status"] != NEEDS_REVIEW:
+        raise StepFailedError(
+            f"the feed reads {GSTR9} {item['seed_status']}: a synthetic approval reviews nothing"
+        )
+    if item["rule_key"] != GSTR9 or not item["citations"]:
+        raise StepFailedError(f"the feed's item of {GSTR9} cites no verified clause")
+    return " and ".join(names[approver] for approver in sorted(item["approved_by"]))
+
+
+def affected_clients(context: CheckContext, version_id: str) -> dict[str, Any]:
+    """The impact of the version on the CA firm, ``result=applies``, once it lists exactly the
+    firm's registrations the answers call for, each under its own client."""
+    product = context.product
+    expected = {
+        seeded.registration_id: seeded.entity_id
+        for seeded in registrations(product, CA_FIRM_TENANT)
+        if seeded.business.expected.get(GSTR9) == APPLIES
+    }
+    if not expected:
+        raise StepFailedError(f"{GSTR9} applies to no registration of {CA_FIRM_TENANT.name}")
+    impact: dict[str, Any] = answered(
+        product.internal.get(
+            f"{CHANGES}/{version_id}/impact",
+            params={"result": APPLIES, "limit": 200},
+            headers=as_tenant(CA_FIRM_TENANT.tenant_id),
+        )
+    )
+    listed = {
+        str(business["business_id"]): str(client["entity_id"])
+        for client in impact["items"]
+        for business in client["businesses"]
+    }
+    if listed != expected:
+        raise NotYetError(
+            f"the impact on {CA_FIRM_TENANT.name} lists {sorted(listed.items())}; the answers "
+            f"call for {sorted(expected.items())}"
+        )
+    if impact["fan_out"] is None or impact["fan_out"]["status"] != "completed":
+        raise NotYetError(f"the impact names the fan-out {impact['fan_out']}, not completed")
+    return impact
+
+
+def dry_run_matches(context: CheckContext, records: ProductRecords, version_id: str) -> list[str]:
+    """A dry run of the version scoped to the CA firm counts what the firm's latest decisions
+    of it count, and writes its audit row and nothing else."""
+    product = context.product
+    firm = CA_FIRM_TENANT
+    headers = as_tenant(firm.tenant_id)
+    whole: dict[str, Any] = ok(
+        product.internal.get(
+            f"{CHANGES}/{version_id}/impact", params={"limit": 200}, headers=headers
+        )
+    )
+    decided = {
+        str(business["business_id"]): str(business["result"])
+        for client in whole["items"]
+        for business in client["businesses"]
+    }
+    listed = records.listed(decided)
+    expected = {
+        result: sum(1 for business in listed if decided[business] == result) for result in RESULTS
+    }
+    before = records.engine_rows(firm.tenant_id)
+    since = context.now() - timedelta(minutes=1)
+    request_id = uuid4().hex
+    report: dict[str, Any] = ok(
+        product.internal.post(
+            DRY_RUNS,
+            json={
+                "rule_version_id": version_id,
+                "scope": {"tenant_id": str(firm.tenant_id), "sample_size": 50},
+            },
+            headers={"x-request-id": request_id},
+        )
+    )
+    after = records.engine_rows(firm.tenant_id)
+    if report["counts"] != expected:
+        raise StepFailedError(
+            f"the dry run counts {report['counts']}; the firm's decisions of {GSTR9} for the "
+            f"{len(listed)} registrations the directory lists count {expected}"
+        )
+    if (report["businesses_total"], report["evaluated"], report["skipped"]) != (
+        len(listed),
+        len(listed),
+        0,
+    ):
+        raise StepFailedError(
+            f"the dry run read {report['businesses_total']} directory entries and decided "
+            f"{report['evaluated']} ({report['skipped']} skipped); the directory lists "
+            f"{len(listed)} of the firm's registrations with a decision of {GSTR9}"
+        )
+    differ = [
+        sample["business_id"]
+        for sample in report["samples"]
+        if decided.get(str(sample["business_id"])) != sample["result"]
+    ]
+    if differ:
+        raise StepFailedError(f"the dry run decided {differ} otherwise than the fan-out")
+    if after != before:
+        raise StepFailedError(f"the dry run wrote to the engine: {before} became {after}")
+    rows = [
+        row
+        for row in records.audit_entries(actions=(DRY_RUN_ACTION,), since=since)
+        if row.correlation_id == request_id
+    ]
+    if len(rows) != 1 or rows[0].tenant_id is not None or rows[0].subject_id != version_id:
+        raise StepFailedError(
+            f"audit.event holds {len(rows)} {DRY_RUN_ACTION} rows of the request, not one of "
+            "no tenant about the version"
+        )
+    counts = ", ".join(f"{count} {result}" for result, count in report["counts"].items())
+    return [
+        f"dry run of {GSTR9} ({report['status']}) for {firm.name}: {report['evaluated']} of "
+        f"{report['businesses_total']} decided ({counts}), as the firm's decisions of the "
+        "registrations the directory lists count",
+        f"wrote one {DRY_RUN_ACTION} row of no tenant by {rows[0].actor_label}; the firm's "
+        + ", ".join(f"{table} {count}" for table, count in after.items())
+        + " rows unchanged",
+    ]
+
+
 # ---------------------------------------------------------------- the command
 
 STEPS: list[Step] = [
@@ -1415,6 +1618,11 @@ STEPS: list[Step] = [
         "tracking",
         "a member starts, assigns, completes once with one key, reads and comments on a duty",
         tracking,
+    ),
+    Step(
+        "changes",
+        "the feed lists the publication, the impact its affected clients, a dry run its counts",
+        changes,
     ),
 ]
 """The steps in the order they run. A later package appends its own."""

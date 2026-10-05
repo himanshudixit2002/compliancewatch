@@ -7,6 +7,30 @@ documentation is a patch; a break (see `BREAKING.md`) is a major bump and a new 
 next to this one. The change that bumps the version adds its section here, and the build fails
 while the version in `public.meta.json` has no section.
 
+## 0.3.0
+
+The changes feed, from the rulebook, and the impact of a change, from the applicability engine.
+Every tenant member role and the regulatory team's roles (analyst, reviewer, admin) may read the
+feed, so `x-roles` may now name the regulatory roles too; the impact is for the tenant's members:
+
+- `GET /v1/changes` lists the published changes to the rulebook, newest first, a page at a time
+  (`limit` up to 100 and `cursor`), optionally since a date (from the start of that day in India)
+  or a date-time, and of one regulator. One item per change the rule events announced: a version
+  published, superseded or withdrawn, or a due date a published version moved
+  (`deadline_changed`, about the version whose date moved, with the period and the new date).
+  Each carries the version's rule key, title, dates, regulator and status, its seed status
+  (needs_review until an analyst reviews it), the approvers of the round it was published from
+  with `published_at`, its verified citations (clause, document and quote) and the versions it
+  supersedes, corrects, withdraws or whose due dates it moves. The feed is the same for every
+  tenant and needs no tenant.
+- `GET /v1/changes/{rule_version_id}/impact` answers what a change means for the caller's tenant:
+  each of its businesses with its latest decision of the version (result, confidence, whether it
+  needs review, when and why it was decided, and every predicate's outcome in words), grouped
+  under the client they belong to, the legal entity at the top of their lineage, a page of
+  clients at a time (`limit` and `cursor`); `result=applies` keeps the affected ones. It also
+  counts the tenant's businesses by result and gives the status and counters of the version's
+  fan-out over every tenant.
+
 ## 0.2.0
 
 Obligation tracking, from the obligation service. The four operations serve the routes the web app

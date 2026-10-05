@@ -33,11 +33,15 @@ The fan-outs run over every tenant and belong to none, so their routes name no t
 (analyst, reviewer or admin) a token names, the anonymous caller without a token, and a 403 for
 anyone else and for services. ``FanOutAdmin`` guards the controls (pause, resume, cancel, the
 hold) the way a resolution is: an admin a token names; the anonymous caller only in ``header``
-mode, and a 401 without a token in ``dual`` mode.
+mode, and a 401 without a token in ``dual`` mode. ``DryRunAdmin`` guards a dry run the same way:
+it reads every tenant's profiles, so only an admin runs one.
+
+``PUBLIC_ROUTE`` is the ``openapi_extra`` of a route of the public API every member of the tenant
+may call (the impact of a change): the member roles as ``x-roles``.
 """
 
 from collections.abc import AsyncIterator
-from typing import Annotated, Final
+from typing import Annotated, Any, Final
 from uuid import UUID
 
 import structlog
@@ -63,6 +67,10 @@ from py_common.auth.fastapi import (
     tenant_scope,
 )
 
+PUBLIC_ROLES: Final = tuple(role.value for role in Role if role in TENANT_MEMBER_ROLES)
+"""The roles of a tenant's members, in the kernel's order."""
+PUBLIC_ROUTE: Final[dict[str, Any]] = {"x-roles": list(PUBLIC_ROLES)}
+"""``openapi_extra`` of a public route every member of the tenant may call."""
 RESOLVER_ROLES: Final = frozenset({Role.REVIEWER, Role.ADMIN})
 FAN_OUT_ADMIN_ROLES: Final = frozenset({Role.ADMIN})
 REVIEW_TENANT_DESCRIPTION: Final = (
@@ -131,8 +139,9 @@ async def fan_out_reader(principal: CurrentPrincipal) -> Principal:
     return principal
 
 
-async def fan_out_admin(request: Request, principal: CurrentPrincipal) -> Principal:
-    """An admin a token names; the anonymous caller in ``header`` mode only."""
+def _admin(request: Request, principal: Principal, doing: str) -> Principal:
+    """An admin a token names; the anonymous caller in ``header`` mode only. ``doing`` names
+    the action in the 401 that asks for a token."""
     if principal.is_authenticated:
         if principal.kind is PrincipalKind.USER and principal.has_role(*FAN_OUT_ADMIN_ROLES):
             return principal
@@ -140,9 +149,20 @@ async def fan_out_admin(request: Request, principal: CurrentPrincipal) -> Princi
         raise AuthForbiddenError(f"this request needs one of: {names}")
     if authenticator_of(request).mode != "header":
         raise AuthTokenRequiredError(
-            "Controlling a fan-out needs an admin's access token as Authorization: Bearer <token>"
+            f"{doing} needs an admin's access token as Authorization: Bearer <token>"
         )
     return principal
+
+
+async def fan_out_admin(request: Request, principal: CurrentPrincipal) -> Principal:
+    """An admin a token names; the anonymous caller in ``header`` mode only."""
+    return _admin(request, principal, "Controlling a fan-out")
+
+
+async def dry_run_admin(request: Request, principal: CurrentPrincipal) -> Principal:
+    """Who runs a dry run: the fan-out controls' guard, an admin a token names, the anonymous
+    caller in ``header`` mode only."""
+    return _admin(request, principal, "A dry run")
 
 
 def resolved_by(principal: Principal, offered: UUID) -> UserId:
@@ -162,4 +182,5 @@ ReviewTenant = Annotated[TenantId, Depends(review_tenant)]
 Resolver = Annotated[Principal, Depends(resolver)]
 FanOutReader = Annotated[Principal, Depends(fan_out_reader)]
 FanOutAdmin = Annotated[Principal, Depends(fan_out_admin)]
+DryRunAdmin = Annotated[Principal, Depends(dry_run_admin)]
 Wired = Annotated[Wiring, Depends(wiring)]

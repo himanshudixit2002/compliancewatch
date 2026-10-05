@@ -127,6 +127,8 @@ const CLAUSE = uses("rulebook", "GET", "/v1/rulebook/clauses/{clause_id}");
 const ENTITY = uses("rulebook", "GET", "/v1/rulebook/entities/{entity_id}");
 const REVIEW_RELATIONS = uses("rulebook", "GET", "/v1/rulebook/review/relations");
 const OBLIGATIONS_LIST = uses("obligation", "GET", "/v1/obligation/obligations");
+const CHANGES = uses("rulebook", "GET", "/v1/changes");
+const CHANGE_IMPACT = uses("applicability-engine", "GET", "/v1/changes/{rule_version_id}/impact");
 /** py-common's liveness and readiness routes, which every committed spec carries. */
 const PROBES: readonly RouteRef[] = SERVICES_WITH_SPECS.flatMap((service) => [
   uses(service, "GET", "/health"),
@@ -769,15 +771,14 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [RULE_VERSIONS, RELATIONS],
-    awaits: [
-      servicesTrack("WP29", "rulebook", "GET", "/v1/changes"),
-      servicesTrack("WP26", "applicability-engine", "GET", "/v1/changes/{rule_version_id}/impact"),
-    ],
-    status: "waiting",
+    uses: [RULE_VERSIONS, RELATIONS, CHANGES, CHANGE_IMPACT],
+    awaits: [],
+    status: "ready",
     e2e: [],
     guideRef: "2 uc2, 10",
     nav: { group: "business", order: 7 },
+    notes:
+      "The published changes newest first with a cursor: the kind, the effective dates, the regulator, the approvers or a not-yet-reviewed notice from the seed status, and the verified citations; each card's applicability badge from the business's latest decision in the change's impact.",
   },
   {
     id: "owner.reminders",
@@ -1062,11 +1063,8 @@ const SCREEN_LIST = [
     section: "ca",
     roles: CA,
     tenantKinds: ["ca_firm"],
-    uses: [],
-    awaits: [
-      servicesTrack("WP26", "applicability-engine", "GET", "/v1/changes/{rule_version_id}/impact"),
-      servicesTrack("WP26", "notification", "POST", "/v1/notification/bulk"),
-    ],
+    uses: [CHANGE_IMPACT],
+    awaits: [servicesTrack("WP26", "notification", "POST", "/v1/notification/bulk")],
     status: "waiting",
     e2e: [],
     guideRef: "2 uc5, 10, 15; G75",
@@ -1908,14 +1906,16 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [uses("profile", "GET", "/v1/ontology")],
-    awaits: [
-      servicesTrack("WP26", "applicability-engine", "POST", "/v1/applicability-engine/dry-runs"),
-      ONTOLOGY,
+    uses: [
+      uses("profile", "GET", "/v1/ontology"),
+      uses("applicability-engine", "POST", "/v1/applicability-engine/dry-runs"),
     ],
-    status: "waiting",
+    awaits: [],
+    status: "ready",
     e2e: [],
     guideRef: "15; G04",
+    notes:
+      "A dry run of a rule version in any status, or of a specification, over the business directory (one tenant or all, at most CW_APPLICABILITY_DRY_RUN_MAX businesses): counts by result and by deciding attribute, and sample decisions. The route takes an admin; it stores nothing but its audit entry.",
     nav: { group: "engine", order: 1 },
     parent: "admin.home",
   },

@@ -120,7 +120,12 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         build_applicability_engine,
         components=applicability_engine_components,
         url_fields=("profile_url", "rulebook_url"),
-        loopback_routes=("POST /v1/applicability-engine/businesses/{business_id}/decisions",),
+        # Evaluating reads the rule version and the profile; a dry run reads the version and
+        # every profile of its scope.
+        loopback_routes=(
+            "POST /v1/applicability-engine/businesses/{business_id}/decisions",
+            "POST /v1/applicability-engine/dry-runs",
+        ),
         takes_token_source=True,
     ),
     ServiceEntry(

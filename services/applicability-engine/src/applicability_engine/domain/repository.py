@@ -1,17 +1,19 @@
 """What the application layer needs from persistence, as protocols the infrastructure implements."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from typing import Protocol
 
 from applicability_engine.domain.directory import DirectoryEntry, DirectoryKey
 from applicability_engine.domain.fanout import FanOutHold, FanOutRun, FanOutRunKey, FanOutStatus
+from applicability_engine.domain.impact import ImpactEntry
 from applicability_engine.domain.model import Decision, DecisionKey
 from applicability_engine.domain.review import ReviewItem, ReviewItemId, ReviewItemKey, ReviewStatus
 from domain_kernel.audit import AuditSink
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId
 from domain_kernel.ontology import AttributeLevel
+from domain_kernel.predicates import Applicability
 
 
 class DecisionRepository(Protocol):
@@ -85,6 +87,29 @@ class ReviewItemRepository(Protocol):
         ...
 
 
+class ImpactRepository(Protocol):
+    """The tenant's latest decision of a rule version per business, placed by the business
+    directory (``domain.impact``)."""
+
+    def latest_by_entity(
+        self,
+        rule_version_id: RuleVersionId,
+        *,
+        result: Applicability | None,
+        after: BusinessId | None,
+        limit: int,
+    ) -> Sequence[ImpactEntry]:
+        """The latest decision of the version (decided_at, then id) of each business under the
+        first ``limit`` entities after ``after``, by entity then business; with ``result``, only
+        the businesses whose latest decision has it, and only the entities with one."""
+        ...
+
+    def result_counts(self, rule_version_id: RuleVersionId) -> Mapping[Applicability, int]:
+        """How many of the tenant's businesses have each result as their latest decision of
+        the version; a result none has is left out."""
+        ...
+
+
 class EventSink(Protocol):
     """Where events go inside the transaction: the outbox."""
 
@@ -105,6 +130,9 @@ class UnitOfWork(Protocol):
     def reviews(self) -> ReviewItemRepository: ...
 
     @property
+    def impact(self) -> ImpactRepository: ...
+
+    @property
     def events(self) -> EventSink: ...
 
     @property
@@ -123,13 +151,20 @@ class BusinessDirectoryReader(Protocol):
     setting and outside any unit of work (``business_directory_read``)."""
 
     def entries(
-        self, *, level: AttributeLevel, after: DirectoryKey | None, limit: int
+        self,
+        *,
+        level: AttributeLevel,
+        after: DirectoryKey | None,
+        limit: int,
+        tenant_id: TenantId | None = None,
     ) -> Sequence[DirectoryEntry]:
-        """Entries of ``level`` by tenant then node, after ``after``, at most ``limit``."""
+        """Entries of ``level`` by tenant then node, after ``after``, at most ``limit``; of
+        ``tenant_id`` alone when one is named."""
         ...
 
-    def count(self, *, level: AttributeLevel) -> int:
-        """How many entries of ``level`` the directory lists."""
+    def count(self, *, level: AttributeLevel, tenant_id: TenantId | None = None) -> int:
+        """How many entries of ``level`` the directory lists; of ``tenant_id`` alone when one
+        is named."""
         ...
 
 

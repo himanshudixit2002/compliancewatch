@@ -1,14 +1,16 @@
 """Tenant isolation at the HTTP edge, route by route, with every service in process on its
 memory store.
 
-Every route of a tenant-owned service (identity, profile, obligation, notification) is either
-tenant-owned, and then answers 401 to a request without ``x-tenant-id`` whatever its path and
-body, or exempt with the reason written next to it. A route in neither list fails the suite
-with its name, so whoever adds a route classifies it. The rulebook holds regulatory data every
-tenant reads, so its writes need the write token (the pipeline) or the review token (analyst
-actions) instead of a tenant, and with an access token rulebook:write or a regulatory role.
-The llm-gateway is shared infrastructure and is recorded with its reasons and one open finding,
-which token mode closes.
+Every route of a tenant-owned service (identity, profile, the applicability engine, obligation,
+notification) is either tenant-owned, and then answers 401 to a request without ``x-tenant-id``
+whatever its path and body, or exempt with the reason written next to it. A route in neither list
+fails the suite with its name, so whoever adds a route classifies it. The engine's exempt writes
+(the fan-out controls and the dry run, which name no tenant) are guarded by a token once tokens
+are read: in ``dual`` mode each answers 401 without one. The rulebook holds regulatory data every
+tenant reads (its reads, the changes feed among them, take no tenant), so its writes need the
+write token (the pipeline) or the review token (analyst actions) instead of a tenant, and with an
+access token rulebook:write or a regulatory role. The llm-gateway is shared infrastructure and is
+recorded with its reasons and one open finding, which token mode closes.
 
 The probes at the end seed data as tenant A through the API and read it as tenant B. The
 Postgres proofs (forced row-level security under a plain role) stay in each service's
@@ -16,7 +18,7 @@ integration tests.
 """
 
 from collections.abc import Callable, Iterator
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -26,8 +28,16 @@ from fastapi import FastAPI
 from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
 
+from applicability_engine.domain.model import Decision, Trigger
+from applicability_engine.infrastructure.memory import MemoryStore
+from applicability_engine.main import build_app as build_engine
+from applicability_engine.settings import ApplicabilityEngineSettings
+from applicability_engine.testing import MemoryProfiles, MemoryRulebook
+from applicability_engine.wiring import Readers
 from domain_kernel.access import Role, Scope
-from domain_kernel.ids import BusinessId, DecisionId, TenantId
+from domain_kernel.confidence import CERTAIN
+from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId
+from domain_kernel.predicates import Applicability
 from identity.main import build_app as build_identity
 from identity.testing import identity_settings
 from llm_gateway.main import build_app as build_gateway
@@ -55,6 +65,20 @@ AS_B = {"x-tenant-id": str(TENANT_B)}
 GSTIN = "29ABCDE1234F1Z5"
 FY = "2026-27"
 
+
+def engine_app(**overrides: Any) -> FastAPI:
+    """The applicability engine on its memory store, reading profiles and rule versions from
+    memory too."""
+    settings = ApplicabilityEngineSettings(
+        _env_file=None,
+        service_name="applicability-engine",
+        applicability_engine_store="memory",
+        **overrides,
+    )
+    readers = Readers(profiles=MemoryProfiles(), rulebook=MemoryRulebook())
+    return build_engine(settings, readers=readers)
+
+
 BUILDERS: dict[str, Callable[[], FastAPI]] = {
     "identity": lambda: build_identity(identity_settings()),
     "profile": lambda: build_profile(
@@ -65,6 +89,7 @@ BUILDERS: dict[str, Callable[[], FastAPI]] = {
             profile_gstin_lookup="static",
         )
     ),
+    "applicability-engine": lambda: engine_app(),
     "obligation": lambda: build_obligation(
         ObligationSettings(_env_file=None, service_name="obligation", obligation_store="memory"),
         rules=FakeRuleVersionReader(),
@@ -111,6 +136,16 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "POST /v1/businesses/{business_id}/registrations",
         }
     ),
+    "applicability-engine": frozenset(
+        {
+            "POST /v1/applicability-engine/businesses/{business_id}/decisions",
+            "GET /v1/applicability-engine/businesses/{business_id}/decisions",
+            "GET /v1/applicability-engine/decisions/{decision_id}",
+            "GET /v1/applicability-engine/review-items",
+            "POST /v1/applicability-engine/review-items/{item_id}/resolve",
+            "GET /v1/changes/{rule_version_id}/impact",
+        }
+    ),
     "obligation": frozenset(
         {
             "GET /v1/obligation/obligations",
@@ -152,6 +187,23 @@ PREFERENCE = (
     "needs the notification:preferences scope"
 )
 
+FAN_OUT = (
+    "a fan-out of a published version runs over every tenant and belongs to none: the regulatory "
+    "team reads the runs and the global hold, and an admin controls them, each control audited "
+    "as of no tenant; with tokens read the reads take a regulatory role and the controls an admin "
+    "a token names (401 without one in dual mode)"
+)
+
+FAN_OUT_ROUTES = (
+    "GET /v1/applicability-engine/fan-outs",
+    "GET /v1/applicability-engine/fan-outs/{rule_version_id}",
+    "POST /v1/applicability-engine/fan-outs/{rule_version_id}/pause",
+    "POST /v1/applicability-engine/fan-outs/{rule_version_id}/resume",
+    "POST /v1/applicability-engine/fan-outs/{rule_version_id}/cancel",
+    "GET /v1/applicability-engine/fan-out-hold",
+    "PUT /v1/applicability-engine/fan-out-hold",
+)
+
 EXEMPT_ROUTES: dict[str, dict[str, str]] = {
     "identity": {
         "POST /v1/identity/channel-consents": SERVICE_TOKEN,
@@ -187,6 +239,15 @@ EXEMPT_ROUTES: dict[str, dict[str, str]] = {
             "for every tenant, and nothing a tenant stored is in the answer"
         ),
     },
+    "applicability-engine": {
+        **dict.fromkeys(FAN_OUT_ROUTES, FAN_OUT),
+        "POST /v1/applicability-engine/dry-runs": (
+            "an admin asks what a version would decide for the business directory of every "
+            "tenant, or of the one its scope names: it reads, stores no decision and writes only "
+            "its audit entry of no tenant; with tokens read it takes an admin a token names "
+            "(401 without one in dual mode)"
+        ),
+    },
     "obligation": {},
     "notification": {
         "PUT /v1/notification/preferences/{channel}/{recipient}": PREFERENCE,
@@ -218,6 +279,11 @@ GUARDED_EXEMPT_ROUTES = {
     "POST /v1/notification/receipts/email": 503,
 }
 """Exempt routes whose own guard refuses an anonymous request."""
+
+ENGINE_TOKEN_GUARDED_WRITES = frozenset(
+    route for route in EXEMPT_ROUTES["applicability-engine"] if not route.startswith("GET ")
+)
+"""The engine's writes that name no tenant: in dual mode each needs an admin's token."""
 
 RULEBOOK_READ_ONLY_WRITES: dict[str, str] = {
     "POST /v1/rulebook/search": "clause search takes its query in the body but writes nothing",
@@ -342,6 +408,25 @@ def test_an_unclassified_route_fails_with_its_name() -> None:
 
     with pytest.raises(AssertionError, match=r"GET /v1/profile/nodes/\{node_id\}/documents"):
         check_classified("profile", app)
+
+
+def test_the_engines_writes_without_a_tenant_need_a_token_once_tokens_are_read() -> None:
+    issuer = TestIssuer()
+    assert {
+        "POST /v1/applicability-engine/fan-outs/{rule_version_id}/pause",
+        "POST /v1/applicability-engine/fan-outs/{rule_version_id}/resume",
+        "POST /v1/applicability-engine/fan-outs/{rule_version_id}/cancel",
+        "PUT /v1/applicability-engine/fan-out-hold",
+        "POST /v1/applicability-engine/dry-runs",
+    } == ENGINE_TOKEN_GUARDED_WRITES
+    with TestClient(engine_app(**issuer.settings_overrides("dual"))) as client:
+        for route in sorted(ENGINE_TOKEN_GUARDED_WRITES):
+            response = request(client, route, headers=AS_A)
+            assert response.status_code == 401, (route, response.text)
+            assert response.json()["type"].endswith(":auth-token-required"), route
+        owner = bearer(issuer.user(TenantId(TENANT_A), [Role.OWNER]))
+        for route in sorted(ENGINE_TOKEN_GUARDED_WRITES):
+            assert request(client, route, headers=owner).status_code == 403, route
 
 
 def test_every_rulebook_write_needs_the_write_or_the_review_token() -> None:
@@ -514,6 +599,42 @@ def test_tenant_b_cannot_read_or_change_an_obligation_of_tenant_a(
         headers={**AS_A, "Idempotency-Key": str(uuid4())},
     )
     assert started.json()["status"] == "in_progress", "tenant A's own change still works"
+
+
+def test_tenant_b_reads_nothing_of_the_impact_of_a_change_on_tenant_a(
+    clients: dict[str, TestClient],
+) -> None:
+    engine = clients["applicability-engine"]
+    store = engine.app.state.wiring.unit_of_work  # type: ignore[attr-defined]
+    assert isinstance(store, MemoryStore)
+    version = RuleVersionId.new()
+    decision = Decision(
+        decision_id=DecisionId.new(),
+        tenant_id=TenantId(TENANT_A),
+        business_id=BusinessId.new(),
+        rule_version_id=version,
+        result=Applicability.APPLIES,
+        confidence=CERTAIN,
+        evaluated=(),
+        profile_version=1,
+        decided_at=datetime(2026, 10, 6, 4, 30, tzinfo=UTC),
+        trigger=Trigger.RULE_PUBLISHED,
+        as_of_fy=None,
+    )
+    with store(TenantId(TENANT_A)) as uow:
+        uow.decisions.add(decision)
+    path = f"/v1/changes/{version}/impact"
+    as_a = engine.get(path, headers=AS_A).json()
+    assert [b["business_id"] for i in as_a["items"] for b in i["businesses"]] == [
+        str(decision.business_id)
+    ]
+    as_b = engine.get(path, headers=AS_B).json()
+    assert (as_b["items"], as_b["counts"]) == (
+        [],
+        {"applies": 0, "not_applicable": 0, "unsure": 0},
+    )
+    read = engine.get(f"/v1/applicability-engine/decisions/{decision.decision_id}", headers=AS_B)
+    assert read.status_code == 404
 
 
 def test_tenant_b_cannot_read_the_consents_of_tenant_a(clients: dict[str, TestClient]) -> None:

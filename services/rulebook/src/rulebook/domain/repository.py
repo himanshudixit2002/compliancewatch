@@ -12,6 +12,7 @@ from domain_kernel.knowledge import EntityType, RuleRelation
 from domain_kernel.status import RuleVersionStatus
 from domain_kernel.vectors import ClauseFilter, Vector
 from rulebook.domain.alignment import EntityLookup
+from rulebook.domain.changes import ChangeEntry, ChangeQuery
 from rulebook.domain.documents import StoredClause, StoredDocument
 from rulebook.domain.events import RuleEvent
 from rulebook.domain.graph import (
@@ -243,6 +244,12 @@ class RuleVersionRepository(Protocol):
     def lock_publication(self) -> None:
         """Serialise publishing, withdrawing and the sweep until the transaction ends, so two
         of them cannot both pass the checks on the same versions."""
+        ...
+
+    def changes(self, query: ChangeQuery) -> Sequence[ChangeEntry]:
+        """The changes the decision log records (``rulebook.domain.changes``) that ``query``
+        asks for, newest first: changed at or after ``since``, of a version whose rule
+        ``regulator`` issues, after ``after``, at most ``limit``."""
         ...
 
 

@@ -4,6 +4,7 @@ the api package never imports infrastructure (import-linter keeps api and infras
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from applicability_engine.application.dry_run import DryRun
 from applicability_engine.application.evaluate import EvaluateRule
 from applicability_engine.application.fanout import (
     CancelFanOut,
@@ -15,6 +16,7 @@ from applicability_engine.application.fanout import (
     ResumeFanOut,
     SetHold,
 )
+from applicability_engine.application.impact import ReadChangeImpact
 from applicability_engine.application.queries import ListDecisions, ReadDecision
 from applicability_engine.application.review import ListReviewItems, ResolveReviewItem
 from applicability_engine.domain.ports import ProfileReader, RulebookReader
@@ -50,3 +52,5 @@ class Wiring:
     read_hold: ReadHold
     set_hold: SetHold
     release_hold: ReleaseHold
+    read_change_impact: ReadChangeImpact
+    dry_run: DryRun

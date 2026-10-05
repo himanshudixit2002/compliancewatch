@@ -2,6 +2,6 @@
   "info": {
     "description": "The ComplianceWatch public API, v1 (guide section 10): the operations the services tag public, merged into one spec by `make openapi-public`. Each operation names the service that serves it in x-service and the tenant roles that may call it in x-roles. Errors are problem details (RFC 9457). A POST that creates something takes an Idempotency-Key header, and a list answers one page at a time with limit and cursor. CHANGELOG.md next to this file lists the changes per version.",
     "title": "ComplianceWatch public API",
-    "version": "0.2.0"
+    "version": "0.3.0"
   }
 }

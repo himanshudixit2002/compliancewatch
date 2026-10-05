@@ -1,16 +1,17 @@
-"""A rule published behind the fan-out hold reaches every business once the hold is released:
-rule.published through the engine's rules consumer and its fan-out, applicability.decided through
-obligation's consumer, on the one deployable's memory stores.
+"""The changes feed, the impact of a change and a dry run, end to end on the one deployable's
+memory stores: a publication reaches the rulebook's feed with its synthetic approvers and its
+needs_review status, its fan-out decides both synthetic tenants, the CA firm's impact lists its
+affected client, and a dry run scoped to the firm counts what the fan-out decided while writing
+nothing but its audit entry.
 
 The whole app runs as ``cw-mvp serve`` runs it (``running_app``), with publishing on and the
 rulebook's tokens, and the seed calendar loaded as drafts. A pump stands in for the worker: every
 profile.updated the profile service stores goes to the engine's profile consumer (recompute on),
-every rule.published and rule.withdrawn the rulebook stores to the engine's rules consumer (group
-``applicability-engine.rules``, the flag on), and every applicability.decided to obligation's
-consumer, each through an ``IdempotentConsumer`` on a SQLite inbox; the fan-outs run in the
-process (``LocalFanOuts``), through the loop and the activities the Temporal workflow runs. The
-check's fanout step then runs against it unchanged, twice: first it holds, publishes gstr9_annual
-and releases, then it finds the completed run.
+and every rule.published and rule.withdrawn the rulebook stores to the engine's rules consumer
+(the fan-out on), each through an ``IdempotentConsumer`` on a SQLite inbox; the fan-outs run in
+the process (``LocalFanOuts``). ``cw-product seed`` publishes the GSTR-3B rules, ``cw-product
+publish`` publishes gstr9_annual, and the check's changes step then runs against it unchanged,
+twice.
 """
 
 import asyncio
@@ -19,41 +20,37 @@ from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import Final
 from uuid import UUID
 
 import httpx2
 from pydantic import SecretStr
-from sqlalchemy import Connection, Engine, create_engine
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.pool import NullPool
 
 from applicability_engine import worker as engine_worker
+from applicability_engine.application.dry_run import DRY_RUN_ACTION
 from applicability_engine.application.fanout_activities import fanout_activities
 from applicability_engine.application.rule_events import RuleEvents
 from applicability_engine.domain.fanout import FanOutStatus
-from applicability_engine.domain.model import Trigger
 from applicability_engine.infrastructure.memory import MemoryBusinessDirectory
 from applicability_engine.infrastructure.memory import MemoryStore as EngineStore
 from applicability_engine.main import http_readers
 from applicability_engine.settings import ApplicabilityEngineSettings
 from applicability_engine.testing import LocalFanOuts
 from cw_demo.product import check
-from cw_demo.product.check import CheckContext
-from cw_demo.product.client import Product, ProductSettings
-from cw_demo.product.publish import DEFAULT_RULES
+from cw_demo.product.check import CheckContext, NotYetError
+from cw_demo.product.client import Product, ProductSettings, as_tenant, ok
+from cw_demo.product.publish import DEFAULT_RULES, publish
 from cw_demo.product.records import AuditRecord
 from cw_demo.product.seed import seed
-from cw_demo.product.tenants import BUSINESS_TENANT, CA_FIRM_TENANT, TENANTS
+from cw_demo.product.tenants import CA_FIRM_TENANT
 from cw_mvp.app import CombinedApp
 from cw_mvp.testing import LOCALHOST, MEMORY_SERVICES, running_app
 from domain_kernel.events import DomainEvent
-from domain_kernel.ids import BusinessId, RuleVersionId, TenantId
+from domain_kernel.ids import BusinessId, TenantId
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.predicates import specification_to_mapping
-from obligation import worker as obligation_worker
-from obligation.application.decisions import ApplyDecision
-from obligation.infrastructure.memory import MemoryStore as ObligationStore
-from obligation.infrastructure.rulebook_client import HttpRuleVersionReader
 from ontology import load as load_ontology
 from py_common.events import encode, to_message
 from py_common.outbox import (
@@ -68,8 +65,8 @@ from py_common.outbox.testing import FakeProducer
 from rulebook.application.seed_loader import load_calendar
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 
-WRITE_TOKEN: Final = "publication-test-write-token"
-REVIEW_TOKEN: Final = "publication-test-review-token"
+WRITE_TOKEN: Final = "changes-test-write-token"
+REVIEW_TOKEN: Final = "changes-test-review-token"
 SERVICES: Final = {
     **MEMORY_SERVICES,
     "profile": {"profile_store": "memory", "profile_gstin_lookup": "static"},
@@ -84,8 +81,7 @@ GSTR9: Final = "gstr9_annual"
 
 
 class MemoryRecords:
-    """``ProductRecords`` over the engine's memory store, which keeps no creation times: every
-    entry it lists counts, whatever ``as_of``."""
+    """``ProductRecords`` over the engine's memory store, which keeps no creation times."""
 
     def __init__(self, store: EngineStore) -> None:
         self._store = store
@@ -141,22 +137,16 @@ def record(event: DomainEvent, offset: int) -> InboundRecord:
 
 
 class Pump:
-    """The worker's part, without Kafka or Temporal: each new event of a store goes to the
-    consumer that reads it, and the fan-outs run on threads of the process."""
+    """The worker's part the changes need, without Kafka or Temporal: profile.updated and the
+    rule events to the engine's consumers, and the fan-outs on threads of the process."""
 
     def __init__(self, app: CombinedApp, tmp_path: Path) -> None:
         url = app.settings.mvp_internal_url
-        wirings = {
-            name: app.services[name].state.wiring
-            for name in ("profile", "rulebook", "applicability-engine", "obligation")
-        }
-        self.profiles = wirings["profile"].unit_of_work
-        self.rulebook = wirings["rulebook"].unit_of_work
-        self.engine = wirings["applicability-engine"].unit_of_work
-        self.obligations = wirings["obligation"].unit_of_work
+        self.profiles = app.services["profile"].state.wiring.unit_of_work
+        self.rulebook = app.services["rulebook"].state.wiring.unit_of_work
+        self.engine = app.services["applicability-engine"].state.wiring.unit_of_work
         assert isinstance(self.rulebook, MemoryKnowledgeStore)
         assert isinstance(self.engine, EngineStore)
-        assert isinstance(self.obligations, ObligationStore)
         settings = ApplicabilityEngineSettings(
             _env_file=None,
             service_name="applicability-engine-worker",
@@ -200,26 +190,11 @@ class Pump:
             producer=self.producer,
             config=config,
         )
-        self.obligation_consumer = IdempotentConsumer(
-            group_id=obligation_worker.GROUP_ID,
-            store=read_first_store(
-                inbox(tmp_path / "obligation.sqlite"), obligation_worker.GROUP_ID
-            ),
-            handler=obligation_worker.decision_handler(
-                ApplyDecision(HttpRuleVersionReader(url)), units_on=self.obligation_units
-            ),
-            producer=self.producer,
-            config=config,
-        )
-        self.handed = {"profile": 0, "rulebook": 0, "engine": 0}
+        self.handed = {"profile": 0, "rulebook": 0}
         self.outcomes: list[Outcome] = []
-
-    def obligation_units(self, connection: Connection) -> Any:
-        return self.obligations
 
     def drain(self) -> None:
         assert isinstance(self.rulebook, MemoryKnowledgeStore)
-        assert isinstance(self.engine, EngineStore)
         sources: tuple[tuple[str, list[DomainEvent], IdempotentConsumer, frozenset[str]], ...] = (
             (
                 "profile",
@@ -232,12 +207,6 @@ class Pump:
                 list(self.rulebook.events()),
                 self.rules_consumer,
                 frozenset({"rule.published", "rule.withdrawn"}),
-            ),
-            (
-                "engine",
-                list(self.engine.events),
-                self.obligation_consumer,
-                frozenset({"applicability.decided"}),
             ),
         )
         for source, events, consumer, topics in sources:
@@ -303,79 +272,68 @@ def product_of(app: CombinedApp) -> Iterator[Product]:
         yield Product(settings, internal, public, worker)
 
 
-def test_a_rule_published_behind_the_hold_fans_out_to_both_tenants_once_released(
-    tmp_path: Path,
-) -> None:
+def listed(engine: EngineStore, registration_ids: Sequence[str]) -> bool:
+    missing = [r for r in registration_ids if BusinessId(UUID(r)) not in engine.directory]
+    if missing:
+        raise NotYetError(f"{len(missing)} registrations are not in the directory yet")
+    return True
+
+
+def completed(engine: EngineStore) -> str:
+    runs = [run for run in engine.fanout_runs.values() if run.rule_key == GSTR9]
+    if not runs or runs[0].status is not FanOutStatus.COMPLETED:
+        raise NotYetError(f"the fan-out of {GSTR9} has not completed")
+    return str(runs[0].rule_version_id)
+
+
+def test_the_feed_the_impact_and_a_dry_run_follow_a_publication(tmp_path: Path) -> None:
     with running_app(service_overrides=SERVICES) as app:
         load_seed_drafts(app)
         pump = Pump(app, tmp_path)
+        engine = pump.engine
+        assert isinstance(engine, EngineStore)
         with pump.running(), product_of(app) as product:
             report = seed(product, rules=DEFAULT_RULES, state_path=tmp_path / "last.json")
             seeded = [b.registration_id for t in report.tenants for b in t.businesses]
             context = CheckContext(
-                product, timeout=30.0, interval=0.1, records=MemoryRecords(pump.engine)
+                product, timeout=30.0, interval=0.1, records=MemoryRecords(engine)
             )
-            check.poll(lambda: _listed(pump.engine, seeded), timeout=30.0, interval=0.1)
-            first = check.fanout(context)
-            second = check.fanout(context)
+            (refused,) = check.run_checks(context, check.select(["changes"]))
+            assert not refused.ok, "nothing of gstr9_annual is published yet"
+            assert "was never published" in refused.error
+            check.poll(lambda: listed(engine, seeded), timeout=30.0, interval=0.1)
+            publish(product, [GSTR9])
+            version_id = check.poll(lambda: completed(engine), timeout=30.0, interval=0.1)
+            decisions = len(engine.decisions)
+            first = check.changes(context)
+            second = check.changes(context)
+            feed = ok(product.internal.get("/v1/changes", params={"limit": 100}))
+            unknown = ok(
+                product.internal.get(
+                    "/v1/changes/00000000-0000-4000-8000-000000000999/impact",
+                    headers=as_tenant(CA_FIRM_TENANT.tenant_id),
+                )
+            )
 
-        assert first[0].startswith(f"hold set, {GSTR9} v1 published")
-        assert "the run stood held with 0 of 3 decided and no decision from it" in first[0]
-        assert first[1] == "hold released: the run completed"
-        assert "3 of 3 decided, 2 apply" in first[2]
-        assert f"demo_traders: {GSTR9} applies from the fan-out" in first
-        assert f"client_karnataka: {GSTR9} applies from the fan-out" in first
-        assert f"client_delhi: {GSTR9} not_applicable from the fan-out" in first
-        tenants_with_obligations = [line for line in first if line.endswith("GSTR-9 obligations")]
-        assert [line.split(",")[0] for line in tenants_with_obligations] == [
-            BUSINESS_TENANT.name,
-            CA_FIRM_TENANT.name,
-        ]
-        assert first[-1].startswith("audit.event: 1 hold, 1 release and 0 resume rows of no tenant")
-        assert second[0].startswith(f"{GSTR9} was published before")
-        assert "its fan-out is completed" in second[0]
-        assert second[1] == "hold set and released again; the completed run stays completed"
-
-        engine = pump.engine
-        assert isinstance(engine, EngineStore)
-        (gstr9,) = [run for run in engine.fanout_runs.values() if run.rule_key == GSTR9]
-        assert (gstr9.status, gstr9.counters.evaluated, gstr9.counters.applies) == (
-            FanOutStatus.COMPLETED,
-            3,
-            2,
-        )
-        fanned = [
-            d
-            for d in engine.decisions.values()
-            if d.rule_version_id == gstr9.rule_version_id and d.trigger is Trigger.RULE_PUBLISHED
-        ]
-        assert {str(d.business_id) for d in fanned} == set(seeded)
-        assert {d.tenant_id.value for d in fanned} == {tenant.tenant_id for tenant in TENANTS}
-        assert {d.trigger_ref for d in fanned} == {f"rule.published:{gstr9.trigger_event_id}"}
-        others = [run for run in engine.fanout_runs.values() if run.rule_key != GSTR9]
-        assert {run.rule_key for run in others} == set(DEFAULT_RULES), "the seed fanned out too"
-        actions = [entry.action for entry in engine.audit]
-        assert actions.count("applicability.fanout.hold") == 2
-        assert actions.count("applicability.fanout.release") == 2
-        assert {entry.tenant_id for entry in engine.audit} == {None}
-        obligations = pump.obligations
-        assert isinstance(obligations, ObligationStore)
-        gstr9_obligations = [
-            o
-            for o in obligations.obligations.values()
-            if o.rule_version_id == RuleVersionId(gstr9.rule_version_id.value)
-        ]
-        assert {o.tenant_id.value for o in gstr9_obligations} == {
-            tenant.tenant_id for tenant in TENANTS
-        }
+        assert first[0].startswith(f"GET /v1/changes: {GSTR9} v1 published")
+        assert "approved by Demo reviewer one (synthetic) and Demo reviewer two" in first[0]
+        assert "seed status needs_review" in first[0]
+        assert first[1].startswith(f"{CA_FIRM_TENANT.name}: {GSTR9} applies to ")
+        assert first[1].endswith("the fan-out completed")
+        assert first[2].startswith(f"dry run of {GSTR9} (published) for {CA_FIRM_TENANT.name}")
+        assert "2 of 2 decided (1 applies, 1 not_applicable, 0 unsure)" in first[2]
+        assert "as the firm's decisions of the registrations the directory lists count" in first[2]
+        assert first[3].startswith(f"wrote one {DRY_RUN_ACTION} row of no tenant")
+        assert second[2] == first[2], "a second dry run counts the same"
+        assert len(engine.decisions) == decisions, "the dry runs stored no decision"
+        dry_runs = [entry for entry in engine.audit if entry.action == DRY_RUN_ACTION]
+        assert len(dry_runs) == 2
+        assert {entry.subject_id for entry in dry_runs} == {version_id}
+        assert {entry.tenant_id for entry in dry_runs} == {None}
+        kinds = [(item["kind"], item["rule_key"]) for item in feed["items"]]
+        assert kinds[0] == ("published", GSTR9), "the newest change"
+        assert {key for kind, key in kinds if kind == "published"} == {GSTR9, *DEFAULT_RULES}
+        assert all(item["seed_status"] == "needs_review" for item in feed["items"])
+        assert (unknown["items"], unknown["fan_out"]) == ([], None)
         assert Outcome.DEAD not in pump.outcomes
-        assert pump.producer.sent == []
         assert pump.fanouts.failures == {}
-
-
-def _listed(store: Any, registration_ids: Sequence[str]) -> bool:
-    assert isinstance(store, EngineStore)
-    missing = [r for r in registration_ids if BusinessId(UUID(r)) not in store.directory]
-    if missing:
-        raise check.NotYetError(f"{len(missing)} registrations are not in the directory yet")
-    return True

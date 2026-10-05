@@ -12,7 +12,8 @@
 > embeddings fused by reciprocal rank) and its citation, review and publish flow (analyst
 > actions behind their own review token, edits only while a version is a draft, publishing behind
 > a flag, rule events through the outbox, a daily transition sweep, an alert on the entity review
-> queue), KAG-style knowledge extraction behind a flag (a mention
+> queue, the public API's changes feed read back from the decision log), KAG-style knowledge
+> extraction behind a flag (a mention
 > grammar for notifications, sections, rules, forms, codes, rates, amounts and states; alignment
 > to canonical entities with an analyst review queue; relation proposals through a registered
 > prompt, validated against the clause text and approved into rule relations by an analyst), the obligation service's domain and use cases

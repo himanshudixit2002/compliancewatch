@@ -31,15 +31,17 @@ Anything else on the public listener, and any path no service owns, is a 404
 - **Calls between services** go over the internal listener. Their routes are sync and hold a
   thread while they wait, so the app raises the thread pool to `CW_MVP_THREAD_TOKENS` (200) and
   runs at most `CW_MVP_LOOPBACK_LIMIT` (32) of the routes that make such calls at once: qa's
-  `POST /v1/qa/ask`, the engine's evaluation, and obligation's detail and assignee routes. The
-  routes they call make none themselves: qa reads obligation's list, which calls nothing
-  (`called_routes` in the registry).
+  `POST /v1/qa/ask`, the engine's evaluation and its dry run, and obligation's detail and
+  assignee routes. The routes they call make none themselves: qa reads obligation's list, which
+  calls nothing (`called_routes` in the registry).
 
 The services whose routes do more than read their own store:
 
 - **applicability-engine**: a tenant's members read its decisions on the public listener
   (`GET /v1/applicability-engine/businesses/{business_id}/decisions` and
-  `GET /v1/applicability-engine/decisions/{decision_id}`). Evaluating,
+  `GET /v1/applicability-engine/decisions/{decision_id}`), and in the public API what a change
+  means for their businesses (`GET /v1/changes/{rule_version_id}/impact`, beside the rulebook's
+  `GET /v1/changes`), which reads the engine's own tables only. Evaluating,
   `POST /v1/applicability-engine/businesses/{business_id}/decisions`, is internal: it reads the
   profile snapshot and the rule version over the internal listener, and outside `header` mode
   with the token of the `applicability-engine` dev client, whose tenant:act lets it read the
@@ -50,9 +52,11 @@ The services whose routes do more than read their own store:
   (`GET /v1/applicability-engine/fan-outs`, one run, its pause, resume and cancel, and
   `GET`/`PUT /v1/applicability-engine/fan-out-hold`) are admin too: the regulatory team reads the
   runs, and an admin controls them, each control audited and then signalled to the run's
-  Temporal workflow (`CW_TEMPORAL_*`, with `CW_APPLICABILITY_FANOUT_ENABLED`). Each route
-  requires a regulatory role a verified token names, so the public listener serves them in token
-  mode only. The engine's worker recomputes a business on profile.updated and fans a published
+  Temporal workflow (`CW_TEMPORAL_*`, with `CW_APPLICABILITY_FANOUT_ENABLED`). An admin's dry run,
+  `POST /v1/applicability-engine/dry-runs`, is admin as well: it reads the rule version and every
+  profile of its scope over the internal listener, at most `CW_APPLICABILITY_DRY_RUN_MAX`
+  businesses, and stores nothing but its audit entry. Each route requires a regulatory role a
+  verified token names, so the public listener serves them in token mode only. The engine's worker recomputes a business on profile.updated and fans a published
   version out over the business directory (below).
 - **eval**: the regulatory team reads the stored runs (`GET /v1/eval/runs`, admin). Starting
   one, `POST /v1/eval/runs`, is internal: it runs the harness in a child process, which spends

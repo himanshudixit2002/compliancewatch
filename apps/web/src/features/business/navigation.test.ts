@@ -27,7 +27,7 @@ describe("laterScreens", () => {
       "owner.ask",
     ]);
     expect(later[0]).toMatchObject({ status: "ready", href: "/b/b1/obligations" });
-    expect(later[2]).toMatchObject({ status: "waiting", href: "/b/b1/changes" });
+    expect(later[2]).toMatchObject({ status: "ready", href: "/b/b1/changes" });
   });
 
   it("leaves out pages with more parameters and pages the viewer may not open", () => {

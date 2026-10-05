@@ -24,10 +24,22 @@ from datetime import UTC
 from typing import Any, Self
 from uuid import UUID
 
-from sqlalchemy import Connection, Engine, create_engine, delete, func, select, text, tuple_, update
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session
+from sqlalchemy import (
+    Connection,
+    Engine,
+    and_,
+    create_engine,
+    delete,
+    func,
+    select,
+    text,
+    tuple_,
+    update,
+)
+from sqlalchemy.dialects.postgresql import distinct_on, insert
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy.pool import NullPool
+from sqlalchemy.sql import Subquery
 
 from applicability_engine.domain.directory import DirectoryEntry, DirectoryKey
 from applicability_engine.domain.fanout import (
@@ -37,6 +49,7 @@ from applicability_engine.domain.fanout import (
     FanOutRunKey,
     FanOutStatus,
 )
+from applicability_engine.domain.impact import ImpactEntry
 from applicability_engine.domain.model import Decision, DecisionKey, Trigger
 from applicability_engine.domain.repository import (
     FanOutUnitOfWork,
@@ -226,6 +239,75 @@ class SqlAlchemyReviewItemRepository:
         return [_to_review_item(row) for row in self._session.scalars(statement).all()]
 
 
+class SqlAlchemyImpactRepository:
+    """The latest decision of a version per business: ``DISTINCT ON (business_id)`` over the
+    tenant's decisions of the version, newest first, which a backward scan of
+    ``ix_applicability_decision_impact`` serves in order. Row-level security keeps the decisions
+    to the unit's tenant; the directory, which every session reads, is joined on the decision's
+    tenant too."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def latest_by_entity(
+        self,
+        rule_version_id: RuleVersionId,
+        *,
+        result: Applicability | None,
+        after: BusinessId | None,
+        limit: int,
+    ) -> Sequence[ImpactEntry]:
+        row = aliased(DecisionRow, _latest_of(rule_version_id))
+        entity = func.coalesce(BusinessDirectoryRow.entity_id, row.business_id)
+        placed = select(row, entity.label("entity_id"), BusinessDirectoryRow.level).outerjoin(
+            BusinessDirectoryRow,
+            and_(
+                BusinessDirectoryRow.business_id == row.business_id,
+                BusinessDirectoryRow.tenant_id == row.tenant_id,
+            ),
+        )
+        if result is not None:
+            placed = placed.where(row.result == result.value)
+        chosen = placed.subquery("placed")
+        entities = select(chosen.c.entity_id).distinct().order_by(chosen.c.entity_id).limit(limit)
+        if after is not None:
+            entities = entities.where(chosen.c.entity_id > after.value)
+        wanted: list[UUID] = list(self._session.scalars(entities).all())
+        if not wanted:
+            return []
+        statement = placed.where(entity.in_(wanted)).order_by(entity, row.business_id)
+        return [
+            ImpactEntry(
+                entity_id=BusinessId(entity_id),
+                level=None if level is None else AttributeLevel(level),
+                decision=_to_decision(found),
+            )
+            for found, entity_id, level in self._session.execute(statement).all()
+        ]
+
+    def result_counts(self, rule_version_id: RuleVersionId) -> Mapping[Applicability, int]:
+        latest = _latest_of(rule_version_id)
+        statement = select(latest.c.result, func.count()).group_by(latest.c.result)
+        return {
+            Applicability(found): int(count)
+            for found, count in self._session.execute(statement).all()
+        }
+
+
+def _latest_of(rule_version_id: RuleVersionId) -> Subquery:
+    """The newest decision of the version per business (decided_at, then id), all columns
+    descending so a backward scan of ``ix_applicability_decision_impact`` gives them in order."""
+    return (
+        select(DecisionRow)
+        .where(DecisionRow.rule_version_id == rule_version_id.value)
+        .ext(distinct_on(DecisionRow.business_id))
+        .order_by(
+            DecisionRow.business_id.desc(), DecisionRow.decided_at.desc(), DecisionRow.id.desc()
+        )
+        .subquery("latest")
+    )
+
+
 class OutboxSink:
     def __init__(self, connection: Connection, writer: OutboxWriter) -> None:
         self._connection = connection
@@ -245,6 +327,7 @@ class SqlAlchemyUnitOfWork:
         self.decisions = SqlAlchemyDecisionRepository(session)
         self.directory = SqlAlchemyDirectoryRepository(session)
         self.reviews = SqlAlchemyReviewItemRepository(session)
+        self.impact = SqlAlchemyImpactRepository(session)
         self.events = OutboxSink(connection, writer)
         self.audit = PostgresAuditSink(connection)
 
@@ -327,9 +410,10 @@ class PostgresBusinessDirectory:
         level: AttributeLevel | None = None,
         after: DirectoryKey | None = None,
         limit: int = 1_000,
+        tenant_id: TenantId | None = None,
     ) -> Sequence[DirectoryEntry]:
-        """Entries by tenant then node, of one level or all, after ``after``, at most
-        ``limit``."""
+        """Entries by tenant then node, of one level or all, of one tenant or all, after
+        ``after``, at most ``limit``."""
         statement = (
             select(BusinessDirectoryRow)
             .order_by(BusinessDirectoryRow.tenant_id, BusinessDirectoryRow.business_id)
@@ -337,6 +421,8 @@ class PostgresBusinessDirectory:
         )
         if level is not None:
             statement = statement.where(BusinessDirectoryRow.level == level.value)
+        if tenant_id is not None:
+            statement = statement.where(BusinessDirectoryRow.tenant_id == tenant_id.value)
         if after is not None:
             statement = statement.where(
                 tuple_(BusinessDirectoryRow.tenant_id, BusinessDirectoryRow.business_id)
@@ -345,8 +431,10 @@ class PostgresBusinessDirectory:
         with Session(self._engine) as session:
             return [_to_entry(row) for row in session.scalars(statement).all()]
 
-    def count(self, *, level: AttributeLevel) -> int:
+    def count(self, *, level: AttributeLevel, tenant_id: TenantId | None = None) -> int:
         statement = select(func.count()).where(BusinessDirectoryRow.level == level.value)
+        if tenant_id is not None:
+            statement = statement.where(BusinessDirectoryRow.tenant_id == tenant_id.value)
         with Session(self._engine) as session:
             return int(session.execute(statement).scalar_one())
 

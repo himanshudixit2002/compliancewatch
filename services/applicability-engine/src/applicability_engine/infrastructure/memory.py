@@ -15,13 +15,14 @@ like ``PostgresFanOutUnitOfWorkFactory``; their audit entries are of no tenant t
 """
 
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
 from uuid import UUID
 
 from applicability_engine.domain.directory import DirectoryEntry, DirectoryKey
 from applicability_engine.domain.fanout import FanOutHold, FanOutRun, FanOutRunKey, FanOutStatus
+from applicability_engine.domain.impact import ImpactEntry
 from applicability_engine.domain.model import Decision, DecisionKey
 from applicability_engine.domain.repository import FanOutUnitOfWork, UnitOfWork
 from applicability_engine.domain.review import (
@@ -34,6 +35,7 @@ from domain_kernel.audit import AuditEntry
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId
 from domain_kernel.ontology import AttributeLevel
+from domain_kernel.predicates import Applicability
 from py_common.audit import MemoryAuditSink
 
 
@@ -109,6 +111,10 @@ class MemoryDecisionRepository:
         ]
         return sorted(found, key=_order, reverse=True)[:limit]
 
+    def visible(self) -> list[Decision]:
+        """The tenant's decisions, stored or written in this unit."""
+        return [decision for decision in self._all() if decision.tenant_id == self._tenant_id]
+
     def commit(self) -> None:
         self._committed.update(self.pending)
         self.pending.clear()
@@ -131,6 +137,11 @@ class MemoryDirectoryRepository:
             return False
         self.pending[entry.business_id] = entry
         return True
+
+    def get(self, business_id: BusinessId) -> DirectoryEntry | None:
+        """The tenant's entry of the node, stored or written in this unit."""
+        entry = self.pending.get(business_id) or self._committed.get(business_id)
+        return entry if entry is not None and entry.tenant_id == self._tenant_id else None
 
     def commit(self) -> None:
         self._committed.update(self.pending)
@@ -202,6 +213,63 @@ class MemoryReviewItemRepository:
         self.pending.clear()
 
 
+class MemoryImpactRepository:
+    """The latest decision of a version per business, placed by the unit's directory, as
+    ``SqlAlchemyImpactRepository`` reads them."""
+
+    def __init__(
+        self, decisions: MemoryDecisionRepository, directory: MemoryDirectoryRepository
+    ) -> None:
+        self._decisions = decisions
+        self._directory = directory
+
+    def _latest(self, rule_version_id: RuleVersionId) -> list[Decision]:
+        latest: dict[BusinessId, Decision] = {}
+        for decision in self._decisions.visible():
+            if decision.rule_version_id != rule_version_id:
+                continue
+            known = latest.get(decision.business_id)
+            if known is None or _order(decision) > _order(known):
+                latest[decision.business_id] = decision
+        return list(latest.values())
+
+    def latest_by_entity(
+        self,
+        rule_version_id: RuleVersionId,
+        *,
+        result: Applicability | None,
+        after: BusinessId | None,
+        limit: int,
+    ) -> Sequence[ImpactEntry]:
+        placed: list[ImpactEntry] = []
+        for decision in self._latest(rule_version_id):
+            if result is not None and decision.result is not result:
+                continue
+            entry = self._directory.get(decision.business_id)
+            placed.append(
+                ImpactEntry(
+                    entity_id=decision.business_id if entry is None else entry.entity_id,
+                    level=None if entry is None else entry.level,
+                    decision=decision,
+                )
+            )
+        entities = sorted(
+            {
+                entry.entity_id.value
+                for entry in placed
+                if after is None or entry.entity_id.value > after.value
+            }
+        )[:limit]
+        kept = [entry for entry in placed if entry.entity_id.value in set(entities)]
+        return sorted(kept, key=lambda entry: (entry.entity_id.value, entry.business_id.value))
+
+    def result_counts(self, rule_version_id: RuleVersionId) -> Mapping[Applicability, int]:
+        counts: dict[Applicability, int] = {}
+        for decision in self._latest(rule_version_id):
+            counts[decision.result] = counts.get(decision.result, 0) + 1
+        return counts
+
+
 class MemoryEventSink:
     def __init__(self, published: list[DomainEvent]) -> None:
         self._published = published
@@ -220,6 +288,7 @@ class MemoryUnitOfWork:
         self.decisions = MemoryDecisionRepository(store.decisions, tenant_id)
         self.directory = MemoryDirectoryRepository(store.directory, tenant_id)
         self.reviews = MemoryReviewItemRepository(store.reviews, tenant_id)
+        self.impact = MemoryImpactRepository(self.decisions, self.directory)
         self.events = MemoryEventSink(store.events)
         self.audit = MemoryAuditSink(store.audit, tenant_id=tenant_id)
 
@@ -349,6 +418,7 @@ class MemoryBusinessDirectory:
         level: AttributeLevel | None = None,
         after: DirectoryKey | None = None,
         limit: int = 1_000,
+        tenant_id: TenantId | None = None,
     ) -> Sequence[DirectoryEntry]:
         bound = None if after is None else (after.tenant_id.value, after.business_id.value)
         with self._store.lock:
@@ -356,14 +426,19 @@ class MemoryBusinessDirectory:
                 entry
                 for entry in self._store.directory.values()
                 if (level is None or entry.level is level)
+                and (tenant_id is None or entry.tenant_id == tenant_id)
                 and (bound is None or (entry.tenant_id.value, entry.business_id.value) > bound)
             ]
         found.sort(key=lambda entry: (entry.tenant_id.value, entry.business_id.value))
         return found[:limit]
 
-    def count(self, *, level: AttributeLevel) -> int:
+    def count(self, *, level: AttributeLevel, tenant_id: TenantId | None = None) -> int:
         with self._store.lock:
-            return sum(1 for entry in self._store.directory.values() if entry.level is level)
+            return sum(
+                1
+                for entry in self._store.directory.values()
+                if entry.level is level and (tenant_id is None or entry.tenant_id == tenant_id)
+            )
 
 
 class MemoryStore:

@@ -7,18 +7,20 @@ publication of the seed rules the golden world cites, and `make product-check` p
 published rule becomes decisions, obligations with citations and a change card, that a
 business made or changed in the profile is decided again by itself, that a rule published
 behind the fan-out hold reaches every business once the hold is released, that a sweep run a
-few days before a due date sends a reminder, and that a member can start, assign, complete and
-comment on an obligation, a change sent twice with one Idempotency-Key made once. On a database
-made for the run (CI), it also proves that a withdrawn rule closes its obligations in both tenants
-and sends withdrawal notices.
+few days before a due date sends a reminder, that a member can start, assign, complete and
+comment on an obligation, a change sent twice with one Idempotency-Key made once, and that the
+changes feed lists the publication with its synthetic approvers, the impact of the change lists
+the CA firm's affected client, and a dry run counts what the fan-out decided while writing
+nothing but its audit row. On a database made for the run (CI), it also proves that a withdrawn
+rule closes its obligations in both tenants and sends withdrawal notices.
 
 ```bash
 make product                 # make dev, make migrate, make product-role, the seed calendar, then
                              # cw-mvp serve, cw-mvp worker and next dev; waits until all answer
 make product-seed            # synthetic tenants, the demo publication, the first decisions
-make product-check           # health, honesty, loop, isolation, recompute, fanout, reminders, tracking:
-                             # exit 0 means accepted (rollback reports itself skipped; CI runs it
-                             # with ARGS="--destructive")
+make product-check           # health, honesty, loop, isolation, recompute, fanout, reminders,
+                             # tracking, changes: exit 0 means accepted (rollback reports itself
+                             # skipped; CI runs it with ARGS="--destructive")
 make product-logs PROC=worker   # app, worker or web; FOLLOW=0 prints the end and returns
 make product-down            # stops only what make product started
 ```
@@ -197,6 +199,41 @@ history and writes an `audit.event` row in the same transaction (`obligation.sta
 `.complete` or `.waive`, `obligation.assign`, `obligation.comment`, the last naming the comment
 and not its text). In header mode those rows name the actor `system:obligation`.
 
+## Changes, their impact and dry runs
+
+The public API's changes feed, `GET /v1/changes` (the rulebook), lists every change the rule
+events announced, newest first: a version published, superseded or withdrawn, or a due date a
+published version moved. Each item carries the version's rule, dates, regulator and status, its
+seed status (needs_review for every seed rule here, since the publication is synthetic), the
+approvers of the round it was published from (the two synthetic reviewers) and its verified
+citations. It is the same for every tenant and needs no `x-tenant-id`:
+
+```bash
+curl -s 'http://127.0.0.1:8080/v1/changes?limit=5'
+```
+
+`GET /v1/changes/{rule_version_id}/impact` (the engine) answers what one change means for the
+tenant in `x-tenant-id`: each of its businesses with its latest decision of the version, under
+the client it belongs to, the counts by result and the version's fan-out. With `result=applies`
+it is a CA firm's affected clients:
+
+```bash
+curl -s 'http://127.0.0.1:8080/v1/changes/<gstr9_annual version id>/impact?result=applies' \
+  -H 'x-tenant-id: 00000000-0000-4000-8000-0000000d0002'
+```
+
+An admin's dry run, `POST /v1/applicability-engine/dry-runs` (the engine, internal listener only
+in header mode), evaluates a version in any status, or a specification, against the business
+directory, of one tenant when the scope names one, and answers the counts by result and by
+deciding attribute with sample decisions. It stores nothing but its `applicability.dry_run` row in
+`audit.event`, and refuses a scope wider than `CW_APPLICABILITY_DRY_RUN_MAX` (2,000) businesses:
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/v1/applicability-engine/dry-runs \
+  -H 'content-type: application/json' \
+  -d '{"rule_version_id": "<version id>", "scope": {"tenant_id": "00000000-0000-4000-8000-0000000d0002"}}'
+```
+
 ### The sink
 
 `CW_NOTIFICATION_CHANNELS=sink` replaces both channels with
@@ -282,11 +319,13 @@ the worker does a few seconds after the API answers, and a failed step does not 
 | reminders | runs `obligation-sweep --once --now <moment> --tenant <business tenant>` in the check's process, on the obligation settings of the product's worker, with the moment 5 days, 2 days or 12 hours before one of the business tenant's open obligations is due (the first lead whose threshold has not reminded it yet, so every run sees a new reminder), then waits for the reminder about that obligation to be sent through the sink, with its line in the sink file. The sweep and the window touch no other tenant |
 | rollback | only with `--destructive` (CI), skipped otherwise: withdraws gstr9_annual through the rulebook's withdraw route as the first synthetic reviewer, then waits for every GSTR-9 obligation of both synthetic tenants to close with `rule_withdrawn`, and for the withdrawal notices: sent through the sink for the business tenant, held for the daily digest (or sent) for the CA firm. On a database where it was withdrawn already, it checks what followed |
 | tracking | makes a new synthetic business in the business tenant with `POST /v1/businesses` (a monthly GSTR-3B filer, named "Tracking probe" with the time it was made) and waits for its gstr3b_monthly obligations from profile.updated; starts the first one due, assigns it to the tenant's synthetic owner, and sends the same complete twice with one Idempotency-Key: one closure, and the second answer is the first with `Idempotent-Replayed: true`. The detail must show the history created, started, assigned, closed, both synthetic reviewers in `approved_by` while the seed status stays needs_review, and verified citations; then a comment is added and listed. Each run spends a business of its own, so the seeded registration's obligations stay open for the reminders step and a later check passes again |
+| changes | on the gstr9_annual version the fanout step published: `GET /v1/changes` (read from its `published_at`) must list its publication with both synthetic reviewers in `approved_by`, the seed status needs_review and verified citations; `GET /v1/changes/{id}/impact?result=applies` as the CA firm must list exactly the firm's registrations the answers call for, each under its client, with the fan-out completed; and a dry run of the version scoped to the CA firm must count what the firm's latest decisions of it count for the registrations the directory lists, every one decided and none skipped, write one `applicability.dry_run` row of no tenant (found by the request's correlation id) and not one decision, review item or outbox row of the firm. After the rollback step (CI) the publication stays in the feed and the dry run reads the withdrawn version |
 
-The fanout step reads the business directory and the audit rows of no tenant, which no route
-serves and no policy lets `cw_app` read. `make product-check` gives it `CW_PRODUCT_RECORDS_URL`,
-the database owner's URL, and the tool opens it read only (`default_transaction_read_only`), so the
-session can run nothing but queries.
+The fanout and changes steps read the business directory, the audit rows of no tenant and the
+engine's row counts of a tenant, which no route serves and no policy lets `cw_app` read.
+`make product-check` gives them `CW_PRODUCT_RECORDS_URL`, the database owner's URL, and the tool
+opens it read only (`default_transaction_read_only`), so the session can run nothing but
+queries.
 
 `ARGS="--json"` prints the result as JSON, `ARGS="--step loop"` runs one step, and
 `ARGS="--destructive"` lets the rollback step withdraw gstr9_annual (CI only). A later package
@@ -332,6 +371,11 @@ keys). The web stack connects as the superuser and so reads across tenants; the 
   engine's consumer of profile.updated and obligation's consumer of applicability.decided. A 409
   `obligation-closed` or a history that reads otherwise means something else changed the
   probe's obligation; the step names what it read.
+- **The changes step fails on the dry run's counts.** It counts the CA firm's registrations the
+  business directory lists. A registration made before the engine's consumer group existed is not
+  listed (the fanout step reports it "not in the directory"), so neither the fan-out nor a dry run
+  reads it, though `cw-product seed` still evaluates it; the step leaves it out. Counts that still
+  differ mean the profiles changed since the version was decided.
 - **A late decision made nothing.** `obligation.decision_guarded` in the worker's log names the
   reason: `rule_withdrawn`, `rule_superseded` (with the periods) or `uncited`.
 - **The loop waits for the change card.** `tail var/product/sink.jsonl` shows what the sink got;
