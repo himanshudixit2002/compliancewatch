@@ -20,7 +20,7 @@ from domain_kernel.citations import (
     evidence_tokens_missing,
     quote_match_ratio,
 )
-from domain_kernel.ids import ClauseId, DocumentId, RuleId, RuleVersionId
+from domain_kernel.ids import ClauseId, DocumentId, RuleId, RuleVersionId, UserId
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.periods import EffectivePeriod
 from domain_kernel.status import RuleVersionStatus
@@ -78,6 +78,17 @@ class CitationRecord:
     verified: bool
     match_score: float | None = None
     verified_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RuleVersionDetail:
+    """One version with its citations and, once it has been published, the distinct approvers
+    of the review round it was published from, by user id. Empty for a version that was never
+    published: its current round may still change."""
+
+    record: RuleVersionRecord
+    citations: tuple[CitationRecord, ...]
+    approved_by: tuple[UserId, ...] = ()
 
 
 def in_force(record: RuleVersionRecord, as_of: date) -> bool:

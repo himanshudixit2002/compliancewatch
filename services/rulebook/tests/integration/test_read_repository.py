@@ -166,7 +166,9 @@ def test_versions_in_force_filter_order_and_page(
     assert [r.rule_version_id for r in use_case.run(july, limit=1)] == [new]
     assert [r.rule_version_id for r in use_case.run(date(2026, 6, 30), limit=1)] == [old]
 
-    record, citations = ReadRuleVersion(factory).run(draft)
+    detail = ReadRuleVersion(factory).run(draft)
+    record, citations = detail.record, detail.citations
+    assert detail.approved_by == ()
     assert (record.status, record.seed_status, record.level) == (
         RuleVersionStatus.DRAFT,
         SeedStatus.NEEDS_REVIEW,
@@ -176,7 +178,7 @@ def test_versions_in_force_filter_order_and_page(
     assert record.source == {"instrument": "i"}
     assert record.todo == ("question",)
     assert (record.recurrence, record.published_at, citations) == (None, None, ())
-    assert ReadRuleVersion(factory).run(state)[0].regulator == "KA-CTD"
+    assert ReadRuleVersion(factory).run(state).record.regulator == "KA-CTD"
 
 
 def test_citations_come_in_clause_order(factory: PostgresKnowledgeUnitOfWorkFactory) -> None:

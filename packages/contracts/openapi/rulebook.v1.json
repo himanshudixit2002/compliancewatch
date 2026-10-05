@@ -2365,6 +2365,15 @@
       },
       "RuleVersionDetailOut": {
         "properties": {
+          "approved_by": {
+            "description": "Who approved the review round the version was published from, by user id; empty until it is published",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Approved By",
+            "type": "array"
+          },
           "citations": {
             "items": {
               "$ref": "#/components/schemas/CitationOut"
@@ -2502,6 +2511,7 @@
           "todo",
           "published_at",
           "high_impact",
+          "approved_by",
           "citations"
         ],
         "title": "RuleVersionDetailOut",
@@ -5107,6 +5117,7 @@
     },
     "/v1/rulebook/rule-versions/{rule_version_id}": {
       "get": {
+        "description": "``approved_by`` lists the approvers of the round the version was published from (two for\na high-impact one) and ``published_at`` when it was published, so a reader that shows who\nreviewed a duty does not depend on having seen rule.published.",
         "operationId": "read_rule_version_v1_rulebook_rule_versions__rule_version_id__get",
         "parameters": [
           {
@@ -5152,7 +5163,7 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "One rule version in any status, with its citations",
+        "summary": "One rule version in any status, with its citations and, once published, approvers",
         "tags": [
           "rulebook",
           "rules"

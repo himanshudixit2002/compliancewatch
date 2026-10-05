@@ -1,5 +1,5 @@
 """Rule versions: the ones in force on a date, every version of one rule, one version with its
-citations. Open reads."""
+citations and approvers. Open reads."""
 
 from datetime import date
 from typing import Annotated
@@ -53,12 +53,15 @@ def list_versions_of_rule(
 
 @router.get(
     "/rule-versions/{rule_version_id}",
-    summary="One rule version in any status, with its citations",
+    summary="One rule version in any status, with its citations and, once published, approvers",
     responses=problem_responses(404),
 )
 def read_rule_version(rule_version_id: UUID, wired: Wired) -> RuleVersionDetailOut:
-    record, citations = wired.read_rule_version.run(RuleVersionId(rule_version_id))
-    return RuleVersionDetailOut.from_detail(record, citations)
+    """``approved_by`` lists the approvers of the round the version was published from (two for
+    a high-impact one) and ``published_at`` when it was published, so a reader that shows who
+    reviewed a duty does not depend on having seen rule.published."""
+    detail = wired.read_rule_version.run(RuleVersionId(rule_version_id))
+    return RuleVersionDetailOut.from_detail(detail)
 
 
 @router.get(

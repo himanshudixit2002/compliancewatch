@@ -78,7 +78,7 @@ literal pairs to the kernel.
 | `GET /v1/rulebook/rules` | Rule keys with their latest title, the list the relation prompt may choose a rule from |
 | `GET /v1/rulebook/rules/{rule_key}/versions` | Every version of the rule in any status, by version number: the drafts the seed command writes as well as the versions past them, where a workbench finds the version to cite and submit; 404 `rulebook-rule-not-found` for an unknown key |
 | `GET /v1/rulebook/rule-versions?as_of=&rule_key=&regulator=&limit=&after=` | Versions in force on `as_of`: published or superseded, with `effective_from <= as_of < effective_to`; ordered by rule key, paged with `after` (a rule key) |
-| `GET /v1/rulebook/rule-versions/{id}` | One version in any status, with its citations |
+| `GET /v1/rulebook/rule-versions/{id}` | One version in any status, with its citations, `published_at` and `approved_by`: the distinct approvers of the review round it was published from (the decision audit's approvals since its `submitted_at`), empty until it is published, so a reader showing who reviewed a duty does not depend on having seen rule.published |
 | `GET /v1/rulebook/rule-versions/{id}/citations` | The clauses a version cites, with the quote and its verification |
 | `GET /v1/rulebook/entities/resolve?type=&name=` | Normalise the name and resolve it the way alignment does. Always 200 with `status`: `resolved` (with the entity), `ambiguous` (with the candidates sharing the alias), `not_found`, `unqualified` (a section or rule without its statute) or `empty` |
 | `GET /v1/rulebook/entities/{id}` | An entity with its aliases |

@@ -187,11 +187,14 @@ def test_a_version_goes_from_draft_to_published(
 
     detail = publishing.get(f"{BASE}/rule-versions/{version}").json()
     assert (detail["status"], detail["high_impact"]) == ("published", True)
-    assert detail["published_at"] is not None
+    assert detail["published_at"] == out["published_at"]
+    assert detail["approved_by"] == sorted([ANALYST, REVIEWER]), "the round it was published from"
     assert [type(e).topic for e in store.events()] == ["rule.published"]
 
     withdrawn = step(publishing, version, "withdraw", note="rescinded")
     assert withdrawn.json()["status"] == "withdrawn"
+    after = publishing.get(f"{BASE}/rule-versions/{version}").json()
+    assert after["approved_by"] == sorted([ANALYST, REVIEWER]), "withdrawing keeps who approved it"
     assert [e["topic"] for e in withdrawn.json()["events"]] == ["rule.withdrawn"]
     sweep = publishing.post(f"{BASE}/maintenance/transitions", json={}, headers=REVIEW)
     assert sweep.status_code == 200

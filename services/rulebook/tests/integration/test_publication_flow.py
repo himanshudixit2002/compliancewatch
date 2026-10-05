@@ -27,7 +27,7 @@ from rulebook.application.publication import (
     PublishVersion,
     SubmitForReview,
 )
-from rulebook.application.rule_versions import ListRuleVersions
+from rulebook.application.rule_versions import ListRuleVersions, ReadRuleVersion
 from rulebook.domain.documents import StoredDocument
 from rulebook.domain.events import RuleWithdrawn
 from rulebook.infrastructure.knowledge_repository import PostgresKnowledgeUnitOfWorkFactory
@@ -492,6 +492,9 @@ def test_a_publication_writes_its_events_with_the_change(
         "published",
         "superseded",
     ]
+    detail = ReadRuleVersion(factory).run(new)
+    assert (detail.approved_by, detail.record.published_at) == ((REVIEWER,), clock.now)
+    assert ReadRuleVersion(factory).run(old).approved_by == (REVIEWER,), "superseded keeps them"
 
 
 def test_the_sweep_moves_a_version_when_its_replacement_takes_effect(

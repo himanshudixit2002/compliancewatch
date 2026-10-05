@@ -103,7 +103,7 @@ def test_the_effective_period_is_half_open(
     )
     found = ListRulesInForce(store).run(as_of)
     assert [record.rule_version_id for record in found] == ([version] if expected else [])
-    record, _ = ReadRuleVersion(store).run(version)
+    record = ReadRuleVersion(store).run(version).record
     assert in_force(record, as_of) is expected
 
 
@@ -169,7 +169,9 @@ def test_a_version_reads_in_any_status_with_its_citations(store: MemoryKnowledge
     first = store.add_citation(
         version, clause_id_for(document, "en.p1"), "first clause", verified=False, match_score=None
     )
-    record, citations = ReadRuleVersion(store).run(version)
+    detail = ReadRuleVersion(store).run(version)
+    record, citations = detail.record, detail.citations
+    assert detail.approved_by == ()
     assert record.status is RuleVersionStatus.DRAFT
     assert record.seed_status is SeedStatus.NEEDS_REVIEW
     assert (record.rule_key, record.regulator, record.level) == (
@@ -346,7 +348,7 @@ def test_out_of_force_needs_a_published_citation_and_none_in_force(
     records = []
     for number, status in enumerate(statuses):
         _, version = store.add_rule(f"r{number}", status=status, effective_from=APRIL)
-        records.append(ReadRuleVersion(store).run(version)[0])
+        records.append(ReadRuleVersion(store).run(version).record)
     assert out_of_force(records, as_of) is expected
 
 
