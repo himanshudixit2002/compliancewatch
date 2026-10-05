@@ -1071,6 +1071,37 @@ class AskOut(BaseModel):
     reason: Annotated[Reason | None, Field(description="Why the question is not covered")]
 
 
+class BusinessObligationOut(BaseModel):
+    """
+    One obligation of the business's list, with the facts of its rule version and the
+    verified citations of its clause, as the detail shows them: ``rule_version`` is null, and
+    ``citations`` empty, for a version the service has not kept yet (the detail then reads it
+    from the rulebook). The detail adds the history and the comments.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    assignee_id: Annotated[UUID | None, Field(title="Assignee Id")]
+    business_id: Annotated[UUID, Field(title="Business Id")]
+    citations: Annotated[list[CitationOut], Field(title="Citations")]
+    closed_at: Annotated[AwareDatetime | None, Field(title="Closed At")]
+    closed_reason: ClosureReason | None
+    decision_id: Annotated[UUID, Field(title="Decision Id")]
+    due_at: Annotated[AwareDatetime | None, Field(title="Due At")]
+    evidence_type: Annotated[str, Field(title="Evidence Type")]
+    obligation_id: Annotated[UUID, Field(title="Obligation Id")]
+    period_end: Annotated[date | None, Field(title="Period End")]
+    period_label: Annotated[str | None, Field(title="Period Label")]
+    period_start: Annotated[date | None, Field(title="Period Start")]
+    profile_version: Annotated[int | None, Field(title="Profile Version")]
+    rule_version: RuleVersionFactsOut | None
+    rule_version_id: Annotated[UUID, Field(title="Rule Version Id")]
+    status: ObligationStatus
+    steps: Annotated[list[str], Field(title="Steps")]
+    title: Annotated[str, Field(title="Title")]
+
+
 class BusinessOut(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -1148,6 +1179,20 @@ class ObligationDetailOut(BaseModel):
     status: ObligationStatus
     steps: Annotated[list[str], Field(title="Steps")]
     title: Annotated[str, Field(title="Title")]
+
+
+class PageBusinessObligationOut(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    items: Annotated[list[BusinessObligationOut], Field(title="Items")]
+    next_cursor: Annotated[
+        str | None,
+        Field(
+            description="Send as cursor to read the next page; null on the last page",
+            title="Next Cursor",
+        ),
+    ]
 
 
 class PageRuleChangeOut(BaseModel):

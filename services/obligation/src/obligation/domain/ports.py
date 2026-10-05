@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from domain_kernel._validation import require_bool, require_instance
-from domain_kernel.ids import RuleVersionId, TenantId, UserId
+from domain_kernel.ids import BusinessId, RuleVersionId, TenantId, UserId
 from obligation.domain.rule_versions import RuleVersionRead
 
 
@@ -42,4 +42,14 @@ class TenantMembers(Protocol):
     def membership(self, tenant_id: TenantId, user_id: UserId) -> Membership | None:
         """The user's membership of the tenant, or None when the tenant has no such user.
         Raises ``IdentityUnavailableError`` when the identity service cannot answer now."""
+        ...
+
+
+class ProfileNodes(Protocol):
+    """The profile nodes of each tenant, at the profile service: its businesses (legal
+    entities), their registrations and their locations."""
+
+    def exists(self, tenant_id: TenantId, business_id: BusinessId) -> bool:
+        """Whether the tenant has a profile node with this id. Raises
+        ``ProfileUnavailableError`` when the profile service cannot answer now."""
         ...

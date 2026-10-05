@@ -35,6 +35,33 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/businesses/{business_id}/obligations": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * A business's obligations by due date, a page at a time
+     * @description ``business_id`` is any profile node of the tenant: a business (its legal entity, the id
+     *     of ``/v1/businesses``), one of its registrations or a location. The list holds the
+     *     obligations kept for that node; a GSTIN's returns are kept for its registration. Items come
+     *     by due date, the ones without a date last, then by id, each with what the service keeps of
+     *     its rule version (the title, the rule key, whether the seed rule is reviewed, the approvers)
+     *     and the verified citations of its clause. With ``due_from`` or ``due_to`` only obligations
+     *     with a due date in that window count, and a window longer than 366 days is a 422. 404 when
+     *     the tenant has no such node, 503 when the profile service cannot say whether it has.
+     */
+    get: operations["list_business_obligations_v1_businesses__business_id__obligations_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/obligation/obligations": {
     parameters: {
       query?: never;
@@ -280,6 +307,60 @@ export type components = {
       assignee_id: string | null;
     };
     /**
+     * BusinessObligationOut
+     * @description One obligation of the business's list, with the facts of its rule version and the
+     *     verified citations of its clause, as the detail shows them: ``rule_version`` is null, and
+     *     ``citations`` empty, for a version the service has not kept yet (the detail then reads it
+     *     from the rulebook). The detail adds the history and the comments.
+     */
+    BusinessObligationOut: {
+      /** Assignee Id */
+      assignee_id: string | null;
+      /**
+       * Business Id
+       * Format: uuid
+       */
+      business_id: string;
+      /** Citations */
+      citations: components["schemas"]["CitationOut"][];
+      /** Closed At */
+      closed_at: string | null;
+      closed_reason: components["schemas"]["ClosureReason"] | null;
+      /**
+       * Decision Id
+       * Format: uuid
+       */
+      decision_id: string;
+      /** Due At */
+      due_at: string | null;
+      /** Evidence Type */
+      evidence_type: string;
+      /**
+       * Obligation Id
+       * Format: uuid
+       */
+      obligation_id: string;
+      /** Period End */
+      period_end: string | null;
+      /** Period Label */
+      period_label: string | null;
+      /** Period Start */
+      period_start: string | null;
+      /** Profile Version */
+      profile_version: number | null;
+      rule_version: components["schemas"]["RuleVersionFactsOut"] | null;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+      status: components["schemas"]["ObligationStatus"];
+      /** Steps */
+      steps: string[];
+      /** Title */
+      title: string;
+    };
+    /**
      * ChangeKind
      * @enum {string}
      */
@@ -516,6 +597,16 @@ export type components = {
      * @enum {string}
      */
     ObligationStatus: "open" | "in_progress" | "done" | "waived" | "closed_not_applicable";
+    /** Page[BusinessObligationOut] */
+    Page_BusinessObligationOut_: {
+      /** Items */
+      items: components["schemas"]["BusinessObligationOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
     /**
      * Problem
      * @description The body of every error response.
@@ -682,6 +773,87 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ReadyResponse"];
+        };
+      };
+    };
+  };
+  list_business_obligations_v1_businesses__business_id__obligations_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description First due day, in India (inclusive) */
+        due_from?: string | null;
+        /** @description Last due day, in India (inclusive); at most 366 days after due_from */
+        due_to?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Keep the obligations in this status; repeat it for several */
+        status?: components["schemas"]["ObligationStatus"][] | null;
+      };
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        business_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_BusinessObligationOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
     };

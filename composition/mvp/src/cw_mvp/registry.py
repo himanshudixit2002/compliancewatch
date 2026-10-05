@@ -134,14 +134,16 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         ObligationSettings,
         build_obligation,
         components=obligation_components,
-        url_fields=("rulebook_url",),
-        # The detail reads the rulebook when its cache lacks the rule version, and an assignment
-        # by a verified caller asks identity whether the assignee belongs to the tenant.
+        url_fields=("rulebook_url", "profile_url"),
+        # The detail reads the rulebook when its cache lacks the rule version, an assignment by
+        # a verified caller asks identity whether the assignee belongs to the tenant, and the
+        # public list asks profile whether a business with an empty page is the tenant's.
         loopback_routes=(
             "GET /v1/obligation/obligations/{obligation_id}",
             "PUT /v1/obligation/obligations/{obligation_id}/assignee",
             "GET /v1/obligations/{obligation_id}",
             "PUT /v1/obligations/{obligation_id}/assignee",
+            "GET /v1/businesses/{business_id}/obligations",
         ),
         # qa's ask reads a business's obligations, which calls nothing.
         called_routes=("GET /v1/obligation/obligations",),

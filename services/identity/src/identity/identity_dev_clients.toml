@@ -18,7 +18,7 @@ reason = "reads the rule versions its messages cite from the rulebook, whose rea
 
 [obligation]
 scopes = ["tenant:act"]
-reason = "checks that the user a member assigns an obligation to belongs to the tenant: reads the user's membership at identity for that tenant, and the rule versions, whose read routes need no scope"
+reason = "checks that the user a member assigns an obligation to belongs to the tenant, and that a business with no obligation on a page of the public list is the tenant's: reads the user's membership at identity and the business's node at profile for that tenant, and the rule versions, whose read routes need no scope"
 
 [pipeline]
 scopes = ["rulebook:write", "llm:call", "tenant:act"]

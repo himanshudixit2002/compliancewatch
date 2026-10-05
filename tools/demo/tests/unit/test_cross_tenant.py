@@ -47,7 +47,7 @@ from notification.testing import notification_settings
 from obligation.application.materialise import MaterialiseRequest
 from obligation.main import build_app as build_obligation
 from obligation.settings import ObligationSettings
-from obligation.testing import FakeRuleVersionReader, FakeTenantMembers, rule
+from obligation.testing import FakeProfileNodes, FakeRuleVersionReader, FakeTenantMembers, rule
 from profile_service.main import build_app as build_profile
 from profile_service.settings import ProfileSettings
 from py_common.auth.testing import TestIssuer, bearer
@@ -64,6 +64,10 @@ AS_A = {"x-tenant-id": str(TENANT_A)}
 AS_B = {"x-tenant-id": str(TENANT_B)}
 GSTIN = "29ABCDE1234F1Z5"
 FY = "2026-27"
+
+
+PROFILE_NODES = FakeProfileNodes()
+"""The profile nodes the obligation service asks about; a probe adds the ones it makes."""
 
 
 def engine_app(**overrides: Any) -> FastAPI:
@@ -94,6 +98,7 @@ BUILDERS: dict[str, Callable[[], FastAPI]] = {
         ObligationSettings(_env_file=None, service_name="obligation", obligation_store="memory"),
         rules=FakeRuleVersionReader(),
         members=FakeTenantMembers(),
+        profiles=PROFILE_NODES,
     ),
     "notification": lambda: build_notification(notification_settings()),
     "qa": lambda: build_qa(qa_settings(), ports=memory_ports()),
@@ -149,6 +154,7 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
     "obligation": frozenset(
         {
             "GET /v1/obligation/obligations",
+            "GET /v1/businesses/{business_id}/obligations",
             *(
                 f"{method} {base}/{{obligation_id}}{suffix}"
                 for base in ("/v1/obligation/obligations", "/v1/obligations")
@@ -599,6 +605,27 @@ def test_tenant_b_cannot_read_or_change_an_obligation_of_tenant_a(
         headers={**AS_A, "Idempotency-Key": str(uuid4())},
     )
     assert started.json()["status"] == "in_progress", "tenant A's own change still works"
+
+
+def test_tenant_b_cannot_list_the_obligations_of_a_business_of_tenant_a(
+    clients: dict[str, TestClient],
+) -> None:
+    obligation = clients["obligation"]
+    business = BusinessId.new()
+    obligation.app.state.wiring.materialise.run(  # type: ignore[attr-defined]
+        MaterialiseRequest(
+            TenantId(TENANT_A), business, DecisionId.new(), rule(), date(2026, 9, 28)
+        )
+    )
+    PROFILE_NODES.nodes.add((TenantId(TENANT_A), business))
+    path = f"/v1/businesses/{business}/obligations"
+    as_a = obligation.get(path, headers=AS_A)
+    as_b = obligation.get(path, headers=AS_B)
+    assert as_a.status_code == 200, as_a.text
+    assert {item["business_id"] for item in as_a.json()["items"]} == {str(business)}
+    assert as_b.status_code == 404, as_b.text
+    assert as_b.json()["type"].endswith(":obligation-business-not-found")
+    assert (TenantId(TENANT_B), business) in PROFILE_NODES.asked
 
 
 def test_tenant_b_reads_nothing_of_the_impact_of_a_change_on_tenant_a(

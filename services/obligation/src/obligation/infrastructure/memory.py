@@ -18,11 +18,12 @@ from uuid import UUID
 from domain_kernel.audit import AuditEntry
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId, TenantId
+from domain_kernel.status import ObligationStatus
 from obligation.domain.comments import ObligationComment
 from obligation.domain.history import ObligationChange
 from obligation.domain.model import Obligation, period_matches
 from obligation.domain.reminders import Reminder
-from obligation.domain.repository import UnitOfWork
+from obligation.domain.repository import ListingAfter, UnitOfWork
 from obligation.domain.rule_versions import AppliedDecision, RuleVersionRef
 from py_common.audit import MemoryAuditSink
 
@@ -108,6 +109,36 @@ class MemoryObligationRepository:
         ]
         return sorted(found, key=_listing_order)[:limit]
 
+    def page_for_business(
+        self,
+        business_id: BusinessId,
+        *,
+        statuses: frozenset[ObligationStatus],
+        due_after: datetime | None,
+        due_before: datetime | None,
+        after: ListingAfter | None,
+        limit: int,
+    ) -> Sequence[Obligation]:
+        bounded = due_after is not None or due_before is not None
+        found = [
+            obligation
+            for obligation in self._store.values()
+            if obligation.tenant_id == self._tenant_id
+            and obligation.business_id == business_id
+            and (not statuses or obligation.status in statuses)
+            and not (bounded and obligation.due_at is None)
+            and (
+                due_after is None
+                or (obligation.due_at is not None and obligation.due_at >= due_after)
+            )
+            and (
+                due_before is None
+                or (obligation.due_at is not None and obligation.due_at < due_before)
+            )
+            and (after is None or _page_key(obligation) > _after_key(after))
+        ]
+        return sorted(found, key=_page_key)[:limit]
+
     def add(self, obligation: Obligation) -> None:
         if obligation.id in self._store:
             raise ValueError(f"duplicate obligation {obligation.id}")
@@ -142,6 +173,15 @@ def _listing_order(
         obligation.created_at,
         obligation.id.value,
     )
+
+
+def _page_key(obligation: Obligation) -> tuple[bool, datetime | None, UUID]:
+    """Due date with none last, then id: the order of the public list, as Postgres sorts it."""
+    return (obligation.due_at is None, obligation.due_at, obligation.id.value)
+
+
+def _after_key(after: ListingAfter) -> tuple[bool, datetime | None, UUID]:
+    return (after.due_at is None, after.due_at, after.obligation_id.value)
 
 
 class MemoryEventSink:

@@ -168,6 +168,8 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "POST /v1/obligations/{obligation_id}/status": PUBLIC,
         "PUT /v1/obligations/{obligation_id}/assignee": PUBLIC,
         "POST /v1/obligations/{obligation_id}/comments": PUBLIC,
+        # The public API's list of a business's obligations, beside profile's business routes.
+        "GET /v1/businesses/{business_id}/obligations": PUBLIC,
     },
     "notification": {
         "GET /v1/notification/ping": PUBLIC,

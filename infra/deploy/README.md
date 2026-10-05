@@ -52,7 +52,7 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_OTEL_ENDPOINT` (+ header) | secret | secret | secret | secret | secret | secret | secret | secret | - |
 | `CW_AUTH_MODE` | env | env | env | env | env | env | env | env | - |
 | `CW_AUTH_JWKS_URL`, `CW_AUTH_ISSUER`, `CW_AUTH_AUDIENCE`, `CW_AUTH_LEEWAY_SECONDS` | env (issuer and audience only: identity verifies with its own keys) | env | env | env | env | env | env | env | - |
-| `CW_IDENTITY_URL`, `CW_SERVICE_CLIENT_ID`, `CW_SERVICE_CLIENT_SECRET` | - | - | - | env / env / secret (assignee checks at identity, client with tenant:act) | env / env / secret (rulebook reads) | - | env / env / secret (worker and `pipeline-embed`) | env / env / secret (qa) | - |
+| `CW_IDENTITY_URL`, `CW_SERVICE_CLIENT_ID`, `CW_SERVICE_CLIENT_SECRET` | - | - | - | env / env / secret (assignee checks at identity and business checks at profile, client with tenant:act) | env / env / secret (rulebook reads) | - | env / env / secret (worker and `pipeline-embed`) | env / env / secret (qa) | - |
 | `BOT_SERVICE_CLIENT_ID`, `BOT_SERVICE_CLIENT_SECRET` | - | - | - | - | - | - | - | - | env / secret (identity at `IDENTITY_API_URL`) |
 | `CW_AUTH_PROVIDER`, `CW_SUPABASE_URL`, `CW_SUPABASE_SERVICE_ROLE_KEY`, `CW_SUPABASE_JWT_SECRET` | env / env / secret / secret (`supabase`; `fake` is refused with `CW_ENV=prod`; the JWT secret only for a project on the legacy HS256 secret; owner identity-partner) | - | - | - | - | - | - | - | - |
 | `CW_IDENTITY_SIGNING_KEYS` | secret (one key set per environment, from `identity-admin signing-key new`; required outside local and test) | - | - | - | - | - | - | - | - |
@@ -80,7 +80,7 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_RULEBOOK_PUBLISH_ENABLED` | - | - | env (default `false`; owner regulatory-intelligence; removed once the workbench publishes in production and the obligation consumer of the rule events is live) | - | - | - | - | - | - |
 | `CW_PIPELINE_KNOWLEDGE_ENABLED` | - | - | - | - | - | - | env | - | - |
 | `CW_RULEBOOK_URL`, `CW_LLM_GATEWAY_URL` | - | - | - | - | env (`CW_RULEBOOK_URL` only: the published facts of change cards) | - | env | env (qa) | - |
-| `CW_PROFILE_URL`, `CW_OBLIGATION_URL`, `CW_QA_HTTP_TIMEOUT_SECONDS`, `CW_QA_LLM_TIMEOUT_SECONDS`, `CW_QA_EMBEDDING_TIMEOUT_SECONDS` | - | - | - | - | - | - | - | env (qa; reads time out after 5 s by default, the model calls after 20 s, longer than the gateway's budget for the call) | - |
+| `CW_PROFILE_URL`, `CW_OBLIGATION_URL`, `CW_QA_HTTP_TIMEOUT_SECONDS`, `CW_QA_LLM_TIMEOUT_SECONDS`, `CW_QA_EMBEDDING_TIMEOUT_SECONDS` | - | - | - | env (`CW_PROFILE_URL` only: whether a business with an empty page of the public list is the tenant's) | - | - | - | env (qa; reads time out after 5 s by default, the model calls after 20 s, longer than the gateway's budget for the call) | - |
 | `CW_QA_KAG_ENABLED`, `CW_QA_KAG_TENANTS` | - | - | - | - | - | - | - | env (qa; default `false` and every tenant; owner ai-platform; removed when ADR-017 is Accepted) | - |
 | `CW_QA_PROMPTS_DIR` | - | - | - | - | - | - | - | set by the qa image (`/app/prompts`) | - |
 | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_SEND_ENABLED`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `NOTIFICATION_API_URL` | - | - | - | - | - | - | - | - | secret / secret / env / secret / secret / env |

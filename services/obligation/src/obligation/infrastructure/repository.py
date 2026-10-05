@@ -28,7 +28,18 @@ from datetime import UTC, datetime
 from typing import Any, Final, Self
 from uuid import UUID
 
-from sqlalchemy import Connection, Engine, RowMapping, create_engine, func, select, text, update
+from sqlalchemy import (
+    Connection,
+    Engine,
+    RowMapping,
+    and_,
+    create_engine,
+    func,
+    or_,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
@@ -50,7 +61,7 @@ from obligation.domain.comments import CommentId, ObligationComment
 from obligation.domain.history import ChangeKind, ObligationChange
 from obligation.domain.model import Obligation
 from obligation.domain.reminders import Reminder
-from obligation.domain.repository import UnitOfWork, UnitOfWorkFactory
+from obligation.domain.repository import ListingAfter, UnitOfWork, UnitOfWorkFactory
 from obligation.domain.rule_versions import AppliedDecision, Citation, RuleVersionRef
 from obligation.infrastructure.models import (
     TENANT_SETTING,
@@ -165,6 +176,36 @@ class SqlAlchemyObligationRepository:
             statement = statement.where(ObligationRow.rule_version_id == rule_version_id.value)
         return [_to_obligation(row) for row in self._session.scalars(statement).all()]
 
+    def page_for_business(
+        self,
+        business_id: BusinessId,
+        *,
+        statuses: frozenset[ObligationStatus],
+        due_after: datetime | None,
+        due_before: datetime | None,
+        after: ListingAfter | None,
+        limit: int,
+    ) -> Sequence[Obligation]:
+        # The unique index on (business_id, rule_version_id, period_label) finds the business's
+        # rows, at most a few hundred; they are sorted after the filters.
+        statement = (
+            select(ObligationRow)
+            .where(ObligationRow.business_id == business_id.value)
+            .order_by(ObligationRow.due_at.asc().nulls_last(), ObligationRow.id)
+            .limit(limit)
+        )
+        if statuses:
+            statement = statement.where(
+                ObligationRow.status.in_(sorted(status.value for status in statuses))
+            )
+        if due_after is not None:
+            statement = statement.where(ObligationRow.due_at >= due_after)
+        if due_before is not None:
+            statement = statement.where(ObligationRow.due_at < due_before)
+        if after is not None:
+            statement = statement.where(_after(after))
+        return [_to_obligation(row) for row in self._session.scalars(statement).all()]
+
     def add(self, obligation: Obligation) -> None:
         self._session.add(_to_row(obligation))
         self._session.flush()
@@ -179,6 +220,18 @@ class SqlAlchemyObligationRepository:
     def save(self, obligation: Obligation) -> None:
         self._session.merge(_to_row(obligation))
         self._session.flush()
+
+
+def _after(after: ListingAfter) -> Any:
+    """The rows that come after ``after`` in the order of due date (none last) and id."""
+    later_id = ObligationRow.id > after.obligation_id.value
+    if after.due_at is None:
+        return and_(ObligationRow.due_at.is_(None), later_id)
+    return or_(
+        ObligationRow.due_at > after.due_at,
+        and_(ObligationRow.due_at == after.due_at, later_id),
+        ObligationRow.due_at.is_(None),
+    )
 
 
 class OutboxSink:

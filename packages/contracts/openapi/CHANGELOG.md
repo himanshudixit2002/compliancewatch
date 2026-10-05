@@ -9,6 +9,21 @@ while the version in `public.meta.json` has no section.
 
 ## 0.4.0
 
+A business's obligations, from the obligation service:
+
+- `GET /v1/businesses/{business_id}/obligations` lists the obligations kept for one profile node
+  of the tenant (`business_id`: the business's legal entity, as in `/v1/businesses`, one of its
+  registrations, or a location; a GSTIN's returns are kept for its registration), a page at a
+  time (`limit` up to 200 and `cursor`), by due date with the ones without a date last, then by
+  id. `status` keeps the given statuses (repeat it for several) and `due_from` and `due_to` the
+  obligations due on those days in India, both included; a window longer than 366 days, or one
+  that ends before it starts, is a 422. Each item is an obligation as the detail answers it,
+  with the facts of its rule version (title, rule key, seed status, the approvers and when it
+  was published) and the verified citations of its clause, without the history and the
+  comments; `rule_version` is null and `citations` empty for a version the service has not kept
+  yet, which the detail reads from the rulebook. 404 when the tenant has no such node, 503 when
+  the profile service cannot say. Every tenant member role may read it.
+
 Asking a question, from the qa service:
 
 - `POST /v1/qa` is the public face of `POST /v1/qa/ask`, with the same body and answer: a
