@@ -12,8 +12,10 @@ entry names:
   listener; a field ``<service>_url`` points at that service;
 - ``loopback_routes``, the routes (``METHOD /path``) that call other services over the internal
   listener while they serve a request. The app runs at most ``CW_MVP_LOOPBACK_LIMIT`` of them at
-  once, and a service they call makes no such calls itself (one level deep), so the calls they
-  make always find a free thread;
+  once, and the routes they call make no such calls themselves (one level deep), so the calls
+  they make always find a free thread;
+- ``called_routes``, for a service with loopback routes of its own that another service's
+  loopback routes call: the routes those calls reach, none of them a loopback route;
 - ``takes_authenticator`` and ``takes_token_source``, whether ``build`` accepts identity's
   authenticator and a source of service tokens minted in the process.
 
@@ -75,6 +77,7 @@ class ServiceEntry[S: Settings]:
     components: Callable[[S], WorkerComponents] | None = None
     url_fields: tuple[str, ...] = ()
     loopback_routes: tuple[str, ...] = ()
+    called_routes: tuple[str, ...] = ()
     takes_authenticator: bool = True
     takes_token_source: bool = False
 
@@ -127,6 +130,17 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         build_obligation,
         components=obligation_components,
         url_fields=("rulebook_url",),
+        # The detail reads the rulebook when its cache lacks the rule version, and an assignment
+        # by a verified caller asks identity whether the assignee belongs to the tenant.
+        loopback_routes=(
+            "GET /v1/obligation/obligations/{obligation_id}",
+            "PUT /v1/obligation/obligations/{obligation_id}/assignee",
+            "GET /v1/obligations/{obligation_id}",
+            "PUT /v1/obligations/{obligation_id}/assignee",
+        ),
+        # qa's ask reads a business's obligations, which calls nothing.
+        called_routes=("GET /v1/obligation/obligations",),
+        takes_token_source=True,
     ),
     ServiceEntry(
         "notification",

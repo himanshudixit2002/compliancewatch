@@ -7,6 +7,25 @@ documentation is a patch; a break (see `BREAKING.md`) is a major bump and a new 
 next to this one. The change that bumps the version adds its section here, and the build fails
 while the version in `public.meta.json` has no section.
 
+## 0.2.0
+
+Obligation tracking, from the obligation service. The four operations serve the routes the web app
+calls under `/v1/obligation/obligations/{obligation_id}`, and every tenant member role may call
+them:
+
+- `GET /v1/obligations/{obligation_id}` answers one obligation with the facts of its rule version
+  (title, rule key, whether the seed rule is reviewed, the approvers of the round it was published
+  from and when), the verified citations of its clause, its history and its comments, oldest
+  first. The obligation itself gains `profile_version` and `assignee_id`.
+- `POST /v1/obligations/{obligation_id}/status` starts, completes or waives an obligation; a
+  waiver needs a reason of at least ten characters. 409 when it is closed, 422 when its status
+  does not allow the action.
+- `PUT /v1/obligations/{obligation_id}/assignee` gives an obligation to a user of the tenant, or
+  to nobody with null; a verified caller can only name an active user of the tenant (422).
+- `POST /v1/obligations/{obligation_id}/comments` adds a comment and answers 201.
+
+Each change requires an `Idempotency-Key` header and answers 428 without one.
+
 ## 0.1.1
 
 Documentation of verified access tokens, with no change to the operations:

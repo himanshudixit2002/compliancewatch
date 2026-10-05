@@ -41,6 +41,8 @@ const DTO: ObligationDto = {
   period_end: "2000-09-01",
   closed_at: null,
   closed_reason: null,
+  profile_version: null,
+  assignee_id: null,
 };
 
 function obligation(overrides: Partial<Obligation> = {}): Obligation {
@@ -59,6 +61,8 @@ describe("obligationFromDto", () => {
         status: "done",
         closed_at: "2000-10-18T05:00:00Z",
         closed_reason: "completed",
+        profile_version: 3,
+        assignee_id: "usr_1",
       }),
     ).toEqual({
       id: "obl_1",
@@ -75,6 +79,8 @@ describe("obligationFromDto", () => {
       periodEnd: "2000-09-01",
       closedAt: "2000-10-18T05:00:00Z",
       closedReason: "completed",
+      profileVersion: 3,
+      assigneeId: "usr_1",
     });
   });
 });

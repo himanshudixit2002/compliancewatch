@@ -49,3 +49,22 @@ class RulebookUnavailableError(DomainError, ConnectionError):
 
     type_slug = "rulebook-unavailable"
     title = "Rulebook unavailable"
+
+
+class AssigneeNotMemberError(DomainError, ValueError):
+    """The user named as the assignee is not an active user of the tenant."""
+
+    type_slug = "obligation-assignee-unknown"
+    title = "Assignee is not a user of the tenant"
+
+    def __init__(self, user_id: str) -> None:
+        super().__init__(f"user {user_id} is not an active user of this tenant")
+        self.user_id = user_id
+
+
+class IdentityUnavailableError(DomainError, ConnectionError):
+    """The identity service could not say whether a user belongs to the tenant now; another try
+    may succeed."""
+
+    type_slug = "identity-unavailable"
+    title = "Identity service unavailable"

@@ -150,6 +150,16 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
     "obligation": {
         "GET /v1/obligation/ping": PUBLIC,
         "GET /v1/obligation/obligations": PUBLIC,
+        # Tracking, read by the tenant's members (and services acting for it) and changed by its
+        # members, under the service's prefix for the web app and in the public API.
+        "GET /v1/obligation/obligations/{obligation_id}": PUBLIC,
+        "POST /v1/obligation/obligations/{obligation_id}/status": PUBLIC,
+        "PUT /v1/obligation/obligations/{obligation_id}/assignee": PUBLIC,
+        "POST /v1/obligation/obligations/{obligation_id}/comments": PUBLIC,
+        "GET /v1/obligations/{obligation_id}": PUBLIC,
+        "POST /v1/obligations/{obligation_id}/status": PUBLIC,
+        "PUT /v1/obligations/{obligation_id}/assignee": PUBLIC,
+        "POST /v1/obligations/{obligation_id}/comments": PUBLIC,
     },
     "notification": {
         "GET /v1/notification/ping": PUBLIC,

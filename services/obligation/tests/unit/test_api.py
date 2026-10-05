@@ -25,6 +25,8 @@ FIELDS = {
     "status",
     "closed_at",
     "closed_reason",
+    "profile_version",
+    "assignee_id",
 }
 
 
@@ -53,6 +55,7 @@ def test_obligations_of_a_business_in_a_window(app: FastAPI, client: TestClient)
     assert (first["period_start"], first["period_end"]) == ("2026-09-01", "2026-10-01")
     assert first["due_at"] == "2026-10-20T18:29:59Z"
     assert (first["status"], first["closed_at"], first["closed_reason"]) == ("open", None, None)
+    assert (first["profile_version"], first["assignee_id"]) == (None, None)
 
     october = client.get(
         ROUTE,
