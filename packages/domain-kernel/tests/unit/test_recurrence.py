@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from itertools import pairwise
 
 import pytest
 from hypothesis import given
@@ -69,6 +70,54 @@ def test_periods_lists_consecutive_periods() -> None:
     assert quarters == ["2026-27 Q3", "2026-27 Q4", "2027-28 Q1"]
 
 
+def test_previous_period_ends_where_the_period_starts() -> None:
+    monthly, quarterly = Recurrence.monthly(20), Recurrence.quarterly(22)
+    assert monthly.previous_period(monthly.period_containing(date(2026, 1, 9))).label == "2025-12"
+    april = quarterly.period_containing(date(2026, 4, 1))
+    assert quarterly.previous_period(april) == Period(
+        date(2026, 1, 1), date(2026, 4, 1), "2025-26 Q4"
+    )
+
+
+def labels_due(recurrence: Recurrence, as_of: date, count: int = 2) -> list[str]:
+    return [period.label for period in recurrence.periods_due(as_of, count)]
+
+
+def test_periods_due_keeps_the_return_still_due_from_the_period_before() -> None:
+    monthly = Recurrence.monthly(20)
+    assert labels_due(monthly, date(2026, 10, 5)) == ["2026-09", "2026-10", "2026-11"]
+    assert labels_due(monthly, date(2026, 10, 20)) == ["2026-09", "2026-10", "2026-11"]
+    assert labels_due(monthly, date(2026, 10, 21)) == ["2026-10", "2026-11"]
+    assert labels_due(monthly, date(2026, 10, 25)) == ["2026-10", "2026-11"]
+    assert monthly.due_date(monthly.periods_due(date(2026, 10, 5), 2)[0]) == date(2026, 10, 20)
+    assert monthly.periods_due(date(2026, 10, 5), 0) == ()
+
+
+def test_periods_due_of_quarterly_and_annual_returns() -> None:
+    group_a = Recurrence.quarterly(22)
+    assert labels_due(group_a, date(2026, 10, 5)) == ["2026-27 Q2", "2026-27 Q3", "2026-27 Q4"]
+    assert labels_due(group_a, date(2026, 10, 25)) == ["2026-27 Q3", "2026-27 Q4"]
+    assert labels_due(group_a, date(2026, 11, 5)) == ["2026-27 Q3", "2026-27 Q4"]
+    assert labels_due(group_a, date(2027, 1, 22)) == ["2026-27 Q3", "2026-27 Q4", "2027-28 Q1"]
+    annual = Recurrence.annual(31, due_month_offset=8)
+    assert labels_due(annual, date(2026, 10, 5)) == ["2025-26", "2026-27", "2027-28"]
+    assert labels_due(annual, date(2027, 1, 1)) == ["2026-27", "2027-28"]
+
+
+def test_periods_due_reaches_back_as_far_as_the_offset_does() -> None:
+    late = Recurrence.monthly(20, due_month_offset=2)
+    assert labels_due(late, date(2026, 10, 5)) == [
+        "2026-07",
+        "2026-08",
+        "2026-09",
+        "2026-10",
+        "2026-11",
+    ]
+    assert late.due_date(late.periods_due(date(2026, 10, 5), 2)[0]) == date(2026, 10, 20)
+    with pytest.raises(InvariantViolationError, match="as_of"):
+        late.periods_due("2026-10-05", 2)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
@@ -104,6 +153,26 @@ def test_period_contains_its_date_and_tiles_without_gaps(recurrence: Recurrence,
     assert recurrence.period_containing(period.end - timedelta(days=1)) == period
     assert recurrence.period_containing(period.start) == period
     assert recurrence.due_date(period) >= period.end
+
+
+@given(_recurrences, _days)
+def test_previous_period_undoes_next_period(recurrence: Recurrence, day: date) -> None:
+    period = recurrence.period_containing(day)
+    assert recurrence.previous_period(recurrence.next_period(period)) == period
+    assert recurrence.next_period(recurrence.previous_period(period)) == period
+    assert recurrence.due_date(recurrence.previous_period(period)) < recurrence.due_date(period)
+
+
+@given(_recurrences, _days, st.integers(min_value=1, max_value=4))
+def test_periods_due_are_every_period_still_due_through_the_window(
+    recurrence: Recurrence, as_of: date, count: int
+) -> None:
+    due = recurrence.periods_due(as_of, count)
+    ahead = recurrence.periods(as_of, count)
+    assert due[len(due) - count :] == ahead, "the window from the period containing as_of"
+    assert all(recurrence.due_date(period) >= as_of for period in due)
+    assert all(later.start == earlier.end for earlier, later in pairwise(due))
+    assert recurrence.due_date(recurrence.previous_period(due[0])) < as_of, "nothing still due left"
 
 
 @given(_recurrences, _days)
