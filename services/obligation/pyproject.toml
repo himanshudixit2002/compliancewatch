@@ -15,7 +15,11 @@ dependencies = [
   "domain-kernel",
   "compliancewatch-contracts",
   "httpx2>=2.13",
+  "opentelemetry-api==1.45.0",
 ]
+
+[project.scripts]
+obligation-sweep = "obligation.sweep:main"
 
 [tool.uv.sources]
 py-common = { workspace = true }

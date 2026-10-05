@@ -37,8 +37,10 @@ SCHEMA = "obligation"
 TABLES = {
     "obligation",
     "obligation_change",
+    "obligation_decision",
     "obligation_reminder",
     "obligation_tenant",
+    "rule_version_ref",
     "outbox_event",
     "processed_event",
     "alembic_version",

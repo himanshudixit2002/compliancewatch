@@ -5,6 +5,7 @@ from datetime import date, datetime
 from typing import Final
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -18,10 +19,10 @@ from sqlalchemy import (
     Uuid,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from domain_kernel.status import ClosureReason, ObligationStatus
+from domain_kernel.status import ClosureReason, ObligationStatus, RuleVersionStatus
 from obligation.domain.events import RescheduleReason
 from obligation.domain.history import ChangeKind
 
@@ -33,6 +34,7 @@ CHANGE_REASONS: Final[tuple[str, ...]] = (
     *(reason.value for reason in RescheduleReason),
     *CLOSURE_REASONS,
 )
+RULE_VERSION_STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in RuleVersionStatus)
 TENANT_SETTING: Final[str] = "app.tenant_id"
 """The session setting the row-level security policy reads; set per transaction."""
 
@@ -209,5 +211,69 @@ class ObligationTenantRow(Base):
 
     tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RuleVersionRefRow(Base):
+    """What the service caches of one rule version: rule-level, not tenant data, so it has no
+    tenant_id and no row-level security (migration 0004, exempt in
+    infra/scripts/migration_lint.toml). ``citations`` holds the verified citations as JSON."""
+
+    __tablename__ = "rule_version_ref"
+    __table_args__ = (
+        PrimaryKeyConstraint("rule_version_id", name="pk_rule_version_ref"),
+        CheckConstraint(
+            sql_in_list("status", RULE_VERSION_STATUSES), name="ck_rule_version_ref_status"
+        ),
+        CheckConstraint(
+            "effective_to IS NULL OR effective_to > effective_from",
+            name="ck_rule_version_ref_effective",
+        ),
+        {
+            "comment": (
+                "The rule versions obligations come from, as the rulebook last described them: "
+                "status, dates, approvers and verified citations. Rule-level, the same for every "
+                "tenant."
+            )
+        },
+    )
+
+    rule_version_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    rule_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    seed_status: Mapped[str] = mapped_column(String(24), nullable=False)
+    approved_by: Mapped[list[uuid.UUID]] = mapped_column(ARRAY(Uuid), nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    citations: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ObligationDecisionRow(Base):
+    """The latest applicability decision the service acted on for one business and rule
+    version (migration 0004); the rolling window reads the ones that apply."""
+
+    __tablename__ = "obligation_decision"
+    __table_args__ = (
+        PrimaryKeyConstraint("business_id", "rule_version_id", name="pk_obligation_decision"),
+        Index("ix_obligation_decision_tenant_applies", "tenant_id", "applies"),
+        {
+            "comment": (
+                "The latest applies or not_applicable decision per business and rule version, "
+                "which the daily rolling window reads. Row-level security by tenant_id."
+            )
+        },
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    business_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    rule_version_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    decision_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    applies: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

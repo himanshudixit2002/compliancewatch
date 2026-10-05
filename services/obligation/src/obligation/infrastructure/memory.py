@@ -1,9 +1,11 @@
 """In-memory repository and unit of work: the fakes for tests and the app before Postgres.
 
-A unit of work works on a copy of the obligations and replaces them when the block exits cleanly.
-Units run one at a time (a store-level lock held from open to commit or rollback), so two
-overlapping requests, of one tenant or of two, cannot both start from the same copy and lose each
-other's writes.
+A unit of work works on a copy of the obligations, the cached rule versions and the applied
+decisions, and replaces them when the block exits cleanly. Units run one at a time (a store-level
+lock held from open to commit or rollback), so two overlapping requests, of one tenant or of two,
+cannot both start from the same copy and lose each other's writes. ``MemoryStore.rule_version_refs``
+reads and writes the cached versions outside a unit, under the same lock, as the rule events
+consumer does on its connection.
 """
 
 import threading
@@ -18,6 +20,9 @@ from obligation.domain.history import ObligationChange
 from obligation.domain.model import Obligation, period_matches
 from obligation.domain.reminders import Reminder
 from obligation.domain.repository import UnitOfWork
+from obligation.domain.rule_versions import AppliedDecision, RuleVersionRef
+
+DecisionKey = tuple[BusinessId, RuleVersionId]
 
 
 class MemoryObligationRepository:
@@ -148,6 +153,47 @@ class MemoryEventSink:
         self.pending.clear()
 
 
+class MemoryRuleVersionRefs:
+    """The cached rule versions in a dict; the store's lock, or the unit's, keeps one writer."""
+
+    def __init__(self, refs: dict[RuleVersionId, RuleVersionRef]) -> None:
+        self._refs = refs
+
+    def get(self, rule_version_id: RuleVersionId, *, lock: bool = False) -> RuleVersionRef | None:
+        return self._refs.get(rule_version_id)
+
+    def merge(self, ref: RuleVersionRef) -> RuleVersionRef:
+        current = self._refs.get(ref.rule_version_id)
+        merged = ref if current is None else current.merge(ref)
+        self._refs[ref.rule_version_id] = merged
+        return merged
+
+
+class MemoryAppliedDecisions:
+    """The latest decision per business and rule version; reads and writes see one tenant."""
+
+    def __init__(self, decisions: dict[DecisionKey, AppliedDecision], tenant_id: TenantId) -> None:
+        self._decisions = decisions
+        self._tenant_id = tenant_id
+
+    def record(self, decision: AppliedDecision) -> bool:
+        if decision.tenant_id != self._tenant_id:
+            raise ValueError(f"decision {decision.decision_id} belongs to another tenant")
+        key = (decision.business_id, decision.rule_version_id)
+        if not decision.supersedes(self._decisions.get(key)):
+            return False
+        self._decisions[key] = decision
+        return True
+
+    def applying(self) -> Sequence[AppliedDecision]:
+        found = [
+            decision
+            for decision in self._decisions.values()
+            if decision.tenant_id == self._tenant_id and decision.applies
+        ]
+        return sorted(found, key=lambda d: (d.business_id.value, d.rule_version_id.value))
+
+
 class MemoryUnitOfWork:
     def __init__(
         self,
@@ -156,37 +202,56 @@ class MemoryUnitOfWork:
         tenant_id: TenantId,
         changes: list[ObligationChange] | None = None,
         reminders: list[Reminder] | None = None,
+        refs: dict[RuleVersionId, RuleVersionRef] | None = None,
+        decisions: dict[DecisionKey, AppliedDecision] | None = None,
     ) -> None:
         self._committed = store
         self._working: dict[ObligationId, Obligation] = {}
+        self._committed_refs = {} if refs is None else refs
+        self._working_refs: dict[RuleVersionId, RuleVersionRef] = {}
+        self._committed_decisions = {} if decisions is None else decisions
+        self._working_decisions: dict[DecisionKey, AppliedDecision] = {}
         self.obligations = MemoryObligationRepository(self._working, tenant_id)
         self.events = MemoryEventSink(events)
         self.history = MemoryChangeLog([] if changes is None else changes, tenant_id)
         self.reminders = MemoryReminderLog([] if reminders is None else reminders, tenant_id)
+        self.rule_versions = MemoryRuleVersionRefs(self._working_refs)
+        self.decisions = MemoryAppliedDecisions(self._working_decisions, tenant_id)
 
     def __enter__(self) -> "MemoryUnitOfWork":
         self._working.clear()
         self._working.update(self._committed)
+        self._working_refs.clear()
+        self._working_refs.update(self._committed_refs)
+        self._working_decisions.clear()
+        self._working_decisions.update(self._committed_decisions)
         return self
 
     def __exit__(self, exc_type: object, *exc_info: object) -> None:
         if exc_type is None:
             self._committed.clear()
             self._committed.update(self._working)
+            self._committed_refs.clear()
+            self._committed_refs.update(self._working_refs)
+            self._committed_decisions.clear()
+            self._committed_decisions.update(self._working_decisions)
             self.events.commit()
             self.history.commit()
             self.reminders.commit()
 
 
 class MemoryStore:
-    """Holds every tenant's obligations, published events, changes and reminders; makes units
-    of work, and is the tenant directory of the sweeps (``tenants``)."""
+    """Holds every tenant's obligations, published events, changes, reminders and applied
+    decisions, and the cached rule versions; makes units of work, and is the tenant directory of
+    the sweeps (``tenants``)."""
 
     def __init__(self) -> None:
         self.obligations: dict[ObligationId, Obligation] = {}
         self.events: list[DomainEvent] = []
         self.changes: list[ObligationChange] = []
         self.reminders: list[Reminder] = []
+        self.rule_versions: dict[RuleVersionId, RuleVersionRef] = {}
+        self.decisions: dict[DecisionKey, AppliedDecision] = {}
         self._lock = threading.Lock()
 
     def ping(self) -> bool:
@@ -200,10 +265,20 @@ class MemoryStore:
         with (
             self._lock,
             MemoryUnitOfWork(
-                self.obligations, self.events, tenant_id, self.changes, self.reminders
+                self.obligations,
+                self.events,
+                tenant_id,
+                self.changes,
+                self.reminders,
+                self.rule_versions,
+                self.decisions,
             ) as uow,
         ):
             yield uow
+
+    def rule_version_refs(self) -> "LockedRuleVersionRefs":
+        """The cached rule versions outside a unit of work, each call under the store's lock."""
+        return LockedRuleVersionRefs(self)
 
     def of_tenant(self, tenant_id: TenantId) -> list[Obligation]:
         return [o for o in self.obligations.values() if o.tenant_id == tenant_id]
@@ -275,3 +350,19 @@ class MemoryReminderLog:
     def commit(self) -> None:
         self._committed.extend(self.pending)
         self.pending.clear()
+
+
+class LockedRuleVersionRefs:
+    """``RuleVersionRefs`` on a store's committed cache, each call under the store's lock; it
+    must not be used while a unit of the same store is open on the thread."""
+
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    def get(self, rule_version_id: RuleVersionId, *, lock: bool = False) -> RuleVersionRef | None:
+        with self._store._lock:
+            return MemoryRuleVersionRefs(self._store.rule_versions).get(rule_version_id)
+
+    def merge(self, ref: RuleVersionRef) -> RuleVersionRef:
+        with self._store._lock:
+            return MemoryRuleVersionRefs(self._store.rule_versions).merge(ref)

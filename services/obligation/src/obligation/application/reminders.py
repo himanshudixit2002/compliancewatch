@@ -11,10 +11,11 @@ event goes to the outbox and the reminder row is written in the same transaction
 sweep, or a second worker, never publishes it twice.
 
 A tenant whose unit fails is rolled back alone: the sweep reports it to ``on_failure`` and goes
-on with the next tenant, and the next sweep tries it again.
+on with the next tenant, and the next sweep tries it again. ``run(only=...)`` visits only the
+tenants named, as ``obligation-sweep --tenant`` does.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -62,12 +63,14 @@ class SendDueReminders:
         self._clock = clock
         self._on_failure = on_failure
 
-    def run(self) -> Swept:
+    def run(self, *, only: Collection[TenantId] | None = None) -> Swept:
         now = self._clock()
         visited = 0
         reminded: list[ObligationId] = []
         failed: list[TenantId] = []
         for tenant_id in self._tenants.tenants():
+            if only is not None and tenant_id not in only:
+                continue
             visited += 1
             try:
                 with self._unit_of_work(tenant_id) as uow:

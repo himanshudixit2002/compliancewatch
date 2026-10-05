@@ -161,3 +161,12 @@ The one global hold that stops every fan-out at its next batch boundary, with it
 it and when. It belongs to no tenant, so there is no tenant_id (migration 0003 of
 applicability-engine).
 """
+
+[[exemptions]]
+table = "obligation.rule_version_ref"
+kind = "exempt"
+reason = """
+The rule versions obligations come from, cached from the rulebook: status, effective dates, the
+approvers of the published round and the verified citations. Rule-level data, the same for every
+tenant, so there is no tenant_id; it holds nothing of a tenant (migration 0004 of obligation).
+"""

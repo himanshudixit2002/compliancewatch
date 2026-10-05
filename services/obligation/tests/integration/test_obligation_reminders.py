@@ -28,6 +28,7 @@ from domain_kernel.ids import BusinessId, DecisionId, ObligationId, RuleVersionI
 from domain_kernel.status import ClosureReason
 from obligation import worker
 from obligation.application.changes import CloseObligation
+from obligation.application.decisions import ApplyDecision
 from obligation.application.materialise import MaterialiseObligations, MaterialiseRequest
 from obligation.application.reminders import SendDueReminders
 from obligation.infrastructure.models import Base
@@ -38,8 +39,7 @@ from py_common.outbox import (
     IdempotentConsumer,
     InboundRecord,
     Outcome,
-    SyncProcessedStore,
-    sync_handler,
+    read_first_store,
 )
 from py_common.outbox.testing import FakeProducer
 
@@ -296,8 +296,8 @@ async def test_the_decision_consumer_commits_with_its_inbox_row(app_engine: Engi
     producer = FakeProducer()
     consumer = IdempotentConsumer(
         group_id=worker.GROUP_ID,
-        store=SyncProcessedStore(app_engine, group_id=worker.GROUP_ID),
-        handler=sync_handler(worker.decision_handler(rules)),
+        store=read_first_store(app_engine, worker.GROUP_ID),
+        handler=worker.decision_handler(ApplyDecision(rules)),
         producer=producer,
         config=ConsumerConfig(max_handler_attempts=1, retry_backoff_seconds=0),
     )
@@ -335,6 +335,12 @@ async def test_the_decision_consumer_commits_with_its_inbox_row(app_engine: Engi
     assert counts()[:2] == (2, 4), "a failed decision leaves nothing behind"
 
 
-def test_a_unit_on_a_connection_needs_a_transaction(app_engine: Engine) -> None:
-    with app_engine.connect() as connection, pytest.raises(ValueError, match="transaction"):
-        PostgresUnitOfWorkFactory.on_connection(connection)
+def test_a_unit_on_a_connection_begins_a_transaction_its_owner_ends(app_engine: Engine) -> None:
+    tenant = TenantId.new()
+    with app_engine.connect() as connection:
+        units = PostgresUnitOfWorkFactory.on_connection(connection)
+        assert not connection.in_transaction()
+        with units(tenant) as uow:
+            assert uow.obligations.open_due_between(at(1), at(31)) == []
+        assert connection.in_transaction(), "the unit leaves the transaction to its owner"
+        connection.rollback()
