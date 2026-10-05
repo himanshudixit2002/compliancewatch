@@ -1273,6 +1273,8 @@
   "ruleVersion.fact.effectiveFrom": "In force from",
   "ruleVersion.fact.effectiveTo": "In force until (exclusive)",
   "ruleVersion.fact.published": "Published",
+  "ruleVersion.fact.approvedBy": "Approved by",
+  "ruleVersion.approvedByNone": "No approvers until it is published",
   "ruleVersion.fact.highImpact": "High impact",
   "ruleVersion.fact.id": "Version id",
   "ruleVersion.fact.due": "Due",

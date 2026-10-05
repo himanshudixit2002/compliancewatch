@@ -106,6 +106,22 @@ export function VersionView({
                 : formatDateTime(version.publishedAt),
           },
           {
+            key: "approved",
+            label: t("ruleVersion.fact.approvedBy"),
+            value:
+              version.approvedBy.length === 0 ? (
+                t("ruleVersion.approvedByNone")
+              ) : (
+                <ul data-slot="published-approvers" className="flex flex-col gap-1">
+                  {version.approvedBy.map((userId) => (
+                    <li key={userId}>
+                      <code className="font-mono text-xs">{userId}</code>
+                    </li>
+                  ))}
+                </ul>
+              ),
+          },
+          {
             key: "impact",
             label: t("ruleVersion.fact.highImpact"),
             value: version.highImpact

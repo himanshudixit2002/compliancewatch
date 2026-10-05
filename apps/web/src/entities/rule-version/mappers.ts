@@ -140,6 +140,7 @@ export function ruleVersionFromDto(dto: RuleVersionDto | RuleVersionDetailDto): 
     needsReview: dto.seed_status === NEEDS_REVIEW,
     todo: [...dto.todo],
     publishedAt: dto.published_at ?? null,
+    approvedBy: "approved_by" in dto ? [...dto.approved_by] : [],
     highImpact: dto.high_impact,
     stored: {
       specification: { ...dto.specification },

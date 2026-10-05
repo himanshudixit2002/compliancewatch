@@ -113,17 +113,20 @@ describe("ruleVersionFromDto", () => {
         effective_to: "2001-04-01",
         high_impact: true,
         recurrence: null,
+        approved_by: [EXAMPLE_ANALYST_ID],
       }),
     );
     expect(version).toMatchObject({
       status: "published",
       needsReview: false,
       publishedAt: "2000-05-02T06:00:00Z",
+      approvedBy: [EXAMPLE_ANALYST_ID],
       effectiveTo: "2001-04-01",
       highImpact: true,
       recurrence: null,
     });
     expect(version.stored.recurrence).toBeNull();
+    expect(ruleVersionFromDto(ruleVersionDto()).approvedBy).toEqual([]);
   });
 });
 

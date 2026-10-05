@@ -10,6 +10,7 @@ import {
   EXAMPLE_OTHER_VERSION_ID,
   EXAMPLE_VERSION_ID,
   citationDto,
+  ruleVersionDetailDto,
   ruleVersionDto,
 } from "@/test/rule-version-fixture";
 import { describeSpecification } from "../model/specification";
@@ -121,6 +122,22 @@ describe("VersionView", () => {
     expect(screen.getByText("Example instrument, 2000")).toBeDefined();
     expect(screen.getByText("Example question for the analyst?")).toBeDefined();
     expect(await runAxe(container)).toHaveNoViolations();
+  });
+
+  it("names the approvers of the round a published version came from, on a fresh visit", () => {
+    const published = ruleVersionFromDto(
+      ruleVersionDetailDto({
+        status: "published",
+        published_at: "2000-05-02T06:00:00Z",
+        approved_by: [EXAMPLE_ANALYST_ID],
+      }),
+    );
+    const { container } = renderView(pageView({ version: published }));
+    const approvers = container.querySelector('[data-slot="published-approvers"]') as HTMLElement;
+    expect(within(approvers).getByText(EXAMPLE_ANALYST_ID)).toBeDefined();
+    const draft = renderView(pageView()).container;
+    const facts = draft.querySelector('[data-slot="version-facts"]') as HTMLElement;
+    expect(within(facts).getByText("No approvers until it is published")).toBeDefined();
   });
 
   it("lists the citations with their verification and the clause, and offers the form for a draft", () => {
