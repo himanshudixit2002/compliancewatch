@@ -216,7 +216,13 @@ def test_a_supersession_and_a_withdrawal_are_changes_of_the_version_they_end(
     flow.published(new, clause)
     flow.withdraw.run(new, actor_id=ANALYST, note="rescinded")
 
-    withdrawn, superseded, published = feed(store)
+    withdrawn, *publication = feed(store)
+    assert [c.entry.change_id for c in publication] == sorted(
+        (c.entry.change_id for c in publication), reverse=True
+    ), "one moment: by change id"
+    by_kind = {change.entry.kind: change for change in publication}
+    superseded = by_kind[RuleChangeKind.SUPERSEDED]
+    published = by_kind[RuleChangeKind.PUBLISHED]
     assert (withdrawn.entry.kind, withdrawn.entry.rule_version_id) == (
         RuleChangeKind.WITHDRAWN,
         new,
