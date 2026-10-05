@@ -24,6 +24,23 @@ A business's obligations, from the obligation service:
   yet, which the detail reads from the rulebook. 404 when the tenant has no such node, 503 when
   the profile service cannot say. Every tenant member role may read it.
 
+A CA firm's bulk notification, from the notification service:
+
+- `POST /v1/notification/bulk` sends the change card of one published change (`rule_version_id`)
+  to the firm's affected clients (`business_ids`, 1 to 500, each once: the businesses of the
+  change's impact) with `kind` `change_card`. Each business gets the card about its first open
+  obligation of the change, queued for the client's own people who follow it (an owner or
+  staff; the firm's own people hear in their daily digest), through the usual quiet hours and
+  batching. A person who has the card of that change for that business already, from the change
+  itself or an earlier request, gets nothing more: one change, one card per person and business.
+  It answers 201 with the businesses by outcome (`queued`, `skipped_duplicate`,
+  `skipped_no_recipient`, `skipped_not_affected`, each business counted once), the cards queued
+  (`notifications_queued`) and each business's outcome, and it writes the audit entry
+  `notification.bulk`. Only `ca_admin` and `ca_staff` may call it. It requires an
+  `Idempotency-Key` header (428 without one), and a retry with the same key and body gets the
+  first answer back; 503 while the flag `notification.bulk` is off or when the obligation
+  service cannot answer.
+
 Asking a question, from the qa service:
 
 - `POST /v1/qa` is the public face of `POST /v1/qa/ask`, with the same body and answer: a

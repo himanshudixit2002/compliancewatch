@@ -35,6 +35,34 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/notification/bulk": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Send a change card to a CA firm's affected clients, once per change and person
+     * @description Each business named gets the change card for the client's own people who follow it (an
+     *     owner or staff, not the firm's own people, who hear in their daily digest), about its first
+     *     open obligation of the change, through the same queue, quiet hours and batching as every
+     *     card. A person who has the card of this change for the business already, from the change
+     *     itself or an earlier request, gets nothing more (``skipped_duplicate``). A business nobody can
+     *     be told about is ``skipped_no_recipient``, and one the change asks nothing of (no open
+     *     obligation of it; another tenant's business reads the same) ``skipped_not_affected``. The
+     *     audit entry ``notification.bulk`` names the caller and the counts. 503 while the flag
+     *     ``notification.bulk`` is off or when the obligation service cannot answer.
+     */
+    post: operations["bulk_notify_v1_notification_bulk_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/notification/notifications": {
     parameters: {
       query?: never;
@@ -232,6 +260,101 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
   schemas: {
+    /**
+     * BulkBusinessOut
+     * @description What became of one business. ``queued`` its client recipients who got the card now,
+     *     ``duplicates`` those who had it already and ``unreachable`` those with no open address.
+     */
+    BulkBusinessOut: {
+      /**
+       * Business Id
+       * Format: uuid
+       */
+      business_id: string;
+      /** Duplicates */
+      duplicates: number;
+      /**
+       * Obligation Id
+       * @description The obligation the card is about, the business's first open one of the change; null when not affected
+       */
+      obligation_id: string | null;
+      outcome: components["schemas"]["BulkOutcome"];
+      /** Queued */
+      queued: number;
+      /** Unreachable */
+      unreachable: number;
+    };
+    /**
+     * BulkKind
+     * @description What a bulk notification sends.
+     * @enum {string}
+     */
+    BulkKind: "change_card";
+    /**
+     * BulkNotificationIn
+     * @description A change to tell a CA firm's affected clients about, and the clients.
+     */
+    BulkNotificationIn: {
+      /**
+       * Business Ids
+       * @description The client businesses to tell, each once: the businesses of the change's impact (GET /v1/changes/{rule_version_id}/impact), the profile nodes their obligations and recipients are kept for
+       */
+      business_ids: string[];
+      /** @description What to send: the change card */
+      kind: components["schemas"]["BulkKind"];
+      /**
+       * Rule Version Id
+       * Format: uuid
+       * @description The change: a published rule version
+       */
+      rule_version_id: string;
+    };
+    /**
+     * BulkNotificationOut
+     * @description The businesses by outcome, each counted once, and the change cards queued, one per client
+     *     recipient; ``businesses`` in the order the request named them.
+     */
+    BulkNotificationOut: {
+      /** Businesses */
+      businesses: components["schemas"]["BulkBusinessOut"][];
+      kind: components["schemas"]["BulkKind"];
+      /**
+       * Notifications Queued
+       * @description Change cards queued, one per person
+       */
+      notifications_queued: number;
+      /**
+       * Queued
+       * @description Businesses whose card was queued for at least one person
+       */
+      queued: number;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+      /**
+       * Skipped Duplicate
+       * @description Businesses whose people who can be reached had the card of this change
+       */
+      skipped_duplicate: number;
+      /**
+       * Skipped No Recipient
+       * @description Businesses nobody can be told about: no client recipient follows them, or none has an open address (opted in and not suppressed)
+       */
+      skipped_no_recipient: number;
+      /**
+       * Skipped Not Affected
+       * @description Businesses with no open obligation of the change
+       */
+      skipped_not_affected: number;
+    };
+    /**
+     * BulkOutcome
+     * @description What became of one business.
+     * @enum {string}
+     */
+    BulkOutcome: "queued" | "duplicate" | "no_recipient" | "not_affected";
     /** BusinessLinkIn */
     BusinessLinkIn: {
       /**
@@ -819,6 +942,98 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ReadyResponse"];
+        };
+      };
+    };
+  };
+  bulk_notify_v1_notification_bulk_post: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours */
+        "Idempotency-Key": string;
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BulkNotificationIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BulkNotificationOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
     };

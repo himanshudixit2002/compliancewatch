@@ -36,14 +36,15 @@ from applicability_engine.testing import MemoryProfiles, MemoryRulebook
 from applicability_engine.wiring import Readers
 from domain_kernel.access import Role, Scope
 from domain_kernel.confidence import CERTAIN
-from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId
+from domain_kernel.ids import BusinessId, DecisionId, ObligationId, RuleVersionId, TenantId
 from domain_kernel.predicates import Applicability
 from identity.main import build_app as build_identity
 from identity.testing import identity_settings
 from llm_gateway.main import build_app as build_gateway
 from llm_gateway.settings import GatewaySettings
+from notification.domain.ports import OpenObligation
 from notification.main import build_app as build_notification
-from notification.testing import notification_settings
+from notification.testing import FakeObligationReader, notification_settings
 from obligation.application.materialise import MaterialiseRequest
 from obligation.main import build_app as build_obligation
 from obligation.settings import ObligationSettings
@@ -177,6 +178,7 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "GET /v1/notification/notifications",
             "GET /v1/notification/notifications/{notification_id}",
             "POST /v1/notification/notifications/{notification_id}/resend",
+            "POST /v1/notification/bulk",
         }
     ),
     "qa": frozenset({"POST /v1/qa/ask", "POST /v1/qa"}),
@@ -575,6 +577,54 @@ def test_tenant_b_cannot_read_or_resend_a_notification_of_tenant_a(
     )
     assert listed.status_code == 200
     assert listed.json()["items"] == []
+
+
+def test_tenant_b_cannot_send_a_bulk_change_card_to_a_client_of_tenant_a() -> None:
+    reader = FakeObligationReader()
+    business, change = BusinessId.new(), RuleVersionId.new()
+    reader.add(
+        TenantId(TENANT_A),
+        OpenObligation(
+            obligation_id=ObligationId.new(),
+            business_id=business,
+            rule_version_id=change,
+            title="Example annual return (synthetic)",
+        ),
+    )
+    app = build_notification(
+        notification_settings(notification_bulk_enabled=True), obligations=reader
+    )
+    phone = "+910000000124"
+    body = {"rule_version_id": str(change), "business_ids": [str(business)], "kind": "change_card"}
+    with TestClient(app) as notification:
+        registered = notification.put(
+            f"/v1/notification/recipients/{uuid4()}",
+            json={
+                "role": "owner",
+                "addresses": [{"channel": "whatsapp", "address": phone}],
+                "businesses": [{"business_id": str(business)}],
+            },
+            headers=AS_A,
+        )
+        assert registered.status_code == 200, registered.text
+        opted = notification.put(
+            f"/v1/notification/preferences/whatsapp/{phone}",
+            json={"opted_in": True, "source": "api"},
+        )
+        assert opted.status_code == 200, opted.text
+        as_b = notification.post(
+            "/v1/notification/bulk", json=body, headers={**AS_B, "Idempotency-Key": str(uuid4())}
+        )
+        listed = notification.get(
+            "/v1/notification/notifications", params={"business_id": str(business)}, headers=AS_A
+        )
+        as_a = notification.post(
+            "/v1/notification/bulk", json=body, headers={**AS_A, "Idempotency-Key": str(uuid4())}
+        )
+    assert as_b.status_code == 201, as_b.text
+    assert (as_b.json()["skipped_not_affected"], as_b.json()["notifications_queued"]) == (1, 0)
+    assert listed.json()["items"] == [], "tenant B queued nothing for tenant A's client"
+    assert (as_a.json()["queued"], as_a.json()["notifications_queued"]) == (1, 1)
 
 
 def test_tenant_b_cannot_read_or_change_an_obligation_of_tenant_a(

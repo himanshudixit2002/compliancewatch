@@ -115,6 +115,18 @@
       "services": ["mvp"]
     },
     {
+      "name": "notification.bulk",
+      "type": "bool",
+      "default": false,
+      "owner": "core-product",
+      "description": "Lets a CA firm send a change card to its affected clients in one request (POST /v1/notification/bulk): each client's own people get the card of the change once, deduplicated with the card the change itself made, through the usual queue, quiet hours and batching, and the request is audited as notification.bulk. Off, the route answers 503 and queues nothing.",
+      "removal": "Once CA firms have sent bulk notifications in production for 30 days with no duplicate card for one change to one business.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_NOTIFICATION_BULK_ENABLED",
+      "services": ["notification"]
+    },
+    {
       "name": "notification.email",
       "type": "bool",
       "default": false,

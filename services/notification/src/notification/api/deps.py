@@ -10,6 +10,10 @@ mode, or ``dual`` mode without one) everything works as before tokens existed: t
   another tenant than the user's token is a 403 ``auth-tenant-mismatch``.
 - ``SendTenant`` (``/send``): a service with the notification:send scope, naming the tenant with
   tenant:act.
+- ``BulkCaller`` (``/bulk``, the public API's bulk change card): a user of a CA firm (``ca_admin``
+  or ``ca_staff``) whose token names the tenant, never a service; it carries the audit actor and
+  the request's correlation id. ``PUBLIC_CA_ROUTE`` is its ``openapi_extra``: those roles as
+  ``x-roles``.
 - ``PreferenceAccess``: a service with the notification:preferences scope. Preferences are keyed
   by channel and address and name no tenant, so no user may change them directly.
 - ``BotAccess`` (WhatsApp receipts): a service with the notification:receipts scope, or the bot's
@@ -19,12 +23,14 @@ No tenant at all is this service's own 401 ``notification-tenant-required``.
 """
 
 import hmac
-from typing import Annotated
+from dataclasses import dataclass
+from typing import Annotated, Any, Final
 
 from fastapi import Depends, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from domain_kernel.access import TENANT_MEMBER_ROLES, Principal, Scope
+from domain_kernel.access import TENANT_MEMBER_ROLES, Principal, Role, Scope
+from domain_kernel.audit import AuditActor
 from domain_kernel.ids import TenantId
 from notification.domain.errors import (
     EmailFeedbackUnauthorizedError,
@@ -33,7 +39,13 @@ from notification.domain.errors import (
     TenantRequiredError,
 )
 from notification.wiring import Wiring
+from py_common.audit import audit_actor, current_correlation_id
 from py_common.auth.fastapi import require_roles, shared_token_or_roles, tenant_scope
+
+SERVICE_NAME: Final = "notification"
+CA_ROLES: Final = (Role.CA_ADMIN, Role.CA_STAFF)
+PUBLIC_CA_ROUTE: Final[dict[str, Any]] = {"x-roles": [role.value for role in CA_ROLES]}
+"""``openapi_extra`` of a public route only a CA firm's people may call."""
 
 tenant_of_request = tenant_scope(True, TenantRequiredError)
 member = require_roles(TENANT_MEMBER_ROLES, scopes={Scope.TENANT_ACT})
@@ -41,6 +53,19 @@ member = require_roles(TENANT_MEMBER_ROLES, scopes={Scope.TENANT_ACT})
 ``header`` mode passes."""
 sender = require_roles(scopes={Scope.NOTIFICATION_SEND})
 """A service with notification:send; the anonymous principal of ``header`` mode passes."""
+ca_member = require_roles(CA_ROLES)
+"""A user with a CA firm's role; a service is refused, and the anonymous principal of ``header``
+mode passes."""
+
+
+@dataclass(frozen=True, slots=True)
+class BulkCaller:
+    """Who sends a bulk notification for which tenant: the actor its audit entry names and the
+    request's correlation id."""
+
+    tenant_id: TenantId
+    actor: AuditActor
+    correlation_id: str | None = None
 
 
 async def member_tenant(
@@ -61,6 +86,19 @@ async def send_tenant(
     return tenant
 
 
+async def bulk_caller(
+    principal: Annotated[Principal, Depends(ca_member)],
+    tenant: Annotated[TenantId, Depends(tenant_of_request)],
+) -> BulkCaller:
+    """Who sends a bulk notification of the request's tenant, once the caller is known to be one
+    of its CA firm's people."""
+    return BulkCaller(
+        tenant_id=tenant,
+        actor=audit_actor(SERVICE_NAME, principal),
+        correlation_id=current_correlation_id(),
+    )
+
+
 def wiring(request: Request) -> Wiring:
     wired: Wiring = request.app.state.wiring
     return wired
@@ -68,6 +106,7 @@ def wiring(request: Request) -> Wiring:
 
 Tenant = Annotated[TenantId, Depends(member_tenant)]
 SendTenant = Annotated[TenantId, Depends(send_tenant)]
+Bulk = Annotated[BulkCaller, Depends(bulk_caller)]
 Wired = Annotated[Wiring, Depends(wiring)]
 
 PreferenceAccess = Depends(require_roles(scopes={Scope.NOTIFICATION_PREFERENCES}))

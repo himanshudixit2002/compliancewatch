@@ -8,12 +8,16 @@ behind ``CW_EMAIL_ENABLED`` with ``CW_SMTP_HOST`` and ``CW_EMAIL_FROM``; with
 ``CW_NOTIFICATION_CHANNELS=sink`` (local and test only) both are the sink, which records each
 message in ``CW_NOTIFICATION_SINK_PATH`` instead of sending it. The SES feedback is read
 from SNS with its signature verified. The dispatcher reads the facts of change cards from the
-rulebook at ``CW_RULEBOOK_URL``, with the service's own access token once
-``CW_SERVICE_CLIENT_SECRET`` is set, and counts deliveries through OpenTelemetry. ``wire(settings,
-channels=..., rules=..., email_feedback=...)`` replaces the channels, the rulebook reader and the
-SES feedback reader, which is how the demo and the tests send and receive through fakes; and
-``token_source=`` replaces where the rulebook reader's access token comes from, which is how a
-process that hosts identity gives it a token minted in the process.
+rulebook at ``CW_RULEBOOK_URL``, and a CA firm's bulk notification reads its clients' open
+obligations from the obligation service at ``CW_OBLIGATION_URL``, both with the service's own
+access token once ``CW_SERVICE_CLIENT_SECRET`` is set; deliveries are counted through
+OpenTelemetry. The bulk route's Idempotency-Keys are kept next to the notifications
+(``idempotency_key``, migration 0003), each key in its own short transaction. ``wire(settings,
+channels=..., rules=..., email_feedback=..., obligations=...)`` replaces the channels, the
+rulebook reader, the SES feedback reader and the obligation reader, which is how the demo and the
+tests send and receive through fakes; and ``token_source=`` replaces where the readers' access
+token comes from, which is how a process that hosts identity gives them a token minted in the
+process.
 
 ``notification.main`` builds the HTTP app on it and ``notification.worker`` the worker's
 components; this module builds no app, so the worker does not start the API's telemetry.
@@ -25,6 +29,7 @@ from pathlib import Path
 from starlette.concurrency import run_in_threadpool
 
 from domain_kernel.channels import Channel
+from notification.application.bulk import BulkNotify
 from notification.application.dispatch import DispatchDue
 from notification.application.email_feedback import ReceiveEmailFeedback
 from notification.application.enqueue import EnqueueNotifications
@@ -42,12 +47,13 @@ from notification.application.retention import PurgeExpired
 from notification.application.send import SendNow
 from notification.domain.channels import ChannelAdapter
 from notification.domain.policy import BatchPolicy, DigestPolicy
-from notification.domain.ports import EmailFeedbackReader, RuleVersionReader
+from notification.domain.ports import EmailFeedbackReader, ObligationReader, RuleVersionReader
 from notification.domain.preferences import QuietHours
 from notification.domain.repository import UnitOfWorkFactory, WorkIndex
 from notification.infrastructure.email import SmtpEmailChannel
 from notification.infrastructure.memory import MemoryStore
 from notification.infrastructure.metrics import OtelDeliveryMetrics
+from notification.infrastructure.obligation_client import HttpObligationReader
 from notification.infrastructure.repository import PostgresUnitOfWorkFactory
 from notification.infrastructure.rulebook_client import HttpRuleVersionReader
 from notification.infrastructure.ses_feedback import SnsFeedbackReader
@@ -56,6 +62,8 @@ from notification.infrastructure.whatsapp import DisabledChannel, WhatsAppCloudC
 from notification.settings import NotificationSettings
 from notification.wiring import Wiring
 from py_common.auth import TokenSource, service_auth_from
+from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
+from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
 
 WHATSAPP_DISABLED = "whatsapp channel disabled: set CW_WHATSAPP_ENABLED and the Meta credentials"
 EMAIL_DISABLED = "email channel disabled: set CW_EMAIL_ENABLED, CW_SMTP_HOST and CW_EMAIL_FROM"
@@ -102,17 +110,22 @@ def wire(
     channels: Mapping[Channel, ChannelAdapter] | None = None,
     rules: RuleVersionReader | None = None,
     email_feedback: EmailFeedbackReader | None = None,
+    obligations: ObligationReader | None = None,
     token_source: TokenSource | None = None,
 ) -> Wiring:
     unit_of_work: UnitOfWorkFactory
     work_index: WorkIndex
     ping: Callable[[], bool]
+    idempotency: IdempotencyStore
     if settings.notification_store == "memory":
         memory = MemoryStore()
         unit_of_work, work_index, ping = memory, memory.work_index, memory.ping
+        idempotency = MemoryIdempotencyStore()
     else:
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url)
         unit_of_work, work_index, ping = postgres, postgres.work_index, postgres.ping
+        idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
+    auth = service_auth_from(settings, token_source=token_source)
     wired_channels = dict(default_channels(settings) if channels is None else channels)
     quiet_hours = QuietHours.parse(settings.quiet_hours_start, settings.quiet_hours_end)
     batch = BatchPolicy(window_seconds=settings.notification_batch_window_seconds)
@@ -121,10 +134,7 @@ def wire(
         unit_of_work,
         work_index,
         wired_channels,
-        rules=rules
-        or HttpRuleVersionReader(
-            settings.rulebook_url, auth=service_auth_from(settings, token_source=token_source)
-        ),
+        rules=rules or HttpRuleVersionReader(settings.rulebook_url, auth=auth),
         web_base_url=settings.web_base_url,
         quiet_hours=quiet_hours,
         batch=batch,
@@ -132,6 +142,12 @@ def wire(
     )
 
     reconcile = ReconcileReceipts(unit_of_work, work_index, metrics=metrics)
+    enqueue = EnqueueNotifications(
+        unit_of_work,
+        batch=batch,
+        digest=DigestPolicy.parse(settings.notification_digest_at),
+        metrics=metrics,
+    )
 
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)
@@ -143,12 +159,14 @@ def wire(
         channels=wired_channels,
         quiet_hours=quiet_hours,
         send=SendNow(unit_of_work, dispatch, quiet_hours=quiet_hours),
-        enqueue=EnqueueNotifications(
+        enqueue=enqueue,
+        bulk=BulkNotify(
             unit_of_work,
-            batch=batch,
-            digest=DigestPolicy.parse(settings.notification_digest_at),
-            metrics=metrics,
+            enqueue,
+            obligations or HttpObligationReader(settings.obligation_url, auth=auth),
+            enabled=settings.notification_bulk_enabled,
         ),
+        idempotency=idempotency,
         dispatch=dispatch,
         set_opt_in=SetOptIn(unit_of_work),
         get_preference=GetPreference(unit_of_work),

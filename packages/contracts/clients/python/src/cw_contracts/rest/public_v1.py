@@ -125,6 +125,50 @@ class AttributeSource(StrEnum):
     derived = "derived"
 
 
+class BulkKind(StrEnum):
+    """
+    What a bulk notification sends.
+    """
+
+    change_card = "change_card"
+
+
+class BulkNotificationIn(BaseModel):
+    """
+    A change to tell a CA firm's affected clients about, and the clients.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    business_ids: Annotated[
+        list[UUID],
+        Field(
+            description="The client businesses to tell, each once: the businesses of the change's impact (GET /v1/changes/{rule_version_id}/impact), the profile nodes their obligations and recipients are kept for",
+            max_length=500,
+            min_length=1,
+            title="Business Ids",
+        ),
+    ]
+    kind: Annotated[BulkKind, Field(description="What to send: the change card")]
+    rule_version_id: Annotated[
+        UUID,
+        Field(description="The change: a published rule version", title="Rule Version Id"),
+    ]
+
+
+class BulkOutcome(StrEnum):
+    """
+    What became of one business.
+    """
+
+    queued = "queued"
+    duplicate = "duplicate"
+    no_recipient = "no_recipient"
+    not_affected = "not_affected"
+
+
 class Gstin(RootModel[str]):
     root: Annotated[
         str,
@@ -657,6 +701,78 @@ class AttributeOut(BaseModel):
     state: ValueState
     updated_at: Annotated[AwareDatetime | None, Field(title="Updated At")]
     value: Annotated[Any | None, Field(title="Value")] = None
+
+
+class BulkBusinessOut(BaseModel):
+    """
+    What became of one business. ``queued`` its client recipients who got the card now,
+    ``duplicates`` those who had it already and ``unreachable`` those with no open address.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    business_id: Annotated[UUID, Field(title="Business Id")]
+    duplicates: Annotated[int, Field(title="Duplicates")]
+    obligation_id: Annotated[
+        UUID | None,
+        Field(
+            description="The obligation the card is about, the business's first open one of the change; null when not affected",
+            title="Obligation Id",
+        ),
+    ]
+    outcome: BulkOutcome
+    queued: Annotated[int, Field(title="Queued")]
+    unreachable: Annotated[int, Field(title="Unreachable")]
+
+
+class BulkNotificationOut(BaseModel):
+    """
+    The businesses by outcome, each counted once, and the change cards queued, one per client
+    recipient; ``businesses`` in the order the request named them.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    businesses: Annotated[list[BulkBusinessOut], Field(title="Businesses")]
+    kind: BulkKind
+    notifications_queued: Annotated[
+        int,
+        Field(
+            description="Change cards queued, one per person",
+            title="Notifications Queued",
+        ),
+    ]
+    queued: Annotated[
+        int,
+        Field(
+            description="Businesses whose card was queued for at least one person",
+            title="Queued",
+        ),
+    ]
+    rule_version_id: Annotated[UUID, Field(title="Rule Version Id")]
+    skipped_duplicate: Annotated[
+        int,
+        Field(
+            description="Businesses whose people who can be reached had the card of this change",
+            title="Skipped Duplicate",
+        ),
+    ]
+    skipped_no_recipient: Annotated[
+        int,
+        Field(
+            description="Businesses nobody can be told about: no client recipient follows them, or none has an open address (opted in and not suppressed)",
+            title="Skipped No Recipient",
+        ),
+    ]
+    skipped_not_affected: Annotated[
+        int,
+        Field(
+            description="Businesses with no open obligation of the change",
+            title="Skipped Not Affected",
+        ),
+    ]
 
 
 class BusinessChangeIn(BaseModel):

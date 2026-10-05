@@ -139,3 +139,13 @@ class EmailFeedbackUnauthorizedError(DomainError):
 
     def __init__(self) -> None:
         super().__init__("missing or wrong basic credentials")
+
+
+class BulkNotificationsDisabledError(DomainError):
+    """A CA firm's bulk notifications are off (the notification.bulk flag)."""
+
+    type_slug: ClassVar[str] = "notification-bulk-disabled"
+    title: ClassVar[str] = "Bulk notifications are turned off"
+
+    def __init__(self) -> None:
+        super().__init__("bulk notifications are refused until CW_NOTIFICATION_BULK_ENABLED is set")

@@ -183,6 +183,8 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         # SES reports bounces and complaints here, with the feedback token.
         "POST /v1/notification/receipts/email": PUBLIC,
         "POST /v1/notification/notifications/{notification_id}/resend": ADMIN,
+        # The public API's bulk change card, for a CA firm's people (the route checks the role).
+        "POST /v1/notification/bulk": PUBLIC,
         "POST /v1/notification/send": INTERNAL,
         "PUT /v1/notification/preferences/{channel}/{recipient}": INTERNAL,
         "GET /v1/notification/preferences/{channel}/{recipient}": INTERNAL,

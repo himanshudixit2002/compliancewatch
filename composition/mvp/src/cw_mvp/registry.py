@@ -145,7 +145,7 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
             "PUT /v1/obligations/{obligation_id}/assignee",
             "GET /v1/businesses/{business_id}/obligations",
         ),
-        # qa's ask reads a business's obligations, which calls nothing.
+        # qa's ask and notification's bulk read a business's obligations, which calls nothing.
         called_routes=("GET /v1/obligation/obligations",),
         takes_token_source=True,
     ),
@@ -155,7 +155,9 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         NotificationSettings,
         build_notification,
         components=notification_components,
-        url_fields=("rulebook_url",),
+        url_fields=("rulebook_url", "obligation_url"),
+        # A CA firm's bulk notification reads each client's open obligations of the change.
+        loopback_routes=("POST /v1/notification/bulk",),
         takes_token_source=True,
     ),
     ServiceEntry(

@@ -22,6 +22,11 @@ complaint feedback arrives through SNS with HTTP basic credentials whose passwor
 ``notification_email_feedback_token`` (unset, the route refuses everything), and, when
 ``notification_ses_topic_arn`` is set, only from that topic.
 
+``notification_bulk_enabled`` lets a CA firm send a change card to its affected clients in one
+request (``POST /v1/notification/bulk``; ``CW_NOTIFICATION_BULK_ENABLED``, flag
+``notification.bulk``, default off, owner core-product); off, the route answers 503. It reads each
+business's open obligations of the change from the obligation service at ``obligation_url``.
+
 ``notification_channels`` picks what delivers: ``real`` (the default) wires the WhatsApp and email
 channels as above; ``sink`` wires ``infrastructure.sink.SinkChannel`` for both, which records
 each message as a JSON line in ``notification_sink_path`` instead of sending it (the local
@@ -67,6 +72,8 @@ class NotificationSettings(Settings):
     notification_sink_path: str = "var/notification/sink.jsonl"
     rulebook_url: str = "http://localhost:8003"
     web_base_url: str = "http://localhost:3000"
+    notification_bulk_enabled: bool = False
+    obligation_url: str = "http://localhost:8005"
 
     @model_validator(mode="after")
     def _sink_stays_local(self) -> Self:

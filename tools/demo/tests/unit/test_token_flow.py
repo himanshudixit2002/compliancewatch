@@ -296,11 +296,13 @@ def test_a_service_client_acts_for_a_tenant_with_a_token_from_identity(
     assert (unnamed.status_code, problem(unnamed)) == (401, "tenant-required")
     assert profile_changers(profile) == []
 
-    # The notification client holds no scope, so it may not act for a tenant.
-    notification = pipeline_auth(identity, "notification").source.token()
-    refused = profile.post(
-        REGISTRATIONS, json=REGISTRATION, headers={**as_acme, **bearer(notification)}
-    )
+    # A client without tenant:act may not act for a tenant. Every committed dev client holds it
+    # now, so this one comes from an identity with one dev client of its own, signing with the
+    # same keys.
+    lone = identity_settings(auth_mode="token", identity_dev_clients="reader=llm:call")
+    with TestClient(build_identity(lone)) as other:
+        reader = pipeline_auth(other, "reader").source.token()
+    refused = profile.post(REGISTRATIONS, json=REGISTRATION, headers={**as_acme, **bearer(reader)})
     assert (refused.status_code, problem(refused)) == (403, "auth-forbidden")
 
     wrong = ServiceTokenSource(

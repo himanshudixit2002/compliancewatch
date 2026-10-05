@@ -156,6 +156,18 @@ def test_a_notification_joins_the_batch_still_waiting_for_the_same_person_and_bu
     assert latest.available_at == setup.clock.now + WINDOW, "the first batch is already due"
 
 
+def test_an_audience_keeps_the_recipients_the_notice_is_for() -> None:
+    setup = Setup()
+    owner = setup.recipient((WA, "+919800000001"))
+    setup.recipient((WA, "+919800000002"), role=RecipientRole.CA_ADMIN)
+    with setup.store(TENANT) as unit:
+        queued = setup.enqueue.run_in(
+            unit, created(), audience=lambda recipient: recipient.role is RecipientRole.OWNER
+        )
+    assert queued == Enqueued(queued=1)
+    assert [n.recipient_id for n in setup.store.notifications_of(TENANT)] == [owner]
+
+
 def test_run_in_works_in_the_callers_unit_of_its_tenant() -> None:
     setup = Setup()
     setup.recipient((WA, "+919876543210"))
