@@ -898,7 +898,8 @@ def decided(context: CheckContext, run: dict[str, Any], records: ProductRecords)
                 interval=context.interval,
             )
             lines.append(
-                f"{tenant.name}, {registration.business.name}: {len(made)} GSTR-9 obligations"
+                f"{tenant.name}, {registration.business.registration_name}: {len(made)} GSTR-9 "
+                "obligations"
             )
     return lines
 
