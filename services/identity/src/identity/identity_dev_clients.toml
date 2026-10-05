@@ -16,6 +16,10 @@ reason = "evaluates a rule version for a tenant's business, and recomputes a bus
 scopes = []
 reason = "reads the rule versions its messages cite from the rulebook, whose read routes need no scope"
 
+[obligation]
+scopes = ["tenant:act"]
+reason = "checks that the user a member assigns an obligation to belongs to the tenant: reads the user's membership at identity for that tenant, and the rule versions, whose read routes need no scope"
+
 [pipeline]
 scopes = ["rulebook:write", "llm:call", "tenant:act"]
 reason = "writes extracted documents, mentions and relation candidates to the rulebook and calls the gateway, naming a tenant only when it attributes cost"

@@ -31,7 +31,9 @@ Anything else on the public listener, and any path no service owns, is a 404
 - **Calls between services** go over the internal listener. Their routes are sync and hold a
   thread while they wait, so the app raises the thread pool to `CW_MVP_THREAD_TOKENS` (200) and
   runs at most `CW_MVP_LOOPBACK_LIMIT` (32) of the routes that make such calls at once: qa's
-  `POST /v1/qa/ask` and the engine's evaluation. The services they call make none themselves.
+  `POST /v1/qa/ask`, the engine's evaluation, and obligation's detail and assignee routes. The
+  routes they call make none themselves: qa reads obligation's list, which calls nothing
+  (`called_routes` in the registry).
 
 The services whose routes do more than read their own store:
 
@@ -58,8 +60,15 @@ The services whose routes do more than read their own store:
   `CW_EVAL_GATEWAY_URL`, which the registry leaves alone (it is not named `<service>_url`), and
   the harness sends no token: a nightly run from the deployable needs that URL set to the
   internal listener, and a mode other than `token`.
-- **obligation**: the API only reads obligations; the worker makes them from applicability
-  decisions, closes or moves them on the rule events, and rolls their window (below).
+- **obligation**: a tenant's members read obligations and track one on the public listener, under
+  `/v1/obligation/obligations/{obligation_id}` and in the public API under
+  `/v1/obligations/{obligation_id}`: the detail, its status, its assignee and its comments, each
+  change with an Idempotency-Key and an audit row. The detail reads the rulebook over the internal
+  listener when its cache lacks the rule version, and outside `header` mode an assignment asks
+  identity's internal `GET /v1/identity/users/{user_id}/membership` whether the assignee belongs
+  to the tenant, with the token of the `obligation` dev client (tenant:act). The worker makes
+  obligations from applicability decisions, closes or moves them on the rule events, and rolls
+  their window (below).
 
 The process must stay one process: notification preferences, the gateway's response cache and
 its budget-alarm markers are still held in memory.

@@ -63,6 +63,8 @@ class Decision:
     result: Applicability
     needs_review: bool
     decided_at: datetime
+    profile_version: int | None = None
+    """The profile version the decision was computed from; every obligation it makes keeps it."""
 
     def __post_init__(self) -> None:
         require_aware(self.decided_at, "decided_at")
@@ -83,6 +85,7 @@ class Decision:
             decision_id=self.decision_id,
             applies=self.result is Applicability.APPLIES,
             decided_at=self.decided_at,
+            profile_version=self.profile_version,
         )
 
 
@@ -182,6 +185,7 @@ class ApplyDecision:
                 rule=read.snapshot,
                 as_of=decision.decided_at.astimezone(IST).date(),
                 ref=admission.ref,
+                profile_version=decision.profile_version,
             ),
             window=self._window,
             now=self._clock(),

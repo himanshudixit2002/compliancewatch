@@ -26,6 +26,8 @@ function obligation(overrides: Partial<Obligation>): Obligation {
     periodEnd: "2000-09-01",
     closedAt: null,
     closedReason: null,
+    profileVersion: null,
+    assigneeId: null,
     ...overrides,
   };
 }

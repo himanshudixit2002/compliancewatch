@@ -213,6 +213,24 @@ class ListUsers:
             return [user for user in uow.users.list() if user.tenant_id == tenant_id]
 
 
+class ReadMembership:
+    """Whether a user belongs to a tenant, for a service acting for it (the obligation service
+    checks an assignee this way): the tenant's user with this id, active or disabled.
+    ``TenantNotFoundError`` and ``UserNotFoundError`` when there is no such tenant or user; a user
+    of another tenant is not found either. The route admits only a service with tenant:act, or in
+    header mode the tenant the header names, so no admin is checked here."""
+
+    def __init__(self, unit_of_work: UnitOfWorkFactory) -> None:
+        self._unit_of_work = unit_of_work
+
+    def run(self, tenant_id: TenantId, user_id: UserId) -> User:
+        with self._unit_of_work(tenant_id) as uow:
+            tenant = uow.tenants.get(tenant_id)
+            if tenant is None:
+                raise TenantNotFoundError()
+            return member(uow, tenant, user_id)
+
+
 class InviteUser:
     def __init__(
         self,

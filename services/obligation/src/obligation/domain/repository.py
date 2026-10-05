@@ -5,8 +5,10 @@ from contextlib import AbstractContextManager
 from datetime import datetime
 from typing import Protocol
 
+from domain_kernel.audit import AuditSink
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId, TenantId
+from obligation.domain.comments import ObligationComment
 from obligation.domain.history import ObligationChange
 from obligation.domain.model import Obligation
 from obligation.domain.reminders import Reminder
@@ -16,7 +18,10 @@ from obligation.domain.rule_versions import AppliedDecision, RuleVersionRef
 class ObligationRepository(Protocol):
     """Reads and writes are scoped to the tenant the unit of work was opened for."""
 
-    def get(self, obligation_id: ObligationId) -> Obligation | None: ...
+    def get(self, obligation_id: ObligationId, *, lock: bool = False) -> Obligation | None:
+        """The tenant's obligation; with ``lock`` its row stays locked until the transaction
+        ends, so two changes of one obligation run one after the other."""
+        ...
 
     def find(
         self, business_id: BusinessId, rule_version_id: RuleVersionId, period_label: str | None
@@ -74,6 +79,16 @@ class ChangeLog(Protocol):
         ...
 
 
+class CommentLog(Protocol):
+    """The comments on the tenant's obligations; append-only."""
+
+    def add(self, comment: ObligationComment) -> None: ...
+
+    def for_obligation(self, obligation_id: ObligationId) -> Sequence[ObligationComment]:
+        """The obligation's comments, oldest first."""
+        ...
+
+
 class ReminderLog(Protocol):
     """The reminders sent for the tenant's obligations, one per obligation, due date and
     threshold."""
@@ -121,9 +136,10 @@ class TenantDirectory(Protocol):
 
 
 class UnitOfWork(Protocol):
-    """One transaction: the repository, the event sink, the change log, the reminders, the
-    cached rule versions and the applied decisions commit or roll back together. The factory
-    returns it as a context manager; leaving the block cleanly commits."""
+    """One transaction: the repository, the event sink, the change log, the comments, the
+    reminders, the cached rule versions, the applied decisions and the audit entries commit or
+    roll back together. The factory returns it as a context manager; leaving the block cleanly
+    commits."""
 
     @property
     def obligations(self) -> ObligationRepository: ...
@@ -135,6 +151,9 @@ class UnitOfWork(Protocol):
     def history(self) -> ChangeLog: ...
 
     @property
+    def comments(self) -> CommentLog: ...
+
+    @property
     def reminders(self) -> ReminderLog: ...
 
     @property
@@ -142,6 +161,9 @@ class UnitOfWork(Protocol):
 
     @property
     def decisions(self) -> AppliedDecisions: ...
+
+    @property
+    def audit(self) -> AuditSink: ...
 
 
 class UnitOfWorkFactory(Protocol):

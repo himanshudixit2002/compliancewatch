@@ -11,8 +11,9 @@ from obligation.domain.model import Obligation
 from obligation.domain.repository import UnitOfWork
 
 
-def record(uow: UnitOfWork, event: ObligationEvent, after: Obligation) -> None:
-    """Publish ``event`` and append the change it made; ``after`` is the changed obligation."""
-    change = change_from_event(event, after)
+def record(uow: UnitOfWork, event: ObligationEvent, after: Obligation, *, note: str = "") -> None:
+    """Publish ``event`` and append the change it made; ``after`` is the changed obligation and
+    ``note`` what the person who made the change said."""
+    change = change_from_event(event, after, note=note)
     uow.events.publish(event)
     uow.history.append(change)

@@ -296,6 +296,29 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/identity/users/{user_id}/membership": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Whether a user belongs to the tenant, with their roles and status (services)
+     * @description For a service acting for the tenant it names in x-tenant-id, with the tenant:act scope:
+     *     the user's roles and whether they may still sign in (status active or disabled), and no
+     *     contact details. 404 when the tenant has no such user, a user of another tenant included,
+     *     or when identity has no such tenant.
+     */
+    get: operations["read_membership_v1_identity_users__user_id__membership_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/identity/users/{user_id}/roles": {
     parameters: {
       query?: never;
@@ -575,6 +598,26 @@ export type components = {
     JwksOut: {
       /** Keys */
       keys: components["schemas"]["JwkOut"][];
+    };
+    /**
+     * MembershipOut
+     * @description A user's membership of the tenant: their roles and whether they may still sign in, and
+     *     nothing that reaches them (no contact details).
+     */
+    MembershipOut: {
+      /** Roles */
+      roles: components["schemas"]["Role"][];
+      status: components["schemas"]["UserStatus"];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
     };
     /**
      * MeOut
@@ -1925,6 +1968,67 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  read_membership_v1_identity_users__user_id__membership_get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MembershipOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

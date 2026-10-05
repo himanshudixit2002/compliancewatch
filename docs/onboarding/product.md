@@ -6,16 +6,19 @@ and the web app. `make product-seed` fills it with two synthetic tenants and a s
 publication of the seed rules the golden world cites, and `make product-check` proves that a
 published rule becomes decisions, obligations with citations and a change card, that a
 business made or changed in the profile is decided again by itself, that a rule published
-behind the fan-out hold reaches every business once the hold is released, and that a sweep run a
-few days before a due date sends a reminder. On a database made for the run (CI), it also proves
-that a withdrawn rule closes its obligations in both tenants and sends withdrawal notices.
+behind the fan-out hold reaches every business once the hold is released, that a sweep run a
+few days before a due date sends a reminder, and that a member can start, assign, complete and
+comment on an obligation, a change sent twice with one Idempotency-Key made once. On a database
+made for the run (CI), it also proves that a withdrawn rule closes its obligations in both tenants
+and sends withdrawal notices.
 
 ```bash
 make product                 # make dev, make migrate, make product-role, the seed calendar, then
                              # cw-mvp serve, cw-mvp worker and next dev; waits until all answer
 make product-seed            # synthetic tenants, the demo publication, the first decisions
-make product-check           # health, honesty, loop, isolation, recompute, fanout, reminders: exit 0 means accepted
-                             # (rollback reports itself skipped; CI runs it with ARGS="--destructive")
+make product-check           # health, honesty, loop, isolation, recompute, fanout, reminders, tracking:
+                             # exit 0 means accepted (rollback reports itself skipped; CI runs it
+                             # with ARGS="--destructive")
 make product-logs PROC=worker   # app, worker or web; FOLLOW=0 prints the end and returns
 make product-down            # stops only what make product started
 ```
@@ -172,6 +175,28 @@ for every business whose latest decision applies; `obligation-sweep --once` runs
 reminder sweep at once (`--now` and `--tenant`, local and test only, are how the check's
 reminders step runs it).
 
+## Tracking an obligation
+
+A member of the tenant works an obligation through the obligation service's routes, each under
+`/v1/obligation/obligations/{obligation_id}` (and in the public API under
+`/v1/obligations/{obligation_id}`):
+
+1. `GET` answers the obligation whole: the facts of its rule version from
+   `obligation.rule_version_ref` (title, rule key, `reviewed` false while the seed rule needs
+   review, and `approved_by` with `published_at`, the reviewed-by line), the verified citations
+   of its clause, its history from `obligation.obligation_change` and its comments, oldest first.
+2. `POST .../status` with `start`, `complete` or `waive` (a waiver needs a reason of at least ten
+   characters); completing and waiving publish obligation.closed, which sends no message.
+3. `PUT .../assignee` gives it to a user of the tenant, or to nobody. With a verified caller the
+   obligation service asks identity whether the user belongs to the tenant; in the product's
+   header mode nobody is verified, so the assignee is kept as named.
+4. `POST .../comments` adds a comment (`obligation.obligation_comment`, append-only).
+
+Each change takes an `Idempotency-Key` (kept in `obligation.idempotency_key`), appends to the
+history and writes an `audit.event` row in the same transaction (`obligation.status.start`,
+`.complete` or `.waive`, `obligation.assign`, `obligation.comment`, the last naming the comment
+and not its text). In header mode those rows name the actor `system:obligation`.
+
 ### The sink
 
 `CW_NOTIFICATION_CHANNELS=sink` replaces both channels with
@@ -256,6 +281,7 @@ the worker does a few seconds after the API answers, and a failed step does not 
 | fanout | while gstr9_annual is not published: sets the fan-out hold, publishes gstr9_annual as `cw-product publish --rule gstr9_annual` does, waits for its run to stand `held` with nothing decided, releases the hold and waits for the run to complete. Once it is published (a second check on the same database): finds that run completed, resuming it first if an earlier check left it paused, and sets and releases the hold again. Then the run's counters must match the directory entries of the level, each synthetic registration the directory lists must have its gstr9_annual decision from the fan-out with the result its answers call for, the registrations it applies to must have GSTR-9 obligations in both synthetic tenants, and `audit.event` must hold the hold, the release and any resume the step made. A hold an interrupted check left is lifted first; anyone else's fails the step |
 | reminders | runs `obligation-sweep --once --now <moment> --tenant <business tenant>` in the check's process, on the obligation settings of the product's worker, with the moment 5 days, 2 days or 12 hours before one of the business tenant's open obligations is due (the first lead whose threshold has not reminded it yet, so every run sees a new reminder), then waits for the reminder about that obligation to be sent through the sink, with its line in the sink file. The sweep and the window touch no other tenant |
 | rollback | only with `--destructive` (CI), skipped otherwise: withdraws gstr9_annual through the rulebook's withdraw route as the first synthetic reviewer, then waits for every GSTR-9 obligation of both synthetic tenants to close with `rule_withdrawn`, and for the withdrawal notices: sent through the sink for the business tenant, held for the daily digest (or sent) for the CA firm. On a database where it was withdrawn already, it checks what followed |
+| tracking | makes a new synthetic business in the business tenant with `POST /v1/businesses` (a monthly GSTR-3B filer, named "Tracking probe" with the time it was made) and waits for its gstr3b_monthly obligations from profile.updated; starts the first one due, assigns it to the tenant's synthetic owner, and sends the same complete twice with one Idempotency-Key: one closure, and the second answer is the first with `Idempotent-Replayed: true`. The detail must show the history created, started, assigned, closed, both synthetic reviewers in `approved_by` while the seed status stays needs_review, and verified citations; then a comment is added and listed. Each run spends a business of its own, so the seeded registration's obligations stay open for the reminders step and a later check passes again |
 
 The fanout step reads the business directory and the audit rows of no tenant, which no route
 serves and no policy lets `cw_app` read. `make product-check` gives it `CW_PRODUCT_RECORDS_URL`,
@@ -302,6 +328,10 @@ keys). The web stack connects as the superuser and so reads across tenants; the 
   `notification.event_queued` for the obligation.due_soon the sweep wrote, and the check's error
   names the sweep's exit code and report; `obligation-sweep: refused` means `CW_ENV` is not local
   or test, or the obligation store is not postgres.
+- **The tracking step waits for an obligation.** It needs what the recompute step needs: the
+  engine's consumer of profile.updated and obligation's consumer of applicability.decided. A 409
+  `obligation-closed` or a history that reads otherwise means something else changed the
+  probe's obligation; the step names what it read.
 - **A late decision made nothing.** `obligation.decision_guarded` in the worker's log names the
   reason: `rule_withdrawn`, `rule_superseded` (with the periods) or `uncited`.
 - **The loop waits for the change card.** `tail var/product/sink.jsonl` shows what the sink got;

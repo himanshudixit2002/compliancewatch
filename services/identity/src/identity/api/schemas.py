@@ -336,6 +336,25 @@ class UserOut(BaseModel):
         )
 
 
+class MembershipOut(BaseModel):
+    """A user's membership of the tenant: their roles and whether they may still sign in, and
+    nothing that reaches them (no contact details)."""
+
+    user_id: UUID
+    tenant_id: UUID
+    roles: list[Role]
+    status: UserStatus
+
+    @classmethod
+    def from_user(cls, user: User) -> "MembershipOut":
+        return cls(
+            user_id=user.id.value,
+            tenant_id=user.tenant_id.value,
+            roles=sorted(user.roles),
+            status=user.status,
+        )
+
+
 class MeOut(BaseModel):
     """The signed-in user as the access token names them, checked against the store."""
 

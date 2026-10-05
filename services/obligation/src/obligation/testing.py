@@ -1,6 +1,6 @@
 """Builders for tests of this service and of services that consume its events: fixed ids, a
-fixed clock, a sample recurring rule version, the facts the cache keeps of it, and a rulebook
-reader from a dict."""
+fixed clock, a sample recurring rule version, the facts the cache keeps of it, a rulebook reader
+from a dict, and the identity service's members from a set."""
 
 from collections.abc import Callable, Iterable
 from dataclasses import replace
@@ -15,7 +15,8 @@ from domain_kernel.predicates import Predicate
 from domain_kernel.recurrence import Recurrence
 from domain_kernel.rules import ObligationTemplate, RuleVersionSnapshot
 from domain_kernel.status import RuleVersionStatus
-from obligation.domain.errors import RulebookUnavailableError
+from obligation.domain.errors import IdentityUnavailableError, RulebookUnavailableError
+from obligation.domain.ports import Membership
 from obligation.domain.rule_versions import Citation, RuleVersionRead, RuleVersionRef
 
 TENANT = TenantId.new()
@@ -131,3 +132,29 @@ class FakeRuleVersionReader:
         ended = replace(current.ended(status, effective_to), fetched_at=self.clock())
         self.refs[rule_version_id] = ended
         return ended
+
+
+class FakeTenantMembers:
+    """The users of each tenant from a set of ``(tenant, user)``; ``disabled`` users belong to
+    their tenant but may no longer sign in, and ``down`` makes every call fail as an outage
+    would. ``asked`` lists every call."""
+
+    def __init__(
+        self,
+        members: Iterable[tuple[TenantId, UserId]] = (),
+        *,
+        disabled: Iterable[UserId] = (),
+        down: bool = False,
+    ) -> None:
+        self.members = set(members)
+        self.disabled = set(disabled)
+        self.down = down
+        self.asked: list[tuple[TenantId, UserId]] = []
+
+    def membership(self, tenant_id: TenantId, user_id: UserId) -> Membership | None:
+        self.asked.append((tenant_id, user_id))
+        if self.down:
+            raise IdentityUnavailableError("identity unreachable (fake)")
+        if (tenant_id, user_id) not in self.members:
+            return None
+        return Membership(user_id, tenant_id, active=user_id not in self.disabled)

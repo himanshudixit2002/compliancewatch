@@ -37,6 +37,7 @@ from identity.application.tenancy import (
     DisableUser,
     InviteUser,
     ListUsers,
+    ReadMembership,
 )
 from identity.composition import identity_provider
 from identity.domain.billing import BillingProvider
@@ -216,6 +217,7 @@ def wire(settings: IdentitySettings) -> Wiring:
         create_tenant=CreateTenant(unit_of_work, provider, minter, ttl=access_ttl),
         current_user=CurrentUser(unit_of_work),
         list_users=ListUsers(unit_of_work),
+        read_membership=ReadMembership(unit_of_work),
         invite_user=InviteUser(unit_of_work, provider),
         change_roles=ChangeRoles(unit_of_work),
         disable_user=DisableUser(unit_of_work),

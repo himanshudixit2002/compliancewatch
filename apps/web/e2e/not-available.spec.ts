@@ -1,4 +1,18 @@
-import { ADMIN, ANALYST, OWNER, expect, test } from "./fixtures";
+import { SCREENS, hrefFor, routeParams } from "../src/shared/config/screens.ts";
+import { ADMIN, ANALYST, OWNER, expect, personaFor, test } from "./fixtures";
+
+/**
+ * A tenant page with parameters that is not built yet, while the registry still has one. The
+ * catch-all serves it with "example" for each parameter. Picked from the registry so the spec
+ * does not break each time a backend lands and the screen moves on.
+ */
+const UNBUILT_TENANT_PAGE_WITH_PARAMETERS = SCREENS.find(
+  (screen) =>
+    screen.kind === "page" &&
+    (screen.section === "owner" || screen.section === "ca") &&
+    screen.status !== "live" &&
+    routeParams(screen.route).length > 0,
+);
 
 test.describe("not available yet", () => {
   test("an admin tool shows its awaited routes, owner and breadcrumbs", async ({
@@ -28,17 +42,18 @@ test.describe("not available yet", () => {
     signIn,
     checkA11y,
   }) => {
-    await signIn(OWNER);
-    await page.goto("/b/example/obligations/example");
-    await expect(page.getByRole("heading", { level: 1, name: "Obligation" })).toBeVisible();
-    await expect(page.getByText("services track (WP23)").first()).toBeVisible();
-    await expect(
-      page.getByText("POST /v1/obligation/obligations/{obligation_id}/status"),
-    ).toBeVisible();
-    await expect(page.getByRole("link", { name: "Back", exact: true })).toHaveAttribute(
-      "href",
-      "/",
-    );
+    const screen = UNBUILT_TENANT_PAGE_WITH_PARAMETERS;
+    test.skip(screen === undefined, "every tenant page with parameters is built");
+    if (screen === undefined) return;
+    await signIn(personaFor(screen) ?? OWNER);
+    const params = Object.fromEntries(routeParams(screen.route).map((name) => [name, "example"]));
+    await page.goto(hrefFor(screen, params));
+    await expect(page.getByRole("heading", { level: 1, name: screen.title })).toBeVisible();
+    const route = screen.awaits[0] ?? screen.uses[0];
+    if (route !== undefined) {
+      await expect(page.getByText(`${route.method} ${route.path}`).first()).toBeVisible();
+    }
+    await expect(page.getByRole("link", { name: "Back", exact: true })).toBeVisible();
     await checkA11y();
   });
 

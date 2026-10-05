@@ -1,6 +1,220 @@
 {
   "components": {
     "schemas": {
+      "AssigneeIn": {
+        "additionalProperties": false,
+        "properties": {
+          "assignee_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The user of the tenant to give the obligation to; null for nobody",
+            "title": "Assignee Id"
+          }
+        },
+        "required": [
+          "assignee_id"
+        ],
+        "title": "AssigneeIn",
+        "type": "object"
+      },
+      "ChangeKind": {
+        "enum": [
+          "created",
+          "rescheduled",
+          "closed",
+          "started",
+          "assigned",
+          "unassigned"
+        ],
+        "title": "ChangeKind",
+        "type": "string"
+      },
+      "ChangeOut": {
+        "description": "One change of the obligation. ``reason`` is the reschedule or closure reason ('' for the\nother kinds) and ``note`` what the person said (a waiver's reason); ``actor`` is the user who\nmade the change, null when the system did or no token named the caller. A reschedule names\nboth due dates, an assignment both assignees.",
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "caused_by_rule_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caused By Rule Version Id"
+          },
+          "change_id": {
+            "format": "uuid",
+            "title": "Change Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ChangeKind"
+          },
+          "new_assignee_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Assignee Id"
+          },
+          "new_due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Due At"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "previous_assignee_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Assignee Id"
+          },
+          "previous_due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Due At"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "status_after": {
+            "$ref": "#/components/schemas/ObligationStatus"
+          }
+        },
+        "required": [
+          "change_id",
+          "kind",
+          "occurred_at",
+          "status_after",
+          "reason",
+          "note",
+          "previous_due_at",
+          "new_due_at",
+          "previous_assignee_id",
+          "new_assignee_id",
+          "caused_by_rule_version_id",
+          "actor"
+        ],
+        "title": "ChangeOut",
+        "type": "object"
+      },
+      "CitationOut": {
+        "description": "A verified quote of the clause the obligation comes from.",
+        "properties": {
+          "citation_id": {
+            "format": "uuid",
+            "title": "Citation Id",
+            "type": "string"
+          },
+          "clause_id": {
+            "format": "uuid",
+            "title": "Clause Id",
+            "type": "string"
+          },
+          "clause_ref": {
+            "title": "Clause Ref",
+            "type": "string"
+          },
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "match_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Score"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "citation_id",
+          "clause_id",
+          "document_id",
+          "clause_ref",
+          "quote",
+          "match_score",
+          "verified_at"
+        ],
+        "title": "CitationOut",
+        "type": "object"
+      },
       "ClosureReason": {
         "description": "Why an obligation was closed; decides the closing status.",
         "enum": [
@@ -12,6 +226,73 @@
         ],
         "title": "ClosureReason",
         "type": "string"
+      },
+      "CommentIn": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "description": "The comment, 1 to 2000 characters once trimmed",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "title": "CommentIn",
+        "type": "object"
+      },
+      "CommentOut": {
+        "description": "One comment. ``author_id`` is the user who wrote it, null when no token named the caller;\n``author_label`` the author as the audit log labels them (the user's roles, or\n``system:obligation``), never a name.",
+        "properties": {
+          "author_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Id"
+          },
+          "author_label": {
+            "title": "Author Label",
+            "type": "string"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "comment_id": {
+            "format": "uuid",
+            "title": "Comment Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "obligation_id": {
+            "format": "uuid",
+            "title": "Obligation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "comment_id",
+          "obligation_id",
+          "author_id",
+          "author_label",
+          "body",
+          "created_at"
+        ],
+        "title": "CommentOut",
+        "type": "object"
       },
       "HealthResponse": {
         "properties": {
@@ -36,9 +317,211 @@
         "title": "HealthResponse",
         "type": "object"
       },
-      "ObligationOut": {
-        "description": "One obligation: due_at is the end of the due day in India, given in UTC. The period is\nhalf-open (period_end is the day after its last day), and null for a rule that does not\nrecur.",
+      "ObligationDetailOut": {
+        "description": "One obligation with what its page shows: the facts of its rule version (null when the\nrulebook has no such version), the verified citations of the clause it comes from, its\nhistory, oldest first, and its comments, oldest first.",
         "properties": {
+          "assignee_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Id"
+          },
+          "business_id": {
+            "format": "uuid",
+            "title": "Business Id",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/CitationOut"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "closed_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClosureReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/CommentOut"
+            },
+            "title": "Comments",
+            "type": "array"
+          },
+          "decision_id": {
+            "format": "uuid",
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "evidence_type": {
+            "title": "Evidence Type",
+            "type": "string"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ChangeOut"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "obligation_id": {
+            "format": "uuid",
+            "title": "Obligation Id",
+            "type": "string"
+          },
+          "period_end": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period End"
+          },
+          "period_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period Label"
+          },
+          "period_start": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period Start"
+          },
+          "profile_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Version"
+          },
+          "rule_version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleVersionFactsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rule_version_id": {
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ObligationStatus"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "obligation_id",
+          "business_id",
+          "rule_version_id",
+          "decision_id",
+          "title",
+          "steps",
+          "evidence_type",
+          "period_label",
+          "period_start",
+          "period_end",
+          "due_at",
+          "status",
+          "closed_at",
+          "closed_reason",
+          "profile_version",
+          "assignee_id",
+          "rule_version",
+          "citations",
+          "history",
+          "comments"
+        ],
+        "title": "ObligationDetailOut",
+        "type": "object"
+      },
+      "ObligationOut": {
+        "description": "One obligation: due_at is the end of the due day in India, given in UTC. The period is\nhalf-open (period_end is the day after its last day), and null for a rule that does not\nrecur. profile_version is the profile version of the decision that made it (null for one made\nbefore it was kept); assignee_id the user it is given to, or null.",
+        "properties": {
+          "assignee_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Id"
+          },
           "business_id": {
             "format": "uuid",
             "title": "Business Id",
@@ -127,6 +610,17 @@
             ],
             "title": "Period Start"
           },
+          "profile_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Version"
+          },
           "rule_version_id": {
             "format": "uuid",
             "title": "Rule Version Id",
@@ -161,7 +655,9 @@
           "due_at",
           "status",
           "closed_at",
-          "closed_reason"
+          "closed_reason",
+          "profile_version",
+          "assignee_id"
         ],
         "title": "ObligationOut",
         "type": "object"
@@ -271,6 +767,128 @@
           "checks"
         ],
         "title": "ReadyResponse",
+        "type": "object"
+      },
+      "RuleVersionFactsOut": {
+        "description": "What the obligation service keeps of the rule version an obligation comes from.\n``reviewed`` is false while the seed rule is not reviewed (``seed_status`` needs_review),\nthe cue for a not-yet-reviewed notice; ``approved_by`` lists the approvers of the round it\nwas published from and ``published_at`` when, the reviewed-by line.",
+        "properties": {
+          "approved_by": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Approved By",
+            "type": "array"
+          },
+          "effective_from": {
+            "format": "date",
+            "title": "Effective From",
+            "type": "string"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "reviewed": {
+            "title": "Reviewed",
+            "type": "boolean"
+          },
+          "rule_key": {
+            "title": "Rule Key",
+            "type": "string"
+          },
+          "rule_version_id": {
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          },
+          "seed_status": {
+            "title": "Seed Status",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuleVersionStatus"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_version_id",
+          "rule_key",
+          "title",
+          "status",
+          "effective_from",
+          "effective_to",
+          "seed_status",
+          "reviewed",
+          "approved_by",
+          "published_at"
+        ],
+        "title": "RuleVersionFactsOut",
+        "type": "object"
+      },
+      "RuleVersionStatus": {
+        "enum": [
+          "draft",
+          "in_review",
+          "approved",
+          "published",
+          "superseded",
+          "withdrawn"
+        ],
+        "title": "RuleVersionStatus",
+        "type": "string"
+      },
+      "StatusAction": {
+        "enum": [
+          "start",
+          "complete",
+          "waive"
+        ],
+        "title": "StatusAction",
+        "type": "string"
+      },
+      "StatusIn": {
+        "additionalProperties": false,
+        "description": "``start`` moves an open obligation to in progress; ``complete`` closes it as done;\n``waive`` closes it as waived and needs a ``reason`` of at least ten characters.",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/StatusAction"
+          },
+          "reason": {
+            "default": "",
+            "description": "Why, if you say; required for a waiver; kept in the history and the audit",
+            "maxLength": 2000,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "StatusIn",
         "type": "object"
       },
       "ValidationIssue": {
@@ -524,6 +1142,580 @@
         ]
       }
     },
+    "/v1/obligation/obligations/{obligation_id}": {
+      "get": {
+        "description": "``rule_version`` holds what the obligation service keeps of the rule version: its title\nand rule key, ``reviewed`` false while the seed rule is not reviewed, and the approvers of\nthe round it was published from with when (the reviewed-by line). ``citations`` are the\nverified quotes of the clause it comes from, ``history`` every change oldest first, and\n``comments`` oldest first. An obligation made before its service kept rule versions is read\nfrom the rulebook once; 503 when the rulebook cannot answer then. 404 when the tenant has no\nsuch obligation.",
+        "operationId": "read_obligation_v1_obligation_obligations__obligation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "obligation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Obligation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObligationDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "One obligation with its rule's review, citations, history and comments",
+        "tags": [
+          "obligation"
+        ]
+      }
+    },
+    "/v1/obligation/obligations/{obligation_id}/assignee": {
+      "put": {
+        "description": "With a verified caller the identity service is asked first whether the assignee is an\nactive user of the tenant: 422 when not, 503 when it cannot say. Without a token (header\nmode, or dual mode without one) nobody can be checked, and the assignee is kept as named.\nNaming the assignee it has changes nothing; any other change appends assigned or unassigned\nto the history and writes an audit entry, obligation.assign. 404 when the tenant has no such\nobligation, 409 when it is closed.",
+        "operationId": "assign_v1_obligation_obligations__obligation_id__assignee_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "obligation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Obligation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          },
+          {
+            "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssigneeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObligationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Give an obligation to a user of the tenant, or to nobody",
+        "tags": [
+          "obligation"
+        ]
+      }
+    },
+    "/v1/obligation/obligations/{obligation_id}/comments": {
+      "post": {
+        "description": "The author is the user a verified token names, labelled with their roles; without a token\nit is nobody, labelled system:obligation. A closed obligation takes comments too. Comments are\nnever changed or deleted. The audit entry, obligation.comment, names the comment, not its\ntext. 404 when the tenant has no such obligation.",
+        "operationId": "add_comment_v1_obligation_obligations__obligation_id__comments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "obligation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Obligation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          },
+          {
+            "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Comment on an obligation",
+        "tags": [
+          "obligation"
+        ]
+      }
+    },
+    "/v1/obligation/obligations/{obligation_id}/status": {
+      "post": {
+        "description": "``start`` moves an open obligation to in progress. ``complete`` closes it as done and\n``waive`` as waived, which needs a reason of at least ten characters; both publish\nobligation.closed, which sends no message. Every action appends to the history and writes an\naudit entry (obligation.status.start, .complete or .waive) with the reason. 404 when the\ntenant has no such obligation, 409 when it is closed, 422 when the action does not fit its\nstatus (starting one in progress).",
+        "operationId": "change_status_v1_obligation_obligations__obligation_id__status_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "obligation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Obligation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          },
+          {
+            "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObligationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start, complete or waive an obligation",
+        "tags": [
+          "obligation"
+        ]
+      }
+    },
     "/v1/obligation/ping": {
       "get": {
         "operationId": "ping_v1_obligation_ping_get",
@@ -546,6 +1738,612 @@
         "summary": "Ping",
         "tags": [
           "obligation"
+        ]
+      }
+    },
+    "/v1/obligations/{obligation_id}": {
+      "get": {
+        "description": "``rule_version`` holds what the obligation service keeps of the rule version: its title\nand rule key, ``reviewed`` false while the seed rule is not reviewed, and the approvers of\nthe round it was published from with when (the reviewed-by line). ``citations`` are the\nverified quotes of the clause it comes from, ``history`` every change oldest first, and\n``comments`` oldest first. An obligation made before its service kept rule versions is read\nfrom the rulebook once; 503 when the rulebook cannot answer then. 404 when the tenant has no\nsuch obligation.",
+        "operationId": "read_obligation_v1_obligations__obligation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "obligation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Obligation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObligationDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "One obligation with its rule's review, citations, history and comments",
+        "tags": [
+          "public",
+          "obligations"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
+        ]
+      }
+    },
+    "/v1/obligations/{obligation_id}/assignee": {
+      "put": {
+        "description": "With a verified caller the identity service is asked first whether the assignee is an\nactive user of the tenant: 422 when not, 503 when it cannot say. Without a token (header\nmode, or dual mode without one) nobody can be checked, and the assignee is kept as named.\nNaming the assignee it has changes nothing; any other change appends assigned or unassigned\nto the history and writes an audit entry, obligation.assign. 404 when the tenant has no such\nobligation, 409 when it is closed.",
+        "operationId": "assign_v1_obligations__obligation_id__assignee_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "obligation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Obligation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          },
+          {
+            "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssigneeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObligationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Give an obligation to a user of the tenant, or to nobody",
+        "tags": [
+          "public",
+          "obligations"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
+        ]
+      }
+    },
+    "/v1/obligations/{obligation_id}/comments": {
+      "post": {
+        "description": "The author is the user a verified token names, labelled with their roles; without a token\nit is nobody, labelled system:obligation. A closed obligation takes comments too. Comments are\nnever changed or deleted. The audit entry, obligation.comment, names the comment, not its\ntext. 404 when the tenant has no such obligation.",
+        "operationId": "add_comment_v1_obligations__obligation_id__comments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "obligation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Obligation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          },
+          {
+            "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Comment on an obligation",
+        "tags": [
+          "public",
+          "obligations"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
+        ]
+      }
+    },
+    "/v1/obligations/{obligation_id}/status": {
+      "post": {
+        "description": "``start`` moves an open obligation to in progress. ``complete`` closes it as done and\n``waive`` as waived, which needs a reason of at least ten characters; both publish\nobligation.closed, which sends no message. Every action appends to the history and writes an\naudit entry (obligation.status.start, .complete or .waive) with the reason. 404 when the\ntenant has no such obligation, 409 when it is closed, 422 when the action does not fit its\nstatus (starting one in progress).",
+        "operationId": "change_status_v1_obligations__obligation_id__status_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "obligation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Obligation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          },
+          {
+            "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObligationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start, complete or waive an obligation",
+        "tags": [
+          "public",
+          "obligations"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
         ]
       }
     }

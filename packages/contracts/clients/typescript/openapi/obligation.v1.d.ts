@@ -52,6 +52,105 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/obligation/obligations/{obligation_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * One obligation with its rule's review, citations, history and comments
+     * @description ``rule_version`` holds what the obligation service keeps of the rule version: its title
+     *     and rule key, ``reviewed`` false while the seed rule is not reviewed, and the approvers of
+     *     the round it was published from with when (the reviewed-by line). ``citations`` are the
+     *     verified quotes of the clause it comes from, ``history`` every change oldest first, and
+     *     ``comments`` oldest first. An obligation made before its service kept rule versions is read
+     *     from the rulebook once; 503 when the rulebook cannot answer then. 404 when the tenant has no
+     *     such obligation.
+     */
+    get: operations["read_obligation_v1_obligation_obligations__obligation_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/obligation/obligations/{obligation_id}/assignee": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Give an obligation to a user of the tenant, or to nobody
+     * @description With a verified caller the identity service is asked first whether the assignee is an
+     *     active user of the tenant: 422 when not, 503 when it cannot say. Without a token (header
+     *     mode, or dual mode without one) nobody can be checked, and the assignee is kept as named.
+     *     Naming the assignee it has changes nothing; any other change appends assigned or unassigned
+     *     to the history and writes an audit entry, obligation.assign. 404 when the tenant has no such
+     *     obligation, 409 when it is closed.
+     */
+    put: operations["assign_v1_obligation_obligations__obligation_id__assignee_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/obligation/obligations/{obligation_id}/comments": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Comment on an obligation
+     * @description The author is the user a verified token names, labelled with their roles; without a token
+     *     it is nobody, labelled system:obligation. A closed obligation takes comments too. Comments are
+     *     never changed or deleted. The audit entry, obligation.comment, names the comment, not its
+     *     text. 404 when the tenant has no such obligation.
+     */
+    post: operations["add_comment_v1_obligation_obligations__obligation_id__comments_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/obligation/obligations/{obligation_id}/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start, complete or waive an obligation
+     * @description ``start`` moves an open obligation to in progress. ``complete`` closes it as done and
+     *     ``waive`` as waived, which needs a reason of at least ten characters; both publish
+     *     obligation.closed, which sends no message. Every action appends to the history and writes an
+     *     audit entry (obligation.status.start, .complete or .waive) with the reason. 404 when the
+     *     tenant has no such obligation, 409 when it is closed, 422 when the action does not fit its
+     *     status (starting one in progress).
+     */
+    post: operations["change_status_v1_obligation_obligations__obligation_id__status_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/obligation/ping": {
     parameters: {
       query?: never;
@@ -69,10 +168,188 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/obligations/{obligation_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * One obligation with its rule's review, citations, history and comments
+     * @description ``rule_version`` holds what the obligation service keeps of the rule version: its title
+     *     and rule key, ``reviewed`` false while the seed rule is not reviewed, and the approvers of
+     *     the round it was published from with when (the reviewed-by line). ``citations`` are the
+     *     verified quotes of the clause it comes from, ``history`` every change oldest first, and
+     *     ``comments`` oldest first. An obligation made before its service kept rule versions is read
+     *     from the rulebook once; 503 when the rulebook cannot answer then. 404 when the tenant has no
+     *     such obligation.
+     */
+    get: operations["read_obligation_v1_obligations__obligation_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/obligations/{obligation_id}/assignee": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Give an obligation to a user of the tenant, or to nobody
+     * @description With a verified caller the identity service is asked first whether the assignee is an
+     *     active user of the tenant: 422 when not, 503 when it cannot say. Without a token (header
+     *     mode, or dual mode without one) nobody can be checked, and the assignee is kept as named.
+     *     Naming the assignee it has changes nothing; any other change appends assigned or unassigned
+     *     to the history and writes an audit entry, obligation.assign. 404 when the tenant has no such
+     *     obligation, 409 when it is closed.
+     */
+    put: operations["assign_v1_obligations__obligation_id__assignee_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/obligations/{obligation_id}/comments": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Comment on an obligation
+     * @description The author is the user a verified token names, labelled with their roles; without a token
+     *     it is nobody, labelled system:obligation. A closed obligation takes comments too. Comments are
+     *     never changed or deleted. The audit entry, obligation.comment, names the comment, not its
+     *     text. 404 when the tenant has no such obligation.
+     */
+    post: operations["add_comment_v1_obligations__obligation_id__comments_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/obligations/{obligation_id}/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start, complete or waive an obligation
+     * @description ``start`` moves an open obligation to in progress. ``complete`` closes it as done and
+     *     ``waive`` as waived, which needs a reason of at least ten characters; both publish
+     *     obligation.closed, which sends no message. Every action appends to the history and writes an
+     *     audit entry (obligation.status.start, .complete or .waive) with the reason. 404 when the
+     *     tenant has no such obligation, 409 when it is closed, 422 when the action does not fit its
+     *     status (starting one in progress).
+     */
+    post: operations["change_status_v1_obligations__obligation_id__status_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 };
 export type webhooks = Record<string, never>;
 export type components = {
   schemas: {
+    /** AssigneeIn */
+    AssigneeIn: {
+      /**
+       * Assignee Id
+       * @description The user of the tenant to give the obligation to; null for nobody
+       */
+      assignee_id: string | null;
+    };
+    /**
+     * ChangeKind
+     * @enum {string}
+     */
+    ChangeKind: "created" | "rescheduled" | "closed" | "started" | "assigned" | "unassigned";
+    /**
+     * ChangeOut
+     * @description One change of the obligation. ``reason`` is the reschedule or closure reason ('' for the
+     *     other kinds) and ``note`` what the person said (a waiver's reason); ``actor`` is the user who
+     *     made the change, null when the system did or no token named the caller. A reschedule names
+     *     both due dates, an assignment both assignees.
+     */
+    ChangeOut: {
+      /** Actor */
+      actor: string | null;
+      /** Caused By Rule Version Id */
+      caused_by_rule_version_id: string | null;
+      /**
+       * Change Id
+       * Format: uuid
+       */
+      change_id: string;
+      kind: components["schemas"]["ChangeKind"];
+      /** New Assignee Id */
+      new_assignee_id: string | null;
+      /** New Due At */
+      new_due_at: string | null;
+      /** Note */
+      note: string;
+      /**
+       * Occurred At
+       * Format: date-time
+       */
+      occurred_at: string;
+      /** Previous Assignee Id */
+      previous_assignee_id: string | null;
+      /** Previous Due At */
+      previous_due_at: string | null;
+      /** Reason */
+      reason: string;
+      status_after: components["schemas"]["ObligationStatus"];
+    };
+    /**
+     * CitationOut
+     * @description A verified quote of the clause the obligation comes from.
+     */
+    CitationOut: {
+      /**
+       * Citation Id
+       * Format: uuid
+       */
+      citation_id: string;
+      /**
+       * Clause Id
+       * Format: uuid
+       */
+      clause_id: string;
+      /** Clause Ref */
+      clause_ref: string;
+      /**
+       * Document Id
+       * Format: uuid
+       */
+      document_id: string;
+      /** Match Score */
+      match_score: number | null;
+      /** Quote */
+      quote: string;
+      /** Verified At */
+      verified_at: string | null;
+    };
     /**
      * ClosureReason
      * @description Why an obligation was closed; decides the closing status.
@@ -80,6 +357,43 @@ export type components = {
      */
     ClosureReason:
       "profile_changed" | "rule_withdrawn" | "rule_superseded" | "waived_by_user" | "completed";
+    /** CommentIn */
+    CommentIn: {
+      /**
+       * Body
+       * @description The comment, 1 to 2000 characters once trimmed
+       */
+      body: string;
+    };
+    /**
+     * CommentOut
+     * @description One comment. ``author_id`` is the user who wrote it, null when no token named the caller;
+     *     ``author_label`` the author as the audit log labels them (the user's roles, or
+     *     ``system:obligation``), never a name.
+     */
+    CommentOut: {
+      /** Author Id */
+      author_id: string | null;
+      /** Author Label */
+      author_label: string;
+      /** Body */
+      body: string;
+      /**
+       * Comment Id
+       * Format: uuid
+       */
+      comment_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Obligation Id
+       * Format: uuid
+       */
+      obligation_id: string;
+    };
     /** HealthResponse */
     HealthResponse: {
       /** Service */
@@ -90,12 +404,72 @@ export type components = {
       version: string;
     };
     /**
+     * ObligationDetailOut
+     * @description One obligation with what its page shows: the facts of its rule version (null when the
+     *     rulebook has no such version), the verified citations of the clause it comes from, its
+     *     history, oldest first, and its comments, oldest first.
+     */
+    ObligationDetailOut: {
+      /** Assignee Id */
+      assignee_id: string | null;
+      /**
+       * Business Id
+       * Format: uuid
+       */
+      business_id: string;
+      /** Citations */
+      citations: components["schemas"]["CitationOut"][];
+      /** Closed At */
+      closed_at: string | null;
+      closed_reason: components["schemas"]["ClosureReason"] | null;
+      /** Comments */
+      comments: components["schemas"]["CommentOut"][];
+      /**
+       * Decision Id
+       * Format: uuid
+       */
+      decision_id: string;
+      /** Due At */
+      due_at: string | null;
+      /** Evidence Type */
+      evidence_type: string;
+      /** History */
+      history: components["schemas"]["ChangeOut"][];
+      /**
+       * Obligation Id
+       * Format: uuid
+       */
+      obligation_id: string;
+      /** Period End */
+      period_end: string | null;
+      /** Period Label */
+      period_label: string | null;
+      /** Period Start */
+      period_start: string | null;
+      /** Profile Version */
+      profile_version: number | null;
+      rule_version: components["schemas"]["RuleVersionFactsOut"] | null;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+      status: components["schemas"]["ObligationStatus"];
+      /** Steps */
+      steps: string[];
+      /** Title */
+      title: string;
+    };
+    /**
      * ObligationOut
      * @description One obligation: due_at is the end of the due day in India, given in UTC. The period is
      *     half-open (period_end is the day after its last day), and null for a rule that does not
-     *     recur.
+     *     recur. profile_version is the profile version of the decision that made it (null for one made
+     *     before it was kept); assignee_id the user it is given to, or null.
      */
     ObligationOut: {
+      /** Assignee Id */
+      assignee_id: string | null;
       /**
        * Business Id
        * Format: uuid
@@ -124,6 +498,8 @@ export type components = {
       period_label: string | null;
       /** Period Start */
       period_start: string | null;
+      /** Profile Version */
+      profile_version: number | null;
       /**
        * Rule Version Id
        * Format: uuid
@@ -180,6 +556,65 @@ export type components = {
       };
       /** Status */
       status: string;
+    };
+    /**
+     * RuleVersionFactsOut
+     * @description What the obligation service keeps of the rule version an obligation comes from.
+     *     ``reviewed`` is false while the seed rule is not reviewed (``seed_status`` needs_review),
+     *     the cue for a not-yet-reviewed notice; ``approved_by`` lists the approvers of the round it
+     *     was published from and ``published_at`` when, the reviewed-by line.
+     */
+    RuleVersionFactsOut: {
+      /** Approved By */
+      approved_by: string[];
+      /**
+       * Effective From
+       * Format: date
+       */
+      effective_from: string;
+      /** Effective To */
+      effective_to: string | null;
+      /** Published At */
+      published_at: string | null;
+      /** Reviewed */
+      reviewed: boolean;
+      /** Rule Key */
+      rule_key: string;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+      /** Seed Status */
+      seed_status: string;
+      status: components["schemas"]["RuleVersionStatus"];
+      /** Title */
+      title: string;
+    };
+    /**
+     * RuleVersionStatus
+     * @enum {string}
+     */
+    RuleVersionStatus:
+      "draft" | "in_review" | "approved" | "published" | "superseded" | "withdrawn";
+    /**
+     * StatusAction
+     * @enum {string}
+     */
+    StatusAction: "start" | "complete" | "waive";
+    /**
+     * StatusIn
+     * @description ``start`` moves an open obligation to in progress; ``complete`` closes it as done;
+     *     ``waive`` closes it as waived and needs a ``reason`` of at least ten characters.
+     */
+    StatusIn: {
+      action: components["schemas"]["StatusAction"];
+      /**
+       * Reason
+       * @description Why, if you say; required for a waiver; kept in the history and the audit
+       * @default
+       */
+      reason?: string;
     };
     /**
      * ValidationIssue
@@ -310,6 +745,367 @@ export interface operations {
       };
     };
   };
+  read_obligation_v1_obligation_obligations__obligation_id__get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        obligation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObligationDetailOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  assign_v1_obligation_obligations__obligation_id__assignee_put: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours */
+        "Idempotency-Key": string;
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        obligation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssigneeIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObligationOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  add_comment_v1_obligation_obligations__obligation_id__comments_post: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours */
+        "Idempotency-Key": string;
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        obligation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CommentIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CommentOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  change_status_v1_obligation_obligations__obligation_id__status_post: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours */
+        "Idempotency-Key": string;
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        obligation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["StatusIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObligationOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   ping_v1_obligation_ping_get: {
     parameters: {
       query?: never;
@@ -328,6 +1124,367 @@ export interface operations {
           "application/json": {
             [key: string]: string;
           };
+        };
+      };
+    };
+  };
+  read_obligation_v1_obligations__obligation_id__get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        obligation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObligationDetailOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  assign_v1_obligations__obligation_id__assignee_put: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours */
+        "Idempotency-Key": string;
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        obligation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssigneeIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObligationOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  add_comment_v1_obligations__obligation_id__comments_post: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours */
+        "Idempotency-Key": string;
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        obligation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CommentIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CommentOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  change_status_v1_obligations__obligation_id__status_post: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours */
+        "Idempotency-Key": string;
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        obligation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["StatusIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObligationOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
     };

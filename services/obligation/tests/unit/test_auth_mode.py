@@ -1,19 +1,31 @@
-"""The obligation read route in header, dual and token mode: where the tenant comes from and who
-may read."""
+"""The obligation routes in header, dual and token mode: where the tenant comes from, who may
+read and who may change an obligation, and when an assignee is checked with the identity
+service."""
 
 from collections.abc import Iterator
 from datetime import date
 from typing import Any
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from domain_kernel.access import Role, Scope
+from domain_kernel.ids import ObligationId, UserId
 from obligation.application.materialise import MaterialiseRequest
+from obligation.infrastructure.memory import MemoryStore
 from obligation.main import build_app
 from obligation.settings import ObligationSettings
-from obligation.testing import BUSINESS, DECISION, OTHER_TENANT, TENANT, rule
+from obligation.testing import (
+    BUSINESS,
+    DECISION,
+    OTHER_TENANT,
+    TENANT,
+    FakeRuleVersionReader,
+    FakeTenantMembers,
+    rule,
+)
 from py_common.auth.testing import TestIssuer, bearer
 from py_common.settings import AuthMode
 
@@ -22,7 +34,9 @@ ROUTE = "/v1/obligation/obligations"
 QUERY = {"business_id": str(BUSINESS)}
 AS_TENANT = {"x-tenant-id": str(TENANT)}
 AS_OTHER = {"x-tenant-id": str(OTHER_TENANT)}
-OWNER = bearer(ISSUER.user(TENANT, [Role.OWNER]))
+OWNER_ID = UserId(UUID(int=0x0E1))
+STAFF_ID = UserId(UUID(int=0x5AF))
+OWNER = bearer(ISSUER.user(TENANT, [Role.OWNER], user_id=OWNER_ID))
 COMPLIANCE_LEAD = bearer(ISSUER.user(TENANT, [Role.COMPLIANCE_LEAD]))
 STAFF_OF_OTHER = bearer(ISSUER.user(OTHER_TENANT, [Role.STAFF]))
 ANALYST = bearer(ISSUER.user(TENANT, [Role.ANALYST], mfa=True))
@@ -30,17 +44,22 @@ QA_ACTING = bearer(ISSUER.service("qa", [Scope.LLM_CALL, Scope.TENANT_ACT]))
 QA_ALONE = bearer(ISSUER.service("qa", [Scope.LLM_CALL]))
 
 
-def app_in(mode: AuthMode) -> FastAPI:
+THE_RULE = rule()
+
+
+def app_in(mode: AuthMode, members: FakeTenantMembers | None = None) -> FastAPI:
     app = build_app(
         ObligationSettings(
             _env_file=None,
             service_name="obligation",
             obligation_store="memory",
             **ISSUER.settings_overrides(mode),
-        )
+        ),
+        rules=FakeRuleVersionReader([THE_RULE]),
+        members=members or FakeTenantMembers([(TENANT, OWNER_ID), (TENANT, STAFF_ID)]),
     )
     app.state.wiring.materialise.run(
-        MaterialiseRequest(TENANT, BUSINESS, DECISION, rule(), date(2026, 9, 28))
+        MaterialiseRequest(TENANT, BUSINESS, DECISION, THE_RULE, date(2026, 9, 28))
     )
     return app
 
@@ -140,3 +159,100 @@ def test_token_mode_lets_a_service_read_for_the_tenant_it_names_with_tenant_act(
     assert (without_scope.status_code, problem(without_scope)) == (403, "auth-forbidden")
     no_tenant = read(token_mode, QA_ACTING)
     assert (no_tenant.status_code, problem(no_tenant)) == (401, "obligation-tenant-required")
+
+
+# ---------------------------------------------------------------- tracking
+
+
+def first_obligation(client: TestClient) -> ObligationId:
+    store = client.app.state.wiring.unit_of_work  # type: ignore[attr-defined]
+    assert isinstance(store, MemoryStore)
+    return min(store.obligations, key=lambda obligation_id: store.obligations[obligation_id].title)
+
+
+def keyed(headers: dict[str, str]) -> dict[str, str]:
+    return {**headers, "Idempotency-Key": str(uuid4())}
+
+
+def test_token_mode_lets_a_member_change_an_obligation_as_themselves(
+    token_mode: TestClient,
+) -> None:
+    obligation = first_obligation(token_mode)
+    route = f"{ROUTE}/{obligation}"
+    started = token_mode.post(f"{route}/status", json={"action": "start"}, headers=keyed(OWNER))
+    assert started.status_code == 200, started.text
+    commented = token_mode.post(
+        f"{route}/comments", json={"body": "Example comment (synthetic)"}, headers=keyed(OWNER)
+    )
+    assert (commented.json()["author_id"], commented.json()["author_label"]) == (
+        str(OWNER_ID),
+        "owner",
+    )
+    detail = token_mode.get(route, headers=OWNER).json()
+    (change,) = [c for c in detail["history"] if c["kind"] == "started"]
+    assert change["actor"] == str(OWNER_ID)
+    store = token_mode.app.state.wiring.unit_of_work  # type: ignore[attr-defined]
+    assert {entry.actor.label for entry in store.audit} == {"owner"}
+    assert {entry.actor.id for entry in store.audit} == {str(OWNER_ID)}
+
+
+def test_token_mode_lets_a_service_read_an_obligation_but_never_change_one(
+    token_mode: TestClient,
+) -> None:
+    route = f"{ROUTE}/{first_obligation(token_mode)}"
+    read = token_mode.get(route, headers={**QA_ACTING, **AS_TENANT})
+    assert read.status_code == 200, read.text
+    for method, path, body in (
+        ("post", f"{route}/status", {"action": "start"}),
+        ("put", f"{route}/assignee", {"assignee_id": None}),
+        ("post", f"{route}/comments", {"body": "Example comment (synthetic)"}),
+    ):
+        refused = token_mode.request(
+            method, path, json=body, headers=keyed({**QA_ACTING, **AS_TENANT})
+        )
+        assert (refused.status_code, problem(refused)) == (403, "auth-forbidden")
+        analyst = token_mode.request(method, path, json=body, headers=keyed(ANALYST))
+        assert (analyst.status_code, problem(analyst)) == (403, "auth-forbidden")
+        other = token_mode.request(method, path, json=body, headers=keyed(STAFF_OF_OTHER))
+        assert (other.status_code, problem(other)) == (404, "obligation-not-found")
+        anonymous = token_mode.request(method, path, json=body, headers=keyed(AS_TENANT))
+        assert (anonymous.status_code, problem(anonymous)) == (401, "auth-token-required")
+
+
+def test_token_mode_assigns_only_an_active_user_of_the_tenant() -> None:
+    members = FakeTenantMembers([(TENANT, OWNER_ID), (TENANT, STAFF_ID)], disabled=[OWNER_ID])
+    with TestClient(app_in("token", members)) as client:
+        route = f"{ROUTE}/{first_obligation(client)}/assignee"
+        assigned = client.put(route, json={"assignee_id": str(STAFF_ID)}, headers=keyed(OWNER))
+        assert assigned.status_code == 200, assigned.text
+        assert assigned.json()["assignee_id"] == str(STAFF_ID)
+        stranger = UserId.new()
+        for user in (stranger, OWNER_ID):
+            refused = client.put(route, json={"assignee_id": str(user)}, headers=keyed(OWNER))
+            assert (refused.status_code, problem(refused)) == (422, "obligation-assignee-unknown")
+        members.down = True
+        down = client.put(route, json={"assignee_id": str(OWNER_ID)}, headers=keyed(OWNER))
+        assert (down.status_code, problem(down)) == (503, "identity-unavailable")
+        unassigned = client.put(route, json={"assignee_id": None}, headers=keyed(OWNER))
+        assert unassigned.json()["assignee_id"] is None
+    assert members.asked == [
+        (TENANT, STAFF_ID),
+        (TENANT, stranger),
+        (TENANT, OWNER_ID),
+        (TENANT, OWNER_ID),
+    ], "nobody is asked about to unassign"
+
+
+def test_dual_mode_checks_the_assignee_of_a_signed_in_caller_only() -> None:
+    members = FakeTenantMembers([(TENANT, STAFF_ID)])
+    with TestClient(app_in("dual", members)) as client:
+        route = f"{ROUTE}/{first_obligation(client)}/assignee"
+        stranger = str(UserId.new())
+        kept = client.put(route, json={"assignee_id": stranger}, headers=keyed(AS_TENANT))
+        assert kept.json()["assignee_id"] == stranger
+        assert members.asked == []
+        refused = client.put(route, json={"assignee_id": stranger}, headers=keyed(OWNER))
+        assert refused.status_code == 200, "the assignee it has needs no check"
+        checked = client.put(route, json={"assignee_id": str(STAFF_ID)}, headers=keyed(OWNER))
+        assert checked.json()["assignee_id"] == str(STAFF_ID)
+        assert members.asked == [(TENANT, STAFF_ID)]

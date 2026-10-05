@@ -30,18 +30,31 @@ from domain_kernel.access import Role
 from domain_kernel.ids import TenantId
 from obligation.main import build_app
 from obligation.settings import ObligationSettings
+from obligation.testing import FakeRuleVersionReader, FakeTenantMembers
 from py_common.auth.testing import TestIssuer, bearer
 
 TENANT_ID = "7d0f4d56-2a8e-4c1b-9f3e-5b6a1c2d3e4f"
+TRACKING = frozenset(
+    f"{method} {base}/{{obligation_id}}{suffix}"
+    for base in ("/v1/obligation/obligations", "/v1/obligations")
+    for method, suffix in (
+        ("GET", ""),
+        ("POST", "/status"),
+        ("PUT", "/assignee"),
+        ("POST", "/comments"),
+    )
+)
+"""The tracking routes, under the service's prefix and in the public API."""
 OPERATIONS = frozenset(
     {
         "GET /health",
         "GET /ready",
         "GET /v1/obligation/obligations",
         "GET /v1/obligation/ping",
+        *TRACKING,
     }
 )
-TOKEN_OPERATIONS = frozenset({"GET /v1/obligation/obligations"})
+TOKEN_OPERATIONS = frozenset({"GET /v1/obligation/obligations", *TRACKING})
 EXCLUDED: dict[str, str] = {}
 CHECKS = cast(
     list[CheckFunction],
@@ -55,7 +68,9 @@ CHECKS = cast(
 EXAMPLES = 200 if os.environ.get("HYPOTHESIS_PROFILE") == "nightly" else 25
 
 app = build_app(
-    ObligationSettings(_env_file=None, service_name="obligation", obligation_store="memory")
+    ObligationSettings(_env_file=None, service_name="obligation", obligation_store="memory"),
+    rules=FakeRuleVersionReader(),
+    members=FakeTenantMembers(),
 )
 schema = schemathesis.openapi.from_asgi("/openapi.json", app).include(
     func=lambda ctx: ctx.operation.label in OPERATIONS and ctx.operation.label not in EXCLUDED
@@ -69,7 +84,9 @@ token_app = build_app(
         service_name="obligation",
         obligation_store="memory",
         **ISSUER.settings_overrides("token"),
-    )
+    ),
+    rules=FakeRuleVersionReader(),
+    members=FakeTenantMembers(),
 )
 token_schema = schemathesis.openapi.from_asgi("/openapi.json", token_app).include(
     func=lambda ctx: ctx.operation.label in TOKEN_OPERATIONS

@@ -14,6 +14,7 @@ from identity.application.tenancy import (
     DisableUser,
     InviteUser,
     ListUsers,
+    ReadMembership,
 )
 from identity.domain.channel_consent import ChannelUnitOfWorkFactory
 from identity.domain.provider import DevIdentityProvider, IdentityProvider
@@ -45,6 +46,7 @@ class Wiring:
     create_tenant: CreateTenant
     current_user: CurrentUser
     list_users: ListUsers
+    read_membership: ReadMembership
     invite_user: InviteUser
     change_roles: ChangeRoles
     disable_user: DisableUser

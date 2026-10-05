@@ -135,12 +135,14 @@ def test_dev_clients_come_from_the_committed_file_or_the_setting() -> None:
     assert set(committed) == {
         "applicability-engine",
         "notification",
+        "obligation",
         "pipeline",
         "qa",
         "whatsapp-bot",
         "worker",
     }
     assert committed["applicability-engine"] == {Scope.TENANT_ACT}
+    assert committed["obligation"] == {Scope.TENANT_ACT}
     assert committed["notification"] == frozenset()
     given = identity_settings(
         identity_dev_clients="qa=llm:call, bot = tenant:act+llm:call"

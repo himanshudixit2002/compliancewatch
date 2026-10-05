@@ -43,6 +43,10 @@ export interface Obligation {
   periodEnd: string | null;
   closedAt: string | null;
   closedReason: ClosureReason | null;
+  /** The profile version of the decision that made it; null for one made before it was kept. */
+  profileVersion: number | null;
+  /** The user of the tenant it is given to; null for nobody. */
+  assigneeId: string | null;
 }
 
 /** The figures in the list's summary row. */
@@ -105,6 +109,8 @@ export function obligationFromDto(dto: ObligationDto): Obligation {
     periodEnd: dto.period_end,
     closedAt: dto.closed_at,
     closedReason: dto.closed_reason,
+    profileVersion: dto.profile_version,
+    assigneeId: dto.assignee_id,
   };
 }
 

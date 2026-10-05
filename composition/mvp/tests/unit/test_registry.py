@@ -21,6 +21,7 @@ from cw_mvp.registry import (
 )
 from cw_mvp.testing import MEMORY_SERVICES, mvp_settings
 from py_common.settings import Settings
+from qa.infrastructure.obligation_client import OBLIGATIONS_PATH as QA_OBLIGATIONS_PATH
 from qa.main import build_app as build_qa
 from qa.settings import QaSettings
 
@@ -84,14 +85,29 @@ def test_every_url_of_another_service_is_a_registered_url_field(entry: ServiceEn
 
 def test_routes_that_call_other_services_go_one_level_deep() -> None:
     callers = [entry for entry in REGISTRY if entry.loopback_routes]
-    assert [entry.name for entry in callers] == ["applicability-engine", "qa"]
+    assert [entry.name for entry in callers] == ["applicability-engine", "obligation", "qa"]
     for entry in callers:
         assert set(entry.loopback_routes) <= set(EXPOSURE[entry.name])
         assert entry.calls, f"{entry.name} lists loopback routes but calls no service"
         for called in entry.calls:
-            assert not BY_NAME[called].loopback_routes, (
-                f"{called} is called by {entry.name} and makes calls of its own"
+            target = BY_NAME[called]
+            if not target.loopback_routes:
+                continue
+            assert target.called_routes, (
+                f"{called} is called by {entry.name} and makes calls of its own: list the "
+                "routes the calls reach as its called_routes"
             )
+            assert not set(target.called_routes) & set(target.loopback_routes), (
+                f"{entry.name} calls a route of {called} that makes calls of its own"
+            )
+    assert not BY_NAME["identity"].loopback_routes, "every service may call identity"
+
+
+def test_the_routes_a_caller_reaches_are_the_ones_listed() -> None:
+    obligation = BY_NAME["obligation"]
+    assert set(obligation.called_routes) <= set(EXPOSURE["obligation"])
+    assert f"GET {QA_OBLIGATIONS_PATH}" in obligation.called_routes, "qa reads the list"
+    assert [entry.name for entry in REGISTRY if entry.called_routes] == ["obligation"]
 
 
 @pytest.mark.parametrize("entry", REGISTRY, ids=lambda entry: entry.name)

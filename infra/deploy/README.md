@@ -52,7 +52,7 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_OTEL_ENDPOINT` (+ header) | secret | secret | secret | secret | secret | secret | secret | secret | - |
 | `CW_AUTH_MODE` | env | env | env | env | env | env | env | env | - |
 | `CW_AUTH_JWKS_URL`, `CW_AUTH_ISSUER`, `CW_AUTH_AUDIENCE`, `CW_AUTH_LEEWAY_SECONDS` | env (issuer and audience only: identity verifies with its own keys) | env | env | env | env | env | env | env | - |
-| `CW_IDENTITY_URL`, `CW_SERVICE_CLIENT_ID`, `CW_SERVICE_CLIENT_SECRET` | - | - | - | - | env / env / secret (rulebook reads) | - | env / env / secret (worker and `pipeline-embed`) | env / env / secret (qa) | - |
+| `CW_IDENTITY_URL`, `CW_SERVICE_CLIENT_ID`, `CW_SERVICE_CLIENT_SECRET` | - | - | - | env / env / secret (assignee checks at identity, client with tenant:act) | env / env / secret (rulebook reads) | - | env / env / secret (worker and `pipeline-embed`) | env / env / secret (qa) | - |
 | `BOT_SERVICE_CLIENT_ID`, `BOT_SERVICE_CLIENT_SECRET` | - | - | - | - | - | - | - | - | env / secret (identity at `IDENTITY_API_URL`) |
 | `CW_AUTH_PROVIDER`, `CW_SUPABASE_URL`, `CW_SUPABASE_SERVICE_ROLE_KEY`, `CW_SUPABASE_JWT_SECRET` | env / env / secret / secret (`supabase`; `fake` is refused with `CW_ENV=prod`; the JWT secret only for a project on the legacy HS256 secret; owner identity-partner) | - | - | - | - | - | - | - | - |
 | `CW_IDENTITY_SIGNING_KEYS` | secret (one key set per environment, from `identity-admin signing-key new`; required outside local and test) | - | - | - | - | - | - | - | - |

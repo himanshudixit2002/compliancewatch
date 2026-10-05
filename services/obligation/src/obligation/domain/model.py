@@ -1,19 +1,29 @@
 """The obligation aggregate: one duty for one business, for one period when the rule recurs.
 
-An obligation is created from a rule version's template for a business the rule applies to. It
-moves through the kernel's status table (open, in progress, done, waived, closed as not
-applicable), can be rescheduled while open, and once closed never changes again. Every change
-returns the new obligation and the event that records it; the application layer persists both
-in one transaction.
+An obligation is created from a rule version's template for a business the rule applies to,
+with the profile version the decision that made it was computed from. It moves through the
+kernel's status table (open, in progress, done, waived, closed as not applicable), can be
+rescheduled and given to an assignee while open, and once closed never changes again. A
+rescheduling or a closure returns the new obligation and the event that records it; the
+application layer persists both in one transaction. Starting and assigning publish no event: the
+change log and the audit log record them.
 """
 
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Self
 
-from domain_kernel._validation import require_aware, require_instance, require_text
+from domain_kernel._validation import require_aware, require_instance, require_int, require_text
 from domain_kernel.errors import InvariantViolationError
-from domain_kernel.ids import BusinessId, DecisionId, ObligationId, RuleVersionId, TenantId, UserId
+from domain_kernel.ids import (
+    BusinessId,
+    CorrelationId,
+    DecisionId,
+    ObligationId,
+    RuleVersionId,
+    TenantId,
+    UserId,
+)
 from domain_kernel.recurrence import Period
 from domain_kernel.status import (
     OBLIGATION_TRANSITIONS,
@@ -48,6 +58,9 @@ class Obligation:
     closed_at: datetime | None = None
     closed_reason: ClosureReason | None = None
     closed_by: UserId | None = None
+    profile_version: int | None = None
+    """The profile version of the decision that made it; None for one made before it was kept."""
+    assignee_id: UserId | None = None
 
     def __post_init__(self) -> None:
         require_instance(self.id, ObligationId, "id")
@@ -76,6 +89,10 @@ class Obligation:
             require_instance(self.closed_reason, ClosureReason, "closed_reason")
         if self.closed_by is not None:
             require_instance(self.closed_by, UserId, "closed_by")
+        if self.profile_version is not None:
+            require_int(self.profile_version, "profile_version", minimum=1)
+        if self.assignee_id is not None:
+            require_instance(self.assignee_id, UserId, "assignee_id")
 
     @property
     def is_open(self) -> bool:
@@ -100,11 +117,23 @@ class Obligation:
         )
 
     def start(self, at: datetime) -> Self:
+        """Move an open obligation to in progress; one already in progress cannot start again
+        (``InvalidTransitionError``)."""
         self._require_open()
         OBLIGATION_TRANSITIONS.assert_transition(self.status, ObligationStatus.IN_PROGRESS)
         return replace(
             self, status=ObligationStatus.IN_PROGRESS, updated_at=require_aware(at, "at")
         )
+
+    def assign(self, assignee: UserId | None, *, at: datetime) -> Self:
+        """Give the open obligation to ``assignee``, or to nobody with None. The assignee must
+        change: assigning the one it has is the caller's no-op, not a change."""
+        self._require_open()
+        if assignee is not None:
+            require_instance(assignee, UserId, "assignee")
+        if assignee == self.assignee_id:
+            raise InvariantViolationError(f"obligation {self.id} has that assignee already")
+        return replace(self, assignee_id=assignee, updated_at=require_aware(at, "at"))
 
     def reschedule(
         self,
@@ -136,10 +165,16 @@ class Obligation:
         return moved, event
 
     def close(
-        self, reason: ClosureReason, *, at: datetime, by: UserId | None = None
+        self,
+        reason: ClosureReason,
+        *,
+        at: datetime,
+        by: UserId | None = None,
+        correlation_id: CorrelationId | None = None,
     ) -> tuple[Self, ObligationClosed]:
         """Close for a reason; the kernel decides the terminal status and whether the move is
-        allowed from the current one."""
+        allowed from the current one. ``correlation_id`` ties the event to the request that
+        closed it; a new one otherwise."""
         self._require_open()
         status = close_obligation(self.status, reason)
         closed = replace(
@@ -153,6 +188,7 @@ class Obligation:
         event = ObligationClosed(
             tenant_id=self.tenant_id,
             occurred_at=at,
+            correlation_id=correlation_id or CorrelationId.new(),
             obligation_id=self.id,
             business_id=self.business_id,
             rule_version_id=self.rule_version_id,

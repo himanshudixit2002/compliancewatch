@@ -1,18 +1,21 @@
 # obligation service
 
-Part of the ComplianceWatch monorepo. **Domain, use cases, the Postgres unit of work, a read route and the worker (the applicability.decided consumer, the rule events consumer, the reminder sweep and the rolling window) exist; no write API yet.**
+Part of the ComplianceWatch monorepo. **Domain, use cases, the Postgres unit of work, the read routes, the tracking routes (status, assignee, comments, each with an Idempotency-Key and an audit row) and the worker (the applicability.decided consumer, the rule events consumer, the reminder sweep and the rolling window) exist.**
 Design reference: Project Foundation guide, sections 7 and 14.
 
 - **Owns:** Obligations, evidence metadata, the append-only change log of every obligation (`obligation_change`); builds obligations from the RuleVersion template, computes due dates, schedules reminders
 - **Owning team:** Core Product (guide section 14)
-- **Consumes:** applicability.decided; rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed; user actions
+- **Consumes:** applicability.decided; rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed; user actions (start, complete, waive, assign, comment)
 - **Emits / publishes:** obligation.created, obligation.rescheduled, obligation.closed and obligation.due_soon (through the outbox)
 
 ## What is here
 
 - `domain/model.py`: the `Obligation` aggregate, one per business and rule version, plus one
-  per period when the rule recurs (ADR-015). `start`, `reschedule` and `close` return the new
-  obligation and the event that records it; a closed obligation never changes again.
+  per period when the rule recurs (ADR-015), with the profile version of the decision that made
+  it (`profile_version`, null for one made before it was kept) and its assignee. `reschedule`
+  and `close` return the new obligation and the event that records it; `start` and `assign`
+  return the new obligation alone, since no other service acts on them. A closed obligation
+  never changes again.
 - `application/materialise.py`: `MaterialiseObligations` creates the obligations a rule
   version implies for a business, idempotent on (business, rule version, period), inside a
   rolling window of periods; due dates are the end of the due day in India Standard Time.
@@ -30,8 +33,34 @@ Design reference: Project Foundation guide, sections 7 and 14.
   caused it, the actor and the correlation id. The change's id is the event's id, and it is
   written on the same connection as the event's outbox row, so the two commit or roll back
   together. A use case that leaves an obligation unchanged, or skips a closed one, writes
-  neither. This table is the single history of an obligation; later kinds (started, completed,
-  assigned) widen `ChangeKind` and its CHECK constraint. The change log has no read route yet.
+  neither. This table is the single history of an obligation. A person's changes no event records
+  are rows too, each with an id of its own (`history.started_change` and `assignment_change`):
+  `started`, `assigned` and `unassigned`, the last two naming the assignee before and after; a
+  completion or a waiver is a `closed` change with the reason `completed` or `waived_by_user`, and
+  `note` keeps what the person said (a waiver's reason). The detail route reads it.
+- `domain/comments.py` and `application/tracking.py`: what a tenant's members do with an
+  obligation. `ReadObligation` answers it with the facts of its rule version from the
+  `rule_version_ref` cache (title, rule key, seed status, the approvers of the round it was
+  published from and when), its verified citations, its history and its comments, oldest first;
+  when the cache has no row of the version (an obligation made before migration 0004), it reads
+  the rulebook with no unit of work open and fills the cache, as the decision consumer does.
+  `ChangeStatus` starts (open to in progress), completes or waives one (a reason of at least ten
+  characters), the row locked for the change: a closed obligation is 409 `obligation-closed`, a
+  move the kernel's table refuses (starting one in progress) 422 `invalid-transition`.
+  Completing and waiving publish obligation.closed, which the notification service sends nothing
+  for; starting publishes nothing. `AssignObligation` gives an open one to a user of the tenant,
+  or to nobody: when a verified token named the caller, the identity service is asked first,
+  with no unit of work open, whether the user is an active user of the tenant
+  (`infrastructure/identity_client.py`, `GET /v1/identity/users/{user_id}/membership` with this
+  service's token; 422 `obligation-assignee-unknown` when not, 503 `identity-unavailable` when it
+  cannot say). Without a token (`header` mode, or `dual` without one) nobody can be held to the
+  tenant's users, so the assignee is kept as the request names it: the local product and the web
+  stack run that way, and token mode, as in production, always checks. `AddComment` adds a comment
+  by the caller, on an open or a closed obligation. Every change writes an `audit.event` row in its
+  unit of work (`py_common.audit`): `obligation.status.start`, `.complete` and `.waive` with the
+  reason, `obligation.assign` with the assignee before and after, and `obligation.comment` naming
+  the comment, never its text; the actor is the user a token named, with their roles, else
+  `system:obligation`.
 - `application/decisions.py`: `ApplyDecision` acts on one applicability decision in two steps:
   `plan` reads the rule version (`domain/ports.py` `RuleVersionReader`,
   `infrastructure/rulebook_client.py`) with no transaction open, and `apply` writes. `applies`
@@ -99,6 +128,14 @@ Design reference: Project Foundation guide, sections 7 and 14.
   `obligation_decision`, the latest applies or not_applicable decision per business and rule
   version under the tenant policy, which the rolling window reads. No backfill: a business
   decided before this release has its window rolled from its next decision on.
+- `migrations/versions/20261006_0005_obligation_tracking.py`: `profile_version` and `assignee_id`
+  on `obligation` (and `profile_version` on `obligation_decision`, which the rolling window gives
+  the periods it makes); the change kinds `started`, `assigned` and `unassigned` with the
+  assignee columns and `note` on `obligation_change`; `obligation_comment` (forced row-level
+  security, append-only with the erasure switch like the change log, RESTRICT to its obligation,
+  a body of 1 to 2,000 characters); and py-common's `idempotency_key`, which the daily purge of the
+  worker clears. Expand-only; the downgrade narrows the kind check NOT VALID, so it deletes no
+  change. A tenant erasure deletes the comments before the obligations.
 - `migrations/versions/20261004_0003_obligation_reminders.py`: `obligation_reminder` (one row per
   reminder, unique per obligation, due date and threshold and per obligation and index, forced
   row-level security, cascades with its obligation) and `obligation_tenant`, the tenant
@@ -146,7 +183,21 @@ own due date.
 
 | Route | What it does |
 | --- | --- |
-| `GET /v1/obligation/obligations?business_id=&due_from=&due_to=&rule_version_id=` | The business's obligations with `obligation_id, business_id, rule_version_id, decision_id, title, steps, evidence_type, period_label, period_start, period_end, due_at, status, closed_at, closed_reason`. `due_from` and `due_to` are days in India, both included; an obligation without a due date is left out when either is given. `due_at` is the end of the due day in India, in UTC; the period is half-open. Needs a tenant (401 `obligation-tenant-required` without one; see below); a window that ends before it starts, spans more than 366 days or ends on 9999-12-31 (there is no day after it) is 422 `obligation-window-invalid` |
+| `GET /v1/obligation/obligations?business_id=&due_from=&due_to=&rule_version_id=` | The business's obligations with `obligation_id, business_id, rule_version_id, decision_id, title, steps, evidence_type, period_label, period_start, period_end, due_at, status, closed_at, closed_reason, profile_version, assignee_id`. `due_from` and `due_to` are days in India, both included; an obligation without a due date is left out when either is given. `due_at` is the end of the due day in India, in UTC; the period is half-open. Needs a tenant (401 `obligation-tenant-required` without one; see below); a window that ends before it starts, spans more than 366 days or ends on 9999-12-31 (there is no day after it) is 422 `obligation-window-invalid` |
+| `GET /v1/obligation/obligations/{obligation_id}` | One obligation with `rule_version` (rule key, title, status, effective dates, `seed_status` and `reviewed`, false while the seed rule needs review, and `approved_by` with `published_at`: the reviewed-by line; null when the rulebook has no such version), `citations` (verified), `history` (every change, oldest first) and `comments` (oldest first). 404 `obligation-not-found` for another tenant's; 503 `rulebook-unavailable` when the cache lacks the version and the rulebook cannot answer |
+| `POST /v1/obligation/obligations/{obligation_id}/status` | `{"action": "start" \| "complete" \| "waive", "reason": ""}`: the obligation after the change. A waiver needs a reason of at least ten characters (422 `request-invalid`); 409 `obligation-closed`, 422 `invalid-transition` |
+| `PUT /v1/obligation/obligations/{obligation_id}/assignee` | `{"assignee_id": "<user>" \| null}`: the obligation after the change; the assignee it has already changes nothing. 409 `obligation-closed`; with a verified caller 422 `obligation-assignee-unknown` and 503 `identity-unavailable` |
+| `POST /v1/obligation/obligations/{obligation_id}/comments` | `{"body": "..."}` (1 to 2,000 characters once trimmed): 201 with the comment, its author and their label |
+
+The four tracking routes are in the public API too (tag `public`, with `x-roles`, in
+`packages/contracts/openapi/public.v1.json` from 0.2.0): `GET /v1/obligations/{obligation_id}`,
+`POST /v1/obligations/{obligation_id}/status`, `PUT /v1/obligations/{obligation_id}/assignee` and
+`POST /v1/obligations/{obligation_id}/comments` run the same handlers. Every change requires an
+`Idempotency-Key` header (8 to 128 printable characters; 428 `idempotency-key-required` without
+one): a retry with the same key and body gets the first answer back for 24 hours with
+`Idempotent-Replayed: true`, the same key with another body is 422 `idempotency-key-reused`, and a
+retry while the first runs is 409. Keys are kept per tenant in `idempotency_key`, each in its own
+short transaction (`py_common.idempotency`).
 
 Who calls and for which tenant comes from `py_common.auth` by `CW_AUTH_MODE` (`api/deps.py`):
 
@@ -157,7 +208,15 @@ Who calls and for which tenant comes from `py_common.auth` by `CW_AUTH_MODE` (`a
   tenant, and the user needs one of the tenant member roles (owner, staff, ca_admin, ca_staff,
   compliance_lead); an `x-tenant-id` naming another tenant is a 403 `auth-tenant-mismatch`. A
   service (the qa service reading the obligations a question is about) names the tenant in
-  `x-tenant-id` and needs the tenant:act scope. Anyone else is a 403 `auth-forbidden`.
+  `x-tenant-id` and needs the tenant:act scope; it may read, never change an obligation. Anyone
+  else is a 403 `auth-forbidden`.
+
+The changes record who made them: the user a token names (`closed_by`, the change's `actor`, the
+comment's `author_id`) labelled with their roles in the audit row and the comment, or nobody,
+labelled `system:obligation`, when no token named the caller. Outside `header` mode the service
+calls identity with its own token: `CW_SERVICE_CLIENT_ID` (obligation) and
+`CW_SERVICE_CLIENT_SECRET`, a client with the tenant:act scope (`identity_dev_clients.toml` makes
+it in local and test runs), or the token the one deployable mints in its process.
 
 The unit of work sets the tenant for row-level security, so a read never sees another tenant's
 rows.
@@ -176,10 +235,10 @@ been used in a session.
 
 ```
 src/obligation/
-  api/             # router.py (the read route), schemas.py (ObligationOut), deps.py (caller and tenant, wiring)
-  application/     # materialise.py, changes.py, decisions.py, guard.py, rule_events.py, window.py, reminders.py, queries.py
-  domain/          # model.py (Obligation, DueWindow), events.py, errors.py, reminders.py, rule_versions.py, ports.py, repository.py (protocols)
-  infrastructure/  # models.py, repository.py (Postgres unit of work with the outbox), memory.py, rulebook_client.py, metrics.py
+  api/             # router.py (the read and tracking routes, and the public API's), schemas.py, deps.py (caller and tenant, wiring)
+  application/     # materialise.py, changes.py, decisions.py, guard.py, rule_events.py, window.py, reminders.py, queries.py, tracking.py
+  domain/          # model.py (Obligation, DueWindow), events.py, errors.py, history.py, comments.py, reminders.py, rule_versions.py, ports.py, repository.py (protocols)
+  infrastructure/  # models.py, repository.py (Postgres unit of work with the outbox and the audit), memory.py, rulebook_client.py, identity_client.py, metrics.py
   wiring.py        # what the api layer gets from the composition root
   main.py          # composition root: wire(settings), build_app(settings), problem statuses
   worker.py        # the worker's composition root: components(settings), both handlers, the sweep and window jobs
@@ -199,7 +258,7 @@ From the repo root:
 ```bash
 make dev                          # infrastructure (Docker Compose)
 make migrate SERVICE=obligation
-make run SERVICE=obligation           # http://localhost:8005/health, /ready, /v1/obligation/obligations
+make run SERVICE=obligation           # http://localhost:8005/health, /ready, /v1/obligation/obligations[/{id}]
 make worker SERVICE=obligation        # both consumers (and the sweep and the window when enabled)
 uv run --package compliancewatch-obligation obligation-sweep --once --now 2026-11-15T10:00:00+05:30 --tenant <id>
 make test                         # unit + contract tests with the coverage gate
