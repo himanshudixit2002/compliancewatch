@@ -1,6 +1,32 @@
 {
   "components": {
     "schemas": {
+      "AnswerCitationOut": {
+        "description": "A clause the answer cites, with the quote checked against the clause's text.",
+        "properties": {
+          "clause_ref": {
+            "title": "Clause Ref",
+            "type": "string"
+          },
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "quote": {
+            "description": "Verbatim from the clause, checked before it is returned",
+            "title": "Quote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "clause_ref",
+          "document_id",
+          "quote"
+        ],
+        "title": "AnswerCitationOut",
+        "type": "object"
+      },
       "AskIn": {
         "additionalProperties": false,
         "properties": {
@@ -70,7 +96,7 @@
           },
           "citations": {
             "items": {
-              "$ref": "#/components/schemas/CitationOut"
+              "$ref": "#/components/schemas/AnswerCitationOut"
             },
             "title": "Citations",
             "type": "array"
@@ -126,31 +152,6 @@
           "as_of"
         ],
         "title": "AskOut",
-        "type": "object"
-      },
-      "CitationOut": {
-        "properties": {
-          "clause_ref": {
-            "title": "Clause Ref",
-            "type": "string"
-          },
-          "document_id": {
-            "format": "uuid",
-            "title": "Document Id",
-            "type": "string"
-          },
-          "quote": {
-            "description": "Verbatim from the clause, checked before it is returned",
-            "title": "Quote",
-            "type": "string"
-          }
-        },
-        "required": [
-          "clause_ref",
-          "document_id",
-          "quote"
-        ],
-        "title": "CitationOut",
         "type": "object"
       },
       "HealthResponse": {
@@ -444,8 +445,145 @@
         ]
       }
     },
+    "/v1/qa": {
+      "post": {
+        "description": "The layers answer in turn, cheapest first: the business's own obligations for \"when is\nmy GSTR-3B due\" and \"what is due this month\" (no model call), then the knowledge graph\nwhen it is on for the tenant, then a search of the clauses in force. ``outcome`` is\n``answered`` with at least one citation whose quote was checked against its clause, or\n``not_covered`` with a fixed sentence and the ``reason``. ``layers`` lists every layer that\nran. 404 when ``business_node_id`` names no profile node of the tenant; 429 with the\ngateway's ``Retry-After`` when the model budget is used up; 503 when a service the answer\nneeds did not answer.",
+        "operationId": "ask_v1_qa_post",
+        "parameters": [
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Answer a question with verified citations, or say it is not covered",
+        "tags": [
+          "public",
+          "questions"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
+        ]
+      }
+    },
     "/v1/qa/ask": {
       "post": {
+        "description": "The layers answer in turn, cheapest first: the business's own obligations for \"when is\nmy GSTR-3B due\" and \"what is due this month\" (no model call), then the knowledge graph\nwhen it is on for the tenant, then a search of the clauses in force. ``outcome`` is\n``answered`` with at least one citation whose quote was checked against its clause, or\n``not_covered`` with a fixed sentence and the ``reason``. ``layers`` lists every layer that\nran. 404 when ``business_node_id`` names no profile node of the tenant; 429 with the\ngateway's ``Retry-After`` when the model budget is used up; 503 when a service the answer\nneeds did not answer.",
         "operationId": "ask_v1_qa_ask_post",
         "parameters": [
           {

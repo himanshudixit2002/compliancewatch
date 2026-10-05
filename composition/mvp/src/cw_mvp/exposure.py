@@ -189,6 +189,8 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
     "qa": {
         "GET /v1/qa/ping": PUBLIC,
         "POST /v1/qa/ask": PUBLIC,
+        # The public API's ask: the same handler as the route above.
+        "POST /v1/qa": PUBLIC,
     },
     "llm-gateway": {
         "GET /v1/llm-gateway/ping": INTERNAL,

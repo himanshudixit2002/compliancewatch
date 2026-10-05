@@ -173,7 +173,7 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "POST /v1/notification/notifications/{notification_id}/resend",
         }
     ),
-    "qa": frozenset({"POST /v1/qa/ask"}),
+    "qa": frozenset({"POST /v1/qa/ask", "POST /v1/qa"}),
 }
 """Routes that must answer 401 without ``x-tenant-id``."""
 

@@ -57,10 +57,11 @@ OPERATIONS = frozenset(
         "GET /health",
         "GET /ready",
         "POST /v1/qa/ask",
+        "POST /v1/qa",
         "GET /v1/qa/ping",
     }
 )
-TOKEN_OPERATIONS = frozenset({"POST /v1/qa/ask"})
+TOKEN_OPERATIONS = frozenset({"POST /v1/qa/ask", "POST /v1/qa"})
 EXCLUDED: dict[str, str] = {}
 CHECKS = cast(
     list[CheckFunction],

@@ -162,7 +162,9 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         QaSettings,
         build_qa,
         url_fields=("rulebook_url", "profile_url", "obligation_url", "llm_gateway_url"),
-        loopback_routes=("POST /v1/qa/ask",),
+        # A question reads the profile, the business's obligations and the rulebook and calls
+        # the gateway, under the service's prefix and as the public API's ask.
+        loopback_routes=("POST /v1/qa/ask", "POST /v1/qa"),
         takes_token_source=True,
     ),
     ServiceEntry("llm-gateway", "llm_gateway", GatewaySettings, build_llm_gateway),

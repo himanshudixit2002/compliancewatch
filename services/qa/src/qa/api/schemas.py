@@ -1,4 +1,10 @@
-"""Request and response bodies of the ask route."""
+"""Request and response bodies of the ask routes, ``POST /v1/qa/ask`` and the public API's
+``POST /v1/qa``.
+
+A cited clause is ``AnswerCitationOut``: the public API merges every service's schemas into one
+spec, where the obligation service's ``CitationOut`` already names the verified quote of an
+obligation's clause, a different shape.
+"""
 
 from datetime import date
 from typing import Any, Self
@@ -32,7 +38,9 @@ class AskIn(BaseModel):
     )
 
 
-class CitationOut(BaseModel):
+class AnswerCitationOut(BaseModel):
+    """A clause the answer cites, with the quote checked against the clause's text."""
+
     clause_ref: str
     document_id: UUID
     quote: str = Field(description="Verbatim from the clause, checked before it is returned")
@@ -47,7 +55,7 @@ class LayerOut(BaseModel):
 class AskOut(BaseModel):
     outcome: Outcome
     answer: str = Field(description="A fixed sentence when the outcome is not_covered")
-    citations: list[CitationOut]
+    citations: list[AnswerCitationOut]
     layer: Layer = Field(description="The layer that decided")
     layers: list[LayerOut] = Field(description="Every layer that ran, in order")
     plan: dict[str, Any] | None = Field(
@@ -65,7 +73,7 @@ class AskOut(BaseModel):
             outcome=result.outcome,
             answer=result.answer,
             citations=[
-                CitationOut(
+                AnswerCitationOut(
                     clause_ref=citation.clause_ref,
                     document_id=citation.document_id.value,
                     quote=citation.quote,

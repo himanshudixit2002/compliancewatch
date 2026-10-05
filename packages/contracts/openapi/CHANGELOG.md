@@ -7,6 +7,20 @@ documentation is a patch; a break (see `BREAKING.md`) is a major bump and a new 
 next to this one. The change that bumps the version adds its section here, and the build fails
 while the version in `public.meta.json` has no section.
 
+## 0.4.0
+
+Asking a question, from the qa service:
+
+- `POST /v1/qa` is the public face of `POST /v1/qa/ask`, with the same body and answer: a
+  question about one business (`business_node_id`, any profile node of the tenant) on a date
+  (`as_of`, today in India when absent), answered in layers, cheapest first, as `answered` with
+  citations whose quotes were checked against their clauses, or `not_covered` with a fixed
+  sentence and the reason. `layers` lists every layer that ran and `layer` the one that decided.
+  Every tenant member role may ask; asking creates nothing, so it takes no Idempotency-Key.
+  The answer has no confidence and no related obligations, which the guide's example shows:
+  the service does not produce them. A cited clause is the new schema `AnswerCitationOut`
+  (clause, document and quote), named so beside the obligation's `CitationOut`.
+
 ## 0.3.0
 
 The changes feed, from the rulebook, and the impact of a change, from the applicability engine.

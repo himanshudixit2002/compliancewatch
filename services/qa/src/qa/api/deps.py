@@ -11,15 +11,16 @@ member of it asks for:
   before tokens existed.
 
 Answers read tenant data (profiles, obligations), so no tenant at all is this service's own 401
-``qa-tenant-required``.
+``qa-tenant-required``. ``PUBLIC_ROUTE`` is the ``openapi_extra`` of the public API's ask: the
+roles that may call it, as ``x-roles``.
 """
 
-from typing import Annotated
+from typing import Annotated, Any, Final
 from uuid import uuid4
 
 from fastapi import Depends, Request
 
-from domain_kernel.access import TENANT_MEMBER_ROLES, Principal, Scope
+from domain_kernel.access import TENANT_MEMBER_ROLES, Principal, Role, Scope
 from domain_kernel.ids import TenantId
 from py_common.auth.fastapi import require_roles, tenant_scope
 from py_common.request_context import correlation_id_of
@@ -30,6 +31,11 @@ member = require_roles(TENANT_MEMBER_ROLES, scopes={Scope.TENANT_ACT})
 """A user with a tenant member role or a service with tenant:act; the anonymous principal of
 ``header`` mode passes."""
 tenant_of_request = tenant_scope(True, QaTenantRequiredError)
+
+PUBLIC_ROLES: Final = tuple(role.value for role in Role if role in TENANT_MEMBER_ROLES)
+"""The roles of a tenant's members, in the kernel's order."""
+PUBLIC_ROUTE: Final[dict[str, Any]] = {"x-roles": list(PUBLIC_ROLES)}
+"""``openapi_extra`` of a public route every member of the tenant may call."""
 
 
 async def member_tenant(

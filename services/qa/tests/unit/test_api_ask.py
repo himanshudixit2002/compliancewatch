@@ -1,5 +1,5 @@
-"""POST /v1/qa/ask: the answer shape, the layers, the plan, the problems, and the request id
-reaching every model call."""
+"""POST /v1/qa/ask and the public API's POST /v1/qa: the answer shape, the layers, the plan, the
+problems, and the request id reaching every model call."""
 
 import shutil
 from collections.abc import Iterator
@@ -20,6 +20,7 @@ from qa.testing import answer_text, plan_step, plan_text, qa_settings
 
 World = Any
 ASK = "/v1/qa/ask"
+PUBLIC_ASK = "/v1/qa"
 
 
 @contextmanager
@@ -74,6 +75,42 @@ def test_a_structured_answer(world: World) -> None:
         "reason": None,
         "as_of": "2026-04-10",
     }
+
+
+def test_the_public_ask_answers_as_the_ask_route(world: World) -> None:
+    question = body(world, "What is due next month?")
+    with api(world) as client:
+        internal = client.post(ASK, json=question, headers=headers(world))
+        public = client.post(PUBLIC_ASK, json=question, headers=headers(world))
+        foreign = client.post(
+            PUBLIC_ASK, json=question, headers={"x-tenant-id": str(world.OTHER_TENANT)}
+        )
+        missing = client.post(PUBLIC_ASK, json=question)
+    assert internal.status_code == public.status_code == 200
+    assert public.json() == internal.json()
+    assert (public.json()["outcome"], public.json()["layer"]) == ("answered", "structured")
+    assert public.json()["citations"][0]["quote"] == world.MONTHLY_QUOTE
+    assert foreign.status_code == 404
+    assert problem_type(foreign) == "qa-business-not-found"
+    assert missing.status_code == 401
+    assert problem_type(missing) == "qa-tenant-required"
+
+
+def test_the_public_ask_names_the_member_roles_and_takes_no_idempotency_key(
+    world: World,
+) -> None:
+    with api(world) as client:
+        spec = client.get("/openapi.json").json()
+    public, internal = spec["paths"][PUBLIC_ASK]["post"], spec["paths"][ASK]["post"]
+    assert public["tags"] == ["public", "questions"]
+    assert public["x-roles"] == ["owner", "staff", "ca_admin", "ca_staff", "compliance_lead"]
+    assert "x-roles" not in internal
+    assert not [p for p in public.get("parameters", []) if p["name"] == "Idempotency-Key"]
+    assert public["requestBody"] == internal["requestBody"]
+    assert public["responses"] == internal["responses"]
+    cited = spec["components"]["schemas"]["AskOut"]["properties"]["citations"]["items"]
+    assert cited == {"$ref": "#/components/schemas/AnswerCitationOut"}
+    assert "CitationOut" not in spec["components"]["schemas"]
 
 
 def test_a_kag_answer_carries_the_plan_and_the_request_id(world: World) -> None:

@@ -35,6 +35,33 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/qa": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Answer a question with verified citations, or say it is not covered
+     * @description The layers answer in turn, cheapest first: the business's own obligations for "when is
+     *     my GSTR-3B due" and "what is due this month" (no model call), then the knowledge graph
+     *     when it is on for the tenant, then a search of the clauses in force. ``outcome`` is
+     *     ``answered`` with at least one citation whose quote was checked against its clause, or
+     *     ``not_covered`` with a fixed sentence and the ``reason``. ``layers`` lists every layer that
+     *     ran. 404 when ``business_node_id`` names no profile node of the tenant; 429 with the
+     *     gateway's ``Retry-After`` when the model budget is used up; 503 when a service the answer
+     *     needs did not answer.
+     */
+    post: operations["ask_v1_qa_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/qa/ask": {
     parameters: {
       query?: never;
@@ -44,7 +71,17 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Answer a question with verified citations, or say it is not covered */
+    /**
+     * Answer a question with verified citations, or say it is not covered
+     * @description The layers answer in turn, cheapest first: the business's own obligations for "when is
+     *     my GSTR-3B due" and "what is due this month" (no model call), then the knowledge graph
+     *     when it is on for the tenant, then a search of the clauses in force. ``outcome`` is
+     *     ``answered`` with at least one citation whose quote was checked against its clause, or
+     *     ``not_covered`` with a fixed sentence and the ``reason``. ``layers`` lists every layer that
+     *     ran. 404 when ``business_node_id`` names no profile node of the tenant; 429 with the
+     *     gateway's ``Retry-After`` when the model budget is used up; 503 when a service the answer
+     *     needs did not answer.
+     */
     post: operations["ask_v1_qa_ask_post"];
     delete?: never;
     options?: never;
@@ -73,6 +110,24 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
   schemas: {
+    /**
+     * AnswerCitationOut
+     * @description A clause the answer cites, with the quote checked against the clause's text.
+     */
+    AnswerCitationOut: {
+      /** Clause Ref */
+      clause_ref: string;
+      /**
+       * Document Id
+       * Format: uuid
+       */
+      document_id: string;
+      /**
+       * Quote
+       * @description Verbatim from the clause, checked before it is returned
+       */
+      quote: string;
+    };
     /** AskIn */
     AskIn: {
       /**
@@ -106,7 +161,7 @@ export type components = {
        */
       as_of: string;
       /** Citations */
-      citations: components["schemas"]["CitationOut"][];
+      citations: components["schemas"]["AnswerCitationOut"][];
       /** @description The layer that decided */
       layer: components["schemas"]["Layer"];
       /**
@@ -124,21 +179,6 @@ export type components = {
       } | null;
       /** @description Why the question is not covered */
       reason: components["schemas"]["Reason"] | null;
-    };
-    /** CitationOut */
-    CitationOut: {
-      /** Clause Ref */
-      clause_ref: string;
-      /**
-       * Document Id
-       * Format: uuid
-       */
-      document_id: string;
-      /**
-       * Quote
-       * @description Verbatim from the clause, checked before it is returned
-       */
-      quote: string;
     };
     /** HealthResponse */
     HealthResponse: {
@@ -293,6 +333,96 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ReadyResponse"];
+        };
+      };
+    };
+  };
+  ask_v1_qa_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AskIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AskOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
     };
