@@ -32,6 +32,18 @@ the API answers. One failed step does not stop the next.
   opens for it (none of the seed rules has a free-text predicate; unsure for an unanswered
   question opens none). Each run makes a new business, named with the time it was made, since a
   closed obligation stays closed and only a new business shows the whole change again.
+- ``fanout``: the rule.published fan-out. While gstr9_annual is not published yet it sets the
+  global hold through the engine's route, publishes gstr9_annual (``cw-product publish --rule
+  gstr9_annual``), waits for the run to stand held with nothing decided, releases the hold and
+  waits for the run to complete. Once it is published (a second check on the same database) it
+  finds that run completed instead, resuming it if an earlier check left it paused, and sets and
+  releases the hold again with nothing to stop. Either way the run's counters match the directory
+  entries of the level, each synthetic registration the directory listed has its decision from
+  the fan-out (trigger rule_published) with the result its answers call for, the registrations
+  GSTR-9 applies to in both synthetic tenants have their GSTR-9 obligations, and ``audit.event``
+  holds the hold, the release and any resume this step made. The directory and the audit rows of
+  no tenant are read through ``records.PostgresRecords`` (``CW_PRODUCT_RECORDS_URL``, read only).
+  A hold an interrupted check left is lifted first; anyone else's makes the step fail.
 """
 
 import json
@@ -54,12 +66,14 @@ from cw_demo.product.evaluate import (
     registrations,
     today_in_india,
 )
-from cw_demo.product.publish import RULEBOOK, rule_versions, supported
+from cw_demo.product.publish import RULEBOOK, publish, rule_versions, supported
+from cw_demo.product.records import ProductRecords
 from cw_demo.product.tenants import (
     APPLIES,
     BUSINESS_TENANT,
     CA_FIRM_TENANT,
     NOT_APPLICABLE,
+    TENANTS,
     SyntheticTenant,
 )
 from cw_evals.qa.world import load_world
@@ -76,6 +90,7 @@ CHANGE_CARD: Final = "change_card"
 SENT_STATES: Final = frozenset({"sent", "delivered", "read"})
 CONSUMER_GROUPS: Final = (
     "applicability-engine/consumer:applicability-engine.profiles",
+    "applicability-engine/consumer:applicability-engine.rules",
     "obligation/consumer:obligation.decisions",
     "notification/consumer:notification.obligations",
 )
@@ -87,7 +102,7 @@ RELAYS: Final = (
     "notification/outbox-relay",
 )
 JOBS: Final = ("notification/notification-dispatch", "obligation/obligation-reminder-sweep")
-TASK_QUEUES: Final = ("pipeline",)
+TASK_QUEUES: Final = ("applicability", "pipeline")
 REVIEWED: Final = "reviewed"
 BUSINESSES: Final = "/v1/businesses"
 REVIEW_ITEMS: Final = f"{ENGINE}/review-items"
@@ -110,6 +125,17 @@ PROBE_FLIP: Final[tuple[tuple[str, object], ...]] = (
     ("return_filing_frequency", "quarterly"),
 )
 """The change the check makes: the registration moves to the quarterly scheme (QRMP)."""
+FAN_OUTS: Final = f"{ENGINE}/fan-outs"
+FAN_OUT_HOLD: Final = f"{ENGINE}/fan-out-hold"
+GSTR9: Final = "gstr9_annual"
+FAN_OUT_LEVEL: Final = "registration"
+"""The level of gstr9_annual, whose directory entries its fan-out decides."""
+RULE_PUBLISHED: Final = "rule_published"
+CHECK_MARK: Final = "cw-product check"
+"""How a hold or a resume of this step starts its reason, so a later check knows its own."""
+HOLD_ACTION: Final = "applicability.fanout.hold"
+RELEASE_ACTION: Final = "applicability.fanout.release"
+RESUME_ACTION: Final = "applicability.fanout.resume"
 
 
 class StepFailedError(Exception):
@@ -127,6 +153,8 @@ class CheckContext:
     golden: Path = GOLDEN
     now: Callable[[], datetime] = lambda: datetime.now(UTC)
     interval: float = POLL_SECONDS
+    records: ProductRecords | None = None
+    """The directory and the audit log, read where no route serves them (the fanout step)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -638,6 +666,284 @@ def recompute(context: CheckContext) -> list[str]:
     return lines
 
 
+# ---------------------------------------------------------------- fanout
+
+
+def fanout(context: CheckContext) -> list[str]:
+    records = context.records
+    if records is None:
+        raise StepFailedError(
+            "the fanout step reads the business directory and audit.event: set "
+            "CW_PRODUCT_RECORDS_URL (make product-check passes it)"
+        )
+    product = context.product
+    since = context.now()
+    lines = lift_own_hold(product)
+    versions = rule_versions(product, GSTR9)
+    if not versions:
+        raise StepFailedError(f"{GSTR9} has no version: run make seed SERVICE=rulebook")
+    if versions[-1]["status"] != "published":
+        run, published = publish_behind_the_hold(context, records)
+        lines += published
+    else:
+        run, verified = completed_run(context, str(versions[-1]["rule_version_id"]))
+        lines += verified
+    lines += counted(run, records)
+    lines += decided(context, run, records)
+    lines += audited(records, since)
+    return lines
+
+
+def hold(product: Product, held: bool, reason: str) -> dict[str, Any]:
+    body: dict[str, Any] = ok(
+        product.internal.put(FAN_OUT_HOLD, json={"held": held, "reason": reason})
+    )
+    return body
+
+
+def lift_own_hold(product: Product) -> list[str]:
+    """Release a hold an interrupted check left; refuse to go on under anyone else's."""
+    current = ok(product.internal.get(FAN_OUT_HOLD))
+    if not current["held"]:
+        return []
+    if not str(current["reason"]).startswith(CHECK_MARK):
+        raise StepFailedError(
+            f"the fan-out hold is set ({current['reason']!r}, by {current['set_by']}); the check "
+            "does not lift a hold it did not set"
+        )
+    hold(product, False, f"{CHECK_MARK}: lifting the hold an interrupted check left")
+    return ["lifted the hold an interrupted check left"]
+
+
+def fan_out_of(product: Product, rule_version_id: str) -> dict[str, Any]:
+    run: dict[str, Any] = answered(product.internal.get(f"{FAN_OUTS}/{rule_version_id}"))
+    return run
+
+
+def wait_for_status(context: CheckContext, rule_version_id: str, *wanted: str) -> dict[str, Any]:
+    def reached() -> dict[str, Any]:
+        run = fan_out_of(context.product, rule_version_id)
+        if run["status"] == "disabled":
+            raise StepFailedError(
+                f"the fan-out of {GSTR9} is disabled: the worker runs with the flag "
+                "applicability.fanout off (CW_APPLICABILITY_FANOUT_ENABLED)"
+            )
+        if run["status"] in ("cancelled", "failed"):
+            raise StepFailedError(
+                f"the fan-out of {GSTR9} is {run['status']}: {run['status_reason']} "
+                f"{run['last_error']}".rstrip()
+            )
+        if run["status"] not in wanted:
+            raise NotYetError(
+                f"the fan-out of {GSTR9} is {run['status']}, not {' or '.join(wanted)}"
+            )
+        return run
+
+    return poll(reached, timeout=context.timeout, interval=context.interval)
+
+
+def publish_behind_the_hold(
+    context: CheckContext, records: ProductRecords
+) -> tuple[dict[str, Any], list[str]]:
+    """Hold, publish gstr9_annual, see the run held with nothing decided, release, see it
+    complete."""
+    product = context.product
+    stamp = context.now().astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    hold(product, True, f"{CHECK_MARK} {stamp}: held before the GSTR-9 publication (synthetic)")
+    try:
+        (rule,) = publish(product, [GSTR9], golden=context.golden).rules
+        held = wait_for_status(context, rule.rule_version_id, "held")
+        time.sleep(max(2 * context.interval, 0.5))
+        still = fan_out_of(product, rule.rule_version_id)
+        if (still["status"], still["evaluated"]) != ("held", 0):
+            raise StepFailedError(
+                f"the held run moved on: {still['status']}, {still['evaluated']} decided"
+            )
+        early = published_decisions(context, rule.rule_version_id)
+        if early:
+            raise StepFailedError(f"{len(early)} decisions came from the fan-out while it was held")
+    finally:
+        hold(product, False, f"{CHECK_MARK} {stamp}: released after seeing the run held")
+    run = wait_for_status(context, rule.rule_version_id, "completed")
+    return run, [
+        f"hold set, {GSTR9} v{rule.version} published ({rule.rule_version_id}): the run stood "
+        f"{held['status']} with {held['evaluated']} of {held['businesses_total']} decided and "
+        "no decision from it",
+        f"hold released: the run {run['status']}",
+    ]
+
+
+def completed_run(context: CheckContext, rule_version_id: str) -> tuple[dict[str, Any], list[str]]:
+    """The fan-out of a gstr9_annual an earlier check published: completed, resumed first when
+    it was left paused; the hold set and released again, with nothing to stop."""
+    product = context.product
+    response = product.internal.get(f"{FAN_OUTS}/{rule_version_id}")
+    if response.status_code == 404:
+        raise StepFailedError(
+            f"{GSTR9} is published but has no fan-out: it was published before the worker "
+            "consumed rule.published (make product-logs PROC=worker)"
+        )
+    run: dict[str, Any] = ok(response)
+    lines = [f"{GSTR9} was published before ({rule_version_id}): its fan-out is {run['status']}"]
+    if run["status"] == "paused":
+        ok(
+            product.internal.post(
+                f"{FAN_OUTS}/{rule_version_id}/resume",
+                json={"reason": f"{CHECK_MARK}: resuming the run an earlier check left paused"},
+            )
+        )
+        lines.append("resumed the run an earlier check left paused")
+    run = wait_for_status(context, rule_version_id, "completed")
+    stamp = context.now().astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    held = hold(product, True, f"{CHECK_MARK} {stamp}: hold with no fan-out to stop (synthetic)")
+    try:
+        if not held["held"] or not str(held["reason"]).startswith(CHECK_MARK):
+            raise StepFailedError(f"the hold reads {held} after it was set")
+    finally:
+        released = hold(product, False, f"{CHECK_MARK} {stamp}: released again")
+    if released["held"]:
+        raise StepFailedError("the hold is still set after it was released")
+    lines.append("hold set and released again; the completed run stays completed")
+    return run, lines
+
+
+def counted(run: dict[str, Any], records: ProductRecords) -> list[str]:
+    finished = datetime.fromisoformat(str(run["finished_at"]))
+    listed = records.directory_count(FAN_OUT_LEVEL, as_of=finished)
+    counts = (run["businesses_total"], run["evaluated"])
+    if counts != (listed, listed):
+        raise StepFailedError(
+            f"the run counted {run['businesses_total']} businesses and decided "
+            f"{run['evaluated']}, but the directory listed {listed} of level {FAN_OUT_LEVEL}"
+        )
+    if (run["flips_compared"], run["flips"]) != (0, 0):
+        raise StepFailedError(f"{GSTR9} supersedes nothing, yet the run compared flips")
+    return [
+        f"counters: {run['evaluated']} of {run['businesses_total']} decided, {run['applies']} "
+        f"apply, matching the {listed} directory entries of level {FAN_OUT_LEVEL}"
+    ]
+
+
+def published_decisions(context: CheckContext, rule_version_id: str) -> list[dict[str, Any]]:
+    """The fan-out's decisions of the version for the synthetic registrations."""
+    found: list[dict[str, Any]] = []
+    for tenant in TENANTS:
+        for seeded in registrations(context.product, tenant):
+            found += [
+                item
+                for item in decisions_of(context, tenant, seeded, rule_version_id)
+                if item["trigger"] == RULE_PUBLISHED
+            ]
+    return found
+
+
+def decisions_of(
+    context: CheckContext, tenant: SyntheticTenant, seeded: SeededRegistration, version_id: str
+) -> list[dict[str, Any]]:
+    page = ok(
+        context.product.internal.get(
+            f"{ENGINE}/businesses/{seeded.registration_id}/decisions",
+            params={"rule_version_id": version_id, "limit": 200},
+            headers=as_tenant(tenant.tenant_id),
+        )
+    )
+    items: list[dict[str, Any]] = page["items"]
+    return items
+
+
+def decided(context: CheckContext, run: dict[str, Any], records: ProductRecords) -> list[str]:
+    """Each listed synthetic registration's decision from the fan-out, and the GSTR-9
+    obligations of those it applies to, in both tenants."""
+    version_id = str(run["rule_version_id"])
+    finished = datetime.fromisoformat(str(run["finished_at"]))
+    lines: list[str] = []
+    applying: dict[str, list[tuple[SyntheticTenant, SeededRegistration]]] = {}
+    for tenant in TENANTS:
+        seeded = registrations(context.product, tenant)
+        listed = records.listed([s.registration_id for s in seeded], as_of=finished)
+        for registration in seeded:
+            if registration.registration_id not in listed:
+                lines.append(f"{registration.business.key}: not in the directory, not fanned out")
+                continue
+            fanned = [
+                item
+                for item in decisions_of(context, tenant, registration, version_id)
+                if item["trigger"] == RULE_PUBLISHED
+            ]
+            expected = registration.business.expected[GSTR9]
+            if not fanned:
+                raise StepFailedError(
+                    f"{registration.business.key} is in the directory but has no {GSTR9} "
+                    "decision from the fan-out"
+                )
+            if fanned[0]["result"] != expected:
+                raise StepFailedError(
+                    f"the fan-out decided {GSTR9} {fanned[0]['result']} for "
+                    f"{registration.business.key}; its answers call for {expected}"
+                )
+            lines.append(f"{registration.business.key}: {GSTR9} {expected} from the fan-out")
+            if expected == APPLIES:
+                applying.setdefault(tenant.key, []).append((tenant, registration))
+    missing = [tenant.name for tenant in TENANTS if tenant.key not in applying]
+    if missing:
+        raise StepFailedError(
+            f"{GSTR9} applies to no registration the directory lists in {', '.join(missing)}: "
+            "run make product-seed"
+        )
+    for found in applying.values():
+        for tenant, registration in found:
+            made = poll(
+                partial(gstr9_obligations, context, tenant, registration, version_id),
+                timeout=context.timeout,
+                interval=context.interval,
+            )
+            lines.append(
+                f"{tenant.name}, {registration.business.name}: {len(made)} GSTR-9 obligations"
+            )
+    return lines
+
+
+def gstr9_obligations(
+    context: CheckContext,
+    tenant: SyntheticTenant,
+    registration: SeededRegistration,
+    version_id: str,
+) -> list[dict[str, Any]]:
+    listed: list[dict[str, Any]] = answered(
+        context.product.internal.get(
+            OBLIGATIONS,
+            params={"business_id": registration.registration_id, "rule_version_id": version_id},
+            headers=as_tenant(tenant.tenant_id),
+        )
+    )
+    if not listed:
+        raise NotYetError(f"no GSTR-9 obligation yet for {registration.business.name}")
+    return listed
+
+
+def audited(records: ProductRecords, since: datetime) -> list[str]:
+    """The audit rows of the hold, the release and any resume this step made."""
+    rows = [
+        row
+        for row in records.audit_entries(
+            actions=(HOLD_ACTION, RELEASE_ACTION, RESUME_ACTION), since=since
+        )
+        if row.reason.startswith(CHECK_MARK)
+    ]
+    actions = [row.action for row in rows]
+    for wanted in (HOLD_ACTION, RELEASE_ACTION):
+        if wanted not in actions:
+            raise StepFailedError(f"audit.event has no {wanted} row from this check")
+    if any(row.tenant_id is not None for row in rows):
+        raise StepFailedError("a fan-out control was audited as one tenant's")
+    resumes = actions.count(RESUME_ACTION)
+    actors = sorted({row.actor_label for row in rows})
+    return [
+        f"audit.event: {actions.count(HOLD_ACTION)} hold, {actions.count(RELEASE_ACTION)} "
+        f"release and {resumes} resume rows of no tenant, by {', '.join(actors)}"
+    ]
+
+
 # ---------------------------------------------------------------- the command
 
 STEPS: list[Step] = [
@@ -649,6 +955,11 @@ STEPS: list[Step] = [
         "recompute",
         "a business made or changed in the profile gets decisions and obligations by itself",
         recompute,
+    ),
+    Step(
+        "fanout",
+        "a rule published behind the hold fans out to every business once it is released",
+        fanout,
     ),
 ]
 """The steps in the order they run. A later package appends its own."""

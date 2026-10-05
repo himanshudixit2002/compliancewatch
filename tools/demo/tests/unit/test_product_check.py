@@ -84,7 +84,7 @@ class Scripted:
                 "status": "ok" if all(self.loops.values()) else "unhealthy",
                 "heartbeat_age_seconds": 0.4,
                 "loops": self.loops,
-                "task_queues": {"pipeline": True},
+                "task_queues": {"applicability": True, "pipeline": True},
             }
             return httpx2.Response(200, json=body)
         if path == "/v1/businesses":
@@ -204,7 +204,8 @@ def test_the_health_step_lists_the_worker_loops(product: Product) -> None:
     assert lines[0] == "internal listener ready: 1 checks ok"
     assert "obligation.decisions" in lines[3]
     assert "applicability-engine" in lines[4]
-    assert lines[5] == "task queues: pipeline"
+    assert "applicability-engine.rules" in lines[3]
+    assert lines[5] == "task queues: applicability, pipeline"
 
 
 def test_the_health_step_waits_through_a_listener_that_is_starting(
@@ -299,6 +300,7 @@ def test_steps_are_chosen_by_name_in_the_check_order() -> None:
         "loop",
         "isolation",
         "recompute",
+        "fanout",
     ]
     assert [step.name for step in select(["isolation", "health"])] == ["health", "isolation"]
     assert select(None) == check.STEPS
@@ -375,3 +377,8 @@ def test_a_missing_token_is_named(product: Product) -> None:
         product.review_headers()
     with pytest.raises(ProductError, match="CW_RULEBOOK_WRITE_TOKEN is not set"):
         product.write_headers()
+
+
+def test_the_fanout_step_needs_the_records_it_reads(product: Product) -> None:
+    with pytest.raises(StepFailedError, match="CW_PRODUCT_RECORDS_URL"):
+        check.fanout(context_of(product))
