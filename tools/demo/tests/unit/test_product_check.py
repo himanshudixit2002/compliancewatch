@@ -306,6 +306,7 @@ def test_steps_are_chosen_by_name_in_the_check_order() -> None:
         "rollback",
         "tracking",
         "changes",
+        "public",
     ]
     assert [step.name for step in select(["isolation", "health"])] == ["health", "isolation"]
     assert select(None) == check.STEPS

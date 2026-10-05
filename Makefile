@@ -584,7 +584,8 @@ openapi-ts-check: check-pnpm ## The generated OpenAPI types match the committed 
 # Temporal switches, the reminder sweep and the rolling window on; the engine's recompute on
 # profile.updated on, with the rulebook's in-force listing cached for five seconds, and its
 # fan-out of rule.published on (CW_APPLICABILITY_FANOUT_ENABLED); obligation's consumer of the rule
-# events on (CW_OBLIGATION_RULE_EVENTS_ENABLED); rule publishing on with the placeholder
+# events on (CW_OBLIGATION_RULE_EVENTS_ENABLED); a CA firm's bulk change card on
+# (CW_NOTIFICATION_BULK_ENABLED); rule publishing on with the placeholder
 # tokens local-write-token and local-review-token (not secrets; values in .env win); the profile's
 # static GSTIN lookup, so the demo GSTIN pre-fills; the notification sink in place of the real
 # channels, recording into var/product/sink.jsonl, with a five-second batching window so a change
@@ -607,7 +608,7 @@ PRODUCT_ENV = CW_AUTH_MODE=header CW_MVP_HOST=127.0.0.1 \
   CW_WORKER_KAFKA_ENABLED=true CW_WORKER_TEMPORAL_ENABLED=true CW_OBLIGATION_SWEEP_ENABLED=true \
   CW_APPLICABILITY_RECOMPUTE_ENABLED=true CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS=5 \
   CW_APPLICABILITY_FANOUT_ENABLED=true CW_OBLIGATION_RULE_EVENTS_ENABLED=true \
-  CW_RULEBOOK_PUBLISH_ENABLED=true \
+  CW_NOTIFICATION_BULK_ENABLED=true CW_RULEBOOK_PUBLISH_ENABLED=true \
   CW_RULEBOOK_WRITE_TOKEN="$${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}" \
   CW_RULEBOOK_REVIEW_TOKEN="$${CW_RULEBOOK_REVIEW_TOKEN:-local-review-token}" \
   CW_PROFILE_GSTIN_LOOKUP=static CW_NOTIFICATION_CHANNELS=sink \
