@@ -17,7 +17,7 @@
 > to canonical entities with an analyst review queue; relation proposals through a registered
 > prompt, validated against the clause text and approved into rule relations by an analyst), the obligation service's domain and use cases
 > (obligations per period, deadline changes, withdrawals, row-level security by tenant, events
-> through the outbox, an append-only change log of every obligation) with a read route by business and due window, the qa service (answers in
+> through the outbox, an append-only change log of every obligation) with a read route by business and due window and tracking routes (the detail with its citations and reviewed-by line, status, assignee and comments, each change idempotent and audited), the qa service (answers in
 > three layers: structured answers from obligations, a KAG plan and solve over the rulebook
 > behind a per-tenant flag, hybrid clause search that drops clauses whose rule is out of force;
 > every quote checked against its clause or the answer is "not covered"), the profile service's
