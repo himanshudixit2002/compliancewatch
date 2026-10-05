@@ -1,5 +1,5 @@
 """The review routes on the memory store: listing a tenant's queue a page at a time, settling an
-item, the problems, and who may do either in header, dual and token mode."""
+item and its audit entry, the problems, and who may do either in header, dual and token mode."""
 
 from collections.abc import Iterator
 from typing import Any
@@ -8,6 +8,8 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from applicability_engine.application.review import RESOLVE_ACTION
+from applicability_engine.infrastructure.memory import MemoryStore
 from applicability_engine.main import build_app
 from applicability_engine.settings import ApplicabilityEngineSettings
 from applicability_engine.testing import (
@@ -20,6 +22,7 @@ from applicability_engine.testing import (
 )
 from applicability_engine.wiring import Readers
 from domain_kernel.access import Role, Scope
+from domain_kernel.audit import AuditActor, AuditEntry
 from domain_kernel.ids import TenantId, UserId
 from py_common.auth.testing import TestIssuer, bearer
 from py_common.settings import AuthMode
@@ -65,6 +68,13 @@ def resolution(kind: str = "applies", **changes: object) -> dict[str, object]:
     }
     body.update(changes)
     return body
+
+
+def audit_of(client: TestClient) -> list[AuditEntry]:
+    """The audit entries the app's memory store committed."""
+    store = client.app.state.wiring.unit_of_work  # type: ignore[attr-defined]
+    assert isinstance(store, MemoryStore)
+    return list(store.audit)
 
 
 def problem(response: Any) -> str:
@@ -130,9 +140,22 @@ def test_settling_an_item_appends_a_review_decision(
     answer = seeded.post(
         f"{ITEMS}/{item_id}/resolve",
         json=resolution("not_applicable", resolved_by=reviewer),
-        headers=as_tenant(),
+        headers=as_tenant(**{"x-request-id": "review-request-7"}),
     )
     assert answer.status_code == 200, answer.text
+    (audited,) = audit_of(seeded)
+    assert (audited.action, audited.tenant_id, audited.subject_id) == (
+        RESOLVE_ACTION,
+        TENANT,
+        item_id,
+    )
+    assert audited.actor == AuditActor.system("applicability-engine"), "no verified caller"
+    assert (audited.reason, audited.correlation_id) == (
+        "Example premises checked against the clause",
+        "review-request-7",
+    )
+    assert audited.after is not None
+    assert audited.after["resolved_by"] == reviewer, "the body's reviewer, as the item records"
     body = answer.json()
     assert (body["status"], body["resolution"], body["resolved_by"]) == (
         "resolved",
@@ -157,6 +180,7 @@ def test_settling_an_item_appends_a_review_decision(
 
     again = seeded.post(f"{ITEMS}/{item_id}/resolve", json=resolution(), headers=as_tenant())
     assert (again.status_code, problem(again)) == (409, "applicability-review-item-resolved")
+    assert len(audit_of(seeded)) == 1
     resolved = seeded.get(ITEMS, params={"status": "resolved"}, headers=as_tenant()).json()
     assert [i["item_id"] for i in resolved["items"]] == [item_id]
 
@@ -238,11 +262,15 @@ def test_in_token_mode_the_regulatory_team_names_the_tenant_it_reviews(
         f"{ITEMS}/{item_id}/resolve", json=resolution(), headers=as_tenant(**ANALYST)
     )
     assert (analyst.status_code, problem(analyst)) == (403, "auth-forbidden")
+    assert audit_of(client) == [], "a refused resolution writes no entry"
     settled = client.post(
         f"{ITEMS}/{item_id}/resolve", json=resolution(), headers=as_tenant(**REVIEWER)
     )
     assert settled.status_code == 200, settled.text
     assert settled.json()["resolved_by"] == str(REVIEWER_ID), "the token's user, not the body's"
+    (audited,) = audit_of(client)
+    assert audited.actor == AuditActor.user(REVIEWER_ID, [Role.REVIEWER])
+    assert audited.correlation_id == settled.headers["x-request-id"]
 
 
 def test_in_dual_mode_a_resolution_needs_a_token_while_the_queue_reads_without_one(
@@ -260,3 +288,5 @@ def test_in_dual_mode_a_resolution_needs_a_token_while_the_queue_reads_without_o
     )
     assert admin.status_code == 200, admin.text
     assert admin.json()["resolution_decision_id"] is None
+    (audited,) = audit_of(client)
+    assert (audited.actor.kind.value, audited.actor.label) == ("user", "admin")

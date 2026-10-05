@@ -6,7 +6,8 @@ store-level lock held from open to commit or rollback), like the obligation serv
 rules the Postgres tables enforce hold here too: a write of another tenant's row is refused
 (row-level security), a decision is stored once per id and per (trigger_ref, business, rule
 version), and at most one review item is open per business and rule version. The directory is
-the one table whose reads cross tenants (``MemoryStore.directory``).
+the one table whose reads cross tenants (``MemoryStore.directory``). Audit entries go to
+``MemoryStore.audit`` through ``py_common.audit``'s twin of the audit table, with the unit.
 """
 
 import threading
@@ -24,8 +25,10 @@ from applicability_engine.domain.review import (
     ReviewItemKey,
     ReviewStatus,
 )
+from domain_kernel.audit import AuditEntry
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId
+from py_common.audit import MemoryAuditSink
 
 
 def _require_tenant(owner: TenantId, tenant_id: TenantId, what: str) -> None:
@@ -212,6 +215,7 @@ class MemoryUnitOfWork:
         self.directory = MemoryDirectoryRepository(store.directory, tenant_id)
         self.reviews = MemoryReviewItemRepository(store.reviews, tenant_id)
         self.events = MemoryEventSink(store.events)
+        self.audit = MemoryAuditSink(store.audit, tenant_id=tenant_id)
 
     def __enter__(self) -> "MemoryUnitOfWork":
         return self
@@ -222,17 +226,19 @@ class MemoryUnitOfWork:
             self.directory.commit()
             self.reviews.commit()
             self.events.commit()
+            self.audit.commit()
 
 
 class MemoryStore:
-    """Holds every tenant's decisions, directory entries, review items and published events;
-    makes units of work."""
+    """Holds every tenant's decisions, directory entries, review items, published events and
+    audit entries; makes units of work."""
 
     def __init__(self) -> None:
         self.decisions: dict[DecisionId, Decision] = {}
         self.directory: dict[BusinessId, DirectoryEntry] = {}
         self.reviews: dict[ReviewItemId, ReviewItem] = {}
         self.events: list[DomainEvent] = []
+        self.audit: list[AuditEntry] = []
         self._lock = threading.Lock()
 
     def ping(self) -> bool:

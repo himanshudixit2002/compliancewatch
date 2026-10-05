@@ -31,6 +31,7 @@ Design reference: Project Foundation guide, sections 6, 11 and 13.
 | `predicates` | `Predicate`, `AllOf`, `AnyOf`, `Not`, `Applicability`, `PredicateResult`, `evaluate_predicate` |
 | `status` | `RuleVersionStatus`, `ObligationStatus`, `ClosureReason`, `TransitionTable`, the two tables |
 | `events` | `DomainEvent` envelope (`event_id`, `occurred_at`, `tenant_id`, `correlation_id`, `causation_id`) with the class-level `topic` and `schema_version` |
+| `audit` | `AuditActor` (a user labelled with their roles, a service client, or the system as `system:<service>`), `AuditEntry` (dotted action, tenant or None for a platform-wide action, subject, actor, reason, before and after as read-only JSON, `occurred_at`, correlation id), `AuditEntryId` and the `AuditSink` protocol a unit of work writes entries through |
 | `profiles` | `ProfileSnapshot`: one version of a profile's attributes, with the financial year its per-year values are as of |
 | `documents` | `DocumentRef`, `DiscoveredDocument`, `RawDocument`, `Clause`, `ParsedDocument` (with `parser_version`), `RuleCandidate`; `document_id_for(sha256)` and `clause_id_for(document_id, clause_ref)`, the ids every service derives the same way |
 | `rules` | `ObligationTemplate`, `RuleVersionSnapshot` (read model of a published version, with an optional `Recurrence`) |

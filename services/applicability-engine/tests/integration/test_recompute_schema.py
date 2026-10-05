@@ -1,7 +1,8 @@
 """Migration 0002 on Postgres: the consumer inbox, the business directory and the review queue
 under row-level security through a plain role, the profile.updated consumer committing with its
 inbox row and storing nothing twice for a replayed event, no transaction open while it reads, and
-the review flow. Needs Docker.
+the review flow, whose resolution writes one audit row in its own transaction (``audit.event`` as
+identity's migration makes it, installed by ``py_common.audit.testing``). Needs Docker.
 
 The use cases run as a role that owns nothing and is not a superuser: a superuser bypasses
 row-level security whatever the table says.
@@ -28,6 +29,7 @@ import ontology as ontology_package
 from applicability_engine import worker
 from applicability_engine.application.recompute import ApplyProfileUpdate, ProfileUpdate
 from applicability_engine.application.review import (
+    RESOLVE_ACTION,
     ListReviewItems,
     ResolveRequest,
     ResolveReviewItem,
@@ -43,9 +45,14 @@ from applicability_engine.infrastructure.repository import (
     PostgresUnitOfWorkFactory,
 )
 from applicability_engine.testing import MemoryProfiles, MemoryRulebook, rule_in_force
+from domain_kernel.access import Role
+from domain_kernel.audit import AuditActor
 from domain_kernel.ids import BusinessId, EventId, TenantId, UserId
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.profiles import ProfileSnapshot
+from py_common.audit.schema import AUDIT_SCHEMA, QUALIFIED_TABLE
+from py_common.audit.testing import install_audit_table, read_audit_entries
+from py_common.audit.writer import PostgresAuditSink
 from py_common.outbox import (
     ConsumerConfig,
     IdempotentConsumer,
@@ -102,6 +109,12 @@ def alembic_config(database_url: str) -> Iterator[Config]:
 def engine(database_url: str, alembic_config: Config) -> Iterator[Engine]:
     command.upgrade(alembic_config, "head")
     engine = create_engine(database_url)
+    with engine.begin() as connection:
+        install_audit_table(connection)
+        connection.execute(text(f"GRANT USAGE ON SCHEMA {AUDIT_SCHEMA} TO {APP_ROLE}"))
+        connection.execute(
+            text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {QUALIFIED_TABLE} TO {APP_ROLE}")
+        )
     yield engine
     engine.dispose()
 
@@ -418,11 +431,33 @@ def test_the_review_flow_under_row_level_security(app_engine: Engine) -> None:
         Resolution.APPLIES,
         reviewer,
         "Example premises checked against the clause",
+        AuditActor.user(reviewer, [Role.REVIEWER]),
+        "review-request-1",
     )
     resolved = resolve.run(request)
     assert (resolved.item.status, resolved.item.resolved_by) == (ReviewStatus.RESOLVED, reviewer)
     with pytest.raises(ReviewItemResolvedError):
         resolve.run(request)
+    with app_engine.begin() as connection:
+        as_tenant(connection, world.tenant)
+        (audited,) = read_audit_entries(connection, action=RESOLVE_ACTION)
+    assert (audited.tenant_id, audited.subject_type, audited.subject_id) == (
+        world.tenant,
+        "review_item",
+        str(entry.item.item_id),
+    )
+    assert (audited.actor, audited.reason, audited.correlation_id) == (
+        request.actor,
+        request.note,
+        "review-request-1",
+    )
+    assert audited.before is not None
+    assert audited.after is not None
+    assert (audited.before["status"], audited.after["status"]) == ("open", "resolved")
+    assert (audited.after["resolution"], audited.after["resolution_decision_id"]) == (
+        "applies",
+        str(resolved.item.resolution_decision_id),
+    )
     with factory(world.tenant) as uow:
         appended = uow.decisions.latest(world.registration, world.rule.rule_version_id)
     assert appended is not None
@@ -445,3 +480,37 @@ def test_the_review_flow_under_row_level_security(app_engine: Engine) -> None:
         as_tenant(connection, TenantId.new())
         hidden: int = connection.execute(text(f"SELECT count(*) FROM {REVIEW}")).scalar_one()
     assert hidden == 0, "another tenant reads none of the items"
+
+
+def test_a_resolution_that_fails_after_its_audit_row_leaves_nothing(
+    app_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = World(free_text=True)
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    world.recompute.run(world.update(), factory)
+    listing = ListReviewItems(factory)
+    (entry,) = listing.run(ReviewQuery(world.tenant, limit=10, status=ReviewStatus.OPEN))
+    written = PostgresAuditSink.write
+
+    def write_then_fail(sink: PostgresAuditSink, *args: Any) -> None:
+        written(sink, *args)
+        raise RuntimeError("synthetic failure after the audit row was written")
+
+    monkeypatch.setattr(PostgresAuditSink, "write", write_then_fail)
+    reviewer = UserId.new()
+    request = ResolveRequest(
+        world.tenant,
+        entry.item.item_id,
+        Resolution.APPLIES,
+        reviewer,
+        "Example premises checked against the clause",
+        AuditActor.user(reviewer, [Role.REVIEWER]),
+    )
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        ResolveReviewItem(factory).run(request)
+    (still_open,) = listing.run(ReviewQuery(world.tenant, limit=10))
+    assert still_open.item.is_open
+    assert count(app_engine, world.tenant, "SELECT count(*) FROM applicability_decision") == 1
+    with app_engine.begin() as connection:
+        as_tenant(connection, world.tenant)
+        assert read_audit_entries(connection) == [], "the audit row went with the resolution"

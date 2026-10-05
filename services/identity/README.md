@@ -3,7 +3,7 @@
 Part of the ComplianceWatch monorepo. **Tenants, users and roles (row-level security, events through the outbox), sign-in through an identity provider (a fake one locally, Supabase Auth in the MVP, ADR-014), the access tokens every service verifies (ES256, published as a JWKS), service tokens for service clients, consent records (append-only) with their API, channel consents for WhatsApp numbers no tenant owns yet, and billing behind a flag: the `BillingProvider` protocol, an in-memory provider and a Razorpay skeleton.**
 Design reference: Project Foundation guide, sections 7, 14 and 16.
 
-- **Owns:** Tenants, users, roles, API keys; maps OIDC claims to roles; issues partner API keys; enforces plan limits
+- **Owns:** Tenants, users, roles, API keys; maps OIDC claims to roles; issues partner API keys; enforces plan limits; the audit log's table, `audit.event`
 - **Owning team:** Identity and Partner (guide section 14)
 - **Consumes:** Keycloak events; admin API
 - **Emits / publishes:** tenant.created, user.role.changed (through the outbox)
@@ -72,6 +72,16 @@ query, and the admin use cases check that the user they change belongs to the ca
 tenants stay apart where row-level security does not apply (the dev stack connects as the
 database's owner). `tenant.created` and `user.role.changed` leave through the outbox in the same
 transaction as the change.
+
+The audit log's table is identity's too: migration 0005 creates `audit.event` in the schema
+`audit` (made when it is missing; the dev stack's `init.sql` makes it already), the one table
+every service writes an audited action to, in the transaction of the action, through
+`py_common.audit` (the py-common README describes the writer). Row-level security is forced: a
+session reads and writes the rows of its tenant and may add rows of no tenant, for platform-wide
+actions, which nothing reads yet. A trigger refuses UPDATE and DELETE, a tenant's erasure
+included, and `infra/scripts/migration_lint.toml` exempts the table because its tenant_id may be
+null. The downgrade drops the table and keeps the schema. Identity writes no entry of its own
+yet, and the read route `GET /v1/identity/audit` is not built yet.
 
 Roles depend on the tenant's kind: a business has owners, staff and compliance leads; a CA firm has
 CA admins, CA staff and compliance leads; the internal tenant has analysts, reviewers and admins.

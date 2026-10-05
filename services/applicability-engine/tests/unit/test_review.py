@@ -1,14 +1,16 @@
 """The review queue on the memory store: which decisions need a person, an item's life, and the
-use cases that list and settle items."""
+use cases that list and settle items, a resolution with its audit entry."""
 
 from dataclasses import replace
 from datetime import timedelta
+from typing import Any
 
 import pytest
 
 import ontology as ontology_package
 from applicability_engine.application.evaluate import EvaluateRequest, EvaluateRule
 from applicability_engine.application.review import (
+    RESOLVE_ACTION,
     ListReviewItems,
     ResolveRequest,
     ResolveReviewItem,
@@ -19,6 +21,7 @@ from applicability_engine.domain.errors import ReviewItemNotFoundError, ReviewIt
 from applicability_engine.domain.events import ApplicabilityDecided
 from applicability_engine.domain.model import Decision, Trigger, decision_id_for
 from applicability_engine.domain.review import (
+    NOTE_MAX_CHARS,
     Resolution,
     ReviewItem,
     ReviewItemId,
@@ -39,15 +42,19 @@ from applicability_engine.testing import (
     MemoryRulebook,
     rule_version,
 )
+from domain_kernel.access import Role
+from domain_kernel.audit import MAX_REASON_CHARS, AuditActor
 from domain_kernel.confidence import CERTAIN, ZERO, Confidence
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, UserId
 from domain_kernel.operators import Operator
 from domain_kernel.predicates import Applicability, Predicate, PredicateResult
+from py_common.audit import MemoryAuditSink
 
 REGULAR = {"attribute": "registration_type", "operator": "eq", "value": "regular"}
 FREE_TEXT = {"attribute": "business_category", "free_text": "Example premises shared with a hotel"}
 REVIEWER = UserId.new()
+ACTOR = AuditActor.user(REVIEWER, [Role.REVIEWER])
 FREE = Predicate("business_category", free_text="Example premises shared with a hotel")
 STRUCTURED = Predicate("registration_type", Operator.EQ, "regular")
 
@@ -186,6 +193,7 @@ class Queue:
             "resolution": resolution,
             "resolved_by": REVIEWER,
             "note": "Example premises checked against the clause",
+            "actor": ACTOR,
         }
         values.update(changes)
         return ResolveRequest(**values)  # type: ignore[arg-type]
@@ -237,20 +245,106 @@ def test_resolving_to_a_result_appends_a_review_decision_and_its_event(
     ]
     assert [e.decision_id for e in review_events] == [expected_id]
 
+    (audited,) = queue.store.audit
+    assert (audited.action, audited.tenant_id, audited.subject_type, audited.subject_id) == (
+        RESOLVE_ACTION,
+        TENANT,
+        "review_item",
+        str(queue.item.item_id),
+    )
+    assert (audited.actor, audited.reason, audited.occurred_at, audited.correlation_id) == (
+        ACTOR,
+        "Example premises checked against the clause",
+        NOW + timedelta(hours=1),
+        None,
+    )
+    assert audited.before == {
+        "status": "open",
+        "decision_id": str(queue.decision.decision_id),
+        "resolution": None,
+        "resolved_by": None,
+        "resolution_decision_id": None,
+    }
+    assert audited.after == {
+        "status": "resolved",
+        "decision_id": str(queue.decision.decision_id),
+        "resolution": resolution.value,
+        "resolved_by": str(REVIEWER),
+        "resolution_decision_id": str(expected_id),
+    }
+
     with pytest.raises(ReviewItemResolvedError):
         queue.resolve.run(queue.request(resolution))
+    assert len(queue.store.audit) == 1, "a refused resolution writes no entry"
 
 
-def test_dismissing_appends_nothing() -> None:
+def test_dismissing_appends_nothing_but_is_audited() -> None:
     queue = Queue()
     decisions, events = dict(queue.store.decisions), list(queue.store.events)
+    system = AuditActor.system("applicability-engine")
     entry = queue.resolve.run(
-        queue.request(Resolution.DISMISS, note="Not a question for this rule")
+        queue.request(
+            Resolution.DISMISS,
+            note="Not a question for this rule",
+            actor=system,
+            correlation_id="request-1",
+        )
     )
     assert (entry.item.resolution, entry.item.resolution_decision_id) == (Resolution.DISMISS, None)
     assert entry.item.note == "Not a question for this rule"
     assert queue.store.decisions == decisions
     assert queue.store.events == events
+    (audited,) = queue.store.audit
+    assert (audited.actor, audited.reason, audited.correlation_id) == (
+        system,
+        "Not a question for this rule",
+        "request-1",
+    )
+    assert audited.after is not None
+    assert (audited.after["resolution"], audited.after["resolution_decision_id"]) == (
+        "dismiss",
+        None,
+    )
+
+
+def test_an_item_a_later_decision_settles_is_not_audited() -> None:
+    queue = Queue()
+    queue.profiles.put({"registration_type": "composition"}, version=5)
+    later = queue.evaluate.run(EvaluateRequest(TENANT, BUSINESS, queue.rule.rule_version_id))
+    assert later.result is Applicability.NOT_APPLICABLE
+    settled = queue.store.reviews[queue.item.item_id]
+    assert (settled.status, settled.resolution, settled.resolved_by) == (
+        ReviewStatus.RESOLVED,
+        Resolution.DISMISS,
+        None,
+    )
+    assert queue.store.audit == [], "no person acted, and the item records the decision"
+
+
+def test_the_longest_note_fits_the_audit_reason() -> None:
+    assert NOTE_MAX_CHARS <= MAX_REASON_CHARS
+    queue = Queue()
+    queue.resolve.run(queue.request(Resolution.DISMISS, note="n" * NOTE_MAX_CHARS))
+    assert len(queue.store.audit[0].reason) == NOTE_MAX_CHARS
+
+
+def test_a_resolution_that_fails_after_its_audit_entry_leaves_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue = Queue()
+    decisions = dict(queue.store.decisions)
+    written = MemoryAuditSink.write
+
+    def write_then_fail(sink: MemoryAuditSink, *args: Any) -> None:
+        written(sink, *args)
+        raise RuntimeError("synthetic failure after the audit entry was written")
+
+    monkeypatch.setattr(MemoryAuditSink, "write", write_then_fail)
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        queue.resolve.run(queue.request(Resolution.APPLIES))
+    assert queue.store.audit == []
+    assert queue.store.decisions == decisions
+    assert queue.store.reviews[queue.item.item_id].is_open
 
 
 def test_another_tenant_cannot_see_or_settle_the_item() -> None:
@@ -260,6 +354,7 @@ def test_another_tenant_cannot_see_or_settle_the_item() -> None:
     with pytest.raises(ReviewItemNotFoundError):
         queue.resolve.run(queue.request(Resolution.APPLIES, item_id=ReviewItemId.new()))
     assert ListReviewItems(queue.store).run(ReviewQuery(OTHER_TENANT, limit=10)) == ()
+    assert queue.store.audit == []
 
 
 def test_the_listing_pages_oldest_first_with_a_status_filter() -> None:

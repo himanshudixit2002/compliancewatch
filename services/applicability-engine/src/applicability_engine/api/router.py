@@ -7,7 +7,8 @@ first decision back for 24 hours instead of a second one.
 
 The review routes act for the tenant ``x-tenant-id`` names (``deps.ReviewTenant``), for the
 regulatory team: an analyst, a reviewer or an admin reads the queue, and a reviewer or an admin
-settles an item (``deps.Resolver``).
+settles an item (``deps.Resolver``). A resolution is audited: the reviewer a token names is the
+actor (``py_common.audit.audit_actor``), else the system, with the request's correlation id.
 """
 
 from typing import Annotated
@@ -16,6 +17,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, status
 from fastapi.responses import JSONResponse
 
+from applicability_engine import SERVICE_NAME
 from applicability_engine.api.deps import Resolver, ReviewTenant, Tenant, Wired, resolved_by
 from applicability_engine.api.schemas import (
     DecisionCursor,
@@ -32,6 +34,7 @@ from applicability_engine.domain.model import DecisionKey, Trigger
 from applicability_engine.domain.review import ReviewItemId, ReviewItemKey, ReviewStatus
 from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId
+from py_common.audit import audit_actor, current_correlation_id
 from py_common.idempotency.fastapi import IDEMPOTENCY_RESPONSES, IdempotencyKey, run_idempotent
 from py_common.pagination import Page, Pagination, page_of
 from py_common.problems import problem_responses
@@ -176,8 +179,9 @@ def resolve_review_item(
     """applies and not_applicable append a decision with trigger review, the reviewer's result
     and confidence 1, made from the decision under review, and publish applicability.decided;
     the obligation service then makes or closes the obligations. dismiss appends nothing. A
-    signed-in reviewer is the one recorded; without a token the body's resolved_by is. 404 when
-    the tenant has no such item, 409 when it is already resolved."""
+    signed-in reviewer is the one recorded; without a token the body's resolved_by is. Every
+    resolution writes an audit entry, applicability.review.resolve, with the note as its reason.
+    404 when the tenant has no such item, 409 when it is already resolved."""
     entry = wired.resolve_review_item.run(
         ResolveRequest(
             tenant_id=tenant,
@@ -185,6 +189,8 @@ def resolve_review_item(
             resolution=body.resolution,
             resolved_by=resolved_by(reviewer, body.resolved_by),
             note=body.note,
+            actor=audit_actor(SERVICE_NAME, reviewer),
+            correlation_id=current_correlation_id(),
         )
     )
     return ReviewItemOut.from_entry(entry)

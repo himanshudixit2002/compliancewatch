@@ -7,6 +7,7 @@ from typing import Protocol
 from applicability_engine.domain.directory import DirectoryEntry
 from applicability_engine.domain.model import Decision, DecisionKey
 from applicability_engine.domain.review import ReviewItem, ReviewItemId, ReviewItemKey, ReviewStatus
+from domain_kernel.audit import AuditSink
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId
 
@@ -89,8 +90,8 @@ class EventSink(Protocol):
 
 
 class UnitOfWork(Protocol):
-    """One transaction: the repositories and the event sink commit or roll back together. The
-    factory returns it as a context manager; leaving the block cleanly commits."""
+    """One transaction: the repositories, the event sink and the audit sink commit or roll back
+    together. The factory returns it as a context manager; leaving the block cleanly commits."""
 
     @property
     def decisions(self) -> DecisionRepository: ...
@@ -103,6 +104,12 @@ class UnitOfWork(Protocol):
 
     @property
     def events(self) -> EventSink: ...
+
+    @property
+    def audit(self) -> AuditSink:
+        """Where the audit entries of the unit's actions go: ``audit.event``, next to the
+        outbox."""
+        ...
 
 
 class UnitOfWorkFactory(Protocol):

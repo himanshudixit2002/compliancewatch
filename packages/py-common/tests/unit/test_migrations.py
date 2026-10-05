@@ -50,6 +50,23 @@ def test_tenant_rls_enables_and_forces_it_with_the_nullif_policy() -> None:
     assert sql.count(TENANT_MATCH) == 2
 
 
+def test_a_table_of_another_schema_is_named_with_it() -> None:
+    sql = emitted(lambda op: enable_tenant_rls(op, "event", schema="audit"))
+    assert "ALTER TABLE audit.event ENABLE ROW LEVEL SECURITY;" in sql
+    assert "ALTER TABLE audit.event FORCE ROW LEVEL SECURITY;" in sql
+    assert "CREATE POLICY event_tenant_isolation ON audit.event USING (" in sql
+    dropped = [
+        line
+        for line in emitted(lambda op: drop_tenant_rls(op, "event", schema="audit")).splitlines()
+        if line.strip()
+    ]
+    assert dropped == [
+        "DROP POLICY IF EXISTS event_tenant_isolation ON audit.event;",
+        "ALTER TABLE audit.event NO FORCE ROW LEVEL SECURITY;",
+        "ALTER TABLE audit.event DISABLE ROW LEVEL SECURITY;",
+    ]
+
+
 def test_drop_tenant_rls_reverses_it() -> None:
     sql = emitted(lambda op: drop_tenant_rls(op, TABLE))
     statements = [line for line in sql.splitlines() if line.strip()]
@@ -72,7 +89,8 @@ def test_append_only_guard_refuses_update_and_delete_through_the_schema_function
     assert "app.erasure" not in sql
     assert (
         "CREATE TRIGGER tr_obligation_change_append_only BEFORE UPDATE OR DELETE ON "
-        "obligation_change FOR EACH ROW EXECUTE FUNCTION obligation.obligation_append_only();"
+        "obligation.obligation_change FOR EACH ROW EXECUTE FUNCTION "
+        "obligation.obligation_append_only();"
     ) in sql
 
 
@@ -100,7 +118,7 @@ def test_drop_append_only_guard_drops_the_trigger_and_an_unused_function(
     )
     function = append_only_function_name(SCHEMA, allow_erasure_delete=allow_erasure_delete)
     assert sql.startswith(
-        f"DROP TRIGGER IF EXISTS {append_only_trigger_name(TABLE)} ON obligation_change;"
+        f"DROP TRIGGER IF EXISTS {append_only_trigger_name(TABLE)} ON obligation.obligation_change;"
     )
     assert f"tgfoid = to_regprocedure('{function}()')" in sql
     assert f"DROP FUNCTION IF EXISTS {function}();" in sql
@@ -114,6 +132,8 @@ def test_names_must_be_plain_identifiers(bad: str) -> None:
         emitted(lambda op: enable_tenant_rls(op, bad))
     with pytest.raises(ValueError, match="identifier"):
         emitted(lambda op: create_append_only_guard(op, TABLE, schema=bad))
+    with pytest.raises(ValueError, match="identifier"):
+        emitted(lambda op: enable_tenant_rls(op, TABLE, schema=bad))
 
 
 def test_offline_migrations_must_name_the_schema() -> None:

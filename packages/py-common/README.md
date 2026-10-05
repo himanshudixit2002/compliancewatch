@@ -3,7 +3,7 @@
 Part of the ComplianceWatch monorepo.
 Design reference: Project Foundation guide, sections 13, 14 and 18.
 
-- **Owns:** Logging, tracing and metrics (OpenTelemetry), config, auth middleware, problem details, cursor pagination, idempotency keys, feature flags, outbox, Temporal worker scaffold, testing fakes
+- **Owns:** Logging, tracing and metrics (OpenTelemetry), config, auth middleware, problem details, cursor pagination, idempotency keys, feature flags, outbox, the audit log writer, Temporal worker scaffold, testing fakes
 - **Owning team:** Platform and Infrastructure
 - **Consumes:** n/a
 - **Emits / publishes:** Golden-path library consumed by every Python service
@@ -58,8 +58,14 @@ src/py_common/
     errors.py          # 428 key required, 422 key reused, 409 request in flight
     purge.py           # purge_expired_keys(settings) and purge_job(settings): the daily purge as a worker component
     __main__.py        # python -m py_common.idempotency purge
+  audit/               # the audit log, audit.event; the package itself loads no SQLAlchemy
+    context.py         # audit_actor(service, principal), current_correlation_id()
+    memory.py          # MemoryAuditSink: the memory stores' twin, refusing what the table refuses
+    schema.py          # audit.event; create/drop_audit_table(op) for identity's migration
+    writer.py          # AuditWriter.write(connection, entry); PostgresAuditSink, a unit of work's audit
+    testing.py         # audit_entry, install_audit_table, read_audit_entries
 tests/unit/
-tests/integration/     # the outbox against Postgres and Redpanda, the migration helpers and idempotency keys on Postgres, flags on an Unleash server (testcontainers)
+tests/integration/     # the outbox against Postgres and Redpanda, the migration helpers, idempotency keys and the audit table on Postgres, flags on an Unleash server (testcontainers)
 ```
 
 ## Problem details
@@ -343,6 +349,37 @@ handler that calls another service over HTTP blocks its unit's thread, never the
 `<service>.<purpose>`, such as `notification.obligations`, so dead letters land in
 `<topic>.notification.obligations.dlq`. The store works on any SQLAlchemy engine, so handler
 tests can run it on a SQLite file.
+
+## Audit log
+
+Every admin action, and every change an internal tool makes to customer data, writes one row to
+`audit.event` (guide sections 9, 15 and 16): the action as a dotted name
+(`applicability.review.resolve`), the tenant whose data it touched or none for a platform-wide
+action, the subject's type and id, the actor, the reason, the state before and after as JSON, the
+time and the correlation id. The row is the kernel's `AuditEntry` (`domain_kernel.audit`). A unit
+of work exposes an `audit` sink and the use case writes the entry there, in the transaction of the
+action, so the row commits or rolls back with it: `PostgresAuditSink(connection)` inserts with
+`AuditWriter.write(connection, entry)` as `OutboxWriter` does for events, and
+`MemoryAuditSink(log, tenant_id=...)` serves memory stores, committing with the unit and refusing
+what the table refuses.
+
+- `audit_actor(service, principal)` names the actor: the user a verified token names, labelled
+  with the roles they hold (never a name), or the service client; anyone else (the anonymous
+  principal of `header` mode, or work no request started) is the system, `system:<service>`.
+  `current_correlation_id()` is the request's correlation id as `RequestContextMiddleware` bound
+  it. `py_common.audit` loads no web or database framework (an import-linter contract), so an
+  application layer may call both.
+- Identity's migration owns the table (`py_common.audit.schema.create_audit_table(op)`): the schema
+  `audit` when it is missing, indexes on (tenant_id, occurred_at) and (action, occurred_at),
+  forced row-level security that lets a session read and write its tenant's rows and add rows of
+  no tenant, and a trigger that refuses UPDATE and DELETE, a tenant's erasure included. No policy
+  reads the rows of no tenant yet.
+- `py_common.audit.testing` has `audit_entry(...)`, `install_audit_table(connection)` for a
+  service's integration tests and `read_audit_entries(connection)`.
+
+Not built yet: the read route `GET /v1/identity/audit`, the NDJSON export, masking personal data,
+pseudonymising rows on a tenant's erasure, the call sites in every service and database roles that
+may only insert.
 
 ## Worker processes
 
