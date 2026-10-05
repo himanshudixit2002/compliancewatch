@@ -5,14 +5,17 @@
 and the web app. `make product-seed` fills it with two synthetic tenants and a synthetic
 publication of the seed rules the golden world cites, and `make product-check` proves that a
 published rule becomes decisions, obligations with citations and a change card, that a
-business made or changed in the profile is decided again by itself, and that a rule published
-behind the fan-out hold reaches every business once the hold is released.
+business made or changed in the profile is decided again by itself, that a rule published
+behind the fan-out hold reaches every business once the hold is released, and that a sweep run a
+few days before a due date sends a reminder. On a database made for the run (CI), it also proves
+that a withdrawn rule closes its obligations in both tenants and sends withdrawal notices.
 
 ```bash
 make product                 # make dev, make migrate, make product-role, the seed calendar, then
                              # cw-mvp serve, cw-mvp worker and next dev; waits until all answer
 make product-seed            # synthetic tenants, the demo publication, the first decisions
-make product-check           # health, honesty, loop, isolation, recompute, fanout: exit 0 means accepted
+make product-check           # health, honesty, loop, isolation, recompute, fanout, reminders: exit 0 means accepted
+                             # (rollback reports itself skipped; CI runs it with ARGS="--destructive")
 make product-logs PROC=worker   # app, worker or web; FOLLOW=0 prints the end and returns
 make product-down            # stops only what make product started
 ```
@@ -26,7 +29,7 @@ in the dev database until `make dev-reset`.
 | Process | Where | What |
 | --- | --- | --- |
 | app | public listener `127.0.0.1:8000`, internal listener `127.0.0.1:8080` | `cw-mvp serve`: every service's API in one process ([composition/mvp/README.md](../../composition/mvp/README.md)). The internal listener serves every route; the web app and `cw-product` call it |
-| worker | health `127.0.0.1:8081` (`/health`, `/loops`) | `cw-mvp worker` with `CW_WORKER_KAFKA_ENABLED` and `CW_WORKER_TEMPORAL_ENABLED` on: the outbox relay of every schema, the engine's consumers of profile.updated (group `applicability-engine.profiles`, recompute on) and of rule.published and rule.withdrawn (group `applicability-engine.rules`, fan-out on), obligation's consumer of applicability.decided (group `obligation.decisions`), notification's consumer of the obligation events (group `notification.obligations`), the notification dispatcher and retention sweep, obligation's reminder sweep, the rulebook's transition sweep, and the Temporal task queues of the engine's fan-out (`applicability`) and the pipeline |
+| worker | health `127.0.0.1:8081` (`/health`, `/loops`) | `cw-mvp worker` with `CW_WORKER_KAFKA_ENABLED` and `CW_WORKER_TEMPORAL_ENABLED` on: the outbox relay of every schema, the engine's consumers of profile.updated (group `applicability-engine.profiles`, recompute on) and of rule.published and rule.withdrawn (group `applicability-engine.rules`, fan-out on), obligation's consumers of applicability.decided (group `obligation.decisions`) and of the rule events (group `obligation.rules`, on), notification's consumer of the obligation events (group `notification.obligations`), the notification dispatcher and retention sweep, obligation's reminder sweep and daily rolling window, the rulebook's transition sweep, and the Temporal task queues of the engine's fan-out (`applicability`) and the pipeline |
 | web | `WEB_PORT` (3000) | `next dev` with every `CW_WEB_*_URL` at the internal listener, building into `apps/web/.next/product` |
 
 Before starting them, `make product` runs `make dev` (the compose stack; nothing happens when it
@@ -43,10 +46,11 @@ creates the role on the running stack and grants it the service schemas
 The settings that make this the product are passed by the make targets, never as a default in a
 settings class or the flag registry: header auth, both listeners on `127.0.0.1`, the worker's
 health on `PRODUCT_WORKER_PORT` (8081, since 8001 is identity's under `make run` and
-`make web-stack`), the worker's two switches and the reminder sweep on, the engine's recompute on
-profile.updated on (`CW_APPLICABILITY_RECOMPUTE_ENABLED`) with the rulebook's in-force listing
-cached for five seconds (`CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS`), the engine's fan-out of
-rule.published on (`CW_APPLICABILITY_FANOUT_ENABLED`), rule publishing on with
+`make web-stack`), the worker's two switches and the reminder sweep and rolling window on, the
+engine's recompute on profile.updated on (`CW_APPLICABILITY_RECOMPUTE_ENABLED`) with the
+rulebook's in-force listing cached for five seconds (`CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS`),
+the engine's fan-out of rule.published on (`CW_APPLICABILITY_FANOUT_ENABLED`), obligation's
+consumer of the rule events on (`CW_OBLIGATION_RULE_EVENTS_ENABLED`), rule publishing on with
 the placeholder tokens `local-write-token` and `local-review-token` (not secrets; values in
 `.env` win), the profile's static GSTIN lookup, the notification sink in place of the real
 channels with a five-second batching window, and message links to the product's web app.
@@ -135,6 +139,39 @@ docker compose exec -T redpanda rpk group seek applicability-engine.rules --to e
   --topics rule.published,rule.withdrawn --allow-new-topics
 ```
 
+## From a withdrawal to closed obligations
+
+The rulebook writes rule.withdrawn, rule.superseded and rule.deadline_changed without a tenant.
+Obligation's consumer (group `obligation.rules`) reads the version fresh at the rulebook, caches
+it in `obligation.rule_version_ref`, and applies the event to every tenant of the
+`obligation_tenant` directory, one unit of work per tenant in the consumer's transaction, each
+under its own tenant setting:
+
+1. rule.withdrawn closes the version's open obligations with `rule_withdrawn`
+   (`obligation.closed` and a change row each); notification's consumer turns each closure into
+   an `obligation_withdrawn` notice, sent through the sink for the business owner and held for
+   the CA firm's 09:00 IST digest.
+2. rule.superseded closes, with `rule_superseded`, the open obligations the newer version takes
+   over (the periods that end after it takes effect), and the earlier periods stay open.
+3. rule.deadline_changed moves the period's open obligations to the new date
+   (`obligation.rescheduled`, an `obligation_deadline_extended` notice).
+4. rule.published only fills the cache: the obligations of a new version come with the
+   engine's fan-out decisions.
+
+A decision that reaches obligation after the version was withdrawn or superseded (a fan-out batch
+in flight, a consumer behind on its topic) is refused by the guard, which reads the cache and the
+rulebook: nothing for a withdrawn version, only the periods a superseded one still governs, and
+nothing for a version without a verified citation. The worker logs `obligation.decision_guarded`
+and counts `obligation_guard_refusals_total`. Every use case is idempotent, so a replayed rule
+event changes nothing more.
+
+The new consumer group reads its topics from the earliest offset on its first run: on the dev
+stack that is the rule.published events of the seed rules already published, which only fill the
+cache. The rolling window runs daily at 02:30 IST and makes the periods that entered the window
+for every business whose latest decision applies; `obligation-sweep --once` runs it and the
+reminder sweep at once (`--now` and `--tenant`, local and test only, are how the check's
+reminders step runs it).
+
 ### The sink
 
 `CW_NOTIFICATION_CHANNELS=sink` replaces both channels with
@@ -179,7 +216,10 @@ at any hour. The firm's admin hears by the daily digest (09:00 IST), as every CA
   where `CW_ENV` is local or test. Nothing is marked reviewed.
 - `cw-product` refuses to run unless `CW_ENV` is local or test and `CW_AUTH_MODE` header or dual.
 - A published version stays published: the rulebook has no way back for it short of withdrawing
-  it, which ends it, and only `make dev-reset` gives a dev database without it.
+  it, which ends it, and only `make dev-reset` gives a dev database without it. The check's
+  rollback step withdraws gstr9_annual, so it runs only with `--destructive`, which the CI
+  dev-stack job passes on its fresh database; never pass it against the shared dev database,
+  where the fanout step relies on gstr9_annual staying published.
 
 ## Signing in on the web
 
@@ -208,20 +248,22 @@ the worker does a few seconds after the API answers, and a failed step does not 
 
 | Step | Proves |
 | --- | --- |
-| health | `/ready` on the internal listener lists every service's checks as ok, the public listener answers, and the worker's `/loops` runs the four consumer groups, the outbox relays, the dispatcher, the reminder sweep and the `applicability` and `pipeline` task queues |
+| health | `/ready` on the internal listener lists every service's checks as ok, the public listener answers, and the worker's `/loops` runs the five consumer groups, the outbox relays, the dispatcher, the reminder sweep, the rolling window and the `applicability` and `pipeline` task queues |
 | honesty | every published seed rule is one the world cites and reads needs_review, every other seed rule is a draft, nothing is marked reviewed, and the golden world and its cases are drafts |
 | loop | evaluates the business tenant, then waits for the decisions its answers call for, an obligation of each rule that applies whose version cites a verified clause, and a change card about the business sent through the sink (with its line in the sink file) |
 | isolation | the CA firm reads none of the business tenant's decisions, obligations, notifications or business, and the other way round |
 | recompute | makes a new synthetic business in the business tenant with `POST /v1/businesses` (a monthly GSTR-3B filer in Karnataka with a made-up GSTIN, named with the time it was made), then waits for its gstr3b_monthly decision `applies` with the trigger profile_updated and its obligations; changes its registration to the quarterly scheme with `PATCH /v1/businesses/{id}` and waits for the decision `not_applicable`, the monthly obligations closed with `profile_changed` and the quarterly group A obligations. It never calls `cw-product evaluate`; every decision of the business comes from profile.updated, and no review item opens for it. Each run makes one more business, since a closed obligation stays closed and only a new business shows the whole change again |
-
 | fanout | while gstr9_annual is not published: sets the fan-out hold, publishes gstr9_annual as `cw-product publish --rule gstr9_annual` does, waits for its run to stand `held` with nothing decided, releases the hold and waits for the run to complete. Once it is published (a second check on the same database): finds that run completed, resuming it first if an earlier check left it paused, and sets and releases the hold again. Then the run's counters must match the directory entries of the level, each synthetic registration the directory lists must have its gstr9_annual decision from the fan-out with the result its answers call for, the registrations it applies to must have GSTR-9 obligations in both synthetic tenants, and `audit.event` must hold the hold, the release and any resume the step made. A hold an interrupted check left is lifted first; anyone else's fails the step |
+| reminders | runs `obligation-sweep --once --now <moment> --tenant <business tenant>` in the check's process, on the obligation settings of the product's worker, with the moment 5 days, 2 days or 12 hours before one of the business tenant's open obligations is due (the first lead whose threshold has not reminded it yet, so every run sees a new reminder), then waits for the reminder about that obligation to be sent through the sink, with its line in the sink file. The sweep and the window touch no other tenant |
+| rollback | only with `--destructive` (CI), skipped otherwise: withdraws gstr9_annual through the rulebook's withdraw route as the first synthetic reviewer, then waits for every GSTR-9 obligation of both synthetic tenants to close with `rule_withdrawn`, and for the withdrawal notices: sent through the sink for the business tenant, held for the daily digest (or sent) for the CA firm. On a database where it was withdrawn already, it checks what followed |
 
 The fanout step reads the business directory and the audit rows of no tenant, which no route
 serves and no policy lets `cw_app` read. `make product-check` gives it `CW_PRODUCT_RECORDS_URL`,
 the database owner's URL, and the tool opens it read only (`default_transaction_read_only`), so the
 session can run nothing but queries.
 
-`ARGS="--json"` prints the result as JSON, `ARGS="--step loop"` runs one step. A later package
+`ARGS="--json"` prints the result as JSON, `ARGS="--step loop"` runs one step, and
+`ARGS="--destructive"` lets the rollback step withdraw gstr9_annual (CI only). A later package
 appends its steps to `STEPS` in `tools/demo/src/cw_demo/product/check.py`.
 
 ## `make product` and `make web-stack`
@@ -256,6 +298,12 @@ keys). The web stack connects as the superuser and so reads across tenants; the 
   that reads `disabled` means `CW_APPLICABILITY_FANOUT_ENABLED` was off for the worker when the
   version was published; the Temporal UI (http://localhost:8233) shows the workflow
   `applicability-fan-out-<rule version id>`.
+- **The reminders step finds no reminder.** `make product-logs PROC=worker` shows
+  `notification.event_queued` for the obligation.due_soon the sweep wrote, and the check's error
+  names the sweep's exit code and report; `obligation-sweep: refused` means `CW_ENV` is not local
+  or test, or the obligation store is not postgres.
+- **A late decision made nothing.** `obligation.decision_guarded` in the worker's log names the
+  reason: `rule_withdrawn`, `rule_superseded` (with the periods) or `uncited`.
 - **The loop waits for the change card.** `tail var/product/sink.jsonl` shows what the sink got;
   `GET /v1/notification/notifications?business_id=<registration id>` for the tenant shows each
   notification's state and error.
