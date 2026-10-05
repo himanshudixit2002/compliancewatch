@@ -168,6 +168,8 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "POST /v1/obligations/{obligation_id}/status": PUBLIC,
         "PUT /v1/obligations/{obligation_id}/assignee": PUBLIC,
         "POST /v1/obligations/{obligation_id}/comments": PUBLIC,
+        # The public API's list of a business's obligations, beside profile's business routes.
+        "GET /v1/businesses/{business_id}/obligations": PUBLIC,
     },
     "notification": {
         "GET /v1/notification/ping": PUBLIC,
@@ -181,6 +183,8 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         # SES reports bounces and complaints here, with the feedback token.
         "POST /v1/notification/receipts/email": PUBLIC,
         "POST /v1/notification/notifications/{notification_id}/resend": ADMIN,
+        # The public API's bulk change card, for a CA firm's people (the route checks the role).
+        "POST /v1/notification/bulk": PUBLIC,
         "POST /v1/notification/send": INTERNAL,
         "PUT /v1/notification/preferences/{channel}/{recipient}": INTERNAL,
         "GET /v1/notification/preferences/{channel}/{recipient}": INTERNAL,
@@ -189,6 +193,8 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
     "qa": {
         "GET /v1/qa/ping": PUBLIC,
         "POST /v1/qa/ask": PUBLIC,
+        # The public API's ask: the same handler as the route above.
+        "POST /v1/qa": PUBLIC,
     },
     "llm-gateway": {
         "GET /v1/llm-gateway/ping": INTERNAL,

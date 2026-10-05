@@ -79,6 +79,21 @@ the API answers. One failed step does not stop the next.
   firm (counted before and after through ``records.PostgresRecords``). On a database where the
   rollback step withdrew the version, the publication is still in the feed and the dry run reads
   the withdrawn version.
+- ``public``: the public API through the public listener. As the business tenant,
+  ``GET /v1/businesses/{id}/obligations`` lists the seeded registration's obligations by due date,
+  pages of one follow one another, each item carries its rule's title, ``status`` keeps what it
+  names, a window of 367 days is a 422, and the CA firm reading it gets a 404. ``POST /v1/qa``
+  asks "When is my GSTR-3B due?": with the knowledge graph off the structured layer answers it from
+  the obligations, naming the first open monthly return due from today, with verified citations;
+  the CA firm asking about the registration gets a 404. As the CA firm, ``POST /v1/notification/
+  bulk`` sends the change card of gstr9_annual (of the quarterly return of the client's state once
+  a rollback check withdrew it) to the clients its impact lists: a synthetic client contact made
+  for the step (an owner who follows those clients, on an ``.invalid`` mailbox) gets one card per
+  client, the firm's own admin none; the same Idempotency-Key answers the same, and a new key finds
+  every card queued already. Each request that ran wrote one ``notification.bulk`` row of the firm
+  (found by its correlation id through ``records``), the contact's card goes out through the sink,
+  and the contact is removed afterwards (with any an interrupted check left). A service-to-service
+  route, ``POST /v1/notification/send``, answers 404 on the public listener.
 """
 
 import io
@@ -86,7 +101,7 @@ import json
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from pathlib import Path
 from typing import Any, Final
@@ -95,9 +110,10 @@ from uuid import UUID, uuid4
 import httpx2
 
 from cw_demo.product.analysts import FIRST_REVIEWER, NOTE, REVIEWERS
-from cw_demo.product.client import GOLDEN, Product, ProductError, as_tenant, ok
+from cw_demo.product.client import GOLDEN, Product, ProductError, as_tenant, ok, problem_slug
 from cw_demo.product.evaluate import (
     IDEMPOTENCY_HEADER,
+    IST,
     REPLAYED_HEADER,
     SeededRegistration,
     evaluate,
@@ -107,6 +123,7 @@ from cw_demo.product.evaluate import (
 )
 from cw_demo.product.publish import RULEBOOK, publish, rule_versions, supported
 from cw_demo.product.records import ProductRecords
+from cw_demo.product.seed import ANY_HOUR
 from cw_demo.product.tenants import (
     APPLIES,
     BUSINESS_TENANT,
@@ -202,6 +219,26 @@ CHANGE_PAGES: Final = 20
 """Pages of the feed the changes step reads, newest first, looking for the publication."""
 WAS_PUBLISHED: Final = frozenset({"published", "superseded", "withdrawn"})
 RESULTS: Final = ("applies", "not_applicable", "unsure")
+PUBLIC_QUESTION: Final = "When is my GSTR-3B due?"
+"""A question the structured layer answers from the registration's monthly obligations."""
+GSTR3B_FORM: Final = "GSTR-3B"
+QA: Final = "/v1/qa"
+BULK: Final = "/v1/notification/bulk"
+SEND: Final = "/v1/notification/send"
+"""A service-to-service route: the public listener answers it 404."""
+RECIPIENTS: Final = "/v1/notification/recipients"
+CONTACT_PREFIX: Final = "public-check-"
+CONTACT_DOMAIN: Final = "demo-ca-associates.invalid"
+"""The step's client contact writes to ``public-check-<id>@`` this domain, reserved never to
+exist; nothing reaches it, since the local product delivers through the sink."""
+BULK_ACTION: Final = "notification.bulk"
+OPEN: Final = ("open", "in_progress")
+BULK_RULES: Final = (GSTR9, QUARTERLY)
+"""The changes the step's bulk notification is about, the first one published that affects a
+client: GSTR-9, and the quarterly return of the client's state once a rollback withdrew GSTR-9."""
+LOOKAHEAD: Final = timedelta(days=365)
+"""How far ahead the structured layer looks for the next due date of a form."""
+ROUTE_NOT_FOUND: Final = "route-not-found"
 
 SweepRunner = Callable[[Sequence[str]], tuple[int, dict[str, Any]]]
 """Runs ``obligation-sweep --once --json`` with more arguments: its exit code and its report."""
@@ -1587,6 +1624,378 @@ def dry_run_matches(context: CheckContext, records: ProductRecords, version_id: 
     ]
 
 
+# ---------------------------------------------------------------- public
+
+
+def public(context: CheckContext) -> list[str]:
+    records = context.records
+    if records is None:
+        raise StepFailedError(
+            "the public step reads the bulk notification's audit rows: set "
+            "CW_PRODUCT_RECORDS_URL (make product-check passes it)"
+        )
+    registration = the_registration(context)
+    listed, lines = public_obligations(context, registration)
+    lines += public_answer(context, registration, listed)
+    lines += public_bulk(context, records)
+    lines += internal_hidden(context)
+    return lines
+
+
+def public_obligations(
+    context: CheckContext, registration: SeededRegistration
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The registration's obligations through the public listener, and what the step saw."""
+    product = context.product
+    headers = as_tenant(BUSINESS_TENANT.tenant_id)
+    path = f"{BUSINESSES}/{registration.registration_id}/obligations"
+    whole: dict[str, Any] = ok(product.public.get(path, params={"limit": 200}, headers=headers))
+    items: list[dict[str, Any]] = whole["items"]
+    if not items:
+        raise StepFailedError(f"GET {path} lists nothing: run the loop step first")
+    paged: list[dict[str, Any]] = []
+    params: dict[str, str | int] = {"limit": 1}
+    for _ in range(len(items)):
+        page = ok(product.public.get(path, params=params, headers=headers))
+        paged += page["items"]
+        if page["next_cursor"] is None:
+            break
+        params = {"limit": 1, "cursor": str(page["next_cursor"])}
+    if [item["obligation_id"] for item in paged] != [item["obligation_id"] for item in items]:
+        raise StepFailedError(f"pages of one of GET {path} differ from one page of 200")
+    if any(item["business_id"] != registration.registration_id for item in items):
+        raise StepFailedError(f"GET {path} lists another business's obligations")
+    dated = [str(item["due_at"]) for item in items if item["due_at"]]
+    if dated != sorted(dated, key=datetime.fromisoformat):
+        raise StepFailedError(f"GET {path} is not by due date")
+    titled = [item for item in items if item["rule_version"] and item["rule_version"]["title"]]
+    if not titled:
+        raise StepFailedError(f"no obligation of GET {path} carries its rule's title")
+    still_open = ok(
+        product.public.get(path, params={"status": list(OPEN), "limit": 200}, headers=headers)
+    )["items"]
+    if any(item["status"] not in OPEN for item in still_open):
+        raise StepFailedError(f"GET {path}?status=open&status=in_progress lists closed ones")
+    today = today_in_india(context.now())
+    too_long = product.public.get(
+        path,
+        params={"due_from": today.isoformat(), "due_to": (today + timedelta(days=366)).isoformat()},
+        headers=headers,
+    )
+    if (too_long.status_code, problem_slug(too_long)) != (422, "obligation-window-invalid"):
+        raise StepFailedError(f"a window of 367 days answered {too_long.status_code}, not 422")
+    theirs = product.public.get(path, headers=as_tenant(CA_FIRM_TENANT.tenant_id))
+    if (theirs.status_code, problem_slug(theirs)) != (404, "obligation-business-not-found"):
+        raise StepFailedError(
+            f"{CA_FIRM_TENANT.name} reading {path} answered {theirs.status_code}, not 404"
+        )
+    rule = titled[0]["rule_version"]
+    return items, [
+        f"GET {path} on the public listener: {len(items)} obligations by due date, pages of one "
+        f"alike; {len(titled)} with their rule's title ({rule['title']}, seed status "
+        f"{rule['seed_status']}); {len(still_open)} open or in progress",
+        f"a window of 367 days: 422 obligation-window-invalid; {CA_FIRM_TENANT.name}: 404 "
+        "obligation-business-not-found",
+    ]
+
+
+def public_answer(
+    context: CheckContext, registration: SeededRegistration, listed: Sequence[Mapping[str, Any]]
+) -> list[str]:
+    """``POST /v1/qa`` through the public listener answers the monthly return's next due date
+    from the structured layer, as the product (the knowledge graph off) should."""
+    product = context.product
+    today = today_in_india(context.now())
+    monthly = {
+        str(version["rule_version_id"])
+        for version in published_in_force(product, today)
+        if version["rule_key"] == MONTHLY
+    }
+    due = sorted(
+        (
+            (_ist_day(str(item["due_at"])), str(item["title"]))
+            for item in listed
+            if item["rule_version_id"] in monthly
+            and item["status"] in OPEN
+            and item["due_at"]
+            and today <= _ist_day(str(item["due_at"])) <= today + LOOKAHEAD
+        ),
+    )
+    if not due:
+        raise StepFailedError(
+            f"{registration.business.name} has no open {MONTHLY} obligation due within a year: "
+            "run the loop step first"
+        )
+    day, title = due[0]
+    body = {
+        "question": PUBLIC_QUESTION,
+        "as_of": today.isoformat(),
+        "business_node_id": registration.registration_id,
+    }
+    answer: dict[str, Any] = ok(
+        product.public.post(QA, json=body, headers=as_tenant(BUSINESS_TENANT.tenant_id))
+    )
+    expected = f"Your next {GSTR3B_FORM} is due on {day.day} {day:%B %Y}: {title}."
+    if (answer["outcome"], answer["layer"]) != ("answered", "structured"):
+        raise StepFailedError(
+            f"POST {QA} answered {answer['outcome']} from the {answer['layer']} layer "
+            f"({answer['reason']}); with the knowledge graph off the structured layer answers it "
+            "from the obligations"
+        )
+    if answer["answer"] != expected or not answer["citations"]:
+        raise StepFailedError(
+            f"POST {QA} answered {answer['answer']!r} with {len(answer['citations'])} citations, "
+            f"not {expected!r} with at least one"
+        )
+    foreign = product.public.post(QA, json=body, headers=as_tenant(CA_FIRM_TENANT.tenant_id))
+    if (foreign.status_code, problem_slug(foreign)) != (404, "qa-business-not-found"):
+        raise StepFailedError(
+            f"{CA_FIRM_TENANT.name} asking about the registration answered "
+            f"{foreign.status_code}, not 404"
+        )
+    cited = answer["citations"][0]
+    return [
+        f"POST {QA} {PUBLIC_QUESTION!r}: {answer['answer']} (structured layer, "
+        f"{len(answer['citations'])} verified citations, first {cited['clause_ref']})",
+        f"{CA_FIRM_TENANT.name} asking about the registration: 404 qa-business-not-found",
+    ]
+
+
+def _ist_day(instant: str) -> date:
+    return datetime.fromisoformat(instant).astimezone(IST).date()
+
+
+def public_bulk(context: CheckContext, records: ProductRecords) -> list[str]:
+    """The CA firm's bulk change card to the clients a change affects, through the public
+    listener, to a client contact made for the step and removed after it."""
+    product = context.product
+    firm = CA_FIRM_TENANT
+    headers = as_tenant(firm.tenant_id)
+    rule_key, version_id, affected = bulk_change(context)
+    lines = lift_contacts(product, affected)
+    contact, address = register_contact(product, affected)
+    try:
+        since = context.now() - timedelta(minutes=1)
+        body = {"rule_version_id": version_id, "business_ids": affected, "kind": "change_card"}
+        key, first_request, second_request = str(uuid4()), uuid4().hex, uuid4().hex
+        first = product.public.post(
+            BULK,
+            json=body,
+            headers={**headers, IDEMPOTENCY_HEADER: key, "x-request-id": first_request},
+        )
+        sent: dict[str, Any] = ok(first, 201)
+        told = len(affected)
+        counts = (
+            sent["queued"],
+            sent["notifications_queued"],
+            sent["skipped_duplicate"],
+            sent["skipped_no_recipient"],
+            sent["skipped_not_affected"],
+        )
+        if counts != (told, told, 0, 0, 0):
+            raise StepFailedError(
+                f"POST {BULK} of {rule_key} answered queued, cards, duplicate, no recipient, not "
+                f"affected {counts}; the contact follows {told} affected clients"
+            )
+        replay = product.public.post(BULK, json=body, headers={**headers, IDEMPOTENCY_HEADER: key})
+        if ok(replay, 201) != sent or replay.headers.get(REPLAYED_HEADER) != "true":
+            raise StepFailedError(
+                f"the same POST {BULK} with its Idempotency-Key answered otherwise"
+            )
+        again: dict[str, Any] = ok(
+            product.public.post(
+                BULK,
+                json=body,
+                headers={
+                    **headers,
+                    IDEMPOTENCY_HEADER: str(uuid4()),
+                    "x-request-id": second_request,
+                },
+            ),
+            201,
+        )
+        if (again["queued"], again["skipped_duplicate"], again["notifications_queued"]) != (
+            0,
+            told,
+            0,
+        ):
+            raise StepFailedError(
+                f"a new key for the same change and clients queued {again['notifications_queued']} "
+                f"cards and found {again['skipped_duplicate']} duplicates, not 0 and {told}"
+            )
+        audited = audited_bulk(records, since, firm.tenant_id, (first_request, second_request))
+        card = poll(
+            partial(contact_card, context, contact, affected),
+            timeout=context.timeout,
+            interval=context.interval,
+        )
+    finally:
+        ok(product.internal.delete(f"{RECIPIENTS}/{contact}", headers=headers), 204)
+    return [
+        *lines,
+        f"POST {BULK} of {rule_key} ({version_id}) on the public listener as {firm.name}: "
+        f"{told} clients told, {sent['notifications_queued']} card to the client contact, none "
+        "to the firm's admin; the same key replayed (Idempotent-Replayed: true) with the same "
+        f"answer; a new key found {again['skipped_duplicate']} duplicate",
+        audited,
+        f"the contact's card: {card['channel']} {card['state']} through the sink "
+        f"({card['provider_message_id']}); the contact ({address}) removed",
+        sink_line(product.sink_path, str(card["provider_message_id"])),
+    ]
+
+
+def bulk_change(context: CheckContext) -> tuple[str, str, list[str]]:
+    """The first change of ``BULK_RULES`` published that affects one of the firm's clients:
+    its rule key, its version and the registrations its impact lists."""
+    product = context.product
+    for rule_key in BULK_RULES:
+        published = [v for v in rule_versions(product, rule_key) if v["status"] == "published"]
+        if not published:
+            continue
+        version_id = str(published[-1]["rule_version_id"])
+        impact = ok(
+            product.public.get(
+                f"{CHANGES}/{version_id}/impact",
+                params={"result": APPLIES, "limit": 200},
+                headers=as_tenant(CA_FIRM_TENANT.tenant_id),
+            )
+        )
+        affected = [str(b["business_id"]) for c in impact["items"] for b in c["businesses"]]
+        if affected:
+            return rule_key, version_id, affected
+    raise StepFailedError(
+        f"neither {' nor '.join(BULK_RULES)} is published with a client of "
+        f"{CA_FIRM_TENANT.name} it applies to: run make product-seed and the fanout step"
+    )
+
+
+def _is_contact(recipient: Mapping[str, Any]) -> bool:
+    return any(
+        str(entry["address"]).startswith(CONTACT_PREFIX)
+        and str(entry["address"]).endswith(f"@{CONTACT_DOMAIN}")
+        for entry in recipient["addresses"]
+    )
+
+
+def lift_contacts(product: Product, affected: Sequence[str]) -> list[str]:
+    """Remove the client contacts an interrupted check left."""
+    headers = as_tenant(CA_FIRM_TENANT.tenant_id)
+    left: set[str] = set()
+    for business in affected:
+        page = ok(
+            product.internal.get(
+                RECIPIENTS, params={"business_id": business, "limit": 200}, headers=headers
+            )
+        )
+        left |= {str(item["id"]) for item in page["items"] if _is_contact(item)}
+    for recipient in sorted(left):
+        ok(product.internal.delete(f"{RECIPIENTS}/{recipient}", headers=headers), 204)
+    return [f"removed {len(left)} client contacts an interrupted check left"] if left else []
+
+
+def register_contact(product: Product, affected: Sequence[str]) -> tuple[str, str]:
+    """A client's owner who follows the affected clients, on a mailbox that cannot exist, opted in
+    with no quiet hours: the person a bulk change card is for."""
+    firm = CA_FIRM_TENANT
+    names = {
+        seeded.registration_id: seeded.business.name for seeded in registrations(product, firm)
+    }
+    recipient = str(uuid4())
+    address = f"{CONTACT_PREFIX}{recipient[:8]}@{CONTACT_DOMAIN}"
+    body = {
+        "role": "owner",
+        "language": "en",
+        "digest_mode": "off",
+        "addresses": [{"channel": "email", "address": address}],
+        "businesses": [
+            {"business_id": business, "label": names.get(business, "")} for business in affected
+        ],
+    }
+    ok(
+        product.internal.put(
+            f"{RECIPIENTS}/{recipient}", json=body, headers=as_tenant(firm.tenant_id)
+        )
+    )
+    ok(
+        product.internal.put(
+            f"/v1/notification/preferences/email/{address}",
+            json={
+                "opted_in": True,
+                "source": "api",
+                "language": "en",
+                "quiet_hours_start": ANY_HOUR,
+                "quiet_hours_end": ANY_HOUR,
+            },
+        )
+    )
+    return recipient, address
+
+
+def audited_bulk(
+    records: ProductRecords, since: datetime, tenant: UUID, requests: Sequence[str]
+) -> str:
+    """One ``notification.bulk`` row of the firm per request that ran, found by its correlation
+    id; the replay ran nothing."""
+    rows = [
+        row
+        for row in records.audit_entries(actions=(BULK_ACTION,), since=since)
+        if row.correlation_id in requests
+    ]
+    if sorted(str(row.correlation_id) for row in rows) != sorted(requests):
+        raise StepFailedError(
+            f"audit.event holds {len(rows)} {BULK_ACTION} rows of the step's {len(requests)} "
+            "requests that ran"
+        )
+    if any(row.tenant_id != tenant for row in rows):
+        raise StepFailedError(f"a {BULK_ACTION} row is not the firm's")
+    return f"audit.event: {len(rows)} {BULK_ACTION} rows of the firm, by {rows[0].actor_label}"
+
+
+def contact_card(context: CheckContext, contact: str, affected: Sequence[str]) -> dict[str, Any]:
+    """The contact's change card, once it went out through the sink: one per client."""
+    product = context.product
+    cards: list[dict[str, Any]] = []
+    for business in affected:
+        page = answered(
+            product.internal.get(
+                NOTIFICATIONS,
+                params={"business_id": business, "limit": 200},
+                headers=as_tenant(CA_FIRM_TENANT.tenant_id),
+            )
+        )
+        cards += [
+            n
+            for n in page["items"]
+            if n["occasion"] == CHANGE_CARD and n["recipient_id"] == contact
+        ]
+    if len(cards) > len(affected):
+        raise StepFailedError(
+            f"the contact has {len(cards)} change cards for {len(affected)} clients"
+        )
+    sent = [
+        card
+        for card in cards
+        if card["state"] in SENT_STATES
+        and str(card["provider_message_id"]).startswith(MESSAGE_ID_PREFIX)
+    ]
+    if len(sent) < len(affected):
+        states = ", ".join(f"{c['channel']} {c['state']}" for c in cards) or "none queued"
+        raise NotYetError(f"the contact's change card has not gone through the sink yet ({states})")
+    return sent[0]
+
+
+def internal_hidden(context: CheckContext) -> list[str]:
+    """A service-to-service route stays off the public listener."""
+    response = context.product.public.post(
+        SEND, json={}, headers=as_tenant(CA_FIRM_TENANT.tenant_id)
+    )
+    if (response.status_code, problem_slug(response)) != (404, ROUTE_NOT_FOUND):
+        raise StepFailedError(
+            f"POST {SEND} on the public listener answered {response.status_code}, not 404"
+        )
+    return [f"POST {SEND} on the public listener: 404 {ROUTE_NOT_FOUND}"]
+
+
 # ---------------------------------------------------------------- the command
 
 STEPS: list[Step] = [
@@ -1623,6 +2032,11 @@ STEPS: list[Step] = [
         "changes",
         "the feed lists the publication, the impact its affected clients, a dry run its counts",
         changes,
+    ),
+    Step(
+        "public",
+        "the public listener lists obligations, answers a question and sends a bulk change card",
+        public,
     ),
 ]
 """The steps in the order they run. A later package appends its own."""

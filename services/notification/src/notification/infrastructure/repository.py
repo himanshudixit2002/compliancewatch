@@ -4,7 +4,8 @@ A tenant unit is one transaction with ``app.tenant_id`` set for row-level securi
 repositories share the unit's session: the tenant's recipients and notifications, the work queue
 entries of those notifications, and the consents, suppressions and directory entries of every
 address (tables without row-level security). Events go to the outbox on the same connection, so
-an event commits or rolls back with the change that made it.
+an event commits or rolls back with the change that made it, and so do the unit's audit entries
+(``py_common.audit.writer``, into ``audit.event``).
 
 ``PostgresUnitOfWorkFactory(tenant_id)`` opens a tenant unit on its own transaction; ``shared()``
 opens one without a tenant, for consents, suppressions and the directory. A consumer runs its
@@ -64,6 +65,7 @@ from notification.infrastructure.models import (
     WorkIndexRow,
 )
 from notification.infrastructure.work_index import PostgresWorkIndex
+from py_common.audit.writer import PostgresAuditSink
 from py_common.outbox import OutboxWriter
 
 _PENDING = tuple(state.value for state in PENDING_STATES)
@@ -585,6 +587,7 @@ class SqlAlchemyUnitOfWork:
         self.notifications = SqlAlchemyNotificationRepository(session)
         self.work = SqlAlchemyWorkQueue(session)
         self.events = OutboxSink(connection, writer)
+        self.audit = PostgresAuditSink(connection)
 
     @classmethod
     @contextmanager

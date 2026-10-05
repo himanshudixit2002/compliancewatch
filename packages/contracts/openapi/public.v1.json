@@ -1,6 +1,32 @@
 {
   "components": {
     "schemas": {
+      "AnswerCitationOut": {
+        "description": "A clause the answer cites, with the quote checked against the clause's text.",
+        "properties": {
+          "clause_ref": {
+            "title": "Clause Ref",
+            "type": "string"
+          },
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "quote": {
+            "description": "Verbatim from the clause, checked before it is returned",
+            "title": "Quote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "clause_ref",
+          "document_id",
+          "quote"
+        ],
+        "title": "AnswerCitationOut",
+        "type": "object"
+      },
       "AnswerIn": {
         "additionalProperties": false,
         "properties": {
@@ -48,6 +74,133 @@
         ],
         "title": "Applicability",
         "type": "string"
+      },
+      "AskIn": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The date the question is about; today in India when absent",
+            "title": "As Of"
+          },
+          "business_node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The profile node the question is about; its obligations are the business's",
+            "title": "Business Node Id"
+          },
+          "fy": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{4}-[0-9]{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Financial year of the profile, 2025-26; the year of as_of when absent",
+            "title": "Fy"
+          },
+          "question": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "AskIn",
+        "type": "object"
+      },
+      "AskOut": {
+        "properties": {
+          "answer": {
+            "description": "A fixed sentence when the outcome is not_covered",
+            "title": "Answer",
+            "type": "string"
+          },
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/AnswerCitationOut"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "layer": {
+            "$ref": "#/components/schemas/Layer",
+            "description": "The layer that decided"
+          },
+          "layers": {
+            "description": "Every layer that ran, in order",
+            "items": {
+              "$ref": "#/components/schemas/LayerOut"
+            },
+            "title": "Layers",
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/Outcome"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The plan the KAG layer validated, in the planner's JSON form, even when a later layer answered; null when there was none",
+            "title": "Plan"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Reason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the question is not covered"
+          }
+        },
+        "required": [
+          "outcome",
+          "answer",
+          "citations",
+          "layer",
+          "layers",
+          "plan",
+          "reason",
+          "as_of"
+        ],
+        "title": "AskOut",
+        "type": "object"
       },
       "AssigneeIn": {
         "additionalProperties": false,
@@ -139,6 +292,164 @@
           "derived"
         ],
         "title": "AttributeSource",
+        "type": "string"
+      },
+      "BulkBusinessOut": {
+        "description": "What became of one business. ``queued`` its client recipients who got the card now,\n``duplicates`` those who had it already and ``unreachable`` those with no open address.",
+        "properties": {
+          "business_id": {
+            "format": "uuid",
+            "title": "Business Id",
+            "type": "string"
+          },
+          "duplicates": {
+            "title": "Duplicates",
+            "type": "integer"
+          },
+          "obligation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The obligation the card is about, the business's first open one of the change; null when not affected",
+            "title": "Obligation Id"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/BulkOutcome"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "integer"
+          },
+          "unreachable": {
+            "title": "Unreachable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "business_id",
+          "outcome",
+          "obligation_id",
+          "queued",
+          "duplicates",
+          "unreachable"
+        ],
+        "title": "BulkBusinessOut",
+        "type": "object"
+      },
+      "BulkKind": {
+        "description": "What a bulk notification sends.",
+        "enum": [
+          "change_card"
+        ],
+        "title": "BulkKind",
+        "type": "string"
+      },
+      "BulkNotificationIn": {
+        "additionalProperties": false,
+        "description": "A change to tell a CA firm's affected clients about, and the clients.",
+        "properties": {
+          "business_ids": {
+            "description": "The client businesses to tell, each once: the businesses of the change's impact (GET /v1/changes/{rule_version_id}/impact), the profile nodes their obligations and recipients are kept for",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Business Ids",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/BulkKind",
+            "description": "What to send: the change card"
+          },
+          "rule_version_id": {
+            "description": "The change: a published rule version",
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_version_id",
+          "business_ids",
+          "kind"
+        ],
+        "title": "BulkNotificationIn",
+        "type": "object"
+      },
+      "BulkNotificationOut": {
+        "description": "The businesses by outcome, each counted once, and the change cards queued, one per client\nrecipient; ``businesses`` in the order the request named them.",
+        "properties": {
+          "businesses": {
+            "items": {
+              "$ref": "#/components/schemas/BulkBusinessOut"
+            },
+            "title": "Businesses",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/BulkKind"
+          },
+          "notifications_queued": {
+            "description": "Change cards queued, one per person",
+            "title": "Notifications Queued",
+            "type": "integer"
+          },
+          "queued": {
+            "description": "Businesses whose card was queued for at least one person",
+            "title": "Queued",
+            "type": "integer"
+          },
+          "rule_version_id": {
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          },
+          "skipped_duplicate": {
+            "description": "Businesses whose people who can be reached had the card of this change",
+            "title": "Skipped Duplicate",
+            "type": "integer"
+          },
+          "skipped_no_recipient": {
+            "description": "Businesses nobody can be told about: no client recipient follows them, or none has an open address (opted in and not suppressed)",
+            "title": "Skipped No Recipient",
+            "type": "integer"
+          },
+          "skipped_not_affected": {
+            "description": "Businesses with no open obligation of the change",
+            "title": "Skipped Not Affected",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rule_version_id",
+          "kind",
+          "queued",
+          "skipped_duplicate",
+          "skipped_no_recipient",
+          "skipped_not_affected",
+          "notifications_queued",
+          "businesses"
+        ],
+        "title": "BulkNotificationOut",
+        "type": "object"
+      },
+      "BulkOutcome": {
+        "description": "What became of one business.",
+        "enum": [
+          "queued",
+          "duplicate",
+          "no_recipient",
+          "not_affected"
+        ],
+        "title": "BulkOutcome",
         "type": "string"
       },
       "BusinessChangeIn": {
@@ -285,6 +596,180 @@
           "name"
         ],
         "title": "BusinessIn",
+        "type": "object"
+      },
+      "BusinessObligationOut": {
+        "description": "One obligation of the business's list, with the facts of its rule version and the\nverified citations of its clause, as the detail shows them: ``rule_version`` is null, and\n``citations`` empty, for a version the service has not kept yet (the detail then reads it\nfrom the rulebook). The detail adds the history and the comments.",
+        "properties": {
+          "assignee_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Id"
+          },
+          "business_id": {
+            "format": "uuid",
+            "title": "Business Id",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/CitationOut"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "closed_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClosureReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decision_id": {
+            "format": "uuid",
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "evidence_type": {
+            "title": "Evidence Type",
+            "type": "string"
+          },
+          "obligation_id": {
+            "format": "uuid",
+            "title": "Obligation Id",
+            "type": "string"
+          },
+          "period_end": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period End"
+          },
+          "period_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period Label"
+          },
+          "period_start": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period Start"
+          },
+          "profile_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Version"
+          },
+          "rule_version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleVersionFactsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rule_version_id": {
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ObligationStatus"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "obligation_id",
+          "business_id",
+          "rule_version_id",
+          "decision_id",
+          "title",
+          "steps",
+          "evidence_type",
+          "period_label",
+          "period_start",
+          "period_end",
+          "due_at",
+          "status",
+          "closed_at",
+          "closed_reason",
+          "profile_version",
+          "assignee_id",
+          "rule_version",
+          "citations"
+        ],
+        "title": "BusinessObligationOut",
         "type": "object"
       },
       "BusinessOut": {
@@ -955,6 +1440,54 @@
           "not_applicable"
         ],
         "title": "ItemState",
+        "type": "string"
+      },
+      "Layer": {
+        "description": "The layers a question passes through, cheapest first (ADR-012).",
+        "enum": [
+          "structured",
+          "kag",
+          "hybrid"
+        ],
+        "title": "Layer",
+        "type": "string"
+      },
+      "LayerOut": {
+        "properties": {
+          "layer": {
+            "$ref": "#/components/schemas/Layer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Reason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "$ref": "#/components/schemas/LayerResult"
+          }
+        },
+        "required": [
+          "layer",
+          "result",
+          "reason"
+        ],
+        "title": "LayerOut",
+        "type": "object"
+      },
+      "LayerResult": {
+        "description": "``passed`` means the layer did not apply; ``fallback`` that it tried and handed on.",
+        "enum": [
+          "answered",
+          "not_covered",
+          "passed",
+          "fallback"
+        ],
+        "title": "LayerResult",
         "type": "string"
       },
       "LookupResultOut": {
@@ -1649,6 +2182,43 @@
         "title": "OptionOut",
         "type": "object"
       },
+      "Outcome": {
+        "enum": [
+          "answered",
+          "not_covered"
+        ],
+        "title": "Outcome",
+        "type": "string"
+      },
+      "Page_BusinessObligationOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BusinessObligationOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Send as cursor to read the next page; null on the last page",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[BusinessObligationOut]",
+        "type": "object"
+      },
       "Page_BusinessSummaryOut_": {
         "properties": {
           "items": {
@@ -1988,6 +2558,21 @@
         ],
         "title": "QuestionOut",
         "type": "object"
+      },
+      "Reason": {
+        "description": "Why a layer fell back or did not cover the question. Closed: the evals count them.",
+        "enum": [
+          "plan_invalid",
+          "planner_unavailable",
+          "planner_deferred",
+          "step_budget_exceeded",
+          "step_failed",
+          "no_evidence",
+          "answerer_declined",
+          "citation_check_failed"
+        ],
+        "title": "Reason",
+        "type": "string"
       },
       "RegistrationAddIn": {
         "additionalProperties": false,
@@ -2539,7 +3124,7 @@
   "info": {
     "description": "The ComplianceWatch public API, v1 (guide section 10): the operations the services tag public, merged into one spec by `make openapi-public`. Each operation names the service that serves it in x-service and the tenant roles that may call it in x-roles. Errors are problem details (RFC 9457). A POST that creates something takes an Idempotency-Key header, and a list answers one page at a time with limit and cursor. CHANGELOG.md next to this file lists the changes per version.",
     "title": "ComplianceWatch public API",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -3031,6 +3616,211 @@
           "compliance_lead"
         ],
         "x-service": "profile"
+      }
+    },
+    "/v1/businesses/{business_id}/obligations": {
+      "get": {
+        "description": "``business_id`` is any profile node of the tenant: a business (its legal entity, the id\nof ``/v1/businesses``), one of its registrations or a location. The list holds the\nobligations kept for that node; a GSTIN's returns are kept for its registration. Items come\nby due date, the ones without a date last, then by id, each with what the service keeps of\nits rule version (the title, the rule key, whether the seed rule is reviewed, the approvers)\nand the verified citations of its clause. With ``due_from`` or ``due_to`` only obligations\nwith a due date in that window count, and a window longer than 366 days is a 422. 404 when\nthe tenant has no such node, 503 when the profile service cannot say whether it has.",
+        "operationId": "list_business_obligations_v1_businesses__business_id__obligations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "business_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Business Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Keep the obligations in this status; repeat it for several",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/ObligationStatus"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep the obligations in this status; repeat it for several",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "First due day, in India (inclusive)",
+            "in": "query",
+            "name": "due_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "First due day, in India (inclusive)",
+              "title": "Due From"
+            }
+          },
+          {
+            "description": "Last due day, in India (inclusive); at most 366 days after due_from",
+            "in": "query",
+            "name": "due_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last due day, in India (inclusive); at most 366 days after due_from",
+              "title": "Due To"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 200",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Items per page, 1 to 200",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page; absent for the first page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_cursor of the previous page; absent for the first page",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_BusinessObligationOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "A business's obligations by due date, a page at a time",
+        "tags": [
+          "public",
+          "obligations"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
+        ],
+        "x-service": "obligation"
       }
     },
     "/v1/businesses/{business_id}/onboarding": {
@@ -3550,6 +4340,149 @@
           "compliance_lead"
         ],
         "x-service": "applicability-engine"
+      }
+    },
+    "/v1/notification/bulk": {
+      "post": {
+        "description": "Each business named gets the change card for the client's own people who follow it (an\nowner or staff, not the firm's own people, who hear in their daily digest), about its first\nopen obligation of the change, through the same queue, quiet hours and batching as every\ncard. A person who has the card of this change for the business already, from the change\nitself or an earlier request, gets nothing more (``skipped_duplicate``). A business nobody can\nbe told about is ``skipped_no_recipient``, and one the change asks nothing of (no open\nobligation of it; another tenant's business reads the same) ``skipped_not_affected``. The\naudit entry ``notification.bulk`` names the caller and the counts. 503 while the flag\n``notification.bulk`` is off or when the obligation service cannot answer.",
+        "operationId": "bulk_notify_v1_notification_bulk_post",
+        "parameters": [
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          },
+          {
+            "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkNotificationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkNotificationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Send a change card to a CA firm's affected clients, once per change and person",
+        "tags": [
+          "public",
+          "notifications"
+        ],
+        "x-roles": [
+          "ca_admin",
+          "ca_staff"
+        ],
+        "x-service": "notification"
       }
     },
     "/v1/obligations/{obligation_id}": {
@@ -4214,6 +5147,138 @@
           "compliance_lead"
         ],
         "x-service": "profile"
+      }
+    },
+    "/v1/qa": {
+      "post": {
+        "description": "The layers answer in turn, cheapest first: the business's own obligations for \"when is\nmy GSTR-3B due\" and \"what is due this month\" (no model call), then the knowledge graph\nwhen it is on for the tenant, then a search of the clauses in force. ``outcome`` is\n``answered`` with at least one citation whose quote was checked against its clause, or\n``not_covered`` with a fixed sentence and the ``reason``. ``layers`` lists every layer that\nran. 404 when ``business_node_id`` names no profile node of the tenant; 429 with the\ngateway's ``Retry-After`` when the model budget is used up; 503 when a service the answer\nneeds did not answer.",
+        "operationId": "ask_v1_qa_post",
+        "parameters": [
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Answer a question with verified citations, or say it is not covered",
+        "tags": [
+          "public",
+          "questions"
+        ],
+        "x-roles": [
+          "owner",
+          "staff",
+          "ca_admin",
+          "ca_staff",
+          "compliance_lead"
+        ],
+        "x-service": "qa"
       }
     }
   },

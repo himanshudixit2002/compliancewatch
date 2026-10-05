@@ -1,6 +1,7 @@
 """Builders for tests of this service and of services that consume its events: fixed ids, a
 fixed clock, a sample recurring rule version, the facts the cache keeps of it, a rulebook reader
-from a dict, and the identity service's members from a set."""
+from a dict, the identity service's members from a set, and the profile service's nodes from a
+set."""
 
 from collections.abc import Callable, Iterable
 from dataclasses import replace
@@ -15,7 +16,11 @@ from domain_kernel.predicates import Predicate
 from domain_kernel.recurrence import Recurrence
 from domain_kernel.rules import ObligationTemplate, RuleVersionSnapshot
 from domain_kernel.status import RuleVersionStatus
-from obligation.domain.errors import IdentityUnavailableError, RulebookUnavailableError
+from obligation.domain.errors import (
+    IdentityUnavailableError,
+    ProfileUnavailableError,
+    RulebookUnavailableError,
+)
 from obligation.domain.ports import Membership
 from obligation.domain.rule_versions import Citation, RuleVersionRead, RuleVersionRef
 
@@ -158,3 +163,21 @@ class FakeTenantMembers:
         if (tenant_id, user_id) not in self.members:
             return None
         return Membership(user_id, tenant_id, active=user_id not in self.disabled)
+
+
+class FakeProfileNodes:
+    """The profile nodes of each tenant from a set of ``(tenant, business)``; ``down`` makes
+    every call fail as an outage would. ``asked`` lists every call."""
+
+    def __init__(
+        self, nodes: Iterable[tuple[TenantId, BusinessId]] = (), *, down: bool = False
+    ) -> None:
+        self.nodes = set(nodes)
+        self.down = down
+        self.asked: list[tuple[TenantId, BusinessId]] = []
+
+    def exists(self, tenant_id: TenantId, business_id: BusinessId) -> bool:
+        self.asked.append((tenant_id, business_id))
+        if self.down:
+            raise ProfileUnavailableError("profile unreachable (fake)")
+        return (tenant_id, business_id) in self.nodes

@@ -1,6 +1,7 @@
 """Queue one obligation event's notification for each recipient of the business.
 
-For every recipient that follows the business (``RecipientRepository.for_business``):
+For every recipient that follows the business (``RecipientRepository.for_business``), or every
+one of them ``audience`` keeps (a CA firm's bulk change card keeps the client's own people):
 
 1. The first open address in the recipient's order is chosen: opted in and not suppressed. A
    recipient with none gets nothing.
@@ -42,8 +43,12 @@ from notification.domain.policy import (
     DigestPolicy,
 )
 from notification.domain.ports import NO_METRICS, DeliveryMetrics, QueueResult
+from notification.domain.recipients import Recipient
 from notification.domain.repository import UnitOfWork, UnitOfWorkFactory, WorkEntry
 from notification.domain.routing import ObligationNotice
+
+Audience = Callable[[Recipient], bool]
+"""Which of the business's recipients a notice is for."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +81,11 @@ class EnqueueNotifications:
         with self._unit_of_work(notice.tenant_id) as unit:
             return self.run_in(unit, notice)
 
-    def run_in(self, unit: UnitOfWork, notice: ObligationNotice) -> Enqueued:
+    def run_in(
+        self, unit: UnitOfWork, notice: ObligationNotice, *, audience: Audience | None = None
+    ) -> Enqueued:
+        """The notice's notifications, queued in ``unit``, for the recipients ``audience``
+        keeps (every recipient that follows the business when None)."""
         if unit.tenant_id != notice.tenant_id:
             raise InvariantViolationError("the notice belongs to another tenant than the unit")
         now = self._clock()
@@ -88,6 +97,8 @@ class EnqueueNotifications:
                 params["title"] = earlier["title"]
         queued = duplicates = unreachable = 0
         for recipient in unit.recipients.for_business(notice.business_id):
+            if audience is not None and not audience(recipient):
+                continue
             address = recipient.primary_address(is_open)
             if address is None:
                 unreachable += 1

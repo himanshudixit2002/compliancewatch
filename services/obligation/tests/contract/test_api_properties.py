@@ -30,7 +30,7 @@ from domain_kernel.access import Role
 from domain_kernel.ids import TenantId
 from obligation.main import build_app
 from obligation.settings import ObligationSettings
-from obligation.testing import FakeRuleVersionReader, FakeTenantMembers
+from obligation.testing import FakeProfileNodes, FakeRuleVersionReader, FakeTenantMembers
 from py_common.auth.testing import TestIssuer, bearer
 
 TENANT_ID = "7d0f4d56-2a8e-4c1b-9f3e-5b6a1c2d3e4f"
@@ -45,16 +45,19 @@ TRACKING = frozenset(
     )
 )
 """The tracking routes, under the service's prefix and in the public API."""
+BUSINESS_LIST = "GET /v1/businesses/{business_id}/obligations"
+"""The public API's list; the profile fake knows no business, so an empty page is a 404."""
 OPERATIONS = frozenset(
     {
         "GET /health",
         "GET /ready",
         "GET /v1/obligation/obligations",
         "GET /v1/obligation/ping",
+        BUSINESS_LIST,
         *TRACKING,
     }
 )
-TOKEN_OPERATIONS = frozenset({"GET /v1/obligation/obligations", *TRACKING})
+TOKEN_OPERATIONS = frozenset({"GET /v1/obligation/obligations", BUSINESS_LIST, *TRACKING})
 EXCLUDED: dict[str, str] = {}
 CHECKS = cast(
     list[CheckFunction],
@@ -71,6 +74,7 @@ app = build_app(
     ObligationSettings(_env_file=None, service_name="obligation", obligation_store="memory"),
     rules=FakeRuleVersionReader(),
     members=FakeTenantMembers(),
+    profiles=FakeProfileNodes(),
 )
 schema = schemathesis.openapi.from_asgi("/openapi.json", app).include(
     func=lambda ctx: ctx.operation.label in OPERATIONS and ctx.operation.label not in EXCLUDED
@@ -87,6 +91,7 @@ token_app = build_app(
     ),
     rules=FakeRuleVersionReader(),
     members=FakeTenantMembers(),
+    profiles=FakeProfileNodes(),
 )
 token_schema = schemathesis.openapi.from_asgi("/openapi.json", token_app).include(
     func=lambda ctx: ctx.operation.label in TOKEN_OPERATIONS

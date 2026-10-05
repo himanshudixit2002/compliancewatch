@@ -9,7 +9,8 @@ the same key and body gets the first response back for 24 hours instead of a sec
 The tracking routes are served twice, with the same handlers: under the service's prefix,
 ``/v1/obligation/obligations/{obligation_id}``, which the web app calls, and as part of the public
 API (tag ``public``), ``/v1/obligations/{obligation_id}``, with the roles that may call them as
-``x-roles``.
+``x-roles``. The public API also lists a business's obligations a page at a time,
+``/v1/businesses/{business_id}/obligations``, beside the profile service's business routes.
 """
 
 from datetime import date
@@ -20,23 +21,33 @@ from fastapi import APIRouter, Query, status
 from fastapi.responses import JSONResponse
 
 from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId, UserId
+from domain_kernel.status import ObligationStatus
 from obligation.api.deps import PUBLIC_ROUTE, Tenant, Wired, Writer
 from obligation.api.schemas import (
     AssigneeIn,
+    BusinessObligationCursor,
+    BusinessObligationOut,
     CommentIn,
     CommentOut,
     ObligationDetailOut,
     ObligationOut,
     StatusIn,
 )
-from obligation.application.queries import ObligationQuery
+from obligation.application.queries import (
+    BusinessObligationsQuery,
+    ListedObligation,
+    ObligationQuery,
+)
 from obligation.application.tracking import Assignment, NewComment, StatusChange
 from obligation.domain.model import DueWindow
+from obligation.domain.repository import ListingAfter
 from py_common.idempotency.fastapi import IDEMPOTENCY_RESPONSES, IdempotencyKey, run_idempotent
+from py_common.pagination import Page, Pagination, page_of
 from py_common.problems import problem_responses
 
 router = APIRouter(prefix="/v1/obligation", tags=["obligation"])
 public_router = APIRouter(prefix="/v1/obligations", tags=["public", "obligations"])
+business_router = APIRouter(prefix="/v1/businesses", tags=["public", "obligations"])
 
 ONE: Final = "/obligations/{obligation_id}"
 """One obligation under the service's prefix; the public API's path is ``/{obligation_id}``."""
@@ -47,6 +58,8 @@ ASSIGN_PROBLEMS: Final = {
     **IDEMPOTENCY_RESPONSES,
 }
 COMMENT_PROBLEMS: Final = {**problem_responses(401, 403, 404, 422), **IDEMPOTENCY_RESPONSES}
+LIST_PROBLEMS: Final = problem_responses(401, 403, 404, 422, 503)
+LIST_SCOPE: Final = "obligation.business-obligations"
 
 
 @router.get("/ping")
@@ -82,6 +95,64 @@ def list_obligations(
         )
     )
     return [ObligationOut.from_obligation(obligation) for obligation in found]
+
+
+@business_router.get(
+    "/{business_id}/obligations",
+    summary="A business's obligations by due date, a page at a time",
+    responses=LIST_PROBLEMS,
+    openapi_extra=PUBLIC_ROUTE,
+)
+def list_business_obligations(
+    business_id: UUID,
+    tenant: Tenant,
+    wired: Wired,
+    page: Pagination,
+    statuses: Annotated[
+        list[ObligationStatus] | None,
+        Query(
+            alias="status",
+            description="Keep the obligations in this status; repeat it for several",
+        ),
+    ] = None,
+    due_from: Annotated[
+        date | None, Query(description="First due day, in India (inclusive)")
+    ] = None,
+    due_to: Annotated[
+        date | None,
+        Query(description="Last due day, in India (inclusive); at most 366 days after due_from"),
+    ] = None,
+) -> Page[BusinessObligationOut]:
+    """``business_id`` is any profile node of the tenant: a business (its legal entity, the id
+    of ``/v1/businesses``), one of its registrations or a location. The list holds the
+    obligations kept for that node; a GSTIN's returns are kept for its registration. Items come
+    by due date, the ones without a date last, then by id, each with what the service keeps of
+    its rule version (the title, the rule key, whether the seed rule is reviewed, the approvers)
+    and the verified citations of its clause. With ``due_from`` or ``due_to`` only obligations
+    with a due date in that window count, and a window longer than 366 days is a 422. 404 when
+    the tenant has no such node, 503 when the profile service cannot say whether it has."""
+    window = DueWindow(due_from, due_to)
+    after = page.after(LIST_SCOPE, BusinessObligationCursor)
+    found = wired.list_business_obligations.run(
+        BusinessObligationsQuery(
+            tenant_id=tenant,
+            business_id=BusinessId(business_id),
+            limit=page.limit + 1,
+            window=window,
+            statuses=frozenset(statuses or ()),
+            after=None if after is None else ListingAfter(after.due_at, ObligationId(after.id)),
+        )
+    )
+    items, next_cursor = page_of(found, page.limit, LIST_SCOPE, _cursor)
+    return Page[BusinessObligationOut](
+        items=[BusinessObligationOut.from_listed(listed) for listed in items],
+        next_cursor=next_cursor,
+    )
+
+
+def _cursor(listed: ListedObligation) -> BusinessObligationCursor:
+    obligation = listed.obligation
+    return BusinessObligationCursor(due_at=obligation.due_at, id=obligation.id.value)
 
 
 @public_router.get(

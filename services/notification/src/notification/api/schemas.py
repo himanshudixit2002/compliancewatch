@@ -5,9 +5,18 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from domain_kernel.channels import Channel
+from notification.application.bulk import (
+    MAX_BUSINESSES as MAX_BULK_BUSINESSES,
+)
+from notification.application.bulk import (
+    BulkKind,
+    BulkOutcome,
+    BulkResult,
+    BusinessResult,
+)
 from notification.domain.model import Outcome, SendOutcome
 from notification.domain.notification import DeliveryState, Notification
 from notification.domain.occasions import OccasionKind
@@ -349,3 +358,90 @@ def _plain(value: object) -> Any:
     if isinstance(value, list | tuple):
         return [_plain(item) for item in value]
     return value
+
+
+class BulkNotificationIn(Strict):
+    """A change to tell a CA firm's affected clients about, and the clients."""
+
+    rule_version_id: UUID = Field(description="The change: a published rule version")
+    business_ids: list[UUID] = Field(
+        min_length=1,
+        max_length=MAX_BULK_BUSINESSES,
+        description=(
+            "The client businesses to tell, each once: the businesses of the change's impact "
+            "(GET /v1/changes/{rule_version_id}/impact), the profile nodes their obligations and "
+            "recipients are kept for"
+        ),
+    )
+    kind: BulkKind = Field(description="What to send: the change card")
+
+    @field_validator("business_ids")
+    @classmethod
+    def _once_each(cls, value: list[UUID]) -> list[UUID]:
+        if len(set(value)) != len(value):
+            raise ValueError("a business is listed twice")
+        return value
+
+
+class BulkBusinessOut(BaseModel):
+    """What became of one business. ``queued`` its client recipients who got the card now,
+    ``duplicates`` those who had it already and ``unreachable`` those with no open address."""
+
+    business_id: UUID
+    outcome: BulkOutcome
+    obligation_id: UUID | None = Field(
+        description=(
+            "The obligation the card is about, the business's first open one of the change; "
+            "null when not affected"
+        )
+    )
+    queued: int
+    duplicates: int
+    unreachable: int
+
+    @classmethod
+    def from_result(cls, result: BusinessResult) -> "BulkBusinessOut":
+        return cls(
+            business_id=result.business_id.value,
+            outcome=result.outcome,
+            obligation_id=None if result.obligation_id is None else result.obligation_id.value,
+            queued=result.queued,
+            duplicates=result.duplicates,
+            unreachable=result.unreachable,
+        )
+
+
+class BulkNotificationOut(BaseModel):
+    """The businesses by outcome, each counted once, and the change cards queued, one per client
+    recipient; ``businesses`` in the order the request named them."""
+
+    rule_version_id: UUID
+    kind: BulkKind
+    queued: int = Field(description="Businesses whose card was queued for at least one person")
+    skipped_duplicate: int = Field(
+        description="Businesses whose people who can be reached had the card of this change"
+    )
+    skipped_no_recipient: int = Field(
+        description=(
+            "Businesses nobody can be told about: no client recipient follows them, or none has "
+            "an open address (opted in and not suppressed)"
+        )
+    )
+    skipped_not_affected: int = Field(
+        description="Businesses with no open obligation of the change"
+    )
+    notifications_queued: int = Field(description="Change cards queued, one per person")
+    businesses: list[BulkBusinessOut]
+
+    @classmethod
+    def from_result(cls, result: BulkResult) -> "BulkNotificationOut":
+        return cls(
+            rule_version_id=result.rule_version_id.value,
+            kind=result.kind,
+            queued=result.count(BulkOutcome.QUEUED),
+            skipped_duplicate=result.count(BulkOutcome.DUPLICATE),
+            skipped_no_recipient=result.count(BulkOutcome.NO_RECIPIENT),
+            skipped_not_affected=result.count(BulkOutcome.NOT_AFFECTED),
+            notifications_queued=result.notifications_queued,
+            businesses=[BulkBusinessOut.from_result(business) for business in result.businesses],
+        )

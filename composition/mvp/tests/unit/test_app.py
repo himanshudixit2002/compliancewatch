@@ -195,7 +195,8 @@ def test_in_token_mode_services_share_identity_s_keys_and_mint_tokens_in_process
     qa_tokens = seen["qa"]["token_source"]
     assert isinstance(qa_tokens, IssuerTokenSource)
     assert qa_tokens.principal == Principal.service("qa", {Scope.LLM_CALL, Scope.TENANT_ACT})
-    assert seen["notification"]["token_source"].principal == Principal.service("notification", ())
+    notification = seen["notification"]["token_source"].principal
+    assert notification == Principal.service("notification", {Scope.TENANT_ACT})
     engine = seen["applicability-engine"]["token_source"].principal
     assert engine == Principal.service("applicability-engine", {Scope.TENANT_ACT})
     assert authenticator.principal_for(qa_tokens.token()) == qa_tokens.principal

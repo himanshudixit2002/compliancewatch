@@ -20,6 +20,9 @@ from cw_mvp.registry import (
     service_settings,
 )
 from cw_mvp.testing import MEMORY_SERVICES, mvp_settings
+from notification.infrastructure.obligation_client import (
+    OBLIGATIONS_PATH as NOTIFICATION_OBLIGATIONS_PATH,
+)
 from py_common.settings import Settings
 from qa.infrastructure.obligation_client import OBLIGATIONS_PATH as QA_OBLIGATIONS_PATH
 from qa.main import build_app as build_qa
@@ -85,7 +88,12 @@ def test_every_url_of_another_service_is_a_registered_url_field(entry: ServiceEn
 
 def test_routes_that_call_other_services_go_one_level_deep() -> None:
     callers = [entry for entry in REGISTRY if entry.loopback_routes]
-    assert [entry.name for entry in callers] == ["applicability-engine", "obligation", "qa"]
+    assert [entry.name for entry in callers] == [
+        "applicability-engine",
+        "obligation",
+        "notification",
+        "qa",
+    ]
     for entry in callers:
         assert set(entry.loopback_routes) <= set(EXPOSURE[entry.name])
         assert entry.calls, f"{entry.name} lists loopback routes but calls no service"
@@ -107,6 +115,7 @@ def test_the_routes_a_caller_reaches_are_the_ones_listed() -> None:
     obligation = BY_NAME["obligation"]
     assert set(obligation.called_routes) <= set(EXPOSURE["obligation"])
     assert f"GET {QA_OBLIGATIONS_PATH}" in obligation.called_routes, "qa reads the list"
+    assert f"GET {NOTIFICATION_OBLIGATIONS_PATH}" in obligation.called_routes, "so does bulk"
     assert [entry.name for entry in REGISTRY if entry.called_routes] == ["obligation"]
 
 

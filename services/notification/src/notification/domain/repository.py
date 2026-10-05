@@ -29,6 +29,7 @@ from enum import StrEnum
 from typing import Protocol
 
 from domain_kernel._validation import require_aware, require_instance
+from domain_kernel.audit import AuditSink
 from domain_kernel.channels import Channel
 from domain_kernel.dedupe import DedupeKey
 from domain_kernel.events import DomainEvent
@@ -325,7 +326,8 @@ class SharedUnitOfWork(Protocol):
 
 
 class UnitOfWork(SharedUnitOfWork, Protocol):
-    """One transaction of one tenant."""
+    """One transaction of one tenant; its audit entries (``audit.event``) commit or roll back
+    with the rest."""
 
     @property
     def tenant_id(self) -> TenantId: ...
@@ -341,6 +343,9 @@ class UnitOfWork(SharedUnitOfWork, Protocol):
 
     @property
     def events(self) -> EventSink: ...
+
+    @property
+    def audit(self) -> AuditSink: ...
 
 
 class UnitOfWorkFactory(Protocol):

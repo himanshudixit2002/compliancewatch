@@ -134,16 +134,18 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         ObligationSettings,
         build_obligation,
         components=obligation_components,
-        url_fields=("rulebook_url",),
-        # The detail reads the rulebook when its cache lacks the rule version, and an assignment
-        # by a verified caller asks identity whether the assignee belongs to the tenant.
+        url_fields=("rulebook_url", "profile_url"),
+        # The detail reads the rulebook when its cache lacks the rule version, an assignment by
+        # a verified caller asks identity whether the assignee belongs to the tenant, and the
+        # public list asks profile whether a business with an empty page is the tenant's.
         loopback_routes=(
             "GET /v1/obligation/obligations/{obligation_id}",
             "PUT /v1/obligation/obligations/{obligation_id}/assignee",
             "GET /v1/obligations/{obligation_id}",
             "PUT /v1/obligations/{obligation_id}/assignee",
+            "GET /v1/businesses/{business_id}/obligations",
         ),
-        # qa's ask reads a business's obligations, which calls nothing.
+        # qa's ask and notification's bulk read a business's obligations, which calls nothing.
         called_routes=("GET /v1/obligation/obligations",),
         takes_token_source=True,
     ),
@@ -153,7 +155,9 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         NotificationSettings,
         build_notification,
         components=notification_components,
-        url_fields=("rulebook_url",),
+        url_fields=("rulebook_url", "obligation_url"),
+        # A CA firm's bulk notification reads each client's open obligations of the change.
+        loopback_routes=("POST /v1/notification/bulk",),
         takes_token_source=True,
     ),
     ServiceEntry(
@@ -162,7 +166,9 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         QaSettings,
         build_qa,
         url_fields=("rulebook_url", "profile_url", "obligation_url", "llm_gateway_url"),
-        loopback_routes=("POST /v1/qa/ask",),
+        # A question reads the profile, the business's obligations and the rulebook and calls
+        # the gateway, under the service's prefix and as the public API's ask.
+        loopback_routes=("POST /v1/qa/ask", "POST /v1/qa"),
         takes_token_source=True,
     ),
     ServiceEntry("llm-gateway", "llm_gateway", GatewaySettings, build_llm_gateway),

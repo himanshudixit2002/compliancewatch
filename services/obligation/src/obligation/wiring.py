@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from obligation.application.changes import ApplyDeadlineChange, CloseObligation, WithdrawRule
 from obligation.application.materialise import MaterialiseObligations
-from obligation.application.queries import ListObligations
+from obligation.application.queries import ListBusinessObligations, ListObligations
 from obligation.application.tracking import (
     AddComment,
     AssignObligation,
@@ -29,6 +29,7 @@ class Wiring:
     withdraw_rule: WithdrawRule
     close_obligation: CloseObligation
     list_obligations: ListObligations
+    list_business_obligations: ListBusinessObligations
     read_obligation: ReadObligation
     change_status: ChangeStatus
     assign: AssignObligation

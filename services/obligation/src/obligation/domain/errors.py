@@ -68,3 +68,22 @@ class IdentityUnavailableError(DomainError, ConnectionError):
 
     type_slug = "identity-unavailable"
     title = "Identity service unavailable"
+
+
+class BusinessNotFoundError(DomainError, LookupError):
+    """The tenant has no profile node with this id: no business, registration or location."""
+
+    type_slug = "obligation-business-not-found"
+    title = "Business not found for obligations"
+
+    def __init__(self, business_id: str) -> None:
+        super().__init__(f"business {business_id} is not a profile node of this tenant")
+        self.business_id = business_id
+
+
+class ProfileUnavailableError(DomainError, ConnectionError):
+    """The profile service could not say whether a business belongs to the tenant now; another
+    try may succeed."""
+
+    type_slug = "profile-unavailable"
+    title = "Profile service unavailable"

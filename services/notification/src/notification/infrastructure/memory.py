@@ -5,7 +5,8 @@ works on a copy of the store and replaces it only when the block exits cleanly, 
 leaves nothing behind; a tenant unit sees only its tenant's recipients and notifications, as
 row-level security would show them; dedupe keys and ids are unique across tenants; and events
 are published only when their unit commits. Units run one at a time, which stands in for the
-database's locks. Committed events go to ``LogEventSink``, which keeps and logs them.
+database's locks. Committed events go to ``LogEventSink``, which keeps and logs them, and committed
+audit entries to ``MemoryStore.audit``.
 """
 
 import threading
@@ -15,6 +16,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from uuid import UUID
 
+from domain_kernel.audit import AuditEntry
 from domain_kernel.channels import Channel
 from domain_kernel.dedupe import DedupeKey
 from domain_kernel.events import DomainEvent
@@ -31,6 +33,7 @@ from notification.domain.repository import (
     UnitOfWork,
     WorkEntry,
 )
+from py_common.audit import MemoryAuditSink
 from py_common.logging import get_logger
 
 log = get_logger(__name__)
@@ -328,13 +331,16 @@ class MemorySharedUnitOfWork:
 
 
 class MemoryUnitOfWork(MemorySharedUnitOfWork):
-    def __init__(self, state: MemoryState, tenant_id: TenantId) -> None:
+    def __init__(
+        self, state: MemoryState, tenant_id: TenantId, audit: list[AuditEntry] | None = None
+    ) -> None:
         super().__init__(state)
         self.tenant_id = tenant_id
         self.recipients = MemoryRecipientRepository(state, tenant_id)
         self.notifications = MemoryNotificationRepository(state, tenant_id)
         self.work = MemoryWorkQueue(state, tenant_id)
         self.events = MemoryEventSink()
+        self.audit = MemoryAuditSink([] if audit is None else audit, tenant_id=tenant_id)
 
 
 class MemoryWorkIndex:
@@ -422,6 +428,7 @@ class MemoryStore:
         self.lock = threading.RLock()
         self.sink = sink or LogEventSink()
         self.work_index = MemoryWorkIndex(self)
+        self.audit: list[AuditEntry] = []
 
     @property
     def events(self) -> list[DomainEvent]:
@@ -441,9 +448,10 @@ class MemoryStore:
     def _unit(self, tenant_id: TenantId) -> Iterator[UnitOfWork]:
         with self.lock:
             working = self.state.copy()
-            unit = MemoryUnitOfWork(working, tenant_id)
+            unit = MemoryUnitOfWork(working, tenant_id, self.audit)
             yield unit
             self.state = working
+            unit.audit.commit()
             for event in unit.events.pending:
                 self.sink.publish(event)
 

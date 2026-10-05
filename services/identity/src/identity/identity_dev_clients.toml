@@ -13,12 +13,12 @@ scopes = ["tenant:act"]
 reason = "evaluates a rule version for a tenant's business, and recomputes a business on profile.updated: reads the business, its registrations and their profile snapshots for that tenant, and the published rule versions, whose read routes need no scope"
 
 [notification]
-scopes = []
-reason = "reads the rule versions its messages cite from the rulebook, whose read routes need no scope"
+scopes = ["tenant:act"]
+reason = "reads the rule versions its messages cite from the rulebook, whose read routes need no scope, and for a CA firm's bulk notification the open obligations of the firm's clients at the obligation service for that tenant"
 
 [obligation]
 scopes = ["tenant:act"]
-reason = "checks that the user a member assigns an obligation to belongs to the tenant: reads the user's membership at identity for that tenant, and the rule versions, whose read routes need no scope"
+reason = "checks that the user a member assigns an obligation to belongs to the tenant, and that a business with no obligation on a page of the public list is the tenant's: reads the user's membership at identity and the business's node at profile for that tenant, and the rule versions, whose read routes need no scope"
 
 [pipeline]
 scopes = ["rulebook:write", "llm:call", "tenant:act"]

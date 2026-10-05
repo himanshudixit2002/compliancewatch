@@ -502,19 +502,23 @@ def test_a_membership_stays_inside_its_tenant(token_mode: TestClient) -> None:
     assert nowhere.json()["type"].endswith(":identity-tenant-not-found")
 
 
-def test_a_membership_is_read_by_a_service_with_tenant_act_only(token_mode: TestClient) -> None:
-    created = signed_up(token_mode)
-    tenant = {"x-tenant-id": created["tenant"]["id"]}
-    path = MEMBERSHIP.format(user_id=created["user"]["id"])
-    owner = token_mode.get(path, headers=bearer(created["session"]["access_token"]))
+def test_a_membership_is_read_by_a_service_with_tenant_act_only() -> None:
+    # Every committed dev client holds tenant:act, so this app has one that does not.
+    clients = "obligation=tenant:act,reader=llm:call"
+    settings = identity_settings(auth_mode="token", identity_dev_clients=clients)
+    with TestClient(build_app(settings)) as token_mode:
+        created = signed_up(token_mode)
+        tenant = {"x-tenant-id": created["tenant"]["id"]}
+        path = MEMBERSHIP.format(user_id=created["user"]["id"])
+        owner = token_mode.get(path, headers=bearer(created["session"]["access_token"]))
+        without_scope = token_mode.get(
+            path, headers={**service_bearer(token_mode, "reader"), **tenant}
+        )
+        no_tenant = token_mode.get(path, headers=service_bearer(token_mode, "obligation"))
+        anonymous = token_mode.get(path, headers=tenant)
     assert (owner.status_code, owner.json()["type"].rsplit(":", 1)[-1]) == (403, "auth-forbidden")
-    without_scope = token_mode.get(
-        path, headers={**service_bearer(token_mode, "notification"), **tenant}
-    )
     assert without_scope.status_code == 403
-    no_tenant = token_mode.get(path, headers=service_bearer(token_mode, "obligation"))
     assert no_tenant.json()["type"].endswith(":identity-tenant-required")
-    anonymous = token_mode.get(path, headers=tenant)
     assert anonymous.json()["type"].endswith(":auth-token-required")
 
 

@@ -4,10 +4,18 @@ from datetime import UTC, date, datetime
 from typing import Annotated, Any, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 from domain_kernel.ids import EntityId
 from domain_kernel.status import ClosureReason, ObligationStatus, RuleVersionStatus
+from obligation.application.queries import ListedObligation
 from obligation.application.tracking import MIN_WAIVER_CHARS, ObligationDetail, StatusAction
 from obligation.domain.comments import MAX_COMMENT_CHARS, ObligationComment
 from obligation.domain.history import MAX_NOTE_CHARS, ChangeKind, ObligationChange
@@ -188,6 +196,37 @@ class ObligationDetailOut(ObligationOut):
                 "comments": [CommentOut.from_comment(comment) for comment in detail.comments],
             }
         )
+
+
+class BusinessObligationOut(ObligationOut):
+    """One obligation of the business's list, with the facts of its rule version and the
+    verified citations of its clause, as the detail shows them: ``rule_version`` is null, and
+    ``citations`` empty, for a version the service has not kept yet (the detail then reads it
+    from the rulebook). The detail adds the history and the comments."""
+
+    rule_version: RuleVersionFactsOut | None
+    citations: list[CitationOut]
+
+    @classmethod
+    def from_listed(cls, listed: ListedObligation) -> "BusinessObligationOut":
+        ref = listed.ref
+        return cls.model_validate(
+            {
+                **_obligation_fields(listed.obligation),
+                "rule_version": None if ref is None else RuleVersionFactsOut.from_ref(ref),
+                "citations": []
+                if ref is None
+                else [CitationOut.from_citation(citation) for citation in ref.citations],
+            }
+        )
+
+
+class BusinessObligationCursor(BaseModel):
+    """Where a page of a business's obligations ends: the due date (null for none) and the id
+    of the last one on it."""
+
+    due_at: AwareDatetime | None
+    id: UUID
 
 
 Note = Annotated[

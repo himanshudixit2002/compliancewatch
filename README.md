@@ -18,10 +18,11 @@
 > to canonical entities with an analyst review queue; relation proposals through a registered
 > prompt, validated against the clause text and approved into rule relations by an analyst), the obligation service's domain and use cases
 > (obligations per period, deadline changes, withdrawals, row-level security by tenant, events
-> through the outbox, an append-only change log of every obligation) with a read route by business and due window and tracking routes (the detail with its citations and reviewed-by line, status, assignee and comments, each change idempotent and audited), the qa service (answers in
+> through the outbox, an append-only change log of every obligation) with a read route by business and due window, the public API's list of a business's obligations a page at a time, and tracking routes (the detail with its citations and reviewed-by line, status, assignee and comments, each change idempotent and audited), the qa service (answers in
 > three layers: structured answers from obligations, a KAG plan and solve over the rulebook
 > behind a per-tenant flag, hybrid clause search that drops clauses whose rule is out of force;
-> every quote checked against its clause or the answer is "not covered"), the profile service's
+> every quote checked against its clause or the answer is "not covered", in the public API as
+> `POST /v1/qa`), the profile service's
 > business hierarchy (entity, registration, location;
 > attribute values per node and financial year; snapshots for the engine; one-question onboarding;
 > review tasks) behind the second committed OpenAPI spec, and its public business API (create from a GSTIN or a PAN with an Idempotency-Key, the tenant's list by cursor, an onboarding checklist with worded questions) with `GET /v1/ontology` over the draft English wording of every attribute, all merged into the public API spec (`public.v1.json`, with a changelog, the API rules checked on every public route, and generated Python models),
@@ -39,7 +40,7 @@
 > question-answering suite (56 draft cases asked with the KAG layer on and against the hybrid
 > baseline), the WhatsApp bot with
 > signature checks, keyword opt-in and opt-out and Hindi replies, the notification service's
-> recipients per business, Postgres store under row-level security and worker (obligation events to change cards, reminders and closures with batching, quiet hours, retries, a fallback channel, daily digests for owners and CA firms and a retention sweep), delivery receipts with WhatsApp's 24-hour window, template drafts, and the Cloud API and SMTP email channels behind flags, consent records
+> recipients per business, Postgres store under row-level security and worker (obligation events to change cards, reminders and closures with batching, quiet hours, retries, a fallback channel, daily digests for owners and CA firms and a retention sweep), a CA firm's bulk change card to its affected clients behind a flag (once per change, business and person, idempotent and audited), delivery receipts with WhatsApp's 24-hour window, template drafts, and the Cloud API and SMTP email channels behind flags, consent records
 > and WhatsApp keyword consents in the identity service with the legal drafts in `docs/legal`, sign-in (tenants, users and roles in identity, a fake identity provider locally and a Supabase adapter, ES256 access tokens and service tokens every service verifies behind `CW_AUTH_MODE`, and a secret-rotation runbook), the GSTIN lookup protocol with
 > the manual fallback and an HTTP provider behind a flag (state codes derived from the GSTIN, the business category behind a second flag), the billing protocol with a Razorpay skeleton behind a flag, OpenTelemetry tracing
 > and metrics with a dev observability stack (collector, Prometheus, Tempo, Grafana dashboard),

@@ -79,7 +79,9 @@ def request_bodies() -> set[str]:
 
 def test_request_models_refuse_unknown_fields_and_responses_ignore_them() -> None:
     assert request_bodies() == {
+        "AskIn",
         "AssigneeIn",
+        "BulkNotificationIn",
         "BusinessIn",
         "BusinessPatchIn",
         "CommentIn",

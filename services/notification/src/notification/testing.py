@@ -2,7 +2,7 @@
 
 import base64
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -14,11 +14,17 @@ from cryptography.x509.oid import NameOID
 
 from domain_kernel.channels import Channel
 from domain_kernel.events import utc_now
-from domain_kernel.ids import RuleVersionId
+from domain_kernel.ids import BusinessId, RuleVersionId, TenantId
 from domain_kernel.notifications import DeliveryReceipt, DeliveryStatus, RenderedMessage
 from notification.domain.channels import OutboundMessage
 from notification.domain.errors import DependencyUnavailableError
-from notification.domain.ports import AttemptResult, QueueResult, ReceiptResult, RuleVersionFacts
+from notification.domain.ports import (
+    AttemptResult,
+    OpenObligation,
+    QueueResult,
+    ReceiptResult,
+    RuleVersionFacts,
+)
 from notification.domain.receipts import ReceiptKind
 from notification.infrastructure.ses_feedback import DISPATCH_HEADER, signed_text
 from notification.settings import NotificationSettings
@@ -99,6 +105,39 @@ class FakeRuleVersionReader:
         if self.down:
             raise DependencyUnavailableError("rulebook unreachable (fake)")
         return self.facts.get(rule_version_id)
+
+
+class FakeObligationReader:
+    """The obligation service's open obligations from a list, each of its tenant: a tenant reads
+    only its own, as row-level security keeps them. ``down`` makes every read fail as an outage
+    would; ``asked`` lists every read."""
+
+    def __init__(self, obligations: Iterable[tuple[TenantId, OpenObligation]] = ()) -> None:
+        self.obligations = list(obligations)
+        self.down = False
+        self.asked: list[tuple[TenantId, BusinessId, RuleVersionId]] = []
+
+    def add(self, tenant_id: TenantId, obligation: OpenObligation) -> OpenObligation:
+        self.obligations.append((tenant_id, obligation))
+        return obligation
+
+    def open_obligations(
+        self, tenant_id: TenantId, business_id: BusinessId, rule_version_id: RuleVersionId
+    ) -> Sequence[OpenObligation]:
+        self.asked.append((tenant_id, business_id, rule_version_id))
+        if self.down:
+            raise DependencyUnavailableError("obligation service unreachable (fake)")
+        found = [
+            obligation
+            for tenant, obligation in self.obligations
+            if tenant == tenant_id
+            and obligation.business_id == business_id
+            and obligation.rule_version_id == rule_version_id
+        ]
+        return sorted(
+            found,
+            key=lambda o: (o.due_at is None, o.due_at, o.obligation_id.value),
+        )
 
 
 class RecordingMetrics:

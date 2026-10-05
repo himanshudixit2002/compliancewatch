@@ -25,7 +25,7 @@ from py_common.app import create_app, module_app
 from py_common.auth import TokenSource, service_auth_from
 from py_common.auth.fastapi import Authenticator
 from qa import __version__
-from qa.api.router import router
+from qa.api.router import public_router, router
 from qa.application.answerer import Answerer
 from qa.application.ask import AskQuestion
 from qa.application.kag import KagLayer
@@ -148,7 +148,7 @@ def build_app(
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router],
+        routers=[router, public_router],
         settings=settings,
         readiness_checks=[("prompts", wiring.prompts_ready)],
         problem_status=PROBLEM_STATUS,

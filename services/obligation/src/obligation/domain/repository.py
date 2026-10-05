@@ -2,17 +2,34 @@
 
 from collections.abc import Sequence
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from domain_kernel._validation import require_aware, require_instance
 from domain_kernel.audit import AuditSink
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId, TenantId
+from domain_kernel.status import ObligationStatus
 from obligation.domain.comments import ObligationComment
 from obligation.domain.history import ObligationChange
 from obligation.domain.model import Obligation
 from obligation.domain.reminders import Reminder
 from obligation.domain.rule_versions import AppliedDecision, RuleVersionRef
+
+
+@dataclass(frozen=True, slots=True)
+class ListingAfter:
+    """Where a page of a business's obligations starts: after this obligation, in the order of
+    due date (none last) and id."""
+
+    due_at: datetime | None
+    obligation_id: ObligationId
+
+    def __post_init__(self) -> None:
+        if self.due_at is not None:
+            require_aware(self.due_at, "due_at")
+        require_instance(self.obligation_id, ObligationId, "obligation_id")
 
 
 class ObligationRepository(Protocol):
@@ -56,6 +73,22 @@ class ObligationRepository(Protocol):
         """The business's obligations in any status, due at or after ``due_after`` and before
         ``due_before`` (one without a due date only when neither is given), ordered by due date
         (none last), period start, creation and id, at most ``limit``."""
+        ...
+
+    def page_for_business(
+        self,
+        business_id: BusinessId,
+        *,
+        statuses: frozenset[ObligationStatus],
+        due_after: datetime | None,
+        due_before: datetime | None,
+        after: ListingAfter | None,
+        limit: int,
+    ) -> Sequence[Obligation]:
+        """The business's obligations in one of ``statuses`` (any status when it is empty), due
+        at or after ``due_after`` and before ``due_before`` (one without a due date only when
+        neither is given), ordered by due date (none last) and id, starting after ``after``, at
+        most ``limit``: one page of the public list."""
         ...
 
     def add(self, obligation: Obligation) -> None: ...

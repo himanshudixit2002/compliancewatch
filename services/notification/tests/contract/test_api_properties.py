@@ -34,7 +34,13 @@ from schemathesis.specs.openapi.checks import (
 from domain_kernel.access import Scope
 from notification.infrastructure.ses_feedback import SnsFeedbackReader
 from notification.main import build_app
-from notification.testing import BOT_TOKEN, EMAIL_FEEDBACK_TOKEN, FakeSns, notification_settings
+from notification.testing import (
+    BOT_TOKEN,
+    EMAIL_FEEDBACK_TOKEN,
+    FakeObligationReader,
+    FakeSns,
+    notification_settings,
+)
 from py_common.auth.testing import TestIssuer, bearer
 
 TENANT_ID = "7d0f4d56-2a8e-4c1b-9f3e-5b6a1c2d3e4f"
@@ -56,6 +62,7 @@ OPERATIONS = frozenset(
         "POST /v1/notification/notifications/{notification_id}/resend",
         "POST /v1/notification/receipts/whatsapp",
         "POST /v1/notification/receipts/email",
+        "POST /v1/notification/bulk",
     }
 )
 TOKEN_OPERATIONS = OPERATIONS - {
@@ -79,9 +86,12 @@ EXAMPLES = 200 if os.environ.get("HYPOTHESIS_PROFILE") == "nightly" else 25
 
 app = build_app(
     notification_settings(
-        notification_bot_token=BOT_TOKEN, notification_email_feedback_token=EMAIL_FEEDBACK_TOKEN
+        notification_bot_token=BOT_TOKEN,
+        notification_email_feedback_token=EMAIL_FEEDBACK_TOKEN,
+        notification_bulk_enabled=True,
     ),
     email_feedback=SnsFeedbackReader(FakeSns().certificates),
+    obligations=FakeObligationReader(),
 )
 HEADERS = {
     "x-tenant-id": TENANT_ID,

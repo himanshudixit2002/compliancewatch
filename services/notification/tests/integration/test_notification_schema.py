@@ -1,8 +1,9 @@
 """Migration 0001 on Postgres: the tables, row-level security by tenant on the tenant tables, the
 store's repositories, recipients with their address directory, one row per dedupe key under
 concurrent writes, the work index under two dispatchers, the consumer's transaction, queueing and
-dispatching a batch and a digest, the retention sweep, and the outbox; and migration 0002, which
-adds the web_settings source. Needs Docker.
+dispatching a batch and a digest, the retention sweep, and the outbox; migration 0002, which
+adds the web_settings source; and migration 0003, the idempotency keys of the bulk route
+(``test_bulk_notifications.py`` runs the route). Needs Docker.
 
 The store runs as a plain database role, not the container's superuser: a superuser bypasses
 row-level security whatever the table says, so the service's runtime role must never be one.
@@ -89,7 +90,15 @@ IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "notification"
 TENANT_TABLES = ("recipient", "recipient_address", "recipient_business", "notification")
 SHARED_TABLES = ("channel_preference", "suppression", "address_directory", "work_index")
-TABLES = {*TENANT_TABLES, *SHARED_TABLES, "outbox_event", "processed_event", "alembic_version"}
+KEYS = "idempotency_key"
+TABLES = {
+    *TENANT_TABLES,
+    *SHARED_TABLES,
+    KEYS,
+    "outbox_event",
+    "processed_event",
+    "alembic_version",
+}
 APP_ROLE = "notification_app"
 APP_PASSWORD = "app-role-for-tests"
 GROUP = "notification.obligations"
@@ -215,12 +224,15 @@ def test_migration_creates_the_tables_with_row_level_security_where_it_belongs(
             )
         }
     by_table = {row.relname: row for row in rows}
-    for table in TENANT_TABLES:
+    for table in (*TENANT_TABLES, KEYS):
         assert (by_table[table].relrowsecurity, by_table[table].relforcerowsecurity) == (
             True,
             True,
         ), table
-    assert policies == {(table, f"{table}_tenant_isolation") for table in TENANT_TABLES}
+    assert policies == {
+        *((table, f"{table}_tenant_isolation") for table in (*TENANT_TABLES, KEYS)),
+        (KEYS, f"{KEYS}_purge_expired"),
+    }
     for table in SHARED_TABLES:
         assert not by_table[table].relrowsecurity, table
         assert by_table[table].comment.startswith("No row-level security: "), table

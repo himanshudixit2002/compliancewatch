@@ -29,10 +29,22 @@ def _spec_owners() -> dict[str, str]:
     return owners
 
 
+def _outside_its_prefix(path: str, service: str) -> bool:
+    prefix = f"/v1/{service}"
+    return path != prefix and not path.startswith(prefix + "/")
+
+
 def test_the_facade_table_is_the_x_service_map_of_the_public_api(memory_app: CombinedApp) -> None:
+    """The public paths outside their service's prefix are the facade; the others, such as
+    ``/v1/qa``, belong to their service by the first segment. Every public path reaches the
+    service the spec names."""
     table = memory_app.dispatcher.table
-    assert table.facade() == _spec_owners()
-    for path, service in _spec_owners().items():
+    owners = _spec_owners()
+    assert table.facade() == {
+        path: service for path, service in owners.items() if _outside_its_prefix(path, service)
+    }
+    assert any(not _outside_its_prefix(path, service) for path, service in owners.items())
+    for path, service in owners.items():
         concrete = path.replace("{business_id}", "0b4f0a3e-6f0a-4b8e-9a51-2f7c0e1d3a55")
         assert table.owner(concrete) == service
 

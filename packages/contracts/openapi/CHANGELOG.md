@@ -7,6 +7,52 @@ documentation is a patch; a break (see `BREAKING.md`) is a major bump and a new 
 next to this one. The change that bumps the version adds its section here, and the build fails
 while the version in `public.meta.json` has no section.
 
+## 0.4.0
+
+A business's obligations, from the obligation service:
+
+- `GET /v1/businesses/{business_id}/obligations` lists the obligations kept for one profile node
+  of the tenant (`business_id`: the business's legal entity, as in `/v1/businesses`, one of its
+  registrations, or a location; a GSTIN's returns are kept for its registration), a page at a
+  time (`limit` up to 200 and `cursor`), by due date with the ones without a date last, then by
+  id. `status` keeps the given statuses (repeat it for several) and `due_from` and `due_to` the
+  obligations due on those days in India, both included; a window longer than 366 days, or one
+  that ends before it starts, is a 422. Each item is an obligation as the detail answers it,
+  with the facts of its rule version (title, rule key, seed status, the approvers and when it
+  was published) and the verified citations of its clause, without the history and the
+  comments; `rule_version` is null and `citations` empty for a version the service has not kept
+  yet, which the detail reads from the rulebook. 404 when the tenant has no such node, 503 when
+  the profile service cannot say. Every tenant member role may read it.
+
+A CA firm's bulk notification, from the notification service:
+
+- `POST /v1/notification/bulk` sends the change card of one published change (`rule_version_id`)
+  to the firm's affected clients (`business_ids`, 1 to 500, each once: the businesses of the
+  change's impact) with `kind` `change_card`. Each business gets the card about its first open
+  obligation of the change, queued for the client's own people who follow it (an owner or
+  staff; the firm's own people hear in their daily digest), through the usual quiet hours and
+  batching. A person who has the card of that change for that business already, from the change
+  itself or an earlier request, gets nothing more: one change, one card per person and business.
+  It answers 201 with the businesses by outcome (`queued`, `skipped_duplicate`,
+  `skipped_no_recipient`, `skipped_not_affected`, each business counted once), the cards queued
+  (`notifications_queued`) and each business's outcome, and it writes the audit entry
+  `notification.bulk`. Only `ca_admin` and `ca_staff` may call it. It requires an
+  `Idempotency-Key` header (428 without one), and a retry with the same key and body gets the
+  first answer back; 503 while the flag `notification.bulk` is off or when the obligation
+  service cannot answer.
+
+Asking a question, from the qa service:
+
+- `POST /v1/qa` is the public face of `POST /v1/qa/ask`, with the same body and answer: a
+  question about one business (`business_node_id`, any profile node of the tenant) on a date
+  (`as_of`, today in India when absent), answered in layers, cheapest first, as `answered` with
+  citations whose quotes were checked against their clauses, or `not_covered` with a fixed
+  sentence and the reason. `layers` lists every layer that ran and `layer` the one that decided.
+  Every tenant member role may ask; asking creates nothing, so it takes no Idempotency-Key.
+  The answer has no confidence and no related obligations, which the guide's example shows:
+  the service does not produce them. A cited clause is the new schema `AnswerCitationOut`
+  (clause, document and quote), named so beside the obligation's `CitationOut`.
+
 ## 0.3.0
 
 The changes feed, from the rulebook, and the impact of a change, from the applicability engine.

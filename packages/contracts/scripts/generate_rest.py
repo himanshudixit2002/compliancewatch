@@ -8,9 +8,11 @@ generated for the REST APIs yet, here or in the web app; the web UI track owns t
 generate them from the committed specs.
 
 One ``datamodel-codegen --input-file-type openapi`` call per spec writes the module, whose
-docstring names the spec and its ``info.version``. The script then removes generated modules
-whose spec left the manifest and formats the output with the repo's ruff, so a regeneration is
-byte-for-byte stable.
+docstring names the spec and its ``info.version``. An enum of one value stays an enum class
+(``--enum-field-as-literal none``), as the test of the models expects of every enum, so a value
+added later is a new member, not a change of the field's type. The script then removes generated
+modules whose spec left the manifest and formats the output with the repo's ruff, so a
+regeneration is byte-for-byte stable.
 """
 
 import argparse
@@ -84,6 +86,8 @@ def generate(name: str, spec: Path, version: str) -> None:
         "--disable-timestamp",
         "--use-schema-description",
         "--use-double-quotes",
+        "--enum-field-as-literal",
+        "none",
         "--custom-file-header",
         header,
     )

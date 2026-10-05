@@ -5,7 +5,7 @@ Do not edit by hand: `pnpm --filter web screens:check` (also `make web-screens-c
 of `make check`) and the vitest test `src/test/screens-doc.test.ts` fail when this file and
 the registry differ.
 
-105 entries: 42 live, 26 ready, 23 waiting, 14 planned.
+105 entries: 42 live, 27 ready, 22 waiting, 14 planned.
 
 A screen moves through the statuses in the order planned, waiting, ready, live.
 
@@ -83,7 +83,7 @@ hides the screen while it is off. Guide numbers refer to the Project Foundation 
 
 | Id                     | Route                             | Title            | Kind | Roles              | Status  | Waits for                                                                                                                                                                                                                                                   | Guide              |
 | ---------------------- | --------------------------------- | ---------------- | ---- | ------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `ca.change-impact`     | `/changes/[ruleVersionId]/impact` | Affected clients | page | ca_admin, ca_staff | waiting | `POST /v1/notification/bulk` (services track, WP26)                                                                                                                                                                                                         | 2 uc5, 10, 15; G75 |
+| `ca.change-impact`     | `/changes/[ruleVersionId]/impact` | Affected clients | page | ca_admin, ca_staff | ready   |                                                                                                                                                                                                                                                             | 2 uc5, 10, 15; G75 |
 | `ca.clients`           | `/clients`                        | Clients          | page | ca_admin, ca_staff | planned | `GET /v1/businesses/summary` (not scheduled; indicative path; no design exists); `POST /v1/obligation/obligations/bulk-status` (not scheduled; indicative path; no design exists)                                                                           | F12                |
 | `ca.settings.webhooks` | `/settings/webhooks`              | Webhooks         | page | ca_admin           | planned | `POST /v1/webhooks` (not scheduled; indicative path; no design exists); `GET /v1/webhooks/{webhook_id}/deliveries` (not scheduled; indicative path; no design exists)                                                                                       | 10; F13; G35       |
 | `ca.settings.api-keys` | `/settings/api-keys`              | API keys         | page | owner, ca_admin    | planned | `POST /v1/identity/api-keys` (not scheduled; indicative path; no design exists); `GET /v1/identity/api-keys` (not scheduled; indicative path; no design exists); `DELETE /v1/identity/api-keys/{key_id}` (not scheduled; indicative path; no design exists) | 10, 15; G32, G35   |
