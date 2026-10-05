@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from rulebook.application.alignment import AlignMentions
+from rulebook.application.changes import ListChanges
 from rulebook.application.documents import ReadDocument, RegisterDocument
 from rulebook.application.graph import (
     ListEntityClauses,
@@ -76,3 +77,4 @@ class Wiring:
     publish_version: PublishVersion
     withdraw_version: WithdrawVersion
     apply_transitions: ApplyDueTransitions
+    list_changes: ListChanges

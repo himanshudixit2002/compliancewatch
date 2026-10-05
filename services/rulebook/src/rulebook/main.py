@@ -20,8 +20,9 @@ from py_common.app import create_app, module_app
 from py_common.auth.fastapi import Authenticator
 from py_common.telemetry import Telemetry
 from rulebook import __version__
-from rulebook.api.router import router
+from rulebook.api.router import public_router, router
 from rulebook.application.alignment import AlignMentions
+from rulebook.application.changes import ListChanges
 from rulebook.application.documents import ReadDocument, RegisterDocument
 from rulebook.application.graph import (
     ListEntityClauses,
@@ -217,6 +218,7 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
         publish_version=PublishVersion(unit_of_work, enabled=publishing),
         withdraw_version=WithdrawVersion(unit_of_work, enabled=publishing),
         apply_transitions=ApplyDueTransitions(unit_of_work, enabled=publishing),
+        list_changes=ListChanges(unit_of_work),
     )
 
 
@@ -243,7 +245,7 @@ def build_app(
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router],
+        routers=[router, public_router],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         problem_status=PROBLEM_STATUS,

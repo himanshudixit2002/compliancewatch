@@ -70,6 +70,7 @@ OPERATIONS = frozenset(
         "GET /v1/rulebook/rules",
         "GET /v1/rulebook/rules/{rule_key}/versions",
         "POST /v1/rulebook/search",
+        "GET /v1/changes",
     }
 )
 PIPELINE_OPERATIONS = frozenset(

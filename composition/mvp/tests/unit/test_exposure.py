@@ -23,8 +23,10 @@ RULEBOOK_PUBLIC_READS = {
     "GET /v1/rulebook/relations",
     "GET /v1/rulebook/clauses/{clause_id}",
     "POST /v1/rulebook/search",
+    "GET /v1/changes",
 }
-"""The rulebook's public reads, exactly: every other rulebook route is admin or internal."""
+"""The rulebook's public reads, exactly, the public API's changes feed among them: every other
+rulebook route is admin or internal."""
 
 
 def test_every_service_has_a_table() -> None:

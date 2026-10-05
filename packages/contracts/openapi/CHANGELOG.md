@@ -7,6 +7,22 @@ documentation is a patch; a break (see `BREAKING.md`) is a major bump and a new 
 next to this one. The change that bumps the version adds its section here, and the build fails
 while the version in `public.meta.json` has no section.
 
+## 0.3.0
+
+The changes feed, from the rulebook. Every tenant member role and the regulatory team's roles
+(analyst, reviewer, admin) may call it, so `x-roles` may now name the regulatory roles too:
+
+- `GET /v1/changes` lists the published changes to the rulebook, newest first, a page at a time
+  (`limit` up to 100 and `cursor`), optionally since a date (from the start of that day in India)
+  or a date-time, and of one regulator. One item per change the rule events announced: a version
+  published, superseded or withdrawn, or a due date a published version moved
+  (`deadline_changed`, about the version whose date moved, with the period and the new date).
+  Each carries the version's rule key, title, dates, regulator and status, its seed status
+  (needs_review until an analyst reviews it), the approvers of the round it was published from
+  with `published_at`, its verified citations (clause, document and quote) and the versions it
+  supersedes, corrects, withdraws or whose due dates it moves. The feed is the same for every
+  tenant and needs no tenant.
+
 ## 0.2.0
 
 Obligation tracking, from the obligation service. The four operations serve the routes the web app

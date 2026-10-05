@@ -35,6 +35,31 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/changes": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * The published changes to the rulebook, newest first, a page at a time
+     * @description One item per change the rule events announced: a version published, superseded or
+     *     withdrawn, or a due date a published version moved (``deadline_changed``, about the version
+     *     whose date moved). Each carries the version's rule, dates, regulator, seed status (needs_review
+     *     until an analyst reviews it), the approvers of the round it was published from, its verified
+     *     citations and the versions it acts on. Newest first (changed_at, then change_id); ``limit`` is
+     *     at most 100.
+     */
+    get: operations["list_changes_v1_changes_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/rulebook/clauses/{clause_id}": {
     parameters: {
       query?: never;
@@ -821,6 +846,22 @@ export type components = {
       rule_version_id: string;
     };
     /**
+     * DeadlineExtensionOut
+     * @description A due date the version moves: the version whose date moves, the period (null when that
+     *     version does not recur) and the new due date.
+     */
+    DeadlineExtensionOut: {
+      /** New Due On */
+      new_due_on: string | null;
+      /** Period Label */
+      period_label: string | null;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+    };
+    /**
      * DecisionIn
      * @description Decide every open mention of one (entity type, proposed name).
      */
@@ -1226,6 +1267,16 @@ export type components = {
       /** Mentions */
       mentions: components["schemas"]["MentionIn"][];
     };
+    /** Page[RuleChangeOut] */
+    Page_RuleChangeOut_: {
+      /** Items */
+      items: components["schemas"]["RuleChangeOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
     /**
      * Problem
      * @description The body of every error response.
@@ -1551,6 +1602,126 @@ export type components = {
       span_end: number;
       /** Span Start */
       span_start: number;
+    };
+    /**
+     * RuleChangeCitationOut
+     * @description A verified quote of the clause the version cites.
+     */
+    RuleChangeCitationOut: {
+      /**
+       * Clause Id
+       * Format: uuid
+       */
+      clause_id: string;
+      /**
+       * Clause Ref
+       * @description The clause's reference in its document, such as en.p3
+       */
+      clause_ref: string;
+      /**
+       * Document Id
+       * Format: uuid
+       */
+      document_id: string;
+      /** Quote */
+      quote: string;
+    };
+    /**
+     * RuleChangeKind
+     * @enum {string}
+     */
+    RuleChangeKind: "published" | "superseded" | "withdrawn" | "deadline_changed";
+    /**
+     * RuleChangeOut
+     * @description One published change. ``kind`` says what happened to the version ``rule_version_id``:
+     *     ``published``, ``superseded`` or ``withdrawn``, or ``deadline_changed`` when a published
+     *     version moved its due date (``deadline``). ``caused_by_rule_version_id`` is the version whose
+     *     publication caused it, when one did. ``changed_at`` is when the change was published.
+     *
+     *     The rest is the version as it stands: its rule, dates and status now; ``seed_status``
+     *     needs_review while no analyst reviewed it (a synthetic approval reviews nothing), the cue for
+     *     a not-yet-reviewed notice; ``approved_by`` the approvers of the round it was published from
+     *     and ``published_at`` when (empty and null for a version never published); its verified
+     *     citations; and the versions it acts on when published (``relations``).
+     */
+    RuleChangeOut: {
+      /** Approved By */
+      approved_by: string[];
+      /** Caused By Rule Version Id */
+      caused_by_rule_version_id: string | null;
+      /**
+       * Change Id
+       * Format: uuid
+       */
+      change_id: string;
+      /**
+       * Changed At
+       * Format: date-time
+       */
+      changed_at: string;
+      /** Citations */
+      citations: components["schemas"]["RuleChangeCitationOut"][];
+      deadline: components["schemas"]["RuleDeadlineOut"] | null;
+      /**
+       * Effective From
+       * Format: date
+       */
+      effective_from: string;
+      /**
+       * Effective To
+       * @description Exclusive; null while open-ended
+       */
+      effective_to: string | null;
+      kind: components["schemas"]["RuleChangeKind"];
+      level: components["schemas"]["AttributeLevel"];
+      /** Published At */
+      published_at: string | null;
+      /** Regulator */
+      regulator: string;
+      relations: components["schemas"]["RuleChangeRelationsOut"];
+      /** Rule Key */
+      rule_key: string;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+      seed_status: components["schemas"]["SeedStatus"];
+      status: components["schemas"]["RuleVersionStatus"];
+      /** Summary */
+      summary: string;
+      /** Title */
+      title: string;
+      /** Version */
+      version: number;
+    };
+    /**
+     * RuleChangeRelationsOut
+     * @description The versions the version acts on when it is published: those it supersedes, corrects or
+     *     withdraws (each ends when it takes effect), and the due dates it moves.
+     */
+    RuleChangeRelationsOut: {
+      /** Corrects */
+      corrects: string[];
+      /** Extends Deadline */
+      extends_deadline: components["schemas"]["DeadlineExtensionOut"][];
+      /** Supersedes */
+      supersedes: string[];
+      /** Withdraws */
+      withdraws: string[];
+    };
+    /**
+     * RuleDeadlineOut
+     * @description What a deadline change moved: the period (null when the version does not recur), the new
+     *     due date and the clause that says so.
+     */
+    RuleDeadlineOut: {
+      /** Evidence Clause Id */
+      evidence_clause_id: string | null;
+      /** New Due On */
+      new_due_on: string | null;
+      /** Period Label */
+      period_label: string | null;
     };
     /** RuleOut */
     RuleOut: {
@@ -1932,6 +2103,44 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ReadyResponse"];
+        };
+      };
+    };
+  };
+  list_changes_v1_changes_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Changes per page, 1 to 100 */
+        limit?: number;
+        /** @description Only versions of this regulator's rules */
+        regulator?: string | null;
+        /** @description Only changes published at or after this moment: a date (from the start of that day in India) or a date-time with its offset */
+        since?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_RuleChangeOut_"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
     };

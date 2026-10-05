@@ -98,6 +98,8 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "GET /v1/rulebook/relations": PUBLIC,
         "GET /v1/rulebook/clauses/{clause_id}": PUBLIC,
         "POST /v1/rulebook/search": PUBLIC,
+        # The public API's changes feed: the published changes, the same for every tenant.
+        "GET /v1/changes": PUBLIC,
         # The analysts' review queues, decisions and the publish flow.
         "GET /v1/rulebook/rules": ADMIN,
         "GET /v1/rulebook/rules/{rule_key}/versions": ADMIN,

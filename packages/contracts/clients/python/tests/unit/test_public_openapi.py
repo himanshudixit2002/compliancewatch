@@ -139,7 +139,7 @@ def test_lists_declare_limit_and_cursor() -> None:
         if method == "get" and "next_cursor" in schema.get("properties", {}):
             lists.append(path)
             assert {"query limit", "query cursor"} <= declared(op)
-    assert lists == ["/v1/businesses"]
+    assert lists == ["/v1/businesses", "/v1/changes"]
 
 
 def test_only_components_the_operations_reach_are_copied() -> None:

@@ -32,6 +32,14 @@ from domain_kernel.ontology import AttributeLevel
 from domain_kernel.predicates import specification_to_mapping
 from domain_kernel.status import RULE_VERSION_TRANSITIONS, RuleVersionStatus
 from domain_kernel.vectors import ClauseFilter, Vector
+from rulebook.domain.changes import (
+    CHANGE_ACTIONS,
+    ChangeEntry,
+    ChangeQuery,
+    RuleChangeKind,
+    deadline_change_id,
+    newest_first,
+)
 from rulebook.domain.documents import StoredClause, StoredDocument
 from rulebook.domain.errors import UnknownRuleVersionError
 from rulebook.domain.events import RuleEvent
@@ -670,6 +678,67 @@ class MemoryRuleVersionRepository:
 
     def lock_publication(self) -> None:
         """Units of work already run one at a time here."""
+
+    def changes(self, query: ChangeQuery) -> Sequence[ChangeEntry]:
+        entries: list[ChangeEntry] = []
+        for decision in self._tables.decisions:
+            kind = CHANGE_ACTIONS.get(decision.action)
+            if kind is None:
+                continue
+            entries.append(
+                ChangeEntry(
+                    change_id=decision.decision_id,
+                    kind=kind,
+                    changed_at=decision.decided_at,
+                    rule_version_id=decision.rule_version_id,
+                    caused_by=decision.caused_by,
+                )
+            )
+            if kind is RuleChangeKind.PUBLISHED:
+                entries.extend(self._deadline_changes(decision))
+        found = [
+            entry
+            for entry in entries
+            if (query.since is None or entry.changed_at >= query.since)
+            and (query.regulator is None or self._regulator(entry) == query.regulator)
+            and (
+                query.after is None
+                or (entry.changed_at, entry.change_id)
+                < (query.after.changed_at, query.after.change_id)
+            )
+        ]
+        return newest_first(found)[: query.limit]
+
+    def _deadline_changes(self, decision: RuleVersionDecision) -> list[ChangeEntry]:
+        """The deadline changes the publication ``decision`` made: one per extends_deadline
+        relation from its version to another."""
+        found: list[ChangeEntry] = []
+        for relation_id, (relation, candidate_id) in self._tables.relations.items():
+            target = relation.target
+            if (
+                relation.from_rule_version_id != decision.rule_version_id
+                or relation.relation is not RelationKind.EXTENDS_DEADLINE
+                or not isinstance(target, RuleVersionId)
+            ):
+                continue
+            candidate = None if candidate_id is None else self._tables.candidates.get(candidate_id)
+            found.append(
+                ChangeEntry(
+                    change_id=deadline_change_id(decision.decision_id, relation_id),
+                    kind=RuleChangeKind.DEADLINE_CHANGED,
+                    changed_at=decision.decided_at,
+                    rule_version_id=target,
+                    caused_by=decision.rule_version_id,
+                    period_label=None if candidate is None else candidate.period_label,
+                    new_due_on=None if candidate is None else candidate.new_due_on,
+                    evidence_clause_id=relation.evidence_clause_id,
+                )
+            )
+        return found
+
+    def _regulator(self, entry: ChangeEntry) -> str | None:
+        version = self._tables.versions.get(entry.rule_version_id)
+        return None if version is None else self._tables.rules[version.rule_key].regulator
 
 
 class MemoryClauseIndex:
