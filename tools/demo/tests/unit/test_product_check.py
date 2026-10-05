@@ -338,6 +338,71 @@ def test_the_tracking_step_needs_the_monthly_rule_published(sink: Path) -> None:
         check.tracking(context_of(product))
 
 
+PROBE: Final = check.Probe("Tracking probe (synthetic)", "29ZZZAA0000Z1Z5", ENTITY, str(uuid4()))
+MONTHLY_VERSION: Final[dict[str, Any]] = {
+    "rule_version_id": MONTHLY,
+    "rule_key": "gstr3b_monthly",
+    "recurrence": {"frequency": "monthly", "due_day": 20, "due_month_offset": 0},
+    "effective_from": "2026-04-01",
+}
+
+
+class Decided(Scripted):
+    """The engine lists the probe's decisions, made at ``instants`` with ``result``."""
+
+    def __init__(self, *instants: str, result: str = "applies") -> None:
+        super().__init__()
+        self.instants = instants
+        self.result = result
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == f"{check.ENGINE}/businesses/{PROBE.registration_id}/decisions":
+            items = [{"result": self.result, "decided_at": at} for at in self.instants]
+            return httpx2.Response(200, json={"items": items, "next_cursor": None})
+        return super().__call__(request)
+
+
+def due_next(script: Decided, sink: Path, **version: Any) -> tuple[str, str, str]:
+    decided, period, due_on = check.due_next(
+        context_of(scripted_product(script, sink)), PROBE, {**MONTHLY_VERSION, **version}
+    )
+    return decided.isoformat(), period.label, due_on.isoformat()
+
+
+def test_the_return_due_next_is_the_period_still_due_on_the_day_of_the_first_decision(
+    sink: Path,
+) -> None:
+    newest_first = Decided("2026-10-25T04:00:00Z", "2026-10-05T18:30:00Z")
+    assert due_next(newest_first, sink) == ("2026-10-06", "2026-09", "2026-10-20"), (
+        "6 October in India; September is due on the 20th"
+    )
+    assert due_next(Decided("2026-10-25T04:00:00Z"), sink) == (
+        "2026-10-25",
+        "2026-10",
+        "2026-11-20",
+    )
+    assert due_next(Decided("2026-10-06T04:00:00Z"), sink, effective_from="2026-10-01") == (
+        "2026-10-06",
+        "2026-10",
+        "2026-11-20",
+    ), "September ended before the version took effect"
+    quarterly = {"frequency": "quarterly", "due_day": 22, "due_month_offset": 0}
+    assert due_next(Decided("2026-10-06T04:00:00Z"), sink, recurrence=quarterly) == (
+        "2026-10-06",
+        "2026-27 Q2",
+        "2026-10-22",
+    )
+    with pytest.raises(StepFailedError, match="no decision that it applies"):
+        due_next(Decided("2026-10-06T04:00:00Z", result="not_applicable"), sink)
+
+
+def test_a_title_names_the_form_as_a_whole_code() -> None:
+    assert check.names_form("File GSTR-3B for the month (2026-09)", "GSTR-3B")
+    assert check.names_form("File GSTR - 3B for the quarter", "GSTR-3B")
+    assert not check.names_form("File GSTR-3BA", "GSTR-3B")
+    assert not check.names_form("File GSTR-3 for the year", "GSTR-3B")
+
+
 def tracked(**overrides: Any) -> dict[str, Any]:
     """A detail as the tracking step reads it after its changes, with ``overrides``."""
     detail: dict[str, Any] = {

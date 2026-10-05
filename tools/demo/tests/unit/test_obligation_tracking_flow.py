@@ -265,6 +265,7 @@ def test_a_member_tracks_an_obligation_from_start_to_comment(tmp_path: Path) -> 
 
     assert first[0].startswith("probe: Tracking probe ")
     assert "gstr3b_monthly" in first[0]
+    assert "the return due next on" in first[0], "the first one due is the next to file"
     assert "replayed (Idempotent-Replayed: true) with the same answer" in first[1]
     assert first[2] == "history: created, started, assigned, closed; one closure"
     reviewers = " and ".join(sorted(r.name for r in REVIEWERS))

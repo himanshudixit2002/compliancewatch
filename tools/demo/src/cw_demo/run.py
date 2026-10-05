@@ -272,7 +272,8 @@ def render(report: DemoReport) -> str:
         "   applies: " + (", ".join(report.applies) or "-"),
         "   not applicable: " + (", ".join(report.not_applicable) or "-"),
         "   unsure: " + (", ".join(report.unsure) or "-"),
-        f"5. {len(report.obligations)} obligations materialised (two periods per recurring rule):",
+        f"5. {len(report.obligations)} obligations materialised (each recurring rule's periods "
+        "still due, through the next one):",
     ]
     for o in report.obligations:
         lines.append(f"   - {o['due']}  {o['title']}")
