@@ -30,7 +30,8 @@ class ObligationRepository(Protocol):
         business_id: BusinessId | None = None,
     ) -> Sequence[Obligation]:
         """Open obligations of the rule version, of one period and one business when given,
-        by period start (none first), creation and id."""
+        by period start (none first), creation and id, locked until the transaction ends: the
+        callers close or move them."""
         ...
 
     def open_due_between(self, due_after: datetime, due_before: datetime) -> Sequence[Obligation]:

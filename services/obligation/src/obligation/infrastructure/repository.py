@@ -97,6 +97,8 @@ class SqlAlchemyObligationRepository:
         *,
         business_id: BusinessId | None = None,
     ) -> Sequence[Obligation]:
+        # Locked: every caller closes or moves what it reads. A concurrent closure of the same
+        # obligation waits, and then reads it closed, so no obligation is closed twice.
         statement = (
             select(ObligationRow)
             .where(
@@ -106,6 +108,7 @@ class SqlAlchemyObligationRepository:
             .order_by(
                 ObligationRow.period_start.nulls_first(), ObligationRow.created_at, ObligationRow.id
             )
+            .with_for_update(of=ObligationRow)
         )
         if period_label is not None:
             statement = statement.where(ObligationRow.period_label == period_label)
