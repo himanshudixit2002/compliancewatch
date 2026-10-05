@@ -72,10 +72,13 @@ batching window, and message links to the product's web app.
    published rule for every seeded registration, and stays as an operator tool. The engine also
    decides by itself whenever a profile changes (below). Each decision and its
    applicability.decided event are stored together.
-3. The worker's relay publishes the event; obligation's consumer materialises two periods of an
-   applying rule (obligation.created each) and closes nothing for one that does not apply.
+3. The worker's relay publishes the event; obligation's consumer materialises the periods of an
+   applying rule still due on the decision's day, through the period it falls in and the next
+   (obligation.created each): a monthly return decided on 6 October gets September, due 20
+   October, October and November; decided after the 20th, October and November. It closes
+   nothing for one that does not apply.
 4. Notification's consumer queues one change card per rule version, business, recipient and
-   channel (the second period's event is a duplicate), due after the five-second window.
+   channel (the events of the other periods are duplicates), due after the five-second window.
 5. The dispatcher (every five seconds) renders it. The synthetic owner hears on WhatsApp first and
    email second, has never written to the business number, and every template is a draft, so
    the WhatsApp attempt is refused exactly as the Cloud API adapter refuses it (outside the

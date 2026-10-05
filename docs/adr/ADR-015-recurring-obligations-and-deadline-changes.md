@@ -86,6 +86,13 @@ What the build settled that the decision left open:
   whose latest decision of a recurring version applies; the service keeps that decision
   (`obligation_decision`) as it applies each one. A Temporal workflow buys nothing yet: the job is
   idempotent and a missed day is caught up by the next.
+- **The window starts at the return still due.** "The current period" is not where the window
+  starts: a period falls due after it ends, so a business decided on 5 October must still file
+  September's monthly return, due 20 October. The window on a day holds every period whose due
+  date is on or after that day, through the period containing it and the next one
+  (`Recurrence.periods_due`). Nothing already overdue is made, so a new business gets no backlog;
+  a period whose last day comes before the version takes effect stays the earlier version's even
+  while it is still due; and the daily run gives a business decided earlier the period still due.
 - **A guard in front of materialisation.** The service caches the versions it makes obligations
   from (`rule_version_ref`: status, effective dates, approvers, verified citations), filled when a
   decision finds a version missing and kept current by the rule events, and moving only forward.

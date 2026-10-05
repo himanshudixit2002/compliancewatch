@@ -18,7 +18,15 @@ Design reference: Project Foundation guide, sections 7 and 14.
   never changes again.
 - `application/materialise.py`: `MaterialiseObligations` creates the obligations a rule
   version implies for a business, idempotent on (business, rule version, period), inside a
-  rolling window of periods; due dates are the end of the due day in India Standard Time.
+  rolling window of periods; due dates are the end of the due day in India Standard Time. The
+  window on a day (the decision's day in India, or today for the rolling window) holds every
+  period whose due date is on or after it, through the period containing it and the next one
+  (`Recurrence.periods_due`): decided on 5 October, a monthly return due on the 20th gets
+  September (due 20 October), October and November; decided on 25 October, October and
+  November. Nothing already overdue is made. A period that ends on or before the version's
+  `effective_from` is skipped even while it is still due (an earlier version governs it), and one
+  that ends after its `effective_to` is refused; a one-off keeps its own date, `due_in_days`
+  after the decision's day.
 - `application/changes.py`: `ApplyDeadlineChange` moves open obligations of a period and
   publishes `obligation.rescheduled`; `WithdrawRule` closes them with `rule_withdrawn`;
   `CloseSupersededPeriods` closes, with `rule_superseded`, the open obligations a superseding
@@ -97,7 +105,9 @@ Design reference: Project Foundation guide, sections 7 and 14.
 - `application/window.py`: `RollWindow`, the rolling window. For every tenant (or those named)
   and every business whose latest decision of a recurring rule version applies, it materialises
   the window as of today in India behind the guard, so the periods that entered the window since
-  a decision or a run last made them get their obligations; reads with no unit of work open.
+  a decision or a run last made them get their obligations; reads with no unit of work open. A
+  business decided before the window kept the period still due gets it on the next run while its
+  due date is ahead (September, due 20 October, on any run up to that day).
 - `domain/reminders.py` and `application/reminders.py`: `SendDueReminders`, the reminder sweep.
   For every tenant in the tenant directory it opens one unit of work and publishes
   `obligation.due_soon` for each open obligation whose `days_left` falls in a threshold of
