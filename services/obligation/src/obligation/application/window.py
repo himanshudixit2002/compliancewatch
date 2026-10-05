@@ -13,13 +13,15 @@ Each tenant takes three steps, so no unit of work is open while the rulebook is 
 reads the decisions that apply, the reader reads their rule versions (a one-off version is left
 alone: its obligation was made with its decision), and a second unit puts each version through
 the guard (``guard.admit``: a withdrawn or uncited version makes nothing, a superseded one only
-the periods it still governs) and materialises. A tenant that fails is reported to
-``on_failure`` and the run goes on with the next one; the next run tries it again.
+the periods it still governs) and materialises. A version withdrawn, or no longer in force
+today, is passed over without a word: its decisions stay on record, and refusing its periods
+every day would only be noise. A tenant that fails is reported to ``on_failure`` and the run goes
+on with the next one; the next run tries it again.
 """
 
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
 from domain_kernel.events import utc_now
 from domain_kernel.ids import ObligationId, RuleVersionId, TenantId
@@ -27,7 +29,7 @@ from obligation.application.guard import admit
 from obligation.application.materialise import IST, MaterialiseRequest, materialise_in
 from obligation.domain.ports import RuleVersionReader
 from obligation.domain.repository import TenantDirectory, UnitOfWorkFactory
-from obligation.domain.rule_versions import Refusal, RuleVersionRead
+from obligation.domain.rule_versions import Refusal, RuleVersionRead, RuleVersionRef
 
 FailureHandler = Callable[[TenantId, Exception], None]
 
@@ -103,6 +105,8 @@ class RollWindow:
                 if read is None:
                     continue
                 admission = admit(uow, read.ref)
+                if _retired(admission.ref, as_of) or admission.refusal is Refusal.RULE_WITHDRAWN:
+                    continue
                 if admission.refusal is not None:
                     refused[admission.refusal] = refused.get(admission.refusal, 0) + 1
                     continue
@@ -124,3 +128,9 @@ class RollWindow:
                     superseded = Refusal.RULE_SUPERSEDED
                     refused[superseded] = refused.get(superseded, 0) + len(result.refused)
         return created, refused
+
+
+def _retired(ref: RuleVersionRef, as_of: date) -> bool:
+    """Whether the version stopped governing before ``as_of``: every period of the window is
+    the newer version's, so there is nothing to roll and nothing unusual to report."""
+    return ref.effective_to is not None and as_of >= ref.effective_to

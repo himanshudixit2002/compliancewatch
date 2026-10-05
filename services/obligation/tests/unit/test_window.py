@@ -89,7 +89,10 @@ def test_the_window_asks_the_guard() -> None:
 
     rolled = RollWindow(store, store, reader, clock=lambda: NEXT_MONTH).run()
     assert rolled.created == ()
-    assert dict(rolled.refused) == {Refusal.RULE_WITHDRAWN: 1, Refusal.RULE_SUPERSEDED: 1}
+    assert dict(rolled.refused) == {Refusal.RULE_SUPERSEDED: 1}, "December; withdrawn is quiet"
+
+    later = RollWindow(store, store, reader, clock=lambda: datetime(2026, 12, 2, tzinfo=UTC))
+    assert later.run().refused == (), "no longer in force: nothing to roll, nothing to report"
 
 
 def test_a_failing_tenant_is_reported_and_the_rest_roll() -> None:
