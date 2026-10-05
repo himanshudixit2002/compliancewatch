@@ -11,6 +11,16 @@
         "title": "Applicability",
         "type": "string"
       },
+      "AttributeLevel": {
+        "description": "Which node of the business hierarchy holds the value: the legal entity (PAN), one\nregistration (GSTIN) or one place of business. Values are inherited downward.",
+        "enum": [
+          "entity",
+          "registration",
+          "location"
+        ],
+        "title": "AttributeLevel",
+        "type": "string"
+      },
       "DecisionOut": {
         "description": "One decision: the result of one rule version for one version of a business's profile.\n``needs_review`` is true when the result is unsure or the confidence is below the review\nthreshold; ``evaluated`` lists every predicate in the specification, left to right.",
         "properties": {
@@ -116,6 +126,243 @@
         "title": "EvaluateIn",
         "type": "object"
       },
+      "FanOutHoldIn": {
+        "additionalProperties": false,
+        "description": "``held`` true sets the hold (a reason of at least ten characters is required), or\nreplaces the reason of the one that is set; false releases it, with a reason if you say.",
+        "properties": {
+          "held": {
+            "title": "Held",
+            "type": "boolean"
+          },
+          "reason": {
+            "default": "",
+            "description": "Why, if you say; kept in the audit log",
+            "maxLength": 2000,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "held"
+        ],
+        "title": "FanOutHoldIn",
+        "type": "object"
+      },
+      "FanOutHoldOut": {
+        "description": "The global hold: while ``held`` no fan-out starts its next batch. ``set_by`` is a user\nid, ``system:applicability-engine`` or ``service:<client>``.",
+        "properties": {
+          "held": {
+            "title": "Held",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "set_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set At"
+          },
+          "set_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set By"
+          }
+        },
+        "required": [
+          "held",
+          "reason",
+          "set_by",
+          "set_at"
+        ],
+        "title": "FanOutHoldOut",
+        "type": "object"
+      },
+      "FanOutReasonIn": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "description": "Why, in at least 10 characters; kept in the audit log",
+            "maxLength": 2000,
+            "minLength": 10,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "FanOutReasonIn",
+        "type": "object"
+      },
+      "FanOutResumeIn": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "default": "",
+            "description": "Why, if you say; kept in the audit log",
+            "maxLength": 2000,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "FanOutResumeIn",
+        "type": "object"
+      },
+      "FanOutRunOut": {
+        "description": "One rule version's fan-out over the business directory. ``status`` is running, held (the\nglobal hold stopped it at a batch boundary), paused (a person, or the run itself on flips),\ncompleted, cancelled, disabled (published while the flag was off) or failed (``last_error``\nsays why). ``businesses_total`` is the directory entries of the level when the run began and\n``evaluated`` the businesses decided so far; ``flip_rate`` is ``flips`` over\n``flips_compared``, the businesses compared with the version it supersedes, or null before\nany comparison. ``status_reason`` and ``status_by`` say why and by whom the status last\nchanged: a user id, ``system:applicability-engine`` or ``service:<client>``.",
+        "properties": {
+          "applies": {
+            "title": "Applies",
+            "type": "integer"
+          },
+          "businesses_total": {
+            "title": "Businesses Total",
+            "type": "integer"
+          },
+          "evaluated": {
+            "title": "Evaluated",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "flip_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flip Rate"
+          },
+          "flips": {
+            "title": "Flips",
+            "type": "integer"
+          },
+          "flips_compared": {
+            "title": "Flips Compared",
+            "type": "integer"
+          },
+          "last_error": {
+            "title": "Last Error",
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/AttributeLevel"
+          },
+          "rule_key": {
+            "title": "Rule Key",
+            "type": "string"
+          },
+          "rule_version_id": {
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FanOutStatus"
+          },
+          "status_by": {
+            "title": "Status By",
+            "type": "string"
+          },
+          "status_reason": {
+            "title": "Status Reason",
+            "type": "string"
+          },
+          "supersedes": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Supersedes",
+            "type": "array"
+          },
+          "trigger_event_id": {
+            "format": "uuid",
+            "title": "Trigger Event Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_version_id",
+          "rule_key",
+          "level",
+          "status",
+          "trigger_event_id",
+          "supersedes",
+          "businesses_total",
+          "evaluated",
+          "applies",
+          "flips_compared",
+          "flips",
+          "flip_rate",
+          "started_at",
+          "updated_at",
+          "finished_at",
+          "status_reason",
+          "status_by",
+          "last_error"
+        ],
+        "title": "FanOutRunOut",
+        "type": "object"
+      },
+      "FanOutStatus": {
+        "enum": [
+          "running",
+          "paused",
+          "held",
+          "completed",
+          "cancelled",
+          "disabled",
+          "failed"
+        ],
+        "title": "FanOutStatus",
+        "type": "string"
+      },
       "HealthResponse": {
         "properties": {
           "service": {
@@ -166,6 +413,35 @@
           "next_cursor"
         ],
         "title": "Page[DecisionOut]",
+        "type": "object"
+      },
+      "Page_FanOutRunOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FanOutRunOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Send as cursor to read the next page; null on the last page",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[FanOutRunOut]",
         "type": "object"
       },
       "Page_ReviewItemOut_": {
@@ -1009,6 +1285,632 @@
           }
         ],
         "summary": "One decision with the outcome of every predicate",
+        "tags": [
+          "applicability-engine"
+        ]
+      }
+    },
+    "/v1/applicability-engine/fan-out-hold": {
+      "get": {
+        "operationId": "read_fan_out_hold_v1_applicability_engine_fan_out_hold_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FanOutHoldOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The global fan-out hold",
+        "tags": [
+          "applicability-engine"
+        ]
+      },
+      "put": {
+        "description": "held true stops every fan-out at its next batch boundary (held) until the hold is\nreleased; a reason of at least ten characters is required, and setting it again replaces\nthe reason. held false releases it, and every run it held carries on by itself; a paused run\nstays paused. Audited as applicability.fanout.hold or applicability.fanout.release, of no\ntenant; releasing a hold that is not set changes nothing.",
+        "operationId": "put_fan_out_hold_v1_applicability_engine_fan_out_hold_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FanOutHoldIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FanOutHoldOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set or release the global fan-out hold",
+        "tags": [
+          "applicability-engine"
+        ]
+      }
+    },
+    "/v1/applicability-engine/fan-outs": {
+      "get": {
+        "description": "One fan-out per published rule version: the engine decides the version for every\nbusiness of its level in the business directory, in batches of 1,000, behind the global\nhold. Newest first (started_at, then rule version id).",
+        "operationId": "list_fan_outs_v1_applicability_engine_fan_outs_get",
+        "parameters": [
+          {
+            "description": "Items per page, 1 to 200",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Items per page, 1 to 200",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page; absent for the first page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_cursor of the previous page; absent for the first page",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_FanOutRunOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Every rule version's fan-out, newest first, a page at a time",
+        "tags": [
+          "applicability-engine"
+        ]
+      }
+    },
+    "/v1/applicability-engine/fan-outs/{rule_version_id}": {
+      "get": {
+        "operationId": "read_fan_out_v1_applicability_engine_fan_outs__rule_version_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FanOutRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "One rule version's fan-out: its status, counters and last change",
+        "tags": [
+          "applicability-engine"
+        ]
+      }
+    },
+    "/v1/applicability-engine/fan-outs/{rule_version_id}/cancel": {
+      "post": {
+        "description": "The run stops at its next batch boundary for good. To take back what it decided, withdraw\nthe rule version in the rulebook. Audited as applicability.fanout.cancel with the reason. 404\nwhen the version has no fan-out, 409 when it has finished.",
+        "operationId": "cancel_fan_out_v1_applicability_engine_fan_outs__rule_version_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FanOutReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FanOutRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel a fan-out that has not finished; its decisions stay",
+        "tags": [
+          "applicability-engine"
+        ]
+      }
+    },
+    "/v1/applicability-engine/fan-outs/{rule_version_id}/pause": {
+      "post": {
+        "description": "The run stops at its next batch boundary and waits until an admin resumes it; the global\nhold's release does not. Audited as applicability.fanout.pause with the reason. 404 when the\nversion has no fan-out, 409 when it is not running or held.",
+        "operationId": "pause_fan_out_v1_applicability_engine_fan_outs__rule_version_id__pause_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FanOutReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FanOutRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Pause a running or held fan-out at its next batch boundary",
+        "tags": [
+          "applicability-engine"
+        ]
+      }
+    },
+    "/v1/applicability-engine/fan-outs/{rule_version_id}/resume": {
+      "post": {
+        "description": "The run decides its next batch at once; while the global hold is set it is held again\ninstead. Resuming a run that paused itself on flips turns the flip check off for the rest of\nthe run. Audited as applicability.fanout.resume. 404 when the version has no fan-out, 409\nwhen it is not paused.",
+        "operationId": "resume_fan_out_v1_applicability_engine_fan_outs__rule_version_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/FanOutResumeIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FanOutRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resume a paused fan-out",
         "tags": [
           "applicability-engine"
         ]

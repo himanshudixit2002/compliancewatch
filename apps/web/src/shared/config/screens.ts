@@ -1941,7 +1941,13 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [RULE_VERSIONS],
+    uses: [
+      RULE_VERSIONS,
+      uses("applicability-engine", "GET", "/v1/applicability-engine/fan-outs"),
+      uses("applicability-engine", "GET", "/v1/applicability-engine/fan-outs/{rule_version_id}"),
+      uses("applicability-engine", "GET", "/v1/applicability-engine/fan-out-hold"),
+      uses("applicability-engine", "PUT", "/v1/applicability-engine/fan-out-hold"),
+    ],
     awaits: [
       servicesTrack("WP26", "applicability-engine", "GET", "/v1/applicability-engine/fan-outs"),
       servicesTrack(
@@ -1953,7 +1959,7 @@ const SCREEN_LIST = [
       servicesTrack("WP26", "applicability-engine", "GET", "/v1/applicability-engine/fan-out-hold"),
       servicesTrack("WP26", "applicability-engine", "PUT", "/v1/applicability-engine/fan-out-hold"),
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "16, 18; G03, G05",
     nav: { group: "engine", order: 2 },
@@ -1967,7 +1973,24 @@ const SCREEN_LIST = [
     section: "admin",
     roles: ["reviewer", "admin"],
     tenantKinds: ["internal"],
-    uses: [uses("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/withdraw")],
+    uses: [
+      uses("rulebook", "POST", "/v1/rulebook/rule-versions/{rule_version_id}/withdraw"),
+      uses(
+        "applicability-engine",
+        "POST",
+        "/v1/applicability-engine/fan-outs/{rule_version_id}/pause",
+      ),
+      uses(
+        "applicability-engine",
+        "POST",
+        "/v1/applicability-engine/fan-outs/{rule_version_id}/resume",
+      ),
+      uses(
+        "applicability-engine",
+        "POST",
+        "/v1/applicability-engine/fan-outs/{rule_version_id}/cancel",
+      ),
+    ],
     awaits: [
       servicesTrack(
         "WP26",
@@ -1988,7 +2011,7 @@ const SCREEN_LIST = [
         "/v1/applicability-engine/fan-outs/{rule_version_id}/cancel",
       ),
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "16; PDF 8.1; G05",
     parent: "admin.fan-outs",

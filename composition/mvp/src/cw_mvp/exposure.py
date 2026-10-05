@@ -4,10 +4,11 @@ Every route a hosted service serves has one class:
 
 - ``public``: user-facing routes, served on both listeners;
 - ``admin``: the regulatory team's and operators' routes (rulebook review and publishing, the
-  engine's review queue, the gateway's prompts, models and usage, notification resends, the
-  stored eval runs). The public listener serves them only when ``CW_AUTH_MODE=token``, where each
-  route itself requires an analyst, reviewer or admin a verified token names; in ``header`` and
-  ``dual`` mode a request without a token could reach them, so they stay internal;
+  engine's review queue and fan-out controls, the gateway's prompts, models and usage,
+  notification resends, the stored eval runs). The public listener serves them only when
+  ``CW_AUTH_MODE=token``, where each route itself requires an analyst, reviewer or admin a
+  verified token names; in ``header`` and ``dual`` mode a request without a token could reach
+  them, so they stay internal;
 - ``internal``: service-to-service routes (identity's service tokens and channel consents,
   notification's send, preferences and WhatsApp receipts, the rulebook's pipeline writes, the
   gateway's model calls, the engine's evaluations, which call the profile and the rulebook) and
@@ -132,6 +133,17 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         # listener serves them in token mode only.
         "GET /v1/applicability-engine/review-items": ADMIN,
         "POST /v1/applicability-engine/review-items/{item_id}/resolve": ADMIN,
+        # The fan-outs of published rule versions over every tenant's businesses: the regulatory
+        # team reads them and the global hold, and an admin pauses, resumes or cancels a run and
+        # sets or releases the hold, each audited. Every route requires a role a verified token
+        # names, so the public listener serves them in token mode only.
+        "GET /v1/applicability-engine/fan-outs": ADMIN,
+        "GET /v1/applicability-engine/fan-outs/{rule_version_id}": ADMIN,
+        "POST /v1/applicability-engine/fan-outs/{rule_version_id}/pause": ADMIN,
+        "POST /v1/applicability-engine/fan-outs/{rule_version_id}/resume": ADMIN,
+        "POST /v1/applicability-engine/fan-outs/{rule_version_id}/cancel": ADMIN,
+        "GET /v1/applicability-engine/fan-out-hold": ADMIN,
+        "PUT /v1/applicability-engine/fan-out-hold": ADMIN,
     },
     "obligation": {
         "GET /v1/obligation/ping": PUBLIC,

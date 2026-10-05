@@ -27,6 +27,13 @@ settles, always named in ``x-tenant-id`` (401 ``applicability-tenant-required`` 
 token names (an analyst is a 403). In ``header`` mode the anonymous caller passes and the body
 names the reviewer; in ``dual`` mode a request without a token is a 401, so no resolution is
 stored without a verified person once tokens are read at all.
+
+The fan-outs run over every tenant and belong to none, so their routes name no tenant.
+``FanOutReader`` guards the reads the way the review queue's are guarded: a regulatory role
+(analyst, reviewer or admin) a token names, the anonymous caller without a token, and a 403 for
+anyone else and for services. ``FanOutAdmin`` guards the controls (pause, resume, cancel, the
+hold) the way a resolution is: an admin a token names; the anonymous caller only in ``header``
+mode, and a 401 without a token in ``dual`` mode.
 """
 
 from collections.abc import AsyncIterator
@@ -57,6 +64,7 @@ from py_common.auth.fastapi import (
 )
 
 RESOLVER_ROLES: Final = frozenset({Role.REVIEWER, Role.ADMIN})
+FAN_OUT_ADMIN_ROLES: Final = frozenset({Role.ADMIN})
 REVIEW_TENANT_DESCRIPTION: Final = (
     "The tenant whose review items to read or settle. A regulatory user's token names the "
     "internal tenant, so on the review routes the header names the tenant reviewed."
@@ -112,6 +120,31 @@ async def resolver(request: Request, principal: CurrentPrincipal) -> Principal:
     return principal
 
 
+async def fan_out_reader(principal: CurrentPrincipal) -> Principal:
+    """A regulatory user a token names, or the anonymous caller; services and tenant members are
+    a 403."""
+    if principal.kind is PrincipalKind.SERVICE:
+        raise AuthForbiddenError("fan-outs are read by the regulatory team, not by a service")
+    if principal.kind is PrincipalKind.USER and not principal.has_role(*REGULATORY_ROLES):
+        names = ", ".join(sorted(role.value for role in REGULATORY_ROLES))
+        raise AuthForbiddenError(f"this request needs one of: {names}")
+    return principal
+
+
+async def fan_out_admin(request: Request, principal: CurrentPrincipal) -> Principal:
+    """An admin a token names; the anonymous caller in ``header`` mode only."""
+    if principal.is_authenticated:
+        if principal.kind is PrincipalKind.USER and principal.has_role(*FAN_OUT_ADMIN_ROLES):
+            return principal
+        names = ", ".join(sorted(role.value for role in FAN_OUT_ADMIN_ROLES))
+        raise AuthForbiddenError(f"this request needs one of: {names}")
+    if authenticator_of(request).mode != "header":
+        raise AuthTokenRequiredError(
+            "Controlling a fan-out needs an admin's access token as Authorization: Bearer <token>"
+        )
+    return principal
+
+
 def resolved_by(principal: Principal, offered: UUID) -> UserId:
     """Who settled the item: the user a verified token names, else the body's
     ``resolved_by``."""
@@ -127,4 +160,6 @@ def wiring(request: Request) -> Wiring:
 Tenant = Annotated[TenantId, Depends(member_tenant)]
 ReviewTenant = Annotated[TenantId, Depends(review_tenant)]
 Resolver = Annotated[Principal, Depends(resolver)]
+FanOutReader = Annotated[Principal, Depends(fan_out_reader)]
+FanOutAdmin = Annotated[Principal, Depends(fan_out_admin)]
 Wired = Annotated[Wiring, Depends(wiring)]

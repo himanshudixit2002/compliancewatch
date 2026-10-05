@@ -5,6 +5,16 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from applicability_engine.application.evaluate import EvaluateRule
+from applicability_engine.application.fanout import (
+    CancelFanOut,
+    ListFanOuts,
+    PauseFanOut,
+    ReadFanOut,
+    ReadHold,
+    ReleaseHold,
+    ResumeFanOut,
+    SetHold,
+)
 from applicability_engine.application.queries import ListDecisions, ReadDecision
 from applicability_engine.application.review import ListReviewItems, ResolveReviewItem
 from applicability_engine.domain.ports import ProfileReader, RulebookReader
@@ -32,3 +42,11 @@ class Wiring:
     read_decision: ReadDecision
     list_review_items: ListReviewItems
     resolve_review_item: ResolveReviewItem
+    list_fan_outs: ListFanOuts
+    read_fan_out: ReadFanOut
+    pause_fan_out: PauseFanOut
+    resume_fan_out: ResumeFanOut
+    cancel_fan_out: CancelFanOut
+    read_hold: ReadHold
+    set_hold: SetHold
+    release_hold: ReleaseHold
