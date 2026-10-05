@@ -1053,8 +1053,8 @@ def reminders(context: CheckContext) -> list[str]:
             )
             return [
                 f"obligation-sweep --once --now {now.isoformat()} --tenant {BUSINESS_TENANT.key}: "
-                f"{len(report['reminded'])} reminders, {len(report['created'])} obligations made "
-                "by the window",
+                f"reminders sent {len(report['reminded'])}, obligations the window made "
+                f"{len(report['created'])}",
                 f"reminded: {obligation['title']}, due {obligation['due_at']}, swept "
                 f"{_lead(lead)} before",
                 f"reminder: {notice['channel']} {notice['state']} through the sink "
