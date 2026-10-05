@@ -231,7 +231,7 @@ class Watched:
         self, tenant_id: TenantId, business_id: BusinessId, fy: FinancialYear | None
     ) -> ProfileSnapshot | None:
         with self._engine.connect() as connection:
-            open_transactions = connection.execute(
+            open_transactions: int = connection.execute(
                 text(
                     "SELECT count(*) FROM pg_stat_activity WHERE usename = :role "
                     "AND state LIKE 'idle in transaction%'"
