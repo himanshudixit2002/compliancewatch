@@ -6,13 +6,16 @@ It writes ``<out>/cases/<case id>.yaml``, one per approved candidate, in the sha
 ``pipeline-label`` reads (``label_status: draft``, ``labelled_by`` the decider, ``reviewed_by``
 empty), and ``<out>/summary.yaml``: the cases, the rejected candidates (the golden shape has no
 negative case) and the candidates skipped with why. It refuses an ``--out`` inside
-``evals/golden``: only a person moves a case there, after a review. It reads the rulebook at
+``evals/golden``, however it is spelt (in any case, as a case-insensitive file system such as
+macOS's opens it) or reached (through a link): only a person moves a case there, after a
+review. It reads the rulebook at
 ``CW_DATABASE_URL`` (``make golden-export``). Exit status: 0 written, 1 the store cannot be read,
 2 refused.
 """
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime, time
@@ -28,6 +31,8 @@ from rulebook.infrastructure.knowledge_repository import PostgresKnowledgeUnitOf
 
 SERVICE_NAME: Final = "rulebook-golden-export"
 GOLDEN_PARTS: Final = ("evals", "golden")
+REPO_ROOT: Final = Path(__file__).resolve().parents[4]
+"""The repository this file sits in (``services/rulebook/src/rulebook/golden.py``)."""
 
 
 def case_yaml(content: Mapping[str, Any]) -> str:
@@ -50,12 +55,33 @@ def write_export(export: GoldenExport, out: Path) -> list[Path]:
     return written
 
 
-def inside_golden(out: Path) -> bool:
-    """Whether ``out`` is ``evals/golden`` or under it, wherever the repository is."""
-    parts = out.resolve().parts
+def golden_sets() -> list[Path]:
+    """The golden sets on this machine: the repository's ``evals/golden`` and the working
+    directory's, those that exist."""
+    found = [base / Path(*GOLDEN_PARTS) for base in (REPO_ROOT, Path.cwd())]
+    return [path for path in found if path.is_dir()]
+
+
+def inside_golden(out: Path, *, golden: Sequence[Path] | None = None) -> bool:
+    """Whether ``out`` is ``evals/golden`` or under it: named so in any case (a case-insensitive
+    file system opens ``Evals/Golden`` as ``evals/golden``) wherever the repository is, or the
+    same directory as one of ``golden`` (``golden_sets()`` unless given) or under it, however it
+    is spelt or linked: each ancestor that exists is compared with it as a file
+    (``os.path.samefile``)."""
+    resolved = out.expanduser().resolve()
+    wanted = tuple(part.casefold() for part in GOLDEN_PARTS)
+    parts = tuple(part.casefold() for part in resolved.parts)
+    if any(
+        parts[index : index + len(wanted)] == wanted
+        for index in range(len(parts) - len(wanted) + 1)
+    ):
+        return True
+    sets = [path for path in (golden_sets() if golden is None else golden) if path.exists()]
     return any(
-        parts[index : index + len(GOLDEN_PARTS)] == GOLDEN_PARTS
-        for index in range(len(parts) - len(GOLDEN_PARTS) + 1)
+        os.path.samefile(ancestor, found)
+        for ancestor in (resolved, *resolved.parents)
+        if ancestor.exists()
+        for found in sets
     )
 
 

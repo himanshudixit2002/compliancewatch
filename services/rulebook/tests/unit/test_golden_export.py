@@ -14,7 +14,7 @@ import yaml
 import ontology as ontology_package
 from domain_kernel.ontology import Ontology
 from rulebook.application.golden_export import ExportDecidedCandidates, slug
-from rulebook.golden import case_yaml, inside_golden, run
+from rulebook.golden import REPO_ROOT, case_yaml, inside_golden, run
 from rulebook.testing import (
     APPROVED,
     CLAUSES,
@@ -137,7 +137,34 @@ def test_a_store_that_does_not_answer_is_exit_1(
 def test_paths_and_slugs() -> None:
     assert inside_golden(Path("/x/evals/golden"))
     assert inside_golden(Path("/x/evals/golden/extraction/cases"))
+    assert inside_golden(Path("/x/Evals/GOLDEN/extraction")), "macOS opens it all the same"
     assert not inside_golden(Path("/x/evals/goldens"))
     assert not inside_golden(Path("/x/var/golden-export"))
+    assert inside_golden(REPO_ROOT / "evals" / "golden" / "extraction" / "new")
     assert slug("01/2026-Central Tax") == "01-2026-central-tax"
     assert case_yaml({"b": 1, "a": "é"}).splitlines() == ["b: 1", "a: é"]
+
+
+def test_the_golden_set_is_refused_through_a_link_or_another_name(
+    decided: ExampleDecisions, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A link into evals/golden, or to a golden set under a name of its own, is the golden set:
+    each existing ancestor is compared with it as a file."""
+    golden = tmp_path / "repo" / "evals" / "golden"
+    (golden / "extraction").mkdir(parents=True)
+    drafts = tmp_path / "drafts"
+    drafts.symlink_to(golden, target_is_directory=True)
+    out = drafts / "extraction" / "new"
+    assert inside_golden(out)
+    assert run(["--since", "2000-01-01", "--out", str(out)], units=decided.store) == 2
+    assert "inside evals/golden" in capsys.readouterr().err
+    assert sorted(path.name for path in golden.rglob("*")) == ["extraction"], "nothing written"
+
+    named = tmp_path / "labelled-set"
+    named.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(named, target_is_directory=True)
+    assert inside_golden(alias / "cases", golden=[named])
+    assert inside_golden(named, golden=[named])
+    assert not inside_golden(tmp_path / "elsewhere", golden=[named])
+    assert not inside_golden(tmp_path / "elsewhere", golden=[tmp_path / "missing"])
