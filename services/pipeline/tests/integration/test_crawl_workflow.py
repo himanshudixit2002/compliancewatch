@@ -255,7 +255,8 @@ async def test_a_backfill_crawls_its_window_below_the_watermark_and_keeps_it(
     environment: WorkflowEnvironment,
 ) -> None:
     """A backfill row of 2025 naming 17/2025: its crawl takes that one only, records its run as a
-    backfill and leaves the watermark where the schedule's crawl moved it."""
+    backfill and leaves the source as the schedule's crawls left it: its watermark, last listing
+    and error."""
     pipeline = Pipeline(watermark=date(2026, 4, 21))
     starter = MemoryCrawls()
     request = BackfillRequest(actor=ACTOR, reason="Backfill the recorded history for the test")
@@ -287,7 +288,9 @@ async def test_a_backfill_crawls_its_window_below_the_watermark_and_keeps_it(
         0,
     )
     assert [d.external_ref for d in pipeline.documents()] == ["17/2025-Central Tax"]
-    assert pipeline.store.sources[KEY].watermark_date == date(2026, 4, 21), "never moved back"
+    source = pipeline.store.sources[KEY]
+    assert source.watermark_date == date(2026, 4, 21), "a backfill moves no watermark"
+    assert (source.last_fetch_at, source.last_error) == (None, ""), "nor the source's listing"
     run = pipeline.store.crawl_runs[start.run_id]
     assert (run.trigger, run.workflow_id, run.status) == (
         CrawlTrigger.BACKFILL,
