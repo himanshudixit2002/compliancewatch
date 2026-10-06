@@ -88,6 +88,14 @@ The services whose routes do more than read their own store:
   its `notification.bulk` audit row.
 - **qa**: `POST /v1/qa/ask` and the public `POST /v1/qa` run one handler, reading the profile, the
   business's obligations and the rulebook and calling the gateway over the internal listener.
+- **pipeline**: the source manager is admin. The regulatory team reads the sources with how each
+  stands, their documents and the stored files (`GET /v1/pipeline/sources`,
+  `GET /v1/pipeline/sources/{key}/documents`, `GET /v1/pipeline/documents/{document_id}` and its
+  `/raw`), and an admin adds and edits a source and starts a crawl
+  (`POST /v1/pipeline/sources`, `PATCH /v1/pipeline/sources/{key}`,
+  `POST /v1/pipeline/sources/{key}/fetch`, each audited); in `header` and `dual` mode the writes
+  also take the shared write token `CW_RULEBOOK_WRITE_TOKEN`. A fetch starts the crawl workflow on
+  Temporal (`CW_TEMPORAL_*`) and answers 503 while `CW_PIPELINE_CRAWL_ENABLED` is off.
 
 The process must stay one process: notification preferences, the gateway's response cache and
 its budget-alarm markers are still held in memory.
@@ -109,7 +117,7 @@ service's settings:
 
 | What | When |
 | --- | --- |
-| each service's worker components (`<pkg>.worker.components`): the engine's consumers of profile.updated and of rule.published and rule.withdrawn and its fan-out's Temporal worker (queue `applicability`), notification's consumer, dispatcher and retention sweep, obligation's consumers of applicability.decided and of the rule events, its reminder sweep and rolling window, the rulebook's daily transitions sweep, the pipeline's Temporal worker | consumers with `CW_WORKER_KAFKA_ENABLED`, Temporal workers with `CW_WORKER_TEMPORAL_ENABLED` (one client for all), periodic jobs always, behind their service's own switch: the reminder sweep and the rolling window with `CW_OBLIGATION_SWEEP_ENABLED`, the transitions with `CW_RULEBOOK_PUBLISH_ENABLED`; obligation's rules consumer acts on rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed only with `CW_OBLIGATION_RULE_EVENTS_ENABLED` (it keeps its offsets either way); the engine's profile consumer runs with Kafka and evaluates only with `CW_APPLICABILITY_RECOMPUTE_ENABLED` (it keeps the business directory either way), and its rules consumer starts fan-outs only with `CW_APPLICABILITY_FANOUT_ENABLED` (it records a disabled run otherwise) |
+| each service's worker components (`<pkg>.worker.components`): the engine's consumers of profile.updated and of rule.published and rule.withdrawn and its fan-out's Temporal worker (queue `applicability`), notification's consumer, dispatcher and retention sweep, obligation's consumers of applicability.decided and of the rule events, its reminder sweep and rolling window, the rulebook's daily transitions sweep, the pipeline's Temporal worker, its source sync at start and its crawl tick | consumers with `CW_WORKER_KAFKA_ENABLED`, Temporal workers with `CW_WORKER_TEMPORAL_ENABLED` (one client for all), periodic jobs always, behind their service's own switch: the reminder sweep and the rolling window with `CW_OBLIGATION_SWEEP_ENABLED`, the transitions with `CW_RULEBOOK_PUBLISH_ENABLED`, the pipeline's 60-second crawl tick with `CW_PIPELINE_CRAWL_ENABLED` (it crawls the live regulator sites, so it stays off in `make product` and CI); obligation's rules consumer acts on rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed only with `CW_OBLIGATION_RULE_EVENTS_ENABLED` (it keeps its offsets either way); the engine's profile consumer runs with Kafka and evaluates only with `CW_APPLICABILITY_RECOMPUTE_ENABLED` (it keeps the business directory either way), and its rules consumer starts fan-outs only with `CW_APPLICABILITY_FANOUT_ENABLED` (it records a disabled run otherwise) |
 | one outbox relay per schema that has an `outbox_event` table | `CW_WORKER_KAFKA_ENABLED` |
 | the daily idempotency purge of every schema that has an `idempotency_key` table | always |
 
@@ -301,8 +309,9 @@ refusal, so fixing one can bring the next to light. In staging and production it
   `CW_RULEBOOK_WRITE_TOKEN` for the pipeline's knowledge step outside token mode, and in token
   mode the worker's `CW_SERVICE_CLIENT_SECRET` while its Kafka or Temporal switch is on;
 - a pipeline raw store other than `s3` (`CW_PIPELINE_RAW_STORE=local` or `memory`) while the
-  worker fetches regulator documents, which it does with `CW_WORKER_TEMPORAL_ENABLED` on
-  (`check_config.fetch_switches` lists the switches): the files would go with the machine. The
+  worker fetches regulator documents, which it does with `CW_WORKER_TEMPORAL_ENABLED` or
+  `CW_PIPELINE_CRAWL_ENABLED` on (`check_config.fetch_switches` lists the switches): the files
+  would go with the machine. The
   pipeline's own settings refuse `s3` without its bucket and key, and unencrypted files
   (`CW_PIPELINE_RAW_ENCRYPTION=none`) in staging and production.
 

@@ -1,13 +1,16 @@
-"""Migration 0001 on Postgres: the tables, the unit of work with the outbox, the rules the tables
-keep, the catalog lint, and a downgrade back to nothing. Needs Docker.
+"""Migrations 0001 and 0002 on Postgres: the tables, the unit of work with the outbox and the
+audit log, the rules the tables keep, the crawl's queries, the catalog lint, and a downgrade
+back to nothing. Needs Docker.
 
 The repositories run as a plain database role with the grants infra/dev/postgres/50-app-role.sql
-gives the product's cw_app: it owns nothing and is not a superuser.
+gives the product's cw_app: it owns nothing and is not a superuser. ``audit.event`` is made as
+identity's migration makes it (``py_common.audit.testing.install_audit_table``).
 """
 
 import hashlib
 import importlib
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -21,14 +24,19 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.pool import NullPool
 from testcontainers.community.postgres import PostgresContainer
 
+from domain_kernel.audit import AuditActor, AuditEntryId
 from domain_kernel.documents import DocumentType, document_id_for
-from domain_kernel.ids import SourceId
+from domain_kernel.ids import SourceId, UserId
+from pipeline.application.sources import AddSource, AdminAction, NewSource
 from pipeline.domain.crawl import CrawlCounts, CrawlRun, CrawlStatus
 from pipeline.domain.events import DocumentDiscovered
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
+from pipeline.domain.repository import DocumentKey
 from pipeline.domain.sources import Source, SourceDefinition
+from pipeline.infrastructure.adapters import RegistryAdapterTypes
 from pipeline.infrastructure.models import Base
 from pipeline.infrastructure.repository import PostgresUnitOfWorkFactory
+from py_common.audit.testing import install_audit_table, read_audit_entries
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
@@ -56,16 +64,20 @@ def database_url() -> Iterator[str]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+            connection.execute(text("CREATE SCHEMA audit"))
             connection.execute(
                 text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}' NOSUPERUSER")
             )
-            connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
-            connection.execute(
-                text(
-                    f"ALTER DEFAULT PRIVILEGES IN SCHEMA {SCHEMA} "
-                    f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE}"
+            for schema in (SCHEMA, "audit"):
+                connection.execute(text(f"GRANT USAGE ON SCHEMA {schema} TO {APP_ROLE}"))
+                connection.execute(
+                    text(
+                        f"ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} "
+                        f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE}"
+                    )
                 )
-            )
+        with admin.begin() as connection:
+            install_audit_table(connection)
         admin.dispose()
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 
@@ -144,7 +156,11 @@ def test_migration_creates_the_tables_without_tenant_columns(engine: Engine) -> 
         assert "tenant_id" not in columns, "the pipeline's data is regulatory"
     with engine.connect() as connection:
         version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    assert version == "0001"
+    assert version == "0002"
+    names = {column["name"] for column in inspector.get_columns("source", schema=SCHEMA)}
+    assert "name" in names
+    indexes = {index["name"] for index in inspector.get_indexes("raw_document", schema=SCHEMA)}
+    assert "ix_raw_document_source_url" in indexes
 
 
 def test_models_and_migration_agree(engine: Engine) -> None:
@@ -330,7 +346,160 @@ def test_documents_list_newest_first_and_crawl_runs_round_trip(
     assert units.ping()
 
 
+def test_a_source_name_is_kept_and_bounded(
+    units: PostgresUnitOfWorkFactory, engine: Engine
+) -> None:
+    named = Source.of(
+        SourceDefinition(
+            key="mahagst_notifications",
+            adapter_type="mahagst",
+            parameters={},
+            cadence=timedelta(hours=12),
+            regulator="Maharashtra GST",
+            doc_type=DocumentType.NOTIFICATION,
+            name="Maharashtra GST notifications",
+        ),
+        NOW,
+    )
+    with units() as unit:
+        unit.sources.add(named)
+    with units() as unit:
+        assert unit.sources.get(named.key, for_update=True) == named
+    with (
+        pytest.raises(IntegrityError, match="ck_source_name_length"),
+        engine.begin() as connection,
+    ):
+        connection.execute(
+            text("UPDATE source SET name = repeat('x', 201) WHERE key = :key"),
+            {"key": named.key},
+        )
+
+
+def test_the_crawl_finds_known_urls_and_pages_documents_on_postgres(
+    units: PostgresUnitOfWorkFactory,
+) -> None:
+    council = SourceDefinition(
+        key="gstcouncil_press",
+        adapter_type="gstcouncil",
+        parameters={},
+        cadence=timedelta(hours=6),
+        regulator="GST Council",
+        doc_type=DocumentType.PRESS_RELEASE,
+    )
+    url = "https://gstcouncil.gov.in/press/56.pdf"
+    first = record(b"press 56", source_key=council.key, source_url=url, published_on=None)
+    corrected = record(
+        b"press 56, corrected",
+        source_key=council.key,
+        source_url=url,
+        published_on=None,
+        fetched_at=NOW + timedelta(days=1),
+    )
+    dated = [
+        record(
+            f"press {day}".encode(),
+            source_key=council.key,
+            source_url=f"https://gstcouncil.gov.in/press/{day}.pdf",
+            published_on=date(2026, 9, day),
+        )
+        for day in (3, 9, 21)
+    ]
+    dated.append(
+        record(
+            b"press 9, second",
+            source_key=council.key,
+            source_url="https://gstcouncil.gov.in/press/9b.pdf",
+            published_on=date(2026, 9, 9),
+        )
+    )
+    with units() as unit:
+        unit.sources.add(Source.of(council, NOW))
+        for document in (first, corrected, *dated):
+            unit.documents.add(document)
+    with units() as unit:
+        assert unit.documents.find_by_url(council.key, url) == corrected
+        assert unit.documents.find_by_url(council.key, url + "?x") is None
+        urls = [url, "https://gstcouncil.gov.in/press/3.pdf", "https://gstcouncil.gov.in/nope"]
+        assert unit.documents.known_urls(council.key, urls) == frozenset(urls[:2])
+        assert unit.documents.counts()[council.key] == 2 + len(dated)
+        everything = unit.documents.page(council.key, after=None, limit=50)
+        pages: list[RawDocumentRecord] = []
+        after: DocumentKey | None = None
+        while page := unit.documents.page(council.key, after=after, limit=2):
+            pages.extend(page)
+            after = DocumentKey.of(page[-1])
+        recent = unit.documents.fetched_since(NOW + timedelta(hours=1))
+    assert pages == list(everything)
+    assert [d.published_on for d in everything][:4] == [
+        date(2026, 9, 21),
+        date(2026, 9, 9),
+        date(2026, 9, 9),
+        date(2026, 9, 3),
+    ]
+    assert [d.published_on for d in everything][4:] == [None, None]
+    assert everything[4] == corrected, "the undated last, the latest fetch first"
+    assert corrected in recent
+    assert first not in recent
+
+
+def test_runs_start_once_and_are_found_per_source_on_postgres(
+    units: PostgresUnitOfWorkFactory,
+) -> None:
+    advisories = "gstn_advisories"
+    first = CrawlRun.start(advisories, NOW + timedelta(days=3))
+    second = CrawlRun.start(advisories, NOW + timedelta(days=3, hours=3))
+    with units() as unit:
+        assert unit.crawl_runs.start(first)
+        assert not unit.crawl_runs.start(first)
+        assert unit.crawl_runs.start(second)
+    with units() as unit:
+        unit.crawl_runs.save(first.finish(first.started_at + timedelta(minutes=1), CrawlCounts()))
+        assert unit.crawl_runs.running(advisories) == [second]
+        assert unit.crawl_runs.latest_by_source()[advisories] == second
+        since = unit.crawl_runs.started_since(NOW + timedelta(days=3))
+    assert [run.id for run in since] == [first.id, second.id]
+
+
+def test_an_admins_change_and_its_audit_row_commit_together(
+    units: PostgresUnitOfWorkFactory, engine: Engine
+) -> None:
+    admin = AdminAction(actor=AuditActor.user(UserId.new()), reason="A source for the schema test")
+    added = AddSource(units, RegistryAdapterTypes()).run(
+        NewSource(
+            key="cbic_circulars",
+            name="CBIC CGST circulars",
+            adapter_type="cbic",
+            parameters={"listing": "circulars", "category": "Circulars CGST"},
+            cadence=timedelta(hours=6),
+        ),
+        admin,
+    )
+    with engine.connect() as connection:
+        (entry,) = read_audit_entries(connection, action="pipeline.source.add")
+    assert (entry.subject_id, entry.tenant_id, entry.reason) == (added.key, None, admin.reason)
+
+    def add_then_fail() -> None:
+        with units() as unit:
+            unit.audit.write(replace(entry, entry_id=AuditEntryId.new()))
+            raise RuntimeError("the change fails after its audit row")
+
+    with pytest.raises(RuntimeError, match="after its audit row"):
+        add_then_fail()
+    with engine.connect() as connection:
+        assert len(read_audit_entries(connection, action="pipeline.source.add")) == 1
+
+
 def test_downgrade_removes_everything(engine: Engine, migrated: Config) -> None:
+    command.downgrade(migrated, "0001")
+    try:
+        names = {column["name"] for column in inspect(engine).get_columns("source", schema=SCHEMA)}
+        assert "name" not in names
+        indexes = {
+            index["name"] for index in inspect(engine).get_indexes("raw_document", schema=SCHEMA)
+        }
+        assert "ix_raw_document_source_url" not in indexes
+    finally:
+        command.upgrade(migrated, "head")
     command.downgrade(migrated, "base")
     try:
         assert set(inspect(engine).get_table_names(schema=SCHEMA)) == {"alembic_version"}

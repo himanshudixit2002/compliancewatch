@@ -14,6 +14,7 @@ from pipeline.domain.events import DocumentDiscovered
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.sources import Source, SourceDefinition
 from pipeline.infrastructure.memory import MemoryStore
+from py_common.audit.testing import audit_entry
 
 NOW = datetime(2026, 10, 6, 4, 30, tzinfo=UTC)
 DEFINITION = SourceDefinition(
@@ -239,3 +240,69 @@ def test_crawl_runs_are_kept_per_source() -> None:
             unit.crawl_runs.add(first)
     assert latest is not None
     assert (latest.id, latest.status) == (second.id, CrawlStatus.COMPLETED)
+
+
+def test_the_crawl_finds_known_urls_and_counts_documents_per_source() -> None:
+    store = MemoryStore()
+    first = record(b"first", source_url="https://example.invalid/a.pdf", fetched_at=NOW)
+    again = record(
+        b"first, corrected",
+        source_url="https://example.invalid/a.pdf",
+        fetched_at=NOW + timedelta(1),
+    )
+    other = record(b"other", source_url="https://example.invalid/b.pdf", fetched_at=NOW)
+    with store() as unit:
+        unit.sources.add(Source.of(DEFINITION, NOW))
+        for document in (first, again, other):
+            unit.documents.add(document)
+        assert unit.sources.get(DEFINITION.key, for_update=True) == unit.sources.get(DEFINITION.key)
+        found = unit.documents.find_by_url(DEFINITION.key, "https://example.invalid/a.pdf")
+        assert found == again, "the latest fetch of the URL"
+        assert unit.documents.find_by_url(DEFINITION.key, "https://example.invalid/c.pdf") is None
+        assert (
+            unit.documents.find_by_url("gstn_advisories", "https://example.invalid/a.pdf") is None
+        )
+        known = unit.documents.known_urls(
+            DEFINITION.key, ["https://example.invalid/a.pdf", "https://example.invalid/c.pdf"]
+        )
+        assert known == frozenset({"https://example.invalid/a.pdf"})
+        assert (
+            unit.documents.known_urls("gstn_advisories", ["https://example.invalid/a.pdf"]) == set()
+        )
+        assert unit.documents.counts() == {DEFINITION.key: 3}
+        since = unit.documents.fetched_since(NOW + timedelta(hours=1))
+        assert since == [again]
+
+
+def test_runs_start_once_and_are_found_per_source() -> None:
+    store = MemoryStore()
+    first = CrawlRun.start(DEFINITION.key, NOW)
+    second = CrawlRun.start(DEFINITION.key, NOW + timedelta(hours=2))
+    with store() as unit:
+        unit.sources.add(Source.of(DEFINITION, NOW))
+        assert unit.crawl_runs.start(first)
+        assert not unit.crawl_runs.start(first)
+        assert unit.crawl_runs.start(second)
+        unit.crawl_runs.save(first.finish(NOW + timedelta(minutes=5), CrawlCounts()))
+        assert unit.crawl_runs.running(DEFINITION.key) == [second]
+        assert unit.crawl_runs.latest_by_source() == {DEFINITION.key: second}
+        assert unit.crawl_runs.started_since(NOW + timedelta(hours=1)) == [second]
+        with pytest.raises(KeyError, match="no stored source"):
+            unit.crawl_runs.start(CrawlRun.start("gstn_advisories", NOW))
+
+
+def test_audit_entries_commit_with_the_unit_and_go_with_a_failed_one() -> None:
+    store = MemoryStore()
+    entry = audit_entry(tenant_id=None)
+    with store() as unit:
+        unit.audit.write(entry)
+    assert store.audit == [entry]
+
+    def write_then_fail() -> None:
+        with store() as unit:
+            unit.audit.write(audit_entry(tenant_id=None))
+            raise RuntimeError("the unit fails")
+
+    with pytest.raises(RuntimeError):
+        write_then_fail()
+    assert store.audit == [entry]

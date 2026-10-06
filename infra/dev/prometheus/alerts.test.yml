@@ -1,6 +1,6 @@
 # promtool unit tests for alerts.yml (`make alerts-check`, the ops job in ci.yml). The api-slo,
-# workers, outbox, rulebook-review and notification groups have cases; each package appends the
-# cases for the alert group it owns.
+# workers, outbox, rulebook-review, notification and pipeline groups have cases; each package
+# appends the cases for the alert group it owns.
 rule_files:
   - alerts.yml
 
@@ -347,3 +347,41 @@ tests:
       - eval_time: 50m
         alertname: NotificationEmailBounces
         exp_alerts: []
+
+  # SourceStale. cbic_notifications (a 2-hour cadence) is not listed again: its freshness grows a
+  # minute every minute, passes two cadences (14,400 s) after 240 minutes and pages 5 minutes
+  # later. gstn_advisories (3 hours) is listed every 10 minutes and stays fresh. Two replicas of
+  # the app report the same reading of cbic_notifications.
+  - interval: 1m
+    input_series:
+      - series: 'pipeline_source_freshness_seconds{source="cbic_notifications", service_instance_id="a"}'
+        values: "0+60x300"
+      - series: 'pipeline_source_freshness_seconds{source="cbic_notifications", service_instance_id="b"}'
+        values: "0+60x300"
+      - series: 'pipeline_source_cadence_seconds{source="cbic_notifications", service_instance_id="a"}'
+        values: "7200x300"
+      - series: 'pipeline_source_cadence_seconds{source="cbic_notifications", service_instance_id="b"}'
+        values: "7200x300"
+      - series: 'pipeline_source_freshness_seconds{source="gstn_advisories", service_instance_id="a"}'
+        values: "0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9 0+60x9"
+      - series: 'pipeline_source_cadence_seconds{source="gstn_advisories", service_instance_id="a"}'
+        values: "10800x300"
+    alert_rule_test:
+      # Two cadences exactly: not stale yet.
+      - eval_time: 240m
+        alertname: SourceStale
+        exp_alerts: []
+      # Stale since 241m: pending, not firing, for 5 minutes.
+      - eval_time: 244m
+        alertname: SourceStale
+        exp_alerts: []
+      - eval_time: 250m
+        alertname: SourceStale
+        exp_alerts:
+          - exp_labels:
+              source: cbic_notifications
+              severity: page
+              team: regulatory-intelligence
+            exp_annotations:
+              summary: "No crawl has listed cbic_notifications for more than two cadences"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/source-stale.md

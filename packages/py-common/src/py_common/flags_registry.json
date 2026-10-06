@@ -221,6 +221,20 @@
       ]
     },
     {
+      "name": "pipeline.crawl",
+      "type": "bool",
+      "default": false,
+      "owner": "regulatory-intelligence",
+      "description": "The pipeline crawls its sources: the worker's 60-second tick starts a crawl of every enabled, unpaused source whose cadence has passed, an admin may start one by hand (POST /v1/pipeline/sources/{key}/fetch), and the app reports each source's freshness gauges for the SourceStale alert. A crawl reads the live regulator sites, so it stays off on a laptop, in make product and in CI. Off, the tick starts nothing and the fetch route answers 503.",
+      "removal": "Once the 30-day F1 detection run (pipeline-crawl-report) passes in staging, every listed CBIC notification detected within 6 hours, and the crawl is on in production.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_PIPELINE_CRAWL_ENABLED",
+      "services": [
+        "pipeline"
+      ]
+    },
+    {
       "name": "pipeline.knowledge",
       "type": "bool",
       "default": false,

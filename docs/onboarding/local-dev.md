@@ -66,6 +66,10 @@ go, and `docs/runbooks/temporal-worker.md` what to do when a run fails.
 fetches real documents from a regulator site into `var/raw/` (one request per second, honouring
 `robots.txt`); `--list-only` just lists. The keys are in
 `services/pipeline/src/pipeline/infrastructure/adapters/registry.py`.
+`CW_PIPELINE_CRAWL_ENABLED` stays `false` locally: on, `make worker SERVICE=pipeline` crawls the
+live regulator sites every time a source's cadence passes (`services/pipeline/README.md`, "The
+crawl"), and `make product` and CI force it off. The source manager's routes
+(`GET /v1/pipeline/sources` and the rest) work with it off; a fetch then answers 503.
 
 `make eval` runs the eval harness in the `ci` profile (scripted answers and the in-process
 gateway with the fake provider; no tokens, no network) and writes `evals/reports/latest.md`.

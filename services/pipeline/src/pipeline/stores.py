@@ -1,6 +1,8 @@
 """The stores the settings pick: where the pipeline records what it fetched
 (``CW_PIPELINE_STORE``) and where it keeps the files (``CW_PIPELINE_RAW_STORE``). Composition
-code, beside ``worker``: the layers below take the domain's protocols."""
+code, beside ``worker`` and ``main``: the layers below take the domain's protocols."""
+
+from collections.abc import Callable
 
 from pipeline.domain.ports import RawStore
 from pipeline.domain.repository import UnitOfWorkFactory
@@ -16,6 +18,15 @@ def unit_of_work_of(settings: PipelineSettings) -> UnitOfWorkFactory:
     if settings.pipeline_store == "memory":
         return MemoryStore()
     return PostgresUnitOfWorkFactory.from_url(settings.database_url)
+
+
+def ping_of(units: UnitOfWorkFactory) -> Callable[[], bool]:
+    """The store's readiness probe: its ``ping``, or always ready for a store without one."""
+    ping = getattr(units, "ping", None)
+    if callable(ping):
+        probe: Callable[[], bool] = ping
+        return probe
+    return lambda: True
 
 
 def raw_store_of(settings: PipelineSettings) -> RawStore:

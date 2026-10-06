@@ -1,14 +1,15 @@
-"""What the pipeline needs from the services it hands work to and from the store that keeps the
-files it fetches, as protocols. The adapters live in ``infrastructure`` (HTTP, S3, disk) and
-``testing`` (memory)."""
+"""What the pipeline needs from the services it hands work to, from the store that keeps the
+files it fetches, from the adapter registry and from Temporal, as protocols. The adapters live in
+``infrastructure`` (HTTP, S3, disk, Temporal) and ``testing`` (memory)."""
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from domain_kernel.documents import ParsedDocument, RawDocument
+from domain_kernel.documents import DocumentType, ParsedDocument, RawDocument
 from domain_kernel.ids import ClauseId, DocumentId, SourceId
 from domain_kernel.protocols import SourceAdapter
+from pipeline.domain.crawl import CrawlRunId
 from pipeline.domain.embedding import ClauseToEmbed, ClauseVector, EmbeddingBatch, EmbeddingsStored
 from pipeline.domain.knowledge import (
     AlignmentReport,
@@ -19,6 +20,7 @@ from pipeline.domain.knowledge import (
     RuleKey,
     StagingReport,
 )
+from pipeline.domain.schedule import CrawlTrigger
 from pipeline.domain.sources import SourceDefinition
 
 
@@ -122,4 +124,51 @@ class SourceCatalog(Protocol):
 
     def resolve(self, source_id: SourceId) -> ResolvedSource:
         """The source with this id; ``UnknownSourceError`` when there is none."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class SourceKind:
+    """What an adapter type makes of a source's parameters: the parameters as the type reads
+    them (JSON values, defaults filled in), and the regulator, site and document type they give.
+    """
+
+    adapter_type: str
+    parameters: Mapping[str, object]
+    regulator: str
+    site: str
+    doc_type: DocumentType
+
+
+class AdapterTypes(Protocol):
+    """The adapter types the code has (the registry's ``ADAPTER_TYPES``)."""
+
+    def names(self) -> Sequence[str]:
+        """Every adapter type, sorted."""
+        ...
+
+    def describe(self, adapter_type: str, parameters: Mapping[str, object]) -> SourceKind:
+        """The type's reading of the parameters; ``SourceInvalidError`` for a type the code
+        does not have, or parameters the type refuses (anything it does not name, a value of
+        the wrong kind, a CBIC category without a recorded listing)."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlStart:
+    """A crawl to start: the workflow's id, the run it records, the source, and why."""
+
+    workflow_id: str
+    run_id: CrawlRunId
+    source_key: str
+    trigger: CrawlTrigger
+
+
+class CrawlStarter(Protocol):
+    """Starts the crawl workflow (``pipeline.crawl_source``) on Temporal."""
+
+    def start(self, start: CrawlStart) -> bool:
+        """Start the workflow; False when a workflow with its id exists already, running or
+        not (it is never started twice). ``CrawlUnavailableError`` when Temporal does not
+        answer."""
         ...

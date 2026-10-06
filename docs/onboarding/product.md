@@ -13,16 +13,17 @@ changes feed lists the publication with its synthetic approvers, the impact of t
 the CA firm's affected client, and a dry run counts what the fan-out decided while writing
 nothing but its audit row, and that the public listener lists a business's obligations a page
 at a time, answers a question from them with citations, and sends a CA firm's bulk change card
-once per change and person. On a database made for the run (CI), it also proves that a withdrawn
-rule closes its obligations in both tenants and sends withdrawal notices.
+once per change and person, and that the pipeline lists its sources and refuses to crawl while
+crawling is off. On a database made for the run (CI), it also proves that a withdrawn rule closes
+its obligations in both tenants and sends withdrawal notices.
 
 ```bash
 make product                 # make dev, make migrate, make product-role, the seed calendar, then
                              # cw-mvp serve, cw-mvp worker and next dev; waits until all answer
 make product-seed            # synthetic tenants, the demo publication, the first decisions
 make product-check           # health, honesty, loop, isolation, recompute, fanout, reminders,
-                             # tracking, changes, public: exit 0 means accepted (rollback reports
-                             # itself skipped; CI runs it with ARGS="--destructive")
+                             # tracking, changes, public, sources: exit 0 means accepted (rollback
+                             # reports itself skipped; CI runs it with ARGS="--destructive")
 make product-e2e             # the web app's real-data journey on it (Playwright project product)
 make product-logs PROC=worker   # app, worker or web; FOLLOW=0 prints the end and returns
 make product-down            # stops only what make product started
@@ -63,7 +64,25 @@ consumer of the rule events on (`CW_OBLIGATION_RULE_EVENTS_ENABLED`), a CA firm'
 card on (`CW_NOTIFICATION_BULK_ENABLED`), rule publishing on with the placeholder tokens
 `local-write-token` and `local-review-token` (not secrets; values in `.env` win), the profile's
 static GSTIN lookup, the notification sink in place of the real channels with a five-second
-batching window, and message links to the product's web app.
+batching window, message links to the product's web app, and the pipeline's crawl off.
+
+### The crawl stays off
+
+A crawl reads the live regulator sites (`services/pipeline/README.md`, "The crawl"), and the local
+product never does: `make product` passes `CW_PIPELINE_CRAWL_ENABLED=false` whatever `.env` says,
+and the image product (`docker-compose.yml`, `x-mvp-env`) and CI do the same. The worker still adds
+the built-in sources to the pipeline's store when it starts, so the source manager on the internal
+listener lists them, each healthy and never fetched:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/pipeline/sources | jq '.items[] | {key, status, freshness}'
+```
+
+An admin's fetch (`POST /v1/pipeline/sources/{key}/fetch` with the shared write token
+`local-write-token`) answers 503 `pipeline-crawl-disabled` and starts nothing. No source of the
+product is pointed at recorded fixtures, so nothing here crawls them either: the crawl over
+recorded notifications runs in `tools/demo/tests/unit/test_pipeline_crawl_flow.py` and the
+pipeline's crawl workflow tests.
 
 ## The product from its image
 
@@ -415,6 +434,7 @@ the worker does a few seconds after the API answers, and a failed step does not 
 | tracking | makes a new synthetic business in the business tenant with `POST /v1/businesses` (a monthly GSTR-3B filer, named "Tracking probe" with the time it was made) and waits for its gstr3b_monthly obligations from profile.updated; starts the first one due, assigns it to the tenant's synthetic owner, and sends the same complete twice with one Idempotency-Key: one closure, and the second answer is the first with `Idempotent-Replayed: true`. The detail must show the history created, started, assigned, closed, both synthetic reviewers in `approved_by` while the seed status stays needs_review, and verified citations; then a comment is added and listed. Each run spends a business of its own, so the seeded registration's obligations stay open for the reminders step and a later check passes again |
 | changes | on the gstr9_annual version the fanout step published: `GET /v1/changes` (read from its `published_at`) must list its publication with both synthetic reviewers in `approved_by`, the seed status needs_review and verified citations; `GET /v1/changes/{id}/impact?result=applies` as the CA firm must list exactly the firm's registrations the answers call for, each under its client, with the fan-out completed; and a dry run of the version scoped to the CA firm must count what the firm's latest decisions of it count for the registrations the directory lists, every one decided and none skipped, write one `applicability.dry_run` row of no tenant (found by the request's correlation id) and not one decision, review item or outbox row of the firm. After the rollback step (CI) the publication stays in the feed and the dry run reads the withdrawn version |
 | public | through the public listener: as the business tenant, `GET /v1/businesses/{id}/obligations` lists the seeded registration's obligations by due date, pages of one follow one another, each carries its rule's title, `status=open&status=in_progress` keeps those, a window of 367 days is a 422, and the CA firm reading it gets a 404. `POST /v1/qa` asks "When is my GSTR-3B due?" and must be answered by the structured layer with the first open monthly return due from today and verified citations; the CA firm asking gets a 404. As the CA firm, it registers a synthetic client contact (an owner on a `public-check-…@demo-ca-associates.invalid` mailbox, opted in, following the clients the change affects) and sends `POST /v1/notification/bulk` of gstr9_annual (of gstr3b_quarterly_group_a once the rollback step withdrew it) to the clients its impact lists: one card per client to the contact and none to the firm's admin; the same Idempotency-Key answers the same with `Idempotent-Replayed: true`, and a new key finds every card queued already. Each request that ran wrote one `notification.bulk` row of the firm (found by its correlation id), the contact's card goes through the sink, and the contact is removed (with any an interrupted check left). `POST /v1/notification/send` answers 404 on the public listener |
+| sources | the pipeline's source manager on the internal listener lists the five built-in sources with a name, regulator, cadence, status and freshness each; a fetch of a key no source has is refused as crawling off (with crawling on it would be a 404, and the step stops there without fetching a real source), then a fetch of `cbic_notifications` is refused the same way, 503 `pipeline-crawl-disabled`, and records no crawl run; the public listener answers the list 404 in header mode. No source of the product reads recorded fixtures, so no crawl runs here: `test_pipeline_crawl_flow.py` runs one |
 
 The fanout, changes and public steps read the business directory, the audit rows (of no tenant,
 and the CA firm's bulk notifications) and the engine's row counts of a tenant, which no route

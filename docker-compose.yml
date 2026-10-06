@@ -51,6 +51,9 @@ x-mvp-env: &mvp-env
   CW_NOTIFICATION_SINK_PATH: var/product/sink.jsonl
   CW_NOTIFICATION_BATCH_WINDOW_SECONDS: "5"
   CW_PIPELINE_RAW_DIR: var/product/raw
+  # A crawl reads the live regulator sites: the product from the image, like make product and CI,
+  # never crawls.
+  CW_PIPELINE_CRAWL_ENABLED: "false"
   CW_WEB_BASE_URL: http://localhost:${WEB_PORT:-3000}
 
 services:

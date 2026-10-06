@@ -157,9 +157,12 @@ def sink(tmp_path: Path) -> Path:
     return path
 
 
-def scripted_product(script: Scripted, sink: Path) -> Product:
+def scripted_product(script: Scripted, sink: Path, **settings_values: Any) -> Product:
     settings = ProductSettings(
-        _env_file=None, service_name="cw-product", notification_sink_path=str(sink)
+        _env_file=None,
+        service_name="cw-product",
+        notification_sink_path=str(sink),
+        **settings_values,
     )
 
     def client(name: str) -> httpx2.Client:
@@ -307,6 +310,7 @@ def test_steps_are_chosen_by_name_in_the_check_order() -> None:
         "tracking",
         "changes",
         "public",
+        "sources",
     ]
     assert [step.name for step in select(["isolation", "health"])] == ["health", "isolation"]
     assert select(None) == check.STEPS
@@ -640,3 +644,93 @@ def test_the_reminders_step_fails_when_nothing_is_reminded(sink: Path) -> None:
 
     with pytest.raises(StepFailedError, match="exited 2"):
         check.reminders(CheckContext(product, timeout=2.0, interval=0.01, sweep=refused))
+
+
+class Sources(Scripted):
+    """The pipeline's source manager: the built-in sources, and a fetch answered with
+    ``fetch_status`` (503 crawl-disabled while crawling is off)."""
+
+    def __init__(self, *, fetch_status: int = 503, probe_status: int = 503) -> None:
+        super().__init__()
+        self.fetch_status = fetch_status
+        self.probe_status = probe_status
+        self.fetched: list[str] = []
+        self.runs: dict[str, str | None] = dict.fromkeys(check.BUILT_IN_SOURCES)
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        path = request.url.path
+        if request.url.host == "public" and path.startswith("/v1/pipeline"):
+            return httpx2.Response(
+                404, json={"type": "urn:compliancewatch:problem:route-not-found"}
+            )
+        if path == check.SOURCES:
+            return httpx2.Response(200, json={"items": [self.item(key) for key in self.runs]})
+        if path.endswith("/fetch"):
+            key = path.split("/")[-2]
+            self.fetched.append(key)
+            status = self.probe_status if key == check.NO_SOURCE else self.fetch_status
+            if status == 202:
+                self.runs[key] = str(uuid4())
+                return httpx2.Response(202, json={"run_id": self.runs[key]})
+            slug = "pipeline-source-not-found" if status == 404 else check.CRAWL_DISABLED
+            return httpx2.Response(status, json={"type": f"urn:compliancewatch:problem:{slug}"})
+        return super().__call__(request)
+
+    def item(self, key: str) -> dict[str, Any]:
+        run = self.runs[key]
+        return {
+            "key": key,
+            "name": key.replace("_", " "),
+            "regulator": "CBIC",
+            "cadence_seconds": 7200,
+            "status": "healthy",
+            "freshness": {"state": "never"},
+            "latest_run": None if run is None else {"run_id": run},
+        }
+
+
+def with_token(script: Sources, sink: Path) -> Product:
+    return scripted_product(script, sink, rulebook_write_token="test-write-token")
+
+
+def test_the_sources_step_lists_the_sources_and_proves_the_fetch_refused(sink: Path) -> None:
+    script = Sources()
+    lines = check.sources(context_of(with_token(script, sink)))
+    assert lines[0].startswith("sources: the 5 built-in ones listed (cbic_circulars healthy, ")
+    assert lines[1] == (
+        "fetch refused while crawling is off: 503 pipeline-crawl-disabled, no crawl run recorded"
+    )
+    assert lines[2] == "GET /v1/pipeline/sources on the public listener: 404 route-not-found"
+    assert script.fetched == [check.NO_SOURCE, check.FETCHED_SOURCE]
+
+
+def test_the_sources_step_counts_other_sources_without_judging_them(sink: Path) -> None:
+    class WithOthers(Sources):
+        def item(self, key: str) -> dict[str, Any]:
+            found = super().item(key)
+            return {**found, "regulator": None} if key == "sample" else found
+
+    script = WithOthers()
+    script.runs["sample"] = None
+    lines = check.sources(context_of(with_token(script, sink)))
+    assert lines[0].endswith(", and 1 more")
+
+
+def test_the_sources_step_stops_before_a_real_source_when_crawling_is_on(sink: Path) -> None:
+    script = Sources(probe_status=404, fetch_status=202)
+    with pytest.raises(StepFailedError, match="crawling is on in this product"):
+        check.sources(context_of(with_token(script, sink)))
+    assert script.fetched == [check.NO_SOURCE], "no real source was fetched"
+
+
+def test_the_sources_step_fails_when_a_crawl_starts(sink: Path) -> None:
+    script = Sources(fetch_status=202)
+    with pytest.raises(StepFailedError, match="a crawl of cbic_notifications started"):
+        check.sources(context_of(with_token(script, sink)))
+
+
+def test_the_sources_step_waits_for_the_built_in_sources(sink: Path) -> None:
+    script = Sources()
+    del script.runs["gstn_advisories"]
+    with pytest.raises(StepFailedError, match="lacks gstn_advisories"):
+        check.sources(context_of(with_token(script, sink), timeout=0.05))

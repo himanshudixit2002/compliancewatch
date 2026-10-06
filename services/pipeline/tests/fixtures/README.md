@@ -21,11 +21,15 @@ Other sources are re-recorded by hand (the URLs are in each adapter module).
 
 ## Workflow histories
 
-`histories/` holds two runs of `pipeline.ingest_document` recorded on 2026-10-06 on a local
-Temporal dev server, with the code before `FetchAndStore`, on the sample notification of
-`pipeline.infrastructure.fakes`: `ingest-before-store.json` with knowledge off, and
-`ingest-before-store-knowledge.json` with registration, embedding and the extraction child. Both
-fetched with `pipeline.fetch_document`, whose result carries the bytes. The worker's identity in
-them reads `1@pipeline-history`. `tests/unit/test_workflow_replay.py` replays them on today's
-workflow; record a new pair (`WorkflowHandle.fetch_history()`, `WorkflowHistory.to_json()`)
-before the next change that a patch guards.
+`histories/` holds two pairs of runs of `pipeline.ingest_document`, recorded on 2026-10-06 on a
+local Temporal dev server on the sample notification of `pipeline.infrastructure.fakes`, each pair
+one run with knowledge off and one with registration, embedding and the extraction child:
+
+- `ingest-before-store.json` and `ingest-before-store-knowledge.json`, with the code before
+  `FetchAndStore`: both fetched with `pipeline.fetch_document`, whose result carries the bytes;
+- `ingest-with-store.json` and `ingest-with-store-knowledge.json`, with `FetchAndStore` and before
+  a crawl could hand an ingest its document (`GIVEN_PATCH`): both discovered it first.
+
+The worker's identity in them reads `1@pipeline-history`. `tests/unit/test_workflow_replay.py`
+replays them on today's workflow; record a new pair (`WorkflowHandle.fetch_history()`,
+`WorkflowHistory.to_json()`) before the next change that a patch guards.

@@ -1,9 +1,9 @@
 """Builders for tests and demos that run the whole app in one process without Postgres.
 
 ``mvp_settings(**overrides)`` ignores the repo ``.env``; ``MEMORY_SERVICES`` are the
-``service_overrides`` that put every service with a store on its memory store, identity on its
-memory billing and the gateway on its fake provider, so ``build_app(mvp_settings(),
-service_overrides=MEMORY_SERVICES)`` needs nothing running.
+``service_overrides`` that put every service with a store on its memory store (the pipeline's
+fetched files too), identity on its memory billing and the gateway on its fake provider, so
+``build_app(mvp_settings(), service_overrides=MEMORY_SERVICES)`` needs nothing running.
 
 ``running_app(**overrides)`` serves that app with uvicorn on a thread, both listeners on free
 ports of ``127.0.0.1`` and ``CW_MVP_INTERNAL_URL`` at the internal one, so the calls the services
@@ -29,7 +29,7 @@ MEMORY_SERVICES: Final[Mapping[str, Mapping[str, Any]]] = {
     "notification": {"notification_store": "memory"},
     "llm-gateway": {"llm_ledger": "memory", "llm_provider": "fake"},
     "eval": {"eval_store": "memory"},
-    "pipeline": {"pipeline_store": "memory"},
+    "pipeline": {"pipeline_store": "memory", "pipeline_raw_store": "memory"},
 }
 LOCALHOST: Final = "127.0.0.1"
 STARTUP_SECONDS: Final = 20.0

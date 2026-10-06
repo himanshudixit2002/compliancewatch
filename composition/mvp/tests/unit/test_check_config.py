@@ -330,6 +330,31 @@ def test_the_worker_fetches_documents_only_into_s3(
     assert s3.ok, lines(s3)
 
 
+@pytest.mark.parametrize("base", [STAGING, PRODUCTION], ids=["staging", "prod"])
+def test_the_crawl_flag_fetches_documents_too(
+    monkeypatch: pytest.MonkeyPatch, base: dict[str, str]
+) -> None:
+    crawling = report(monkeypatch, base, pipeline_raw_store="local", pipeline_crawl_enabled="true")
+    assert only(crawling).where == "pipeline"
+    assert only(crawling).message.endswith(
+        "needs s3 while CW_PIPELINE_CRAWL_ENABLED has the worker fetch documents"
+    )
+    both = report(
+        monkeypatch,
+        base,
+        pipeline_raw_store="local",
+        pipeline_crawl_enabled="true",
+        worker_temporal_enabled="true",
+        service_client_secret="worker-secret-x",
+    )
+    assert only(both).message.endswith(
+        "while CW_WORKER_TEMPORAL_ENABLED and CW_PIPELINE_CRAWL_ENABLED have the worker fetch "
+        "documents"
+    )
+    on_s3 = report(monkeypatch, base, pipeline_raw_store="s3", pipeline_crawl_enabled="true")
+    assert on_s3.ok, lines(on_s3)
+
+
 def test_local_and_test_may_fetch_into_a_local_raw_store(monkeypatch: pytest.MonkeyPatch) -> None:
     local = {"CW_LLM_PROVIDER": "fake", "CW_WORKER_TEMPORAL_ENABLED": "true"}
     found = report(monkeypatch, local, env="local", pipeline_raw_store="local")

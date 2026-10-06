@@ -36,6 +36,14 @@ class PipelineSettings(Settings):
       ``pipeline_raw_kms_key_id`` (the bucket's AWS-managed key when it is empty); ``none`` is
       for a local MinIO without a key service and is refused in staging and production.
 
+    ``pipeline_crawl_enabled`` turns the crawl on (``CW_PIPELINE_CRAWL_ENABLED``, default off;
+    owner regulatory-intelligence; remove the flag once the 30-day F1 detection run passes in
+    staging and the crawl is on in production). On, the worker's tick starts a crawl of every
+    enabled, unpaused source whose cadence has passed, an admin may start one by hand
+    (``POST /v1/pipeline/sources/{key}/fetch``), and the app reports each source's freshness
+    gauges. A crawl reads the live regulator sites: leave it off on a laptop, in ``make product``
+    and in CI. Off, the tick starts nothing and the fetch route answers 503.
+
     ``pipeline_knowledge_enabled`` turns on handing parsed documents to the rulebook and
     embedding their clauses (``CW_PIPELINE_KNOWLEDGE_ENABLED``, default off; owner
     regulatory-intelligence; remove the flag once ADR-017 is accepted). Off, the worker makes no
@@ -64,6 +72,7 @@ class PipelineSettings(Settings):
     pipeline_raw_encryption: Encryption = "AES256"
     pipeline_raw_kms_key_id: str | None = None
     pipeline_knowledge_enabled: bool = False
+    pipeline_crawl_enabled: bool = False
     rulebook_url: str = "http://localhost:8003"
     rulebook_write_token: SecretStr | None = None
     llm_gateway_url: str = "http://localhost:8008"

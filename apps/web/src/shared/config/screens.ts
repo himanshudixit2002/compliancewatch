@@ -143,6 +143,14 @@ const RAW_DOCUMENT = servicesTrack(
   "/v1/pipeline/documents/{document_id}/raw",
 );
 const UPLOADS = servicesTrack("WP19", "pipeline", "POST", "/v1/pipeline/sources/{key}/uploads");
+/** The source manager's routes (M2-2), which the sources screens call once built. */
+const SOURCE_LIST = uses("pipeline", "GET", "/v1/pipeline/sources");
+const SOURCE_ADD = uses("pipeline", "POST", "/v1/pipeline/sources");
+const SOURCE_EDIT = uses("pipeline", "PATCH", "/v1/pipeline/sources/{key}");
+const SOURCE_FETCH = uses("pipeline", "POST", "/v1/pipeline/sources/{key}/fetch");
+const SOURCE_DOCUMENTS = uses("pipeline", "GET", "/v1/pipeline/sources/{key}/documents");
+const STORED_DOCUMENT = uses("pipeline", "GET", "/v1/pipeline/documents/{document_id}");
+const STORED_BYTES = uses("pipeline", "GET", "/v1/pipeline/documents/{document_id}/raw");
 const SESSION_EXCHANGE = servicesTrack("WP14", "identity", "POST", "/v1/identity/sessions");
 const DEV_PROVIDER_TOKENS = servicesTrack(
   "WP14",
@@ -398,9 +406,9 @@ const SCREEN_LIST = [
     title: "Raw document stream",
     section: "system",
     roles: REGULATORY,
-    uses: [],
+    uses: [STORED_BYTES],
     awaits: [RAW_DOCUMENT],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15",
   },
@@ -1478,6 +1486,7 @@ const SCREEN_LIST = [
       uses("rulebook", "GET", "/v1/rulebook/documents/{document_id}"),
       RULE_VERSION,
       uses("profile", "GET", "/v1/ontology"),
+      STORED_BYTES,
     ],
     awaits: [
       servicesTrack("WP21", "rulebook", "GET", "/v1/rulebook/review/tasks/{task_id}"),
@@ -1594,7 +1603,7 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [SOURCE_LIST, SOURCE_ADD, SOURCE_EDIT, SOURCE_FETCH, SOURCE_DOCUMENTS],
     awaits: [
       servicesTrack("WP18", "pipeline", "GET", "/v1/pipeline/sources"),
       servicesTrack("WP18", "pipeline", "POST", "/v1/pipeline/sources"),
@@ -1602,7 +1611,7 @@ const SCREEN_LIST = [
       servicesTrack("WP18", "pipeline", "POST", "/v1/pipeline/sources/{key}/fetch"),
       servicesTrack("WP18", "pipeline", "GET", "/v1/pipeline/sources/{key}/documents"),
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15; 7",
     nav: { group: "operations", order: 1 },
@@ -1616,13 +1625,13 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [SOURCE_DOCUMENTS, STORED_DOCUMENT, STORED_BYTES],
     awaits: [
       servicesTrack("WP18", "pipeline", "GET", "/v1/pipeline/sources/{key}/documents"),
       servicesTrack("WP18", "pipeline", "GET", "/v1/pipeline/documents/{document_id}"),
       RAW_DOCUMENT,
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15",
     parent: "admin.sources",

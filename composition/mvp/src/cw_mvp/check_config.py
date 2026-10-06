@@ -30,8 +30,9 @@ there:
   password (with a username) and feedback token, Razorpay's keys, the rulebook's review token
   for publishing and its write token for the pipeline outside token mode, and the worker's
   service client secret in token mode;
-- a raw store other than S3 while the pipeline fetches documents (``fetch_switches``): the files
-  of a local or memory raw store go with the machine or the process.
+- a raw store other than S3 while the pipeline fetches documents (``fetch_switches``: the
+  worker's Temporal switch, the crawl flag): the files of a local or memory raw store go with
+  the machine or the process.
 
 It never prints a secret's value.
 """
@@ -244,8 +245,14 @@ def _gateway(settings: GatewaySettings) -> Iterator[str]:
 
 def fetch_switches(root: MvpSettings, settings: PipelineSettings) -> tuple[str, ...]:
     """The switches that are on and have the pipeline fetch regulator documents and keep their
-    files: the worker's Temporal switch runs the pipeline's fetch activities."""
-    return ("CW_WORKER_TEMPORAL_ENABLED",) if root.worker_temporal_enabled else ()
+    files: the worker's Temporal switch runs the pipeline's fetch activities, and the crawl flag
+    has the worker's tick and an admin's fetch start crawls of the regulator sites."""
+    switches: list[str] = []
+    if root.worker_temporal_enabled:
+        switches.append("CW_WORKER_TEMPORAL_ENABLED")
+    if settings.pipeline_crawl_enabled:
+        switches.append("CW_PIPELINE_CRAWL_ENABLED")
+    return tuple(switches)
 
 
 def _pipeline(settings: PipelineSettings, root: MvpSettings) -> Iterator[str]:
@@ -263,7 +270,8 @@ def _pipeline(settings: PipelineSettings, root: MvpSettings) -> Iterator[str]:
         yield (
             f"CW_PIPELINE_RAW_STORE={store} keeps the regulator files {kept}, which a restart "
             f"or a new machine loses; CW_ENV={settings.env} needs s3 while "
-            f"{' and '.join(switches)} has the worker fetch documents"
+            f"{' and '.join(switches)} {'has' if len(switches) == 1 else 'have'} the worker "
+            "fetch documents"
         )
 
 
