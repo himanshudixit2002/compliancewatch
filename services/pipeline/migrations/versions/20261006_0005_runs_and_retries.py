@@ -4,8 +4,21 @@ Revision ID: 0005
 Revises: 0004
 Create Date: 2026-10-06
 
-Hand-written; mirrors pipeline.infrastructure.models. Expand only, so the image before it keeps
-working on it: that image never writes the new columns or the new table, and reads none of them.
+Hand-written; mirrors pipeline.infrastructure.models. Expand only: the image before it never
+writes the new columns or the new table and reads none of them, so it starts on this schema. It
+does not keep working beside the image that came with it, or after it, without care
+(infra/deploy/README.md, "Promotion and rollback"):
+
+- the new image's workflow and activity inputs carry fields the old models refuse (they forbid
+  extra fields): a crawl's ``backfill`` trigger and window, the listing's window, the finish's
+  ``trigger`` and ``deferred``, the ingest's ``reclassify``, the classify step's ``fresh``. An old
+  worker fails each task of a workflow the new image started, so old and new pipeline workers
+  must never poll the ``pipeline`` task queue at the same time: stop the old workers before the
+  new ones start, and on a rollback let every workflow the new image started end (or terminate
+  it) before an old worker starts;
+- a type a person gave on a retry is a ``document_classification`` row by ``retry`` with the
+  person in ``decided_by``, which the old ``Classification`` refuses ("only a triage is decided
+  by a person"): the old image fails on each such document. Roll forward once one is stored.
 
 - ``crawl_run.trigger`` (``schedule``, ``manual`` or ``backfill``) and ``crawl_run.workflow_id``
   say why a run ran and which workflow ran it; both are null on the runs recorded before.
