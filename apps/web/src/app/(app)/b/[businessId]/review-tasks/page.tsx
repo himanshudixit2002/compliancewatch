@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { ReviewTasksView, businessHeaderLinks, getReviewTasksPage } from "@/features/business";
+import {
+  ReviewTasksView,
+  businessFlags,
+  businessHeaderLinks,
+  getReviewTasksPage,
+} from "@/features/business";
 import { requireScreenSession } from "@/server/dal";
 import { screenById } from "@/shared/config/screens";
 import { isUuid } from "@/shared/lib/identifiers";
@@ -34,6 +39,7 @@ export default async function BusinessReviewTasksPage({ params }: Props) {
         session,
         businessId,
         page.value.header.name,
+        await businessFlags(session),
       )}
     />
   );

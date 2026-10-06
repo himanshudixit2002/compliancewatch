@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { businessHeaderLinks } from "@/features/business";
+import { businessFlags, businessHeaderLinks } from "@/features/business";
 import { ReminderView, getReminder } from "@/features/notifications";
 import { requireScreenSession } from "@/server/dal";
 import { hrefFor, screenById } from "@/shared/config/screens";
@@ -31,6 +31,7 @@ export default async function ReminderPage({ params }: Props) {
     session,
     businessId,
     page.value.business.name,
+    await businessFlags(session),
   );
   const crumbs = [
     ...list.crumbs,

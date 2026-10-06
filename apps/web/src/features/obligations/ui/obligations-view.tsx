@@ -1,85 +1,102 @@
-import type { Route } from "next";
-import { EmptyState, PageHeader } from "@compliancewatch/ui";
+import { EmptyState, PageHeader, type SelectOption } from "@compliancewatch/ui";
+import type { Crumb, NavLink } from "@/shared/config/nav";
 import { t } from "@/shared/i18n";
-import { StatCard } from "@/shared/ui/stat-card";
-import {
-  dueDateText,
-  duePhrase,
-  evidenceTypeText,
-  isObligationOverdue,
-  obligationCounts,
-  obligationStatusLabel,
-  obligationStatusOptions,
-  obligationStatusTone,
-  periodText,
-  type Obligation,
-} from "../model/obligations";
-import type { ObligationRow } from "./obligation-rows";
+import { Breadcrumbs } from "@/shared/ui/breadcrumbs";
+import { NotLegalAdvice } from "@/shared/ui/not-legal-advice";
+import { SectionNav } from "@/shared/ui/section-nav";
+import { MAX_WINDOW_DAYS, windowText } from "../model/list";
+import { ALL_STATUSES } from "../model/obligations";
+import type { ObligationListView } from "../queries";
+import { ListPager } from "./list-pager";
+import { ObligationFilters } from "./obligation-filters";
 import { ObligationsTable } from "./obligations-table";
 
 export interface ObligationsViewProps {
-  /** The business's obligations, earliest due date first as the service lists them. */
-  obligations: readonly Obligation[];
-  /** The page of one obligation. */
-  hrefFor: (obligationId: string) => Route;
-  /** Now, for the due dates; tests pass a fixed instant. */
-  now?: Date;
-}
-
-function obligationRow(
-  item: Obligation,
-  hrefFor: (obligationId: string) => Route,
-  now: Date,
-): ObligationRow {
-  return {
-    id: item.id,
-    title: item.title,
-    href: hrefFor(item.id),
-    period: periodText(item),
-    status: item.status,
-    statusLabel: obligationStatusLabel(item.status),
-    statusTone: obligationStatusTone(item.status),
-    due: dueDateText(item),
-    dueNote: duePhrase(item, now),
-    overdue: isObligationOverdue(item, now),
-    evidence: evidenceTypeText(item.evidenceType),
-  };
+  title: string;
+  view: ObligationListView;
+  header: { crumbs: readonly Crumb[]; tabs: readonly NavLink[] };
+  /** The list itself, without a query. */
+  pageHref: string;
+  statusOptions: readonly SelectOption[];
+  /** Whether the business has more than one node, so a row names the one it is kept for. */
+  severalNodes: boolean;
 }
 
 /**
- * A business's obligations: how many are open, in progress, overdue and done, then the list
- * with each one's status, due date and the evidence it needs, or an empty state.
+ * A business's obligations by due date, a page at a time, with the status and the due window to
+ * filter by. An empty list says why: nothing worked out yet, or nothing matching the filter. A
+ * window the service would refuse is shown on its field and nothing is listed for it.
  */
-export function ObligationsView({ obligations, hrefFor, now = new Date() }: ObligationsViewProps) {
-  const counts = obligationCounts(obligations, now);
+export function ObligationsView({
+  title,
+  view,
+  header,
+  pageHref,
+  statusOptions,
+  severalNodes,
+}: ObligationsViewProps) {
+  const { read, rows } = view;
+  const filtered =
+    read.filter.status !== ALL_STATUSES || read.filter.from !== null || read.filter.to !== null;
+  const window = windowText(read.filter);
   return (
-    <div data-slot="obligations" className="flex flex-col gap-6">
-      <PageHeader title={t("obligations.title")} description={t("obligations.description")} />
-      {obligations.length === 0 ? (
-        <EmptyState title={t("obligations.empty.title")} body={t("obligations.empty.body")} />
+    <div data-slot="obligations" className="flex max-w-5xl flex-col gap-6">
+      <div className="flex flex-col gap-4">
+        <PageHeader
+          title={title}
+          description={t("business.pageIntro", {
+            name: view.business.name,
+            pan: view.business.pan,
+          })}
+          breadcrumbs={<Breadcrumbs crumbs={header.crumbs} />}
+        />
+        <SectionNav items={header.tabs} label={t("business.tabs")} />
+      </div>
+      <p className="max-w-prose text-sm text-fg-muted">{t("obligations.intro")}</p>
+      <ObligationFilters
+        action={pageHref}
+        status={read.filter.status}
+        options={statusOptions}
+        from={read.typed.from}
+        to={read.typed.to}
+        errors={read.errors}
+        maxDays={MAX_WINDOW_DAYS}
+      />
+      {!view.asked ? (
+        <EmptyState
+          title={t("obligations.window.refusedTitle")}
+          body={t("obligations.window.refusedBody", { max: MAX_WINDOW_DAYS })}
+        />
+      ) : rows.length === 0 ? (
+        filtered ? (
+          <EmptyState
+            title={t("obligations.noMatch.title")}
+            body={
+              window === null
+                ? t("obligations.noMatch.body")
+                : t("obligations.noMatch.window", { window })
+            }
+          />
+        ) : read.filter.after !== null ? (
+          <EmptyState
+            title={t("obligations.pager.endTitle")}
+            body={t("obligations.pager.endBody")}
+          />
+        ) : (
+          <EmptyState title={t("obligations.empty.title")} body={t("obligations.empty.body")} />
+        )
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
-            <StatCard label={t("obligations.stat.total")} value={counts.total} />
-            <StatCard label={t("obligations.stat.open")} value={counts.open} tone="info" />
-            <StatCard
-              label={t("obligations.stat.inProgress")}
-              value={counts.inProgress}
-              tone="warning"
-            />
-            <StatCard
-              label={t("obligations.stat.overdue")}
-              value={counts.overdue}
-              tone={counts.overdue > 0 ? "danger" : "neutral"}
-            />
-            <StatCard label={t("obligations.stat.done")} value={counts.done} tone="success" />
-          </div>
-          <ObligationsTable
-            rows={obligations.map((item) => obligationRow(item, hrefFor, now))}
-            statusOptions={obligationStatusOptions()}
-          />
+          {window === null ? null : <p className="text-sm text-fg-muted">{window}</p>}
+          <ObligationsTable rows={rows} showNode={severalNodes} />
         </>
       )}
+      <ListPager
+        nextHref={view.nextHref}
+        firstHref={view.firstHref}
+        label={t("obligations.pager.label")}
+      />
+      <NotLegalAdvice />
     </div>
   );
 }

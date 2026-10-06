@@ -1,198 +1,134 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import type { Route } from "next";
+import { render, screen, within } from "@testing-library/react";
 import { runAxe } from "@compliancewatch/ui/test/axe";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { OBLIGATION_STATUS_FIELDS, type Obligation } from "../model/obligations";
+import { describe, expect, it, vi } from "vitest";
+import { decisionFromDto } from "@/entities/applicability/mappers";
+import { obligationDetailFromDto } from "@/entities/obligation/mappers";
+import {
+  APPROVER_IDS,
+  DECISION_ID,
+  NOW,
+  USER_ID,
+  changeDto,
+  commentDto,
+  decisionDto,
+  obligationDetailDto,
+} from "@/test/obligation-fixture";
+import { obligationPageView, whyView, type WhyView } from "../model/detail";
 import { ObligationDetailView } from "./obligation-detail-view";
+import type { TrackingAction } from "./tracking-form";
 
-/** Noon on 15 Oct 2000 in India. */
-const NOW = new Date("2000-10-15T06:30:00Z");
+const action: TrackingAction = vi.fn(async () => ({ status: "idle" as const }));
+const HEADER = {
+  crumbs: [{ id: "owner.obligation", href: "/b/x/obligations/y", label: "Example return 1" }],
+  tabs: [],
+};
 
-const EVIDENCE_HREF = "/b/biz_1/obligations/obl_1/evidence" as Route;
-
-function obligation(overrides: Partial<Obligation> = {}): Obligation {
-  return {
-    id: "obl_1",
-    businessId: "biz_1",
-    title: "File example return 1 for the month",
-    status: "open",
-    dueAt: "2000-10-12T18:29:59Z",
-    evidenceType: "filing_acknowledgement",
-    steps: [
-      "Reconcile the month's supplies",
-      "Pay the tax due",
-      "File example return 1 on the example portal",
-    ],
-    ruleVersionId: "rv_1",
-    decisionId: "dec_1",
-    periodLabel: "2000-08",
-    periodStart: "2000-08-01",
-    periodEnd: "2000-09-01",
-    closedAt: null,
-    closedReason: null,
-    profileVersion: null,
-    assigneeId: null,
-    ...overrides,
-  };
-}
-
-function figures(container: HTMLElement): Record<string, { value: string; tone: string }> {
-  const cards = [...container.querySelectorAll<HTMLElement>("[data-slot='stat-card']")];
-  return Object.fromEntries(
-    cards.map((card) => [
-      card.querySelector("dt")?.textContent ?? "",
-      {
-        value: card.querySelector("dd")?.textContent ?? "",
-        tone: card.getAttribute("data-tone") ?? "",
-      },
-    ]),
+function renderView(
+  dto = obligationDetailDto(),
+  why: WhyView = whyView(decisionFromDto(decisionDto()), DECISION_ID),
+) {
+  const view = obligationPageView(obligationDetailFromDto(dto), {
+    node: "29ABCDE1234F1Z5 (Example registration)",
+    clauses: new Map(),
+    why,
+    viewerId: USER_ID,
+    now: NOW,
+  });
+  return render(
+    <ObligationDetailView
+      view={view}
+      header={HEADER}
+      listHref="/b/x/obligations"
+      viewerId={USER_ID}
+      actions={{ status: action, assign: action, comment: action }}
+      keys={{
+        status: "00000000-0000-4000-8000-00000000c0c1",
+        assign: "00000000-0000-4000-8000-00000000c0c2",
+        comment: "00000000-0000-4000-8000-00000000c0c3",
+      }}
+      assignee={{ mode: { kind: "id", note: "Example note on giving it by id." }, text: "Nobody" }}
+    />,
   );
 }
 
-function fact(label: string): string | null | undefined {
-  const facts = screen.getByRole("heading", { name: "Details" }).parentElement as HTMLElement;
-  const term = [...facts.querySelectorAll("dt")].find((dt) => dt.textContent === label);
-  return term?.nextElementSibling?.textContent;
-}
-
-afterEach(() => {
-  vi.useRealTimers();
-});
-
 describe("ObligationDetailView", () => {
-  it("shows an overdue open obligation with its steps, details, evidence link and status buttons", async () => {
-    const statusAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined);
-    const { container } = render(
-      <ObligationDetailView
-        obligation={obligation()}
-        evidenceHref={EVIDENCE_HREF}
-        statusAction={statusAction}
-        now={NOW}
-      />,
+  it("shows what to do, the rule's review, its citations, why it applies and its tracking", async () => {
+    const { container } = renderView(
+      obligationDetailDto({
+        history: [
+          changeDto(),
+          changeDto({
+            change_id: "c2",
+            kind: "started",
+            status_after: "in_progress",
+            actor: USER_ID,
+          }),
+        ],
+        comments: [commentDto()],
+      }),
     );
-    expect(
-      screen.getByRole("heading", { level: 1, name: "File example return 1 for the month" }),
-    ).toBeDefined();
-    expect(screen.getByText("Period 2000-08: 1 Aug 2000 to 31 Aug 2000")).toBeDefined();
-    expect(screen.getByRole("link", { name: "Evidence" }).getAttribute("href")).toBe(EVIDENCE_HREF);
-    expect(figures(container)).toEqual({
-      Status: { value: "Open", tone: "info" },
-      Due: { value: "12 Oct 2000", tone: "danger" },
-      "Evidence needed": { value: "Filing acknowledgement", tone: "neutral" },
-    });
-    expect(screen.getByText("Overdue by 3 days")).toBeDefined();
-
-    const update = screen.getByRole("heading", { level: 2, name: "Update the status" })
-      .parentElement as HTMLElement;
-    expect(
-      within(update)
-        .getAllByRole("button")
-        .map((button) => button.textContent),
-    ).toEqual(["Start work", "Mark as done"]);
-    const done = container.querySelector("form[data-change='done']") as HTMLFormElement;
-    expect(
-      done.querySelector<HTMLInputElement>(`input[name='${OBLIGATION_STATUS_FIELDS.status}']`)
-        ?.value,
-    ).toBe("done");
-
-    const steps = screen.getByRole("heading", { level: 2, name: "What to do" })
-      .parentElement as HTMLElement;
-    expect(
-      within(steps)
-        .getAllByRole("listitem")
-        .map((item) => item.textContent),
-    ).toEqual([
-      "Reconcile the month's supplies",
-      "Pay the tax due",
-      "File example return 1 on the example portal",
-    ]);
-    expect(fact("Rule version")).toContain("rv_1");
-    expect(fact("Applicability decision")).toContain("dec_1");
-    expect(screen.getByRole("button", { name: "Copy Rule version" })).toBeDefined();
-    expect(fact("Closed")).toBeUndefined();
-    expect(await runAxe(container)).toHaveNoViolations();
-
-    await userEvent.setup().click(screen.getByRole("button", { name: "Start work" }));
-    await waitFor(() => expect(statusAction).toHaveBeenCalledTimes(1));
-    expect(statusAction.mock.calls[0]?.[0].get(OBLIGATION_STATUS_FIELDS.status)).toBe(
-      "in_progress",
+    expect(screen.getByRole("heading", { level: 1, name: "Example return 1" })).toBeDefined();
+    const facts = screen.getByLabelText("The obligation");
+    expect(facts.textContent).toContain("20 Jan 2000");
+    expect(facts.textContent).toContain("Due in 10 days");
+    expect(facts.textContent).toContain("29ABCDE1234F1Z5 (Example registration)");
+    expect(screen.getByText("Example step one")).toBeDefined();
+    // The seed rule is not reviewed, whatever approved its publication: both are said.
+    const rule = container.querySelector("[data-slot='obligation-rule']") as HTMLElement;
+    expect(within(rule).getByText("Not yet reviewed")).toBeDefined();
+    expect(rule.textContent).toContain(
+      "Published on 2 Jan 2000, approved for publication by 2 people:",
     );
-  });
-
-  it("only offers to mark an obligation in progress done", () => {
-    render(
-      <ObligationDetailView
-        obligation={obligation({ status: "in_progress", dueAt: "2000-10-20T18:29:59Z" })}
-        statusAction={vi.fn(async () => undefined)}
-        now={NOW}
-      />,
-    );
+    for (const approver of APPROVER_IDS) {
+      expect(rule.querySelector(`[data-approver='${approver}']`)?.textContent).toBe(approver);
+    }
+    expect(screen.getByText("Example quoted clause text.")).toBeDefined();
+    const why = container.querySelector("[data-slot='why-applies']") as HTMLElement;
+    expect(why.textContent).toContain("with 100% confidence");
+    expect(within(why).getByRole("table").textContent).toContain("Example kind is second");
+    expect(screen.getByRole("button", { name: "Start work" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Mark as done" })).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Start work" })).toBeNull();
-    expect(screen.getByText("Due in 5 days")).toBeDefined();
-    expect(screen.queryByRole("link", { name: "Evidence" })).toBeNull();
-  });
-
-  it("offers no status buttons without a status action", () => {
-    render(<ObligationDetailView obligation={obligation()} now={NOW} />);
-    expect(screen.queryByRole("heading", { name: "Update the status" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Start work" })).toBeNull();
-  });
-
-  it("shows when and why a closed obligation was closed, with nothing left to change", async () => {
-    const { container } = render(
-      <ObligationDetailView
-        obligation={obligation({
-          status: "done",
-          closedAt: "2000-10-10T05:00:00Z",
-          closedReason: "completed",
-        })}
-        statusAction={vi.fn(async () => undefined)}
-        now={NOW}
-      />,
-    );
-    expect(figures(container).Status).toEqual({ value: "Done", tone: "success" });
-    expect(figures(container).Due).toEqual({ value: "12 Oct 2000", tone: "neutral" });
-    expect(container.querySelector("[data-slot='stat-card'] p")).toBeNull();
-    expect(fact("Closed")).toBe("Completed on 10 Oct 2000");
-    expect(screen.queryByRole("heading", { name: "Update the status" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Waive" })).toBeDefined();
+    expect(screen.getByText("Example comment")).toBeDefined();
+    const history = container.querySelector("[data-slot='history']") as HTMLElement;
+    expect(history.textContent).toContain("Started");
+    expect(history.textContent).toContain("By you");
+    expect(screen.getByRole("link", { name: "All obligations of this business" })).toBeDefined();
+    expect(screen.getByRole("complementary", { name: "Not legal advice" })).toBeDefined();
     expect(await runAxe(container)).toHaveNoViolations();
   });
 
-  it("gives the closing date alone when the service names no reason", () => {
-    render(
-      <ObligationDetailView
-        obligation={obligation({ status: "waived", closedAt: "2000-10-10T05:00:00Z" })}
-        now={NOW}
-      />,
+  it("offers no status change on a closed obligation and says why nothing explains it", () => {
+    renderView(
+      obligationDetailDto({
+        status: "done",
+        closed_at: "2000-01-08T05:00:00Z",
+        closed_reason: "completed",
+        rule_version: null,
+        citations: [],
+        history: [],
+      }),
+      { state: "none" },
     );
-    expect(fact("Closed")).toBe("10 Oct 2000");
+    expect(screen.getByText(/This obligation is closed/)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Mark as done" })).toBeNull();
+    expect(screen.getByText("Completed on 8 Jan 2000")).toBeDefined();
+    expect(screen.getByText(/has not kept the facts of this rule version/)).toBeDefined();
+    expect(screen.getByText(/cites no verified clause/)).toBeDefined();
+    expect(screen.getByText(/holds no decision of this rule/)).toBeDefined();
+    expect(screen.getByText("Nothing has happened to this obligation yet.")).toBeDefined();
+    expect(screen.getByText("A closed obligation keeps who it was given to.")).toBeDefined();
   });
 
-  it("words a one-off obligation without a due date, steps or named evidence", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(NOW);
-    const { container } = render(
-      <ObligationDetailView
-        obligation={obligation({
-          periodLabel: null,
-          periodStart: null,
-          periodEnd: null,
-          dueAt: null,
-          steps: [],
-          evidenceType: "",
-        })}
-      />,
-    );
-    expect(screen.getByText("A one-off duty: it does not recur.")).toBeDefined();
-    expect(figures(container)).toEqual({
-      Status: { value: "Open", tone: "info" },
-      Due: { value: "No due date", tone: "neutral" },
-      "Evidence needed": { value: "Not specified", tone: "neutral" },
+  it("shows a decision that could not be read with its correlation id", () => {
+    renderView(obligationDetailDto(), {
+      state: "error",
+      message: "Example engine down",
+      correlationId: "req-example-1",
     });
-    expect(screen.getByText("No steps are listed for this obligation.")).toBeDefined();
-    expect(container.querySelector("ol")).toBeNull();
-    expect(await runAxe(container)).toHaveNoViolations();
+    expect(
+      screen.getByText("Why this applies could not be read from the applicability engine"),
+    ).toBeDefined();
+    expect(screen.getByText("req-example-1")).toBeDefined();
   });
 });

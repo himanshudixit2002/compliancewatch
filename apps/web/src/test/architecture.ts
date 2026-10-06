@@ -233,8 +233,6 @@ export const PARKED_FEATURES: Readonly<Record<string, readonly string[]>> = {
   "admin-qa-triage": ["admin.qa-triage"],
   "admin-sources": ["admin.sources"],
   "admin-tenants": ["admin.tenants"],
-  changes: ["owner.changes"],
-  obligations: ["owner.obligations", "owner.obligation"],
   "settings-activity": ["owner.settings.activity"],
   "settings-data-rights": ["owner.settings.data-rights"],
   team: ["owner.settings.team"],

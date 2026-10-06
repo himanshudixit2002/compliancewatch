@@ -4,19 +4,55 @@ import { defineConfig, devices } from "@playwright/test";
  * Runs against `next start` on PORT (3000 unless set; the ui clone uses 3200). The server is
  * started with CW_WEB_ENV=test so the local-only pages exist, with the fake sign-in provider so
  * the specs can sign in through the form, and with a fixed session secret (32 bytes of "e2e",
- * not a secret: it only keys the cookies of this run). The pages that read a service call the
- * ones `make web-stack` starts (`make web-e2e` points the app at their ports); the specs that
- * need the services and the seeded tenant run once `make web-stack`, `make web-stack-wait` and
- * `make web-seed` have written var/seed/last.json (the CI job runs them first and fails such a
- * spec without that file; elsewhere it is skipped). The app gets the rulebook's two placeholder
- * tokens `make web-stack` gives the rulebook (unless the environment names others), and the
- * web.publish_actions flag on (its override counts in local and test only), so the rule version
- * specs can cite, submit, approve and return drafts through the web app.
+ * not a secret: it only keys the cookies of this run). The app gets the rulebook's two
+ * placeholder tokens `make web-stack` gives the rulebook (unless the environment names others),
+ * and the web.publish_actions and web.qa_enabled flags on (their overrides count in local and
+ * test only), so the rule version specs can cite, submit, approve and return drafts and the ask
+ * specs can ask.
+ *
+ * Two projects:
+ *   chromium  every spec but e2e/product, against the services `make web-stack` starts (`make
+ *             web-e2e` points the app at their ports); the specs that need the services and the
+ *             seeded tenant run once `make web-stack`, `make web-stack-wait` and `make web-seed`
+ *             have written var/seed/last.json (the CI job runs them first and fails such a spec
+ *             without that file; elsewhere it is skipped)
+ *   product   e2e/product, the real-data journey against `make product` (its internal listener,
+ *             every route of every service on one port) after `make product-seed`: set
+ *             CW_E2E_PRODUCT_URL to that listener (http://localhost:8080) and every service URL of
+ *             the app defaults to it (`make product-e2e`, and the CI dev-stack job, do so)
  */
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE_URL = `http://localhost:${PORT}`;
 const CI = process.env.CI !== undefined && process.env.CI !== "" && process.env.CI !== "false";
 const E2E_SESSION_SECRET = Buffer.alloc(32, "e2e").toString("base64");
+
+/** The product's internal listener, when the product project is the one being run. */
+const PRODUCT_URL = process.env.CW_E2E_PRODUCT_URL?.trim().replace(/\/+$/, "") || undefined;
+
+/** The Makefile's SERVICES, as the app names their URL variables. */
+const SERVICES = [
+  "IDENTITY",
+  "PROFILE",
+  "RULEBOOK",
+  "APPLICABILITY_ENGINE",
+  "OBLIGATION",
+  "NOTIFICATION",
+  "QA",
+  "LLM_GATEWAY",
+  "EVAL",
+  "PIPELINE",
+] as const;
+
+/** With the product named, every CW_WEB_<SERVICE>_URL the environment leaves unset points at it. */
+function productServiceUrls(): Record<string, string> {
+  if (PRODUCT_URL === undefined) return {};
+  return Object.fromEntries(
+    SERVICES.map((service) => {
+      const name = `CW_WEB_${service}_URL`;
+      return [name, process.env[name] ?? PRODUCT_URL];
+    }),
+  );
+}
 
 export default defineConfig({
   testDir: "e2e",
@@ -25,7 +61,10 @@ export default defineConfig({
   retries: CI ? 1 : 0,
   reporter: CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: { baseURL: BASE_URL, trace: "on-first-retry" },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    { name: "chromium", testIgnore: "**/e2e/product/**", use: { ...devices["Desktop Chrome"] } },
+    { name: "product", testDir: "e2e/product", use: { ...devices["Desktop Chrome"] } },
+  ],
   webServer: {
     command: "pnpm start",
     url: `${BASE_URL}/api/health`,
@@ -40,6 +79,8 @@ export default defineConfig({
       CW_WEB_RULEBOOK_REVIEW_TOKEN:
         process.env.CW_WEB_RULEBOOK_REVIEW_TOKEN ?? "local-review-token",
       CW_WEB_FLAG_PUBLISH_ACTIONS: process.env.CW_WEB_FLAG_PUBLISH_ACTIONS ?? "true",
+      CW_WEB_FLAG_QA_ENABLED: process.env.CW_WEB_FLAG_QA_ENABLED ?? "true",
+      ...productServiceUrls(),
     },
   },
 });

@@ -6,6 +6,7 @@ import {
   REGISTRATION_FIELDS,
   addLocation,
   addRegistration,
+  businessFlags,
   businessHeaderLinks,
   getProfilePage,
   type RegistrationSection,
@@ -73,6 +74,7 @@ export default async function BusinessProfilePage({ params }: Props) {
         session,
         businessId,
         business.value.name,
+        await businessFlags(session),
       )}
       nodeLinks={nodeLinks}
       locationAction={edits ? addLocation : null}

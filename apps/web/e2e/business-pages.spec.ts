@@ -49,13 +49,19 @@ test.describe("business pages", () => {
       "href",
       `/onboarding/${business.id}/questions`,
     );
-    const later = page.locator("section").filter({
-      has: page.getByRole("heading", { name: "Not available yet" }),
-    });
-    await expect(later.getByRole("link", { name: "Changes" })).toHaveAttribute(
-      "href",
-      `/b/${business.id}/changes`,
-    );
+    // Every page of a business is built: none is listed as not available, each is a tab.
+    await expect(page.getByRole("heading", { name: "Not available yet" })).toHaveCount(0);
+    for (const [tab, path] of [
+      ["Changes", "changes"],
+      ["Obligations", "obligations"],
+      ["Calendar", "calendar"],
+      ["Ask", "ask"],
+    ] as const) {
+      await expect(tabs.getByRole("link", { name: tab, exact: true })).toHaveAttribute(
+        "href",
+        `/b/${business.id}/${path}`,
+      );
+    }
     await checkA11y();
 
     await tabs.getByRole("link", { name: "Profile" }).click();

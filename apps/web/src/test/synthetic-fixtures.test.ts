@@ -29,6 +29,8 @@ const ALLOWED: Readonly<Record<string, string>> = {
   "apps/web/src/test/synthetic-fixtures.test.ts": "this guard's own list of the tokens",
   "apps/web/src/features/design-catalogue/ui/fixtures.test.ts":
     "the catalogue's pattern of the regulatory vocabulary its fixtures must not contain",
+  "apps/web/e2e/product/journey-product.spec.ts":
+    "the product journey asks the seeded product the question cw-product check asks and finds the change of the seed calendar's annual return by its rule key; the answers come from the running product, the spec states no rule",
 };
 
 /** Realistic return and tax names, the regulator, and the stock business and person names. */

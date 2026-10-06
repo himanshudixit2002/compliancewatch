@@ -50,6 +50,19 @@ describe("DoneSummary", () => {
     expect(await runAxe(container)).toHaveNoViolations();
   });
 
+  it("shows what the page passes about the first obligation above the way on", () => {
+    render(
+      <DoneSummary
+        {...PROPS}
+        view={VIEW}
+        firstObligation={<section aria-label="Example first obligation">Example slot</section>}
+      />,
+    );
+    const slot = screen.getByRole("region", { name: "Example first obligation" });
+    const open = screen.getByRole("link", { name: "Open the business" });
+    expect(slot.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("leaves out the empty sections", async () => {
     const { container } = render(
       <DoneSummary

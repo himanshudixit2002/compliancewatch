@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { SnapshotView, businessHeaderLinks, getSnapshotPage } from "@/features/business";
+import {
+  SnapshotView,
+  businessFlags,
+  businessHeaderLinks,
+  getSnapshotPage,
+} from "@/features/business";
 import { requireScreenSession } from "@/server/dal";
 import { hrefFor, screenById } from "@/shared/config/screens";
 import { isUuid } from "@/shared/lib/identifiers";
@@ -43,7 +48,13 @@ export default async function BusinessSnapshotPage({ params, searchParams }: Pro
     <SnapshotView
       title={SCREEN.title}
       view={view}
-      header={businessHeaderLinks("owner.business.snapshot", session, businessId, view.header.name)}
+      header={businessHeaderLinks(
+        "owner.business.snapshot",
+        session,
+        businessId,
+        view.header.name,
+        await businessFlags(session),
+      )}
       pageHref={pageHref}
       nodeHref={(nodeId) => withQuery(pageHref, { node: nodeId, fy: view.fy })}
     />

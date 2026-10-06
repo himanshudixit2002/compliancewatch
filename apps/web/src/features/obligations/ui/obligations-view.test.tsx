@@ -1,131 +1,151 @@
-import { render, screen } from "@testing-library/react";
-import type { Route } from "next";
+import { render, screen, within } from "@testing-library/react";
 import { runAxe } from "@compliancewatch/ui/test/axe";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Obligation } from "../model/obligations";
+import { describe, expect, it } from "vitest";
+import { listedObligationFromDto } from "@/entities/obligation/mappers";
+import { NOW, REGISTRATION_ID, dueAt, listedObligationDto } from "@/test/obligation-fixture";
+import { encodeListKey, obligationRow, readListFilter } from "../model/list";
+import { statusFilterOptions } from "../model/obligations";
+import type { ObligationListView } from "../queries";
 import { ObligationsView } from "./obligations-view";
 
-/** Noon on 15 Oct 2000 in India. */
-const NOW = new Date("2000-10-15T06:30:00Z");
+const HEADER = {
+  crumbs: [
+    { id: "owner.businesses", href: "/businesses", label: "Businesses" },
+    { id: "owner.business", href: "/b/x", label: "Example business" },
+    { id: "owner.obligations", href: "/b/x/obligations", label: "Obligations" },
+  ],
+  tabs: [
+    { id: "owner.business", href: "/b/x", label: "Business" },
+    { id: "owner.obligations", href: "/b/x/obligations", label: "Obligations" },
+  ],
+};
 
-const hrefFor = (id: string) => `/b/biz_1/obligations/${id}` as Route;
+const NODES = [
+  { id: "00000000-0000-4000-8000-0000000000e1", name: "Example business (PAN ABCDE1234F)" },
+  { id: REGISTRATION_ID, name: "29ABCDE1234F1Z5 (Example registration)" },
+];
 
-function obligation(overrides: Partial<Obligation>): Obligation {
+function view(overrides: Partial<ObligationListView> = {}): ObligationListView {
+  const items = [
+    listedObligationDto({ due_at: dueAt("2000-01-09") }),
+    listedObligationDto({
+      obligation_id: "00000000-0000-4000-8000-0000000000b2",
+      title: "Example return 2",
+      status: "done",
+      rule_version: null,
+      citations: [],
+    }),
+  ].map(listedObligationFromDto);
   return {
-    id: "obl_1",
-    businessId: "biz_1",
-    title: "File example return 1 for the month",
-    status: "open",
-    dueAt: "2000-10-20T18:29:59Z",
-    evidenceType: "filing_acknowledgement",
-    steps: ["Pay the tax due", "File example return 1"],
-    ruleVersionId: "rv_1",
-    decisionId: "dec_1",
-    periodLabel: "2000-08",
-    periodStart: "2000-08-01",
-    periodEnd: "2000-09-01",
-    closedAt: null,
-    closedReason: null,
-    profileVersion: null,
-    assigneeId: null,
+    business: { id: "x", name: "Example business", pan: "ABCDE1234F" },
+    nodes: 2,
+    read: readListFilter({}),
+    rows: items.map((item) =>
+      obligationRow(item, { href: `/b/x/obligations/${item.id}`, nodes: NODES, now: NOW }),
+    ),
+    asked: true,
+    nextHref: "/b/x/obligations?after=abc",
+    firstHref: null,
     ...overrides,
   };
 }
 
-const OBLIGATIONS: Obligation[] = [
-  obligation({
-    id: "obl_2",
-    title: "Deposit example tax for September",
-    status: "in_progress",
-    dueAt: "2000-10-07T18:29:59Z",
-    evidenceType: "",
-    periodLabel: null,
-    periodStart: null,
-    periodEnd: null,
-  }),
-  obligation({ id: "obl_1" }),
-  obligation({
-    id: "obl_3",
-    title: "File example return 2 for the month",
-    status: "done",
-    dueAt: "2000-10-11T18:29:59Z",
-    closedAt: "2000-10-10T05:00:00Z",
-    closedReason: "completed",
-  }),
-];
-
-function figures(container: HTMLElement): Record<string, { value: string; tone: string }> {
-  const cards = [...container.querySelectorAll<HTMLElement>("[data-slot='stat-card']")];
-  return Object.fromEntries(
-    cards.map((card) => [
-      card.querySelector("dt")?.textContent ?? "",
-      {
-        value: card.querySelector("dd")?.textContent ?? "",
-        tone: card.getAttribute("data-tone") ?? "",
-      },
-    ]),
+function renderView(model: ObligationListView, severalNodes = true) {
+  return render(
+    <ObligationsView
+      title="Obligations"
+      view={model}
+      header={HEADER}
+      pageHref="/b/x/obligations"
+      statusOptions={statusFilterOptions()}
+      severalNodes={severalNodes}
+    />,
   );
 }
 
-afterEach(() => {
-  vi.useRealTimers();
-});
-
 describe("ObligationsView", () => {
-  it("summarises the obligations and lists them, worded and linked", async () => {
-    const { container } = render(
-      <ObligationsView obligations={OBLIGATIONS} hrefFor={hrefFor} now={NOW} />,
-    );
+  it("lists the obligations with their status, due date, node and review state", async () => {
+    const { container } = renderView(view());
     expect(screen.getByRole("heading", { level: 1, name: "Obligations" })).toBeDefined();
-    expect(figures(container)).toEqual({
-      "Total obligations": { value: "3", tone: "neutral" },
-      Open: { value: "1", tone: "info" },
-      "In progress": { value: "1", tone: "warning" },
-      Overdue: { value: "1", tone: "danger" },
-      Done: { value: "1", tone: "success" },
-    });
-    const rows = [...container.querySelectorAll<HTMLElement>("[data-obligation]")];
-    expect(rows.map((row) => row.getAttribute("data-obligation"))).toEqual([
-      "obl_2",
-      "obl_1",
-      "obl_3",
-    ]);
-    const [deposit, monthly, closed] = rows as [HTMLElement, HTMLElement, HTMLElement];
-    expect(deposit.textContent).toContain("In progress");
-    expect(deposit.textContent).toContain("7 Oct 2000");
-    expect(deposit.textContent).toContain("Overdue by 8 days");
-    expect(deposit.textContent).toContain("Not specified");
-    expect(monthly.textContent).toContain("Period 2000-08: 1 Aug 2000 to 31 Aug 2000");
-    expect(monthly.textContent).toContain("Due in 5 days");
-    expect(monthly.textContent).toContain("Filing acknowledgement");
-    expect(closed.textContent).toContain("Done");
-    expect(closed.textContent).toContain("11 Oct 2000");
-    expect(closed.querySelector("[data-slot='due-note']")).toBeNull();
-    expect(
-      screen
-        .getByRole("link", { name: "File example return 2 for the month" })
-        .getAttribute("href"),
-    ).toBe("/b/biz_1/obligations/obl_3");
+    const table = screen.getByRole("table");
+    const first = within(table).getByRole("link", { name: "Example return 1" });
+    expect(first.getAttribute("href")).toBe(
+      "/b/x/obligations/00000000-0000-4000-8000-0000000000b1",
+    );
+    const row = container.querySelector(
+      "tr[data-obligation='00000000-0000-4000-8000-0000000000b1']",
+    );
+    expect(row?.textContent).toContain("Overdue by 1 day");
+    expect(row?.textContent).toContain("29ABCDE1234F1Z5 (Example registration)");
+    expect(row?.textContent).toContain("Not yet reviewed");
+    expect(row?.textContent).toContain("1 verified citation");
+    const done = container.querySelector(
+      "tr[data-obligation='00000000-0000-4000-8000-0000000000b2']",
+    );
+    expect(done?.textContent).toContain("Review not known yet");
+    expect(done?.textContent).toContain("0 verified citations");
+    expect(screen.getByRole("link", { name: "Next page" }).getAttribute("href")).toBe(
+      "/b/x/obligations?after=abc",
+    );
+    expect(screen.getByRole("complementary", { name: "Not legal advice" })).toBeDefined();
+    expect(screen.getByText(/at most 366 days/)).toBeDefined();
     expect(await runAxe(container)).toHaveNoViolations();
   });
 
-  it("keeps the overdue count neutral when nothing is overdue, measured against now by default", () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(NOW);
-    const { container } = render(
-      <ObligationsView obligations={[obligation({})]} hrefFor={hrefFor} />,
-    );
-    expect(figures(container).Overdue).toEqual({ value: "0", tone: "neutral" });
-    expect(container.querySelector("[data-obligation='obl_1']")?.textContent).toContain(
-      "Due in 5 days",
-    );
+  it("leaves the node out for a business with one", () => {
+    const { container } = renderView(view(), false);
+    expect(container.textContent).not.toContain("(Example registration)");
   });
 
-  it("shows the empty state when the business has no obligations", async () => {
-    const { container } = render(<ObligationsView obligations={[]} hrefFor={hrefFor} now={NOW} />);
+  it("says why the list is empty: nothing yet, nothing matching, or the end of the list", () => {
+    const empty = renderView(view({ rows: [], nextHref: null }));
     expect(screen.getByRole("heading", { level: 2, name: "No obligations yet" })).toBeDefined();
-    expect(container.querySelector("[data-slot='stat-card']")).toBeNull();
-    expect(screen.queryByRole("table")).toBeNull();
+    empty.unmount();
+    const filtered = renderView(
+      view({
+        rows: [],
+        nextHref: null,
+        read: readListFilter({ status: "done", from: "2000-01-01" }),
+      }),
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "No obligations match" })).toBeDefined();
+    expect(screen.getByText(/Due on or after 1 Jan 2000/)).toBeDefined();
+    filtered.unmount();
+    const statusOnly = renderView(
+      view({ rows: [], nextHref: null, read: readListFilter({ status: "done" }) }),
+    );
+    expect(screen.getByText(/Choose another status, or clear the filters/)).toBeDefined();
+    statusOnly.unmount();
+    renderView(
+      view({
+        rows: [],
+        nextHref: null,
+        firstHref: "/b/x/obligations",
+        read: readListFilter({
+          after: encodeListKey({ dueAt: null, id: "00000000-0000-4000-8000-00000000000a" }),
+        }),
+      }),
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "No more obligations" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "Back to the first page" })).toBeDefined();
+  });
+
+  it("shows a refused window on its field and lists nothing for it", async () => {
+    const { container } = renderView(
+      view({
+        rows: [],
+        asked: false,
+        nextHref: null,
+        read: readListFilter({ from: "2000-01-01", to: "2001-06-30" }),
+      }),
+    );
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Nothing listed for this window" }),
+    ).toBeDefined();
+    expect(screen.getByText(/This window spans 547 days/)).toBeDefined();
+    const to = screen.getByLabelText(/Due by/) as HTMLInputElement;
+    expect(to.value).toBe("2001-06-30");
+    expect(to.getAttribute("aria-invalid")).toBe("true");
     expect(await runAxe(container)).toHaveNoViolations();
   });
 });

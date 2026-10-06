@@ -138,6 +138,10 @@ test.describe("journey: an owner from sign-in to settings", () => {
     await expect(
       page.getByRole("table", { name: "Open review tasks on this business" }),
     ).toContainText("You said this does not apply; an analyst will confirm");
+    // The summary looks for the first obligation; the web stack has no worker to make one.
+    await expect(
+      page.getByRole("heading", { level: 2, name: "Your first obligation" }),
+    ).toBeVisible();
     await checkA11y();
     await page.getByRole("link", { name: "Open the business" }).click();
 
@@ -150,6 +154,10 @@ test.describe("journey: an owner from sign-in to settings", () => {
       ["Profile", "profile"],
       ["Attributes", "attributes"],
       ["Snapshot", "snapshot"],
+      ["Changes", "changes"],
+      ["Obligations", "obligations"],
+      ["Calendar", "calendar"],
+      ["Ask", "ask"],
       ["Review tasks", "review-tasks"],
     ] as const) {
       await tabs.getByRole("link", { name: tab, exact: true }).click();

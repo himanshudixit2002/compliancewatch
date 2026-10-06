@@ -14,20 +14,36 @@ describe("businessHeaderLinks", () => {
     ]);
     expect(links.tabs[0]?.href).toBe("/b/b1");
     expect(links.tabs.map((tab) => tab.id)).toContain("owner.business.review-tasks");
+    expect(links.tabs.map((tab) => tab.id)).toContain("owner.obligations");
+  });
+
+  it("lists a page behind a flag only while its flag is on", () => {
+    const off = businessHeaderLinks("owner.business", OWNER, "b1", "Example business");
+    expect(off.tabs.map((tab) => tab.id)).not.toContain("owner.ask");
+    const on = businessHeaderLinks(
+      "owner.business",
+      OWNER,
+      "b1",
+      "Example business",
+      new Set(["web.qa_enabled"] as const),
+    );
+    expect(on.tabs.map((tab) => tab.id)).toContain("owner.ask");
   });
 });
 
 describe("laterScreens", () => {
   it("lists the business's pages that are not built, with their notices", () => {
-    const later = laterScreens(OWNER, "b1");
-    expect(later.map((screen) => screen.id)).toEqual([
-      "owner.obligations",
-      "owner.calendar",
-      "owner.changes",
-      "owner.ask",
+    // Every page of a business is built today; an example entry stands in for the next one.
+    const next: Screen = {
+      ...screenById("owner.changes"),
+      id: "owner.example",
+      route: "/b/[businessId]/example",
+      status: "ready",
+    };
+    expect(laterScreens(OWNER, "b1")).toEqual([]);
+    expect(laterScreens(OWNER, "b1", [next, screenById("owner.changes")])).toEqual([
+      { id: "owner.example", title: "Changes", status: "ready", href: "/b/b1/example" },
     ]);
-    expect(later[0]).toMatchObject({ status: "ready", href: "/b/b1/obligations" });
-    expect(later[2]).toMatchObject({ status: "ready", href: "/b/b1/changes" });
   });
 
   it("leaves out pages with more parameters and pages the viewer may not open", () => {

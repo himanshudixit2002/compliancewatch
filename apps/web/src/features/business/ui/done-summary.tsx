@@ -1,5 +1,6 @@
 import type { Route } from "next";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { Button, KeyValue, PageHeader, ProgressBar } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
 import { OnboardingStepper } from "@/shared/ui/onboarding-stepper";
@@ -14,6 +15,8 @@ export interface DoneSummaryProps {
   businessIdField: string;
   questionsHref: string;
   businessHref: string;
+  /** Whether the business has its first obligation yet (the page's poll), above the way on. */
+  firstObligation?: ReactNode;
 }
 
 function ItemList({ items }: { items: readonly OpenItem[] }) {
@@ -38,6 +41,7 @@ export function DoneSummary({
   businessIdField,
   questionsHref,
   businessHref,
+  firstObligation,
 }: DoneSummaryProps) {
   const gstins = view.gstins.length === 0 ? t("done.noGstin") : view.gstins.join(", ");
   return (
@@ -102,6 +106,7 @@ export function DoneSummary({
           <ReviewTasksTable rows={view.reviewTasks} caption={t("done.reviewTasksCaption")} />
         )}
       </section>
+      {firstObligation}
       <div>
         <Button asChild>
           <Link href={businessHref as Route}>{t("done.openBusiness")}</Link>
