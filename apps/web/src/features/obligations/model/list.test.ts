@@ -4,6 +4,7 @@ import { NOW, REGISTRATION_ID, dueAt, listedObligationDto } from "@/test/obligat
 import {
   MAX_WINDOW_DAYS,
   compareByDue,
+  decisionKey,
   decodeListKey,
   encodeListKey,
   hasFilterErrors,
@@ -189,5 +190,15 @@ describe("obligationRow", () => {
     expect(obligationRow(item, { href: "/x", nodes: [nodes[0]!, nodes[0]!], now: NOW }).node).toBe(
       "A node of this business",
     );
+    expect(row.applicability).toBeNull();
+  });
+
+  it("carries the engine's latest decision for the row's node, keyed by node and version", () => {
+    const item = listedObligationFromDto(listedObligationDto());
+    const applicability = { state: "decided", result: "applies", needsReview: false } as const;
+    expect(
+      obligationRow(item, { href: "/x", nodes: [], now: NOW, applicability }).applicability,
+    ).toEqual(applicability);
+    expect(decisionKey(item)).toBe(`${item.businessId}:${item.ruleVersionId}`);
   });
 });

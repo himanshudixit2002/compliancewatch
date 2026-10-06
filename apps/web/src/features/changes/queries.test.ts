@@ -53,6 +53,26 @@ describe("getChanges", () => {
     expect(fake.requests.filter((request) => request.pathname === IMPACT)).toHaveLength(1);
     expect(changes.value.nextHref).toBe(`/b/${ENTITY_ID}/changes?cursor=next-1`);
     expect(changes.value.firstHref).toBeNull();
+    // Only a CA firm's people are offered every client a change affects.
+    expect(changes.value.cards.every((card) => card.impactHref === null)).toBe(true);
+  });
+
+  it("links a CA firm's people to every client a change affects", async () => {
+    const fake = fakeFetch([
+      { path: `/v1/businesses/${ENTITY_ID}`, body: BUSINESS_DTO },
+      { path: "/v1/changes", body: ruleChangePageDto([ruleChangeDto()]) },
+      { path: IMPACT, body: changeImpactDto([{ result: "applies" }]) },
+      { path: `/v1/rulebook/clauses/${CLAUSE_ID}`, status: 503, problem: {} },
+    ]);
+    const changes = await getChanges(
+      { ...session, tenantKind: "ca_firm", roles: ["ca_staff"] },
+      ENTITY_ID,
+      null,
+      { fetchImpl: fake.fetchImpl },
+    );
+    expect(changes.ok && changes.value.cards[0]?.impactHref).toBe(
+      `/changes/${CHANGED_VERSION_ID}/impact`,
+    );
   });
 
   it("walks the impact's pages of clients to this business, or says it is not decided", async () => {

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { RUN_VERSION_ID, bulkOutDto } from "@/test/engine-admin-fixture";
+import { REGISTRATION_ID } from "@/test/obligation-fixture";
 import {
   BUSINESS_ID,
   NOTIFICATION_ID,
@@ -10,6 +12,8 @@ import {
 import {
   CHANNELS,
   DELIVERY_STATES,
+  bulkRequestToDto,
+  bulkResultFromDto,
   isDeliveryState,
   notificationFromDto,
   notificationPageFromDto,
@@ -244,5 +248,47 @@ describe("messageTemplateFromDto", () => {
       placeholders: ["business_name", "title"],
       body: "Example {business_name}: {title}.",
     });
+  });
+});
+
+describe("bulk change card mappers", () => {
+  it("names each business once, in the order given, for the change card", () => {
+    expect(
+      bulkRequestToDto(RUN_VERSION_ID, [REGISTRATION_ID, BUSINESS_ID, REGISTRATION_ID]),
+    ).toEqual({
+      rule_version_id: RUN_VERSION_ID,
+      business_ids: [REGISTRATION_ID, BUSINESS_ID],
+      kind: "change_card",
+    });
+  });
+
+  it("maps what became of each business and the counts", () => {
+    const result = bulkResultFromDto(
+      bulkOutDto({
+        skipped_not_affected: 1,
+        businesses: [
+          ...bulkOutDto().businesses,
+          {
+            business_id: BUSINESS_ID,
+            outcome: "not_affected",
+            obligation_id: null,
+            queued: 0,
+            duplicates: 0,
+            unreachable: 0,
+          },
+        ],
+      }),
+    );
+    expect(result).toMatchObject({
+      ruleVersionId: RUN_VERSION_ID,
+      queued: 1,
+      skippedNotAffected: 1,
+      notificationsQueued: 2,
+    });
+    expect(result.businesses.map((business) => [business.businessId, business.outcome])).toEqual([
+      [REGISTRATION_ID, "queued"],
+      [BUSINESS_ID, "not_affected"],
+    ]);
+    expect(result.businesses[1]?.obligationId).toBeNull();
   });
 });

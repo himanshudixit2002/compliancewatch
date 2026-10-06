@@ -4,7 +4,9 @@ What a business has to do and why: the obligation list and the calendar, one obl
 with its tracking, the changes feed, and asking a question. They are the registry entries
 `owner.obligations`, `owner.calendar`, `owner.obligation`, `owner.changes` and `owner.ask`, tabs
 of a business's pages (`/b/[businessId]/...`, [business-pages.md](business-pages.md)), readable
-by every tenant member role in a business or CA-firm tenant. The onboarding summary
+by every tenant member role in a business or CA-firm tenant. A CA firm's people also have the
+clients a change affects, with the bulk change card (`ca.change-impact`, below).
+[product-loop.md](product-loop.md) follows a rule from its publication to these pages. The onboarding summary
 (`owner.onboarding.done`) waits for the business's first obligation. Every page ends with the
 "not legal advice" footer (section 2 of the terms) and says nothing a service did not say.
 
@@ -29,7 +31,10 @@ The obligations by due date (the ones without one last, then by id, the service'
 to a page, each with its period, the GSTIN it is kept for (when the business has several nodes),
 its status, the due date in India with how it relates to today ("Due in 3 days", "Overdue by 2
 days" in words, never colour alone), whether its rule has been reviewed and how many verified
-citations it has. The title opens the obligation.
+citations it has, and the engine's latest decision of its rule for its node as a badge ("Applies",
+"Not sure, needs review"; "Not decided" for a node the engine has no decision for, "Not known now"
+when the read failed, without failing the list), read once per node and rule version on the page
+(D-053). The title opens the obligation.
 
 - **Filters** are a GET form, so the choice is in the address: a status (every status, still to
   do, or one status; the service's repeated `status`) and a due window, "Due from" and "Due by",
@@ -130,6 +135,31 @@ decision of the version for it (a business made after the version's fan-out, for
 decision is listed with its date. An impact that could not be read is said on its card with the
 correlation id.
 
+For a CA firm's people, each card links to every client the change affects (below).
+
+## Affected clients: `/changes/[ruleVersionId]/impact`
+
+A CA firm's admin and staff (`ca.change-impact`; a business tenant is sent to `/forbidden`) read
+what a change means for every client of the firm, from `GET /v1/changes/{id}/impact` (D-052):
+
+- The change from the rulebook (its rule key, number, title and status; an id the rulebook does
+  not hold is the not-found page), the counts over every business of the firm with a decision of
+  it, and how far its fan-out got over every tenant.
+- The clients, 50 to a page by the engine's cursor: the affected ones by default, or the unsure,
+  the not affected or every one by a filter in the address. Each client is named from the profile
+  service with its PAN; each of its businesses (a GSTIN, or the client itself by its PAN) shows the
+  engine's latest result as a badge, how sure it was and when it decided. Every filter's empty list
+  says why.
+- **The bulk change card**: one card to each affected client's own people who follow it (an owner
+  or staff; the firm's own people hear in their daily digest), about the client's first open
+  obligation of the change, through the usual queue, quiet hours and batching. The page renders
+  the affected businesses (walked from the impact, at most 500) into the form with the
+  Idempotency-Key it minted, so sending again from the page, or "Try again" after an answer that
+  never arrived, is the same request and the service answers with its first answer, which the
+  page says. The answer lists each business: queued (people told now), already told, nobody to
+  tell, or not affected (no open obligation of the change). With the notification service's
+  switch off the page says nothing was sent, with the service's problem.
+
 ## Ask: `/b/[businessId]/ask`
 
 Behind `web.qa_enabled` (off by default; the override counts in local and test only): while it is
@@ -167,3 +197,5 @@ seconds.
   (`owner.report-error`, waiting on the services track's WP24 routes).
 - Feedback on an answer (`owner.answer-feedback`, planned).
 - The approvers by name: a route that names users of the internal tenant.
+- Telling more than 500 affected businesses of one change: the bulk card names the first 500 and
+  the page says so.

@@ -692,12 +692,15 @@ product-check: check-uv ## Prove the running product works, step by step (cw-pro
 	  CW_PRODUCT_RECORDS_URL="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}" \
 	  $(UV) run --package compliancewatch-demo cw-product check $(ARGS)
 
-# The web app's real-data journey (Playwright project product, apps/web/e2e/product): the web app
+# The web app's real-data journeys (Playwright project product, apps/web/e2e/product): the web app
 # is built into its own directory (.next/e2e-product, so neither the default build nor the
 # .next/product of make product's next dev is touched) and started with next start on
 # PRODUCT_E2E_PORT, every CW_WEB_*_URL at the product's internal listener (CW_E2E_PRODUCT_URL), the
 # fake sign-in and CW_WEB_ENV=test; it signs in as the tenant make product-seed recorded. It
-# writes as that tenant: a probe business of its own, started, completed and commented on.
+# writes as that tenant: a probe business of its own, started, completed and commented on. The
+# oversight journey sets and releases the global fan-out hold, runs a dry run of the annual return
+# and, as the synthetic CA firm, sends its change card to a client contact made for the run and
+# removed afterwards; it withdraws nothing (make product-check --destructive proves the rollback).
 PRODUCT_E2E_PORT ?= 3400
 
 product-e2e: check-pnpm ## Build the web app and run the Playwright product project against the running product (after make product and make product-seed): make product-e2e [PRODUCT_E2E_PORT=3400]

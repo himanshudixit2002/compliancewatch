@@ -30,6 +30,7 @@ function model(overrides: Partial<ChangesViewModel> = {}): ChangesViewModel {
       changeCard(ruleChangeFromDto(ruleChangeDto()), {
         clauses: new Map(),
         applicability: applies,
+        impactHref: "/changes/example/impact",
       }),
       changeCard(
         ruleChangeFromDto(
@@ -76,6 +77,11 @@ describe("ChangesView", () => {
     expect(published.querySelector(`[data-approver='${APPROVER_IDS[0]}']`)).not.toBeNull();
     expect(within(published).getByText("1 citation")).toBeDefined();
     expect(published.textContent).toContain("Example quoted clause text.");
+    expect(
+      within(published)
+        .getByRole("link", { name: "See every client this change affects" })
+        .getAttribute("href"),
+    ).toBe("/changes/example/impact");
     const moved = container.querySelector(
       "[data-change='00000000-0000-4000-8000-00000000c0c2']",
     ) as HTMLElement;
@@ -84,6 +90,7 @@ describe("ChangesView", () => {
     expect(moved.textContent).toContain("req-example-6");
     expect(moved.textContent).toContain("names no approvers");
     expect(within(moved).queryByText("Not yet reviewed")).toBeNull();
+    expect(within(moved).queryByRole("link", { name: /every client/ })).toBeNull();
     expect(screen.getByRole("link", { name: "Older changes" }).getAttribute("href")).toBe(
       "/b/x/changes?cursor=next",
     );

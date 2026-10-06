@@ -11,6 +11,7 @@ import { calendarView, monthWindow, type CalendarMonth, type CalendarView } from
 import { obligationPageView, whyView, type ObligationPageView, type WhyView } from "./model/detail";
 import {
   LIST_PAGE_SIZE,
+  decisionKey,
   hasFilterErrors,
   isAfterKey,
   listHref,
@@ -22,6 +23,7 @@ import {
   type NamedNode,
   type NodeRows,
   type ObligationRow,
+  type RowApplicability,
 } from "./model/list";
 import { dueDateText, duePhrase, statusesOf, type StatusFilter } from "./model/obligations";
 import { obligationsGateway, type ObligationsGateway } from "./gateway";
@@ -124,6 +126,39 @@ function all<T>(results: readonly Result<T>[]): Result<T[]> {
   return ok(values);
 }
 
+/**
+ * The engine's latest decision of each row's rule version for its node, read once per pair on
+ * the page (a monthly return's periods share one), in parallel; a failed read leaves its rows'
+ * badge unknown rather than failing the list.
+ */
+async function rowDecisions(
+  gateway: ObligationsGateway,
+  items: readonly ListedObligation[],
+): Promise<Map<string, RowApplicability>> {
+  const pairs = new Map<string, ListedObligation>();
+  for (const item of items) pairs.set(decisionKey(item), item);
+  const entries = [...pairs.entries()];
+  const read = await Promise.all(
+    entries.map(([, item]) => gateway.latestDecision(item.businessId, item.ruleVersionId)),
+  );
+  return new Map(
+    entries.map(([key], index): [string, RowApplicability] => {
+      const decision = read[index];
+      if (decision === undefined || !decision.ok) return [key, { state: "unknown" }];
+      return [
+        key,
+        decision.value === null
+          ? { state: "none" }
+          : {
+              state: "decided",
+              result: decision.value.result,
+              needsReview: decision.value.needsReview,
+            },
+      ];
+    }),
+  );
+}
+
 export interface ObligationListView {
   business: BusinessRef;
   /** How many nodes the list merges: the entity and its registrations. */
@@ -163,6 +198,7 @@ export async function getObligationList(
   const merged = mergeByDue(pages.value, LIST_PAGE_SIZE);
   const detail = screenById("owner.obligation");
   const last = merged.items.at(-1);
+  const decisions = await rowDecisions(gateway, merged.items);
   return ok({
     ...base,
     asked: true,
@@ -170,6 +206,7 @@ export async function getObligationList(
       obligationRow(item, {
         href: hrefFor(detail, { businessId, obligationId: item.id }),
         nodes,
+        applicability: decisions.get(decisionKey(item)) ?? { state: "unknown" },
         ...(deps.now === undefined ? {} : { now: deps.now }),
       }),
     ),

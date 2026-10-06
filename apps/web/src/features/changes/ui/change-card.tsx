@@ -1,3 +1,5 @@
+import type { Route } from "next";
+import Link from "next/link";
 import { Badge, Banner, ErrorState, StatusChip } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
 import { CitationList } from "@/shared/ui/citation-list";
@@ -49,6 +51,17 @@ export function ChangeCard({ card }: ChangeCardProps) {
             <li key={line}>{line}</li>
           ))}
         </ul>
+      )}
+      {card.impactHref === null ? null : (
+        <p className="text-sm">
+          <Link
+            href={card.impactHref as Route}
+            className="text-primary underline-offset-2 hover:underline"
+            data-slot="impact-link"
+          >
+            {t("changes.allClients")}
+          </Link>
+        </p>
       )}
       {card.applicability.failure === null ? null : (
         <ErrorState

@@ -182,6 +182,8 @@ export interface ChangeCardView {
   publishedAt: string | null;
   citations: readonly CitationView[];
   applicability: ApplicabilityView;
+  /** A CA firm's view of every client the change affects; null for anyone else. */
+  impactHref: string | null;
 }
 
 export function changeCard(
@@ -189,6 +191,7 @@ export function changeCard(
   options: {
     clauses: ReadonlyMap<string, ClauseDetail>;
     applicability: ApplicabilityView;
+    impactHref?: string | null;
   },
 ): ChangeCardView {
   return {
@@ -224,6 +227,7 @@ export function changeCard(
       };
     }),
     applicability: options.applicability,
+    impactHref: options.impactHref ?? null,
   };
 }
 

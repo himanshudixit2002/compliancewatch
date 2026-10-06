@@ -37,8 +37,10 @@ by a withdrawal writes the same entries as the system.
 ## The controls
 
 Reads need a regulatory role (analyst, reviewer or admin); controls need an admin. Pausing,
-cancelling and holding need a reason of at least ten characters. On the local product
-(`make product`) the internal listener answers without a token:
+cancelling and holding need a reason of at least ten characters. The web app's internal tools do
+all of it on screen (`/admin/fan-outs`, a version's run, the impact explorer;
+[docs/web/runbook-admin.md](../web/runbook-admin.md)). On the local product (`make product`) the
+internal listener answers without a token:
 
 ```bash
 API=http://127.0.0.1:8080/v1/applicability-engine
@@ -94,9 +96,9 @@ that many results, which is more often a fault than a change of law.
 2. The change is intended: resume. The flip check stays off for the rest of the run, since you
    have seen the flips.
 3. The version is wrong: cancel the run, then withdraw the version in the rulebook. The decisions
-   already made stay. The obligation service does not act on a withdrawal yet, so the obligations
-   the version made stay open until it does. A corrected version fans out on its own when it is
-   published.
+   already made stay; the obligation service closes the open obligations the version made
+   (`rule.withdrawn`, closure reason `rule_withdrawn`) and tells their people. A corrected version
+   fans out on its own when it is published.
 
 ## A run stays held or paused
 
@@ -130,6 +132,7 @@ version of the rule fans out in full.
 ## Roll back a version
 
 Cancel its fan-out if it is still running, then withdraw the version in the rulebook
-(`POST /v1/rulebook/rule-versions/<id>/withdraw`). `rule.withdrawn` cancels a run that has not
-finished, as the system, and drops the engine's cached list of the versions in force, so a
-profile change no longer decides it.
+(`POST /v1/rulebook/rule-versions/<id>/withdraw`, or "Roll back this version" on the version's
+fan-out page). `rule.withdrawn` cancels a run that has not finished, as the system, and drops the
+engine's cached list of the versions in force, so a profile change no longer decides it; the
+obligation service closes the obligations the version made.

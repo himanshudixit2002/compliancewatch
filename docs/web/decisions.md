@@ -768,3 +768,94 @@ which suits a poll and a month read; the calendar puts the month in the address 
 `history.replaceState`, and the previous and next months stay plain links. Consequences: no route
 handler is registered for these reads; a check that fails is shown with its correlation id and
 the poll goes on; the poll stops after 90 seconds and says so.
+
+## D-049: The fan-out tools read for every regulatory role, and only an admin controls
+
+2026-10-06. The engine reads its fan-outs and the hold for every regulatory role and takes the
+controls, a dry run and the hold from an admin alone (`FanOutReader`, `FanOutAdmin`,
+`DryRunAdmin`); a reviewer or an admin settles a review item (`Resolver`). The registry listed
+`admin.fan-out` for reviewers and admins, `admin.impact` for every regulatory role, and the
+capability `admin.fan_outs.control` named the reviewer. Settled: `admin.fan-outs` and
+`admin.fan-out` open to every regulatory role and are read-only for anyone but an admin, so an
+analyst or a reviewer who reads the list also reaches each run, as the engine's reads allow; the
+controls (the hold, pause, resume, cancel and the rollback) render for the admin only, and each
+action checks `admin.fan_outs.control`, now the admin alone, before any request. `admin.impact`
+is the admin's alone (`roles: ["admin"]`, capability `admin.impact`): a dry run reads every
+tenant's profiles, so another regulatory role gets the not-found page, as for any tool narrower
+than the regulatory set, and the navigation leaves it out. A read-only page explaining the dry run
+to the others was considered and rejected: it would show a form nobody but an admin may send.
+`admin.decisions` reads for every regulatory role and settles for a reviewer or an admin
+(`admin.decisions.resolve`). The engine trusts a caller without a token in `header` mode, so until
+tokens the web server's check is the only one; the engine records a control as
+`system:applicability-engine` and a resolution with the session's user as `resolved_by`.
+Consequences: with tokens the engine checks the same roles again and names the admin in its audit
+rows.
+
+## D-050: The hold leads the fan-out pages and takes a reason both ways; rollback is the withdraw
+
+2026-10-06. The global hold stops every fan-out, the most severe state these tools show: while it
+is set, both fan-out pages lead with a danger banner (an alert) naming its reason, who set it and
+when, read from `GET /fan-out-hold` on every render; a failed read is shown in its place without
+failing the page. Setting it needs a reason of ten characters or more (the engine's rule), and
+releasing asks for one too, although the engine accepts none, because a release restarts every
+held run and the audit row should say why. A version's fan-out page opens for any version the
+engine or the rulebook holds: a version without a run says so by its status (a published one
+without a run is a case the runbook covers), and only an id neither holds is the not-found page.
+Rolling back is the rulebook's withdraw, `POST /v1/rulebook/rule-versions/{id}/withdraw` through
+`server/api/rulebook-write.ts`, behind `web.publish_actions` and the review token, with the admin
+as `actor_id`: offered only for a published version, in a `ReasonDialog` whose warning says what
+follows (the engine cancels a run that has not finished, the obligation service closes every open
+obligation the version made in every tenant and tells their people, the decisions stay, and
+nothing undoes it). Cancelling stops a run; withdrawing takes the version back; there is no third
+control. Consequences: the memory stack shows no run and no published version, so its specs cover
+the hold, the read-only pages and a draft's rollback refused, and the unit tests cover the
+controls and the rollback dialog; the product project shows a completed run and the hold, and
+withdraws nothing.
+
+## D-051: The decision review is a lookup by tenant
+
+2026-10-06. The review routes act for the tenant named in `x-tenant-id`: on these two routes a
+regulatory user names the tenant reviewed, the engine's documented cross-tenant exception (the
+security review signs it off in M3). As the notification console does (D-041), the screen asks
+for the tenant id in a GET form, with the status to list (open by default, resolved, every item)
+and the engine's cursor in the query string, and the gateway acts for that tenant through
+`ClientContext.tenantId`. Each item shows its version (named from the rulebook, read once per
+version on the page), its node, why it needs a person, the decision under review with every
+condition's outcome in the engine's words, and how it was settled. Settling goes through a
+`ConfirmDialog` that says what follows: `applies` or `not_applicable` append a decision the
+obligation service acts on, `dismiss` appends nothing; the note is required (the engine's rule)
+and the reviewer is the session's user, never a field. Settling an item twice is the engine's
+409, shown as it comes. Consequences: no route lists the tenants with open items, so the queue is
+not browsed across tenants until one exists.
+
+## D-052: A CA firm's affected clients, and one bulk change card per render
+
+2026-10-06. `GET /v1/changes/{id}/impact` lists the firm's clients a page at a time with each
+business's latest decision of the version; the screen shows the affected clients by default
+(`result=applies`) and any other result by a filter in the address, each client named from the
+profile service. The bulk change card, `POST /v1/notification/bulk`, names at most 500
+businesses: the page walks the affected clients (pages of 200, at most five) and renders their ids
+into the form with the Idempotency-Key it minted (`<IdempotencyKeyInput/>`,
+`notification.bulk`), so the request is fixed when the page renders. Sending again from the same
+page, or "Try again" after an answer that never arrived (D-046), sends the same body with the same
+key, and the service answers with its first answer, which the panel says in words. More than 500
+affected businesses, or a walk that stopped short, is said, and the card names the first 500. The
+answer lists each business's outcome: queued, already told, nobody to tell, not affected. The
+service's switch `notification.bulk` has no web flag: with it off, the route's 503
+`notification-bulk-disabled` is shown as it is, saying nothing was sent. A change card on a
+business's changes feed links a CA firm's people to the page. Considered and rejected: reading the
+impact again in the action (a retry could then name other businesses and meet the key-reused 422)
+and a web flag (it would hide the service's own answer). Consequences: a firm with more than 500
+affected businesses for one change cannot tell the rest from this page yet.
+
+## D-053: Obligation rows carry the engine's latest decision
+
+2026-10-06. The change cards already say whether a change applies to the business (from its
+impact). The obligation list adds a Decision column: the engine's latest decision of the row's
+rule version for its node (`GET .../businesses/{node}/decisions?rule_version_id=&limit=1`, the read
+the obligation's page makes), read once per node and version on the page, since a recurring
+return's periods share one, and in parallel. The badge says the result in words, with "needs
+review" when a person has to look (`shared/ui/applicability.tsx`, the badge every engine screen
+uses); a node without a decision says "Not decided", and a read that failed "Not known now"
+without failing the list. Consequences: a page costs one engine read per distinct node and
+version, at most 25.

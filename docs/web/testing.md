@@ -49,8 +49,9 @@ IGST, SGST, Acme and Asha. Exempt: the recorded rulebook fixtures under
 replays and hashes byte for byte (there are no recorded e2e fixtures; the specs read what the seed
 wrote at run time). Allowed, each with its reason in the test: the guard itself and the design
 catalogue's `fixtures.test.ts`, which name the tokens in order to reject them, and the product
-journey (`e2e/product/journey-product.spec.ts`), which asks the seeded product the question
-`cw-product check` asks and finds the seed calendar's annual return by its rule key (D-047). A
+journeys (`e2e/product/journey-product.spec.ts` and `journey-oversight.spec.ts`), which ask the
+seeded product the question `cw-product check` asks and find the seed calendar's annual return's
+change and fan-out by its rule key (D-047). A
 new test uses the example forms above; a live page whose test seems to need a realistic token
 gets synthetic data instead, or one narrow entry in the allow list with the reason.
 
@@ -91,7 +92,7 @@ outside `src` and outside the floor.
 secret (32 bytes of `e2e`; it keys the cookies of one run and is not a secret), chromium only,
 and waits for `/api/health` before the first test. It has two projects: `chromium`, every spec but
 `e2e/product`, against the memory stack (`make web-e2e` and the `web-e2e` job run it with
-`--project=chromium`), and `product`, the real-data journey against `make product` (below). The
+`--project=chromium`), and `product`, the real-data journeys against `make product` (below). The
 config turns `web.publish_actions` and `web.qa_enabled` on for the run. Outside CI it reuses a
 server already listening on that port. On CI it retries once and writes the HTML report.
 `e2e/fixtures.ts` extends `test` with `checkA11y(selector?)`, which runs `AxeBuilder` on the page
@@ -146,7 +147,12 @@ The specs on `main`:
 | `owner-obligations.spec.ts` | the obligation list, the calendar and an obligation's page on the memory stack, each test in a new tenant with a business made on the service (the stack has no worker, so no obligation appears): the list from the business's tabs with why it is empty, the filters in the address, a 547-day window refused on its field with nothing listed and a 366-day one asked, clearing the filters; the calendar of February 2000 with its arrow keys, Enter choosing a day, Page Down reading March in place with focus kept and the address following, the month links; the onboarding summary still looking for the first obligation; an unknown, a malformed or another tenant's obligation or business as the not-found page; a compliance lead reading the list, a visitor sent to sign in and an analyst to `/forbidden`; axe on each state |
 | `owner-changes.spec.ts` | the changes feed on the memory stack: the feed read from the rulebook first, so the page says nothing is published yet (the stack's rulebook starts with drafts) or shows the newest change as not decided for a business no fan-out has seen; another tenant's, an unknown and a malformed business as the not-found page; a visitor sent to sign in; axe |
 | `owner-ask.spec.ts` | ask on the memory stack with `web.qa_enabled` on: the Ask tab, an empty question refused on its field, the registration offered first, a question asked and the page compared with the qa service's answer to the same question (outcome, text, citations), the question kept in its field; not-found for other businesses; axe |
+| `admin-decisions.spec.ts` | the decision review against the engine (needs the seed): a tenant role gets a 404; an analyst opens it from the sidebar, is refused a malformed tenant id on its field (kept), looks up the seeded tenant and reads its open items and then every item as the engine lists them (empty on the stack, which has no condition in words to review); a reviewer reads a tenant with no settled item; axe on each |
+| `admin-fan-outs.spec.ts` | the fan-out tools against the engine (needs the seed; serial, since the hold is one switch): a tenant role gets a 404, a malformed id the not-found page; an analyst reads the runs (compared with the engine's) and the hold with no control; an admin holds every fan-out (a reason too short keeps the dialog's button off), sees the danger banner with the reason as the engine records it, and releases it, a hold an interrupted run left lifted first; a seeded draft's page with no run, its version, the dry-run link and its rollback refused ("Only a published version can be rolled back"); a reviewer reads it with no control; an id nobody holds is the not-found page; axe on each |
+| `admin-impact.spec.ts` | the impact explorer against the engine (needs the seed): a tenant role gets a 404, an analyst and a reviewer the not-found page; an admin opens it from the sidebar, is refused an empty id on its field, dry-runs a seeded draft and a specification at a level (refused first when it is not a JSON object), each compared with the engine's answer to the same request (the stack's directory is empty, so the page says nothing was in scope); the address names the version; axe |
+| `ca-change-impact.spec.ts` | a CA firm's affected clients (needs the seed): a visitor is sent to sign in and a business owner to `/forbidden`; a CA admin of a new firm reads a seeded draft's impact, compared with the engine's (no client, zero counts), each filter's empty state, and no bulk card to send since nobody is affected; an unknown and a malformed version are the not-found page; axe |
 | `product/journey-product.spec.ts` | project `product`, against `make product` after `make product-seed` (needs `CW_E2E_PRODUCT_URL`; `make product-e2e` sets it): signed in as the seeded synthetic business tenant through "Use the last seeded tenant", the obligation list compared with the service's merged lists and filtered to the ones still to do, the calendar of the first open obligation's month opening it; an obligation's page with its citations and whole clause, both synthetic approvers, the not-yet-reviewed warning and why it applies; a probe business made on the service whose first obligation the onboarding summary's poll finds, started, completed through a dropped answer and "Try again" (the replay said, one closure in the service's history) and commented on; the annual return's change applying to the business in the feed; "When is my GSTR-3B due?" answered from the business's obligations with the service's text and citations; axe on each |
+| `product/journey-oversight.spec.ts` | project `product`, after `make product-check` (whose fanout step publishes the annual return): an admin finds the annual return's fan-out completed in the list (compared with the engine), opens it, and sets and releases the global hold with a reason, each compared with the engine (a hold an interrupted run left is lifted first, anyone else's fails the spec); a dry run of the annual return over the synthetic CA firm whose counts and samples are the engine's answer to the same request; the CA firm's admin opens the change's affected clients, sends the change card to a synthetic client contact made for the run (removed afterwards) and sends the same request again: the same outcome per business, said as a replay, and one card per business on the service (queued while the return is published; not affected once CI's rollback step withdrew it). Nothing is withdrawn; axe on each |
 
 Every live page entry in the registry names its spec files in `e2e`, and `screens.test.ts`
 checks they exist. A spec is named after what it covers, not after the registry id. The
@@ -184,7 +190,11 @@ listener. It writes as the seeded tenant only to a probe business of its own. Th
 return's change is published by the fanout step of `make product-check`, so the project runs
 after the check; on CI the check's rollback step (`--destructive`) has withdrawn that return by
 then, and the spec reads its publication, which stays in the feed with the decisions the fan-out
-made. Without `CW_E2E_PRODUCT_URL` or the state file it is skipped locally and fails on CI.
+made. `journey-oversight.spec.ts` reads the same run (a completed run stays completed after the
+withdrawal), sets and releases the hold, and sends the CA firm's change card to a client contact
+of its own; it withdraws nothing, so the shared dev database keeps its published rules and the
+rollback is proven by the check's destructive step alone. Without `CW_E2E_PRODUCT_URL` or the
+state file it is skipped locally and fails on CI.
 
 ## Running things
 

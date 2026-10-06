@@ -29,6 +29,8 @@ import {
  *
  *   identity, profile, notification, llm-gateway, obligation, qa,   x-tenant-id from the session
  *   applicability-engine
+ *   applicability-engine's admin routes (fan-outs, the hold, dry      no tenant header
+ *   runs), through applicabilityEngineAdminClient
  *   rulebook                                                         no tenant header
  *
  * Rulebook writes go through ./rulebook-write.ts, the only module that sends the write and
@@ -108,13 +110,27 @@ export function qaClient(ctx: ClientContext): QaClient {
 }
 
 /**
- * The engine's decisions and a change's impact are the tenant's: every call carries x-tenant-id.
- * The fan-out and dry-run routes name no tenant and belong to the admin tools, which do not use
- * this factory yet.
+ * The engine's decisions, a change's impact and the review queue are a tenant's: every call
+ * carries x-tenant-id (the review queue's admin lookup names the reviewed tenant through
+ * `ctx.tenantId`). The fan-out, hold and dry-run routes name no tenant: they go through
+ * `applicabilityEngineAdminClient`.
  */
 export function applicabilityEngineClient(ctx: ClientContext): ApplicabilityEngineClient {
   return createServiceClient<applicabilityEngine.paths>(
     optionsFor("applicability-engine", ctx, tenantHeaders(ctx)),
+  );
+}
+
+/**
+ * The engine's admin routes that belong to no tenant: the fan-outs, the global hold and dry
+ * runs. A fan-out runs over every tenant, so no tenant header goes out, whoever is signed in; the
+ * admin tools check the role before they call (the engine checks it again once tokens are read).
+ */
+export function applicabilityEngineAdminClient(
+  ctx: Pick<ClientContext, "fetchImpl"> = {},
+): ApplicabilityEngineClient {
+  return createServiceClient<applicabilityEngine.paths>(
+    optionsFor("applicability-engine", ctx, {}),
   );
 }
 

@@ -1,5 +1,8 @@
 import { isE164, isEmailAddress } from "@/shared/lib/identifiers";
 import type {
+  BulkNotificationInDto,
+  BulkNotificationOutDto,
+  BulkNotificationResult,
   Channel,
   DeliveryState,
   MessageTemplate,
@@ -179,4 +182,35 @@ export function notificationFromDto(dto: NotificationDto): NotificationRecord {
 
 export function notificationPageFromDto(dto: NotificationPageDto): NotificationPage {
   return { items: dto.items.map(notificationFromDto), nextCursor: dto.next_cursor ?? null };
+}
+
+/** The change card for the businesses named, each once, in the order given. */
+export function bulkRequestToDto(
+  ruleVersionId: string,
+  businessIds: readonly string[],
+): BulkNotificationInDto {
+  return {
+    rule_version_id: ruleVersionId,
+    business_ids: [...new Set(businessIds)],
+    kind: "change_card",
+  };
+}
+
+export function bulkResultFromDto(dto: BulkNotificationOutDto): BulkNotificationResult {
+  return {
+    ruleVersionId: dto.rule_version_id,
+    queued: dto.queued,
+    skippedDuplicate: dto.skipped_duplicate,
+    skippedNoRecipient: dto.skipped_no_recipient,
+    skippedNotAffected: dto.skipped_not_affected,
+    notificationsQueued: dto.notifications_queued,
+    businesses: dto.businesses.map((business) => ({
+      businessId: business.business_id,
+      outcome: business.outcome,
+      obligationId: business.obligation_id ?? null,
+      queued: business.queued,
+      duplicates: business.duplicates,
+      unreachable: business.unreachable,
+    })),
+  };
 }
