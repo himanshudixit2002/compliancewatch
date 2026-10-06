@@ -18,22 +18,31 @@ export const IS_CI =
 const DEFAULT_SEED_STATE_PATH = "../../var/seed/last.json";
 
 /**
- * The tenant `make web-seed` filled last, read from the file the app reads for the sign-in
- * form's "last seeded tenant" option (CW_WEB_SEED_STATE_PATH relative to apps/web, else
- * var/seed/last.json at the repository root); null when the seed has not run here.
+ * What `make web-seed` recorded last, read from the file the app reads for the sign-in form's
+ * "last seeded tenant" option (CW_WEB_SEED_STATE_PATH relative to apps/web, else
+ * var/seed/last.json at the repository root): the ids as strings by name; null when the seed has
+ * not run here.
  */
-export function seededTenantId(): string | null {
+export function seededState(): Readonly<Record<string, string>> | null {
   const configured = process.env.CW_WEB_SEED_STATE_PATH?.trim();
   const path = resolve(__dirname, "..", configured || DEFAULT_SEED_STATE_PATH);
   try {
     const state: unknown = JSON.parse(readFileSync(path, "utf8"));
-    if (typeof state === "object" && state !== null && "tenant_id" in state) {
-      return typeof state.tenant_id === "string" ? state.tenant_id : null;
-    }
+    if (typeof state !== "object" || state === null) return null;
+    return Object.fromEntries(
+      Object.entries(state).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
   } catch {
     // Absent or unreadable: the seed has not run on this machine.
   }
   return null;
+}
+
+/** The tenant `make web-seed` filled last; null when the seed has not run here. */
+export function seededTenantId(): string | null {
+  return seededState()?.tenant_id ?? null;
 }
 
 const SERVICE_ORDER = [

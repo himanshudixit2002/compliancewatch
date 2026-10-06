@@ -142,6 +142,7 @@ export function ruleVersionFromDto(dto: RuleVersionDto | RuleVersionDetailDto): 
     publishedAt: dto.published_at ?? null,
     approvedBy: "approved_by" in dto ? [...dto.approved_by] : [],
     highImpact: dto.high_impact,
+    closed: dto.closed ?? false,
     stored: {
       specification: { ...dto.specification },
       obligationTemplate: { ...dto.obligation_template },

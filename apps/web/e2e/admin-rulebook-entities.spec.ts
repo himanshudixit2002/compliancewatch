@@ -6,9 +6,9 @@ import { rulebookGet } from "./rulebook-helpers";
 
 /**
  * The resolve tool and an entity's page against the rulebook the stack runs. A fresh stack holds
- * no canonical entity (one is created only when an analyst decides a review group, which the web
- * app does not offer yet), so the names below resolve as the rulebook says (the specs compare
- * each answer with the service's) and an entity's page is opened when one resolves.
+ * no canonical entity (one is created only when an analyst decides a review group, as the entity
+ * review spec does for names of its own), so the names below resolve as the rulebook says (the
+ * specs compare each answer with the service's) and an entity's page is opened when one resolves.
  */
 const TOOL = "/admin/rulebook/entities/canonical";
 

@@ -36,7 +36,7 @@ describe("NotAvailablePage", () => {
 
   it("says a ready tool's backend is on main, lists what it will use and keeps its preview slot", () => {
     const ready = {
-      ...screenById("admin.llm.prompts"),
+      ...screenById("admin.evals.run"),
       awaitsFiles: [{ path: "packages/example/registry.json", owner: "plan-a" as const }],
       preview: "ExamplePreview",
     };
@@ -46,7 +46,7 @@ describe("NotAvailablePage", () => {
     expect(screen.getByText(/The backend for this screen is on main/)).toBeDefined();
     expect(screen.getByText("It will use:")).toBeDefined();
     expect(screen.getByText("file packages/example/registry.json")).toBeDefined();
-    expect(screen.getByText("GET /v1/llm-gateway/prompts")).toBeDefined();
+    expect(screen.getByText("GET /v1/eval/runs/{run_id}")).toBeDefined();
     expect(screen.queryByText("This screen waits for:")).toBeNull();
     // A preview named in the registry but not registered renders nothing.
     expect(container.querySelector("[data-slot='preview']")).toBeNull();

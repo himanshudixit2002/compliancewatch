@@ -276,7 +276,7 @@
       "type": "bool",
       "default": false,
       "owner": "regulatory-intelligence",
-      "description": "Entity and relation decisions from /admin through the web app's server-side rulebook write token. Off, the admin forms say which flag holds them back.",
+      "description": "Entity and relation decisions from /admin, sent with the web app's server-side rulebook review token. Off, the admin forms say which flag holds them back.",
       "removal": "When the rulebook write routes take a bearer token and no shared token remains.",
       "expires": "2027-03-31",
       "targeting": "none",

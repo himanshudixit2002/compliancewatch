@@ -146,27 +146,27 @@ describe("awaits audit", () => {
 
   it("lists the ready entries as ready with what they will use", () => {
     const ready = readyEntries();
-    expect(ready.map((row) => row.screenId)).toContain("admin.llm.prompts");
-    expect(ready.find((row) => row.screenId === "admin.llm.prompts")?.items).toEqual([
-      "GET /v1/llm-gateway/prompts",
+    expect(ready.map((row) => row.screenId)).toContain("admin.evals.run");
+    expect(ready.find((row) => row.screenId === "admin.evals.run")?.items).toEqual([
+      "GET /v1/eval/runs/{run_id}",
     ]);
-    const prompts = screenById("admin.llm.prompts");
+    const run = screenById("admin.evals.run");
     const withFile: Screen = {
-      ...prompts,
+      ...run,
       awaitsFiles: [{ path: "packages/example/registry.json", owner: "plan-a", ref: "WP12" }],
     };
     const withAwait: Screen = {
-      ...prompts,
+      ...run,
       uses: [{ service: "profile", method: "GET", path: "/v1/ontology" }],
       awaits: [{ service: "profile", method: "GET", path: "/v1/ontology", owner: "plan-a" }],
     };
     expect(readyEntries([withAwait, screenById("admin.error-reports")])).toEqual([
-      { screenId: "admin.llm.prompts", items: ["GET /v1/ontology"] },
+      { screenId: "admin.evals.run", items: ["GET /v1/ontology"] },
     ]);
     const text = renderAudit([], readyEntries([withFile]));
     expect(text).toContain("1 entries are ready");
     expect(text).toContain(
-      "  admin.llm.prompts ready: file packages/example/registry.json; GET /v1/llm-gateway/prompts",
+      "  admin.evals.run ready: file packages/example/registry.json; GET /v1/eval/runs/{run_id}",
     );
   });
 });

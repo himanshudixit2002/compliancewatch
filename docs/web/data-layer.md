@@ -58,6 +58,12 @@ import type { profile } from "@compliancewatch/contracts/openapi";
 type Snapshot = profile.components["schemas"]["SnapshotOut"];
 ```
 
+A list of a spec enum's values (the gateway's features, a candidate's statuses, the entity types)
+is written as `membersOf<Union>({ value: true, ... })` from `shared/lib/union.ts`: the record is
+checked against the generated union both ways, so a value a service adds breaks the build in the
+entity's `types.ts` instead of going missing from a filter, a form or a page. A list that is a
+subset on purpose (the relations that only point at a version) stays `as const satisfies`.
+
 `pipeline` has no committed spec, so the app has no client for it; a screen that needs one of
 its routes is a waiting entry in the registry until the spec lands. There is no hand-written or
 untyped client.
@@ -106,9 +112,11 @@ Every request carries:
   value or the error, and `ErrorState` shows it.
 - `accept: application/json`.
 - `x-tenant-id`: `ctx.tenantId ?? ctx.session?.tenantId` on the tenant-scoped services, and
-  nothing when neither is set. The `tenantId` override is the only way a request acts for a
-  tenant other than the session's, and only admin lookups use it: the notification console reads
-  the tenant its lookup names ([admin-tools.md](admin-tools.md)).
+  nothing when neither is set (a factory built with `session: null`, as the ontology read and the
+  LLM gateway pages build theirs). The `tenantId` override is the only way a request acts for a
+  tenant other than the session's, and only admin lookups use it: the notification console, the
+  decision review and the profile review task lookup read the tenant their lookup names
+  ([admin-tools.md](admin-tools.md)).
 - The time limit: `AbortSignal.timeout(CW_WEB_REQUEST_TIMEOUT_MS)`, combined with the request's
   own signal.
 
@@ -238,7 +246,7 @@ Tenant data is never cached; a handful of records every tenant sees the same way
 | a rulebook document                                           | `cachedRead([tags.rulebook.document(id)])`          | `rulebook:document:<id>`                                                              |
 | a rulebook clause                                             | `cachedRead([tags.rulebook.clause(id)])`            | `rulebook:clause:<id>`                                                                |
 | rule versions, citations, relations, entities                 | `uncachedRead()`                                    | none: versions move through review outside this server, and an action renders the page again |
-| the entity and relation review queues                         | `cachedRead([tags.rulebook.reviewEntities()])`, ... | `rulebook:review-entities`, `rulebook:review-relations`                               |
+| the entity and relation review queues                         | `uncachedRead()`                                    | none: the pipeline fills them and decisions empty them outside this server (D-036, D-055) |
 | notification templates                                        | `cachedRead([tags.notification.templates()])`       | `notification:templates`                                                              |
 | the ontology (`server/ontology.ts`)                           | `cachedRead([tags.profile.ontology()], 3600)`       | `profile:ontology`                                                                    |
 | gateway prompts and models                                    | `cachedRead([tags.llm.prompts()])`, ...             | `llm-gateway:prompts`, `llm-gateway:models`                                           |
@@ -517,6 +525,39 @@ actions check the role before any request (`admin.fan_outs.control`, `admin.deci
 `admin.impact`; D-049), since the engine trusts a caller without a token in `header` mode.
 [admin-tools.md](admin-tools.md) and [obligation-pages.md](obligation-pages.md) have the pages.
 
+## Review queues, rules, the LLM gateway and the system page
+
+`features/entity-review/gateway.ts` reads the open entity groups (`GET /v1/rulebook/review/entities`
+with `entity_type`, `limit` and the `after_type` and `after_name` keyset) and one group's open
+mentions (`GET .../review/entities/items` with `entity_type` and `proposed_name`, an empty name
+included); `features/relation-review/gateway.ts` reads the relation candidates
+(`GET /v1/rulebook/review/relations` with `status`, `document_id`, `limit` and `after`), the
+evidence clause (cached under its tag), the rules (cached under `rulebook:rules`) and each rule's
+versions. All of them go over `rulebookClient` with no tenant header and no token, and the queues and
+versions are read fresh. A candidate is read by its id through the list: `after` set to the id
+minus one and `limit=1`, once per status until it turns up (D-055). The decisions (`decideEntityGroup`,
+`approveCandidate`, `rejectCandidate`) are server actions that check the form's shape, then go
+through `rulebookWrites(ctx)` in `server/api/rulebook-write.ts`, which checks the role,
+`web.admin_rulebook_writes` and the review token, sends `decided_by` from the session, and on success
+render the queue and the page again (`afterMutation({ paths })`). The routes take no
+Idempotency-Key: a repeat is refused as a decided group or candidate (409), so a decision sent again
+after its answer was lost would read as a failure although it was recorded. On that 409 the action
+reads the group's open mentions or the candidate again, and when they confirm it (none of the
+included mentions open, the candidate no longer open), renders the page again and answers "already
+decided" as information: by whom and how for a candidate, without a name for a group, whose read
+lists open mentions only. A read that fails passes the refusal on.
+`features/rulebook-rules/gateway.ts` reads the cached rule list. `features/llm-registry/gateway.ts`
+reads the gateway's prompts and model routes (cached under `llm-gateway:prompts` and
+`llm-gateway:models`) and its usage (fresh, the tenant in the `tenant_id` query only), over
+`llmGatewayClient({ session: null })` so no `x-tenant-id` goes out (D-056).
+`features/profile-review-tasks/gateway.ts` reads a node, its open review tasks and its snapshot
+over `profileClient` with the looked-up tenant as `ClientContext.tenantId`, uncached.
+`features/system/queries.ts` probes `/health` and `/ready` of every service through
+`server/health.ts` (two seconds each, never throwing) and reads the web server's own settings as
+facts (a token only as set or not). `server/telemetry.ts` decides at startup whether OpenTelemetry
+registers and exports, and `server/telemetry-redaction.ts` takes every query and personal value
+out of a span's URLs before export (D-057).
+
 ## Rule versions, citations and the publish workflow
 
 `features/rule-versions/gateway.ts` reads the rulebook's rules (`GET /v1/rulebook/rules`), each
@@ -683,7 +724,8 @@ from `.env` or the placeholders `local-write-token` and `local-review-token`, as
 passes them (D-020, D-042). On the memory store the rulebook starts with the seed calendar's
 draft rule versions (`CW_RULEBOOK_SEED_ON_START`, honoured in local and test only), every one
 needing review; with `STORE=postgres`, `make seed SERVICE=rulebook` writes them. `make web-e2e`
-gives the web app the same two tokens and the e2e config turns `web.publish_actions` on.
+gives the web app the same two tokens and the e2e config turns `web.publish_actions`,
+`web.admin_rulebook_writes` and `web.qa_enabled` on.
 `make web-stack-wait` waits for every `/health`; `make web-stack-down` stops them, and the
 memory stores forget their rows (the rule versions an e2e run moved included).
 

@@ -898,3 +898,77 @@ and `@eslint/js` ranges, the root `eslint.config.mjs`'s two comments that name E
 looks the config up from the cwd; ESLint 10 looks it up from each file's directory) and a lint run.
 Vitest 5 is its own change, and TypeScript 7 waits until typescript-eslint and openapi-typescript
 run on it.
+
+## D-055: The review queues are read fresh, a group is named in the query, a candidate is read through the list
+
+2026-10-07. The entity review and the relation candidate screens were registered ready with the
+routes the rulebook serves, and three of their questions had no route to answer them directly. The
+queues change outside this server (the pipeline fills them, analysts empty them), so both are read
+on every visit like the admin home's counts (D-036), and the two cache tags the data layer had kept
+for them, which nothing read, were removed. A group is an (entity type, proposed name) pair, and a
+proposed name can hold a slash, `@`, parentheses and spaces, or be empty, so its page takes the pair
+in the query (`?type=&name=`, the name kept even when empty) rather than a path segment, and the
+queue's keyset travels the same way (`after_type`, `after_name`). No route reads one relation
+candidate, and re-finding it in a filtered page of 200 would miss it on a busy document. The list is
+in id order and `after` is exclusive, so the page asks for one candidate after the id just before
+this one (the UUID minus one, computed with bigint), in the status the queue listed it in first and
+then the other two, and the row is the candidate when its id matches; an id no status holds is the
+not-found page. Each list asks for one row more than it shows, to know whether a next page exists
+without a count. The decision forms mirror the rulebook's shape rules before they send anything: a
+group whose name cannot name an entity (empty, or a section or rule without its statute) cannot make
+one and must name its mentions, and an approval needs the affected version for the relations that
+only point at a version and for a candidate naming its rule; the rulebook still decides. Both
+decision panels stay on the page after the decision, so the rulebook's answer is still there while
+the page renders again without the decided mentions or with the candidate's new status.
+Consequences: a candidate's page costs up to three list reads, plus every rule's versions while an
+open candidate may be decided (the drafts it can start from); when the rulebook adds a read by id,
+the page uses it and the keyset lookup goes.
+
+## D-056: The LLM gateway pages read without a tenant header and show money to every place the ledger keeps
+
+2026-10-07. The gateway's prompts, model routes and usage belong to no tenant, and the usage route
+falls back to the `x-tenant-id` header when its query names no tenant: built the usual way, with the
+session's tenant, a feature's budget would have come back as the internal tenant's spend. The
+pages build the gateway's client with `session: null`, so no header goes out, and name a tenant only
+in the `tenant_id` query. The registries are cached five minutes under their tags; usage is read
+fresh. By default the usage page shows every feature's budget for the month (six reads), since that
+is what an operator checks first. The ledger keeps fractions of a paisa, so spend and budgets are
+shown from the decimal text with every place it has (`formatDecimalRupees`, en-IN grouping through
+bigint), and the share spent is computed from the ratio's text without floats (`ratioPercent`).
+Nothing on these pages edits: the planned entry `admin.llm.edit-controls` waits for prompt and route
+write routes nobody has scheduled, both pages say so from that entry, and the budgets are the
+gateway's settings. Consequences: when the write routes land, the edit controls are their own change
+on these pages.
+
+## D-057: The system page probes readiness too, and OpenTelemetry registers behind its flag with no exporter unless configured
+
+2026-10-07. The system page reuses the admin home's probe for `/health` and adds `/ready` beside it
+(`probeReady` in `server/health.ts`: ready with each check on a 200, not ready with the failing
+checks on a 503, down for anything else), twenty probes in parallel with two seconds each, so a
+stopped service is a row that says why. It reads what the screen registry says about each service
+(the built screens that call it, the routes still awaited from it) and the web server's own settings,
+where a token is only said to be set. `@vercel/otel` 2.1.3 registers in `instrumentation.ts` on the
+Node.js runtime when `web.otel_enabled` is on (registered off, owned by platform), loaded only then.
+Its default span processor exports to `localhost:4318` whether or not a collector listens there, so
+the web server passes an empty processor list unless `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set (OTLP over HTTP; protocol and headers from the standard OTLP
+variables). The addresses the server calls carry personal data (a notification preference's
+WhatsApp number or email is a path segment, and the business search sends what was typed in `q=`),
+and the fetch instrumentation names each span `fetch GET <full URL>` and copies the URL into
+`http.url` and `resource.name`, so a redacting span processor (`server/telemetry-redaction.ts`) runs
+ahead of the exporting ones: every URL and absolute path in a span's name, attributes, events and
+status loses its query, fragment and user; the recipient segment of the preference route becomes
+`{recipient}`; any other segment, or value inside a text, that is an email, a phone number, a PAN or
+a GSTIN becomes `{email}`, `{phone}`, `{pan}` or `{gstin}`. It rewrites at the start through the
+span's API, and again at the end on the finished record, for a name or an attribute set later
+(Next.js names its request span by its route late, and @vercel/otel adds `resource.name` at the
+end). Generic patterns plus the known route were chosen over the instrumentation's `ignoreUrls`,
+which would drop the very spans an operator traces a slow page by. Its seven OpenTelemetry peers are
+pinned in `apps/web` at the newest releases more than a day old (`@opentelemetry/api` 1.9.1 already
+was), and none has an install script. A failed registration logs one line and never stops the
+server. What registration did is kept on `globalThis` (the instrumentation bundle and the pages'
+bundle each have their own copy of the module, in one process), and the system page shows that
+rather than reading the flag again, which would show a state that never registered. Consequences:
+with the flag on and no endpoint, spans (Next.js's own, the fetch instrumentation and the product
+events) stay in the process; turning export on is two variables; a new route that names a person
+in its path joins `PERSONAL_ROUTES` with a test.

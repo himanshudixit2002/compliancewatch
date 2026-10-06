@@ -128,6 +128,12 @@ describe("ruleVersionFromDto", () => {
     expect(version.stored.recurrence).toBeNull();
     expect(ruleVersionFromDto(ruleVersionDto()).approvedBy).toEqual([]);
   });
+
+  it("reads a draft whose rule candidate was rejected as closed, and a missing flag as open", () => {
+    expect(ruleVersionFromDto(ruleVersionDto({ closed: true })).closed).toBe(true);
+    expect("closed" in ruleVersionDto()).toBe(false);
+    expect(ruleVersionFromDto(ruleVersionDto()).closed).toBe(false);
+  });
 });
 
 describe("specificationFromMapping", () => {

@@ -16,7 +16,8 @@ test.describe("sitemap", () => {
       "Waiting for a backend",
     );
     await expect(page.locator("[data-screen='system.sitemap']")).toContainText("Available");
-    await expect(page.locator("[data-screen='admin.system']")).toContainText("Ready to build");
+    await expect(page.locator("[data-screen='admin.system']")).toContainText("Available");
+    await expect(page.locator("[data-screen='admin.evals.run']")).toContainText("Ready to build");
     await expect(page.locator("[data-screen='admin.flags']")).toContainText("Available");
     await checkA11y();
   });

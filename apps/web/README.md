@@ -32,7 +32,11 @@ src/app/            route files only: page.tsx is gate, query, render; layouts, 
                     (the browser), notifications (the console by tenant and business, a notification,
                     the message templates), decisions (the review queue by tenant), fan-outs (the runs
                     and a version's run with the hold, the controls and the rollback), impact (the dry
-                    run); [...slug] serves unbuilt tools
+                    run), rulebook/entities and its group page (the entity review and its decisions),
+                    rulebook/relations and [candidateId] (the relation candidates, approve and reject),
+                    rulebook/rules, llm/prompts, llm/models and llm/usage (the gateway's registries and
+                    spend), profiles/review-tasks (the lookup), system (the services' health and
+                    readiness); [...slug] serves unbuilt tools
   sign-out/         POST handler: clears the session cookie and returns to /sign-in (GET is a 405)
   api/health/       liveness handler {status, version, commit}
 src/features/       one directory per screen family: model/, ui/, index.ts (ports, gateway, queries and
@@ -63,7 +67,10 @@ src/features/       one directory per screen family: model/, ui/, index.ts (port
                     engine's runs and the global hold, a run's pause, resume and cancel, the rollback
                     through the rulebook's withdraw), decision-review (one tenant's review items and
                     settling one), impact-explorer (the admin's dry run), change-impact (a CA firm's
-                    affected clients and the bulk change card with its key); and the parked
+                    affected clients and the bulk change card with its key), entity-review and
+                    relation-review (the review queues and their decisions through
+                    server/api/rulebook-write.ts), rulebook-rules, llm-registry, profile-review-tasks
+                    and system (the probes, the registry's view, the web server's facts); and the parked
                     folders of screens not built yet, which no page imports (docs/web/architecture.md,
                     "Parked feature folders")
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
@@ -74,7 +81,8 @@ src/entities/       pure domain types and DTO-to-view mappers (no React, no fetc
                     business/ a business, its registrations and nodes, stored values, onboarding, prefill,
                     review tasks and snapshots, with the mappers both ways; consent/ consent records,
                     states and purposes; notification/ a channel preference, recipients, the notification history and a bulk change card; rulebook/ documents,
-                    decisions, entities, relations, clauses and search hits; rule-version/ rules, rule
+                    the review queues and decisions, entities, relations, clauses and search hits; llm/
+                    the gateway's prompts, model routes and usage; rule-version/ rules, rule
                     versions with their condition tree, citations and a step's lifecycle; obligation/
                     obligations with their rule's facts, citations, history and comments; applicability/
                     decisions, a change's impact, review items, fan-out runs, the global hold and dry runs;
@@ -109,6 +117,8 @@ src/server/         server-only modules; every file starts with `import "server-
                     override variables (CW_WEB_FLAG_<NAME>) count in local and test only
                     analytics.ts: track(), a product event as a JSON line and a span event, only while
                     web.analytics_enabled is on and the person's analytics consent is current
+                    telemetry.ts: OpenTelemetry behind web.otel_enabled, decided once when the server starts;
+                    telemetry-redaction.ts: no query and no personal value in an exported span
 src/shared/config/  the screen registry (screens.ts), roles and permissions, flags, navigation, the legal doc list
 src/shared/lib/     IST dates, financial years, money and decimal strings, humanise, identifiers, pagination, urls,
                     action-state (what a server action returns to a form)

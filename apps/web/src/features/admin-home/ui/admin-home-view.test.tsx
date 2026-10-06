@@ -48,7 +48,8 @@ describe("AdminHomeView", () => {
     expect(task?.textContent).toContain("services/rulebook/README.md");
     expect(task?.textContent).toContain("+");
     const system = container.querySelector("[data-tool='admin.system']");
-    expect(system?.textContent).toContain("Ready to build");
+    expect(system?.textContent).toContain("Available");
+    expect(screen.getByRole("link", { name: "System" }).getAttribute("href")).toBe("/admin/system");
     const flags = container.querySelector("[data-tool='admin.flags']");
     expect(flags?.textContent).toContain("Available");
     const sources = container.querySelector("[data-tool='admin.sources']");

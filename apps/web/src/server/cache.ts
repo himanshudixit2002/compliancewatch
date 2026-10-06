@@ -6,8 +6,9 @@ import { revalidatePath, updateTag } from "next/cache";
  * What the data layer caches, and how a mutation invalidates it.
  *
  * Only global reads are cached: records every tenant sees the same way (billing plans,
- * notification templates, the ontology, rulebook rules and documents, the review queues, the
- * gateway's prompts and models). A gateway passes `cachedRead(tags)` as the call's fetch
+ * notification templates, the ontology, rulebook rules, documents and clauses, the gateway's
+ * prompts and models). The review queues are global too but read fresh: the pipeline fills them
+ * and analysts empty them outside this server (D-036). A gateway passes `cachedRead(tags)` as the call's fetch
  * options and Next keeps the response for `GLOBAL_REVALIDATE_SECONDS` (or the read's own
  * lifetime) under those tags. A tenant read passes
  * `uncachedRead()` (`cache: "no-store"`): profile nodes, consents, obligations and everything
@@ -74,10 +75,6 @@ export const tags = {
     document: (documentId: string) => cacheTag("rulebook", "document", documentId),
     /** GET /v1/rulebook/clauses/{clause_id}: a clause never changes under its id */
     clause: (clauseId: string) => cacheTag("rulebook", "clause", clauseId),
-    /** GET /v1/rulebook/review/entities and its items */
-    reviewEntities: () => cacheTag("rulebook", "review-entities"),
-    /** GET /v1/rulebook/review/relations */
-    reviewRelations: () => cacheTag("rulebook", "review-relations"),
   },
   notification: {
     /** GET /v1/notification/templates */

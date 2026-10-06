@@ -41,3 +41,30 @@ export function compareAmounts(a: string, b: string): -1 | 0 | 1 {
 export function isAmount(value: string): boolean {
   return DECIMAL.test(value.trim());
 }
+
+/** Decimal text of any precision: "0.0012", "20000", "-3.5". */
+const DECIMAL_TEXT = /^(-)?(\d+)(?:\.(\d+))?$/;
+
+export function isDecimalText(value: string): boolean {
+  return DECIMAL_TEXT.test(value.trim());
+}
+
+/**
+ * A share written as decimal text ("0.061700") as a percentage with `places` decimals, rounded
+ * half up with bigint arithmetic: "0.061700" is "6.17", "0.000060" is "0.01", "1.2" is "120.00".
+ * Malformed text throws.
+ */
+export function ratioPercent(ratio: string, places = 2): string {
+  const match = DECIMAL_TEXT.exec(ratio.trim());
+  if (match === null) throw new Error(`not a decimal: ${ratio}`);
+  const [, sign, whole, fraction = ""] = match;
+  // The ratio in units of 10^-(places + 2), with one more digit to round on.
+  const digits = places + 3;
+  const scaled = BigInt(`${whole}${fraction.padEnd(digits, "0").slice(0, digits)}`);
+  const rounded = (scaled + 5n) / 10n;
+  const factor = 10n ** BigInt(places);
+  const integer = rounded / factor;
+  const rest = (rounded % factor).toString().padStart(places, "0");
+  const negative = sign === "-" && rounded !== 0n;
+  return `${negative ? "-" : ""}${integer}${places > 0 ? `.${rest}` : ""}`;
+}

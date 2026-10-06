@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { documentDto } from "@/test/rulebook-fixture";
+import { documentDto, mentionGroupDto, reviewItemDto } from "@/test/rulebook-fixture";
 import {
   approvalToDto,
   approvedFromDto,
@@ -9,11 +9,13 @@ import {
   entityDecidedFromDto,
   entityDecisionToDto,
   entityFromDto,
+  mentionGroupFromDto,
   mentionedClauseFromDto,
   rejectionToDto,
   relationCandidateFromDto,
   relationFromDto,
   resolutionFromDto,
+  reviewItemFromDto,
   searchHitFromDto,
   searchToDto,
 } from "./mappers";
@@ -297,5 +299,32 @@ describe("the search mappers", () => {
       citedBy: ["00000000-0000-4000-8000-0000000000f1"],
       outOfForce: false,
     });
+  });
+});
+
+describe("the review queue mappers", () => {
+  it("maps a mention group with its examples", () => {
+    expect(mentionGroupFromDto(mentionGroupDto())).toEqual({
+      entityType: "form",
+      proposedName: "EXAMPLE-1",
+      openCount: 2,
+      examples: [
+        {
+          reviewId: "00000000-0000-4000-8000-0000000000a7",
+          documentId: "00000000-0000-0000-0000-00000000d0c1",
+          clauseId: "00000000-0000-5000-8000-0000000000c2",
+          mentionText: "Example clause",
+          spanStart: 0,
+          spanEnd: 14,
+          reason: "no_match",
+        },
+      ],
+    });
+  });
+
+  it("keeps a review reason this app does not know as sent", () => {
+    expect(reviewItemFromDto(reviewItemDto({ reason: "example_reason" })).reason).toBe(
+      "example_reason",
+    );
   });
 });

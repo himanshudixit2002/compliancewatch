@@ -6,8 +6,9 @@ import { defineConfig, devices } from "@playwright/test";
  * the specs can sign in through the form, and with a fixed session secret (32 bytes of "e2e",
  * not a secret: it only keys the cookies of this run). The app gets the rulebook's two
  * placeholder tokens `make web-stack` gives the rulebook (unless the environment names others),
- * and the web.publish_actions and web.qa_enabled flags on (their overrides count in local and
- * test only), so the rule version specs can cite, submit, approve and return drafts and the ask
+ * and the web.publish_actions, web.admin_rulebook_writes and web.qa_enabled flags on (their
+ * overrides count in local and test only), so the rule version specs can cite, submit, approve and
+ * return drafts, the review specs can decide entity groups and relation candidates, and the ask
  * specs can ask.
  *
  * Two projects:
@@ -79,6 +80,7 @@ export default defineConfig({
       CW_WEB_RULEBOOK_REVIEW_TOKEN:
         process.env.CW_WEB_RULEBOOK_REVIEW_TOKEN ?? "local-review-token",
       CW_WEB_FLAG_PUBLISH_ACTIONS: process.env.CW_WEB_FLAG_PUBLISH_ACTIONS ?? "true",
+      CW_WEB_FLAG_ADMIN_RULEBOOK_WRITES: process.env.CW_WEB_FLAG_ADMIN_RULEBOOK_WRITES ?? "true",
       CW_WEB_FLAG_QA_ENABLED: process.env.CW_WEB_FLAG_QA_ENABLED ?? "true",
       ...productServiceUrls(),
     },

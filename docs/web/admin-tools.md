@@ -10,10 +10,11 @@ The admin layout runs `requireAdmin()` before anything renders, so a tenant role
 404 with no admin markup; each page calls its gate again on its first line
 (`requireScreenSession`), and a regulatory role a tool's entry does not list gets the not-found
 page as well ([auth-and-roles.md](auth-and-roles.md)). The flags, ontology, notification,
-template, rulebook, decision review, fan-out and impact pages each have a sibling `loading.tsx`
-with a skeleton (the console's sits in the route group `(console)`, the rule version list's and
-the fan-out list's in `(list)` and the resolve tool's in `(resolve)`, so each wraps that page
-alone, as the home's sits in `(home)`); under one, a
+template, rulebook, review queue, decision review, fan-out, impact, LLM gateway, review task and
+system pages each have a sibling `loading.tsx` with a skeleton (the console's sits in the route
+group `(console)`, the rule version list's and the fan-out list's in `(list)`, the resolve tool's
+in `(resolve)` and the two review queues' in `(queue)`, so each wraps that page alone, as the
+home's sits in `(home)`); under one, a
 not-found answer (an unknown id, a regulatory role the tool does not list) is streamed with status
 200 and a `noindex` tag rather than a 404 status, as on the business pages (D-029 in
 [decisions.md](decisions.md)). A tenant role still gets the real 404 from the layout's gate. The
@@ -33,10 +34,20 @@ document tool has no loading boundary, so its unknown ids stay real 404s (D-037)
 | Canonical entity    | `/admin/rulebook/entities/canonical/[id]`| every regulatory role   | the entity, the clauses that mention it, the relations to it and their versions |
 | Clause search       | `/admin/rulebook/search`                 | every regulatory role   | `POST /v1/rulebook/search` (the words posted, never in the address)   |
 | Relations graph     | `/admin/rulebook/relations/graph`        | every regulatory role   | `GET /v1/rulebook/relations` and each version it reaches              |
+| Entity review       | `/admin/rulebook/entities`               | every regulatory role   | `GET /v1/rulebook/review/entities`                                    |
+| Entity group        | `/admin/rulebook/entities/group?type=&name=` | every regulatory role reads and decides | `GET /v1/rulebook/review/entities/items`; `POST .../review/entities/decisions` through `server/api/rulebook-write.ts`, behind `web.admin_rulebook_writes` |
+| Relation candidates | `/admin/rulebook/relations`              | every regulatory role   | `GET /v1/rulebook/review/relations`                                   |
+| Relation candidate  | `/admin/rulebook/relations/[candidateId]`| every regulatory role reads and decides | the list's keyset for the candidate, its evidence clause, the rules and their versions; `POST .../{candidate_id}/approve` and `/reject` through `server/api/rulebook-write.ts`, behind `web.admin_rulebook_writes` |
+| Rules               | `/admin/rulebook/rules`                  | every regulatory role   | `GET /v1/rulebook/rules` (cached five minutes)                        |
 | Decision review     | `/admin/decisions`                       | every regulatory role reads; a reviewer or an admin settles | `GET /v1/applicability-engine/review-items`, `POST .../{item_id}/resolve`, for the tenant looked up; each version from the rulebook |
 | Fan-outs            | `/admin/fan-outs`                        | every regulatory role reads; an admin holds | `GET /v1/applicability-engine/fan-outs`, `GET` and `PUT .../fan-out-hold`; each version from the rulebook |
 | Fan-out control     | `/admin/fan-outs/[ruleVersionId]`        | every regulatory role reads; an admin controls | the run, the hold, `POST .../fan-outs/{id}/pause`, `/resume`, `/cancel`; the version and its withdraw (`server/api/rulebook-write.ts`, `web.publish_actions`) |
 | Impact explorer     | `/admin/impact`                          | `admin`                 | `POST /v1/applicability-engine/dry-runs`; the ontology for the attributes |
+| Prompts             | `/admin/llm/prompts`                     | every regulatory role   | `GET /v1/llm-gateway/prompts` (cached five minutes, no tenant header) |
+| Model routes        | `/admin/llm/models`                      | every regulatory role   | `GET /v1/llm-gateway/models` (cached five minutes, no tenant header)  |
+| Usage and budgets   | `/admin/llm/usage`                       | every regulatory role   | `GET /v1/llm-gateway/usage` (no tenant header), once per feature or once for the question asked |
+| Profile review tasks| `/admin/profiles/review-tasks`           | every regulatory role   | `GET /v1/profile/nodes/{node_id}`, `.../review-tasks`, `.../snapshot`, for the tenant looked up; the ontology |
+| System              | `/admin/system`                          | every regulatory role   | `GET /health` and `GET /ready` of every service; the screen registry; the web server's settings |
 
 ## Internal tools: `/admin`
 
@@ -241,6 +252,107 @@ from assistive technology; a table beside it lists the same relations with their
 evidence. No graph library is used (D-044). An id the rulebook does not hold is answered on the
 form's field.
 
+## Entity review: `/admin/rulebook/entities`
+
+The mentions the rulebook's alignment could not settle by itself, one row per (entity type,
+proposed name) group, in the rulebook's order (by type, then name), 25 to a page: the name (a
+link to the group's page), the type, how many mentions are open and the first of them with why it
+is open (no entity has the name, several share it as an alias, the mention names nothing, a section
+or rule lacks its statute) and a link marking it in its document. A GET form chooses one type; the
+pages continue after the last group shown (`after_type` and `after_name`, an empty name included),
+so a page has its own address. The queue is read fresh on every visit, as the admin home reads it
+(D-036): the pipeline fills it and decisions empty it outside this server (D-055). An empty page
+says why in its own words: nothing waits at all, nothing of the chosen type (with the way to every
+type), or nothing after the previous page, where the first page is always offered.
+
+## Entity group: `/admin/rulebook/entities/group?type=&name=`
+
+One group, named by the query rather than a path segment: a proposed name may hold a slash
+(`01/2000-example`), `@` and spaces, and an empty name is a group too (D-055). The page shows the
+type, the name and how many mentions are open, every open mention with why it is open and a link
+marking it in its document, a link asking the canonical entities tool how the name resolves today,
+and the decision. The rulebook lists at most 200 open mentions of a group, so a list of 200 is
+counted as "200 or more (the first 200 listed)" in the facts, the table's caption, the line saying
+what the decision covers and the dialog: a decision over the whole group covers every open mention,
+listed or not, and the page never states a count it does not know.
+
+- **Make the entity**: the rulebook makes the canonical entity with the proposed name (or finds the
+  one that has it) and aligns the mentions to it; **Add the name to an entity**: the name becomes
+  another name of an existing entity of the type, named by its id (the resolve tool finds the id);
+  **Reject the mentions**: they close as rejected with one of the rulebook's reasons (not an
+  entity, the wrong type, a slip in the source text, out of scope).
+- The decision covers the mentions the analyst includes, or every open mention when none is
+  included. A name that cannot name an entity (empty, or a section or rule without its statute)
+  cannot make one and is decided by its mentions, as the rulebook's own rule says; the form says so
+  and the action checks it again.
+- An optional note (at most 2000 characters), then a dialog that says what the rulebook records:
+  on each decided mention the decision, the signed-in user as `decided_by` (filled by
+  `server/api/rulebook-write.ts`, never a form field), the note and the time; making an entity or
+  adding a name also points the relation candidates that name it at the entity. Nothing else is
+  written.
+- The panel then shows the rulebook's answer (the status, how the name was resolved, the entity
+  with a link to its page, the mentions closed and the candidates updated) and stays on the page
+  when the last mention is decided, beside the empty state. A refusal (an entity of another type,
+  a name that is not canonical) is shown with the rulebook's problem. Mentions decided before the
+  decision arrived (often the analyst's own decision, sent again after its answer was lost: the
+  route takes no Idempotency-Key) are information, not an error: the group is read again, the
+  page renders with what is open now, and the panel says they were already decided. Who decided
+  them is not shown, since the group read lists open mentions only.
+- The decision is offered only with `web.admin_rulebook_writes` on for the session's tenant and
+  `CW_WEB_RULEBOOK_REVIEW_TOKEN` set; otherwise the page names the flag or the variable and lists
+  the mentions read-only. Without a group in the address the page says how to open one.
+
+## Relation candidates: `/admin/rulebook/relations`
+
+What the pipeline proposed each document says about a rule or an entity (a deadline extended, a
+version superseded), in the rulebook's id order, 25 to a page with the route's `after` cursor.
+Status chips choose open (the default), approved or rejected; a GET form narrows the list to one
+document by its id. A row shows the relation (a link to the candidate's page, which carries the
+status it was listed in), the period and new due date of a deadline, the target with whether it is
+aligned to an entity and the rule key it names, the evidence quote with a link marking its clause
+in the document, the quote match and the confidence as percentages, whether the pipeline flagged it
+and the issues it raised, and the status. Read fresh on every visit. An empty page says which case
+it is: nothing in the status, nothing in the status for the document named, or nothing after the
+previous page, where the first page is always offered.
+
+## Relation candidate: `/admin/rulebook/relations/[candidateId]`
+
+One candidate. No route reads a candidate by its id, so the page reads it through the list's
+keyset: one row after the id just before it, in the status the address names first and then the
+others (D-055); an id no status holds is the not-found page. The page shows the facts (the status,
+the relation, the target with its alignment, linking the entity or its review group, the rule key,
+the deadline, the scores, the model and prompt that proposed it, who decided it and why it was
+rejected), the issues the pipeline flagged, and the evidence clause (read from
+`GET /v1/rulebook/clauses/{id}`, cached under its tag) with the quote marked where the clause holds
+it word for word, else the quote alone.
+
+- **Approve** writes a rule relation from a draft version: the form offers the drafts that are not
+  closed (a closed draft's rule candidate was rejected, so it never moves on), read from every
+  rule's versions, and the version it points at: required for the relations that only point at a
+  version (supersedes, extends a deadline, corrects, withdraws) and for a candidate that names its
+  target rule (whose versions are offered then), optional otherwise, when the relation points at the
+  aligned entity. The dialog names both versions.
+- **Reject** takes one of the rulebook's reasons (the wrong kind, the wrong target, not in the
+  text, a duplicate, out of scope).
+- Both take an optional note and record the signed-in user as `decided_by`. The panel shows the
+  answer (the rule relation written, with a link to the relations graph around the draft) and stays
+  on the page as the candidate renders again in its new status; every refusal (a draft that is not
+  editable or closed, a target that is not aligned, a supersession cycle) comes with the rulebook's
+  problem. A candidate decided before the decision arrived is read again and shown as information:
+  "already decided", approved or rejected (with the reason), by whom ("you" for the signed-in
+  analyst, whose earlier answer may have been lost), and the page renders in that state. A decided
+  candidate offers nothing. The same flag and token as the entity group apply.
+
+## Rules: `/admin/rulebook/rules`
+
+Every rule the rulebook lists, by key in code point order (the order it pages them in), with the
+regulator, the title of its latest version (a rule whose only drafts are closed is left out by the
+rulebook), its id to copy and a link to all its versions on the rule version list
+(`?status=all&rule=`). A filter typed over the list keeps the rules holding every word in the key,
+the title or the regulator and announces how many are shown. The read is the cached rule list
+(five minutes under `rulebook:rules`, as the admin home counts it). Read-only: a rule arrives with
+its first version.
+
 ## Decision review: `/admin/decisions`
 
 The decisions the applicability engine could not settle by itself, one tenant at a time. The
@@ -306,6 +418,56 @@ results (each by key with the ontology's meaning), and the sample decisions with
 outcome. A scope over the engine's maximum is its 422 `applicability-dry-run-too-large`, shown with
 the way to narrow it; nothing is stored but the engine's audit entry.
 
+## Prompts and model routes: `/admin/llm/prompts`, `/admin/llm/models`
+
+The LLM gateway's prompt registry (each prompt by name and version with its owner, the eval cases
+that guard it, flagged when there are none, the hash of its text to copy and what it is for) and
+its routing table (each feature's primary and fallback model, the providers it may use or must
+offer, the sort, the reasoning effort, the time limit, and whether the route is the default or set
+by the gateway's environment, naming the `CW_LLM_ROUTES__<FEATURE>` variable it reads). Both are
+read without a tenant header (the registries belong to no tenant) and cached five minutes under
+`llm-gateway:prompts` and `llm-gateway:models`. Read-only: both pages say, from the planned registry
+entry `admin.llm.edit-controls`, that edits wait for routes nobody has scheduled (D-056).
+
+## Usage and budgets: `/admin/llm/usage`
+
+Spend against the gateway's monthly budgets. By default the page shows every feature's budget for
+this month (the gateway counts months in UTC), one read per feature; a GET form asks for one
+tenant's budget (a feature then narrows its spend) or one feature's, for a month as `YYYY-MM`. Each
+budget shows the spend and the ceiling in rupees to every place the ledger keeps (a spend of
+`0.0012` is `Rs 0.0012`, never rounded to nothing), the share spent as a bar and a percentage
+computed without floats, whether the gateway raised its alarm, and when the budget starts again. A
+tenant's budget asked with a feature is labelled "Tenant budget, <feature> spend only", with a note
+and "Spent on <feature>": the gateway sums that feature's spend alone against the tenant's whole
+budget, and decides the alarm on that sum. The reads carry no tenant header: the usage route takes
+its tenant from the header when the query names none, which would turn a feature's budget into the
+internal tenant's spend (D-056). Read-only: the budgets are the gateway's settings.
+
+## Profile review tasks: `/admin/profiles/review-tasks`
+
+A lookup, like the notification console: the profile routes act for the tenant in `x-tenant-id`, so a
+GET form takes a tenant id, a node id (a business's legal entity, a registration or a location) and a
+financial year (this one by default), and the gateway is built with that tenant as
+`ClientContext.tenantId`. The page shows the node (its level, key, name, profile version, a link that
+looks up its parent, its id), its open review tasks (the attribute in the ontology's words, why the
+task is open, the year, when it opened) and the snapshot the applicability engine evaluates for the
+year, each value worded by the ontology (shown as stored when the ontology cannot be read). A node
+the tenant does not hold is answered as such. Read-only: a task closes when the attribute is
+answered on the business's own pages, and no route lists a tenant's tasks.
+
+## System: `/admin/system`
+
+Every service as the web server reaches it: `GET /health` (up or down, the version, the time it
+took, the reason it is down) and `GET /ready` (ready or not, each dependency check) of all ten,
+probed in parallel from the server with two seconds each and no tenant header or token
+(`server/health.ts`, the probe the admin home uses), so a stopped service is a row that says so
+and never a failed page; a summary counts the services up and ready. From the screen registry,
+each service's built screens and the routes screens still wait for from it, with who delivers
+them. Then the web server's own facts: the environment, the sign-in provider, the build, Node.js,
+the time limit of a service call, whether each rulebook token is set (never its value), the flag
+provider, and OpenTelemetry as it registered when the server started (off, on with no exporter,
+exporting, or failed; the flag is not read again; D-057). Refresh probes again.
+
 ## What waits
 
 - The usage counts per attribute on the ontology browser: `GET /v1/profile/admin/attribute-usage`
@@ -318,8 +480,12 @@ the way to narrow it; nothing is stored but the engine's audit entry.
 - The approvers of a review round on a fresh visit: the rulebook's version read does not carry them
   yet (the services track adds them to it), so the rule version page shows them from the answer
   to a step.
-- Creating an entity: only an analyst's decision on the entity review queue does it, and those
-  screens are not built, so on a fresh stack every name resolves to not found, unqualified or empty.
+- Picking the entity for an alias by name: no route lists entities, so the decision takes the
+  entity's id, which the canonical entities tool finds by name.
+- Reading one relation candidate by its id: the page reads it through the list's keyset (D-055).
+- Editing a prompt, a model route or a budget: no route exists; the prompt and route edits are the
+  planned component `admin.llm.edit-controls`, and the budgets are the gateway's settings.
+- Closing a profile review task from here, or listing a tenant's tasks: no route does either.
 - The vector leg of the clause search: it needs a query embedding from the LLM gateway, which the
   page does not ask for.
 - Browsing review items across tenants: no route lists the tenants with open items, so the

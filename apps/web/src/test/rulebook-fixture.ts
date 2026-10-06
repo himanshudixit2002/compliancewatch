@@ -1,7 +1,12 @@
 import type {
+  ApprovalOutDto,
+  EntityDecisionOutDto,
   EntityDto,
+  MentionGroupDto,
   MentionedClauseDto,
+  RelationCandidateDto,
   RelationDto,
+  ReviewItemDto,
   RulebookDocumentDto,
 } from "@/entities/rulebook/types";
 
@@ -116,6 +121,104 @@ export function relationDto(overrides: Partial<RelationDto> = {}): RelationDto {
     candidate_id: null,
     period_label: null,
     new_due_on: null,
+    ...overrides,
+  };
+}
+
+// ---- The review queues: open mentions in groups, relation candidates, and decisions ----------
+
+export const EXAMPLE_REVIEW_IDS = {
+  first: "00000000-0000-4000-8000-0000000000a7",
+  second: "00000000-0000-4000-8000-0000000000a8",
+} as const;
+
+export const EXAMPLE_CANDIDATE_ID = "00000000-0000-4000-8000-0000000000ca";
+export const EXAMPLE_OTHER_CANDIDATE_ID = "00000000-0000-4000-8000-0000000000cb";
+export const EXAMPLE_RULE_RELATION_ID = "00000000-0000-4000-8000-0000000000b9";
+
+/** One open mention in the second clause: its first two words (code points 0 to 14). */
+export function reviewItemDto(overrides: Partial<ReviewItemDto> = {}): ReviewItemDto {
+  return {
+    review_id: EXAMPLE_REVIEW_IDS.first,
+    document_id: EXAMPLE_DOCUMENT_ID,
+    clause_id: EXAMPLE_CLAUSE_IDS.second,
+    mention_text: "Example clause",
+    span_start: 0,
+    span_end: 14,
+    reason: "no_match",
+    ...overrides,
+  };
+}
+
+/** `count` open mentions of one group, each with its own review id and text. */
+export function reviewItemDtos(count: number): ReviewItemDto[] {
+  return Array.from({ length: count }, (_, index) =>
+    reviewItemDto({
+      review_id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      mention_text: `Example clause ${index + 1}`,
+    }),
+  );
+}
+
+/** The group of the open mentions of the form "EXAMPLE-1", with one example. */
+export function mentionGroupDto(overrides: Partial<MentionGroupDto> = {}): MentionGroupDto {
+  return {
+    entity_type: "form",
+    proposed_name: "EXAMPLE-1",
+    open_count: 2,
+    examples: [reviewItemDto()],
+    ...overrides,
+  };
+}
+
+/** What a decision over a group answers. */
+export function groupDecisionDto(
+  overrides: Partial<EntityDecisionOutDto> = {},
+): EntityDecisionOutDto {
+  return {
+    status: "resolved",
+    resolution: "created",
+    entity_id: EXAMPLE_ENTITY_ID,
+    items_closed: 2,
+    relation_targets_updated: 1,
+    ...overrides,
+  };
+}
+
+/** An open candidate extending a deadline of the rule "example_rule", quoting the first clause. */
+export function relationCandidateDto(
+  overrides: Partial<RelationCandidateDto> = {},
+): RelationCandidateDto {
+  return {
+    candidate_id: EXAMPLE_CANDIDATE_ID,
+    document_id: EXAMPLE_DOCUMENT_ID,
+    relation: "extends_deadline",
+    target_type: "form",
+    target_name: "EXAMPLE-1",
+    target_entity_id: null,
+    target_rule_key: "example_rule",
+    evidence_clause_id: EXAMPLE_CLAUSE_IDS.first,
+    evidence_quote: "clause text that opens",
+    quote_score: 1,
+    period_label: "2000-01",
+    new_due_on: "2000-02-21",
+    prompt_version: "example.prompt@1",
+    model: "example/model",
+    confidence: 0.9,
+    issues: [{ code: "target_unaligned", detail: "Example detail" }],
+    needs_review: true,
+    status: "open",
+    reject_reason: null,
+    decided_by: "",
+    ...overrides,
+  };
+}
+
+/** What approving a candidate answers. */
+export function approvalDto(overrides: Partial<ApprovalOutDto> = {}): ApprovalOutDto {
+  return {
+    candidate_id: EXAMPLE_CANDIDATE_ID,
+    rule_relation_id: EXAMPLE_RULE_RELATION_ID,
     ...overrides,
   };
 }
