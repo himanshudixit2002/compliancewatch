@@ -47,6 +47,7 @@ MAX_WORKFLOW_ID_CHARS: Final = 200
 MAX_REFS: Final = 200
 """The most references one backfill crawl takes."""
 _SPACES = re.compile(r"\s+")
+_LEADING_ZEROS = re.compile(r"^0+(?=\d)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,9 +187,10 @@ class DocumentOutcome:
 
 
 def ref_key(ref: str) -> str:
-    """A listing's reference as a backfill compares it: no spaces, case folded, so
-    ``82/2020-Central Tax`` and ``82/2020 - central tax`` are the same notification."""
-    return _SPACES.sub("", ref).casefold()
+    """A listing's reference as a backfill compares it: no spaces, case folded, no leading
+    zeros, so ``82/2020-Central Tax`` and ``82/2020 - central tax`` are one notification, and so
+    are ``01/2026-Central Tax`` and ``1/2026-Central Tax``."""
+    return _LEADING_ZEROS.sub("", _SPACES.sub("", ref)).casefold()
 
 
 @dataclass(frozen=True, slots=True)

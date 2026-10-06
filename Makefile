@@ -267,9 +267,17 @@ seed: check-uv ## Load the rulebook seed calendar as draft rule versions: make s
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \
 	  $(UV) run --package compliancewatch-$(SERVICE) $(SERVICE)-seed $(ARGS)
 
-backfill: check-uv ## Backfill one regulator source into var/raw: make backfill SERVICE=pipeline ARGS="--source cbic_notifications --since 2026-01-01"
-	@[ "$(SERVICE)" = "pipeline" ] || { echo "usage: make backfill SERVICE=pipeline ARGS=\"--source <key> [--since YYYY-MM-DD] [--limit N] [--list-only]\""; exit 1; }
-	@$(UV) run --package compliancewatch-pipeline pipeline-backfill $(ARGS)
+# The backfill through the crawl workflow (pipeline.backfill, services/pipeline/README.md): a plan
+# with --dry-run (lists each row on the live regulator site, fetches and writes nothing),
+# --workflow (crawls each row through the running worker; needs CW_PIPELINE_CRAWL_ENABLED and a
+# --reason) or --report (where the documents got to, and the rulebook's acceptance). --legacy
+# keeps the old fetch into var/raw. It reads the database make migrate uses.
+backfill: check-uv ## Backfill from a plan through the crawl workflow: make backfill ARGS="--plan services/pipeline/backfill-plan.yaml --dry-run" | ARGS="... --workflow --reason '<why>'" | ARGS="... --report"
+	@[ -n "$(ARGS)" ] || { echo 'usage: make backfill ARGS="--plan services/pipeline/backfill-plan.yaml --dry-run|--report|--workflow --reason <why>" (or ARGS="--legacy --source <key> [--since YYYY-MM-DD] [--limit N] [--list-only]")'; exit 1; }
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3Dpipeline%2Cpublic"; \
+	CW_DATABASE_URL="$$url" CW_DB_SCHEMA=pipeline CW_PIPELINE_STORE=postgres CW_LOG_LEVEL=WARNING \
+	  $(UV) run --package compliancewatch-pipeline pipeline-backfill $(ARGS)
 
 # The crawl's report over the pipeline store and the F1 check (every new CBIC notification detected
 # within 6 hours over the window): exit 0 when F1 is met, 1 when it is not, 2 when the store cannot

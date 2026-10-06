@@ -82,6 +82,13 @@ class RulebookReader(Protocol):
         ...
 
 
+class CandidateStats(Protocol):
+    """How analysts decided the rule candidates: the ``candidates`` block of the rulebook's
+    review stats (decided, approved, approved without edits, rejected, acceptance rate)."""
+
+    def candidate_stats(self) -> Mapping[str, object]: ...
+
+
 class Embedder(Protocol):
     """Vectors for texts, through the llm-gateway's retrieval feature."""
 
