@@ -11,13 +11,14 @@ from temporalio.client import Client
 from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
-from domain_kernel.documents import DocumentType
+from domain_kernel.documents import DocumentType, document_id_for
 from domain_kernel.ids import SourceId
 from pipeline.application.sources import SyncSources
 from pipeline.domain.crawl import CrawlRunId
 from pipeline.domain.errors import CrawlUnavailableError, SourceInvalidError, UnknownSourceError
-from pipeline.domain.ports import CrawlStart
-from pipeline.domain.schedule import CRAWL_TIMEOUT, CrawlTrigger
+from pipeline.domain.ports import CrawlStart, IngestStart
+from pipeline.domain.raw_documents import RawDocumentRecord
+from pipeline.domain.schedule import CRAWL_TIMEOUT, INGEST_TIMEOUT, CrawlTrigger
 from pipeline.domain.sources import Source, source_id_of
 from pipeline.infrastructure.adapters import (
     ADAPTER_TYPES,
@@ -27,8 +28,16 @@ from pipeline.infrastructure.adapters import (
 )
 from pipeline.infrastructure.adapters.cbic import CbicAdapter
 from pipeline.infrastructure.memory import MemoryStore
-from pipeline.infrastructure.temporal import CRAWL_WORKFLOW, TemporalCrawls, crawl_payload
+from pipeline.infrastructure.temporal import (
+    CRAWL_WORKFLOW,
+    INGEST_WORKFLOW,
+    TemporalCrawls,
+    TemporalIngests,
+    crawl_payload,
+    ingest_payload,
+)
 from pipeline.testing import RecordedAdapter, recorded_client, recorded_types
+from pipeline.workflows import IngestRequest
 from py_common.settings import Settings
 
 NOW = datetime(2026, 10, 6, 6, 0, tzinfo=UTC)
@@ -187,3 +196,57 @@ def test_a_taken_id_is_refused_and_an_unreachable_temporal_is_unavailable() -> N
     )
     with pytest.raises(CrawlUnavailableError, match="TimeoutError"):
         hanging.start(START)
+
+
+def test_an_ingest_of_a_stored_document_starts_with_its_request() -> None:
+    digest = "ab" * 32
+    record = RawDocumentRecord(
+        document_id=document_id_for(digest),
+        source_key="cgst_rules",
+        source_url=f"upload://cgst_rules/{digest}",
+        fetched_at=NOW,
+        content_type="application/pdf",
+        size=10,
+        sha256=digest,
+        storage_key=f"ab/{digest}",
+        title="Example statute",
+    )
+    start = IngestStart(
+        workflow_id="pipeline-manual-parse-1",
+        record=record,
+        source_id=source_id_of("cgst_rules"),
+        regulator="CBIC",
+        raw_uri=f"memory://ab/{digest}",
+        duplicate=True,
+        transcript_key="cd/" + "cd" * 32,
+        knowledge=True,
+    )
+    client = FakeClient()
+
+    async def connect(_: Settings) -> Client:
+        return client  # type: ignore[return-value]
+
+    ingests = TemporalIngests(Settings(_env_file=None, service_name="pipeline"), connector=connect)
+    assert ingests.start(start) is True
+    ((workflow, payload, options),) = client.calls
+    assert workflow == INGEST_WORKFLOW == "pipeline.ingest_document"
+    request = IngestRequest.model_validate(payload)
+    assert payload == ingest_payload(start)
+    assert request.stored is not None
+    assert (request.stored.document_id, request.transcript_key, request.regulator) == (
+        record.document_id.value,
+        start.transcript_key,
+        "CBIC",
+    )
+    assert options["id_reuse_policy"] is WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY
+    assert options["execution_timeout"] == INGEST_TIMEOUT
+    taken = WorkflowAlreadyStartedError(start.workflow_id, INGEST_WORKFLOW)
+    refused = TemporalIngests(
+        Settings(_env_file=None, service_name="pipeline"),
+        connector=lambda _: _ready(FakeClient(taken)),
+    )
+    assert refused.start(start) is False
+
+
+async def _ready(client: "FakeClient") -> Client:
+    return client  # type: ignore[return-value]

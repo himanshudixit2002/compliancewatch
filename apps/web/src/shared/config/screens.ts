@@ -143,6 +143,11 @@ const RAW_DOCUMENT = servicesTrack(
   "/v1/pipeline/documents/{document_id}/raw",
 );
 const UPLOADS = servicesTrack("WP19", "pipeline", "POST", "/v1/pipeline/sources/{key}/uploads");
+/** An admin's upload of a document to a source, and the pipeline's task queue (M2-3). */
+const UPLOAD = uses("pipeline", "POST", "/v1/pipeline/sources/{key}/uploads");
+const TASKS = uses("pipeline", "GET", "/v1/pipeline/tasks");
+const TASK_RESOLVE = uses("pipeline", "POST", "/v1/pipeline/tasks/{task_id}/resolve");
+const TASK_DISMISS = uses("pipeline", "POST", "/v1/pipeline/tasks/{task_id}/dismiss");
 /** The source manager's routes (M2-2), which the sources screens call once built. */
 const SOURCE_LIST = uses("pipeline", "GET", "/v1/pipeline/sources");
 const SOURCE_ADD = uses("pipeline", "POST", "/v1/pipeline/sources");
@@ -419,9 +424,9 @@ const SCREEN_LIST = [
     title: "Document upload",
     section: "system",
     roles: REGULATORY,
-    uses: [],
+    uses: [UPLOAD],
     awaits: [UPLOADS],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "7, 15",
   },
@@ -1666,14 +1671,14 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [TASKS, TASK_RESOLVE, TASK_DISMISS, UPLOAD],
     awaits: [
       servicesTrack("WP19", "pipeline", "GET", "/v1/pipeline/tasks"),
       servicesTrack("WP19", "pipeline", "POST", "/v1/pipeline/tasks/{task_id}/resolve"),
       servicesTrack("WP19", "pipeline", "POST", "/v1/pipeline/tasks/{task_id}/dismiss"),
       UPLOADS,
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "7, 15; G47, G48",
     nav: { group: "operations", order: 3 },

@@ -194,10 +194,148 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/pipeline/sources/{key}/uploads": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload a document to a source
+     * @description Store the file under the source, record it with its document.discovered and start its
+     *     ingest, which parses it and, while knowledge is on, registers it in the rulebook. Answers
+     *     202 at once with the stored document and the ingest's workflow id; a document no parser
+     *     reads opens a manual-parse task (GET /v1/pipeline/tasks). Bytes stored before are a
+     *     duplicate: nothing is recorded again and the ingest runs again. 413 past the upload limit,
+     *     415 for a file that is not a PDF or an HTML page, 404 for an unknown source, 503 when
+     *     Temporal does not answer (the document stays stored: upload it again). Audited as
+     *     pipeline.document.upload with the reason.
+     */
+    post: operations["upload_document_v1_pipeline_sources__key__uploads_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/pipeline/tasks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the pipeline's tasks, oldest first
+     * @description The tasks of a status and a kind (both optional), a page at a time, oldest first (then
+     *     by id), each with its document: open manual parses are documents no parser reads, waiting
+     *     for an analyst's transcript.
+     */
+    get: operations["list_tasks_v1_pipeline_tasks_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/pipeline/tasks/{task_id}/dismiss": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Dismiss a task with a reason
+     * @description Close an open task without the work: the reason says why (a duplicate scan, not a
+     *     regulatory document). A dismissed manual parse leaves its document failed and unregistered.
+     *     Audited as pipeline.task.dismiss. 409 for a closed task.
+     */
+    post: operations["dismiss_task_v1_pipeline_tasks__task_id__dismiss_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/pipeline/tasks/{task_id}/resolve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Resolve a task: a manual parse with the analyst's transcript
+     * @description Resolve an open manual-parse task with the document typed by hand: headings, numbered
+     *     paragraphs and tables in document order, checked first (422 names each problem). The
+     *     transcript is kept in the raw store, the task is resolved and audited as
+     *     pipeline.task.resolve, and an ingest starts that parses the document from it as manual@1
+     *     and, while knowledge is on, registers it in the rulebook; from then on the document is
+     *     parsed from its transcript. 409 for a closed task (the same transcript again starts the
+     *     ingest if it did not start); 422 for a resolution that does not fit the task (a manual parse
+     *     without a transcript, a triage task, which its own step resolves); 503 when Temporal does
+     *     not answer, in which case the task stays resolved and the same request starts the ingest
+     *     again.
+     */
+    post: operations["resolve_task_v1_pipeline_tasks__task_id__resolve_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 };
 export type webhooks = Record<string, never>;
 export type components = {
   schemas: {
+    /** Body_upload_document_v1_pipeline_sources__key__uploads_post */
+    Body_upload_document_v1_pipeline_sources__key__uploads_post: {
+      /**
+       * Actor Id
+       * Format: uuid
+       * @description The admin taking the step; a signed-in user's token overrides it, and the audit entry names whoever acted
+       */
+      actor_id: string;
+      /** @description What it is; the source's document type when left out */
+      document_type?: components["schemas"]["DocumentType"] | null;
+      /**
+       * External Ref
+       * @description Its own reference, such as a notification number or the Act's name
+       * @default
+       */
+      external_ref?: string;
+      /**
+       * File
+       * @description The document: a PDF or an HTML page
+       */
+      file: string;
+      /**
+       * Published On
+       * @description When it was published
+       */
+      published_on?: string | null;
+      /**
+       * Reason
+       * @description Why: kept verbatim in the audit entry
+       */
+      reason: string;
+      /**
+       * Title
+       * @description Its title
+       * @default
+       */
+      title?: string;
+    };
     /** CrawlRunOut */
     CrawlRunOut: {
       /** Duplicates */
@@ -235,10 +373,29 @@ export type components = {
      * @enum {string}
      */
     CrawlTrigger: "schedule" | "manual";
+    /**
+     * DismissIn
+     * @description A task dismissed; the reason is why it needs no work.
+     */
+    DismissIn: {
+      /**
+       * Actor Id
+       * Format: uuid
+       * @description The admin taking the step; a signed-in user's token overrides it, and the audit entry names whoever acted
+       */
+      actor_id: string;
+      /**
+       * Reason
+       * @description Why: kept verbatim in the audit entry
+       */
+      reason: string;
+    };
     /** DocumentOut */
     DocumentOut: {
       /** Content Type */
       content_type: string;
+      /** @description The type its uploader gave; null when it is its source's */
+      doc_type: components["schemas"]["DocumentType"] | null;
       /**
        * Document Id
        * Format: uuid
@@ -252,6 +409,11 @@ export type components = {
        * @description When the bytes were first fetched
        */
       fetched_at: string;
+      /**
+       * Parser Version
+       * @description The parser of the document's last parse (pdf@1, pdf-tables@1, html@1, html-tables@1, manual@1 for an analyst's transcript); empty before one
+       */
+      parser_version: string;
       /** Published On */
       published_on: string | null;
       /**
@@ -343,6 +505,21 @@ export type components = {
      * @enum {string}
      */
     FreshnessState: "fresh" | "late" | "stale" | "never";
+    /** HeadingIn */
+    HeadingIn: {
+      /**
+       * Page
+       * @description The page it is on, from 1
+       */
+      page?: number | null;
+      /** Text */
+      text: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "heading";
+    };
     /** HealthResponse */
     HealthResponse: {
       /** Service */
@@ -361,6 +538,37 @@ export type components = {
        * @description Send as cursor to read the next page; null on the last page
        */
       next_cursor: string | null;
+    };
+    /** Page[TaskOut] */
+    Page_TaskOut_: {
+      /** Items */
+      items: components["schemas"]["TaskOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
+    /** ParagraphIn */
+    ParagraphIn: {
+      /**
+       * Number
+       * @description The paragraph's numbering as printed: 1., (2), (a)
+       * @default
+       */
+      number?: string;
+      /**
+       * Page
+       * @description The page it is on, from 1
+       */
+      page?: number | null;
+      /** Text */
+      text: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "paragraph";
     };
     /**
      * Problem
@@ -402,6 +610,36 @@ export type components = {
       };
       /** Status */
       status: string;
+    };
+    /**
+     * ResolutionOut
+     * @description The resolved task and the ingest that parses its transcript: ``started`` is false when it
+     *     was started before (it runs, or it is done).
+     */
+    ResolutionOut: {
+      /** Started */
+      started: boolean;
+      task: components["schemas"]["TaskOut"];
+      /** Workflow Id */
+      workflow_id: string;
+    };
+    /**
+     * ResolveIn
+     * @description The resolution of a task: a manual parse takes the analyst's transcript.
+     */
+    ResolveIn: {
+      /**
+       * Actor Id
+       * Format: uuid
+       * @description The admin taking the step; a signed-in user's token overrides it, and the audit entry names whoever acted
+       */
+      actor_id: string;
+      /**
+       * Reason
+       * @description Why: kept verbatim in the audit entry
+       */
+      reason: string;
+      transcript?: components["schemas"]["TranscriptIn"] | null;
     };
     /**
      * SourceEditIn
@@ -564,6 +802,121 @@ export type components = {
      * @enum {string}
      */
     SourceStatus: "healthy" | "fetching" | "failing" | "paused";
+    /** TableIn */
+    TableIn: {
+      /**
+       * Header
+       * @description The header row, if the table has one
+       */
+      header?: string[] | null;
+      /**
+       * Page
+       * @description The page it is on, from 1
+       */
+      page?: number | null;
+      /** Rows */
+      rows: string[][];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "table";
+    };
+    /**
+     * TaskKind
+     * @enum {string}
+     */
+    TaskKind: "manual_parse" | "triage";
+    /** TaskOut */
+    TaskOut: {
+      /** Claimed By */
+      claimed_by: string | null;
+      document: components["schemas"]["DocumentOut"];
+      /**
+       * Document Id
+       * Format: uuid
+       */
+      document_id: string;
+      /** @description manual_parse (no parser reads the document) or triage */
+      kind: components["schemas"]["TaskKind"];
+      /**
+       * Note
+       * @description The resolver's or dismisser's reason
+       */
+      note: string;
+      /**
+       * Opened At
+       * Format: date-time
+       */
+      opened_at: string;
+      /**
+       * Reason
+       * @description Why it opened: each parser's reason, for a manual parse
+       */
+      reason: string;
+      /**
+       * Resolution
+       * @description What the resolution did: for a manual parse, the transcript's storage key and digest, the parser (manual@1) and the clause count
+       */
+      resolution: {
+        [key: string]: unknown;
+      } | null;
+      /** Resolved At */
+      resolved_at: string | null;
+      /**
+       * Resolved By
+       * @description Who resolved or dismissed it; null for one the pipeline closed itself
+       */
+      resolved_by: string | null;
+      /** Source Key */
+      source_key: string;
+      status: components["schemas"]["TaskStatus"];
+      /**
+       * Task Id
+       * Format: uuid
+       */
+      task_id: string;
+    };
+    /**
+     * TaskStatus
+     * @enum {string}
+     */
+    TaskStatus: "open" | "resolved" | "dismissed";
+    /**
+     * TranscriptIn
+     * @description A document typed by hand in the shape of the parsers' blocks: headings, numbered
+     *     paragraphs and tables in document order. Each heading and paragraph becomes a clause, each
+     *     table row one (its cells joined by ' | '), numbered en.p1, hi.p1, ... per language.
+     */
+    TranscriptIn: {
+      /** Blocks */
+      blocks: (
+        | components["schemas"]["HeadingIn"]
+        | components["schemas"]["ParagraphIn"]
+        | components["schemas"]["TableIn"]
+      )[];
+      /**
+       * Title
+       * @default
+       */
+      title?: string;
+    };
+    /**
+     * UploadOut
+     * @description The uploaded document as stored, and the ingest that parses it. For bytes stored before,
+     *     ``duplicate`` is true and ``document`` is the record stored first (it may be another
+     *     source's).
+     */
+    UploadOut: {
+      document: components["schemas"]["DocumentOut"];
+      /** Duplicate */
+      duplicate: boolean;
+      /**
+       * Workflow Id
+       * @description The ingest started for it, pipeline-upload-<key>-<id>
+       */
+      workflow_id: string;
+    };
     /**
      * ValidationIssue
      * @description One failed check on the request. The submitted value is not echoed back.
@@ -1085,6 +1438,348 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FetchOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  upload_document_v1_pipeline_sources__key__uploads_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role */
+        "x-cw-write-token"?: string | null;
+      };
+      path: {
+        /** @description The source's key */
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_document_v1_pipeline_sources__key__uploads_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UploadOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  list_tasks_v1_pipeline_tasks_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Only tasks of this kind */
+        kind?: components["schemas"]["TaskKind"] | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Only tasks of this status */
+        status?: components["schemas"]["TaskStatus"] | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_TaskOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  dismiss_task_v1_pipeline_tasks__task_id__dismiss_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role */
+        "x-cw-write-token"?: string | null;
+      };
+      path: {
+        task_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DismissIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  resolve_task_v1_pipeline_tasks__task_id__resolve_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role */
+        "x-cw-write-token"?: string | null;
+      };
+      path: {
+        task_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ResolveIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ResolutionOut"];
         };
       };
       /** @description Bad Request */

@@ -383,4 +383,4 @@ def test_token_mode_takes_the_bearer_alone(token: Wired) -> None:
 
 
 def test_every_problem_the_service_answers_has_its_status() -> None:
-    assert set(PROBLEM_STATUS.values()) <= {401, 404, 409, 422, 502, 503}
+    assert set(PROBLEM_STATUS.values()) <= {401, 404, 409, 413, 415, 422, 502, 503}

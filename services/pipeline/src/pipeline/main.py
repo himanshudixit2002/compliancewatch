@@ -19,6 +19,8 @@ from domain_kernel.events import utc_now
 from pipeline import __version__
 from pipeline.api.router import router
 from pipeline.api.sources import router as sources_router
+from pipeline.api.tasks import router as tasks_router
+from pipeline.api.uploads import router as uploads_router
 from pipeline.application.crawl import StartCrawl
 from pipeline.application.sources import (
     AddSource,
@@ -29,27 +31,36 @@ from pipeline.application.sources import (
     ReadRawDocument,
     SyncSources,
 )
+from pipeline.application.tasks import DismissTask, ListTasks, ResolveTask
+from pipeline.application.uploads import UploadDocument
 from pipeline.domain.errors import (
     CrawlDisabledError,
     CrawlRunningError,
     CrawlUnavailableError,
     DocumentNotFoundError,
+    IngestUnavailableError,
     RawDocumentUnreadableError,
     RawStoreUnavailableError,
     SourceExistsError,
     SourceInvalidError,
     SourceNotFoundError,
     SourceNotListableError,
+    TaskClosedError,
+    TaskNotFoundError,
+    TaskResolutionError,
+    TranscriptInvalidError,
+    UploadTooLargeError,
+    UploadUnsupportedError,
     WritesDisabledError,
     WriteTokenInvalidError,
 )
-from pipeline.domain.ports import AdapterTypes, CrawlStarter, RawStore
+from pipeline.domain.ports import AdapterTypes, CrawlStarter, IngestStarter, RawStore
 from pipeline.domain.repository import UnitOfWorkFactory
 from pipeline.domain.sources import Source
 from pipeline.infrastructure.adapters import SOURCES, RegistryAdapterTypes
 from pipeline.infrastructure.memory import MemoryStore
 from pipeline.infrastructure.source_metrics import register_source_gauges
-from pipeline.infrastructure.temporal import TemporalCrawls
+from pipeline.infrastructure.temporal import TemporalCrawls, TemporalIngests
 from pipeline.settings import PipelineSettings
 from pipeline.stores import ping_of, raw_store_of, unit_of_work_of
 from pipeline.wiring import Wiring
@@ -73,6 +84,13 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     CrawlDisabledError: 503,
     CrawlRunningError: 409,
     CrawlUnavailableError: 503,
+    UploadTooLargeError: 413,
+    UploadUnsupportedError: 415,
+    IngestUnavailableError: 503,
+    TaskNotFoundError: 404,
+    TaskClosedError: 409,
+    TaskResolutionError: 422,
+    TranscriptInvalidError: 422,
     WriteTokenInvalidError: 401,
     WritesDisabledError: 503,
 }
@@ -85,13 +103,16 @@ def build_wiring(
     raw_store: RawStore | None = None,
     starter: CrawlStarter | None = None,
     adapter_types: AdapterTypes | None = None,
+    ingests: IngestStarter | None = None,
 ) -> Wiring:
     """The use cases on the stores the settings pick; the keywords replace them (tests pass
-    memory ones, a recording starter and adapter types with a recorded one)."""
+    memory ones, recording starters and adapter types with a recorded one)."""
     store = units or unit_of_work_of(settings)
     ping: Callable[[], bool] = ping_of(store)
     types = adapter_types or RegistryAdapterTypes()
     raw = raw_store or raw_store_of(settings)
+    ingest = ingests or TemporalIngests(settings)
+    knowledge = settings.pipeline_knowledge_enabled
 
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)
@@ -114,6 +135,17 @@ def build_wiring(
         list_documents=ListSourceDocuments(store),
         read_document=ReadDocument(store),
         read_raw=ReadRawDocument(store, raw),
+        upload_document=UploadDocument(
+            store,
+            raw,
+            ingest,
+            types,
+            max_bytes=settings.pipeline_upload_max_bytes,
+            knowledge=knowledge,
+        ),
+        list_tasks=ListTasks(store),
+        resolve_task=ResolveTask(store, raw, ingest, types, knowledge=knowledge),
+        dismiss_task=DismissTask(store),
     )
 
 
@@ -156,13 +188,19 @@ def build_app(
     raw_store: RawStore | None = None,
     starter: CrawlStarter | None = None,
     adapter_types: AdapterTypes | None = None,
+    ingests: IngestStarter | None = None,
 ) -> FastAPI:
     """``authenticator`` replaces the one ``CW_AUTH_MODE`` describes; a process that hosts
-    identity passes identity's own. The other keywords replace the stores, the Temporal starter
+    identity passes identity's own. The other keywords replace the stores, the Temporal starters
     and the adapter types (``build_wiring``)."""
     settings = settings or PipelineSettings(service_name=SERVICE_NAME)
     wiring = build_wiring(
-        settings, units=units, raw_store=raw_store, starter=starter, adapter_types=adapter_types
+        settings,
+        units=units,
+        raw_store=raw_store,
+        starter=starter,
+        adapter_types=adapter_types,
+        ingests=ingests,
     )
     in_memory = isinstance(wiring.units, MemoryStore)
     if in_memory:
@@ -177,7 +215,7 @@ def build_app(
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router, sources_router],
+        routers=[router, sources_router, uploads_router, tasks_router],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         lifespan=lifespan,

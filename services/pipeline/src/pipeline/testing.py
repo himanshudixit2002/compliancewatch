@@ -15,9 +15,10 @@ The crawl's tests and demos read recorded sources only: ``RECORDED_TYPE`` is an 
 ``recorded``, whose adapter lists the CBIC notifications its ``numbers`` parameter names from
 the recorded listing files (whatever today's date) and fetches their recorded PDFs through the
 client it is given, the fixture transport of ``recorded_sources``; ``recorded_types()`` are the
-registry's types with it. ``MemoryCrawls`` is a crawl starter that records what it would start
-and refuses an id it has seen, as Temporal does. ``pipeline_settings`` are the app's settings
-for tests: memory stores and the shared write token ``WRITE_TOKEN``.
+registry's types with it. ``MemoryCrawls`` and ``MemoryIngests`` are a crawl and an ingest starter
+that record what they would start and refuse an id they have seen, as Temporal does.
+``pipeline_settings`` are the app's settings for tests: memory stores and the shared write token
+``WRITE_TOKEN``.
 """
 
 import hashlib
@@ -62,7 +63,7 @@ from pipeline.domain.knowledge import (
     RuleKey,
     StagingReport,
 )
-from pipeline.domain.ports import CrawlStart
+from pipeline.domain.ports import CrawlStart, IngestStart
 from pipeline.domain.repository import UnitOfWorkFactory
 from pipeline.infrastructure.adapters._shared import on_or_after, parse_iso_date
 from pipeline.infrastructure.adapters.cbic import CbicAdapter
@@ -622,6 +623,25 @@ class MemoryCrawls:
     fail: Exception | None = None
 
     def start(self, start: CrawlStart) -> bool:
+        if self.fail is not None:
+            error, self.fail = self.fail, None
+            raise error
+        if any(seen.workflow_id == start.workflow_id for seen in self.started):
+            return False
+        self.started.append(start)
+        return True
+
+
+@dataclass
+class MemoryIngests:
+    """An ``IngestStarter`` that keeps what it starts and refuses an id it has seen, as
+    Temporal's ALLOW_DUPLICATE_FAILED_ONLY does for a running or completed workflow; ``fail``
+    makes the next start raise it."""
+
+    started: list[IngestStart] = field(default_factory=list)
+    fail: Exception | None = None
+
+    def start(self, start: IngestStart) -> bool:
         if self.fail is not None:
             error, self.fail = self.fail, None
             raise error

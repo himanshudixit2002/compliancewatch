@@ -20,6 +20,7 @@ from pipeline.domain.knowledge import (
     RuleKey,
     StagingReport,
 )
+from pipeline.domain.raw_documents import RawDocumentRecord
 from pipeline.domain.schedule import CrawlTrigger
 from pipeline.domain.sources import SourceDefinition
 from pipeline.domain.transcripts import Transcript
@@ -204,4 +205,31 @@ class CrawlStarter(Protocol):
         """Start the workflow; False when a workflow with its id exists already, running or
         not (it is never started twice). ``CrawlUnavailableError`` when Temporal does not
         answer."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class IngestStart:
+    """An ingest of a stored document to start (``pipeline.ingest_document`` with
+    ``IngestRequest.stored``): the workflow's id; the document as its record holds it, under the
+    source it is stored for (its id and regulator) and where the raw store keeps it; whether
+    those bytes were stored before; the analyst's transcript to parse it from, if any; and
+    whether the knowledge steps run."""
+
+    workflow_id: str
+    record: RawDocumentRecord
+    source_id: SourceId
+    regulator: str
+    raw_uri: str
+    duplicate: bool = False
+    transcript_key: str = ""
+    knowledge: bool = False
+
+
+class IngestStarter(Protocol):
+    """Starts the ingest of a stored document on Temporal (an upload's, a resolution's)."""
+
+    def start(self, start: IngestStart) -> bool:
+        """Start the workflow; False when a workflow with its id runs or has completed (one
+        that failed may run again). ``IngestUnavailableError`` when Temporal does not answer."""
         ...

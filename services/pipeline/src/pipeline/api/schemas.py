@@ -1,7 +1,7 @@
-"""Request and response bodies of the source manager's routes."""
+"""Request and response bodies of the source manager's, the uploads' and the tasks' routes."""
 
 from datetime import date, timedelta
-from typing import Any, Final, Self
+from typing import Annotated, Any, Final, Literal, Self
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
@@ -14,10 +14,12 @@ from pipeline.application.sources import (
     SourceEdit,
     SourceView,
 )
+from pipeline.application.tasks import Resolution, TaskView
+from pipeline.application.uploads import UploadOutcome
 from pipeline.domain.crawl import CrawlRun, CrawlStatus
 from pipeline.domain.ports import CrawlStart
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
-from pipeline.domain.repository import DocumentKey
+from pipeline.domain.repository import DocumentKey, TaskKey
 from pipeline.domain.schedule import CrawlTrigger, Freshness, FreshnessState, SourceStatus
 from pipeline.domain.sources import (
     ADAPTER_TYPE_PATTERN,
@@ -26,6 +28,9 @@ from pipeline.domain.sources import (
     MIN_CADENCE,
     SOURCE_KEY_PATTERN,
 )
+from pipeline.domain.structure import MAX_CLAUSE_CHARS, MAX_CLAUSES
+from pipeline.domain.tasks import TaskId, TaskKind, TaskStatus
+from pipeline.domain.transcripts import MAX_CELLS, MAX_NUMBER_CHARS, MAX_TITLE_CHARS
 
 MIN_CADENCE_SECONDS: Final = int(MIN_CADENCE.total_seconds())
 MAX_CADENCE_SECONDS: Final = int(MAX_CADENCE.total_seconds())
@@ -248,6 +253,15 @@ class DocumentOut(BaseModel):
     sha256: str
     storage_key: str
     status: DocumentStatus
+    parser_version: str = Field(
+        description=(
+            "The parser of the document's last parse (pdf@1, pdf-tables@1, html@1, "
+            "html-tables@1, manual@1 for an analyst's transcript); empty before one"
+        )
+    )
+    doc_type: DocumentType | None = Field(
+        description="The type its uploader gave; null when it is its source's"
+    )
     raw_path: str = Field(description="Where the stored bytes are served")
 
     @classmethod
@@ -265,6 +279,8 @@ class DocumentOut(BaseModel):
             sha256=record.sha256,
             storage_key=record.storage_key,
             status=record.status,
+            parser_version=record.parser_version,
+            doc_type=record.doc_type,
             raw_path=f"/v1/pipeline/documents/{record.document_id}/raw",
         )
 
@@ -282,3 +298,147 @@ class DocumentCursor(BaseModel):
 
     def key(self) -> DocumentKey:
         return DocumentKey(self.p, self.f, DocumentId(self.i))
+
+
+class UploadOut(BaseModel):
+    """The uploaded document as stored, and the ingest that parses it. For bytes stored before,
+    ``duplicate`` is true and ``document`` is the record stored first (it may be another
+    source's)."""
+
+    document: DocumentOut
+    duplicate: bool
+    workflow_id: str = Field(description="The ingest started for it, pipeline-upload-<key>-<id>")
+
+    @classmethod
+    def of(cls, outcome: UploadOutcome) -> Self:
+        return cls(
+            document=DocumentOut.of(outcome.record),
+            duplicate=outcome.duplicate,
+            workflow_id=outcome.workflow_id,
+        )
+
+
+class _Block(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page: int | None = Field(default=None, ge=1, description="The page it is on, from 1")
+
+
+class HeadingIn(_Block):
+    type: Literal["heading"]
+    text: str = Field(min_length=1, max_length=MAX_CLAUSE_CHARS)
+
+
+class ParagraphIn(_Block):
+    type: Literal["paragraph"]
+    text: str = Field(min_length=1, max_length=MAX_CLAUSE_CHARS)
+    number: str = Field(
+        default="",
+        max_length=MAX_NUMBER_CHARS,
+        description="The paragraph's numbering as printed: 1., (2), (a)",
+    )
+
+
+Cells = Annotated[list[str], Field(min_length=1, max_length=MAX_CELLS)]
+
+
+class TableIn(_Block):
+    type: Literal["table"]
+    rows: list[Cells] = Field(min_length=1, max_length=MAX_CLAUSES)
+    header: Cells | None = Field(default=None, description="The header row, if the table has one")
+
+
+class TranscriptIn(BaseModel):
+    """A document typed by hand in the shape of the parsers' blocks: headings, numbered
+    paragraphs and tables in document order. Each heading and paragraph becomes a clause, each
+    table row one (its cells joined by ' | '), numbered en.p1, hi.p1, ... per language."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(default="", max_length=MAX_TITLE_CHARS)
+    blocks: list[Annotated[HeadingIn | ParagraphIn | TableIn, Field(discriminator="type")]] = Field(
+        min_length=1, max_length=MAX_CLAUSES
+    )
+
+
+class ResolveIn(AdminWriteIn):
+    """The resolution of a task: a manual parse takes the analyst's transcript."""
+
+    transcript: TranscriptIn | None = None
+
+
+class DismissIn(AdminWriteIn):
+    """A task dismissed; the reason is why it needs no work."""
+
+
+class TaskOut(BaseModel):
+    task_id: UUID
+    kind: TaskKind = Field(description="manual_parse (no parser reads the document) or triage")
+    status: TaskStatus
+    document_id: UUID
+    source_key: str
+    opened_at: AwareDatetime
+    reason: str = Field(description="Why it opened: each parser's reason, for a manual parse")
+    claimed_by: UUID | None
+    resolved_by: UUID | None = Field(
+        description="Who resolved or dismissed it; null for one the pipeline closed itself"
+    )
+    resolved_at: AwareDatetime | None
+    resolution: dict[str, Any] | None = Field(
+        description=(
+            "What the resolution did: for a manual parse, the transcript's storage key and "
+            "digest, the parser (manual@1) and the clause count"
+        )
+    )
+    note: str = Field(description="The resolver's or dismisser's reason")
+    document: DocumentOut
+
+    @classmethod
+    def of(cls, view: TaskView) -> Self:
+        task = view.task
+        return cls(
+            task_id=task.id.value,
+            kind=task.kind,
+            status=task.status,
+            document_id=task.document_id.value,
+            source_key=task.source_key,
+            opened_at=task.opened_at,
+            reason=task.reason,
+            claimed_by=task.claimed_by,
+            resolved_by=task.resolved_by,
+            resolved_at=task.resolved_at,
+            resolution=None if task.resolution is None else dict(task.resolution),
+            note=task.note,
+            document=DocumentOut.of(view.document),
+        )
+
+
+class ResolutionOut(BaseModel):
+    """The resolved task and the ingest that parses its transcript: ``started`` is false when it
+    was started before (it runs, or it is done)."""
+
+    task: TaskOut
+    workflow_id: str
+    started: bool
+
+    @classmethod
+    def of(cls, resolution: Resolution) -> Self:
+        return cls(
+            task=TaskOut.of(resolution.task),
+            workflow_id=resolution.workflow_id,
+            started=resolution.started,
+        )
+
+
+class TaskCursor(BaseModel):
+    """The keyset of the task list: when the task opened, and its id."""
+
+    o: AwareDatetime
+    i: UUID
+
+    @classmethod
+    def of(cls, view: TaskView) -> Self:
+        return cls(o=view.task.opened_at, i=view.task.id.value)
+
+    def key(self) -> TaskKey:
+        return TaskKey(self.o, TaskId(self.i))

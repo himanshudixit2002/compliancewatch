@@ -17,6 +17,8 @@ dependencies = [
   "pypdf>=6.0",
   "pyyaml>=6.0",
   "ontology",
+  # The upload route's multipart body (FastAPI's File and Form)
+  "python-multipart>=0.0.32",
 ]
 
 [project.scripts]
