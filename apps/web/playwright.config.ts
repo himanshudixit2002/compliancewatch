@@ -18,7 +18,7 @@ import { defineConfig, devices } from "@playwright/test";
  *             without that file; elsewhere it is skipped)
  *   product   e2e/product, the real-data journey against `make product` (its internal listener,
  *             every route of every service on one port) after `make product-seed`: set
- *             CW_E2E_PRODUCT_URL to that listener (http://localhost:8080) and every service URL of
+ *             CW_E2E_PRODUCT_URL to that listener (http://127.0.0.1:8080) and every service URL of
  *             the app defaults to it (`make product-e2e`, and the CI dev-stack job, do so)
  */
 const PORT = Number(process.env.PORT ?? 3000);

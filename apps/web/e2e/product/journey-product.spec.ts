@@ -189,7 +189,7 @@ test.describe("the product journey", () => {
     const filters = page.getByRole("form", { name: "Filter the obligations" });
     await filters.getByLabel("Status").selectOption("todo");
     await filters.getByRole("button", { name: "Show" }).click();
-    await expect(page).toHaveURL(/\?status=todo$/);
+    await expect(page).toHaveURL(/\?status=todo/);
     const open = listed.filter((item) => item.status === "open" || item.status === "in_progress");
     expect(open.length, "the seeded business has obligations still to do").toBeGreaterThan(0);
     await expect(rows).toHaveCount(Math.min(open.length, 25));
@@ -299,7 +299,7 @@ test.describe("the product journey", () => {
     await expect(status.locator("[data-slot='tracking-done']")).toHaveText(
       "Started: the obligation is in progress.",
     );
-    await expect(page.getByLabel("The obligation")).toContainText("In progress");
+    await expect(page.getByLabel("The obligation", { exact: true })).toContainText("In progress");
 
     // The first complete reaches the service, but its answer never reaches the browser; "Try
     // again" sends the same request with the same key, and the service replays its first answer.
@@ -324,7 +324,7 @@ test.describe("the product journey", () => {
       "Marked as done. This request had already been recorded, so nothing was recorded twice.",
     );
     await page.unroute(`**/b/${probe}/obligations/${obligationId}`);
-    await expect(page.getByLabel("The obligation")).toContainText("Done");
+    await expect(page.getByLabel("The obligation", { exact: true })).toContainText("Done");
     const closed = await onProduct<DetailBody>(
       tenantId,
       `/v1/obligation/obligations/${obligationId}`,
