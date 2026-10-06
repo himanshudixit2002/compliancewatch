@@ -185,8 +185,8 @@ draft by hand. A used-up budget is the gateway's problem type `llm-budget-exceed
 `Retry-After` until the budget resets): the activity hands it to the workflow without retrying,
 and the workflow sleeps on a durable timer, between 15 minutes and 6 hours, and asks again, at
 most 160 times (some 40 days). This replaces the gateway's deferral queue, which is dropped from
-the plan. Any other failure fails the child, and the document stays `classified` for a later
-extraction.
+the plan. Any other failure fails the child, and the document stays `classified` until a
+re-ingest of it starts the extraction again.
 
 **The candidate is a contract.** `rule.candidate.created` 1.1.0 adds, as optional fields: the
 outcome, the candidate in the extraction schema's shape (the schema file keeps the extractor's
@@ -210,4 +210,7 @@ Consequences:
   recommendations of the Council", which nearly every notification says, no longer reads as a
   press release.
 - Classification runs whatever the flag says: with the extraction off, a classified notification
-  waits as `classified`, and a later run of the extraction (a re-ingest, a backfill) finds it.
+  waits as `classified`. Turning the flag on later does not extract that backlog by itself: a
+  re-ingest of a document (an upload of the same file, say) finds its classification and
+  extracts it, and a sweep of the documents waiting as `classified` is not built yet. The
+  backfill command never extracts.

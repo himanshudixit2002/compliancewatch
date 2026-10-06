@@ -704,7 +704,10 @@ as `ModelBudgetExhaustedError`; the activity hands it to the workflow without a 
 workflow sleeps on a durable timer for the `Retry-After`, kept between 15 minutes and 6 hours (a
 raised budget takes effect before the month ends), and asks again, at most 160 times. Any other
 failure (a gateway or rulebook outage past six tries over some 15 minutes) fails the child; the
-document stays `classified` and a later run finds it.
+document stays `classified` until a re-ingest of it (an upload of the same bytes, say) finds its
+classification and starts the extraction again. The same goes for the documents that waited as
+`classified` while the flag was off: turning the flag on extracts none of them, since a sweep of
+that backlog is not built yet, and the backfill command never extracts.
 
 `rule.candidate.created` 1.1.0 keeps the fields of 1.0.0 and adds `outcome`, `candidate` (the
 model's candidate in `CANDIDATE_SCHEMA`'s shape, which the schema file keeps under `$defs`: a
