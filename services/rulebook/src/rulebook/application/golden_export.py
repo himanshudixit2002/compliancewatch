@@ -241,15 +241,23 @@ def _case(uow: KnowledgeUnitOfWork, candidate: RuleCandidate) -> ExportedCase:
 
 
 _MORE: Final = re.compile(r" and \d+ more$")
+_CHANGED: Final = re.compile(
+    r"^(?:drafted from rule candidate [0-9a-fA-F-]+, )?changed (?P<paths>[^:;]*)"
+)
+"""The head of an ``edited`` decision's note that names the paths, as the rulebook writes it:
+``drafted from rule candidate <id>, changed title, citations`` or ``changed title``; the
+analyst's own words follow a colon, and a citation count a semicolon."""
 
 
 def _changed_paths(note: str) -> list[str]:
     """The dotted paths an ``edited`` decision's note names: ``drafted from rule candidate <id>,
-    changed title, citations: <note>`` or ``changed title; cited 2 clauses: <note>``."""
-    marker = "changed "
-    if marker not in note:
+    changed title, citations: <note>`` or ``changed title; cited 2 clauses: <note>``. Only the
+    note's head is read: ``cited 1 clause: the rate changed`` names none, whatever the analyst
+    wrote."""
+    head = _CHANGED.match(note)
+    if head is None:
         return []
-    named = note.split(marker, 1)[1].split(";", 1)[0].split(": ", 1)[0]
+    named = head["paths"]
     return [_MORE.sub("", path.strip()) for path in named.split(",") if path.strip()]
 
 

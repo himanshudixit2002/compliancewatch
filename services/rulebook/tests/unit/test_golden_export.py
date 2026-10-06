@@ -13,7 +13,7 @@ import yaml
 
 import ontology as ontology_package
 from domain_kernel.ontology import Ontology
-from rulebook.application.golden_export import ExportDecidedCandidates, slug
+from rulebook.application.golden_export import ExportDecidedCandidates, _changed_paths, slug
 from rulebook.golden import REPO_ROOT, case_yaml, inside_golden, run
 from rulebook.testing import (
     APPROVED,
@@ -168,3 +168,19 @@ def test_the_golden_set_is_refused_through_a_link_or_another_name(
     assert inside_golden(named, golden=[named])
     assert not inside_golden(tmp_path / "elsewhere", golden=[named])
     assert not inside_golden(tmp_path / "elsewhere", golden=[tmp_path / "missing"])
+
+
+def test_only_the_head_of_an_edit_note_names_changed_paths() -> None:
+    candidate = "drafted from rule candidate 0e9a0a39-7c49-4a8b-9a54-08f0d0c3d0aa"
+    assert _changed_paths(f"{candidate}, changed title, citations: the rate changed") == [
+        "title",
+        "citations",
+    ]
+    assert _changed_paths("changed title, specification; cited 2 clauses: changed my mind") == [
+        "title",
+        "specification",
+    ]
+    assert _changed_paths("changed a, b, c and 3 more") == ["a", "b", "c"]
+    assert _changed_paths("cited 1 clause: the due date changed last week") == []
+    assert _changed_paths("cited 2 clauses") == []
+    assert _changed_paths("approved; nothing changed here") == []
