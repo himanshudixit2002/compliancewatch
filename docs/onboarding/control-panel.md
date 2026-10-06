@@ -1,292 +1,417 @@
-# The control panel
+# ComplianceWatch Control
 
-The control panel is one window over the whole project: the dev stack, the services and their
-workers, the product, the data, the quality gates, the pipeline's events, the flags and the
-checkout's processes. Every button runs a make target of the repo, or a plain program, so the
-panel adds no behaviour of its own; this page lists what each tab runs and what the panel never
-does.
+ComplianceWatch Control is the Mac app that runs ComplianceWatch on this Mac and shows what it
+is doing. It is for everyone on the team, technical or not: every button says what it does,
+what happens to the computer, how long it usually takes and how safe it is, and the technical
+detail (commands, logs, process ids) is always one click away under "Show technical details".
+
+ComplianceWatch watches regulators for rule changes, decides which changes apply to one
+specific business, and turns each into a dated obligation the owner can act on. It starts with
+Indian small businesses under GST.
+
+## Open it
 
 ```bash
-make control-panel           # open the window from a terminal, from this checkout's files
-make control-panel-app       # build ComplianceWatch.app on the Desktop (DEST=~/Applications)
+make control-panel-app       # build the app on the Desktop (DEST=~/Applications puts it there)
+make control-panel           # open the same window in your browser, from a terminal
 ```
 
-The window uses only Python's standard library (tkinter); `tools/control-panel/panel_core.py`
-holds its logic (the probes, the parsers, the command plans, the checks and the runner) without
-tkinter, and `tools/control-panel/tests` tests it without a display, Docker or a network.
-`CW_CONTROL_PANEL_REPO=<path>` points the window at another checkout.
+Building it again replaces the app in place: the new one is built beside the old one and swapped
+in only when it is complete, and on any failure the old one stays. Built somewhere else
+(`DEST=...`), macOS stops listing the old copy, and the build names it so you can delete it.
 
-## The app
+Open the app like any other. It starts a small helper on this Mac, and the window talks only to
+that helper. The first time, a short tour shows you around (five steps; skip it whenever you
+like, and replay it from the Guide).
 
-`make control-panel-app` builds ComplianceWatch.app on the Desktop, or in `DEST`. The bundle
-carries its own copy of `control_panel.py` and `panel_core.py` in
-`Contents/Resources/control-panel`, with a `BUILD` file that records when it was built, the
-commit the files came from (`+changes` when they differ from it) and their hash. Its launcher
-changes into the checkout, sets `CW_CONTROL_PANEL_REPO` to it and runs that copy with the
-checkout's `.venv/bin/python` (after `uv sync --all-packages` when the venv is missing). The
-window is therefore the one installed whatever branch the checkout is on; the make targets it
-runs are the checkout's. The footer names the build: its date and commit, or "this checkout's
-tools/control-panel" for `make control-panel`.
+On this Mac:
 
-To update the app, run `make control-panel-app` again from a checkout that has the panel you
-want; it replaces the bundle. From a copy of the panel outside a checkout, name the checkout:
-`CW_CONTROL_PANEL_REPO=<checkout> tools/control-panel/install-app.sh [destination]`.
+- Everything runs on this Mac. Nothing here is a service for real customers.
+- Nothing this app starts reads the real regulator websites: the crawl stays off.
+- The full product writes its messages to a file (the sink) instead of sending them. Real
+  WhatsApp and email stay off unless someone turns them on in `.env`.
+- The demo businesses and people are made up. Their names say so: synthetic.
 
-## How it runs things
+## The window
 
-- **No shell.** Every step is an argument list (`make product WEB_PORT=3400`, `colima start
-  ...`), and links and files open through macOS's `open` the same way; nothing goes through a
-  shell. A Finder-launched app gets a bare PATH, so the panel puts `/opt/homebrew/bin` and
-  `/usr/local/bin` first and `~/.local/bin` last.
+On the left, the sections: **Home**; to do things, **Run**, **Data** and **Checks**; to see
+things, **Features**, **Pipeline & events**, **Flags**, **Processes** and **Logs**; to find
+things, **Commands** and the **Guide**.
+
+Along the top:
+
+- **The lights** for Docker, Databases, Services, Product and Web. Each light has a shape as
+  well as a colour: a filled green dot is running, a half-filled amber dot partly running, a
+  spinning blue ring starting or stopping, an empty ring stopped, a red diamond needs attention.
+  Choose one to go to its controls.
+- **Activity**: what is running now, with its step and progress, and everything that ran since
+  the window opened, each with its steps and output.
+- **The branch chip**: the branch of the checkout. Amber means it is not `main`; red means
+  another session (for example Claude's build agent running tests) is working in the checkout.
+  Choose it for the details.
+- **Search actions (⌘K)**: type what you want ("backup", "check", "start") to find any action,
+  any place in the app or any Guide entry, and press Return.
+
+### Every action says the same four things
+
+Each action is a card with a title, a plain line, how long it usually takes and a safety badge:
+
+| Badge           | Means                                                    |
+| --------------- | -------------------------------------------------------- |
+| Safe            | Starts or reads things. Nothing is lost.                 |
+| Changes data    | Writes to your local databases or files.                 |
+| Stops things    | Stops running parts. Anything using them is interrupted. |
+| Deletes data    | Removes local data. You are always asked first.          |
+| Never runs here | This app never runs it; the reason says why.             |
+
+"What happens" lists the steps in plain words, and "Show technical details" the exact commands.
+While an action runs, its card shows a progress bar, the step it is on ("Step 3 of 7: Migrate
+databases"), how long it has run, Cancel, and its live output behind "Show the live output".
+One action that starts, stops or changes something runs at a time; the others wait and say
+what they are waiting for. A card that cannot run now says why ("Start the product first").
+
+### Questions before risky actions
+
+Anything that changes data, stops or deletes asks first, in plain words, and names exactly
+what stops or changes; so does anything that asks the AI model. The question also warns when:
+
+- the checkout is not on `main` (the action runs that branch's code and commands);
+- another session is working in the checkout, naming it ("Claude's build agent is running
+  make check"), because stopping what it uses breaks its work;
+- the action asks the model and the model may be a paid one: "This may call a paid model" when
+  the app cannot tell which model the gateway uses (the product is not running, or its log does
+  not say), and the provider by name when it is a paid one.
+
+Stopping the web app (and so Stop everything) first lists the processes it will reach, read
+afresh when the question opens. Reset and Restore offer to back up the database first, and a
+deletion needs a tick in "I understand that this deletes local data". Every such question is
+asked, on `main` too; the window never answers one itself. "Run all checks" and the contracts
+check ask too, since `make contracts-check` regenerates the generated clients.
+
+### When something fails
+
+A failed action says what went wrong in plain words ("Docker is not running"), what to do
+about it, and offers the button that does it ("Start Docker"), with "Try again" and the exact
+lines under "Show technical details". A notice in the corner says the same, and finished actions
+say so there too, with the obvious next step ("Open the app").
+
+## What each section does
+
+**Home.** One big Start or Stop. Start everything starts Docker, the databases and queues, the
+ten services and the web app at `localhost:3000`, then opens it; Stop everything stops all of
+it, Docker included, and keeps your data. Below: "What is running", the parts as connected
+boxes coloured as they run (choose one to start or stop it on its own); four quick tasks (open
+the app, load demo data, run the checks, free up memory); recent activity; and the code the app
+runs (branch, last change, uncommitted files, how far from `origin/main`).
+
+**Run.** Each part on its own: Docker, the databases and queues, the services, the web app,
+the full product and the product from its image, the optional tools (observability, the fake AI
+gateway, Unleash), and a table of workers and outbox relays per service.
+
+**Data.** Demo data (for the screens, for the product, and the five-minute demo); keeping the
+databases up to date (all services or one) and their checks; Back up the database, Restore a
+backup (the backups of `var/backups`, newest first, with size and age) and Start fresh (reset
+the database); a database prompt in Terminal.
+
+**Checks.** The quick checks (`make check`, what CI runs before Docker) and every CI check in
+order; the product check (every step, or one) and the product's web journey; each check on its
+own; and the result of each check you ran since the window opened.
+
+**Features.** What the product can do today: live numbers from the running product (review
+queue, pipeline tasks, fan-outs, obligations, changes, messages through the sink, flags, the
+last product check and eval report), links to the web app's pages that exist, and "Not built
+yet" where the product has no route for something.
+
+**Pipeline & events.** How events move between the services: each consumer group with how far
+behind it is, each topic with its messages, and dead-letter topics that hold messages in red.
+It reads the queue at most once every 30 seconds. The crawl report is here too, and links to the
+Temporal UI, the worker's loops and the pipeline's own answers.
+
+**Flags.** Every switch in `packages/flags/registry.json`, in plain words, with the value this
+Mac gives it and where that comes from; open a row for the full description, the variable, the
+owner and when it goes away. This app never changes a flag: "Open .env" opens the file in your
+editor.
+
+**Processes.** Every port the project uses with the program on it, and the programs running
+from this checkout with how long each has run and who started it. Stop shows exactly which
+processes it would reach, and offers the process group or the process with its children when
+they differ. It signals only the processes the question named, one by one, and leaves alone
+(by name, in its log) anything that started after the question. It never stops another
+control window, what an editor or Claude Code runs (language servers included), your terminal
+itself, or anything outside the checkout, and it says why when it will not. A `make check` you
+started in a terminal of this checkout can be stopped.
+
+**Logs.** The end of each log (the services, the web app, the product, the workers and relays,
+the containers): the last 200, 500 or 2,000 lines, find in the log, keep at the latest line,
+copy.
+
+**Commands.** Every action the app can run, the project's documented make targets among them,
+searchable and grouped, filtered by safety. An action that may never run here (such as
+`make backfill`) is listed with the reason. A make target that an action already does
+(`make dev` is Start the databases) stays out of the list until you search for it, and then
+names that action.
+
+**Guide.** How ComplianceWatch works, what each part does, the recipes below with a button for
+each step the app can do, a glossary, what to do when something goes wrong, what this app will never do,
+the project's own guides, and the tour again.
+
+## Two ways to run it
+
+- **The screens (the UI-only stack).** Start everything on Home starts Docker, the databases
+  and queues, the ten services (each on its own port, 8001 to 8010) and the web app at
+  `localhost:3000`, then opens it. Use it to click through the screens. It has no worker, so
+  publishing a rule does not turn into obligations or messages here.
+- **The full product.** Run, The product starts the one app that holds every service, its
+  worker (with the message queue and Temporal on) and its own web app at `127.0.0.1:3400`. Here a
+  published rule really becomes decisions, obligations and a change card. Fill it with sample
+  data, then check it works ([product.md](product.md)).
+
+Your data lives in Docker's storage (volumes) on this Mac: Postgres holds every service's data
+and Redpanda the messages between them. Stopping keeps it. Only Reset deletes it; it asks first
+and offers to back up. Backups are files in `var/backups`.
+
+## Recipes
+
+The Guide has these with a button for each step the app can do, and a tick on a step that is
+already done.
+
+**See the app's screens** (about 10 minutes the first time)
+
+1. Start everything. The first time, Docker downloads about 2 GB.
+2. Load the demo data: the thirteen standing GST rules as drafts, a demo business with its
+   answers, and one recorded CBIC notification.
+3. Open the web app.
+4. Sign in: choose the tenant kind Business, tick Owner, type any display name, press "Use the
+   last seeded tenant", then Sign in. Nothing is checked on this sign-in page; it exists only on
+   your Mac.
+
+**Run the whole product** (about 10 minutes)
+
+1. Start the product. It starts Docker if needed, updates the databases, then the product's
+   app, its worker and its web app, and waits until all of them answer.
+2. Fill it with sample data: two made-up customers, a business (Demo Traders) and a CA firm
+   (Demo CA Associates), and a made-up publication of the three GSTR-3B rules.
+3. Check it works: the product check runs its steps one after another and says which passed.
+   Its rollback step always reports itself skipped here.
+4. Open the product's sign-in page.
+
+**Try it as a business owner.** With the product running and filled, open its sign-in page,
+choose the tenant kind Business, tick Owner, type a display name, press "Use the last seeded
+tenant", then Sign in. Demo Traders (synthetic) opens with its obligations, calendar and changes.
+The Ask tab appears only when the web app's Q&A flag is on.
+
+**Try it as a CA firm.** On the product's sign-in page choose the tenant kind CA firm, tick CA
+admin, type a display name, paste the tenant id `00000000-0000-4000-8000-0000000d0002` and sign
+in. It is Demo CA Associates (synthetic), with two client businesses. A change's Affected
+clients page lists the clients it applies to; a page listing all clients is not built yet.
+
+**Try it as an admin.** On the product's sign-in page choose the tenant kind Internal
+(regulatory team), tick Admin, type a display name, leave the tenant id empty and sign in.
+Internal tools (`/admin`) opens. Pages that are not built yet, such as the review queue, say
+so.
+
+**Show the five-minute demo** (a few seconds, no Docker needed). Run the demo: it records
+consents, registers the business by GSTIN, decides which rules apply, makes the calendar and
+sends a reminder in Hindi through a fake channel. [demo.md](demo.md) says what to point out at
+each minute.
+
+**Check your work before sharing it.** Run the quick checks (`make check`: code style, types,
+tests and the project's own rules; no Docker needed). If one fails, its name turns red in
+Checks; read its output, fix the cause, then run that check alone again. For a bigger change,
+run every CI check in order: it needs Docker, takes much longer and carries on past a failure,
+then lists each result.
+
+**Stop everything to free memory.** Stop everything stops the web app, the services, the
+product, this app's workers and relays, the databases and Docker itself. If another session is
+working in this checkout, the question names it first.
+
+**Start fresh.** Start fresh (reset the database) with "Back up first" ticked: Reset stops the services and
+the product, deletes all local data (Docker's storage for this project), then starts the
+databases again, empty, updated and with the seed rules. Then Start everything and load the demo
+data again.
+
+**When something breaks.** Look at the lights (grey is stopped, amber partly running, red needs
+attention); read the error where it happened, with its fix button; open the part's log; look the
+problem up below. Still stuck? Every output has a Copy button: send it to a developer.
+
+## When something goes wrong
+
+| What you see                                           | Why                                                                                                     | What to do                                                                                                                                                  |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docker is not running                                  | The databases and the queue run inside Docker.                                                          | Start Docker. The first start takes a minute or two.                                                                                                        |
+| Start everything stopped part-way                      | One of its steps failed; the card names the step and the reason.                                        | Use the fix button the card offers, or read Show technical details. Then press Start everything again.                                                      |
+| A port is already in use                               | Another program, perhaps a second copy of the project, listens on a port this needs.                    | Processes lists every port with the program on it. Stop it there if it belongs to this checkout; otherwise quit that program, or change the port in `.env`. |
+| The web app does not open                              | The first start builds it, which takes a minute or two.                                                 | Wait until the Web light turns green. If it stays grey, read its log in Logs, then stop and start the web app from Run.                                     |
+| The product check fails                                | One of its steps found something wrong; the others still run.                                           | Run that step on its own from Checks and read its output. [product.md](product.md) has a troubleshooting list for each step.                                |
+| "make ... is not a target of this checkout's Makefile" | The checkout is on a branch that does not have that command.                                            | Switch the checkout to `main` in a terminal, or ask whoever works on that branch.                                                                           |
+| A tool is missing                                      | A command needs a program that is not installed (for example uv, pnpm or colima).                       | Run Which tools are installed. [local-dev.md](local-dev.md) says how to install each one.                                                                   |
+| Docker did not stop in time                            | Each step of a stop has a time limit, and `colima stop` overran its 2 minutes.                          | The failure offers Force-stop Docker, which asks first: a forced stop gives the databases no time to close their files.                                     |
+| The branch chip at the top is red                      | Another session is working in this checkout, for example Claude's build agent running tests.            | Wait for it to finish, or see what it is in Processes. Stop everything, Start fresh and Restore a backup would break its work, and their questions say so.  |
+| The window says it lost its connection                 | The app's helper stopped, or the Mac went to sleep.                                                     | Wait a few seconds; it reconnects by itself. If it does not, quit the app and open it again.                                                                |
+| The window says "Open this window from the app"        | The page was reloaded without the key the app gives it.                                                 | Open the app again (or run `make control-panel` again).                                                                                                     |
+| The window is empty, or says it could not load         | Part of the window did not arrive from the app's helper. The window loads itself again once on its own. | Press ⌘R to load it again. If it stays empty, quit the app and open it again.                                                                               |
+| The Mac feels slow                                     | Docker's virtual machine uses memory and processor time while it runs.                                  | Stop everything when you are done. Your data is kept for next time.                                                                                         |
+
+## What this app will never do
+
+These rules are checked where each program starts, not only when you press a button, so no
+button can get around them.
+
+- **Run anything it was not built to run.** Every button runs one of the project's own make
+  commands or a plain program, never through a shell, and only commands this checkout's
+  Makefile has.
+- **Read the real regulator websites.** It never runs `make backfill` or `make label`, which
+  read those sites, and the crawl stays off for everything it starts, whatever `.env` says.
+- **Withdraw a published rule.** It never runs the product check's rollback step
+  (`--destructive`). Only CI runs that, on a database made for the run.
+- **Fill the product with extra options.** Filling the product with sample data runs with no
+  options, and only while the product answers.
+- **Stop what is not this project's.** It never stops itself, another control window, what
+  Claude Code or an editor runs, or anything outside this checkout, such as your terminal
+  itself. Stopping a process names every process it reaches before it happens, and signals
+  only those.
+- **Touch git.** It never fetches, commits, pushes or switches branches, and it writes nothing
+  in the checkout before you start something.
+- **Change your settings.** It never changes a flag, `.env` or the project's files itself. The
+  commands it runs write what they always write, such as test reports, and
+  `make contracts-check` regenerates the generated clients before it compares them.
+- **Delete data without asking.** Reset and Restore ask first, say what they delete and offer a
+  backup.
+- **Run two changes at once.** One step runs at a time, and Cancel stops the running one with
+  everything it started.
+
+## Words
+
+| Word                | Meaning                                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Analyst             | A person on the regulatory team who checks a rule against the regulator's text before it is published.                               |
+| Backup              | A copy of the database in a file in `var/backups`, made with Back up the database. Restore a backup puts it back.                    |
+| Branch              | A line of work in the code. `main` is the shared, reviewed version; other branches hold work in progress.                            |
+| CA firm             | A firm of chartered accountants that looks after the compliance of several client businesses.                                        |
+| Change card         | The message that tells a business about a rule change that applies to it.                                                            |
+| Check               | An automatic test of the code or the data. CI runs the same checks on every change. Also called a gate.                              |
+| Checkout            | The folder with the project's code on this Mac. This app runs its commands there.                                                    |
+| CI                  | Continuous integration: GitHub runs the checks on every change before it is merged.                                                  |
+| Citation            | The exact regulator clause a rule is based on, quoted word for word.                                                                 |
+| Colima              | The free tool this app uses to run Docker on a Mac.                                                                                  |
+| Consumer group      | A named reader of the message queue. It remembers how far it has read each topic.                                                    |
+| Container           | One program running inside Docker, such as the Postgres database.                                                                    |
+| Crawl               | Reading the regulators' websites on a schedule. Always off for everything this app starts.                                           |
+| Database            | Where the data is kept. Here it is Postgres, running in Docker.                                                                      |
+| Dead letters        | Messages that could not be handled. They wait in a topic whose name ends in `.dlq` until someone looks at them.                      |
+| Docker              | Software that runs programs in containers. The databases and the queue run in it.                                                    |
+| Eval                | A measured test of the AI parts against a golden set of right answers.                                                               |
+| Fan-out             | Deciding a newly published rule for every business at once, in batches.                                                              |
+| Flag                | A switch or setting for a feature, usually set in `.env`. This app shows flags but never changes them.                               |
+| GSTIN               | A business's GST registration number.                                                                                                |
+| Hold                | A pause an admin puts on every fan-out until it is released.                                                                         |
+| Lag                 | How many messages a consumer group still has to read.                                                                                |
+| LLM gateway         | The one service that talks to AI models (large language models). By default it uses a fake model.                                    |
+| make                | The tool that runs the project's named commands, such as `make dev` or `make check`. Most buttons here run one or more of them.      |
+| Migration           | A step that updates the database's structure to match the code.                                                                      |
+| Obligation          | A dated duty for a business, such as a GST return to file by a due date.                                                             |
+| Outbox relay        | A helper that passes a service's saved events on to the message queue.                                                               |
+| Pid                 | The number the Mac gives each running program (its process id).                                                                      |
+| Port                | A numbered door a program listens on, like 3000 for the web app.                                                                     |
+| Process             | A running program.                                                                                                                   |
+| Product check       | A test of the running product from end to end, one step at a time: health, the loop from rule to message, tenant isolation and more. |
+| Queue               | The message queue, Redpanda, which carries events between services in topics. It speaks Kafka's language.                            |
+| Rule version        | One version of a rule. It starts as a draft, analysts review it, and then it is published.                                           |
+| Seed                | Loading starter data: the thirteen standing GST rules as drafts, or the made-up demo businesses.                                     |
+| Service             | One part of ComplianceWatch with one job, such as obligations or notifications.                                                      |
+| Sink                | A file, `var/product/sink.jsonl`, where the full product writes its messages instead of sending them.                                |
+| Synthetic           | Made up for tests and demos. Synthetic businesses and people are not real.                                                           |
+| Temporal            | Runs long jobs as steps and tries a failed step again.                                                                               |
+| Tenant              | One customer account: a business or a CA firm. A tenant never sees another tenant's data.                                            |
+| Topic               | A named stream of events in the queue, such as `obligation.created`.                                                                 |
+| UI-only stack       | The ten services and the web app, for clicking through screens. It has no worker.                                                    |
+| Uncommitted changes | Edits in the checkout that are not yet saved in git. This app shows how many there are.                                              |
+| Volume              | Docker's storage on this Mac, where the databases keep their data between runs.                                                      |
+| Worker              | A program that does background work: it reads events, sends reminders and runs long jobs.                                            |
+
+## For developers
+
+### How it fits together
+
+- `tools/control-panel/panel_core.py` holds the logic and the safety rules, with no window: the
+  probes, the parsers, the plan behind every action, the checks every program passes where it
+  starts, the process rules and the runner. `tools/control-panel/tests` tests it without a
+  display, Docker or a network.
+- `tools/control-panel/panel_server.py` serves the window and a JSON API with server-sent
+  events, on `127.0.0.1` and a random free port, with a random token per launch. Its contract is
+  `tools/control-panel/API.md`; `--demo` serves made-up data from a fake core (no program runs,
+  nothing is signalled), and `--open` opens the default browser.
+- `tools/control-panel/ui/` is the window: plain HTML, CSS and JavaScript modules, no build step
+  and nothing from the network. `guide.js` holds the Guide's words; `model.js` turns the API's
+  answers into what the views read; `api.js` holds the token, the requests and the event
+  stream.
+- `tools/control-panel/shell/` is the Mac app around it; `install-app.sh` builds it.
+- `CW_CONTROL_PANEL_REPO=<path>` points the helper at another checkout.
+
+### Security
+
+No token ever travels in a URL. The app opens the window with a single-use launch code in the
+address's fragment (`http://127.0.0.1:<port>/#launch=...`), which it asks the helper for with
+the token. The window clears the address bar at once, swaps the code for the token with a
+`POST` that the helper accepts only from its own page (the `Origin` and `Host` are checked), and
+keeps the token in memory only (never in storage). A code lasts 30 seconds and works once, so a
+copied or reloaded address is worth nothing. The window sends the token as `X-Panel-Token` on
+every request, the event stream included (read with `fetch`). The helper also checks that `Host`
+is `127.0.0.1:<port>` and that an `Origin`, when present, is the window's own, so another
+website or a DNS rebinding cannot reach it. A reload without the app says "Open this window
+from the app". The window's content security policy allows nothing but its own files and its
+own helper.
+
+### How it runs things
+
+- **No shell.** Every step is an argument list (`make product WEB_PORT=3400`,
+  `colima start ...`), and links and files open through macOS's `open` the same way. A
+  Finder-launched app gets a bare PATH, so `/opt/homebrew/bin` and `/usr/local/bin` go first and
+  `~/.local/bin` last.
 - **Checked where it starts.** Every program is checked where it starts, not only when its
   button is pressed: no shell, nothing that reads the regulator sites, no `--destructive`, the
-  crawl off (`CW_PIPELINE_CRAWL_ENABLED=false` for everything the panel starts), make without
-  options or shell characters, a destructive target only in a step that asked first, and only
-  the checkout's make targets. A step the panel performs itself declares every program it runs,
-  and the runner refuses any other. The panel passes none of `ARGS`, `MAKEFLAGS`, `MFLAGS`,
-  `GNUMAKEFLAGS`, `MAKELEVEL`, `MAKEOVERRIDES`, `SERVICE`, `PROC`, `FOLLOW`, `FILE` or `WEB` on
-  from the environment it was opened in, so `make control-panel ARGS=--destructive` reaches no
-  target.
-- **One step at a time.** A step is anything that starts, stops or changes something. While
-  one runs, the other step buttons wait; links, status, tables and logs stay usable.
-- **The output pane.** A step streams into the Steps tab of the pane at the bottom; logs and
-  other reads (container logs, `make product-logs`, `make dev-ps`, the crawl report) stream
-  into Logs and reads, so they never mix with a running step. Drag the bar above the pane to
-  give it more room. When the window falls 20,000 lines behind a step, the pane says how many
-  lines it left out.
+  crawl off (`CW_PIPELINE_CRAWL_ENABLED=false` for everything it starts), make without options
+  or shell characters, a destructive target only in a step that asked first, and only the
+  checkout's make targets. A step the app performs itself declares every program it runs, and
+  the runner refuses any other. None of `ARGS`, `MAKEFLAGS`, `MFLAGS`, `GNUMAKEFLAGS`,
+  `MAKELEVEL`, `MAKEOVERRIDES`, `SERVICE`, `PROC`, `FOLLOW`, `FILE` or `WEB` is passed on from
+  the environment the app was opened in.
+- **One step at a time.** Reads (logs, the container list, the crawl report) may run beside a
+  step.
 - **Cancel.** Each step runs in a session of its own, so Cancel ends the running step's whole
-  process group: SIGTERM, then, five seconds later, SIGKILL to whatever of the group is left,
-  whether or not the step's first process has exited. Cancelling `make product` or
-  `make web-stack` therefore also stops what they had started. A read stops by itself after
-  three minutes.
-- **Time limits.** Each step of a stop has one: the web app 1 minute, `make web-stack-down`
-  and `make product-down` 2, the panel's workers and relays 1, `make dev-down` 3 and
-  `colima stop` 2. A step that overruns is stopped the way Cancel stops it and shows as timed
-  out. When `colima stop` times out, the panel offers `colima stop --force` as a question of its
-  own; Stop everything never forces. While a step runs, the line above the output says which
-  step of how many it is and for how long it has run. A step's output stops being read two
-  seconds after its program exits, so a process it left behind holding the pipe cannot hold
-  the step.
-- **Confirms.** Stop everything, reset, restore, stopping Docker and Cancel ask first and say
-  what they remove or stop. So does stopping a process this panel did not start: the UI-only
-  stack or the product when another window or a terminal started them, the web app (its confirm
-  names each pid its stop reaches), and anything on the Processes tab. Before Docker or the
-  product stops (Stop everything, Docker or Databases Stop, Product Stop, a restore or a reset),
-  the confirm names other sessions' processes in the checkout that use them, such as another
-  terminal's `pytest` or `make product-check`, and says the stop will break them. A question
-  opens in a small window of the panel's own, not a macOS sheet: the panel keeps drawing,
-  polling and streaming while it is open.
+  process group: SIGTERM, then, five seconds later, SIGKILL to whatever of the group is left.
+  Cancelling `make product` or `make web-stack` therefore also stops what they had started.
+- **Time limits.** Each step of a stop has one: the web app 1 minute, `make web-stack-down` and
+  `make product-down` 2, the workers and relays 1, `make dev-down` 3 and `colima stop` 2. A step
+  that overruns is stopped the way Cancel stops it and shows as timed out. When `colima stop`
+  times out, the window offers `colima stop --force` as a question of its own; Stop everything
+  never forces. A step's output stops being read two seconds after its program exits.
 - **What it writes.** Nothing until you start something. Then: `var/control-panel/registry.json`
-  (the process group of every step and background process it started, so it can tell them
-  from another session's), the pid and log file of each worker and relay it starts in
-  `var/control-panel/`, the web app's in `var/web-stack/web.pid` and `web.log` as before, and
-  `var/control-panel/psql.command` for the psql button. A `hang-<time>.log` appears there only
-  when the window stopped responding. `var/` is git-ignored.
-- **Probes.** The status (Docker, the containers, every `/health` and `/ready`) refreshes every
-  four seconds on a background thread. git, `ps` and `lsof` run every 30 seconds and when a tab
-  needs them. rpk runs on demand, at most once every 30 seconds however it is asked: the
-  button, a visit to the Pipeline tab or its 30-second box. Only one probe of each kind runs at
-  a time, and each program a probe runs has a hard limit (6 seconds for `docker info`, 8 for
-  `docker compose ps`, which hang while Colima stops): past it, SIGKILL goes to the program's
-  whole process group. No probe thread touches the window; each hands its result to the window's
-  own loop.
-- **When the window stops responding.** A watch thread notices when the window's event loop has
-  not run for five seconds and writes `var/control-panel/hang-<time>.log`: the main thread's
-  Python stack, the other threads' stacks and the timers and idle callbacks that were waiting.
-  When the window answers again, a banner under the title names the log.
+  (the process group of every step and background process it started, so it can tell them from
+  another session's), the pid and log file of each worker and relay it starts in
+  `var/control-panel/`, the web app's in `var/web-stack/web.pid` and `web.log`, and
+  `var/control-panel/psql.command` for the database prompt. `var/` is git-ignored.
+- **Live updates.** One poller in the helper reads the status (Docker, the containers, every
+  `/health` and `/ready`, git, the processes) and pushes changes to the window over the event
+  stream; the window never polls, it only sends a heartbeat every 20 seconds. rpk runs at most
+  once every 30 seconds. Every program a probe runs has a hard time limit.
 
-Closing the window leaves the stack, the services and the panel's workers running; Stop
-everything shuts them down. Closing it while a step runs cancels that step, after a confirm.
+### Developing the window
 
-## The tabs
+```bash
+node tools/control-panel/ui-tests/run.mjs                      # the Playwright suite, against panel_server.py --demo
+PANEL_BACKEND=mock node tools/control-panel/ui-tests/run.mjs   # against the mock, without Python
+node tools/control-panel/ui-tests/run.mjs --both               # both, one after the other
+.venv/bin/python tools/control-panel/panel_server.py --demo --open   # look at the window with made-up data
+```
 
-### Overview
-
-The status the panel always showed (Docker, the databases and queues, the web app on 3000, the
-product on 8080 and the ten services' `/health`), the big buttons (Start everything, Stop
-everything, and the two web apps), and quick start and stop buttons for Docker, the databases,
-the UI-only stack, the web app and the product.
-
-Stop for the web app reads the processes first. It reaches the process tree of the web app the
-panel recorded (`var/web-stack/web.pid`, while that pid still runs it) and of whatever of this
-checkout listens on the web port, from the top of its pnpm and next chain, and names each pid
-in its confirm when this panel did not start them all. It never signals a process group: a
-`make product` from a terminal whose web app holds the port keeps its app and worker, which
-share that group. A pid that appears after the confirm is left alone.
-
-**The code the stack runs** reads the checkout through `git --no-optional-locks`, which takes
-no lock: the branch, the short sha and subject, the count of uncommitted files, and how far HEAD
-is ahead of and behind `origin/main` as last fetched (the panel never fetches). A branch other
-than `main` shows in amber, here and beside the window's title.
-
-**Not started by this panel** lists, when there are any, the checkout's processes that another
-session started: another terminal's `make check` or `pytest`, a `make product-check`, another
-control panel window. Click it for the Processes tab.
-
-### Stack
-
-The containers of every compose profile with their state, health and ports (`docker compose
-ps -a`); `make dev` and `make dev-down`; `make dev-observability` (Langfuse, the OTel collector,
-Prometheus, Tempo, Grafana), `make dev-llm` and `make dev-flags`; `make dev-ps`; and the last
-200 lines of one container's log (`docker compose logs --tail 200`, never `--follow`). Links
-open what the stack serves: the Temporal UI, Grafana, Prometheus, Langfuse, Unleash, the
-OTel collector's health and the fake LLM gateway's docs. Redpanda has no console in this stack,
-so its admin API and schema registry stand for it.
-
-### Services
-
-The ten services of the UI-only stack with their port and `/health`, a link to each one's
-`/docs` and its log (the last 200 lines, or the whole file in Console). Start and Stop for
-`make web-stack STORE=postgres`. `make web-stack-down` signals a pid of `var/web-stack` only
-while it still runs that file's service (its uvicorn, or the web app's pnpm or next); a pid that
-now belongs to another program is left alone and its file removed.
-
-Workers and outbox relays start and stop here as background processes the panel keeps:
-`make worker SERVICE=<service>` for the five services with a worker module and
-`make relay SERVICE=<service>` for those whose migrations create an outbox, each in a session
-of its own, with its pid and log in `var/control-panel/worker-<service>.*` or
-`relay-<service>.*`. A recorded pid counts only while its command line is still that worker's
-or relay's, so a pid reused after a reboot neither reads as running nor blocks a start. Each
-starts with `CW_PIPELINE_CRAWL_ENABLED=false`, whatever `.env` says. The product's own worker
-already runs every relay and consumer, so these are for the UI-only stack.
-
-### Product
-
-Each listener and process of `make product` with its health: the app's internal listener
-(`/ready`), its public listener (`/health`), the worker (`/health`, and a link to `/loops`) and
-the web app on 3400, with the pid listening on each port and who started it; and the three
-containers of `make product-image`.
-
-| Button | Runs |
-| --- | --- |
-| Start, Stop, Wait, Role | `make product WEB_PORT=3400`, `make product-down`, `make product-wait WEB_PORT=3400`, `make product-role` |
-| Seed | `make product-seed`, only while the product's internal listener answers `/ready` |
-| Check all, Check this step | `make product-check`, or `make product-check ARGS="--step <step>"` with a step from `cw-product check`'s own list |
-| Web journey | `make product-e2e PRODUCT_E2E_PORT=3401` (3400 is the product's web app) |
-| Logs app, worker, web | `make product-logs PROC=<proc> FOLLOW=0` |
-| Image: Build, Start, Stop, logs | `make mvp-image`, `make product-image`, `make product-image-down`, `make product-image-logs PROC=<proc> FOLLOW=0` |
-
-The web app on 3400 opens at `127.0.0.1`, so its session stays apart from the UI-only web app's
-on `localhost:3000` (product.md, "Signing in on the web"). The links under it go to the admin
-pages the web app's screen registry (`apps/web/src/shared/config/screens.ts`) marks live; a page
-it does not, such as the review queue today, is named as not built yet.
-
-### Data
-
-`make migrate` for every service or one, `make migrations-check`, `make migrations-catalog`,
-`make data-quality`, the seed calendar's check (`make seed SERVICE=rulebook ARGS=--check`),
-Load demo data (`make seed SERVICE=rulebook`, then `make web-seed` for the UI-only stack) and
-Run the demo (`make demo`). psql opens Terminal on `make dev-psql`.
-
-Back up runs `make dev-backup`. Restore offers the dumps of `var/backups` newest first, each
-with its size and age, and leaves out an empty one: `make dev-backup` creates its file before
-`pg_dump` writes to it, so a failed or cancelled backup leaves one behind. Before the confirm,
-the panel reads the picked dump with `pg_restore --list` in the Postgres container (the file on
-its standard input, as `make dev-restore` gives it) and refuses one it cannot read; the confirm
-says what it read and that `make dev-restore` drops the database first. The restore reads the
-dump again as its first step.
-
-Reset DB asks whether to back up first, then stops the UI-only stack, the product's processes
-and the panel's workers and relays, and runs `make dev-reset`, `make dev`, `make migrate` and
-the seed calendar. Its confirm lists every named volume `make dev-reset` removes, read from
-`docker-compose.yml` with the compose project's name (`compliancewatch_postgres_data`,
-`compliancewatch_redis_data`, `compliancewatch_redpanda_data`,
-`compliancewatch_prometheus_data`, `compliancewatch_tempo_data`,
-`compliancewatch_grafana_data` today), with what each holds.
-
-### Gates
-
-One button per gate: `make check`, `lint`, `typecheck`, `test`, `py-test-integration` (with
-`TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`), `eval EVAL_PROFILE=ci`,
-`eval-check`, `openapi-compat`, `contracts-check`, `alerts-check`, `flags-check`,
-`migrations-check`, `sast`, `deps-scan`, `web-screens-check`, `web-e2e` and `ci-lint`.
-
-**Run the CI gates in order** runs the gates of `make check` one by one in the order of CI's
-jobs, then `eval-check` and `eval`, `openapi-compat`, the ops checks, `py-test-integration`,
-`sast` and `deps-scan`, carrying on past a failure, and ends with each gate's result and
-duration; the table keeps them. It leaves out `make check` itself (its gates run one by one),
-`web-e2e` (it needs the seeded UI-only stack), CI's dev-stack job, whose
-`make product-check ARGS="--destructive"` needs a database made for the run, and any gate the
-checkout's Makefile does not have.
-
-### Pipeline
-
-`make crawl-report`, which only reads the pipeline store, and the consumer groups with their
-lag and the topics with their message counts, read through
-`docker compose exec -T redpanda rpk group describe` and `rpk topic describe`, at most once
-every 30 seconds. A dead-letter topic that holds messages shows in red. The links open the
-Temporal UI, the worker's `/loops`, the source manager's and the task queue's JSON on the
-internal listener, and the admin pipeline and review pages once the screen registry marks them
-live.
-
-### Flags
-
-A read-only table of `packages/flags/registry.json`: each flag's owner, default, the variable
-that sets it (its own `env`, or `CW_FLAG_<NAME>`) and the value `.env` gives it, or
-`apps/web/.env.local` for a web flag and `apps/whatsapp-bot/.env` for the bot's. Pick a flag to
-read what it does and when it is removed. `make flags-check` and Open .env (`open -t .env`) are
-here; the panel never changes a flag.
-
-### Processes
-
-Every port the project uses, both stacks, the infrastructure and the tools, with the pid and
-command listening on it (`lsof -iTCP -sTCP:LISTEN` and `ps`); Docker's ports show as Colima's
-port forwarding. Below them, the checkout's processes: make, `uv run`, pnpm, the repo's Python
-and Node scripts of the checkout, running in it or naming a path in it, and their children that
-stay in it, each with how long it has run and who started it (this panel, `make web-stack` or
-`make product` by their pid files, another control panel window, or another session). Shells,
-Claude Code and the tools an agent fetches (`uvx`, `uv tool`, MCP servers), editors, Colima's
-own processes and anything in a worktree under `.claude/` are never the checkout's, even when
-they run in its directory.
-
-Stop selected sends SIGTERM after a confirm that names every process it reaches: the process
-group, when every member is the checkout's and none is a control panel window; or the process
-and its children, which the confirm offers too when the group holds more. It refuses a control
-panel window, this one or another, and a process with a window under it (the make behind
-`make control-panel`).
-
-### Docs
-
-Opens the onboarding guides, the README, CONTRIBUTING and the runbooks and ADR folders,
-`make doctor` (which tools are on the PATH), and the repository's pull requests, Actions, the
-current branch and its comparison with `main` on GitHub (from `git remote get-url origin`).
-
-## What it never does
-
-- Run anything through a shell, a program a step did not declare, or a step while another
-  runs.
-- Run `make backfill`, `make label` or anything else that contacts the live regulator sites,
-  or start anything with the crawl on.
-- Pass `--destructive` to `make product-check`: its rollback step withdraws gstr9_annual, which
-  the shared dev database keeps published (product.md, "Honesty"). Rollback is not in the list
-  of single steps either, and an `ARGS` or `MAKEFLAGS` in the environment the panel was opened
-  in reaches no target.
-- Run `make product-seed` with arguments, or while the product does not answer.
-- Signal itself, another control panel window, a process outside the checkout, or a process
-  group that holds a control panel window.
-- Write anything in the checkout before you start something (but a hang log, when the window
-  stopped responding), fetch, or run a git command that writes.
-- Force-stop Colima without asking: `colima stop --force` runs only after its own question.
-- Edit a flag, `.env` or a tracked file itself. The make targets it runs write what they always
-  write: `make dev` creates `.env` from `.env.example` when it is missing; `make contracts-check`
-  regenerates the generated clients, which are tracked files, before it compares them;
-  `make test`, `make sast` and `make eval` write their reports (`coverage.xml`, `semgrep.sarif`,
-  `evals/reports/`); and the web builds write under `apps/web/.next`. All of these but the
-  generated clients are git-ignored.
-
-## When something is off
-
-- **The app opens an older panel.** The footer names the build; run `make control-panel-app`
-  again from a checkout that has the panel you want.
-- **`make X is not a target of this checkout's Makefile`.** The checkout is on a branch without
-  that target; the panel checks every step's targets against the Makefile before it runs one.
-- **A tool is missing in a step started from the app.** Run Docs, Which tools are installed
-  (`make doctor`): the app's PATH is Homebrew's and the system's.
-- **Another session's processes.** The Overview names them and the Processes tab lists them;
-  a reset, a restore or Stop everything affects them too, and their confirms say so.
-- **The window stopped responding.** The banner names the log in `var/control-panel/`; attach
-  it to the report. Before this build, a tab never opened could re-lay itself out for ever once
-  its text changed (after Stop everything, the Product tab), and the next tab click froze the
-  window at full CPU; the tabs now keep a width of their own.
-- **colima stop timed out.** Answer the force-stop question, or leave Colima as it is and run
-  `colima stop` in a terminal to watch it.
+The suite uses the checkout's own Playwright and axe (`apps/web/node_modules`) and the installed
+Google Chrome, headless. It runs against the real helper in `--demo` mode and sets the made-up world
+each test needs (another session at work, a branch that is not main, a step that fails or times out)
+through `POST /api/demo/state`. `ui-tests/mock-server.mjs` is a stand-in that speaks the same API
+with the catalog's own words, for checks without Python; it is never part of the app. The suite
+checks that every view renders, the palette, a run streaming and being cancelled, the questions and
+their warnings, errors with their fixes, the tour, events that land while a read is on its way,
+double clicks (one question, one start), tables at 1280, 1100 and 900 px, first paint and layout
+shift, and axe (WCAG 2.1 AA) in light and dark. It saves light and dark screenshots of every view in
+`var/screenshots/`. `prettier --check` covers the window's files like the rest of the repo.

@@ -560,8 +560,8 @@ web-stack-down: ## Stop the web-stack services and remove their pid files (logs 
 	  rm -f "$$pidfile"; \
 	done; true
 
-control-panel: ## Open the click-to-run control panel window (tools/control-panel)
-	@.venv/bin/python tools/control-panel/control_panel.py
+control-panel: ## Open ComplianceWatch Control in your browser (tools/control-panel); Ctrl-C stops it
+	@.venv/bin/python tools/control-panel/panel_server.py --open
 
 control-panel-app: ## Build ComplianceWatch.app on the Desktop: make control-panel-app [DEST=~/Applications]
 	@tools/control-panel/install-app.sh $(DEST)

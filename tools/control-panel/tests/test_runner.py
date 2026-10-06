@@ -566,3 +566,28 @@ def test_a_destructive_target_runs_only_inside_a_plan_that_asked_first(tmp_path:
     made, events = runner(tmp_path)
     assert not made.execute("reset", ("make", "dev-reset"))
     assert events.lines() == ["error: refused: reset: a destructive target without a confirm"]
+
+
+def test_one_probe_of_each_kind_at_a_time() -> None:
+    flights = core.SingleFlight()
+    assert flights.begin("status")
+    assert not flights.begin("status")
+    assert flights.begin("git")
+    assert flights.running() == {"status", "git"}
+    flights.end("status")
+    assert flights.begin("status")
+    flights.end("status")
+    flights.end("git")
+    wins: list[bool] = []
+    start = threading.Barrier(16)
+
+    def race() -> None:
+        start.wait()
+        wins.append(flights.begin("processes"))
+
+    threads = [threading.Thread(target=race) for _ in range(16)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert wins.count(True) == 1
