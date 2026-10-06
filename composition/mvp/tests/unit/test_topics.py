@@ -153,13 +153,13 @@ def test_the_plan_creates_the_missing_reports_drift_and_leaves_unlisted_topics_a
     assert result.unlisted == ("obligation.created.dlq",)
     assert result.replication_factor == 1
     assert result.summary() == (
-        "1 to create, 1 differ, 1 as the file says, replication factor 1 (1 broker)"
+        "1 to create, 1 differing, 1 as the file says, replication factor 1 (1 broker)"
     )
     assert result.lines() == [
         "  to create: rule.published.obligation.rules.dlq (1 partition, retention 30 days, "
         "cleanup delete)",
         "  differs, left as it is: profile.updated (partitions 1 on the broker, 3 in the file)",
-        "  as the file says: 1 topics",
+        "  as the file says: 1 topic",
         "  not in the file, left alone: obligation.created.dlq",
     ]
 
@@ -202,7 +202,7 @@ async def test_apply_creates_only_what_is_missing_and_a_second_apply_creates_not
     assert admin.held["profile.updated"].partitions == 1
     assert [drift.name for drift in first.drift] == ["profile.updated"]
     assert first.lines(applied=True)[0].startswith("  created: rule.published (")
-    assert first.summary(applied=True).startswith("2 created, 1 differ")
+    assert first.summary(applied=True).startswith("2 created, 1 differing")
 
     admin.created.clear()
     second = await apply(admin, wanted)

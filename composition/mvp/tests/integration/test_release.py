@@ -85,7 +85,7 @@ def test_a_release_makes_a_fresh_database_and_broker_whole_and_a_second_changes_
     first = capsys.readouterr().out
     assert f"migrate: {len(REGISTRY)} services, 8 migrated, 2 unchanged" in first
     assert first.count("schema created") == len(REGISTRY)
-    assert f"{len(load().topics)} created, 0 differ, 0 as the file says" in first
+    assert f"{len(load().topics)} created, 0 differing, 0 as the file says" in first
     assert first.rstrip().endswith("release: done")
 
     with PostgresCatalog(owner_url) as catalog:
@@ -104,7 +104,7 @@ def test_a_release_makes_a_fresh_database_and_broker_whole_and_a_second_changes_
     second = capsys.readouterr().out
     assert f"migrate: {len(REGISTRY)} services, 0 migrated, {len(REGISTRY)} unchanged" in second
     assert "schema created" not in second
-    assert f"0 created, 0 differ, {len(load().topics)} as the file says" in second
+    assert f"0 created, 0 differing, {len(load().topics)} as the file says" in second
 
 
 def test_the_topics_leave_unlisted_and_differing_topics_as_they_are(
@@ -136,7 +136,7 @@ def test_the_topics_leave_unlisted_and_differing_topics_as_they_are(
     assert "drift.missing" not in broker_topics(bootstrap)
 
     assert run_topics(settings, "apply", path=path) == 0
-    assert "topics apply: 1 created, 1 differ, 0 as the file says" in capsys.readouterr().out
+    assert "topics apply: 1 created, 1 differing, 0 as the file says" in capsys.readouterr().out
     topics = broker_topics(bootstrap)
     assert topics["drift.missing"].partitions == 2
     assert topics["drift.listed"].partitions == 1

@@ -206,7 +206,8 @@ class TopicPlan:
             for drift in self.drift
         ]
         if self.matching:
-            lines.append(f"  as the file says: {len(self.matching)} topics")
+            count = len(self.matching)
+            lines.append(f"  as the file says: {count} topic{'s' if count != 1 else ''}")
         if self.unlisted:
             lines.append(f"  not in the file, left alone: {', '.join(self.unlisted)}")
         return lines
@@ -214,7 +215,7 @@ class TopicPlan:
     def summary(self, *, applied: bool = False) -> str:
         made = f"{len(self.create)} {'created' if applied else 'to create'}"
         return (
-            f"{made}, {len(self.drift)} differ, {len(self.matching)} as the file says, "
+            f"{made}, {len(self.drift)} differing, {len(self.matching)} as the file says, "
             f"replication factor {self.replication_factor} ({self.brokers} "
             f"broker{'s' if self.brokers != 1 else ''})"
         )

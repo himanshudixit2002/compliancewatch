@@ -142,7 +142,7 @@ def test_the_plan_creates_nothing(capsys: pytest.CaptureFixture[str]) -> None:
     assert broker.created == []
     out = capsys.readouterr().out.splitlines()
     assert out[1].startswith(f"  to create: {load().topics[0].name} (")
-    assert out[-1].startswith("topics plan: 1 to create, 0 differ, ")
+    assert out[-1].startswith("topics plan: 1 to create, 0 differing, ")
 
 
 def test_a_malformed_topics_file_is_refused(
