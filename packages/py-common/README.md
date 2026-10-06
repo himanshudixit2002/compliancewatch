@@ -328,8 +328,11 @@ dead rows (the newest dead first, a page at a time), reads one, and puts a dead 
 with its audit row (the pipeline's `GET /v1/pipeline/outbox/dead` and
 `POST /v1/pipeline/outbox/{event_id}/requeue` do). `py_common.outbox.replay.DeadLetters` lists a
 dead-letter topic, the relay's `<topic>.dlq` or a consumer's `<topic>.<group>.dlq`, read only (no
-consumer group, nothing committed), and sends one message, by its event id, back to its origin
-topic without the dead-letter headers; `make replay` is its command line. `MemoryOutboxStore`
+consumer group, nothing committed; a read that does not reach the end of every partition in
+time is a `TimeoutError`, never a part of the topic), and sends one message, by its event id,
+back to its origin topic without the dead-letter headers, once the broker says it has that topic;
+`make replay` is its command line (exit 0 done, 1 unknown, 2 the broker did not answer or the
+read timed out, 64 wrong arguments). `MemoryOutboxStore`
 answers the same three as `OutboxAdmin`, and `FakeConsumer` reads what a `FakeProducer` sent.
 
 Every Kafka client (the relay's producer, consumers, their dead-letter producers and the topic

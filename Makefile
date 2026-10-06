@@ -326,7 +326,8 @@ relay: check-uv ## Run the outbox relay for one service's schema: make relay SER
 # The dead letters on Kafka (py_common.outbox.replay): list reads a dead-letter topic from its first
 # offset with no consumer group, so it commits nothing; send puts one message, by its event id,
 # back on its origin topic without the dead-letter headers. CW_KAFKA_BOOTSTRAP (.env) names the
-# cluster.
+# cluster. Exit 0 done, 1 an unknown event id or topic, 2 the broker did not answer or the topic
+# was not read to its end in time, 64 wrong arguments.
 replay: check-uv ## List a dead-letter topic, or send one message back to its origin: make replay ARGS="list --topic <topic>.<group>.dlq" | ARGS="send --topic <dlq> --event-id <id> [--dry-run]"
 	@[ -n "$(ARGS)" ] || { echo 'usage: make replay ARGS="list --topic <dead-letter topic> [--json]" | ARGS="send --topic <dead-letter topic> --event-id <uuid> [--to <topic>] [--dry-run]"'; exit 1; }
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \

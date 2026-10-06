@@ -85,11 +85,14 @@ and `error`). The message was delivered; the fix lives in the consumer or what i
    its document is registered), the database it writes to.
 3. Send the message back to its origin: `make replay ARGS="send --topic <topic>.<group>.dlq
    --event-id <id>"` (`--dry-run` says what it would send). It goes to the `origin_topic` header's
-   topic (`--to` names another; a dead-letter topic is refused) with its key, value and headers
-   less the dead-letter ones. Every group of the origin topic reads it again: the groups that took
-   it in skip it (they deduplicate on the event id), and the one that failed runs its handler
-   again. An event id the topic does not hold answers `holds no message with event id ...` and
-   exits 1; a broker that does not answer exits 2.
+   topic (`--to` names another; a dead-letter topic is refused, and so is a topic the broker does
+   not have, before anything is sent) with its key, value and headers less the dead-letter ones.
+   Every group of the origin topic reads it again: the groups that took it in skip it (they
+   deduplicate on the event id), and the one that failed runs its handler again. Exit status: 0
+   done; 1 an event id the topic does not hold (`holds no message with event id ...`), a topic
+   the broker does not have, or a message that cannot go back; 2 a broker that does not answer,
+   or a topic not read to the end of every partition within 30 seconds (nothing is listed or sent
+   from part of it); 64 wrong arguments.
 
 ## Ordering
 

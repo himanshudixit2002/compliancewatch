@@ -13,13 +13,16 @@ and the dead-letter ones: ``origin_topic``, ``attempts`` and ``error``, and a co
 
 ``DeadLetters.list(topic)`` reads every message of a dead-letter topic from its first offset to
 its end as it stands when the call starts, as a reader with no consumer group: nothing is
-committed and no group sees the read, so listing changes nothing. ``DeadLetters.replay(topic,
-event_id)`` sends the last message with that event id back to its origin topic (the
-``origin_topic`` header; ``to`` names another) with the same key and value and its headers less
-the dead-letter ones. Every consumer group of the origin topic then reads it again: the groups
-that took it in skip it, since they deduplicate on the event id, and the one that failed runs its
-handler again. An event id the topic does not hold is ``UnknownDeadLetterError``, a topic the
-broker does not have ``UnknownTopicError``; a message is never sent to a dead-letter topic.
+committed and no group sees the read, so listing changes nothing. A read that has not reached the
+end of every partition within its time is a ``TimeoutError``, never a part of the topic.
+``DeadLetters.replay(topic, event_id)`` sends the last message with that event id back to its
+origin topic (the ``origin_topic`` header; ``to`` names another) with the same key and value and
+its headers less the dead-letter ones. Every consumer group of the origin topic then reads it
+again: the groups that took it in skip it, since they deduplicate on the event id, and the one
+that failed runs its handler again. An event id the topic does not hold is
+``UnknownDeadLetterError``, a topic the broker does not have ``UnknownTopicError`` (the topic a
+replay would send to included, which is checked before anything is sent, so a misspelt ``to`` is
+never created); a message is never sent to a dead-letter topic.
 
 For a relay's dead letter, the outbox row is the source of truth: putting the row back to pending
 (``py_common.outbox.admin.OutboxAdmin.requeue``, the pipeline's
@@ -34,8 +37,10 @@ published. Replaying the message works too, but leaves the row dead.
         [--to <topic>] [--dry-run]
 
 ``list`` prints one line per message (``--json`` for JSON); ``send`` prints what it sent, or with
-``--dry-run`` what it would send. Exit status: 0 done, 1 an unknown event id or topic, or a
-message that cannot go back, 2 the broker did not answer.
+``--dry-run`` what it would send. Exit status: 0 done; 1 an unknown event id or topic (the one to
+send to included), or a message that cannot go back; 2 the broker did not answer, or not all of
+the topic was read in time (nothing is listed or sent from part of it); 64 the arguments are
+wrong (``USAGE_EXIT``, sysexits' ``EX_USAGE``).
 """
 
 import argparse
@@ -44,7 +49,7 @@ import json
 import sys
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Final, Protocol
+from typing import Final, NoReturn, Protocol
 from uuid import UUID
 
 from aiokafka import AIOKafkaConsumer, TopicPartition
@@ -59,6 +64,9 @@ DEAD_LETTER_HEADERS: Final = frozenset({"origin_topic", "consumer_group", "attem
 """The headers a dead-letter send adds; a replay sends the message without them."""
 READ_TIMEOUT_SECONDS: Final = 30.0
 MAX_ERROR_CHARS: Final = 300
+USAGE_EXIT: Final = 64
+"""The exit status for wrong arguments (sysexits' ``EX_USAGE``): 2 says the broker did not
+answer."""
 
 
 class UnknownTopicError(LookupError):
@@ -76,9 +84,11 @@ class ReplayRefusedError(ValueError):
 
 class TopicReader(Protocol):
     """Reads a whole topic, from its first offset to its end when the call starts, with no
-    consumer group."""
+    consumer group, and says whether the broker has a topic."""
 
     async def read(self, topic: str) -> Sequence[InboundRecord]: ...
+
+    async def has_topic(self, topic: str) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +211,10 @@ class DeadLetters:
             )
         if target.endswith(DLQ_SUFFIX):
             raise ReplayRefusedError(f"{target} is a dead-letter topic; a replay never goes there")
+        if not await self._reader.has_topic(target):
+            raise UnknownTopicError(
+                f"no topic {target} on the broker: nothing is sent to a topic it does not have"
+            )
         if not dry_run:
             await self._producer.send(
                 target,
@@ -228,14 +242,25 @@ class AiokafkaTopicReader:
         self._client_id = client_id
         self._timeout = timeout_seconds
 
-    async def read(self, topic: str) -> list[InboundRecord]:
-        consumer = AIOKafkaConsumer(
+    def _consumer(self) -> AIOKafkaConsumer:
+        return AIOKafkaConsumer(
             **self._kafka.aiokafka_kwargs(),
             client_id=self._client_id,
             group_id=None,
             enable_auto_commit=False,
             auto_offset_reset="earliest",
         )
+
+    async def has_topic(self, topic: str) -> bool:
+        consumer = self._consumer()
+        await consumer.start()
+        try:
+            return topic in await consumer.topics()
+        finally:
+            await consumer.stop()
+
+    async def read(self, topic: str) -> list[InboundRecord]:
+        consumer = self._consumer()
         await consumer.start()
         try:
             if topic not in await consumer.topics():
@@ -246,7 +271,7 @@ class AiokafkaTopicReader:
             partitions = await self._assigned(consumer)
             await consumer.seek_to_beginning(*partitions)
             ends = await consumer.end_offsets(partitions)
-            return await self._until(consumer, ends)
+            return await self._until(consumer, topic, ends)
         finally:
             await consumer.stop()
 
@@ -260,8 +285,10 @@ class AiokafkaTopicReader:
         return sorted(consumer.assignment(), key=lambda tp: tp.partition)
 
     async def _until(
-        self, consumer: AIOKafkaConsumer, ends: dict[TopicPartition, int]
+        self, consumer: AIOKafkaConsumer, topic: str, ends: dict[TopicPartition, int]
     ) -> list[InboundRecord]:
+        """Every record below the end offsets, or ``TimeoutError`` when a partition was not read
+        to its end in time: a part of the topic is never listed or replayed from."""
         records: list[InboundRecord] = []
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._timeout
@@ -282,6 +309,15 @@ class AiokafkaTopicReader:
                             )
                         )
             waiting = {tp for tp in waiting if await consumer.position(tp) < ends[tp]}
+        if waiting:
+            unread = ", ".join(
+                str(tp.partition) for tp in sorted(waiting, key=lambda tp: tp.partition)
+            )
+            raise TimeoutError(
+                f"{topic}: partition(s) {unread} not read to their end within "
+                f"{self._timeout:g} s ({len(records)} message(s) read); nothing is listed or "
+                "sent from part of the topic"
+            )
         return sorted(records, key=lambda record: (record.partition, record.offset))
 
 
@@ -318,8 +354,17 @@ async def _send(args: argparse.Namespace, letters: DeadLetters) -> int:
     return 0
 
 
+class _Parser(argparse.ArgumentParser):
+    """argparse with its own exit status for wrong arguments (``USAGE_EXIT``), since its usual
+    2 is this command's "the broker did not answer"."""
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        self.exit(USAGE_EXIT, f"{self.prog}: error: {message}\n")
+
+
 def parser() -> argparse.ArgumentParser:
-    found = argparse.ArgumentParser(
+    found = _Parser(
         prog="python -m py_common.outbox.replay",
         description="List a dead-letter topic, or send one of its messages back to its origin.",
     )

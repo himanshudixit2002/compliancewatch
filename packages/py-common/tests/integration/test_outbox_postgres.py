@@ -585,6 +585,10 @@ async def test_a_dead_row_is_requeued_and_its_dead_letter_listed_and_replayed(
         assert replayed.to == replay_topic
         with pytest.raises(UnknownTopicError):
             await reader.read(f"{replay_topic}.nothing.dlq")
+        missing = f"{replay_topic}.misspelt"
+        with pytest.raises(UnknownTopicError, match="nothing is sent"):
+            await letters.replay(f"{replay_topic}.dlq", written.event_id, to=missing)
+        assert not await reader.has_topic(missing), "the send never created it"
     sync_engine.dispose()
     records = await read_topic(bootstrap, replay_topic, 2)
     assert [decode(record.value).event_id for record in records] == [  # type: ignore[attr-defined]

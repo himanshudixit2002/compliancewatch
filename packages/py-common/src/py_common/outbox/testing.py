@@ -57,8 +57,9 @@ class FakeProducer:
 class FakeConsumer:
     """Topics held in memory, read from their first offset by a reader with no consumer group
     (``py_common.outbox.replay.TopicReader``): each record on partition 0, offsets in the order
-    they came. ``of(producer)`` holds what a ``FakeProducer`` sent; ``append`` adds one more. A
-    topic nothing was sent to is ``UnknownTopicError``, as on a broker that has no such topic."""
+    they came. ``of(producer)`` holds what a ``FakeProducer`` sent; ``append`` adds one more and
+    ``create`` adds empty topics. A topic it does not hold is ``UnknownTopicError``, as on a
+    broker that has no such topic."""
 
     def __init__(self, records: Iterable[InboundRecord] = ()) -> None:
         self.topics: dict[str, list[InboundRecord]] = {}
@@ -88,11 +89,20 @@ class FakeConsumer:
         held.append(record)
         return record
 
+    def create(self, *topics: str) -> "FakeConsumer":
+        """These topics exist on the broker, empty unless something was sent to them."""
+        for topic in topics:
+            self.topics.setdefault(topic, [])
+        return self
+
     async def read(self, topic: str) -> list[InboundRecord]:
         self.reads.append(topic)
         if topic not in self.topics:
             raise UnknownTopicError(f"no topic {topic} on the broker")
         return list(self.topics[topic])
+
+    async def has_topic(self, topic: str) -> bool:
+        return topic in self.topics
 
 
 @dataclass

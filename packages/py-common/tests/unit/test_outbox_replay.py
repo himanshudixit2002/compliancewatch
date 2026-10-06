@@ -4,10 +4,11 @@ unknown event id or topic answers clearly; the command line lists, sends and dry
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import ClassVar
+from typing import Any, ClassVar
 from uuid import UUID
 
 import pytest
+from aiokafka import TopicPartition
 
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import TenantId
@@ -16,6 +17,8 @@ from py_common.outbox.consumer import ConsumerConfig, IdempotentConsumer, Inboun
 from py_common.outbox.relay import OutboxRelay, RelayConfig
 from py_common.outbox.replay import (
     DEAD_LETTER_HEADERS,
+    USAGE_EXIT,
+    AiokafkaTopicReader,
     DeadLetter,
     DeadLetters,
     ReplayRefusedError,
@@ -98,9 +101,14 @@ async def dead_lettered() -> tuple[EventMessage, FakeProducer, Handler, Idempote
     return found, producer, handler, group
 
 
+def reader_of(producer: FakeProducer) -> FakeConsumer:
+    """What the producer sent, on a broker that also has the origin topic."""
+    return FakeConsumer.of(producer).create(TOPIC)
+
+
 async def test_a_consumer_dead_letter_is_listed_with_its_origin_and_why() -> None:
     found, producer, _, _ = await dead_lettered()
-    letters = DeadLetters(FakeConsumer.of(producer), FakeProducer())
+    letters = DeadLetters(reader_of(producer), FakeProducer())
     (letter,) = await letters.list(CONSUMER_DLQ)
     assert (letter.event_id, letter.origin_topic, letter.consumer_group, letter.attempts) == (
         found.event_id,
@@ -120,7 +128,7 @@ async def test_a_consumer_dead_letter_is_listed_with_its_origin_and_why() -> Non
 
 async def test_a_replay_sends_it_back_without_the_dead_letter_headers_and_it_is_taken_in() -> None:
     found, producer, handler, group = await dead_lettered()
-    reader, sender = FakeConsumer.of(producer), FakeProducer()
+    reader, sender = reader_of(producer), FakeProducer()
     replayed = await DeadLetters(reader, sender).replay(CONSUMER_DLQ, found.event_id)
     assert (replayed.to, replayed.sent) == (TOPIC, True)
     (sent,) = sender.sent
@@ -155,7 +163,7 @@ async def test_a_relay_dead_letter_goes_back_to_its_topic() -> None:
     assert row.status == "dead"
     assert T0 < row.available_at < T0 + timedelta(hours=1), "when it went dead"
     sender = FakeProducer()
-    letters = DeadLetters(FakeConsumer.of(producer), sender)
+    letters = DeadLetters(reader_of(producer), sender)
     (letter,) = await letters.list(RELAY_DLQ)
     assert (letter.origin_topic, letter.consumer_group, letter.attempts) == (TOPIC, "", 2)
     await letters.replay(RELAY_DLQ, found.event_id)
@@ -166,14 +174,14 @@ async def test_a_relay_dead_letter_goes_back_to_its_topic() -> None:
 async def test_the_last_copy_of_an_event_is_the_one_replayed() -> None:
     found, producer, _, group = await dead_lettered()
     assert await group.process(inbound(found, offset=1)) is Outcome.DEAD
-    reader = FakeConsumer.of(producer)
+    reader = reader_of(producer)
     replayed = await DeadLetters(reader, FakeProducer()).replay(CONSUMER_DLQ, found.event_id)
     assert replayed.letter.offset == 1
 
 
 async def test_an_unknown_event_id_and_an_unknown_topic_answer_clearly() -> None:
     _, producer, _, _ = await dead_lettered()
-    letters = DeadLetters(FakeConsumer.of(producer), FakeProducer())
+    letters = DeadLetters(reader_of(producer), FakeProducer())
     nobody = UUID(int=7)
     with pytest.raises(UnknownDeadLetterError, match=f"holds no message with event id {nobody}"):
         await letters.replay(CONSUMER_DLQ, nobody)
@@ -185,10 +193,10 @@ async def test_an_unknown_event_id_and_an_unknown_topic_answer_clearly() -> None
 
 async def test_a_message_never_goes_to_a_dead_letter_topic_or_nowhere() -> None:
     found, producer, _, _ = await dead_lettered()
-    letters = DeadLetters(FakeConsumer.of(producer), FakeProducer())
+    letters = DeadLetters(reader_of(producer), FakeProducer())
     with pytest.raises(ReplayRefusedError, match="is a dead-letter topic"):
         await letters.replay(CONSUMER_DLQ, found.event_id, to=RELAY_DLQ)
-    bare = FakeConsumer()
+    bare = FakeConsumer().create(TOPIC)
     bare.append("bare.dlq", None, encode(found), [])
     with pytest.raises(ReplayRefusedError, match="names no origin topic"):
         await DeadLetters(bare, FakeProducer()).replay("bare.dlq", found.event_id)
@@ -207,7 +215,7 @@ def test_a_letter_without_an_event_id_or_attempts_reads_as_unknown() -> None:
 
 async def test_the_command_lists_sends_and_dry_runs(capsys: pytest.CaptureFixture[str]) -> None:
     found, producer, _, _ = await dead_lettered()
-    reader, sender = FakeConsumer.of(producer), FakeProducer()
+    reader, sender = reader_of(producer), FakeProducer()
 
     def made() -> FakeProducer:
         return sender
@@ -239,5 +247,77 @@ async def test_a_broker_that_does_not_answer_is_exit_2(capsys: pytest.CaptureFix
         async def read(self, topic: str) -> list[InboundRecord]:
             raise ConnectionRefusedError("example broker away")
 
+        async def has_topic(self, topic: str) -> bool:
+            raise ConnectionRefusedError("example broker away")
+
     assert await run(["list", "--topic", RELAY_DLQ], reader=Away(), producer=FakeProducer) == 2
     assert "the broker did not answer" in capsys.readouterr().err
+
+
+async def test_a_replay_to_a_topic_the_broker_lacks_sends_nothing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A misspelt ``--to`` is refused before the send, which would create the topic on a
+    broker that creates topics on first use; a dry run says so too."""
+    found, producer, _, _ = await dead_lettered()
+    reader, sender = reader_of(producer), FakeProducer()
+    letters = DeadLetters(reader, sender)
+    with pytest.raises(UnknownTopicError, match=r"no topic rule\.candidate\.creatd"):
+        await letters.replay(CONSUMER_DLQ, found.event_id, to="rule.candidate.creatd")
+    with pytest.raises(UnknownTopicError):
+        await letters.replay(CONSUMER_DLQ, found.event_id, to="nowhere", dry_run=True)
+    gone = DeadLetters(FakeConsumer.of(producer), sender)
+    with pytest.raises(UnknownTopicError, match=f"no topic {TOPIC}"):
+        await gone.replay(CONSUMER_DLQ, found.event_id)
+    args = ["send", "--topic", CONSUMER_DLQ, "--event-id", str(found.event_id)]
+    assert await run([*args, "--to", "nowhere"], reader=reader, producer=lambda: sender) == 1
+    assert "no topic nowhere on the broker" in capsys.readouterr().err
+    assert sender.sent == []
+
+
+class Stalled:
+    """A consumer whose partition never reaches its end: it fetches nothing."""
+
+    async def getmany(self, *partitions: TopicPartition, timeout_ms: int) -> dict[Any, Any]:
+        return {}
+
+    async def position(self, partition: TopicPartition) -> int:
+        return 0
+
+
+async def test_a_read_that_does_not_reach_every_partitions_end_is_a_timeout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reader = AiokafkaTopicReader("localhost:1", timeout_seconds=0.05)
+    ends = {TopicPartition(RELAY_DLQ, 0): 3, TopicPartition(RELAY_DLQ, 1): 0}
+    with pytest.raises(TimeoutError, match=r"partition\(s\) 0 not read to their end"):
+        await reader._until(Stalled(), RELAY_DLQ, ends)  # type: ignore[arg-type]
+
+    class Partial:
+        async def read(self, topic: str) -> list[InboundRecord]:
+            raise TimeoutError(f"{topic}: partition(s) 0 not read to their end within 30 s")
+
+        async def has_topic(self, topic: str) -> bool:
+            return True
+
+    assert await run(["list", "--topic", RELAY_DLQ], reader=Partial(), producer=FakeProducer) == 2
+    assert "not read to their end" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["list"],
+        ["send", "--topic", CONSUMER_DLQ],
+        ["send", "--topic", CONSUMER_DLQ, "--event-id", "not-a-uuid"],
+        ["replay"],
+    ],
+    ids=["no-topic", "no-event-id", "bad-event-id", "no-such-command"],
+)
+async def test_wrong_arguments_exit_with_their_own_status(
+    argv: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        await run(argv, reader=FakeConsumer(), producer=FakeProducer)
+    assert raised.value.code == USAGE_EXIT == 64, "2 says the broker did not answer"
+    assert "usage:" in capsys.readouterr().err
