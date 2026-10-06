@@ -333,17 +333,32 @@ class SqlAlchemyRawDocumentRepository:
     def awaiting_extraction(
         self, prompt_version: str, *, source_key: str | None = None, limit: int = 500
     ) -> Sequence[RawDocumentRecord]:
-        extracted = exists().where(
-            RuleExtractionRow.document_id == RawDocumentRow.id,
-            RuleExtractionRow.prompt_version == prompt_version,
-        )
         statement = select(RawDocumentRow).where(
-            RawDocumentRow.status == DocumentStatus.CLASSIFIED.value, ~extracted
+            RawDocumentRow.status == DocumentStatus.CLASSIFIED.value, ~_extracted_by(prompt_version)
         )
         if source_key is not None:
             statement = statement.where(RawDocumentRow.source_key == source_key)
         statement = statement.order_by(RawDocumentRow.fetched_at, RawDocumentRow.id).limit(limit)
         return [_to_record(row) for row in self._session.scalars(statement).all()]
+
+    def awaiting_counts(self, prompt_version: str) -> Mapping[str, int]:
+        statement = (
+            select(RawDocumentRow.source_key, func.count())
+            .where(
+                RawDocumentRow.status == DocumentStatus.CLASSIFIED.value,
+                ~_extracted_by(prompt_version),
+            )
+            .group_by(RawDocumentRow.source_key)
+        )
+        return {key: int(count) for key, count in self._session.execute(statement).all()}
+
+
+def _extracted_by(prompt_version: str) -> ColumnElement[bool]:
+    """The documents with an extraction stored for ``prompt_version``."""
+    return exists().where(
+        RuleExtractionRow.document_id == RawDocumentRow.id,
+        RuleExtractionRow.prompt_version == prompt_version,
+    )
 
 
 def _read_as(query: DocumentQuery) -> ColumnElement[bool]:

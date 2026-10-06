@@ -223,6 +223,12 @@ class MemoryRawDocumentRepository:
         ]
         return sorted(found, key=lambda d: (d.fetched_at, d.document_id.value.int))[:limit]
 
+    def awaiting_counts(self, prompt_version: str) -> Mapping[str, int]:
+        counted: dict[str, int] = {}
+        for document in self.awaiting_extraction(prompt_version, limit=len(self._documents)):
+            counted[document.source_key] = counted.get(document.source_key, 0) + 1
+        return counted
+
 
 def _fetch_order(key: FetchKey) -> tuple[float, int]:
     """``FetchKey``'s order, read backwards: uuids compare as their 128-bit integers."""

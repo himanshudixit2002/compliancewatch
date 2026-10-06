@@ -217,6 +217,11 @@ class RawDocumentRepository(Protocol):
         ``limit``."""
         ...
 
+    def awaiting_counts(self, prompt_version: str) -> Mapping[str, int]:
+        """How many documents of each source ``awaiting_extraction`` would give; a source with
+        none is absent."""
+        ...
+
 
 class CrawlRunRepository(Protocol):
     def add(self, run: CrawlRun) -> None: ...

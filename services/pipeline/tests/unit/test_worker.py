@@ -23,6 +23,7 @@ from pipeline.worker import SYNC_HOOK, TICK_JOB, TICK_SECONDS, WORKFLOWS, activi
 from pipeline.workflows import (
     TASK_QUEUE,
     CrawlSourceWorkflow,
+    ExtractBacklogWorkflow,
     ExtractKnowledgeWorkflow,
     ExtractRulesWorkflow,
     IngestDocumentWorkflow,
@@ -91,6 +92,7 @@ def test_the_worker_serves_every_workflow_and_activity_on_the_pipeline_queue() -
         ExtractKnowledgeWorkflow,
         ExtractRulesWorkflow,
         CrawlSourceWorkflow,
+        ExtractBacklogWorkflow,
     ) == WORKFLOWS
     assert [a.name for a in temporal.activities] == [a.name for a in activities(settings())]
     assert not components(settings()).loops(), "crawling is off: no tick"

@@ -199,7 +199,7 @@ ts-dev: check-pnpm ## next dev (:3000) and whatsapp-bot (:8080) with reload
 	$(PNPM) turbo run dev
 
 # ---- Composition (guide sections 13, 17, 19) -------------------------------------------------
-.PHONY: install lint format typecheck test check eval eval-check label demo runbooks-check migrate run worker relay replay seed openapi contracts contracts-check hooks ci-lint crawl-report
+.PHONY: install lint format typecheck test check eval eval-check label demo runbooks-check migrate run worker relay replay seed openapi contracts contracts-check hooks ci-lint crawl-report extract-backlog
 # The gates `make check` runs. A package adds its own with `CHECKS += <target>` in its section.
 # The prerequisites of check expand a second time when make runs them (.SECONDEXPANSION below),
 # so a `CHECKS +=` line counts wherever it sits in this file.
@@ -280,6 +280,16 @@ crawl-report: check-uv ## Crawl runs, failures, gaps and detection delays per so
 	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3Dpipeline%2Cpublic"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA=pipeline CW_PIPELINE_STORE=postgres CW_LOG_LEVEL=WARNING \
 	  $(UV) run --package compliancewatch-pipeline pipeline-crawl-report $(ARGS)
+
+# The documents that wait as classified with no extraction for the current prompt (the ones the
+# ingest classified while CW_PIPELINE_EXTRACTION_ENABLED was off), per source, and a sweep that
+# extracts them on the running worker's Temporal: --dry-run only counts; without it the command
+# refuses while the extraction flag is off.
+extract-backlog: check-uv ## The classified backlog per source, and a sweep that extracts it: make extract-backlog [ARGS="--dry-run --source cbic_notifications --limit 200 --json"]
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3Dpipeline%2Cpublic"; \
+	CW_DATABASE_URL="$$url" CW_DB_SCHEMA=pipeline CW_PIPELINE_STORE=postgres CW_LOG_LEVEL=WARNING \
+	  $(UV) run --package compliancewatch-pipeline pipeline-extract-backlog $(ARGS)
 
 worker: check-uv ## Run a service's worker process, python -m <pkg>.worker (consumers, relay, periodic jobs, Temporal): make worker SERVICE=pipeline
 	@[ -n "$(SERVICE)" ] || { echo "usage: make worker SERVICE=<pipeline|notification|...>"; exit 1; }
