@@ -15,6 +15,7 @@ Flat; markdown guides.
 - [local-dev.md](local-dev.md): tools, the Docker Compose stack, ports, running a service, troubleshooting.
 - [demo.md](demo.md): the demo tenant end to end in one process (`make demo`).
 - [product.md](product.md): the local product (`make product`, `make product-seed`, `make product-check`): the one deployable with its worker on the dev stack, synthetic tenants, and the check of the event chain.
+- [control-panel.md](control-panel.md): the control panel (`make control-panel`, `make control-panel-app`): each tab's buttons and the make targets they run, and what the panel never does.
 - [repository-settings.md](repository-settings.md): the `gh` commands for branch protection (the required `CI gate` check), squash merges, Dependabot, secret scanning and private vulnerability reporting, and the secrets CI needs.
 
 ## How to run

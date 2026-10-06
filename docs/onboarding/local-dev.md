@@ -5,6 +5,12 @@ whole product (the one deployable's app and worker with Kafka and Temporal on, a
 and prove its event chain, see [product.md](product.md): `make product`, `make product-seed`,
 `make product-check`.
 
+The same targets have buttons in the control panel (`make control-panel`, or the app
+`make control-panel-app` builds on the Desktop): the stack, the services and their workers, the
+product, the data, the quality gates, the pipeline's events, the flags and the checkout's
+processes in one window. [control-panel.md](control-panel.md) lists what each tab runs and what
+it never does.
+
 ## Prerequisites
 
 | Tool | Install | Notes |
