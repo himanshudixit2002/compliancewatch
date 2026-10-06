@@ -2292,7 +2292,8 @@ STEPS: list[Step] = [
     ),
     Step(
         "sources",
-        "the pipeline lists its sources and refuses a fetch while crawling is off",
+        "the pipeline lists its sources, refuses a fetch while crawling is off and an upload "
+        "that is no document",
         sources,
     ),
 ]
