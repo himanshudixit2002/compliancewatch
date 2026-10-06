@@ -23,8 +23,9 @@ Hand-written; mirrors rulebook.infrastructure.models. Expand only:
 
 Every seed task stored before keeps its version and passes the new checks. The image before
 this one expects every task to have a version; it writes no candidate task, and none is written
-while the candidate intake (``rulebook.candidate_intake``) is off. The downgrade fails while a
-candidate task or a version drafted from a candidate is stored, rather than dropping them.
+while the candidate intake (``rulebook.candidate_intake``) is off. The downgrade refuses, before
+it changes anything, while a rule candidate or a candidate task is stored (a version drafted
+from a candidate names one), rather than dropping them.
 """
 
 from collections.abc import Sequence
@@ -46,6 +47,11 @@ OUTCOMES = ("extracted", "unparseable")
 STATUSES = ("open", "drafted", "approved", "rejected")
 REJECT_REASONS = ("not_a_rule", "wrong_extraction", "duplicate", "out_of_scope", "unparseable")
 UNDECIDED = "status IN ('open', 'claimed')"
+STORED = """
+SELECT (SELECT count(*) FROM rule_candidate),
+       (SELECT count(*) FROM review_task WHERE kind = 'candidate')
+"""
+"""What the downgrade would drop: the rule candidates and the candidate review tasks."""
 TASK_COMMENT_BEFORE = (
     "Review tasks: one decision (approve, return, reject) asked about one rule version, "
     "queued by regulator and priority. A version has at most one task that is not "
@@ -247,6 +253,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    candidates, tasks = op.get_bind().execute(sa.text(STORED)).one()
+    if candidates or tasks:
+        raise RuntimeError(
+            f"0010 drops rule_candidate and the candidate review tasks, and found {candidates} "
+            f"rule candidates and {tasks} candidate tasks; the downgrade never drops an "
+            "analyst's review, so it stops before it changes anything"
+        )
     drop_processed_event_table(op)
 
     op.execute(GUARD_BEFORE)

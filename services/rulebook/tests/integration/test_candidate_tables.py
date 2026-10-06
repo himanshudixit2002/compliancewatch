@@ -883,3 +883,25 @@ async def test_a_failing_handler_leaves_neither_candidate_task_nor_inbox_row(
     assert await dead.process(unknown_record) is Outcome.DEAD
     assert stored(engine, unknown_record, unknown["candidate_id"]) == (0, 0, 0)
     assert producer.topics() == ["rule.candidate.created.rulebook.rule-candidates.dlq"]
+
+
+# ---------------------------------------------------------------- the way down
+
+
+def test_migration_0010_goes_down_only_while_no_candidate_is_stored(
+    notification: PostgresKnowledgeUnitOfWorkFactory, alembic_config: Config, engine: Engine
+) -> None:
+    """Last in this module: it stores one more candidate, and the way down stays closed. The
+    downgrade refuses before it changes anything, with what it found, rather than failing on
+    the check it would put back."""
+    IngestRuleCandidate(notification, Clock()).run(payload(), uuid4())
+    candidates = scalar(engine, "SELECT count(*) FROM rule_candidate")
+    tasks = scalar(engine, "SELECT count(*) FROM review_task WHERE kind = 'candidate'")
+    assert candidates > 0
+    with pytest.raises(
+        RuntimeError, match=f"found {candidates} rule candidates and {tasks} candidate tasks"
+    ):
+        command.downgrade(alembic_config, "0009")
+    assert scalar(engine, "SELECT version_num FROM alembic_version") == "0011"
+    assert _keys_0011(engine) == list(KEYS_0011), "the refused downgrade changed nothing"
+    assert scalar(engine, "SELECT count(*) FROM rule_candidate") == candidates
