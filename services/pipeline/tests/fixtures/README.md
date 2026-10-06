@@ -21,14 +21,20 @@ Other sources are re-recorded by hand (the URLs are in each adapter module).
 
 ## Workflow histories
 
-`histories/` holds two pairs of runs of `pipeline.ingest_document`, recorded on 2026-10-06 on a
-local Temporal dev server on the sample notification of `pipeline.infrastructure.fakes`, each pair
-one run with knowledge off and one with registration, embedding and the extraction child:
+`histories/` holds runs of `pipeline.ingest_document`, recorded on 2026-10-06 on a local
+Temporal dev server on the sample notification of `pipeline.infrastructure.fakes`, each pair one
+run with knowledge off and one with registration, embedding and the extraction child:
 
 - `ingest-before-store.json` and `ingest-before-store-knowledge.json`, with the code before
   `FetchAndStore`: both fetched with `pipeline.fetch_document`, whose result carries the bytes;
 - `ingest-with-store.json` and `ingest-with-store-knowledge.json`, with `FetchAndStore` and before
-  a crawl could hand an ingest its document (`GIVEN_PATCH`): both discovered it first.
+  a crawl could hand an ingest its document (`GIVEN_PATCH`): both discovered it first;
+- `ingest-with-crawl.json` and `ingest-with-crawl-knowledge.json`, handed their document as a
+  crawl hands it, before a document that does not parse opened a manual-parse task; and
+  `ingest-with-crawl-unparsed.json`, handed a synthetic PDF with no text layer
+  (`https://example.invalid/notifications/18-2026-scanned`) and the real parsers, whose parse
+  failed with `UnparsedDocumentError` and failed the ingest. Its failures' stack traces were
+  emptied after recording, so no local path is committed; replay never reads them.
 
 The worker's identity in them reads `1@pipeline-history`. `tests/unit/test_workflow_replay.py`
 replays them on today's workflow; record a new pair (`WorkflowHandle.fetch_history()`,
