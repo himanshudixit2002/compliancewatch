@@ -342,7 +342,12 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Approve a candidate into a rule relation from a draft rule version */
+    /**
+     * Approve a candidate into a rule relation from a draft rule version
+     * @description The version the relation starts from must be a draft (409
+     *     rulebook-rule-version-not-editable) that is not closed: a draft made from a rule candidate
+     *     that was rejected takes no relation (409 rulebook-rule-version-closed).
+     */
     post: operations["approve_relation_v1_rulebook_review_relations__candidate_id__approve_post"];
     delete?: never;
     options?: never;
@@ -395,7 +400,9 @@ export type paths = {
      * The review queue: by regulator, higher priority first, then oldest first
      * @description Each task with its version's rule, number, title and status, whether it is high impact
      *     and how many people approved its current round. A task open again after the first of two
-     *     approvals waits for a second, different reviewer.
+     *     approvals waits for a second, different reviewer. A candidate task not drafted yet shows its
+     *     candidate's title, suggested rule key and suggested impact; ``candidate`` summarises the
+     *     candidate of every candidate task.
      */
     get: operations["list_review_tasks_v1_rulebook_review_tasks_get"];
     put?: never;
@@ -417,7 +424,11 @@ export type paths = {
      * A review task with its version, citations, documents and history
      * @description The version's content with its specification described, every citation with its
      *     verification, the documents they cite, the approvers of its current round, its decision
-     *     audit and every task it has had.
+     *     audit and every task it has had. A candidate task also carries its candidate: the
+     *     extraction as stored, its document (the stored file is at the pipeline's ``GET
+     *     /v1/pipeline/documents/{document_id}/raw``), the draft it proposes and what does not map,
+     *     why it looks high impact, and whether a rule has its suggested key; until it is drafted the
+     *     task has no version.
      */
     get: operations["read_review_task_v1_rulebook_review_tasks__task_id__get"];
     put?: never;
@@ -465,7 +476,13 @@ export type paths = {
      *     an earlier one leaves the task open for another reviewer, and the same person twice is 409
      *     rulebook-duplicate-approver. Approving never publishes; POST .../rule-versions/{id}/publish
      *     does. return sends the version back to draft and opens the next task for it; reject closes
-     *     the task and leaves the version a draft. Both need a note.
+     *     the task and leaves the version a draft. Both need a note. A candidate task's approval of
+     *     the round approves its candidate; its rejection names a reason, rejects the candidate before
+     *     or after drafting and writes rule.rejected; before drafting it can only be rejected (409
+     *     rulebook-candidate-not-drafted). A draft whose candidate is rejected is closed: it stays a
+     *     draft, is never cited, submitted, approved or published (409 rulebook-rule-version-closed)
+     *     and is no longer its rule's latest version, and the relation candidates approved onto it are
+     *     open again, their rule relations deleted, for another draft to take.
      */
     post: operations["decide_review_task_v1_rulebook_review_tasks__task_id__decide_post"];
     delete?: never;
@@ -483,14 +500,30 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    post?: never;
+    /**
+     * Draft a version from a candidate task's candidate, cited and with its relations
+     * @description Only the analyst who claimed the task (409 rulebook-review-task-not-claimed), once per
+     *     candidate (409 rulebook-candidate-already-drafted). The version is the next of the rule
+     *     ``rule_key`` names, or the first of a new rule when ``new_rule`` gives its regulator and
+     *     level (422 rulebook-rule-key-unknown without it; 409 rulebook-rule-key-taken with it for a
+     *     key a rule has). It is a draft that names the candidate and starts high impact when the
+     *     candidate suggests it. Its content is the candidate's with ``edits`` applied, checked as the
+     *     seed calendar is: what is missing, does not map or fails the checks is 422
+     *     rulebook-draft-incomplete, every problem in the detail, and nothing is stored. The citations
+     *     (the candidate's quotes, or ``citations``) are verified against their clauses (422
+     *     rulebook-citation-not-verified), and each relation candidate listed, of the candidate's
+     *     document, is approved onto the draft. What the analyst changed from the candidate is an
+     *     edited row of the decision audit.
+     */
+    post: operations["draft_from_candidate_v1_rulebook_review_tasks__task_id__draft_post"];
     delete?: never;
     options?: never;
     head?: never;
     /**
      * Edit the draft of a claimed task: its content and citations, every quote verified
      * @description Only the analyst who claimed the task (409 rulebook-review-task-not-claimed), only while
-     *     the version is a draft (409 rulebook-rule-version-not-editable). Content is checked against
+     *     the version is a draft (409 rulebook-rule-version-not-editable), and for a candidate task
+     *     once a version is drafted (409 rulebook-candidate-not-drafted). Content is checked against
      *     the ontology as the seed calendar is, and citations go through the citation step: a quote
      *     not in its clause is 422 rulebook-citation-not-verified and nothing is stored. The edit is
      *     recorded in the version's decision audit as edited.
@@ -573,7 +606,10 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Approve a version under review; high-impact versions need two different approvers */
+    /**
+     * Approve a version under review; high-impact versions need two different approvers
+     * @description A version drafted from a rule candidate that was rejected is closed: 409 rulebook-rule-version-closed.
+     */
     post: operations["approve_v1_rulebook_rule_versions__rule_version_id__approve_post"];
     delete?: never;
     options?: never;
@@ -590,7 +626,10 @@ export type paths = {
     };
     /** The clauses a rule version cites, with the quotes and their verification */
     get: operations["list_citations_v1_rulebook_rule_versions__rule_version_id__citations_get"];
-    /** Cite clauses for a draft version; every quote must be in its clause */
+    /**
+     * Cite clauses for a draft version; every quote must be in its clause
+     * @description A version drafted from a rule candidate that was rejected is closed: 409 rulebook-rule-version-closed.
+     */
     put: operations["add_citations_v1_rulebook_rule_versions__rule_version_id__citations_put"];
     post?: never;
     delete?: never;
@@ -608,7 +647,10 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Publish an approved version, apply its relations and write the rule events */
+    /**
+     * Publish an approved version, apply its relations and write the rule events
+     * @description A version drafted from a rule candidate that was rejected is closed: 409 rulebook-rule-version-closed.
+     */
     post: operations["publish_v1_rulebook_rule_versions__rule_version_id__publish_post"];
     delete?: never;
     options?: never;
@@ -642,7 +684,10 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Submit a draft for review; starts a new approval round */
+    /**
+     * Submit a draft for review; starts a new approval round
+     * @description A version drafted from a rule candidate that was rejected is closed: 409 rulebook-rule-version-closed.
+     */
     post: operations["submit_v1_rulebook_rule_versions__rule_version_id__submit_post"];
     delete?: never;
     options?: never;
@@ -674,7 +719,12 @@ export type paths = {
       path?: never;
       cookie?: never;
     };
-    /** Rules by key with their latest title */
+    /**
+     * Rules by key with their latest title
+     * @description Each rule with the title of its latest version. A draft made from a rule candidate that
+     *     was rejected is closed and never its rule's latest version, so a rule only such drafts have
+     *     is left out.
+     */
     get: operations["list_rules_v1_rulebook_rules_get"];
     put?: never;
     post?: never;
@@ -838,6 +888,26 @@ export type components = {
       note: string;
       to_status: components["schemas"]["RuleVersionStatus"];
     };
+    /**
+     * CandidateCountsOut
+     * @description The rule candidates analysts decided. ``acceptance_rate`` is the share of them approved
+     *     without edits (ADR-006's measure of the extraction); null while none is decided.
+     */
+    CandidateCountsOut: {
+      /** Acceptance Rate */
+      acceptance_rate: number | null;
+      /** Approved */
+      approved: number;
+      /**
+       * Approved Without Edits
+       * @description Approved with no edit recorded on the version drafted from them
+       */
+      approved_without_edits: number;
+      /** Decided */
+      decided: number;
+      /** Rejected */
+      rejected: number;
+    };
     /** CandidateIn */
     CandidateIn: {
       /** Confidence */
@@ -869,6 +939,99 @@ export type components = {
       target_span_start: number;
       target_type: components["schemas"]["EntityType"];
     };
+    /**
+     * CandidateOut
+     * @description A candidate task's rule candidate: the extraction as stored, its document (its file is at
+     *     the pipeline's ``GET /v1/pipeline/documents/{document_id}/raw``) and the draft it
+     *     proposes.
+     */
+    CandidateOut: {
+      /**
+       * Candidate
+       * @description The candidate in the extraction schema's shape; null when unparseable
+       */
+      candidate: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Candidate Id
+       * Format: uuid
+       */
+      candidate_id: string;
+      /**
+       * Citation Count
+       * @description Quotes the pipeline verified against the clauses
+       */
+      citation_count: number;
+      /** Clause Ids */
+      clause_ids: string[];
+      /** Confidence */
+      confidence: number;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Decided At */
+      decided_at: string | null;
+      /** Decided By */
+      decided_by: string | null;
+      /** Doc Type */
+      doc_type: string | null;
+      document: components["schemas"]["TaskDocumentOut"] | null;
+      /**
+       * Document Id
+       * Format: uuid
+       */
+      document_id: string;
+      /**
+       * Event Id
+       * Format: uuid
+       * @description The rule.candidate.created event it came with
+       */
+      event_id: string;
+      /** High Impact Reasons */
+      high_impact_reasons: string[];
+      /** High Impact Suggested */
+      high_impact_suggested: boolean;
+      /** Issues */
+      issues: components["schemas"]["ExtractionIssueOut"][];
+      /** Model */
+      model: string;
+      /** Needs Review */
+      needs_review: boolean;
+      /** Ontology Version */
+      ontology_version: string | null;
+      outcome: components["schemas"]["CandidateOutcome"];
+      /** Prompt Version */
+      prompt_version: string;
+      proposed: components["schemas"]["ProposedDraftOut"];
+      /** Regulator */
+      regulator: string;
+      reject_reason: components["schemas"]["RuleRejectReason"] | null;
+      /**
+       * Rule Version Id
+       * @description The version drafted from it
+       */
+      rule_version_id: string | null;
+      /** Source Key */
+      source_key: string | null;
+      status: components["schemas"]["RuleCandidateStatus"];
+      /** Suggested Rule Key */
+      suggested_rule_key: string | null;
+      /**
+       * Suggested Rule Known
+       * @description Whether a rule has the suggested key
+       */
+      suggested_rule_known: boolean;
+    };
+    /**
+     * CandidateOutcome
+     * @description How the extraction ended: ``extracted``, the model's answer read as a candidate (the
+     *     validators may still send it to review); ``unparseable``, no candidate, twice.
+     * @enum {string}
+     */
+    CandidateOutcome: "extracted" | "unparseable";
     /**
      * CandidateRejectReason
      * @enum {string}
@@ -1074,6 +1237,8 @@ export type components = {
        * @default
        */
       note?: string;
+      /** @description With reject, and only for a candidate task: why the candidate is rejected */
+      reason?: components["schemas"]["RuleRejectReason"] | null;
     };
     /**
      * DecisionAction
@@ -1283,6 +1448,85 @@ export type components = {
        */
       todo?: string[] | null;
     };
+    /**
+     * DraftFieldsIn
+     * @description The content fields of a draft, each one optional: a field left out keeps its value, and
+     *     null clears ``recurrence`` or ``effective_to``.
+     */
+    DraftFieldsIn: {
+      /** Effective From */
+      effective_from?: string | null;
+      /**
+       * Effective To
+       * @description Exclusive; null: open-ended
+       */
+      effective_to?: string | null;
+      /** Obligation Template */
+      obligation_template?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Recurrence
+       * @description null: no recurrence
+       */
+      recurrence?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Specification
+       * @description The kernel's predicate tree mapping
+       */
+      specification?: {
+        [key: string]: unknown;
+      } | null;
+      /** Summary */
+      summary?: string | null;
+      /** Title */
+      title?: string | null;
+      /**
+       * Todo
+       * @description The open questions, all of them
+       */
+      todo?: string[] | null;
+    };
+    /**
+     * DraftFromCandidateIn
+     * @description A version drafted from the task's candidate: into the rule ``rule_key`` names (its next
+     *     version), or a new rule with that key when ``new_rule`` gives its regulator and level. The
+     *     content is the candidate's with ``edits`` applied; the citations are the candidate's quotes
+     *     unless ``citations`` lists the ones to cite (an empty list cites none for now); the
+     *     relation candidates listed are approved onto the draft.
+     */
+    DraftFromCandidateIn: {
+      /**
+       * Actor Id
+       * Format: uuid
+       * @description The analyst who claimed the task; a signed-in user's token overrides it
+       */
+      actor_id: string;
+      /**
+       * Citations
+       * @description The quotes to cite instead of the candidate's; every one is verified
+       */
+      citations?: components["schemas"]["CitationIn"][] | null;
+      /** @description What to change in the content the candidate proposes */
+      edits?: components["schemas"]["DraftFieldsIn"] | null;
+      /** @description Only for a key no rule has: the new rule's regulator and level */
+      new_rule?: components["schemas"]["NewRuleIn"] | null;
+      /**
+       * Note
+       * @description Why, for the audit
+       * @default
+       */
+      note?: string;
+      /** Relation Candidates */
+      relation_candidates?: components["schemas"]["RelationChoiceIn"][];
+      /**
+       * Rule Key
+       * @description The rule the version belongs to, such as gstr3b_monthly
+       */
+      rule_key: string;
+    };
     /** EmbeddingIn */
     EmbeddingIn: {
       /**
@@ -1388,6 +1632,18 @@ export type components = {
       event_id: string;
       /** Topic */
       topic: string;
+    };
+    /** ExtractionIssueOut */
+    ExtractionIssueOut: {
+      /** Clause Ref */
+      clause_ref: string | null;
+      /**
+       * Code
+       * @description The check that failed, such as citation_quote_not_found
+       */
+      code: string;
+      /** Detail */
+      detail: string;
     };
     /** GroupDecisionOut */
     GroupDecisionOut: {
@@ -1568,6 +1824,19 @@ export type components = {
       /** Mentions */
       mentions: components["schemas"]["MentionIn"][];
     };
+    /**
+     * NewRuleIn
+     * @description The rule a draft starts when its key is new.
+     */
+    NewRuleIn: {
+      /** @description Where the rule applies: entity, registration... */
+      level: components["schemas"]["AttributeLevel"];
+      /**
+       * Regulator
+       * @description The candidate's regulator; compared in lower case
+       */
+      regulator: string;
+    };
     /** Page[QueuedTaskOut] */
     Page_QueuedTaskOut_: {
       /** Items */
@@ -1619,6 +1888,60 @@ export type components = {
       title: string;
       /** Type */
       type: string;
+    };
+    /** ProposedCitationOut */
+    ProposedCitationOut: {
+      /**
+       * Clause Id
+       * Format: uuid
+       * @description The id the kernel derives for the clause in the document
+       */
+      clause_id: string;
+      /** Clause Ref */
+      clause_ref: string;
+      /** Quote */
+      quote: string;
+    };
+    /**
+     * ProposedDraftOut
+     * @description The draft the candidate proposes, in the stored forms, before the analyst's edits: each
+     *     field the candidate maps, null for one it does not (``problems`` says why), and its
+     *     quotes. ``POST .../draft`` starts from it.
+     */
+    ProposedDraftOut: {
+      /** Citations */
+      citations: components["schemas"]["ProposedCitationOut"][];
+      /** Effective From */
+      effective_from: string | null;
+      /** Effective To */
+      effective_to: string | null;
+      /** Obligation Template */
+      obligation_template: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Problems
+       * @description Each field that does not map, and why
+       */
+      problems: string[];
+      /**
+       * Recurrence
+       * @description Null: a one-off duty, or a problem
+       */
+      recurrence: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Specification
+       * @description An all_of of the candidate's applies_to; null when a condition is refused
+       */
+      specification: {
+        [key: string]: unknown;
+      } | null;
+      /** Summary */
+      summary: string | null;
+      /** Title */
+      title: string | null;
     };
     /** PublicationOut */
     PublicationOut: {
@@ -1676,6 +1999,41 @@ export type components = {
       /** Version */
       version: number;
     };
+    /**
+     * QueuedCandidateOut
+     * @description What the queue shows of a candidate task's candidate.
+     */
+    QueuedCandidateOut: {
+      /**
+       * Candidate Id
+       * Format: uuid
+       */
+      candidate_id: string;
+      /** Confidence */
+      confidence: number;
+      /**
+       * Document Id
+       * Format: uuid
+       */
+      document_id: string;
+      /** High Impact Suggested */
+      high_impact_suggested: boolean;
+      /**
+       * Issue Count
+       * @description What the validators found wrong with it
+       */
+      issue_count: number;
+      /**
+       * Needs Review
+       * @description The extraction asked for review
+       */
+      needs_review: boolean;
+      /** @description extracted, or unparseable: no candidate, so an analyst drafts by hand */
+      outcome: components["schemas"]["CandidateOutcome"];
+      status: components["schemas"]["RuleCandidateStatus"];
+      /** Suggested Rule Key */
+      suggested_rule_key: string | null;
+    };
     /** QueuedTaskOut */
     QueuedTaskOut: {
       /**
@@ -1683,6 +2041,13 @@ export type components = {
        * @description Distinct approvers of the version's current review round
        */
       approvals: number;
+      /** @description A candidate task's candidate */
+      candidate: components["schemas"]["QueuedCandidateOut"] | null;
+      /**
+       * Candidate Id
+       * @description A candidate task's rule candidate
+       */
+      candidate_id: string | null;
       /** Claimed At */
       claimed_at: string | null;
       /**
@@ -1695,9 +2060,12 @@ export type components = {
       /** Decided By */
       decided_by: string | null;
       decision: components["schemas"]["ReviewDecision"] | null;
-      /** High Impact */
+      /**
+       * High Impact
+       * @description Before drafting, what the candidate suggests
+       */
       high_impact: boolean;
-      /** @description seed: a draft the seed calendar wrote */
+      /** @description seed: a draft the seed calendar wrote; candidate: a rule candidate the pipeline extracted, and the version drafted from it */
       kind: components["schemas"]["ReviewTaskKind"];
       /**
        * Note
@@ -1721,24 +2089,34 @@ export type components = {
        * @description One, or two different ones when high impact
        */
       required_approvals: number;
-      /** Rule Key */
-      rule_key: string;
+      /**
+       * Rule Key
+       * @description The version's rule; before drafting, the key suggested for the candidate
+       */
+      rule_key: string | null;
       /**
        * Rule Version Id
-       * Format: uuid
+       * @description The version the task reviews; null for a candidate task not drafted yet
        */
-      rule_version_id: string;
+      rule_version_id: string | null;
       status: components["schemas"]["ReviewTaskStatus"];
       /**
        * Task Id
        * Format: uuid
        */
       task_id: string;
-      /** Title */
+      /**
+       * Title
+       * @description The version's title, or the candidate's before drafting
+       */
       title: string;
-      /** Version */
-      version: number;
-      version_status: components["schemas"]["RuleVersionStatus"];
+      /**
+       * Version
+       * @description The version's number; null before drafting
+       */
+      version: number | null;
+      /** @description Null before drafting */
+      version_status: components["schemas"]["RuleVersionStatus"] | null;
     };
     /** ReadyResponse */
     ReadyResponse: {
@@ -1851,6 +2229,23 @@ export type components = {
       /** Target Rule Key */
       target_rule_key: string | null;
       target_type: components["schemas"]["EntityType"];
+    };
+    /**
+     * RelationChoiceIn
+     * @description A relation candidate of the candidate's document to approve onto the new draft.
+     */
+    RelationChoiceIn: {
+      /**
+       * Candidate Id
+       * Format: uuid
+       * @description The relation candidate
+       */
+      candidate_id: string;
+      /**
+       * Target Rule Version Id
+       * @description The version it targets: needed for supersedes, extends_deadline, corrects and withdraws, and for a relation that names a rule
+       */
+      target_rule_version_id?: string | null;
     };
     /**
      * RelationKind
@@ -2008,6 +2403,7 @@ export type components = {
       /** By Regulator */
       by_regulator: components["schemas"]["RegulatorCountsOut"][];
       by_status: components["schemas"]["StatusCountsOut"];
+      candidates: components["schemas"]["CandidateCountsOut"];
       decisions: components["schemas"]["DecisionCountsOut"];
       /**
        * Median Seconds To Decide
@@ -2032,6 +2428,8 @@ export type components = {
        * @description Approvers of the version's current round
        */
       approved_by: string[];
+      /** @description A candidate task's rule candidate */
+      candidate: components["schemas"]["CandidateOut"] | null;
       /**
        * Citations
        * @description With each quote's verification
@@ -2049,10 +2447,11 @@ export type components = {
       documents: components["schemas"]["TaskDocumentOut"][];
       /** Required Approvals */
       required_approvals: number;
-      rule_version: components["schemas"]["RuleVersionOut"];
+      /** @description The version the task reviews; null for a candidate task not drafted yet */
+      rule_version: components["schemas"]["RuleVersionOut"] | null;
       /**
        * Source Url
-       * @description The link the seed calendar gives, if any
+       * @description The link the version's source gives, if any
        */
       source_url: string | null;
       /**
@@ -2063,19 +2462,24 @@ export type components = {
       task: components["schemas"]["ReviewTaskOut"];
       /**
        * Tasks
-       * @description Every task of the version, oldest first
+       * @description Every task of the version (of the candidate before drafting), oldest first
        */
       tasks: components["schemas"]["ReviewTaskOut"][];
     };
     /**
      * ReviewTaskKind
-     * @description What a task reviews. ``seed``: a draft the seed calendar wrote. The pipeline's candidates
-     *     get a kind of their own when their intake is built.
+     * @description What a task reviews. ``seed``: a draft the seed calendar wrote. ``candidate``: a rule
+     *     candidate the pipeline extracted, and the version an analyst drafts from it.
      * @enum {string}
      */
-    ReviewTaskKind: "seed";
+    ReviewTaskKind: "seed" | "candidate";
     /** ReviewTaskOut */
     ReviewTaskOut: {
+      /**
+       * Candidate Id
+       * @description A candidate task's rule candidate
+       */
+      candidate_id: string | null;
       /** Claimed At */
       claimed_at: string | null;
       /**
@@ -2088,7 +2492,7 @@ export type components = {
       /** Decided By */
       decided_by: string | null;
       decision: components["schemas"]["ReviewDecision"] | null;
-      /** @description seed: a draft the seed calendar wrote */
+      /** @description seed: a draft the seed calendar wrote; candidate: a rule candidate the pipeline extracted, and the version drafted from it */
       kind: components["schemas"]["ReviewTaskKind"];
       /**
        * Note
@@ -2109,9 +2513,9 @@ export type components = {
       regulator: string;
       /**
        * Rule Version Id
-       * Format: uuid
+       * @description The version the task reviews; null for a candidate task not drafted yet
        */
-      rule_version_id: string;
+      rule_version_id: string | null;
       status: components["schemas"]["ReviewTaskStatus"];
       /**
        * Task Id
@@ -2124,6 +2528,11 @@ export type components = {
      * @enum {string}
      */
     ReviewTaskStatus: "open" | "claimed" | "decided";
+    /**
+     * RuleCandidateStatus
+     * @enum {string}
+     */
+    RuleCandidateStatus: "open" | "drafted" | "approved" | "rejected";
     /**
      * RuleChangeCitationOut
      * @description A verified quote of the clause the version cites.
@@ -2258,6 +2667,15 @@ export type components = {
       /** Title */
       title: string;
     };
+    /**
+     * RuleRejectReason
+     * @description Why an analyst rejects a candidate: the document states no rule, the model read it
+     *     wrongly, another candidate or rule holds it already, the product does not cover it, or
+     *     there was no candidate to draft from.
+     * @enum {string}
+     */
+    RuleRejectReason:
+      "not_a_rule" | "wrong_extraction" | "duplicate" | "out_of_scope" | "unparseable";
     /** RuleVersionDetailOut */
     RuleVersionDetailOut: {
       /**
@@ -2535,6 +2953,13 @@ export type components = {
     };
     /** TaskDecisionOut */
     TaskDecisionOut: {
+      /** @description A candidate task's candidate after the decision */
+      candidate_status: components["schemas"]["RuleCandidateStatus"] | null;
+      /**
+       * Events
+       * @description Events the decision wrote to the outbox: rule.rejected for a candidate
+       */
+      events: components["schemas"]["EventOut"][];
       /**
        * Next Task Id
        * @description The task a return opened for the rework
@@ -2542,7 +2967,8 @@ export type components = {
       next_task_id: string | null;
       /** @description Decided, or open again when the round needs another approver */
       task: components["schemas"]["ReviewTaskOut"];
-      version: components["schemas"]["LifecycleOut"];
+      /** @description The version after the decision; null for a candidate rejected before drafting */
+      version: components["schemas"]["LifecycleOut"] | null;
     };
     /**
      * TaskDocumentOut
@@ -3882,9 +4308,11 @@ export interface operations {
       query?: {
         /** @description The next_cursor of the previous page; absent for the first page */
         cursor?: string | null;
+        /** @description Only tasks of this kind */
+        kind?: components["schemas"]["ReviewTaskKind"] | null;
         /** @description Items per page, 1 to 200 */
         limit?: number;
-        /** @description Only this regulator's */
+        /** @description Only this regulator's, in any case */
         regulator?: string | null;
         /** @description Only tasks of this status */
         status?: components["schemas"]["ReviewTaskStatus"] | null;
@@ -4108,6 +4536,98 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TaskDecisionOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  draft_from_candidate_v1_rulebook_review_tasks__task_id__draft_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
+        "x-cw-review-token"?: string | null;
+      };
+      path: {
+        task_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DraftFromCandidateIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReviewTaskDetailOut"];
         };
       };
       /** @description Bad Request */

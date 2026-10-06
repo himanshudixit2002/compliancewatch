@@ -14,7 +14,7 @@ from domain_kernel.vectors import ClauseFilter, Vector
 from rulebook.domain.alignment import EntityLookup
 from rulebook.domain.changes import ChangeEntry, ChangeQuery
 from rulebook.domain.documents import StoredClause, StoredDocument
-from rulebook.domain.events import RuleEvent
+from rulebook.domain.events import RulebookEvent
 from rulebook.domain.graph import (
     ClauseDetail,
     EntityRecord,
@@ -22,11 +22,12 @@ from rulebook.domain.graph import (
     RelationQuery,
     RelationRecord,
 )
+from rulebook.domain.intake import RuleCandidate
 from rulebook.domain.publication import PendingReplacement, RuleVersionDecision
 from rulebook.domain.relations import CandidateStatus, RelationCandidate
 from rulebook.domain.review import EntityReviewItem, MentionGroup, ReviewQueueStats
 from rulebook.domain.review_tasks import QueuedTask, ReviewTask, ReviewTaskStats, TaskQuery
-from rulebook.domain.rule_versions import CitationRecord, RuleVersionRecord, VersionPage
+from rulebook.domain.rule_versions import CitationRecord, RuleHead, RuleVersionRecord, VersionPage
 from rulebook.domain.runs import ExtractionRun, RuleSummary
 from rulebook.domain.search import CitedClause, ClauseEmbedding
 
@@ -184,6 +185,14 @@ class RelationRepository(Protocol):
         """Relations matching every id the query names, ordered by relation id."""
         ...
 
+    def remove_approved(self, rule_version_id: RuleVersionId) -> tuple[UUID, ...]:
+        """Delete the relations from the version that relation candidates were approved into,
+        and return those candidates' ids in id order; a relation with no candidate stays. The
+        caller removes only a draft's relations, once the rule candidate it was drafted from is
+        rejected, and reopens each candidate in the same transaction
+        (``relations.reopen_relations``)."""
+        ...
+
 
 class RuleVersionRepository(Protocol):
     def in_force(self, as_of: date, page: VersionPage) -> Sequence[RuleVersionRecord]:
@@ -261,6 +270,19 @@ class RuleVersionRepository(Protocol):
         ``regulator`` issues, after ``after``, at most ``limit``."""
         ...
 
+    def lock_rule(self, rule_key: str) -> RuleHead | None:
+        """The rule with this key, locked for the rest of the transaction so two writers of its
+        next version (drafts from candidates, and the seed command, which takes the same lock)
+        never take one number, with the highest number its versions have, a closed draft's
+        included; None when no rule has the key."""
+        ...
+
+    def add_rule_and_version(self, record: RuleVersionRecord, *, new_rule: bool) -> None:
+        """Insert ``record`` as a new draft version, its rule first when ``new_rule`` (with the
+        record's rule id, key, regulator and level). A new rule whose key another rule has is
+        ``RuleKeyTakenError``; the version number must follow the rule's highest."""
+        ...
+
 
 class CitationRepository(Protocol):
     def for_version(self, rule_version_id: RuleVersionId) -> tuple[CitationRecord, ...]:
@@ -272,10 +294,26 @@ class CitationRepository(Protocol):
         ...
 
 
+class RuleCandidateRepository(Protocol):
+    def add(self, candidate: RuleCandidate) -> bool:
+        """Insert unless a candidate with the id exists; whether this call inserted it."""
+        ...
+
+    def get(self, candidate_id: UUID) -> RuleCandidate | None: ...
+
+    def lock(self, candidate_id: UUID) -> RuleCandidate | None:
+        """The candidate, locked for the rest of the transaction."""
+        ...
+
+    def save(self, candidate: RuleCandidate) -> None:
+        """Write the candidate's status, version, reject reason and decision."""
+        ...
+
+
 class ReviewTaskRepository(Protocol):
     def add(self, task: ReviewTask) -> bool:
-        """Insert unless the version has a task that is not decided; whether this call
-        inserted it."""
+        """Insert unless the version, or the candidate, has a task that is not decided; whether
+        this call inserted it."""
         ...
 
     def get(self, task_id: UUID) -> ReviewTask | None: ...
@@ -285,8 +323,9 @@ class ReviewTaskRepository(Protocol):
         ...
 
     def save(self, task: ReviewTask) -> None:
-        """Write the task's status, claim and decision. A decided task never changes
-        (``ReviewTaskClosedError``; the table's trigger refuses it too)."""
+        """Write the task's status, claim and decision, and the version a candidate task gets
+        when it is drafted. A decided task never changes (``ReviewTaskClosedError``; the
+        table's trigger refuses it too), nor does a task's version once it has one."""
         ...
 
     def page(self, query: TaskQuery) -> Sequence[QueuedTask]:
@@ -298,25 +337,35 @@ class ReviewTaskRepository(Protocol):
         """Every task of the version, oldest first."""
         ...
 
+    def of_candidate(self, candidate_id: UUID) -> tuple[ReviewTask, ...]:
+        """Every task of the candidate, oldest first."""
+        ...
+
     def drafts_without_task(self) -> Sequence[RuleVersionRecord]:
-        """The drafts that need review (seed status needs_review) and have no task that is not
-        decided, by rule key and version."""
+        """The seed drafts that need review (seed status needs_review, no candidate) and have
+        no task that is not decided, by rule key and version. A draft made from a candidate is
+        reviewed through its candidate's task, never a seed task."""
         ...
 
     def stats(self) -> ReviewTaskStats:
-        """Tasks per regulator and status, the decisions made, the median time to decide and
-        when the oldest task not decided yet was opened."""
+        """Tasks per regulator and status, the decisions made, the median time to decide, when
+        the oldest task not decided yet was opened, and the decided candidates: approved (and
+        how many of those with no edit recorded on their version) and rejected."""
         ...
 
 
 class EventSink(Protocol):
-    """Where rule events go inside the transaction: the outbox, keyed by rule."""
+    """Where the rulebook's events go inside the transaction: the outbox, each keyed by its
+    partition key (a rule event by its rule)."""
 
-    def publish(self, event: RuleEvent) -> None: ...
+    def publish(self, event: RulebookEvent) -> None: ...
 
 
 class RuleCatalog(Protocol):
-    def list_rules(self) -> tuple[RuleSummary, ...]: ...
+    def list_rules(self) -> tuple[RuleSummary, ...]:
+        """Every rule by key with the title of its latest version, a closed draft skipped
+        (``intake.version_closed``); a rule with no other version is left out."""
+        ...
 
     def rule_id(self, rule_key: str) -> UUID | None: ...
 
@@ -396,6 +445,9 @@ class KnowledgeUnitOfWork(Protocol):
 
     @property
     def review_tasks(self) -> ReviewTaskRepository: ...
+
+    @property
+    def rule_candidates(self) -> RuleCandidateRepository: ...
 
     @property
     def index(self) -> ClauseIndex: ...

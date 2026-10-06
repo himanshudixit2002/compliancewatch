@@ -45,6 +45,12 @@ def write_rows(root: Path, *rows: str) -> None:
     (root / "BREAKING.md").write_text(TABLE_HEAD + "".join(f"{row}\n" for row in rows))
 
 
+def add_row(root: Path, row: str) -> None:
+    """A row added below the committed ones, as a branch adds it."""
+    with (root / "BREAKING.md").open("a", encoding="utf-8") as log:
+        log.write(f"{row}\n")
+
+
 @pytest.fixture
 def base(tmp_path: Path) -> Path:
     copy = tmp_path / "base"
@@ -238,7 +244,7 @@ def test_a_new_break_log_row_allows_the_listed_break(base: Path, head: Path) -> 
     edit_spec(
         head, "identity.v1.json", lambda doc: doc["paths"]["/v1/identity/consents"].pop("post")
     )
-    write_rows(
+    add_row(
         head,
         "| `identity.v1.json` | `POST /v1/identity/consents` | Consents move to a new route |"
         " ADR-099 |",

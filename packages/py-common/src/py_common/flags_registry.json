@@ -310,6 +310,20 @@
       ]
     },
     {
+      "name": "rulebook.candidate_intake",
+      "type": "bool",
+      "default": false,
+      "owner": "regulatory-intelligence",
+      "description": "The rulebook worker's consumer of rule.candidate.created (group rulebook.rule-candidates): each rule candidate the pipeline's extraction publishes is stored once and queued for an analyst as a review task of kind candidate, at a priority and under its regulator. Analysts draft a version from it, never the intake. Off, no consumer group reads the topic, so the candidates wait there (it keeps a month) and the group reads them from the start once it is on.",
+      "removal": "Once candidates from the extraction are reviewed into rules through the review queue in staging and production for 30 days.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_RULEBOOK_CANDIDATE_INTAKE_ENABLED",
+      "services": [
+        "rulebook"
+      ]
+    },
+    {
       "name": "rulebook.publish",
       "type": "bool",
       "default": false,

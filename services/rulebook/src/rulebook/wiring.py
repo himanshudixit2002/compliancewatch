@@ -34,6 +34,7 @@ from rulebook.application.review import DecideMentionGroup, ListGroupItems, List
 from rulebook.application.review_tasks import (
     ClaimReviewTask,
     DecideReviewTask,
+    DraftFromCandidate,
     EditReviewDraft,
     ListReviewTasks,
     OpenSeedReviewTasks,
@@ -93,6 +94,7 @@ class Wiring:
     list_review_tasks: ListReviewTasks
     claim_review_task: ClaimReviewTask
     read_review_task: ReadReviewTask
+    draft_from_candidate: DraftFromCandidate
     edit_review_draft: EditReviewDraft
     decide_review_task: DecideReviewTask
     read_review_stats: ReadReviewStats

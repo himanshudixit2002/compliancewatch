@@ -20,3 +20,8 @@ reason in one sentence (without a `|`), and the ADR as `ADR-NNN`.
 
 | Spec | Operation | Reason | ADR |
 | ---- | --------- | ------ | --- |
+| rulebook.v1.json | GET /v1/rulebook/review/tasks | A candidate task has no rule version until an analyst drafts one, so its rule_version_id, rule_key, version and version_status are null until then, and every task's kind gains candidate; cw-product's check reads the queue (review_queue and claim_one in tools/demo/src/cw_demo/product/check.py) and changes with it to accept a null version_status and claim seed tasks only | ADR-018 |
+| rulebook.v1.json | GET /v1/rulebook/review/tasks/{task_id} | A candidate task not drafted yet has no rule version, so the task's rule_version_id and the detail's rule_version are null, and the kind of the task and of each task in its history gains candidate; cw-product's check reads only the seed task it claimed (read_task) | ADR-018 |
+| rulebook.v1.json | POST /v1/rulebook/review/tasks/{task_id}/claim | A candidate task not drafted yet has no rule version, so the claimed task's rule_version_id is null, and its kind gains candidate; cw-product's check claims a task (claim_one) and changes with it to claim seed tasks only | ADR-018 |
+| rulebook.v1.json | PATCH /v1/rulebook/review/tasks/{task_id}/draft | The response is the task detail, whose task rule_version_id and rule_version are null for a candidate task not drafted yet, and whose tasks' kind gains candidate; no client calls it yet | ADR-018 |
+| rulebook.v1.json | POST /v1/rulebook/review/tasks/{task_id}/decide | A candidate rejected before it was drafted has no version, so the decision's version and the task's rule_version_id are null, and the task's kind gains candidate; no client calls it yet | ADR-018 |

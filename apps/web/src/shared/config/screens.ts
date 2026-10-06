@@ -192,12 +192,14 @@ const NOTIFICATION = uses(
 const BUDGET_ALARMS = servicesTrack("WP27", "eval", "GET", "/v1/eval/budget-alarms");
 const QA_COVERAGE = servicesTrack("WP28", "eval", "GET", "/v1/eval/qa-coverage");
 const REVIEW_STATS = servicesTrack("WP21", "rulebook", "GET", "/v1/rulebook/review/stats");
-/** The rulebook's review tasks (M2-4): the queue, the seed tasks, a task, its claim, its draft's
- * edit and its decision, and the stats. Drafting a version from a candidate comes later. */
+/** The rulebook's review tasks (M2-4, M2-6): the queue, the seed tasks, a task, its claim, the
+ * version drafted from a candidate task's candidate, its draft's edit and its decision, and the
+ * stats. */
 const REVIEW_TASKS = uses("rulebook", "GET", "/v1/rulebook/review/tasks");
 const REVIEW_SEED = uses("rulebook", "POST", "/v1/rulebook/review/tasks/seed");
 const REVIEW_TASK = uses("rulebook", "GET", "/v1/rulebook/review/tasks/{task_id}");
 const REVIEW_CLAIM = uses("rulebook", "POST", "/v1/rulebook/review/tasks/{task_id}/claim");
+const REVIEW_DRAFT = uses("rulebook", "POST", "/v1/rulebook/review/tasks/{task_id}/draft");
 const REVIEW_EDIT = uses("rulebook", "PATCH", "/v1/rulebook/review/tasks/{task_id}/draft");
 const REVIEW_DECIDE = uses("rulebook", "POST", "/v1/rulebook/review/tasks/{task_id}/decide");
 const REVIEW_STATS_READ = uses("rulebook", "GET", "/v1/rulebook/review/stats");
@@ -1503,6 +1505,7 @@ const SCREEN_LIST = [
       STORED_BYTES,
       REVIEW_TASK,
       REVIEW_CLAIM,
+      REVIEW_DRAFT,
       REVIEW_EDIT,
       REVIEW_DECIDE,
     ],
@@ -1514,7 +1517,7 @@ const SCREEN_LIST = [
       ONTOLOGY,
       RAW_DOCUMENT,
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15; ADR-006; F4",
     parent: "admin.review",

@@ -125,7 +125,9 @@ the API answers. One failed step does not stop the next.
   changes nothing. It reads that task (its draft, the specification described, the citations
   with their verification, the history) and the stats, which count the waiting tasks. The
   public listener answers the queue 404 in header mode. Nothing is edited or decided, so no seed
-  draft changes, none is approved or published and none is marked reviewed:
+  draft changes, none is approved or published and none is marked reviewed. Only seed tasks are
+  claimed; a candidate task (``rulebook.candidate_intake``, off in ``make product``) is never
+  touched:
   ``tools/demo/tests/unit/test_review_flow.py`` edits, approves and publishes on memory stores.
 - ``extraction``: the pipeline's triage and its rule extraction, ingesting nothing. It runs only
   while the running gateway's routing table (``GET /v1/llm-gateway/models``) routes the
@@ -2448,7 +2450,7 @@ def review(context: CheckContext) -> list[str]:
     moved_on = sorted(
         f"{task['rule_key']} v{task['version']} ({task['version_status']})"
         for task in waiting
-        if task["version_status"] not in IN_REVIEW_FLOW
+        if task["version_status"] is not None and task["version_status"] not in IN_REVIEW_FLOW
     )
     claimed, claim_line = claim_one(product, waiting)
     lines = [
@@ -2488,13 +2490,14 @@ def claim_one(
     """The task the check analyst holds, or the first open one, claimed (again) by the check
     analyst; the claimant claiming again changes nothing."""
     analyst = str(CHECK_ANALYST.user_id)
+    seed = [task for task in waiting if task.get("kind", "seed") == "seed"]
     held = [
         task
-        for task in waiting
+        for task in seed
         if task["claimed_by"] == analyst and task["version_status"] in IN_REVIEW_FLOW
     ]
     candidates = held or [
-        task for task in waiting if task["status"] == "open" and task["version_status"] == "draft"
+        task for task in seed if task["status"] == "open" and task["version_status"] == "draft"
     ]
     if not candidates:
         return None, "claim: every waiting draft is claimed by someone else, so none was claimed"

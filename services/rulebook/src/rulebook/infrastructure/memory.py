@@ -45,9 +45,11 @@ from rulebook.domain.documents import StoredClause, StoredDocument
 from rulebook.domain.errors import (
     ReviewTaskClosedError,
     ReviewTaskNotFoundError,
+    RuleCandidateNotFoundError,
+    RuleKeyTakenError,
     UnknownRuleVersionError,
 )
-from rulebook.domain.events import RuleEvent
+from rulebook.domain.events import RulebookEvent
 from rulebook.domain.graph import (
     ClauseDetail,
     EntityRecord,
@@ -55,6 +57,12 @@ from rulebook.domain.graph import (
     MentionSpan,
     RelationQuery,
     RelationRecord,
+)
+from rulebook.domain.intake import (
+    CandidateSummary,
+    RuleCandidate,
+    RuleCandidateStatus,
+    version_closed,
 )
 from rulebook.domain.publication import (
     REPLACING,
@@ -71,6 +79,7 @@ from rulebook.domain.review import (
     ReviewStatus,
 )
 from rulebook.domain.review_tasks import (
+    CandidateCounts,
     QueuedTask,
     ReviewTask,
     ReviewTaskStats,
@@ -81,6 +90,7 @@ from rulebook.domain.review_tasks import (
 from rulebook.domain.rule_versions import (
     IN_FORCE_STATUSES,
     CitationRecord,
+    RuleHead,
     RuleVersionRecord,
     VersionPage,
     ended_since,
@@ -104,6 +114,8 @@ FROZEN_STATUSES = frozenset(
     {RuleVersionStatus.PUBLISHED, RuleVersionStatus.SUPERSEDED, RuleVersionStatus.WITHDRAWN}
 )
 """Statuses whose content the rule_version guard freezes."""
+TASK_VERSION_KEY = "fk_review_task_rule_version_id_candidate_id_rule_version"
+"""Migration 0011's key from a candidate task's version and candidate to the version."""
 TEST_EFFECTIVE_FROM = date(2026, 4, 1)
 """Where a test version starts when the test does not say: a date, not a regulatory fact."""
 _TOKEN = re.compile(r"[\w\u0900-\u097f]+")
@@ -123,7 +135,6 @@ class _Rule:
     rule_id: UUID
     rule_key: str
     regulator: str
-    title: str
     level: AttributeLevel = AttributeLevel.REGISTRATION
 
 
@@ -146,6 +157,7 @@ class _Version:
     published_at: datetime | None = None
     high_impact: bool = False
     submitted_at: datetime | None = None
+    candidate_id: UUID | None = None
 
 
 @dataclass
@@ -176,8 +188,9 @@ class _Tables:
     embeddings: dict[tuple[ClauseId, str], Vector] = field(default_factory=dict)
     runs: dict[UUID, ExtractionRun] = field(default_factory=dict)
     decisions: list[RuleVersionDecision] = field(default_factory=list)
-    outbox: list[RuleEvent] = field(default_factory=list)
+    outbox: list[RulebookEvent] = field(default_factory=list)
     review_tasks: dict[UUID, ReviewTask] = field(default_factory=dict)
+    rule_candidates: dict[UUID, RuleCandidate] = field(default_factory=dict)
 
     def copy(self) -> "_Tables":
         return copy.deepcopy(self)
@@ -492,6 +505,16 @@ class MemoryRelationRepository:
     def lock_supersession(self) -> None:
         """Units of work already run one at a time here."""
 
+    def remove_approved(self, rule_version_id: RuleVersionId) -> tuple[UUID, ...]:
+        removed = [
+            (relation_id, candidate_id)
+            for relation_id, (relation, candidate_id) in self._tables.relations.items()
+            if relation.from_rule_version_id == rule_version_id and candidate_id is not None
+        ]
+        for relation_id, _ in removed:
+            del self._tables.relations[relation_id]
+        return tuple(sorted((candidate_id for _, candidate_id in removed if candidate_id), key=str))
+
     def find(self, query: RelationQuery) -> Sequence[RelationRecord]:
         found: list[RelationRecord] = []
         for relation_id, (relation, candidate_id) in sorted(
@@ -561,10 +584,16 @@ class MemoryRuleCatalog:
         self._tables = tables
 
     def list_rules(self) -> tuple[RuleSummary, ...]:
-        return tuple(
-            RuleSummary(rule.rule_key, rule.rule_id, rule.regulator, rule.title)
-            for rule in sorted(self._tables.rules.values(), key=lambda r: r.rule_key)
-        )
+        """Each rule with the title of its latest version, a closed draft skipped, as the
+        Postgres store reads it; a rule with no other version is left out."""
+        found: list[RuleSummary] = []
+        for rule in sorted(self._tables.rules.values(), key=lambda r: r.rule_key):
+            latest = _latest_open(self._tables, rule)
+            if latest is not None:
+                found.append(
+                    RuleSummary(rule.rule_key, rule.rule_id, rule.regulator, latest[1].title)
+                )
+        return tuple(found)
 
     def rule_id(self, rule_key: str) -> UUID | None:
         rule = self._tables.rules.get(rule_key)
@@ -779,6 +808,105 @@ class MemoryRuleVersionRepository:
         version = self._tables.versions.get(entry.rule_version_id)
         return None if version is None else self._tables.rules[version.rule_key].regulator
 
+    def lock_rule(self, rule_key: str) -> RuleHead | None:
+        """Units of work already run one at a time here, so nothing is locked."""
+        rule = self._tables.rules.get(rule_key)
+        if rule is None:
+            return None
+        return RuleHead(
+            rule_id=RuleId(rule.rule_id),
+            rule_key=rule.rule_key,
+            regulator=rule.regulator,
+            level=rule.level,
+            last_version=max(
+                (v.version for v in self._tables.versions.values() if v.rule_id == rule.rule_id),
+                default=0,
+            ),
+        )
+
+    def add_rule_and_version(self, record: RuleVersionRecord, *, new_rule: bool) -> None:
+        if new_rule:
+            if record.rule_key in self._tables.rules:
+                raise RuleKeyTakenError(record.rule_key)
+            self._tables.rules[record.rule_key] = _Rule(
+                record.rule_id.value, record.rule_key, record.regulator, record.level
+            )
+        rule = self._tables.rules[record.rule_key]
+        if rule.rule_id != record.rule_id.value:
+            raise InvariantViolationError(f"rule {record.rule_key} has another id")
+        taken = {v.version for v in self._tables.versions.values() if v.rule_id == rule.rule_id}
+        if record.version in taken or record.version != max(taken, default=0) + 1:
+            raise InvariantViolationError(
+                f"version {record.version} of {record.rule_key} does not follow the latest"
+            )
+        if record.status is not RuleVersionStatus.DRAFT or record.published_at is not None:
+            raise InvariantViolationError("a version is inserted as an unpublished draft")
+        if record.candidate_id is not None and any(
+            version.candidate_id == record.candidate_id
+            for version in self._tables.versions.values()
+        ):
+            raise InvariantViolationError(f"candidate {record.candidate_id} has a version already")
+        self._tables.versions[record.rule_version_id] = _Version(
+            rule_id=rule.rule_id,
+            rule_key=record.rule_key,
+            version=record.version,
+            status=record.status,
+            title=record.title,
+            summary=record.summary,
+            specification=dict(record.specification),
+            obligation_template=dict(record.obligation_template),
+            recurrence=None if record.recurrence is None else dict(record.recurrence),
+            effective_from=record.effective_from,
+            effective_to=record.effective_to,
+            source=dict(record.source),
+            seed_status=record.seed_status,
+            todo=tuple(record.todo),
+            high_impact=record.high_impact,
+            candidate_id=record.candidate_id,
+        )
+
+
+class MemoryRuleCandidateRepository:
+    """The rule candidates under the table's rules: one row per candidate id, first write
+    wins, and the version a candidate names was drafted from it (the composite key)."""
+
+    def __init__(self, tables: _Tables) -> None:
+        self._tables = tables
+
+    def add(self, candidate: RuleCandidate) -> bool:
+        if candidate.candidate_id in self._tables.rule_candidates:
+            return False
+        if candidate.document_id not in self._tables.documents:
+            raise InvariantViolationError(f"document {candidate.document_id} is not stored")
+        _require_drafted_from(
+            self._tables,
+            candidate.rule_version_id,
+            candidate.candidate_id,
+            "fk_rule_candidate_rule_version_id_id_rule_version",
+        )
+        self._tables.rule_candidates[candidate.candidate_id] = candidate
+        return True
+
+    def get(self, candidate_id: UUID) -> RuleCandidate | None:
+        return self._tables.rule_candidates.get(candidate_id)
+
+    def lock(self, candidate_id: UUID) -> RuleCandidate | None:
+        """Units of work already run one at a time here."""
+        return self.get(candidate_id)
+
+    def save(self, candidate: RuleCandidate) -> None:
+        if candidate.candidate_id not in self._tables.rule_candidates:
+            raise RuleCandidateNotFoundError(
+                f"rule candidate {candidate.candidate_id} is not stored"
+            )
+        _require_drafted_from(
+            self._tables,
+            candidate.rule_version_id,
+            candidate.candidate_id,
+            "fk_rule_candidate_rule_version_id_id_rule_version",
+        )
+        self._tables.rule_candidates[candidate.candidate_id] = candidate
+
 
 class MemoryClauseIndex:
     """Token overlap for the lexical leg, cosine similarity for the vector leg."""
@@ -923,7 +1051,47 @@ def _version_record(
         published_at=version.published_at,
         high_impact=version.high_impact,
         submitted_at=version.submitted_at,
+        candidate_id=version.candidate_id,
     )
+
+
+def _require_drafted_from(
+    tables: _Tables, rule_version_id: RuleVersionId | None, candidate_id: UUID, key: str
+) -> None:
+    """A candidate, or its task, names only the version drafted from that candidate: what
+    migration 0011's composite keys (``key``) refuse in Postgres is refused here."""
+    if rule_version_id is None:
+        return
+    version = tables.versions.get(rule_version_id)
+    if version is None:
+        raise UnknownRuleVersionError(str(rule_version_id))
+    if version.candidate_id != candidate_id:
+        drafted_from = "no candidate" if version.candidate_id is None else version.candidate_id
+        raise InvariantViolationError(
+            f"rule version {rule_version_id} was drafted from {drafted_from}, not rule candidate "
+            f"{candidate_id} ({key})"
+        )
+
+
+def _closed(tables: _Tables, rule_version_id: RuleVersionId, version: _Version) -> bool:
+    """``intake.version_closed``: drafted from a rule candidate that was rejected, never
+    published."""
+    if version.candidate_id is None:
+        return False
+    candidate = tables.rule_candidates.get(version.candidate_id)
+    return version_closed(_version_record(tables, rule_version_id, version), candidate)
+
+
+def _versions_of(tables: _Tables, rule: _Rule) -> list[tuple[RuleVersionId, _Version]]:
+    """Every version of the rule, by number."""
+    found = [(v_id, v) for v_id, v in tables.versions.items() if v.rule_id == rule.rule_id]
+    return sorted(found, key=lambda item: item[1].version)
+
+
+def _latest_open(tables: _Tables, rule: _Rule) -> tuple[RuleVersionId, _Version] | None:
+    """The rule's latest version, a closed draft skipped; None when it has no other."""
+    open_versions = [item for item in _versions_of(tables, rule) if not _closed(tables, *item)]
+    return open_versions[-1] if open_versions else None
 
 
 def _seed_version(rule: _Rule, seeded: SeedRule, number: int) -> _Version:
@@ -1002,18 +1170,33 @@ class MemoryCitationRepository:
 
 class MemoryReviewTaskRepository:
     """The review tasks under the table's rules: at most one task per version that is not
-    decided (the partial unique index), and a decided task never changes (the trigger)."""
+    decided, and one per candidate (the partial unique indexes), a decided task never changes
+    and a task takes its version once (the trigger), and a candidate task's version was drafted
+    from its candidate (the composite key)."""
 
     def __init__(self, tables: _Tables) -> None:
         self._tables = tables
 
     def add(self, task: ReviewTask) -> bool:
-        if task.rule_version_id not in self._tables.versions:
+        if task.rule_version_id is not None and task.rule_version_id not in self._tables.versions:
             raise UnknownRuleVersionError(str(task.rule_version_id))
+        if task.candidate_id is not None and task.candidate_id not in self._tables.rule_candidates:
+            raise RuleCandidateNotFoundError(f"rule candidate {task.candidate_id} is not stored")
+        if task.candidate_id is not None:
+            _require_drafted_from(
+                self._tables, task.rule_version_id, task.candidate_id, TASK_VERSION_KEY
+            )
         if task.task_id in self._tables.review_tasks:
             return False
         if task.undecided and any(
-            stored.undecided and stored.rule_version_id == task.rule_version_id
+            stored.undecided
+            and (
+                (
+                    task.rule_version_id is not None
+                    and stored.rule_version_id == task.rule_version_id
+                )
+                or (task.candidate_id is not None and stored.candidate_id == task.candidate_id)
+            )
             for stored in self._tables.review_tasks.values()
         ):
             return False
@@ -1033,10 +1216,20 @@ class MemoryReviewTaskRepository:
             raise ReviewTaskNotFoundError(f"review task {task.task_id} is not stored")
         if not stored.undecided:
             raise ReviewTaskClosedError(f"review task {task.task_id}: a decided task never changes")
-        identity = ("rule_version_id", "kind", "regulator", "opened_at")
+        identity = ("kind", "candidate_id", "regulator", "opened_at")
         if any(getattr(stored, name) != getattr(task, name) for name in identity):
             raise InvariantViolationError(
-                f"review task {task.task_id} keeps its version, kind, regulator and opening time"
+                f"review task {task.task_id} keeps its kind, candidate, regulator and opening time"
+            )
+        if stored.rule_version_id is not None and stored.rule_version_id != task.rule_version_id:
+            raise InvariantViolationError(
+                f"review task {task.task_id} keeps its version once it has one"
+            )
+        if task.rule_version_id is not None and task.rule_version_id not in self._tables.versions:
+            raise UnknownRuleVersionError(str(task.rule_version_id))
+        if task.candidate_id is not None:
+            _require_drafted_from(
+                self._tables, task.rule_version_id, task.candidate_id, TASK_VERSION_KEY
             )
         self._tables.review_tasks[task.task_id] = task
 
@@ -1048,6 +1241,22 @@ class MemoryReviewTaskRepository:
         return [self._queued(task) for task in found[: query.limit]]
 
     def _queued(self, task: ReviewTask) -> QueuedTask:
+        candidate = (
+            None if task.candidate_id is None else self._tables.rule_candidates[task.candidate_id]
+        )
+        summary = None if candidate is None else CandidateSummary.of(candidate)
+        if task.rule_version_id is None:
+            assert candidate is not None, "a task without a version names its candidate"
+            return QueuedTask(
+                task=task,
+                rule_key=candidate.suggested_rule_key,
+                version=None,
+                title=candidate.title,
+                version_status=None,
+                high_impact=candidate.high_impact_suggested,
+                approvals=0,
+                candidate=summary,
+            )
         version = self._tables.versions[task.rule_version_id]
         submitted = version.submitted_at
         approvals = (
@@ -1072,6 +1281,7 @@ class MemoryReviewTaskRepository:
             version_status=version.status,
             high_impact=version.high_impact,
             approvals=approvals,
+            candidate=summary,
         )
 
     def of_version(self, rule_version_id: RuleVersionId) -> tuple[ReviewTask, ...]:
@@ -1079,6 +1289,12 @@ class MemoryReviewTaskRepository:
             task
             for task in self._tables.review_tasks.values()
             if task.rule_version_id == rule_version_id
+        ]
+        return tuple(sorted(found, key=lambda task: (task.opened_at, task.task_id)))
+
+    def of_candidate(self, candidate_id: UUID) -> tuple[ReviewTask, ...]:
+        found = [
+            task for task in self._tables.review_tasks.values() if task.candidate_id == candidate_id
         ]
         return tuple(sorted(found, key=lambda task: (task.opened_at, task.task_id)))
 
@@ -1091,19 +1307,42 @@ class MemoryReviewTaskRepository:
             for version_id, version in self._tables.versions.items()
             if version.status is RuleVersionStatus.DRAFT
             and version.seed_status is SeedStatus.NEEDS_REVIEW
+            and version.candidate_id is None
             and version_id not in tasked
         ]
         return sorted(found, key=lambda record: (record.rule_key, record.version))
 
     def stats(self) -> ReviewTaskStats:
-        return task_stats(list(self._tables.review_tasks.values()))
+        return task_stats(list(self._tables.review_tasks.values()), self._candidate_counts())
+
+    def _candidate_counts(self) -> CandidateCounts:
+        edited = {
+            decision.rule_version_id
+            for decision in self._tables.decisions
+            if decision.action is DecisionAction.EDITED
+        }
+        approved = [
+            candidate
+            for candidate in self._tables.rule_candidates.values()
+            if candidate.status is RuleCandidateStatus.APPROVED
+        ]
+        return CandidateCounts(
+            approved=len(approved),
+            approved_without_edits=sum(
+                candidate.rule_version_id not in edited for candidate in approved
+            ),
+            rejected=sum(
+                candidate.status is RuleCandidateStatus.REJECTED
+                for candidate in self._tables.rule_candidates.values()
+            ),
+        )
 
 
 class MemoryEventSink:
     def __init__(self, tables: _Tables) -> None:
         self._tables = tables
 
-    def publish(self, event: RuleEvent) -> None:
+    def publish(self, event: RulebookEvent) -> None:
         self._tables.outbox.append(event)
 
 
@@ -1130,6 +1369,7 @@ class MemoryUnitOfWork:
         self._rule_versions = MemoryRuleVersionRepository(tables)
         self._citations = MemoryCitationRepository(tables)
         self._review_tasks = MemoryReviewTaskRepository(tables)
+        self._rule_candidates = MemoryRuleCandidateRepository(tables)
         self._index = MemoryClauseIndex(tables)
         self._runs = MemoryRunRepository(tables)
         self._events = MemoryEventSink(tables)
@@ -1173,6 +1413,10 @@ class MemoryUnitOfWork:
     @property
     def review_tasks(self) -> MemoryReviewTaskRepository:
         return self._review_tasks
+
+    @property
+    def rule_candidates(self) -> MemoryRuleCandidateRepository:
+        return self._rule_candidates
 
     @property
     def index(self) -> MemoryClauseIndex:
@@ -1230,7 +1474,7 @@ class MemoryKnowledgeStore:
         The version's content defaults to empty mappings: nothing here is a regulatory fact."""
         rule_id = RuleId(uuid4())
         with self._lock:
-            self._tables.rules[rule_key] = _Rule(rule_id.value, rule_key, regulator, title, level)
+            self._tables.rules[rule_key] = _Rule(rule_id.value, rule_key, regulator, level)
         version_id = self.add_version(
             rule_key,
             title=title,
@@ -1289,12 +1533,20 @@ class MemoryKnowledgeStore:
 
     def apply_seed(self, calendar: SeedCalendar) -> SeedOutcome:
         """The seed calendar's rules as draft versions, the way ``rulebook-seed`` writes them
-        into Postgres (``SqlAlchemySeedRepository``): a new rule gets version 1; while its
-        latest version is a draft it is updated in place; a version past draft is never changed,
-        and a rule whose content differs from it gets a new draft version. ``seed_status`` is
-        left out of that comparison. A rule whose latest version an analyst edited through its
-        review task is left alone (``kept_edited``). Everything written is a draft that needs
-        review; this is what ``CW_RULEBOOK_SEED_ON_START`` loads in local and test."""
+        into Postgres (``SqlAlchemySeedRepository``), rule by rule:
+
+        - a rule with no version, or only closed drafts (``intake.version_closed``), gets the
+          next number;
+        - the seed's own draft (its latest version not drafted from a candidate, while it is a
+          draft) is updated in place, even beside a candidate's draft, unless an analyst edited
+          it through its review task (``kept_edited``);
+        - otherwise the rule's latest version, a closed draft skipped, decides: one drafted from
+          a candidate or edited by an analyst is left alone (``kept_edited``), and one past
+          draft gets a new draft version after it when its content differs (``seed_status`` is
+          left out of that comparison).
+
+        Everything written is a draft that needs review; this is what
+        ``CW_RULEBOOK_SEED_ON_START`` loads in local and test."""
         created_rules: list[str] = []
         created_versions: list[str] = []
         updated: list[str] = []
@@ -1304,51 +1556,53 @@ class MemoryKnowledgeStore:
             for rule in calendar.rules:
                 stored = self._tables.rules.get(rule.rule_key)
                 if stored is None:
-                    stored = _Rule(uuid4(), rule.rule_key, rule.regulator, rule.title, rule.level)
+                    stored = _Rule(uuid4(), rule.rule_key, rule.regulator, rule.level)
                     self._tables.rules[rule.rule_key] = stored
                     created_rules.append(rule.rule_key)
                 content = seed_content(rule)
-                versions = [
-                    (version_id, version)
-                    for version_id, version in self._tables.versions.items()
-                    if version.rule_id == stored.rule_id
-                ]
-                latest = max(versions, key=lambda item: item[1].version, default=None)
-                if latest is None:
-                    self._tables.versions[RuleVersionId.new()] = _seed_version(stored, rule, 1)
-                    created_versions.append(f"{rule.rule_key}@1")
-                elif any(
-                    decision.rule_version_id == latest[0]
-                    and decision.action is DecisionAction.EDITED
-                    for decision in self._tables.decisions
-                ):
-                    kept.append(rule.rule_key)
-                    continue
-                elif latest[1].status is RuleVersionStatus.DRAFT:
-                    latest_id, draft = latest
-                    if _seed_content_of(draft) == content:
-                        unchanged.append(rule.rule_key)
-                        continue
-                    seeded = _seed_version(stored, rule, draft.version)
-                    self._tables.versions[latest_id] = replace(
-                        draft, **{key: getattr(seeded, key) for key in SEED_CONTENT_KEYS}
-                    )
-                    updated.append(f"{rule.rule_key}@{draft.version}")
-                elif reviewed_content(_seed_content_of(latest[1])) == reviewed_content(content):
-                    unchanged.append(rule.rule_key)
-                    continue
-                else:
-                    number = latest[1].version + 1
+                versions = _versions_of(self._tables, stored)
+                number = 1 + (versions[-1][1].version if versions else 0)
+                current = [item for item in versions if not _closed(self._tables, *item)]
+                own = next(
+                    (item for item in reversed(current) if item[1].candidate_id is None), None
+                )
+                if not current:
                     self._tables.versions[RuleVersionId.new()] = _seed_version(stored, rule, number)
                     created_versions.append(f"{rule.rule_key}@{number}")
-                # GET /v1/rulebook/rules lists a rule by the title of its latest version.
-                stored.title = rule.title
+                elif own is not None and own[1].status is RuleVersionStatus.DRAFT:
+                    own_id, draft = own
+                    if self._edited(own_id):
+                        kept.append(rule.rule_key)
+                    elif _seed_content_of(draft) == content:
+                        unchanged.append(rule.rule_key)
+                    else:
+                        seeded = _seed_version(stored, rule, draft.version)
+                        self._tables.versions[own_id] = replace(
+                            draft, **{key: getattr(seeded, key) for key in SEED_CONTENT_KEYS}
+                        )
+                        updated.append(f"{rule.rule_key}@{draft.version}")
+                elif current[-1][1].candidate_id is not None or self._edited(current[-1][0]):
+                    kept.append(rule.rule_key)
+                elif reviewed_content(_seed_content_of(current[-1][1])) == reviewed_content(
+                    content
+                ):
+                    unchanged.append(rule.rule_key)
+                else:
+                    self._tables.versions[RuleVersionId.new()] = _seed_version(stored, rule, number)
+                    created_versions.append(f"{rule.rule_key}@{number}")
         return SeedOutcome(
             tuple(created_rules),
             tuple(created_versions),
             tuple(updated),
             tuple(unchanged),
             tuple(kept),
+        )
+
+    def _edited(self, rule_version_id: RuleVersionId) -> bool:
+        """Whether an analyst edited the version through its review task."""
+        return any(
+            decision.rule_version_id == rule_version_id and decision.action is DecisionAction.EDITED
+            for decision in self._tables.decisions
         )
 
     def add_citation(
@@ -1401,7 +1655,7 @@ class MemoryKnowledgeStore:
         with self._lock:
             return list(self._tables.runs.values())
 
-    def events(self) -> list[RuleEvent]:
+    def events(self) -> list[RulebookEvent]:
         """The committed outbox, oldest first."""
         with self._lock:
             return list(self._tables.outbox)
@@ -1424,3 +1678,9 @@ class MemoryKnowledgeStore:
                 if rule_version_id in (None, task.rule_version_id)
             ]
         return sorted(found, key=lambda task: (task.opened_at, task.task_id))
+
+    def rule_candidates(self) -> list[RuleCandidate]:
+        """The committed rule candidates, oldest first."""
+        with self._lock:
+            found = list(self._tables.rule_candidates.values())
+        return sorted(found, key=lambda candidate: (candidate.created_at, candidate.candidate_id))

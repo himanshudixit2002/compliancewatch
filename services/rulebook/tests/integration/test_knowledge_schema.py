@@ -47,9 +47,10 @@ DOCUMENT_TABLES = {"document", "clause", "citation"}
 REVIEW_TABLES = {"extraction_run", "entity_review", "relation_candidate"}
 SEARCH_TABLES = {"clause_embedding"}
 PUBLISH_TABLES = {"rule_version_decision"}
-REVIEW_TASK_TABLES = {"review_task"}
-OUTBOX_TABLES = {"outbox_event"}
-"""py-common's table, created by migration 0007 but not part of the rulebook's metadata."""
+REVIEW_TASK_TABLES = {"review_task", "rule_candidate"}
+OUTBOX_TABLES = {"outbox_event", "processed_event"}
+"""py-common's tables, created by migrations 0007 and 0010 but not part of the rulebook's
+metadata."""
 ALL_TABLES = (
     KNOWLEDGE_TABLES
     | RULE_TABLES
@@ -211,7 +212,7 @@ def test_upgrade_head_creates_the_knowledge_tables(migrated: Config, engine: Eng
         version: str = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-    assert version == "0009"
+    assert version == "0011"
 
 
 def test_indexes_by_name_and_access_method(migrated: Config, engine: Engine) -> None:
@@ -422,7 +423,8 @@ def test_models_and_migration_agree(migrated: Config, engine: Engine) -> None:
 
 
 def _rulebook_owned(name: str | None, type_: str, parent_names: object) -> bool:
-    """Leave the outbox out: py-common's metadata describes it, not the rulebook's."""
+    """Leave the outbox and the inbox out: py-common's metadata describes them, not the
+    rulebook's."""
     return not (type_ == "table" and name in OUTBOX_TABLES)
 
 

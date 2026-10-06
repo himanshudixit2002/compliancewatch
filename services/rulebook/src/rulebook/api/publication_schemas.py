@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from domain_kernel.events import DomainEvent
 from domain_kernel.ids import ClauseId
 from domain_kernel.knowledge import RelationKind
 from domain_kernel.status import RuleVersionStatus
@@ -18,7 +19,6 @@ from rulebook.application.publication import (
     SweepReport,
     VersionState,
 )
-from rulebook.domain.events import RuleEvent
 from rulebook.domain.seed import SeedStatus
 
 
@@ -90,7 +90,7 @@ class EventOut(BaseModel):
     causation_id: UUID | None
 
     @classmethod
-    def from_event(cls, event: RuleEvent) -> Self:
+    def from_event(cls, event: DomainEvent) -> Self:
         return cls(
             event_id=event.event_id.value,
             topic=type(event).topic,

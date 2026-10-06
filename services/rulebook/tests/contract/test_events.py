@@ -1,17 +1,20 @@
 """The rule events the publish flow writes serialise to messages the published event schemas
-accept: every topic it emits, taken from a publication run on the memory store."""
+accept: every topic it emits, taken from a publication run on the memory store, and the
+rule.rejected a candidate's rejection writes."""
 
 import hashlib
 from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 from cw_contracts.events import TOPICS, EventEnvelopeV1
+from cw_contracts.events.rule_rejected_v1 import RuleRejectedV1
 from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.ids import ClauseId, RuleVersionId, SourceId, UserId
 from domain_kernel.knowledge import EntityType, RelationKind, RuleRelation
 from domain_kernel.status import RuleVersionStatus
 from py_common.events import decode, encode, to_message
 from rulebook.application.documents import RegisterDocument
+from rulebook.application.intake import IngestRuleCandidate
 from rulebook.application.publication import (
     AddCitations,
     ApplyDueTransitions,
@@ -21,9 +24,12 @@ from rulebook.application.publication import (
     SubmitForReview,
     WithdrawVersion,
 )
+from rulebook.application.review_tasks import DecideReviewTask
 from rulebook.domain.documents import StoredDocument
-from rulebook.domain.events import RuleEvent
+from rulebook.domain.events import RulebookEvent
+from rulebook.domain.intake import RuleRejectReason
 from rulebook.domain.relations import RelationCandidate
+from rulebook.domain.review_tasks import ReviewDecision
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 
 NOW = datetime(2026, 10, 1, 4, 30, tzinfo=UTC)
@@ -34,7 +40,7 @@ REVIEWER = UserId(UUID(int=12))
 SPECIFICATION = {"attribute": "registration_type", "operator": "eq", "value": "regular"}
 
 
-def check(event: RuleEvent) -> None:
+def check(event: RulebookEvent) -> None:
     message = decode(encode(to_message(event)))
     EventEnvelopeV1.model_validate(message.model_dump(mode="json"))
     spec = TOPICS[message.topic]
@@ -144,3 +150,58 @@ def test_every_rule_event_matches_its_schema() -> None:
     assert len(events) == 6
     for event in events:
         check(event)
+
+
+def test_a_rejected_candidate_writes_a_rule_rejected_its_schema_accepts() -> None:
+    store = MemoryKnowledgeStore()
+    digest = hashlib.sha256(b"rejected candidate contract").hexdigest()
+    document_id = document_id_for(digest)
+    RegisterDocument(store).run(
+        StoredDocument(
+            document_id=document_id,
+            source_id=SourceId(UUID(int=7)),
+            sha256=digest,
+            regulator="CBIC",
+            doc_type=DocumentType.NOTIFICATION,
+            url="https://example.invalid/rejected.pdf",
+            language="en",
+            media_type="application/pdf",
+            parser_version="pdf@1",
+            fetched_at=NOW,
+        ),
+        [Clause("en.p1", TEXT)],
+    )
+    intake = IngestRuleCandidate(store, lambda: NOW).run(
+        {
+            "candidate_id": str(uuid4()),
+            "document_id": str(document_id),
+            "regulator": "CBIC",
+            "model": "fake/echo",
+            "prompt_version": "extraction.rule_candidate@1",
+            "confidence": 0.0,
+            "citation_count": 0,
+            "needs_review": True,
+            "outcome": "unparseable",
+            "candidate": None,
+        },
+        uuid4(),
+    )
+    assert intake.task is not None
+    decided = DecideReviewTask(store, lambda: NOW).run(
+        intake.task.task_id,
+        ReviewDecision.REJECT,
+        by=REVIEWER,
+        note="Nothing to draft from",
+        reason=RuleRejectReason.UNPARSEABLE,
+    )
+    (event,) = store.events()
+    assert decided.events == (event,)
+    check(event)
+    message = decode(encode(to_message(event)))
+    payload = RuleRejectedV1.model_validate(message.payload)
+    assert (payload.regulator, payload.reason.value, payload.rule_version_id) == (
+        "cbic",
+        "unparseable",
+        None,
+    )
+    assert message.causation_id is not None, "it answers the rule.candidate.created event"

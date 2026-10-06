@@ -16,6 +16,7 @@ export type { ProfileUpdated } from "./profile.updated.v1";
 export type { RuleCandidateCreated } from "./rule.candidate.created.v1";
 export type { RuleDeadlineChanged } from "./rule.deadline_changed.v1";
 export type { RulePublished } from "./rule.published.v1";
+export type { RuleRejected } from "./rule.rejected.v1";
 export type { RuleSuperseded } from "./rule.superseded.v1";
 export type { RuleWithdrawn } from "./rule.withdrawn.v1";
 export type { TenantCreated } from "./tenant.created.v1";
@@ -37,9 +38,10 @@ export const EVENT_TOPICS = {
   "obligation.due_soon": { version: "1.0.0", tenantScoped: true },
   "obligation.rescheduled": { version: "1.0.0", tenantScoped: true },
   "profile.updated": { version: "1.0.0", tenantScoped: true },
-  "rule.candidate.created": { version: "1.1.0", tenantScoped: false },
+  "rule.candidate.created": { version: "1.1.1", tenantScoped: false },
   "rule.deadline_changed": { version: "1.0.0", tenantScoped: false },
   "rule.published": { version: "1.0.0", tenantScoped: false },
+  "rule.rejected": { version: "1.0.0", tenantScoped: false },
   "rule.superseded": { version: "1.0.0", tenantScoped: false },
   "rule.withdrawn": { version: "1.0.0", tenantScoped: false },
   "tenant.created": { version: "1.0.0", tenantScoped: true },

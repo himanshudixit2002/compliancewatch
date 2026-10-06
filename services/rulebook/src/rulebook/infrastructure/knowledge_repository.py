@@ -17,6 +17,11 @@ transition sweep also hold an advisory lock for their transaction. Their events 
 commits or rolls back with the change it describes; the ``rule_version`` trigger checks the
 same rules as the use cases. A review task's decision locks the task, then its version, and
 commits with the version's transition; the ``review_task`` trigger keeps a decided task as it is.
+
+``ConnectionKnowledgeUnitOfWorkFactory`` makes units of work inside a transaction someone else
+owns, such as the inbox transaction of the worker's consumer of rule.candidate.created
+(``py_common.outbox.sync``): the candidate, its review task and the ``processed_event`` row then
+commit together, or none of them. A unit there neither commits nor rolls back.
 """
 
 from collections.abc import Iterator, Mapping, Sequence
@@ -29,6 +34,7 @@ from uuid import UUID
 from sqlalchemy import (
     ColumnElement,
     CompoundSelect,
+    Connection,
     Date,
     Engine,
     Float,
@@ -40,6 +46,7 @@ from sqlalchemy import (
     bindparam,
     cast,
     create_engine,
+    delete,
     func,
     literal,
     literal_column,
@@ -76,9 +83,11 @@ from rulebook.domain.documents import StoredClause, StoredDocument
 from rulebook.domain.errors import (
     ReviewTaskClosedError,
     ReviewTaskNotFoundError,
+    RuleCandidateNotFoundError,
+    RuleKeyTakenError,
     UnknownRuleVersionError,
 )
-from rulebook.domain.events import RuleEvent
+from rulebook.domain.events import RulebookEvent
 from rulebook.domain.graph import (
     ClauseDetail,
     EntityRecord,
@@ -86,6 +95,13 @@ from rulebook.domain.graph import (
     MentionSpan,
     RelationQuery,
     RelationRecord,
+)
+from rulebook.domain.intake import (
+    CandidateOutcome,
+    CandidateSummary,
+    RuleCandidate,
+    RuleCandidateStatus,
+    RuleRejectReason,
 )
 from rulebook.domain.publication import (
     REPLACING,
@@ -110,6 +126,7 @@ from rulebook.domain.review import (
 )
 from rulebook.domain.review_tasks import (
     UNDECIDED,
+    CandidateCounts,
     QueuedTask,
     RegulatorCounts,
     ReviewDecision,
@@ -124,6 +141,7 @@ from rulebook.domain.rule_versions import (
     CITING_STATUSES,
     IN_FORCE_STATUSES,
     CitationRecord,
+    RuleHead,
     RuleVersionRecord,
     VersionPage,
 )
@@ -141,6 +159,7 @@ from rulebook.infrastructure.models import (
     ExtractionRunRow,
     RelationCandidateRow,
     ReviewTaskRow,
+    RuleCandidateRow,
     RuleRelationRow,
     RuleRow,
     RuleVersionDecisionRow,
@@ -603,6 +622,17 @@ class SqlAlchemyRelationRepository:
             text("SELECT pg_advisory_xact_lock(:key)"), {"key": SUPERSESSION_LOCK}
         )
 
+    def remove_approved(self, rule_version_id: RuleVersionId) -> tuple[UUID, ...]:
+        removed = self._session.scalars(
+            delete(RuleRelationRow)
+            .where(
+                RuleRelationRow.from_rule_version_id == rule_version_id.value,
+                RuleRelationRow.candidate_id.is_not(None),
+            )
+            .returning(RuleRelationRow.candidate_id)
+        ).all()
+        return tuple(sorted((candidate for candidate in removed if candidate), key=str))
+
     def find(self, query: RelationQuery) -> Sequence[RelationRecord]:
         statement = (
             select(
@@ -668,6 +698,7 @@ class SqlAlchemyRuleCatalog:
     def list_rules(self) -> tuple[RuleSummary, ...]:
         latest = (
             select(RuleVersionRow.rule_id, func.max(RuleVersionRow.version).label("version"))
+            .where(~closed_version())
             .group_by(RuleVersionRow.rule_id)
             .subquery()
         )
@@ -931,6 +962,61 @@ class SqlAlchemyRuleVersionRepository:
             for row in self._session.execute(statement).all()
         ]
 
+    def lock_rule(self, rule_key: str) -> RuleHead | None:
+        rule = self._session.execute(
+            select(RuleRow.id, RuleRow.regulator, RuleRow.level)
+            .where(RuleRow.rule_key == rule_key)
+            .with_for_update()
+        ).first()
+        if rule is None:
+            return None
+        last = self._session.scalar(
+            select(func.max(RuleVersionRow.version)).where(RuleVersionRow.rule_id == rule.id)
+        )
+        return RuleHead(
+            rule_id=RuleId(rule.id),
+            rule_key=rule_key,
+            regulator=rule.regulator,
+            level=AttributeLevel(rule.level),
+            last_version=int(last or 0),
+        )
+
+    def add_rule_and_version(self, record: RuleVersionRecord, *, new_rule: bool) -> None:
+        if new_rule:
+            inserted = self._session.execute(
+                insert(RuleRow)
+                .values(
+                    id=record.rule_id.value,
+                    rule_key=record.rule_key,
+                    regulator=record.regulator,
+                    level=record.level.value,
+                )
+                .on_conflict_do_nothing()
+                .returning(RuleRow.id)
+            ).first()
+            if inserted is None:
+                raise RuleKeyTakenError(record.rule_key)
+        self._session.execute(
+            insert(RuleVersionRow).values(
+                id=record.rule_version_id.value,
+                rule_id=record.rule_id.value,
+                version=record.version,
+                status=record.status.value,
+                title=record.title,
+                summary=record.summary,
+                specification=dict(record.specification),
+                obligation_template=dict(record.obligation_template),
+                recurrence=None if record.recurrence is None else dict(record.recurrence),
+                effective_from=record.effective_from,
+                effective_to=record.effective_to,
+                source=dict(record.source),
+                seed_status=record.seed_status.value,
+                todo=list(record.todo),
+                high_impact=record.high_impact,
+                candidate_id=record.candidate_id,
+            )
+        )
+
 
 class SqlAlchemyCitationRepository:
     def __init__(self, session: Session) -> None:
@@ -980,6 +1066,54 @@ REVIEW_TASKS = ReviewTaskRow.__table__
 UNDECIDED_STATUSES = sorted(status.value for status in UNDECIDED)
 
 
+class SqlAlchemyRuleCandidateRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, candidate: RuleCandidate) -> bool:
+        statement = (
+            insert(RuleCandidateRow)
+            .values(_rule_candidate_values(candidate))
+            .on_conflict_do_nothing()
+            .returning(RuleCandidateRow.id)
+        )
+        return self._session.execute(statement).first() is not None
+
+    def get(self, candidate_id: UUID) -> RuleCandidate | None:
+        row = self._session.scalar(
+            select(RuleCandidateRow).where(RuleCandidateRow.id == candidate_id)
+        )
+        return None if row is None else _to_rule_candidate(row)
+
+    def lock(self, candidate_id: UUID) -> RuleCandidate | None:
+        row = self._session.scalar(
+            select(RuleCandidateRow).where(RuleCandidateRow.id == candidate_id).with_for_update()
+        )
+        return None if row is None else _to_rule_candidate(row)
+
+    def save(self, candidate: RuleCandidate) -> None:
+        saved = self._session.execute(
+            update(RuleCandidateRow)
+            .where(RuleCandidateRow.id == candidate.candidate_id)
+            .values(
+                status=candidate.status.value,
+                rule_version_id=None
+                if candidate.rule_version_id is None
+                else candidate.rule_version_id.value,
+                reject_reason=None
+                if candidate.reject_reason is None
+                else candidate.reject_reason.value,
+                decided_by=None if candidate.decided_by is None else candidate.decided_by.value,
+                decided_at=candidate.decided_at,
+            )
+            .returning(RuleCandidateRow.id)
+        ).first()
+        if saved is None:
+            raise RuleCandidateNotFoundError(
+                f"rule candidate {candidate.candidate_id} is not stored"
+            )
+
+
 class SqlAlchemyReviewTaskRepository:
     """Review tasks read and written as plain rows (never ORM objects), so a task written in a
     transaction reads back as written in the same one. ``add`` leaves it to the partial unique
@@ -1012,7 +1146,7 @@ class SqlAlchemyReviewTaskRepository:
 
     def save(self, task: ReviewTask) -> None:
         values = _task_values(task)
-        for fixed in ("id", "rule_version_id", "kind", "regulator", "opened_at"):
+        for fixed in ("id", "kind", "candidate_id", "regulator", "opened_at"):
             values.pop(fixed)
         saved = self._session.execute(
             update(ReviewTaskRow)
@@ -1046,9 +1180,11 @@ class SqlAlchemyReviewTaskRepository:
                 RuleVersionRow.status.label("version_status"),
                 RuleVersionRow.high_impact,
                 approvals.label("approvals"),
+                RuleCandidateRow,
             )
-            .join(RuleVersionRow, RuleVersionRow.id == REVIEW_TASKS.c.rule_version_id)
-            .join(RuleRow, RuleRow.id == RuleVersionRow.rule_id)
+            .outerjoin(RuleVersionRow, RuleVersionRow.id == REVIEW_TASKS.c.rule_version_id)
+            .outerjoin(RuleRow, RuleRow.id == RuleVersionRow.rule_id)
+            .outerjoin(RuleCandidateRow, RuleCandidateRow.id == REVIEW_TASKS.c.candidate_id)
             .order_by(
                 REVIEW_TASKS.c.regulator,
                 REVIEW_TASKS.c.priority.desc(),
@@ -1060,26 +1196,25 @@ class SqlAlchemyReviewTaskRepository:
         if query.status is not None:
             statement = statement.where(REVIEW_TASKS.c.status == query.status.value)
         if query.regulator is not None:
-            statement = statement.where(REVIEW_TASKS.c.regulator == query.regulator)
+            statement = statement.where(func.lower(REVIEW_TASKS.c.regulator) == query.regulator)
+        if query.kind is not None:
+            statement = statement.where(REVIEW_TASKS.c.kind == query.kind.value)
         if query.after is not None:
             statement = statement.where(_after_task(query.after))
-        return [
-            QueuedTask(
-                task=_to_task(row),
-                rule_key=row.rule_key,
-                version=row.version,
-                title=row.title,
-                version_status=RuleVersionStatus(row.version_status),
-                high_impact=row.high_impact,
-                approvals=int(row.approvals or 0),
-            )
-            for row in self._session.execute(statement).all()
-        ]
+        return [_to_queued(row) for row in self._session.execute(statement).all()]
 
     def of_version(self, rule_version_id: RuleVersionId) -> tuple[ReviewTask, ...]:
         rows = self._session.execute(
             select(REVIEW_TASKS)
             .where(REVIEW_TASKS.c.rule_version_id == rule_version_id.value)
+            .order_by(REVIEW_TASKS.c.opened_at, REVIEW_TASKS.c.id)
+        ).all()
+        return tuple(_to_task(row) for row in rows)
+
+    def of_candidate(self, candidate_id: UUID) -> tuple[ReviewTask, ...]:
+        rows = self._session.execute(
+            select(REVIEW_TASKS)
+            .where(REVIEW_TASKS.c.candidate_id == candidate_id)
             .order_by(REVIEW_TASKS.c.opened_at, REVIEW_TASKS.c.id)
         ).all()
         return tuple(_to_task(row) for row in rows)
@@ -1094,6 +1229,7 @@ class SqlAlchemyReviewTaskRepository:
             .where(
                 RuleVersionRow.status == RuleVersionStatus.DRAFT.value,
                 RuleVersionRow.seed_status == SeedStatus.NEEDS_REVIEW.value,
+                RuleVersionRow.candidate_id.is_(None),
                 ~undecided.exists(),
             )
             .order_by(RuleRow.rule_key, RuleVersionRow.version)
@@ -1139,6 +1275,26 @@ class SqlAlchemyReviewTaskRepository:
             decisions=decisions,
             median_seconds_to_decide=None if median is None else float(median),
             oldest_open_at=None if oldest is None else oldest.astimezone(UTC),
+            candidates=self._candidate_counts(),
+        )
+
+    def _candidate_counts(self) -> CandidateCounts:
+        approved = RuleCandidateRow.status == RuleCandidateStatus.APPROVED.value
+        edited = select(RuleVersionDecisionRow.id).where(
+            RuleVersionDecisionRow.rule_version_id == RuleCandidateRow.rule_version_id,
+            RuleVersionDecisionRow.action == DecisionAction.EDITED.value,
+        )
+        row = self._session.execute(
+            select(
+                func.count(RuleCandidateRow.id).filter(approved),
+                func.count(RuleCandidateRow.id).filter(and_(approved, ~edited.exists())),
+                func.count(RuleCandidateRow.id).filter(
+                    RuleCandidateRow.status == RuleCandidateStatus.REJECTED.value
+                ),
+            )
+        ).one()
+        return CandidateCounts(
+            approved=int(row[0]), approved_without_edits=int(row[1]), rejected=int(row[2])
         )
 
 
@@ -1150,7 +1306,7 @@ class SqlAlchemyEventSink:
         self._session = session
         self._writer = writer
 
-    def publish(self, event: RuleEvent) -> None:
+    def publish(self, event: RulebookEvent) -> None:
         self._writer.write(self._session.connection(), event, partition_key=event.partition_key)
 
 
@@ -1315,6 +1471,7 @@ class SqlAlchemyKnowledgeUnitOfWork:
         self._rule_versions = SqlAlchemyRuleVersionRepository(session)
         self._citations = SqlAlchemyCitationRepository(session)
         self._review_tasks = SqlAlchemyReviewTaskRepository(session)
+        self._rule_candidates = SqlAlchemyRuleCandidateRepository(session)
         self._index = SqlAlchemyClauseIndex(session)
         self._runs = SqlAlchemyRunRepository(session)
         self._events = SqlAlchemyEventSink(session, writer)
@@ -1360,6 +1517,10 @@ class SqlAlchemyKnowledgeUnitOfWork:
         return self._review_tasks
 
     @property
+    def rule_candidates(self) -> SqlAlchemyRuleCandidateRepository:
+        return self._rule_candidates
+
+    @property
     def index(self) -> SqlAlchemyClauseIndex:
         return self._index
 
@@ -1399,6 +1560,37 @@ class PostgresKnowledgeUnitOfWorkFactory:
         with self._engine.connect() as connection:
             connection.execute(text("SELECT 1"))
         return True
+
+    @staticmethod
+    def on_connection(
+        connection: Connection, *, writer: OutboxWriter | None = None
+    ) -> "ConnectionKnowledgeUnitOfWorkFactory":
+        """Units of work inside the transaction of ``connection``, which its owner commits."""
+        return ConnectionKnowledgeUnitOfWorkFactory(connection, writer or OutboxWriter())
+
+
+class ConnectionKnowledgeUnitOfWorkFactory:
+    """Units of work inside the transaction of ``connection``, begun on it when it has none
+    yet. A unit neither commits nor rolls back: the owner of the connection does, so whatever
+    the units wrote commits with what the owner writes (a consumer's ``processed_event`` row)."""
+
+    def __init__(self, connection: Connection, writer: OutboxWriter) -> None:
+        self._connection = connection
+        self._writer = writer
+
+    def __call__(self) -> AbstractContextManager[KnowledgeUnitOfWork]:
+        return self._open()
+
+    @contextmanager
+    def _open(self) -> Iterator[KnowledgeUnitOfWork]:
+        if not self._connection.in_transaction():
+            # A session given a connection with no transaction would begin one of its own and
+            # roll it back when it closes; begun here, the session joins it, and the owner of
+            # the connection still ends it.
+            self._connection.begin()
+        with Session(bind=self._connection, expire_on_commit=False) as session:
+            yield SqlAlchemyKnowledgeUnitOfWork(session, self._writer)
+            session.flush()
 
 
 def _document_values(document: StoredDocument) -> dict[str, object]:
@@ -1489,6 +1681,17 @@ def _ended_since(since: date) -> ColumnElement[bool]:
         RuleVersionRow.effective_to.is_not(None),
         RuleVersionRow.effective_to >= since,
     )
+
+
+def closed_version() -> ColumnElement[bool]:
+    """``intake.version_closed`` in SQL, over the ``rule_version`` row of the enclosing query:
+    drafted from a rule candidate that was rejected, and never published. The seed command
+    skips such a version too (``seed_repository``)."""
+    rejected = select(RuleCandidateRow.id).where(
+        RuleCandidateRow.id == RuleVersionRow.candidate_id,
+        RuleCandidateRow.status == RuleCandidateStatus.REJECTED.value,
+    )
+    return and_(RuleVersionRow.published_at.is_(None), rejected.exists())
 
 
 def _after(rule_key: str, version: int | None) -> ColumnElement[bool]:
@@ -1594,13 +1797,14 @@ def _to_version(
         published_at=row.published_at,
         high_impact=row.high_impact,
         submitted_at=row.submitted_at,
+        candidate_id=row.candidate_id,
     )
 
 
 def _task_values(task: ReviewTask) -> dict[str, object]:
     return {
         "id": task.task_id,
-        "rule_version_id": task.rule_version_id.value,
+        "rule_version_id": None if task.rule_version_id is None else task.rule_version_id.value,
         "kind": task.kind.value,
         "priority": task.priority,
         "regulator": task.regulator,
@@ -1612,13 +1816,14 @@ def _task_values(task: ReviewTask) -> dict[str, object]:
         "decided_at": task.decided_at,
         "decision": None if task.decision is None else task.decision.value,
         "note": task.note,
+        "candidate_id": task.candidate_id,
     }
 
 
 def _to_task(row: Any) -> ReviewTask:
     return ReviewTask(
         task_id=row.id,
-        rule_version_id=RuleVersionId(row.rule_version_id),
+        rule_version_id=None if row.rule_version_id is None else RuleVersionId(row.rule_version_id),
         kind=ReviewTaskKind(row.kind),
         priority=row.priority,
         regulator=row.regulator,
@@ -1630,6 +1835,86 @@ def _to_task(row: Any) -> ReviewTask:
         decided_at=row.decided_at,
         decision=None if row.decision is None else ReviewDecision(row.decision),
         note=row.note,
+        candidate_id=row.candidate_id,
+    )
+
+
+def _to_queued(row: Any) -> QueuedTask:
+    """A row of the queue's page: the task, its version's summary when it has one, and its
+    candidate when it is a candidate task."""
+    task = _to_task(row)
+    candidate = None if row.RuleCandidateRow is None else _to_rule_candidate(row.RuleCandidateRow)
+    summary = None if candidate is None else CandidateSummary.of(candidate)
+    if row.version is None:
+        return QueuedTask(
+            task=task,
+            rule_key=None if candidate is None else candidate.suggested_rule_key,
+            version=None,
+            title="" if candidate is None else candidate.title,
+            version_status=None,
+            high_impact=candidate is not None and candidate.high_impact_suggested,
+            approvals=0,
+            candidate=summary,
+        )
+    return QueuedTask(
+        task=task,
+        rule_key=row.rule_key,
+        version=row.version,
+        title=row.title,
+        version_status=RuleVersionStatus(row.version_status),
+        high_impact=row.high_impact,
+        approvals=int(row.approvals or 0),
+        candidate=summary,
+    )
+
+
+def _rule_candidate_values(candidate: RuleCandidate) -> dict[str, Any]:
+    return {
+        "id": candidate.candidate_id,
+        "document_id": candidate.document_id.value,
+        "regulator": candidate.regulator,
+        "model": candidate.model,
+        "prompt_version": candidate.prompt_version,
+        "confidence": _score(candidate.confidence),
+        "citation_count": candidate.citation_count,
+        "needs_review": candidate.needs_review,
+        "outcome": candidate.outcome.value,
+        "payload": dict(candidate.payload),
+        "status": candidate.status.value,
+        "reject_reason": None if candidate.reject_reason is None else candidate.reject_reason.value,
+        "rule_version_id": None
+        if candidate.rule_version_id is None
+        else candidate.rule_version_id.value,
+        "suggested_rule_key": candidate.suggested_rule_key,
+        "high_impact_suggested": candidate.high_impact_suggested,
+        "event_id": candidate.event_id,
+        "created_at": candidate.created_at,
+        "decided_by": None if candidate.decided_by is None else candidate.decided_by.value,
+        "decided_at": candidate.decided_at,
+    }
+
+
+def _to_rule_candidate(row: RuleCandidateRow) -> RuleCandidate:
+    return RuleCandidate(
+        candidate_id=row.id,
+        document_id=DocumentId(row.document_id),
+        regulator=row.regulator,
+        model=row.model,
+        prompt_version=row.prompt_version,
+        confidence=float(row.confidence),
+        citation_count=row.citation_count,
+        needs_review=row.needs_review,
+        outcome=CandidateOutcome(row.outcome),
+        payload=row.payload,
+        event_id=row.event_id,
+        created_at=row.created_at.astimezone(UTC),
+        suggested_rule_key=row.suggested_rule_key,
+        high_impact_suggested=row.high_impact_suggested,
+        status=RuleCandidateStatus(row.status),
+        reject_reason=None if row.reject_reason is None else RuleRejectReason(row.reject_reason),
+        rule_version_id=None if row.rule_version_id is None else RuleVersionId(row.rule_version_id),
+        decided_by=None if row.decided_by is None else UserId(row.decided_by),
+        decided_at=None if row.decided_at is None else row.decided_at.astimezone(UTC),
     )
 
 

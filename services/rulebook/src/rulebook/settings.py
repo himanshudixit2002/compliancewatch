@@ -40,6 +40,12 @@ class RulebookSettings(Settings):
     marked synthetic, the one the local product's demo publication sends, which counts towards
     the review round but leaves the version needs_review.
 
+    ``rulebook_candidate_intake_enabled`` turns on the worker's consumer of rule.candidate.created
+    (``CW_RULEBOOK_CANDIDATE_INTAKE_ENABLED``, flag ``rulebook.candidate_intake``, default off;
+    owner regulatory-intelligence): with Kafka on, each candidate the pipeline extracts becomes a
+    stored candidate and a review task of kind candidate. Off, no consumer group reads the topic,
+    so the candidates wait there (a month) and a group started later reads them from the start.
+
     ``rulebook_seed_on_start`` (``CW_RULEBOOK_SEED_ON_START``, default off) loads the packaged
     seed calendar's draft versions into the memory store when the app is built, as
     ``make seed SERVICE=rulebook`` writes them into Postgres, so a rulebook without a database
@@ -53,6 +59,7 @@ class RulebookSettings(Settings):
     rulebook_write_token: SecretStr | None = None
     rulebook_review_token: SecretStr | None = None
     rulebook_publish_enabled: bool = False
+    rulebook_candidate_intake_enabled: bool = False
     rulebook_seed_on_start: bool = False
 
     @property

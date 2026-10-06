@@ -37,6 +37,7 @@ from py_common.runtime import (
 )
 from py_common.settings import Settings
 from py_common.temporal.liveness import running
+from rulebook.settings import RulebookSettings
 
 LOCALHOST = "127.0.0.1"
 OUTBOX_SCHEMAS = frozenset({"profile", "obligation", "rulebook"})
@@ -213,6 +214,22 @@ async def test_each_service_calls_the_others_at_the_internal_url_as_the_worker()
         entry_named("qa"), _root(service_client_id="ops"), internal_url="http://x:1"
     )
     assert named.service_client_id == "ops"
+
+
+async def test_the_rulebook_consumes_rule_candidates_with_kafka_and_its_flag() -> None:
+    intake = {"rulebook": {"rulebook_candidate_intake_enabled": True}}
+    hosted = await build_registry(
+        _root(worker_kafka_enabled=True), probe=_inspector(), service_overrides=intake
+    )
+    assert "rulebook.rule-candidates" in hosted.consumer_groups()
+    assert "rulebook/consumer:rulebook.rule-candidates" in hosted.loops()
+    (rulebook,) = [entry for entry in hosted.hosted if entry.service == "rulebook"]
+    assert isinstance(rulebook.settings, RulebookSettings)
+    assert rulebook.settings.rulebook_candidate_intake_enabled
+    off = await build_registry(_root(worker_kafka_enabled=True), probe=_inspector())
+    assert "rulebook.rule-candidates" not in off.consumer_groups()
+    no_kafka = await build_registry(_root(), probe=_inspector(), service_overrides=intake)
+    assert "rulebook.rule-candidates" not in no_kafka.consumer_groups()
 
 
 async def test_the_rulebook_sweep_runs_while_publishing_is_on() -> None:

@@ -44,7 +44,9 @@ a rule, whether or not that rule is in force."""
 class RuleVersionRecord:
     """One rule version with its rule's key, regulator and level. Specification, template and
     recurrence are the kernel's mapping forms, as stored. ``high_impact`` asks for two
-    different approvers (ADR-006); ``submitted_at`` starts the current review round."""
+    different approvers (ADR-006); ``submitted_at`` starts the current review round;
+    ``candidate_id`` names the rule candidate an analyst drafted the version from, None for the
+    seed calendar's versions."""
 
     rule_version_id: RuleVersionId
     rule_id: RuleId
@@ -66,10 +68,28 @@ class RuleVersionRecord:
     published_at: datetime | None = None
     high_impact: bool = False
     submitted_at: datetime | None = None
+    candidate_id: UUID | None = None
 
     @property
     def effective(self) -> EffectivePeriod:
         return EffectivePeriod(self.effective_from, self.effective_to)
+
+
+@dataclass(frozen=True, slots=True)
+class RuleHead:
+    """A rule as its next version needs it: the rule's id, key, regulator and level, and the
+    highest number its versions have, every version counted (a closed draft keeps its number),
+    so the next one takes ``next_version``."""
+
+    rule_id: RuleId
+    rule_key: str
+    regulator: str
+    level: AttributeLevel
+    last_version: int
+
+    @property
+    def next_version(self) -> int:
+        return self.last_version + 1
 
 
 @dataclass(frozen=True, slots=True)
