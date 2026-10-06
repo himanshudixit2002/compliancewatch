@@ -2155,13 +2155,11 @@ const SCREEN_LIST = [
     tenantKinds: ["internal"],
     uses: PROBES,
     awaits: [],
-    status: "ready",
-    e2e: [],
+    status: "live",
+    e2e: ["admin-system.spec.ts", "a11y.spec.ts"],
     guideRef: "14, 18",
     nav: { group: "operations", order: 9 },
     parent: "admin.home",
-    notes:
-      "Every service's health and readiness with its version and latency, the ports and the web app's facts; the pipeline's probes are the same py-common routes outside a committed spec.",
   },
   {
     id: "admin.backfill",

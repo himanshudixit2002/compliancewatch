@@ -4,7 +4,13 @@ import { SERVICE_NAMES } from "@/shared/config/services";
 import { fakeFetch, hangingFetch, refusingFetch, textResponse } from "@/test/fake-fetch";
 import { REQUEST_ID_HEADER } from "./api/client";
 import { resetEnvCache } from "./env";
-import { HEALTH_TIMEOUT_MS, probeAllHealth, probeHealth } from "./health";
+import {
+  HEALTH_TIMEOUT_MS,
+  probeAllHealth,
+  probeAllReady,
+  probeHealth,
+  probeReady,
+} from "./health";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -105,5 +111,69 @@ describe("probeAllHealth", () => {
     expect(probes.filter((probe) => probe.state === "down").map((probe) => probe.service)).toEqual([
       "eval",
     ]);
+  });
+});
+
+describe("probeReady", () => {
+  it("reports a ready service with its checks", async () => {
+    const fake = fakeFetch([
+      { path: "/ready", body: { status: "ready", checks: { database: true, broker: true } } },
+    ]);
+    const probe = await probeReady("rulebook", { fetchImpl: fake.fetchImpl, now: clock(5, 9) });
+    expect(probe).toEqual({
+      service: "rulebook",
+      baseUrl: "http://localhost:8003",
+      state: "ready",
+      status: 200,
+      checks: { database: true, broker: true },
+      latencyMs: 4,
+    });
+    expect(fake.requests[0]?.url).toBe("http://localhost:8003/ready");
+    expect(fake.requests[0]?.headers["x-tenant-id"]).toBeUndefined();
+    expect(fake.requests[0]?.cache).toBe("no-store");
+  });
+
+  it("reports a 503 readiness report as not ready, with the failing check", async () => {
+    const fake = fakeFetch([
+      {
+        path: "/ready",
+        status: 503,
+        body: { status: "not_ready", checks: { database: false } },
+      },
+    ]);
+    const probe = await probeReady("profile", { fetchImpl: fake.fetchImpl });
+    expect(probe).toMatchObject({ state: "not_ready", status: 503, checks: { database: false } });
+    expect(probe.reason).toBeUndefined();
+  });
+
+  it("counts another status, a body that is not a report and no answer as down", async () => {
+    const teapot = fakeFetch([{ path: "/ready", status: 418, problem: { title: "Example" } }]);
+    expect(await probeReady("qa", { fetchImpl: teapot.fetchImpl })).toMatchObject({
+      state: "down",
+      status: 418,
+      reason: "HTTP 418",
+      checks: {},
+    });
+    const odd = fakeFetch([{ path: "/ready", body: { status: "ready", checks: { a: "yes" } } }]);
+    expect(await probeReady("qa", { fetchImpl: odd.fetchImpl })).toMatchObject({
+      state: "down",
+      reason: "the answer is not a readiness report",
+    });
+    const text = fakeFetch(() => textResponse(503, "busy"));
+    expect((await probeReady("qa", { fetchImpl: text.fetchImpl })).state).toBe("down");
+    const refused = await probeReady("eval", { fetchImpl: refusingFetch().fetchImpl });
+    expect(refused).toMatchObject({ state: "down", reason: "unreachable" });
+  });
+
+  it("gives up after its time limit", async () => {
+    const probe = await probeReady("eval", { fetchImpl: hangingFetch().fetchImpl, timeoutMs: 20 });
+    expect(probe).toMatchObject({ state: "down", reason: "no answer within 20 ms" });
+  });
+
+  it("probes every service in the Makefile's order", async () => {
+    const fake = fakeFetch([{ path: "/ready", body: { status: "ready", checks: {} } }]);
+    const probes = await probeAllReady({ fetchImpl: fake.fetchImpl });
+    expect(probes.map((probe) => probe.service)).toEqual([...SERVICE_NAMES]);
+    expect(probes.every((probe) => probe.state === "ready")).toBe(true);
   });
 });
