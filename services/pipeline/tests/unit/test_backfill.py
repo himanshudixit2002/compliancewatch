@@ -12,6 +12,7 @@ from uuid import UUID
 
 import pytest
 
+from domain_kernel.audit import AuditActor
 from domain_kernel.documents import DocumentType, document_id_for
 from pipeline import backfill
 from pipeline.application.backfill import (
@@ -225,7 +226,7 @@ def test_a_row_is_crawled_again_while_new_documents_are_left() -> None:
         clock=lambda: NOW,
         request_ids=iter(UUID(int=n) for n in range(1, 10)).__next__,
     )
-    request = BackfillRequest(actor=backfill.AuditActor.system("pipeline-backfill"), reason=REASON)
+    request = BackfillRequest(actor=AuditActor.system("pipeline-backfill"), reason=REASON)
     (ran,) = RunBackfill(start, crawls).run([row(limit=100)], request)
     assert (len(ran.rounds), ran.stored, ran.stopped) == (2, 160, "nothing new is left")
     first = crawls.started[0]
@@ -251,7 +252,7 @@ def test_a_row_is_crawled_again_while_new_documents_are_left() -> None:
 
 def test_a_row_stops_at_its_documents_its_rounds_or_when_nothing_is_kept() -> None:
     store = synced()
-    request = BackfillRequest(actor=backfill.AuditActor.system("pipeline-backfill"), reason=REASON)
+    request = BackfillRequest(actor=AuditActor.system("pipeline-backfill"), reason=REASON)
 
     def ran(outcomes: list[CrawlOutcome], wanted: BackfillRow, rounds: int = 20) -> Any:
         crawls = FakeCrawls(store, outcomes)
@@ -274,7 +275,7 @@ def test_a_backfill_is_refused_while_crawling_is_off_for_an_upload_only_source_o
     None
 ):
     store = synced()
-    request = BackfillRequest(actor=backfill.AuditActor.system("pipeline-backfill"), reason=REASON)
+    request = BackfillRequest(actor=AuditActor.system("pipeline-backfill"), reason=REASON)
     off = StartBackfill(store, FakeCrawls(store, []), types=TYPES, enabled=False)
     with pytest.raises(CrawlDisabledError):
         off.run(row(), 10, request)
