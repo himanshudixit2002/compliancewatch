@@ -1,131 +1,134 @@
-import type { Route } from "next";
-import { render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen } from "@testing-library/react";
 import { runAxe } from "@compliancewatch/ui/test/axe";
-import { describe, expect, it, vi } from "vitest";
-import { formatDateTime } from "@/shared/lib/dates";
-import { SOURCE_KEY_FIELD, type PipelineSource } from "../model/sources";
-import { AdminSourcesView } from "./sources-view";
+import { describe, expect, it } from "vitest";
+import { sourceFromDto } from "@/entities/pipeline/mappers";
+import { crawlRunDto, sourceDto, uploadSourceDto } from "@/test/pipeline-fixture";
+import { addSourceNote, runSummary, sourcesView, type CrawlState } from "../model/sources";
+import { SourcesError, SourcesView } from "./sources-view";
 
-const hrefFor = (key: string) => `/admin/sources/${key}` as Route;
-
-const SOURCES: PipelineSource[] = [
-  {
-    key: "example_notices",
-    name: "Example notices",
-    site: "notices.example.com",
-    documentType: "notification",
-    status: "healthy",
-    lastFetchedAt: "2000-10-02T04:00:00Z",
-    documentCount: 1234567,
-  },
-  {
-    key: "example_press",
-    name: "Example press releases",
-    site: "press.example.com",
-    documentType: "press_release",
-    status: "fetching",
-    lastFetchedAt: "2000-10-01T04:00:00Z",
-    documentCount: 87,
-  },
-  {
-    key: "example_state_notices",
-    name: "Example state notices",
-    site: "state.example.com",
-    documentType: "notification",
-    status: "failing",
-    lastFetchedAt: null,
-    documentCount: 0,
-  },
+const CRUMBS = [
+  { id: "admin.home", href: "/admin", label: "Internal tools" },
+  { id: "admin.sources", href: "/admin/sources", label: "Sources" },
 ];
 
-function figures(container: HTMLElement): Record<string, { value: string; tone: string }> {
-  const cards = [...container.querySelectorAll<HTMLElement>("[data-slot='stat-card']")];
-  return Object.fromEntries(
-    cards.map((card) => [
-      card.querySelector("dt")?.textContent ?? "",
-      {
-        value: card.querySelector("dd")?.textContent ?? "",
-        tone: card.getAttribute("data-tone") ?? "",
-      },
-    ]),
+const FLAG = {
+  name: "pipeline.crawl",
+  variable: "CW_PIPELINE_CRAWL_ENABLED",
+  defaultOn: false,
+  owner: "regulatory-intelligence",
+};
+
+function view(crawl: CrawlState["latestScheduled"]) {
+  return sourcesView(
+    [
+      sourceFromDto(sourceDto({ last_error: "Example listing error" })),
+      sourceFromDto(
+        sourceDto({
+          key: "example_backfilled",
+          name: "Example backfilled",
+          status: "failing",
+          freshness: {
+            state: "stale",
+            age_seconds: 99_999,
+            cadence_seconds: 7200,
+            cadences: 13.89,
+          },
+          latest_run: crawlRunDto({ trigger: "backfill", status: "failed" }),
+        }),
+      ),
+      sourceFromDto(uploadSourceDto()),
+    ],
+    { flag: FLAG, latestScheduled: crawl },
   );
 }
 
-function row(container: HTMLElement, key: string): HTMLElement {
-  return container.querySelector(`[data-source='${key}']`) as HTMLElement;
-}
-
-describe("AdminSourcesView", () => {
-  it("counts the sources and lists each with its type, state, last fetch and documents", async () => {
-    const { container } = render(<AdminSourcesView sources={SOURCES} hrefFor={hrefFor} />);
-    expect(screen.getByRole("heading", { level: 1, name: "Sources" })).toBeDefined();
-    expect(figures(container)).toEqual({
-      Sources: { value: "3", tone: "info" },
-      Healthy: { value: "1", tone: "success" },
-      Failing: { value: "1", tone: "danger" },
-    });
-    expect(screen.getByRole("table", { name: "Sources the pipeline fetches from" })).toBeDefined();
-    expect(screen.getAllByRole("columnheader").map((head) => head.textContent)).toEqual([
-      "Source",
-      "Document type",
-      "Status",
-      "Last fetched",
-      "Documents",
-    ]);
-
-    const notices = row(container, "example_notices");
-    expect(
-      within(notices).getByRole("link", { name: "Example notices" }).getAttribute("href"),
-    ).toBe("/admin/sources/example_notices");
-    expect(notices.textContent).toContain("notices.example.com");
-    expect(notices.textContent).toContain("Notifications");
-    expect(notices.querySelector("[data-slot='status-chip']")?.textContent).toBe("Healthy");
-    expect(notices.textContent).toContain(formatDateTime("2000-10-02T04:00:00Z"));
-    expect(notices.textContent).toContain("12,34,567");
-
-    const press = row(container, "example_press");
-    expect(press.textContent).toContain("Press releases");
-    expect(press.querySelector("[data-slot='status-chip']")?.getAttribute("data-tone")).toBe(
-      "info",
+describe("SourcesView", () => {
+  it("lists each source with its state, freshness, latest crawl and watermark, under the crawl switch", async () => {
+    const { container } = render(
+      <SourcesView title="Sources" crumbs={CRUMBS} view={view({ kind: "none" })} addNote={null} />,
     );
-    const stateNotices = row(container, "example_state_notices");
-    expect(stateNotices.textContent).toContain("Never");
-    expect(stateNotices.querySelector("[data-slot='status-chip']")?.textContent).toBe("Failing");
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Sources" })).toBeDefined();
+    const banner = container.querySelector("[data-slot='crawl-banner']");
+    expect(banner?.textContent).toContain("Crawling (pipeline.crawl)");
+    expect(banner?.textContent).toContain("Crawling is off by default");
+    expect(banner?.textContent).toContain("CW_PIPELINE_CRAWL_ENABLED");
+    expect(banner?.textContent).toContain("The schedule has not crawled any source.");
+    expect(screen.getByRole("table", { name: "Sources by key: 3" })).toBeDefined();
+    const first = container.querySelector("[data-source='example_notices']");
+    expect(first?.textContent).toContain("Example listing error");
+    expect(first?.textContent).toContain("Every 2 h");
+    expect(first?.textContent).toContain("1 Jan 2000");
+    expect(screen.getByRole("link", { name: "Example notices" }).getAttribute("href")).toBe(
+      "/admin/sources/example_notices",
+    );
+    const backfilled = container.querySelector("[data-source='example_backfilled']");
+    expect(backfilled?.getAttribute("data-freshness")).toBe("stale");
+    expect(backfilled?.textContent).toContain("Backfill");
+    const upload = container.querySelector("[data-source='example_statutes']");
+    expect(upload?.textContent).toContain("Uploaded, never crawled");
+    expect(upload?.textContent).toContain("Upload-only");
+    expect(upload?.textContent).toContain("No crawl yet");
+    const counts = container.querySelector("[data-slot='source-counts']");
+    expect(counts?.textContent).toContain("Failing1");
+    expect(counts?.textContent).toContain("Late or stale1");
+    expect(counts?.textContent).toContain("Upload-only1");
+    expect(container.querySelector("[data-slot='add-source-note']")).toBeNull();
     expect(await runAxe(container)).toHaveNoViolations();
   });
 
-  it("offers a fetch for each source not already fetching and posts its key", async () => {
-    const user = userEvent.setup();
-    const fetchAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined);
-    const { container } = render(<AdminSourcesView sources={SOURCES} fetchAction={fetchAction} />);
-    expect(screen.queryByRole("link")).toBeNull();
-    expect(screen.getByRole("columnheader", { name: "Fetch" })).toBeDefined();
-    expect(within(row(container, "example_press")).queryByRole("button")).toBeNull();
-    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "Fetch now Example notices",
-      "Fetch now Example state notices",
-    ]);
-    expect(await runAxe(container)).toHaveNoViolations();
-
-    await user.click(screen.getByRole("button", { name: /^Fetch now\s*Example state/ }));
-    await waitFor(() => expect(fetchAction).toHaveBeenCalledTimes(1));
-    const formData = fetchAction.mock.calls[0]?.[0];
-    expect(formData?.get(SOURCE_KEY_FIELD)).toBe("example_state_notices");
+  it("names the schedule's latest crawl or why it could not be read, and the note for an admin", () => {
+    const run = runSummary(sourceFromDto(sourceDto()).latestRun!);
+    const { container, rerender } = render(
+      <SourcesView
+        title="Sources"
+        crumbs={CRUMBS}
+        view={view({ kind: "run", sourceKey: "example_notices", summary: run })}
+        addNote={addSourceNote()}
+      />,
+    );
+    expect(container.querySelector("[data-slot='latest-scheduled']")?.textContent).toContain(
+      "The schedule's latest crawl: example_notices, Completed, started",
+    );
+    expect(container.querySelector("[data-slot='add-source-note']")?.textContent).toContain(
+      "POST /v1/pipeline/sources",
+    );
+    rerender(
+      <SourcesView
+        title="Sources"
+        crumbs={CRUMBS}
+        view={view({ kind: "error", message: "Example failure", correlationId: "req-1" })}
+        addNote={null}
+      />,
+    );
+    expect(container.querySelector("[data-slot='latest-scheduled']")?.textContent).toContain(
+      "could not be read: Example failure (correlation id req-1)",
+    );
   });
 
-  it("keeps the failing count neutral when every source is healthy", () => {
-    const { container } = render(<AdminSourcesView sources={SOURCES.slice(0, 1)} />);
-    expect(figures(container).Failing).toEqual({ value: "0", tone: "neutral" });
-    expect(screen.getByText("Example notices").tagName).toBe("SPAN");
-  });
-
-  it("shows the empty state before any source is set up", async () => {
-    const { container } = render(<AdminSourcesView sources={[]} fetchAction={vi.fn()} />);
-    expect(screen.getByRole("heading", { level: 2, name: "No sources" })).toBeDefined();
-    expect(screen.queryByRole("table")).toBeNull();
-    expect(container.querySelector("[data-slot='stat-card']")).toBeNull();
+  it("says why the list is empty, and shows a failed read with its correlation id", async () => {
+    const empty = sourcesView([], {
+      flag: { ...FLAG, defaultOn: true },
+      latestScheduled: { kind: "none" },
+    });
+    const { container, rerender } = render(
+      <SourcesView title="Sources" crumbs={CRUMBS} view={empty} addNote={null} />,
+    );
+    expect(screen.getByRole("heading", { name: "The pipeline lists no source" })).toBeDefined();
+    expect(container.textContent).toContain("declares crawling on by default");
+    rerender(
+      <SourcesError
+        title="Sources"
+        crumbs={CRUMBS}
+        error={{
+          message: "Example outage",
+          status: 503,
+          requestId: "req-2",
+          problem: { detail: "Example detail" },
+        }}
+      />,
+    );
+    expect(screen.getByText("Example outage")).toBeDefined();
+    expect(screen.getByText("req-2")).toBeDefined();
     expect(await runAxe(container)).toHaveNoViolations();
   });
 });

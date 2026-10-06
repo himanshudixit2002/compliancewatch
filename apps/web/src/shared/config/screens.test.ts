@@ -304,7 +304,8 @@ describe("routes", () => {
 
   it("links a static route only once its page is live", () => {
     expect(livePageHref("/admin")).toBe("/admin");
-    expect(livePageHref("/admin/sources")).toBeNull();
+    expect(livePageHref("/admin/sources")).toBe("/admin/sources");
+    expect(livePageHref("/admin/team")).toBeNull();
     expect(livePageHref("/admin/nowhere")).toBeNull();
     expect(livePageHref("/legal/[doc]")).toBeNull();
   });

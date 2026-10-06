@@ -230,7 +230,6 @@ export const PARKED_FEATURES: Readonly<Record<string, readonly string[]>> = {
   "admin-audit": ["admin.audit"],
   "admin-error-reports": ["admin.error-reports"],
   "admin-qa-triage": ["admin.qa-triage"],
-  "admin-sources": ["admin.sources"],
   "admin-tenants": ["admin.tenants"],
   "settings-activity": ["owner.settings.activity"],
   "settings-data-rights": ["owner.settings.data-rights"],

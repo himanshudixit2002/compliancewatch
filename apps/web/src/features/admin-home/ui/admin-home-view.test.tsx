@@ -53,7 +53,7 @@ describe("AdminHomeView", () => {
     const flags = container.querySelector("[data-tool='admin.flags']");
     expect(flags?.textContent).toContain("Available");
     const sources = container.querySelector("[data-tool='admin.sources']");
-    expect(sources?.textContent).toContain("Ready to build");
+    expect(sources?.textContent).toContain("Available");
     const pipeline = container.querySelector("[data-tool='admin.pipeline']");
     expect(pipeline?.textContent).toContain("Available");
     const team = container.querySelector("[data-tool='admin.team']");

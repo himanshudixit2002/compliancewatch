@@ -15,7 +15,7 @@ test.describe("admin home", () => {
     await expect(page.getByRole("table")).toHaveCount(7);
     const sources = page.locator("[data-tool='admin.sources']");
     await expect(sources).toContainText("services/pipeline/README.md");
-    await expect(sources).toContainText("Ready to build");
+    await expect(sources).toContainText("Available");
     await expect(page.locator("[data-tool='admin.pipeline']")).toContainText("Available");
     await expect(page.locator("[data-tool='admin.evals.run']")).toContainText("Ready to build");
     await expect(page.locator("[data-tool='admin.audit']")).toContainText("Waiting for a backend");
@@ -57,7 +57,7 @@ test.describe("admin home", () => {
     await page.goto("/admin");
     const sidebar = page.locator("aside");
     const sources = sidebar.getByRole("link", { name: "Sources", exact: true });
-    await expect(sources).toHaveAccessibleDescription("Not built");
+    await expect(sources).toHaveAccessibleDescription("");
     const stats = sidebar.getByRole("link", { name: "Review stats", exact: true });
     await expect(stats).toHaveAccessibleDescription("Not built");
     const audit = sidebar.getByRole("link", { name: "Audit trail", exact: true });
