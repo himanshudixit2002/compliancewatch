@@ -8,10 +8,11 @@
 # packages a change affects, an ops job (runbook links, promtool rules, actionlint), a compose
 # dev-stack smoke that also runs the local product (make product, product-seed, product-check:
 # a published rule becomes decisions, obligations and a change card through the one deployable's
-# worker), secrets scanning, SAST (semgrep) and a dependency and config scan (trivy), both
-# reported to code scanning, and the web e2e job (Playwright with axe against the built Next.js
-# app, with every service running on memory stores and seeded with the demo tenant). The job
-# "CI gate" needs every other job and is the one check branch protection requires;
+# worker) and the web app's real-data journey on it (make product-e2e), secrets scanning, SAST
+# (semgrep) and a dependency and config scan (trivy), both reported to code scanning, and the web
+# e2e job (Playwright with axe against the built Next.js app, with every service running on memory
+# stores and seeded with the demo tenant). The job "CI gate" needs every other job and is the one
+# check branch protection requires;
 # infra/scripts/check_ci_gate.py fails when a job is missing from its needs.
 # Steps 5-7 are listed as TODO at the end.
 name: ci
@@ -150,6 +151,10 @@ jobs:
               - 'composition/**'
               - 'tools/demo/**'
               - 'evals/**'
+              # make product-e2e runs the web app's real-data journey on that product
+              - 'apps/web/**'
+              - 'packages/ui/**'
+              - 'pnpm-lock.yaml'
             ops:
               - 'infra/**'
               - 'docs/runbooks/**'
@@ -403,6 +408,12 @@ jobs:
     runs-on: ubuntu-latest # has docker + compose v2
     steps:
       - uses: actions/checkout@v7
+      # The web app's product journey (make product-e2e, below) builds and runs apps/web.
+      - uses: pnpm/action-setup@v6 # pnpm version comes from package.json "packageManager"
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
       - name: Validate compose files
         run: |
           docker compose config -q
@@ -470,12 +481,33 @@ jobs:
           make product WEB=0
           make product-seed
           make product-check ARGS="--destructive"
+      # The web app on that product: built (no CW_WEB_* variable, as in the typescript job) and
+      # started with next start by Playwright against the internal listener (:8080), signed in as
+      # the tenant make product-seed recorded, through the obligations, the calendar, an
+      # obligation's page and its tracking, the changes feed and ask (Playwright project
+      # product). Chromium comes as the web-e2e job fetches it; nothing else is installed.
+      - name: Workspace and Chromium for the product journey
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter web e2e:install
+      - name: The product journey in the web app (make product-e2e)
+        run: make product-e2e
       - name: Product logs
         if: failure()
         run: |
           make product-logs PROC=app FOLLOW=0 || true
           make product-logs PROC=worker FOLLOW=0 || true
           tail -n 50 var/product/sink.jsonl || true
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report-product
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+            var/product/*.log
+            var/seed/last.json
+          if-no-files-found: ignore
       - name: Stop the product
         if: always()
         run: make product-down
@@ -658,7 +690,7 @@ jobs:
         env:
           PORT: "3000"
           CW_WEB_ENV: test
-        run: pnpm --filter web e2e
+        run: pnpm --filter web e2e --project=chromium
       - name: Service log tails
         if: always()
         run: make web-stack-logs
