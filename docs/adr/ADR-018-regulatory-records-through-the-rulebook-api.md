@@ -234,7 +234,8 @@ policy of the queue: 100 when the candidate looks high impact (it extends a dead
 something, its `applies_to` is empty, or it names amounts), 80 when there is no candidate to draft
 from, 50 when the extraction asked for review or a validator found an issue, 10 otherwise. The
 pipeline's suggested rule key is kept as a suggestion: a key no rule has gives way to the one rule
-key the document's relation candidates name, and the task says whether a rule has the key.
+key the document's relation candidates name (those an analyst rejected left out), and the task
+says whether a rule has the key.
 
 **Drafting is an analyst's step, never the intake's.** No transition discards a draft, so a wrong
 draft made automatically would linger. The analyst who claimed the task drafts a version from the
@@ -250,18 +251,47 @@ the analyst picks from the document are approved onto the draft in the same tran
 the obligation worker turns into rescheduled obligations. What the analyst changed from the
 candidate is recorded as an `edited` decision; a candidate taken as it was records none, and the
 review stats count it as approved without edits, the acceptance this ADR's extraction is measured
-by. The seed command leaves a candidate's draft alone, and no seed task is opened for it.
+by. The seed command leaves a candidate's draft alone and updates only its own draft, the rule's
+latest version not drafted from a candidate, so a candidate's draft beside it never freezes the
+rule; it locks the rule's row as drafting does, so the two never take one version number. No seed
+task is opened for a candidate's draft.
 
 **Rejection is a decision with a reason and an event.** A candidate task's rejection names why
 (`not_a_rule`, `wrong_extraction`, `duplicate`, `out_of_scope`, `unparseable`), closes the
 candidate before or after drafting, and writes `rule.rejected` 1.0.0 through the rulebook's outbox
-in the decision's transaction. A draft made from a rejected candidate stays a draft.
+in the decision's transaction. A draft made from a rejected candidate stays a draft, since no
+transition discards one, but it is closed:
+
+- it never moves on: citing it, approving a relation from it, submitting, approving and
+  publishing it are refused with 409 `rulebook-rule-version-closed`, on the review task routes and
+  the generic ones alike;
+- it is never its rule's latest version: the seed command and `GET /v1/rulebook/rules` skip it,
+  so its model-written title never reaches the pipeline's relation prompt, and the rule's next
+  version is numbered past it;
+- the relation candidates approved onto it are open again, in the rejection's transaction, with a
+  note saying why, and their `rule_relation` rows are deleted. Approval takes only open
+  candidates and staging a proposal again changes nothing, so without this an `extends_deadline`
+  approved onto a rejected draft could never reach a corrected one, and the obligations it
+  reschedules never would be.
+
+A version the publish routes published before the rejection stands, with its relations.
+
+**The database keeps a candidate's draft its own.** Migration 0011 adds composite foreign keys
+from `review_task (rule_version_id, candidate_id)` and from `rule_candidate (rule_version_id, id)`
+to `rule_version (id, candidate_id)`, so a candidate task, and its candidate, name only the
+version drafted from that candidate; a seed task and a task not drafted yet are not checked.
+0010's downgrade refuses while a rule candidate or a candidate task is stored, before it changes
+anything.
 
 **The review task routes change shape.** A candidate task has no rule version until it is
 drafted, so `rule_version_id` and the version fields of the queue, and the version of a task's
-detail and of a decision, are null until then. No client reads these routes yet (the review
-workbench is not built), so the shape changes in place, recorded in
-`packages/contracts/openapi/BREAKING.md`, and the workbench is built on it.
+detail and of a decision, are null until then, and every task's `kind` admits `candidate`. One
+client reads these routes: the local product's check (`cw-product check`, `review_queue`,
+`claim_one` and `read_task` in `tools/demo/src/cw_demo/product/check.py`) lists the queue, claims
+a seed task and reads it. It changes in the same pull request to accept a null `version_status`
+and to claim seed tasks only, so the shape changes in place, recorded in
+`packages/contracts/openapi/BREAKING.md`. The review workbench (W10) is not built and is built on
+the new shape.
 
 Consequences:
 

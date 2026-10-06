@@ -84,9 +84,13 @@ rulebook that cannot reach its database shows as missing data rather than as an 
     (the document states no rule), `wrong_extraction` (the model read it wrongly), `duplicate`
     (another candidate or rule holds it), `out_of_scope` (a rule the product does not cover) or
     `unparseable` (nothing to draft from, and the analyst will not draft it by hand). It rejects
-    the candidate, before or after drafting, and writes rule.rejected; a draft made from it
-    stays a draft, since no transition discards one, so prefer `return` when the draft is worth
-    another round. A candidate task not drafted yet can only be rejected.
+    the candidate, before or after drafting, and writes rule.rejected. A draft made from it
+    stays a draft, since no transition discards one, but it is closed: it is never cited,
+    submitted, approved or published (409 `rulebook-rule-version-closed`) and never its rule's
+    latest version, so prefer `return` when the draft is worth another round. The relation
+    candidates approved onto it are open again (`GET /v1/rulebook/review/relations` lists them;
+    `relation_candidate.note` says why), so a corrected candidate's draft can take an extension
+    again. A candidate task not drafted yet can only be rejected.
 - The writes need `x-cw-review-token` (`CW_RULEBOOK_REVIEW_TOKEN`) without a bearer in header
   and dual mode, or an access token: claiming and editing take the `analyst` role, deciding
   `analyst`, `reviewer` or `admin`. A signed-in user is recorded as the actor whatever the
