@@ -23,7 +23,6 @@ from temporalio.common import RetryPolicy
 from domain_kernel.documents import clause_id_for
 from domain_kernel.ids import DocumentId, SourceId
 from domain_kernel.knowledge import EntityType, RelationKind
-from domain_kernel.protocols import DocumentParser
 from pipeline.application.activities import Frozen, ParseRequest, on_thread, parse_request
 from pipeline.application.detector import detect
 from pipeline.application.embedding import EmbeddingStage
@@ -38,7 +37,7 @@ from pipeline.domain.knowledge import (
     RelationSubmission,
     StagedRelation,
 )
-from pipeline.domain.ports import KnowledgeSink, RawStore, RulebookReader
+from pipeline.domain.ports import DocumentParsers, KnowledgeSink, RawStore, RulebookReader
 from py_common.logging import get_logger
 from py_common.temporal import ActivityBase
 
@@ -86,7 +85,7 @@ class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
 
     def __init__(
         self,
-        parser: DocumentParser,
+        parser: DocumentParsers,
         sink: KnowledgeSink,
         *,
         enabled: bool,

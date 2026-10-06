@@ -1,5 +1,6 @@
 """What can go wrong when the pipeline hands regulator records and their embeddings to the
-rulebook, keeps fetched files in the raw store, or looks a source up, and what its API refuses.
+rulebook, keeps fetched files in the raw store, parses a document or looks a source up, and what
+its API refuses.
 
 The pipeline's own failures are plain exceptions: they cross Temporal as failure types, and the
 activities list the ones a retry cannot fix as non-retryable. What the API answers with a problem
@@ -51,6 +52,24 @@ class RawObjectCorruptError(RawStoreError):
 
 class UnknownSourceError(LookupError):
     """No source with this id is known to the pipeline; retrying cannot help."""
+
+
+class UnparsedDocumentError(ValueError):
+    """No parser of the chain could read the document's bytes: a PDF with no text layer (a scan,
+    which needs OCR or a person), or bytes a parser could not open. The ingest opens a
+    manual-parse task for it; retrying cannot help."""
+
+
+class UnsupportedDocumentError(Exception):
+    """No parser of the chain takes the document's media type; retrying cannot help."""
+
+
+class TranscriptInvalidError(DomainError, ValueError):
+    """An analyst's transcript is not in the shape of the parsers' blocks, or gives clauses the
+    rulebook would refuse; the message names each problem by its place."""
+
+    type_slug = "pipeline-transcript-invalid"
+    title = "The transcript is not valid"
 
 
 class SourceNotFoundError(DomainError, LookupError):
@@ -109,6 +128,14 @@ class CrawlDisabledError(DomainError):
         )
 
 
+class SourceNotListableError(DomainError):
+    """The source is upload-only (its adapter type lists nothing): there is no crawl to start;
+    its documents are uploaded."""
+
+    type_slug = "pipeline-source-upload-only"
+    title = "The source is upload-only"
+
+
 class CrawlRunningError(DomainError):
     """A crawl of the source is running; a second one waits for it to end."""
 
@@ -121,6 +148,49 @@ class CrawlUnavailableError(DomainError):
 
     type_slug = "pipeline-crawl-unavailable"
     title = "The crawl could not be started"
+
+
+class UploadTooLargeError(DomainError):
+    """The uploaded file is larger than ``CW_PIPELINE_UPLOAD_MAX_BYTES``."""
+
+    type_slug = "pipeline-upload-too-large"
+    title = "The upload is too large"
+
+
+class UploadUnsupportedError(DomainError):
+    """The uploaded file is not a PDF or an HTML page, or its bytes are not what its type says."""
+
+    type_slug = "pipeline-upload-unsupported"
+    title = "The upload is not a PDF or an HTML page"
+
+
+class IngestUnavailableError(DomainError):
+    """The ingest could not be started: Temporal did not answer. What was stored stays stored."""
+
+    type_slug = "pipeline-ingest-unavailable"
+    title = "The ingest could not be started"
+
+
+class TaskNotFoundError(DomainError, LookupError):
+    """No pipeline task has this id."""
+
+    type_slug = "pipeline-task-not-found"
+    title = "Pipeline task not found"
+
+
+class TaskClosedError(DomainError):
+    """The task is resolved or dismissed already; a closed task does not change."""
+
+    type_slug = "pipeline-task-closed"
+    title = "The task is closed"
+
+
+class TaskResolutionError(DomainError, ValueError):
+    """The resolution does not fit the task: a manual parse is resolved with a transcript, and
+    nothing else takes one."""
+
+    type_slug = "pipeline-task-resolution-invalid"
+    title = "The resolution does not fit the task"
 
 
 class WriteTokenInvalidError(DomainError, PermissionError):

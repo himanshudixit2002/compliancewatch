@@ -38,7 +38,7 @@ from pipeline.domain.crawl import Outcome
 from pipeline.domain.sources import watermark_of
 from pipeline.infrastructure.adapters import RegistryAdapterTypes, StoreCatalog
 from pipeline.infrastructure.memory import MemoryStore
-from pipeline.infrastructure.parsers import SourceParsers
+from pipeline.infrastructure.parsers import ParserChain
 from pipeline.infrastructure.raw_store import MemoryRawStore
 from pipeline.testing import MemoryCrawls, recorded_client, recorded_types
 
@@ -77,7 +77,7 @@ class Pipeline:
             ListRequest(source_key="recorded_cbic", run_id=UUID(run_id))
         )
         fetch = FetchAndStore(StoreDocument(self.catalog, self.store, self.raw))
-        parse = ParseDocument(SourceParsers(self.catalog), self.raw)
+        parse = ParseDocument(ParserChain(self.catalog), self.raw)
         outcomes = []
         for document in listing.new:
             stored = await fetch.run(document)

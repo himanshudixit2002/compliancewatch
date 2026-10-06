@@ -22,6 +22,32 @@ from pipeline.domain.knowledge import (
 )
 from pipeline.domain.schedule import CrawlTrigger
 from pipeline.domain.sources import SourceDefinition
+from pipeline.domain.transcripts import Transcript
+
+
+@dataclass(frozen=True, slots=True)
+class ParseHints:
+    """How to parse one document: as ``doc_type`` (None: its source's type); with
+    ``parser_version`` first, the parser that parsed it before, which the chain then uses as it
+    always did and never lets give way, so a document's clauses and their ids stay what they
+    were while the code has that parser; or from ``transcript``, an analyst's, as ``manual@1``
+    instead of from the bytes."""
+
+    doc_type: DocumentType | None = None
+    parser_version: str = ""
+    transcript: Transcript | None = None
+
+
+class DocumentParsers(Protocol):
+    """The parser chain (``infrastructure.parsers.ParserChain``): text-layer PDF, table-aware
+    PDF, HTML, table-aware HTML, each document taken by the first parser for its media type
+    that reads it."""
+
+    def parse_as(self, raw: RawDocument, hints: ParseHints) -> ParsedDocument:
+        """The document's clauses, by the hints. ``UnsupportedDocumentError`` when no parser
+        takes the media type, ``UnparsedDocumentError`` when none of those that do can read the
+        bytes."""
+        ...
 
 
 class KnowledgeSink(Protocol):

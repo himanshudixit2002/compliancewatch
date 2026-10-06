@@ -1,36 +1,34 @@
 """Text into clauses, and which language a text is in.
 
 Regulator documents are English, Hindi or both (a Hindi gazette text followed by the English
-one). Clauses are the paragraphs of the text; a numbered paragraph (``1.``, ``(2)``, ``(a)``)
-starts a new clause even without a blank line before it. The reference is ``<lang>.p<n>``
-so an English and a Hindi rendering of the same document never collide.
+one; ``pipeline.domain.language``). Clauses are the paragraphs of the text; a numbered paragraph
+(``1.``, ``(2)``, ``(a)``) starts a new clause even without a blank line before it. The
+reference is ``<lang>.p<n>`` so an English and a Hindi rendering of the same document never
+collide.
 """
 
 import re
 from dataclasses import dataclass
 
-LANGUAGE_ENGLISH = "en"
-LANGUAGE_HINDI = "hi"
-LANGUAGE_BILINGUAL = "mul"
-_DEVANAGARI = re.compile(r"[ऀ-ॿ]")
-_LATIN = re.compile(r"[A-Za-z]")
+from pipeline.domain.language import (
+    LANGUAGE_BILINGUAL,
+    LANGUAGE_ENGLISH,
+    LANGUAGE_HINDI,
+    detect_language,
+)
+
+__all__ = [
+    "LANGUAGE_BILINGUAL",
+    "LANGUAGE_ENGLISH",
+    "LANGUAGE_HINDI",
+    "TextClause",
+    "detect_language",
+    "renumber",
+    "split_clauses",
+]
+
 _NUMBERED = re.compile(r"^\s*(?:\(?[0-9]{1,3}[.)]|\([a-z]\)|\([ivx]+\))\s+")
 _BLANK = re.compile(r"\n\s*\n")
-
-
-def detect_language(text: str, *, bilingual_threshold: float = 0.15) -> str:
-    """``hi``, ``en`` or ``mul`` from the share of Devanagari and Latin letters."""
-    devanagari = len(_DEVANAGARI.findall(text))
-    latin = len(_LATIN.findall(text))
-    total = devanagari + latin
-    if total == 0:
-        return LANGUAGE_ENGLISH
-    hindi_share = devanagari / total
-    if hindi_share >= 1 - bilingual_threshold:
-        return LANGUAGE_HINDI
-    if hindi_share <= bilingual_threshold:
-        return LANGUAGE_ENGLISH
-    return LANGUAGE_BILINGUAL
 
 
 @dataclass(frozen=True, slots=True)

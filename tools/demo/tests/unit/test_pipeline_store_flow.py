@@ -25,7 +25,7 @@ from pipeline.domain.raw_documents import DocumentStatus
 from pipeline.infrastructure.adapters import RegistryCatalog, source_id_for
 from pipeline.infrastructure.http import ClientConfig, PoliteClient
 from pipeline.infrastructure.memory import MemoryStore
-from pipeline.infrastructure.parsers import SourceParsers
+from pipeline.infrastructure.parsers import ParserChain
 from pipeline.infrastructure.raw_store import S3RawStore, storage_key_for
 from pipeline.infrastructure.s3 import S3Client, S3Credentials
 from pipeline.testing import StubS3, recorded_sources
@@ -106,7 +106,7 @@ async def test_a_recorded_notification_is_stored_once_and_announced_once() -> No
     )
     assert payload.published_at == listed.published_at
 
-    parse = ParseDocument(SourceParsers(catalog), raw_store)
+    parse = ParseDocument(ParserChain(catalog), raw_store)
     parsed = await parse.run(ParseRequest(document_id=stored.document_id, stored=stored))
     assert parsed.document_id == stored.document_id
     assert (parsed.doc_type, parsed.clause_count > 3) == ("notification", True)

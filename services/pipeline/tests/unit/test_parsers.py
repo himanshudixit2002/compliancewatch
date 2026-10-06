@@ -8,15 +8,15 @@ from pypdf import PdfWriter
 
 from domain_kernel.documents import DocumentRef, DocumentType, RawDocument, document_id_for
 from domain_kernel.ids import SourceId
-from pipeline.domain.errors import UnknownSourceError
+from pipeline.domain.errors import UnknownSourceError, UnsupportedDocumentError
 from pipeline.infrastructure.adapters import RegistryCatalog, source_id_for
 from pipeline.infrastructure.http import PoliteClient
 from pipeline.infrastructure.parsers import (
     LANGUAGE_ENGLISH,
     LANGUAGE_HINDI,
     HtmlParser,
+    ParserChain,
     PdfParser,
-    SourceParsers,
     detect_language,
     split_clauses,
 )
@@ -109,8 +109,8 @@ def test_html_parser_keeps_block_text_and_drops_scripts() -> None:
     assert "var x" not in html_to_text(html)
 
 
-def test_source_parsers_parse_as_the_document_type_of_the_source() -> None:
-    parsers = SourceParsers(RegistryCatalog(PoliteClient()))
+def test_the_chain_parses_as_the_document_type_of_the_source() -> None:
+    parsers = ParserChain(RegistryCatalog(PoliteClient()))
     pdf = pdf_fixture("gst-ct-01-2026.pdf.json")
     for key, doc_type in (
         ("cbic_notifications", DocumentType.NOTIFICATION),
@@ -125,7 +125,7 @@ def test_source_parsers_parse_as_the_document_type_of_the_source() -> None:
     assert parsers.parse(html).doc_type is DocumentType.PRESS_RELEASE
     text = RawDocument.from_bytes(advisory, b"plain text", "text/plain")
     assert not parsers.supports(text)
-    with pytest.raises(ValueError, match="no parser for text/plain"):
+    with pytest.raises(UnsupportedDocumentError, match="no parser for text/plain"):
         parsers.parse(text)
     with pytest.raises(UnknownSourceError):
-        parsers.supports(pdf)
+        parsers.parse(pdf)

@@ -35,10 +35,11 @@ from domain_kernel.documents import (
 from domain_kernel.documents import document_id_for as kernel_document_id_for
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import DocumentId, SourceId
-from domain_kernel.protocols import DocumentParser, SourceAdapter
+from domain_kernel.protocols import SourceAdapter
 from pipeline.application.store_document import StoreDocument, StoreRequest
 from pipeline.domain.errors import RawStoreError
-from pipeline.domain.ports import RawStore, SourceCatalog
+from pipeline.domain.errors import UnsupportedDocumentError as UnsupportedDocumentError
+from pipeline.domain.ports import DocumentParsers, ParseHints, RawStore, SourceCatalog
 from py_common.temporal import ActivityBase
 from py_common.temporal.activity import DEFAULT_RETRY_POLICY
 
@@ -157,10 +158,6 @@ class Parsed(Frozen):
 
 class NothingDiscoveredError(Exception):
     """The source listed nothing since the requested time."""
-
-
-class UnsupportedDocumentError(Exception):
-    """No parser handles this media type."""
 
 
 async def on_thread[T](
@@ -316,7 +313,9 @@ class FetchAndStore(ActivityBase[Discovered, Stored]):
 
 
 class ParseDocument(ActivityBase[ParseRequest, Parsed]):
-    """Split the document's bytes into clauses with stable references."""
+    """Split the document's bytes into clauses with stable references, through the parser
+    chain. A document no parser of the chain reads fails with ``UnparsedDocumentError`` (or
+    ``UnsupportedDocumentError`` for a media type none takes), which no retry fixes."""
 
     name: ClassVar[str] = "pipeline.parse_document"
     input_type: ClassVar[type[ParseRequest]] = ParseRequest
@@ -326,12 +325,13 @@ class ParseDocument(ActivityBase[ParseRequest, Parsed]):
         maximum_attempts=2,
         non_retryable_error_types=[
             "UnsupportedDocumentError",
+            "UnparsedDocumentError",
             "RawObjectMissingError",
             "RawObjectCorruptError",
         ],
     )
 
-    def __init__(self, parser: DocumentParser, raw_store: RawStore | None = None) -> None:
+    def __init__(self, parser: DocumentParsers, raw_store: RawStore | None = None) -> None:
         self._parser = parser
         self._raw = raw_store
 
@@ -366,14 +366,16 @@ def raw_document_of(request: ParseRequest, raw_store: RawStore | None) -> RawDoc
 
 
 def parse_request(
-    parser: DocumentParser, request: ParseRequest, raw_store: RawStore | None
+    parser: DocumentParsers,
+    request: ParseRequest,
+    raw_store: RawStore | None,
+    hints: ParseHints | None = None,
 ) -> ParsedDocument:
-    """Parse the bytes the request names; ``UnsupportedDocumentError`` when the parser cannot
-    read them."""
+    """Parse the bytes the request names through the chain, by ``hints``;
+    ``UnsupportedDocumentError`` when no parser takes their media type, ``UnparsedDocumentError``
+    when none reads them."""
     raw = raw_document_of(request, raw_store)
-    if not parser.supports(raw):
-        raise UnsupportedDocumentError(f"no parser for {raw.media_type}")
-    return parser.parse(raw)
+    return parser.parse_as(raw, hints or ParseHints())
 
 
 def document_id_for(fetched: Fetched) -> DocumentId:

@@ -4,6 +4,7 @@ tests."""
 import hashlib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from dataclasses import replace as dataclass_replace
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -18,9 +19,10 @@ from domain_kernel.documents import (
 )
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import SourceId
-from pipeline.domain.errors import UnknownSourceError
-from pipeline.domain.ports import ResolvedSource
+from pipeline.domain.errors import UnknownSourceError, UnsupportedDocumentError
+from pipeline.domain.ports import ParseHints, ResolvedSource
 from pipeline.domain.sources import SourceDefinition
+from pipeline.domain.transcripts import transcribed
 
 PARSER_VERSION = "fake@1"
 
@@ -59,10 +61,23 @@ class FakeSourceAdapter:
 
 
 class FakePlainTextParser:
-    """Paragraphs become clauses ``p1``, ``p2``, ... with a document id derived from the digest."""
+    """Paragraphs become clauses ``p1``, ``p2``, ... with a document id derived from the digest.
+    As ``DocumentParsers`` it parses an analyst's transcript the way the chain does and refuses
+    any media type but plain text."""
 
     def supports(self, doc: RawDocument) -> bool:
         return doc.media_type.startswith("text/plain")
+
+    def parse_as(self, raw: RawDocument, hints: ParseHints) -> ParsedDocument:
+        doc_type = hints.doc_type or DocumentType.NOTIFICATION
+        if hints.transcript is not None:
+            return transcribed(
+                hints.transcript, document_id=document_id_for(raw.sha256), doc_type=doc_type
+            )
+        if not self.supports(raw):
+            raise UnsupportedDocumentError(f"no parser for {raw.media_type}")
+        parsed = self.parse(raw)
+        return parsed if hints.doc_type is None else dataclass_replace(parsed, doc_type=doc_type)
 
     def parse(self, doc: RawDocument) -> ParsedDocument:
         text = doc.content.decode("utf-8")

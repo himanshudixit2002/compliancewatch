@@ -3,7 +3,8 @@
 Registers the crawl, ingest and extraction workflows and their activities on the ``pipeline``
 task queue against ``CW_TEMPORAL_ADDRESS``. The activities read the sources the store holds
 (``StoreCatalog``: each adapter built from its row's adapter type and parameters) over one polite
-client, parse each document as its source's document type (``SourceParsers``), keep the fetched
+client, parse each document through the parser chain as its source's document type
+(``ParserChain``: text-layer PDF, table-aware PDF, HTML, table-aware HTML), keep the fetched
 files in the raw store ``CW_PIPELINE_RAW_STORE`` names and record them, with their
 document.discovered, in the store ``CW_PIPELINE_STORE`` names, which must be postgres:
 ``pipeline.stores``. The outbox relay that publishes the events runs on its own
@@ -29,7 +30,6 @@ services adds them to its own.
 from collections.abc import Callable
 from typing import Any, Final, Protocol
 
-from domain_kernel.protocols import DocumentParser
 from pipeline import __version__
 from pipeline.application.activities import (
     DiscoverDocument,
@@ -52,6 +52,7 @@ from pipeline.application.store_document import StoreDocument
 from pipeline.domain.ports import (
     ClauseIndexSink,
     CrawlStarter,
+    DocumentParsers,
     Embedder,
     KnowledgeSink,
     RawStore,
@@ -62,7 +63,7 @@ from pipeline.domain.repository import UnitOfWorkFactory
 from pipeline.infrastructure.adapters import SOURCES, StoreCatalog
 from pipeline.infrastructure.gateway import GatewayEmbedder, GatewayProvider
 from pipeline.infrastructure.http import PoliteClient
-from pipeline.infrastructure.parsers import SourceParsers
+from pipeline.infrastructure.parsers import ParserChain
 from pipeline.infrastructure.prompts import PROMPTS_DIR, load_prompt
 from pipeline.infrastructure.rulebook_client import HttpRulebook
 from pipeline.infrastructure.temporal import TemporalCrawls
@@ -106,18 +107,18 @@ def activities(
     stage: RelationStage | None = None,
     embedder: Embedder | None = None,
     sources: SourceCatalog | None = None,
-    parser: DocumentParser | None = None,
+    parser: DocumentParsers | None = None,
     units: UnitOfWorkFactory | None = None,
     raw_store: RawStore | None = None,
 ) -> list[ActivityBase[Any, Any]]:
     """The worker's activities. The keywords replace what the settings would build: ``sink``
     the rulebook client, ``stage`` the relation stage, ``embedder`` the gateway's embeddings,
-    ``sources`` the store's sources, ``parser`` the parsers by source, ``units`` the store
+    ``sources`` the store's sources, ``parser`` the parser chain, ``units`` the store
     and ``raw_store`` the raw store (tests pass memory ones and the sample source)."""
     settings = settings or PipelineSettings(_env_file=None, service_name=SERVICE_NAME)
     records = units or unit_of_work_of(settings)
     catalog = sources or StoreCatalog(records, PoliteClient())
-    parsers = parser or SourceParsers(catalog)
+    parsers = parser or ParserChain(catalog)
     raw = raw_store or raw_store_of(settings)
     store = StoreDocument(catalog, records, raw)
     auth = service_auth_from(settings)
