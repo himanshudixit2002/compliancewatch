@@ -5,13 +5,15 @@ The whole app runs as ``cw-mvp serve`` runs it, on memory stores, with knowledge
 pipeline's ingest starter handed in (a recording one, no Temporal). An admin uploads two documents
 on the internal listener with the shared write token: the recorded table-heavy notification
 10/2025-Central Tax, and a synthetic scan (a PDF page with no text layer) of the CGST Rules, an
-upload-only statute source. Each ingest then runs as the worker runs it, step by step: the
-recorded notification parses with the table-aware PDF parser and is registered in the rulebook
-over its HTTP API; the scan is read by no parser, so its document is set failed, a manual-parse
-task opens and nothing is registered. The analyst's transcript (synthetic text) resolves the task
-and starts an ingest that parses the scan from the transcript as manual@1 and registers it as a
-statute; an ingest of the same bytes later parses it from the transcript again and opens no task.
-The public listener answers none of these routes in header mode.
+upload-only statute source. Each ingest then runs as the worker runs it with the extraction off,
+step by step: the recorded notification parses with the table-aware PDF parser, is classified as
+a notification (on its way to the rule extraction, which is off here) and is registered in the
+rulebook over its HTTP API; the scan is read by no parser, so its document is set failed, a
+manual-parse task opens and nothing is classified or registered. The analyst's transcript
+(synthetic text) resolves the task and starts an ingest that parses the scan from the transcript
+as manual@1, classifies it as a statute, kept for reference, and registers it as one; an ingest
+of the same bytes later parses it from the transcript again, finds its classification and opens
+no task. The public listener answers none of these routes in header mode.
 """
 
 import base64
@@ -28,6 +30,7 @@ from pypdf import PdfWriter
 
 from cw_mvp.app import CombinedApp
 from cw_mvp.testing import LOCALHOST, MEMORY_SERVICES, running_app
+from domain_kernel.documents import DocumentType
 from domain_kernel.ids import DocumentId
 from pipeline.application.activities import (
     OpenManualParse,
@@ -35,6 +38,7 @@ from pipeline.application.activities import (
     ParseFailure,
     ParseRequest,
 )
+from pipeline.application.classify import ClassifyDocument, ClassifyRequest
 from pipeline.application.knowledge_activities import RegisterDocument, RegisterRequest
 from pipeline.domain.errors import UnparsedDocumentError, UnsupportedDocumentError
 from pipeline.domain.ports import IngestStart
@@ -100,8 +104,10 @@ class Pipeline:
         return {"pipeline": {"units": self.store, "raw_store": self.raw, "ingests": self.ingests}}
 
     async def ingest(self, start: IngestStart, rulebook: HttpRulebook) -> dict[str, Any]:
-        """What the ingest workflow does with a stored document, one activity after another:
-        parse; on a parse no parser can do, open the manual-parse task; else register."""
+        """What the ingest workflow does with a stored document while the extraction is off,
+        one activity after another: parse; on a parse no parser can do, open the manual-parse
+        task; else classify and, unless the classification stops the ingest, register as the
+        type it gave."""
         request = IngestRequest.model_validate(ingest_payload(start))
         assert request.stored is not None
         chain = ParserChain(StoreCatalog(self.store, recorded_client()))
@@ -120,12 +126,22 @@ class Pipeline:
                 ParseFailure(document_id=parse.document_id, reason=reason)
             )
             return {"parse_failed": True, "task_id": opened.task_id}
+        classified = await ClassifyDocument(chain, self.raw, self.store, extraction=False).run(
+            ClassifyRequest(parse=parse)
+        )
+        if classified.stops:
+            return {"parse_failed": False, "classification": classified.route}
         registered = await RegisterDocument(
             chain, rulebook, enabled=True, raw_store=self.raw, units=self.store
-        ).run(RegisterRequest(parse=parse, regulator=request.regulator))
+        ).run(
+            RegisterRequest(
+                parse=parse, regulator=request.regulator, doc_type=DocumentType(classified.doc_type)
+            )
+        )
         return {
             "parse_failed": False,
             "parser_version": parsed.parser_version,
+            "classification": classified.route,
             "registered": not registered.skipped,
             "kept": registered.parser_version,
         }
@@ -180,10 +196,16 @@ async def test_a_scan_opens_a_task_and_its_transcript_registers_it() -> None:
         assert tables == {
             "parse_failed": False,
             "parser_version": "pdf-tables@1",
+            "classification": "extract",
             "registered": True,
             "kept": "pdf-tables@1",
         }
-        stored = ok(internal.get(f"{RULEBOOK}/documents/{notice['document']['document_id']}"))
+        notice_id = notice["document"]["document_id"]
+        notice_record = pipeline.store.documents[DocumentId(UUID(notice_id))]
+        assert notice_record.status is DocumentStatus.CLASSIFIED, (
+            "on its way to the rule extraction, which is off here"
+        )
+        stored = ok(internal.get(f"{RULEBOOK}/documents/{notice_id}"))
         assert (stored["parser_version"], stored["doc_type"]) == ("pdf-tables@1", "notification")
         assert any(
             clause["text"].startswith("“23. | Chennai Outer | Districts of Viluppuram")
@@ -228,6 +250,7 @@ async def test_a_scan_opens_a_task_and_its_transcript_registers_it() -> None:
         assert manual == {
             "parse_failed": False,
             "parser_version": "manual@1",
+            "classification": "reference",
             "registered": True,
             "kept": "manual@1",
         }
@@ -245,12 +268,16 @@ async def test_a_scan_opens_a_task_and_its_transcript_registers_it() -> None:
             "Second example item | 12%",
         ]
         record = pipeline.store.documents[DocumentId(UUID(document_id))]
-        assert (record.status, record.parser_version) == (DocumentStatus.PARSED, "manual@1")
+        assert (record.status, record.parser_version) == (DocumentStatus.REFERENCE, "manual@1")
 
         again = upload(internal, "cgst_rules", scan())
         assert again["duplicate"] is True
         reparsed = await pipeline.ingest(pipeline.ingests.started[-1], rulebook)
-        assert (reparsed["parser_version"], reparsed["kept"]) == ("manual@1", "manual@1")
+        assert (reparsed["parser_version"], reparsed["classification"], reparsed["kept"]) == (
+            "manual@1",
+            "reference",
+            "manual@1",
+        )
         assert ok(internal.get(f"{PIPELINE}/tasks", params={"status": "open"}))["items"] == []
         assert [entry.action for entry in pipeline.store.audit] == [
             "pipeline.document.upload",
@@ -260,6 +287,7 @@ async def test_a_scan_opens_a_task_and_its_transcript_registers_it() -> None:
         ]
         topics = [event.topic for event in pipeline.store.events]
         assert topics.count("document.parsed") == 2, "each document once, when first parsed"
+        assert topics.count("document.classified") == 2, "each once, when first classified"
 
         for method, path in (
             ("GET", f"{PIPELINE}/tasks"),
