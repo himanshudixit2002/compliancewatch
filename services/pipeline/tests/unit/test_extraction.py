@@ -18,7 +18,7 @@ from temporalio.exceptions import ApplicationError
 
 from domain_kernel.documents import Clause, DocumentType, ParsedDocument, clause_id_for
 from domain_kernel.ids import DocumentId
-from domain_kernel.llm import CompletionRequest, CompletionResponse
+from domain_kernel.llm import CompletionRequest
 from ontology import load as load_ontology
 from pipeline.application.extraction import (
     BUDGET_ERROR,
@@ -41,7 +41,7 @@ from pipeline.domain.sources import Source
 from pipeline.infrastructure.adapters import SOURCES, source_id_for
 from pipeline.infrastructure.gateway import BUDGET_PROBLEM, GatewayError, GatewayProvider
 from pipeline.infrastructure.memory import MemoryStore
-from pipeline.testing import MemoryRulebook
+from pipeline.testing import AnswersInTurn, MemoryRulebook
 
 NOW = datetime(2026, 10, 6, 6, 0, tzinfo=UTC)
 KEY = "cbic_notifications"
@@ -80,28 +80,11 @@ ANSWER = {
 }
 
 
-class Answers:
-    """An ``LLMProvider`` that answers from a list, in turn, raising any exception in it."""
-
-    MODEL = "scripted/turns"
-
-    def __init__(self, *answers: str | Exception) -> None:
-        self.answers = list(answers)
-        self.requests: list[CompletionRequest] = []
-
-    def complete(self, req: CompletionRequest) -> CompletionResponse:
-        self.requests.append(req)
-        answer = self.answers.pop(0)
-        if isinstance(answer, Exception):
-            raise answer
-        return CompletionResponse(text=answer, model=self.MODEL, input_tokens=0, output_tokens=0)
-
-
 class World:
     def __init__(self, *answers: str | Exception, enabled: bool = True) -> None:
         self.store = MemoryStore()
         self.rulebook = MemoryRulebook()
-        self.model = Answers(*answers)
+        self.model = AnswersInTurn(*answers)
         stage = RuleExtractionStage(LlmRuleExtractor(self.model, PROMPT, load_ontology()))
         self.extract = ExtractRules(self.rulebook, stage, self.store, enabled=enabled)
         self.write = StoreExtraction(self.store, clock=lambda: NOW)

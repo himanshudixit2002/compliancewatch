@@ -17,7 +17,7 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer
 
-from pipeline.domain.events import DocumentDiscovered, DocumentParsed
+from pipeline.domain.events import DocumentClassified, DocumentDiscovered, DocumentParsed
 from pipeline.domain.raw_documents import DocumentStatus
 from pipeline.infrastructure.fakes import SAMPLE_TEXT
 from pipeline.infrastructure.memory import MemoryStore
@@ -29,7 +29,7 @@ from pipeline.workflows import (
     IngestRequest,
     IngestResult,
 )
-from pipeline.workflows.ingest_document import STORE_PATCH
+from pipeline.workflows.ingest_document import CLASSIFY_PATCH, STORE_PATCH
 from py_common.temporal.client import default_interceptors
 from py_common.temporal.worker import WorkerConfig, build_worker
 
@@ -127,21 +127,24 @@ async def test_a_new_run_stores_the_document_and_passes_on_its_key(
     assert raw_store.files == {result.storage_key: SAMPLE_TEXT.encode()}
     (record,) = store.documents.values()
     assert record.document_id.value == result.document_id
-    assert (record.status, record.parser_version) == (DocumentStatus.PARSED, "fake@1")
-    discovered, parsed = store.events
+    assert (record.status, record.parser_version) == (DocumentStatus.CLASSIFIED, "fake@1")
+    discovered, parsed, classified = store.events
     assert isinstance(discovered, DocumentDiscovered)
     assert discovered.document_id.value == result.document_id
     assert isinstance(parsed, DocumentParsed)
     assert (parsed.parser_version, parsed.clause_count) == ("fake@1", 3)
+    assert isinstance(classified, DocumentClassified)
+    assert (result.classification, result.doc_type) == ("extract", "notification")
 
-    assert patches(history) == [STORE_PATCH]
+    assert patches(history) == [STORE_PATCH, CLASSIFY_PATCH]
     activities = scheduled(history)
     assert [name for name, _ in activities] == [
         "pipeline.discover_document",
         "pipeline.fetch_and_store",
         "pipeline.parse_document",
+        "pipeline.classify_document",
     ]
-    (_, parse_input) = activities[-1]
+    (_, parse_input) = activities[2]
     assert parse_input["fetched"] is None
     assert parse_input["stored"]["storage_key"] == result.storage_key
     body = "In exercise of the powers conferred"
@@ -164,5 +167,9 @@ async def test_a_refetch_is_a_duplicate_announced_once(environment: WorkflowEnvi
     assert (again.document_id, again.storage_key) == (first.document_id, first.storage_key)
     assert again.clause_refs == first.clause_refs, "the duplicate still parses from the store"
     assert len(store.documents) == 1
-    assert [type(event) for event in store.events] == [DocumentDiscovered, DocumentParsed]
+    assert [type(event) for event in store.events] == [
+        DocumentDiscovered,
+        DocumentParsed,
+        DocumentClassified,
+    ], "the second ingest finds the document parsed and classified"
     assert raw_store.puts == 1
