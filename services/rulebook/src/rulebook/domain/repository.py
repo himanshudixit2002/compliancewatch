@@ -185,6 +185,14 @@ class RelationRepository(Protocol):
         """Relations matching every id the query names, ordered by relation id."""
         ...
 
+    def remove_approved(self, rule_version_id: RuleVersionId) -> tuple[UUID, ...]:
+        """Delete the relations from the version that relation candidates were approved into,
+        and return those candidates' ids in id order; a relation with no candidate stays. The
+        caller removes only a draft's relations, once the rule candidate it was drafted from is
+        rejected, and reopens each candidate in the same transaction
+        (``relations.reopen_relations``)."""
+        ...
+
 
 class RuleVersionRepository(Protocol):
     def in_force(self, as_of: date, page: VersionPage) -> Sequence[RuleVersionRecord]:

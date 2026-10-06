@@ -24,7 +24,7 @@ from domain_kernel.status import RuleVersionStatus
 from py_common.events import to_message
 from rulebook.application.documents import RegisterDocument
 from rulebook.application.intake import IngestRuleCandidate
-from rulebook.application.publication import CitationInput, PublishVersion
+from rulebook.application.publication import ApproveVersion, CitationInput, PublishVersion
 from rulebook.application.review_tasks import (
     ClaimReviewTask,
     DecideReviewTask,
@@ -61,7 +61,7 @@ from rulebook.domain.intake import (
 from rulebook.domain.publication import DecisionAction
 from rulebook.domain.relations import CandidateStatus, RelationCandidate
 from rulebook.domain.review_tasks import ReviewDecision, ReviewTaskKind, ReviewTaskStatus
-from rulebook.infrastructure.memory import MemoryKnowledgeStore
+from rulebook.infrastructure.memory import MemoryEventSink, MemoryKnowledgeStore
 
 SCHEMAS = Path(__file__).resolve().parents[4] / "packages" / "contracts" / "events" / "schemas"
 START = datetime(2000, 1, 3, 4, 30, tzinfo=UTC)
@@ -640,6 +640,126 @@ def test_rejecting_after_drafting_keeps_the_draft_and_names_it(review: Review) -
     stats = review.stats.run()
     assert (stats.candidates.rejected, stats.candidates.acceptance_rate) == (1, 0.0)
     assert review.seed.run().opened == (), "a candidate's draft never gets a seed task"
+
+
+def test_rejecting_after_drafting_reopens_the_relations_for_a_corrected_draft(
+    review: Review,
+) -> None:
+    relation = review.relation()
+    task_id = review.received()
+    review.claim.run(task_id, by=ANALYST)
+    detail = review.draft_new_rule(task_id, relations=[RelationChoice(relation, review.monthly)])
+    assert detail.version is not None
+    rejected = review.decide.run(
+        task_id,
+        ReviewDecision.REJECT,
+        by=REVIEWER,
+        note="The model read the date wrongly",
+        reason=RuleRejectReason.WRONG_EXTRACTION,
+    )
+    assert rejected.reopened_relations == (relation,)
+    assert review.store.rule_relations() == [], "the closed draft carries no relation"
+    with review.store() as uow:
+        staged = uow.candidates.lock(relation)
+    assert staged is not None
+    assert (staged.status, staged.decided_by, staged.decided_at) == (CandidateStatus.OPEN, "", None)
+    assert staged.note == (
+        f"reopened: rule candidate {detail.task.candidate_id} was rejected (wrong_extraction) "
+        f"by {REVIEWER}, so its draft {detail.version.rule_version_id} no longer carries this "
+        "relation; approve it onto another draft"
+    )
+
+    corrected = review.received()
+    review.claim.run(corrected, by=ANALYST)
+    again = review.draft_new_rule(
+        corrected,
+        rule_key="example_extension_2000_01_corrected",
+        relations=[RelationChoice(relation, review.monthly)],
+    )
+    assert again.version is not None
+    ((rule_relation, candidate_id),) = review.store.rule_relations()
+    assert (rule_relation.from_rule_version_id, candidate_id) == (
+        again.version.rule_version_id,
+        relation,
+    )
+    review.decide.run(corrected, ReviewDecision.APPROVE, by=REVIEWER)
+    approved = review.decide.run(corrected, ReviewDecision.APPROVE, by=OTHER_REVIEWER)
+    assert approved.version is not None
+    published = review.publish.run(approved.version.record.rule_version_id, actor_id=REVIEWER)
+    assert [type(event).topic for event in published.events] == [
+        "rule.published",
+        "rule.deadline_changed",
+    ], "the extension reaches the publication through the corrected draft"
+
+
+def test_a_rejection_before_drafting_reopens_nothing(review: Review) -> None:
+    relation = review.relation()
+    task_id = review.received()
+    rejected = review.decide.run(
+        task_id,
+        ReviewDecision.REJECT,
+        by=REVIEWER,
+        note="The example notification states no rule",
+        reason=RuleRejectReason.NOT_A_RULE,
+    )
+    assert rejected.reopened_relations == ()
+    with review.store() as uow:
+        staged = uow.candidates.lock(relation)
+    assert staged is not None
+    assert (staged.status, staged.note) == (CandidateStatus.OPEN, "")
+
+
+def test_a_rejection_that_fails_leaves_the_relations_approved(
+    review: Review, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    relation = review.relation()
+    task_id = review.received()
+    review.claim.run(task_id, by=ANALYST)
+    review.draft_new_rule(task_id, relations=[RelationChoice(relation, review.monthly)])
+
+    def refused(sink: MemoryEventSink, event: object) -> None:
+        raise RuntimeError("the outbox refused the event")
+
+    monkeypatch.setattr(MemoryEventSink, "publish", refused)
+    with pytest.raises(RuntimeError, match="outbox refused"):
+        review.decide.run(
+            task_id,
+            ReviewDecision.REJECT,
+            by=REVIEWER,
+            note="The model read the date wrongly",
+            reason=RuleRejectReason.WRONG_EXTRACTION,
+        )
+    ((_, candidate_id),) = review.store.rule_relations()
+    assert candidate_id == relation, "the rejection and the reopening commit together, or neither"
+    with review.store() as uow:
+        staged = uow.candidates.lock(relation)
+    assert staged is not None
+    assert staged.status is CandidateStatus.APPROVED
+
+
+def test_a_published_versions_relations_stand_when_its_candidate_is_rejected(
+    review: Review,
+) -> None:
+    relation = review.relation()
+    task_id = review.received()
+    review.claim.run(task_id, by=ANALYST)
+    detail = review.draft_new_rule(task_id, relations=[RelationChoice(relation, review.monthly)])
+    assert detail.version is not None
+    version_id = detail.version.rule_version_id
+    review.decide.run(task_id, ReviewDecision.APPROVE, by=REVIEWER)
+    ApproveVersion(review.store, review.clock).run(version_id, actor_id=OTHER_REVIEWER)
+    review.publish.run(version_id, actor_id=REVIEWER)
+    rejected = review.decide.run(
+        task_id,
+        ReviewDecision.REJECT,
+        by=REVIEWER,
+        note="Published outside the task before this rejection",
+        reason=RuleRejectReason.DUPLICATE,
+    )
+    assert rejected.version is not None
+    assert rejected.version.record.status is RuleVersionStatus.PUBLISHED
+    assert rejected.reopened_relations == ()
+    assert [candidate for _, candidate in review.store.rule_relations()] == [relation]
 
 
 def test_a_return_opens_the_next_round_for_the_same_candidate(review: Review) -> None:

@@ -46,6 +46,7 @@ from sqlalchemy import (
     bindparam,
     cast,
     create_engine,
+    delete,
     func,
     literal,
     literal_column,
@@ -619,6 +620,17 @@ class SqlAlchemyRelationRepository:
         self._session.execute(
             text("SELECT pg_advisory_xact_lock(:key)"), {"key": SUPERSESSION_LOCK}
         )
+
+    def remove_approved(self, rule_version_id: RuleVersionId) -> tuple[UUID, ...]:
+        removed = self._session.scalars(
+            delete(RuleRelationRow)
+            .where(
+                RuleRelationRow.from_rule_version_id == rule_version_id.value,
+                RuleRelationRow.candidate_id.is_not(None),
+            )
+            .returning(RuleRelationRow.candidate_id)
+        ).all()
+        return tuple(sorted((candidate for candidate in removed if candidate), key=str))
 
     def find(self, query: RelationQuery) -> Sequence[RelationRecord]:
         statement = (

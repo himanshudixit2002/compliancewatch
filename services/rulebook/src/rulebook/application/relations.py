@@ -12,6 +12,9 @@ writes one ``rule_relation`` row pointing back at the candidate; a supersession 
 a cycle is refused. ``approve_relation`` is that approval inside a unit of work the caller
 opened, with no transaction of its own: drafting a version from a rule candidate approves the
 relations the analyst picks onto the new draft in the drafting's own transaction.
+``reopen_relations`` undoes the approvals onto a draft when the rule candidate it was drafted
+from is rejected: it deletes their ``rule_relation`` rows and opens the candidates again, in the
+rejection's transaction, so they can be approved onto another draft.
 """
 
 from collections.abc import Mapping, Sequence
@@ -241,6 +244,33 @@ def approve_relation(
     uow.relations.add(relation, relation_id=relation_id, candidate_id=candidate_id)
     uow.candidates.save(candidate.approve(decided_by=decided_by, at=now, note=note))
     return Approval(candidate_id=candidate_id, rule_relation_id=relation_id)
+
+
+def reopen_relations(
+    uow: KnowledgeUnitOfWork, rule_version_id: RuleVersionId, *, note: str
+) -> tuple[UUID, ...]:
+    """Undo the approvals onto a draft that closed, inside the caller's transaction: each
+    ``rule_relation`` row a relation candidate was approved into from ``rule_version_id`` is
+    deleted, and the candidate is open again with ``note`` saying why, so an analyst can approve
+    it onto another draft (approval takes only open candidates, and staging a proposal again
+    changes nothing). The caller has locked the version, a draft; the candidates reopened, by
+    id."""
+    version = uow.rule_versions.lock(rule_version_id)
+    if version is None:
+        raise UnknownRuleVersionError(str(rule_version_id))
+    if version.status not in EDITABLE_FROM_STATUSES:
+        raise RuleVersionNotEditableError(
+            f"rule version {rule_version_id} is {version.status.value}: the relations of a "
+            "version past draft stand"
+        )
+    reopened: list[UUID] = []
+    for candidate_id in uow.relations.remove_approved(rule_version_id):
+        candidate = uow.candidates.lock(candidate_id)
+        if candidate is None:  # pragma: no cover - a rule relation's candidate is stored
+            raise CandidateNotFoundError(f"relation candidate {candidate_id} does not exist")
+        uow.candidates.save(candidate.reopened(note=note))
+        reopened.append(candidate_id)
+    return tuple(reopened)
 
 
 def _target_entity(

@@ -117,6 +117,26 @@ class RelationCandidate:
             note=note,
         )
 
+    def reopened(self, *, note: str) -> "RelationCandidate":
+        """The approved candidate open again, its approval cleared, once the draft it was
+        approved onto is closed (the rule candidate that draft was made from was rejected): an
+        analyst can approve it onto another draft. ``note`` says why it was reopened."""
+        if self.status is not CandidateStatus.APPROVED:
+            raise InvariantViolationError(
+                f"candidate {self.candidate_id} is {self.status.value}: only an approved one "
+                "is reopened"
+            )
+        if not note.strip():
+            raise InvariantViolationError("a reopened candidate says why in its note")
+        return replace(
+            self,
+            status=CandidateStatus.OPEN,
+            reject_reason=None,
+            decided_by="",
+            decided_at=None,
+            note=note,
+        )
+
     def _require_open(self) -> None:
         if self.status is not CandidateStatus.OPEN:
             raise InvariantViolationError(f"candidate {self.candidate_id} is {self.status.value}")

@@ -498,6 +498,16 @@ class MemoryRelationRepository:
     def lock_supersession(self) -> None:
         """Units of work already run one at a time here."""
 
+    def remove_approved(self, rule_version_id: RuleVersionId) -> tuple[UUID, ...]:
+        removed = [
+            (relation_id, candidate_id)
+            for relation_id, (relation, candidate_id) in self._tables.relations.items()
+            if relation.from_rule_version_id == rule_version_id and candidate_id is not None
+        ]
+        for relation_id, _ in removed:
+            del self._tables.relations[relation_id]
+        return tuple(sorted((candidate_id for _, candidate_id in removed if candidate_id), key=str))
+
     def find(self, query: RelationQuery) -> Sequence[RelationRecord]:
         found: list[RelationRecord] = []
         for relation_id, (relation, candidate_id) in sorted(

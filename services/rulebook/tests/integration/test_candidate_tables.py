@@ -448,6 +448,86 @@ def test_a_candidate_is_drafted_approved_and_another_rejected_on_postgres(
     assert counts.acceptance_rate == 0.5
 
 
+def _monthly(engine: Engine) -> RuleVersionId:
+    """The seed calendar's first gstr3b_monthly version, which the extension targets."""
+    return RuleVersionId(
+        scalar(
+            engine,
+            "SELECT v.id FROM rule_version v JOIN rule r ON r.id = v.rule_id"
+            " WHERE r.rule_key = :rule ORDER BY v.version LIMIT 1",
+            rule=MONTHLY,
+        )
+    )
+
+
+def test_a_rejection_after_drafting_reopens_the_relations_on_postgres(
+    notification: PostgresKnowledgeUnitOfWorkFactory, engine: Engine
+) -> None:
+    factory, clock = notification, Clock(START + timedelta(days=3))
+    relation, monthly = _relation(factory), _monthly(engine)
+    draft = DraftFromCandidate(factory, ontology_package.load, clock)
+    decide = DecideReviewTask(factory, clock)
+    intake = IngestRuleCandidate(factory, clock).run(payload(), uuid4())
+    assert intake.task is not None
+    ClaimReviewTask(factory, clock).run(intake.task.task_id, by=ANALYST)
+    detail = draft.run(
+        intake.task.task_id,
+        by=ANALYST,
+        rule_key="example_extension_reopened",
+        new_rule=NewRule("cbic", AttributeLevel.REGISTRATION),
+        relations=[RelationChoice(relation, monthly)],
+    )
+    assert detail.version is not None
+    decided = decide.run(
+        intake.task.task_id,
+        ReviewDecision.REJECT,
+        by=REVIEWER,
+        note="The model read the date wrongly",
+        reason=RuleRejectReason.WRONG_EXTRACTION,
+    )
+    assert decided.reopened_relations == (relation,)
+    assert (
+        scalar(engine, "SELECT count(*) FROM rule_relation WHERE candidate_id = :c", c=relation)
+        == 0
+    )
+    with engine.connect() as connection:
+        reopened = connection.execute(
+            text(
+                "SELECT status, decided_at, decided_by, reject_reason, note"
+                " FROM relation_candidate WHERE id = :c"
+            ),
+            {"c": relation},
+        ).one()
+    assert tuple(reopened)[:4] == ("open", None, "", None)
+    assert reopened.note.startswith(
+        f"reopened: rule candidate {intake.candidate.candidate_id} was rejected (wrong_extraction)"
+    )
+
+    corrected = IngestRuleCandidate(factory, clock).run(payload(), uuid4())
+    assert corrected.task is not None
+    ClaimReviewTask(factory, clock).run(corrected.task.task_id, by=ANALYST)
+    again = draft.run(
+        corrected.task.task_id,
+        by=ANALYST,
+        rule_key="example_extension_corrected",
+        new_rule=NewRule("cbic", AttributeLevel.REGISTRATION),
+        relations=[RelationChoice(relation, monthly)],
+    )
+    assert again.version is not None
+    assert (
+        scalar(
+            engine,
+            "SELECT from_rule_version_id FROM rule_relation WHERE candidate_id = :c",
+            c=relation,
+        )
+        == again.version.rule_version_id.value
+    )
+    assert (
+        scalar(engine, "SELECT status FROM relation_candidate WHERE id = :c", c=relation)
+        == "approved"
+    )
+
+
 def _relation(factory: PostgresKnowledgeUnitOfWorkFactory) -> UUID:
     clause = clause_id_for(DOC, "en.p2")
     candidate = RelationCandidate(

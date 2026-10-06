@@ -48,7 +48,10 @@
     back to draft, a draft stays a draft, and a version the publish routes moved on is left
     as it is. The next ``OpenSeedReviewTasks`` opens a new task for a rejected seed draft. A
     candidate task's rejection names its reason and rejects the candidate, before drafting or
-    after, and ``rule.rejected`` goes out through the outbox in the same transaction.
+    after, and ``rule.rejected`` goes out through the outbox in the same transaction. After
+    drafting, the relation candidates approved onto the draft are open again with a note saying
+    why, and their ``rule_relation`` rows are deleted (``relations.reopen_relations``), so a
+    corrected draft can take them.
   A candidate task not drafted yet can only be rejected (``CandidateNotDraftedError``). A
   return or a rejection says why in its note.
 - ``ReadReviewStats``: counts by status and regulator, the decisions made, the median time to
@@ -78,7 +81,7 @@ from rulebook.application.publication import (
     return_to_draft,
     submit_for_review,
 )
-from rulebook.application.relations import approve_relation
+from rulebook.application.relations import approve_relation, reopen_relations
 from rulebook.domain.documents import StoredDocument
 from rulebook.domain.drafting import DraftEdit, described_paths, edited_record
 from rulebook.domain.errors import (
@@ -181,13 +184,15 @@ class SeedTasks:
 class TaskDecision:
     """What a decision did: the task as it stands now (decided, or open again for a second
     approver), the version after its transition (None for a candidate rejected before it was
-    drafted), the task a return opened, a candidate task's candidate, and the events written."""
+    drafted), the task a return opened, a candidate task's candidate, the events written, and
+    the relation candidates a rejection after drafting opened again."""
 
     task: ReviewTask
     version: VersionState | None
     next_task: ReviewTask | None = None
     candidate: RuleCandidate | None = None
     events: tuple[RuleRejected, ...] = ()
+    reopened_relations: tuple[UUID, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -593,6 +598,16 @@ def _draft_note(candidate: RuleCandidate, changed: Sequence[str], note: str) -> 
     return f"{text}: {note}" if note else text
 
 
+def _reopen_note(candidate: RuleCandidate, rule_version_id: RuleVersionId, by: UserId) -> str:
+    """Why a relation candidate approved onto a candidate's draft is open again."""
+    reason = "" if candidate.reject_reason is None else f" ({candidate.reject_reason.value})"
+    return (
+        f"reopened: rule candidate {candidate.candidate_id} was rejected{reason} by {by}, so "
+        f"its draft {rule_version_id} no longer carries this relation; approve it onto another "
+        "draft"
+    )
+
+
 class EditReviewDraft:
     """The claimant's change to the draft: content (``edit``) and citations, at least one of
     them, all or nothing."""
@@ -741,12 +756,21 @@ class DecideReviewTask:
         reason: RuleRejectReason | None,
     ) -> TaskDecision:
         """The task decided, the candidate rejected and ``rule.rejected`` in the outbox, in the
-        decision's transaction; a version drafted from the candidate stays a draft."""
+        decision's transaction. A version drafted from the candidate stays a draft, and the
+        relation candidates approved onto it are open again (``relations.reopen_relations``),
+        their ``rule_relation`` rows deleted, so they can reach another draft."""
         assert reason is not None, "a candidate's rejection names its reason"
         after = task.decide(ReviewDecision.REJECT, by=by, at=now, note=note)
         uow.review_tasks.save(after)
         rejected = candidate.rejected(reason, by=by, at=now)
         uow.rule_candidates.save(rejected)
+        reopened: tuple[UUID, ...] = ()
+        if state is not None and state.record.status is RuleVersionStatus.DRAFT:
+            reopened = reopen_relations(
+                uow,
+                state.record.rule_version_id,
+                note=_reopen_note(rejected, state.record.rule_version_id, by),
+            )
         event = RuleRejected(
             occurred_at=now,
             correlation_id=CorrelationId.new(),
@@ -760,7 +784,9 @@ class DecideReviewTask:
             rule_version_id=candidate.rule_version_id,
         )
         uow.events.publish(event)
-        return TaskDecision(after, state, candidate=rejected, events=(event,))
+        return TaskDecision(
+            after, state, candidate=rejected, events=(event,), reopened_relations=reopened
+        )
 
     def _approve(
         self,

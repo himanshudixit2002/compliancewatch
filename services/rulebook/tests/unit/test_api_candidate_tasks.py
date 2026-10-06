@@ -16,10 +16,12 @@ from fastapi.testclient import TestClient
 from domain_kernel.access import Role, Scope
 from domain_kernel.documents import clause_id_for, document_id_for
 from domain_kernel.ids import TenantId, UserId
+from domain_kernel.knowledge import EntityType, RelationKind
 from domain_kernel.status import RuleVersionStatus
 from py_common.auth.testing import TestIssuer, bearer
 from py_common.settings import AuthMode
 from rulebook.application.intake import IngestRuleCandidate
+from rulebook.domain.relations import RelationCandidate
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 from rulebook.main import build_app
 from rulebook.testing import REVIEW_TOKEN, WRITE_TOKEN, rulebook_settings
@@ -311,6 +313,81 @@ def test_a_candidate_is_rejected_with_its_reason_before_drafting(client: TestCli
     assert event["topic"] == "rule.rejected"
     detail = client.get(f"{TASKS}/{task_id}", headers=REVIEW).json()
     assert detail["candidate"]["reject_reason"] == "not_a_rule"
+
+
+def staged_extension(client: TestClient) -> str:
+    """The extension the knowledge child staged for the notification, as staging stores it."""
+    clause = clause_id_for(DOC, "en.p2")
+    start = TEXT_EXTENDS.index("example return")
+    candidate = RelationCandidate(
+        candidate_id=uuid4(),
+        document_id=DOC,
+        relation=RelationKind.EXTENDS_DEADLINE,
+        target_type=EntityType.FORM,
+        target_name="example return",
+        target_clause_id=clause,
+        target_span_start=start,
+        target_span_end=start + len("example return"),
+        evidence_clause_id=clause,
+        evidence_quote=QUOTE_EXTENDS,
+        quote_score=1.0,
+        prompt_version="extraction.rule_relations@1",
+        confidence=0.9,
+        needs_review=False,
+        target_rule_key=MONTHLY,
+        period_label="2000-01",
+        new_due_on=date(2000, 2, 25),
+    )
+    with store_of(client)() as uow:
+        uow.candidates.add(candidate)
+    return str(candidate.candidate_id)
+
+
+def test_a_rejection_after_drafting_reopens_the_relations_approved_onto_the_draft(
+    client: TestClient,
+) -> None:
+    relation = staged_extension(client)
+    monthly = client.get(f"{BASE}/rules/{MONTHLY}/versions").json()[0]["rule_version_id"]
+    task_id = received(client)
+    claim(client, task_id)
+    choice = {"candidate_id": relation, "target_rule_version_id": monthly}
+    drafted = draft(client, task_id, relation_candidates=[choice])
+    assert drafted.status_code == 200, drafted.text
+    version_id = drafted.json()["rule_version"]["rule_version_id"]
+    approved = client.get(
+        f"{BASE}/review/relations", params={"status": "approved"}, headers=REVIEW
+    ).json()
+    assert [c["candidate_id"] for c in approved] == [relation]
+    rejected = decide(
+        client,
+        task_id,
+        REVIEWER_ID,
+        decision="reject",
+        note="The model read the date wrongly",
+        reason="wrong_extraction",
+    )
+    assert rejected.status_code == 200, rejected.text
+    reopened = client.get(
+        f"{BASE}/review/relations", params={"document_id": str(DOC)}, headers=REVIEW
+    ).json()
+    assert [(c["candidate_id"], c["status"], c["decided_by"]) for c in reopened] == [
+        (relation, "open", "")
+    ]
+    with store_of(client)() as uow:
+        stored = uow.candidates.lock(UUID(relation))
+    assert stored is not None
+    assert f"its draft {version_id} no longer carries this relation" in stored.note
+    relations = client.get(
+        f"{BASE}/relations",
+        params={"from_rule_version_id": version_id, "published_only": "false"},
+    ).json()
+    assert relations == [], "the closed draft's rule relation is gone"
+    corrected = received(client)
+    claim(client, corrected)
+    again = draft(
+        client, corrected, rule_key=f"{EXTENSION}_corrected", relation_candidates=[choice]
+    )
+    assert again.status_code == 200, again.text
 
 
 def test_token_mode_lets_an_analyst_draft_and_not_a_reviewer() -> None:

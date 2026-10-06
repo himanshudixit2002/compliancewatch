@@ -9,7 +9,7 @@ import pytest
 from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.errors import InvalidRelationError, InvariantViolationError
 from domain_kernel.ids import CanonicalEntityId, DocumentId, RuleVersionId, SourceId
-from domain_kernel.knowledge import EntityRef, EntityType, RelationKind
+from domain_kernel.knowledge import EntityRef, EntityType, RelationKind, RuleRelation
 from domain_kernel.status import RuleVersionStatus
 from rulebook.application.alignment import AlignMentions, SubmittedMention
 from rulebook.application.documents import RegisterDocument
@@ -21,6 +21,7 @@ from rulebook.application.relations import (
     RelationSubmission,
     StageRelationCandidates,
     SubmittedCandidate,
+    reopen_relations,
 )
 from rulebook.application.review import DecideMentionGroup, ListGroupItems, ListMentionGroups
 from rulebook.domain.alignment import MatchKind, Resolved, ReviewReason, Unresolved, resolve
@@ -593,6 +594,73 @@ def test_a_supersession_cycle_is_refused(store: MemoryKnowledgeStore) -> None:
         ApproveRelationCandidate(store, clock).run(two, second, first, decided_by="a")
 
 
+def test_reopening_a_drafts_relations_deletes_them_and_opens_their_candidates(
+    store: MemoryKnowledgeStore,
+) -> None:
+    store.add_rule("gstr3b_monthly")
+    _, draft = store.add_rule("gstr3b_extension_2026_03")
+    _, other = store.add_rule("gstr3b_extension_other")
+    _, affected = store.add_rule("gstr3b_monthly_v1", status=RuleVersionStatus.PUBLISHED)
+    supersedes = replace(
+        REFERS,
+        relation=RelationKind.SUPERSEDES,
+        target_type=EntityType.NOTIFICATION,
+        target_name="01/2026-central tax",
+    )
+    extends, superseding = stage(store, EXTENDS, supersedes)
+    approve = ApproveRelationCandidate(store, clock)
+    approve.run(extends, draft, affected, decided_by="a", note="checked")
+    approve.run(superseding, other, affected, decided_by="a")
+    with store() as uow:
+        uow.relations.add(
+            RuleRelation(
+                from_rule_version_id=draft,
+                relation=RelationKind.REFERS_TO,
+                target=affected,
+                evidence_clause_id=clause_id_for(DOC, "en.p2"),
+            ),
+            relation_id=UUID(int=9),
+            candidate_id=None,
+        )
+        reopened = reopen_relations(uow, draft, note="the draft's candidate was rejected")
+    assert reopened == (extends,)
+    kept = {(relation.from_rule_version_id, linked) for relation, linked in store.rule_relations()}
+    assert kept == {(draft, None), (other, superseding)}, (
+        "a relation with no candidate, and another version's, stay"
+    )
+    (candidate,) = ListRelationCandidates(store).run(status=CandidateStatus.OPEN)
+    assert (candidate.candidate_id, candidate.decided_by, candidate.decided_at, candidate.note) == (
+        extends,
+        "",
+        None,
+        "the draft's candidate was rejected",
+    )
+    approve.run(extends, other, affected, decided_by="a", note="onto another draft")
+    assert (other, extends) in {
+        (relation.from_rule_version_id, linked) for relation, linked in store.rule_relations()
+    }
+
+
+def test_the_relations_of_a_version_past_draft_are_never_reopened(
+    store: MemoryKnowledgeStore,
+) -> None:
+    store.add_rule("gstr3b_monthly")
+    _, version = store.add_rule("gstr3b_extension_2026_03")
+    _, affected = store.add_rule("gstr3b_monthly_v1", status=RuleVersionStatus.PUBLISHED)
+    (extends,) = stage(store, EXTENDS)
+    ApproveRelationCandidate(store, clock).run(extends, version, affected, decided_by="a")
+    with store() as uow:
+        record = uow.rule_versions.get(version)
+        assert record is not None
+        uow.rule_versions.save_lifecycle(replace(record, status=RuleVersionStatus.IN_REVIEW))
+    with pytest.raises(RuleVersionNotEditableError, match="in_review"), store() as uow:
+        reopen_relations(uow, version, note="example")
+    with pytest.raises(UnknownRuleVersionError), store() as uow:
+        reopen_relations(uow, RuleVersionId.new(), note="example")
+    assert [linked for _, linked in store.rule_relations()] == [extends]
+    assert ListRelationCandidates(store).run(status=CandidateStatus.OPEN) == []
+
+
 def test_a_rejection_keeps_the_reason(store: MemoryKnowledgeStore) -> None:
     (candidate_id,) = stage(store, REFERS)
     rejected = RejectRelationCandidate(store, clock).run(
@@ -632,23 +700,26 @@ def test_rules_are_listed_by_key(store: MemoryKnowledgeStore) -> None:
 # ---------------------------------------------------------------- domain rules
 
 
+CANDIDATE_FIELDS: dict[str, object] = {
+    "candidate_id": UUID(int=1),
+    "document_id": DOC,
+    "relation": RelationKind.REFERS_TO,
+    "target_type": EntityType.FORM,
+    "target_name": "GSTR-3B",
+    "target_clause_id": clause_id_for(DOC, "en.p3"),
+    "target_span_start": 0,
+    "target_span_end": 4,
+    "evidence_clause_id": clause_id_for(DOC, "en.p3"),
+    "evidence_quote": "a quote of the clause",
+    "quote_score": 1.0,
+    "prompt_version": PROMPT,
+    "confidence": 0.9,
+    "needs_review": False,
+}
+
+
 def test_candidates_hold_their_invariants() -> None:
-    base = {
-        "candidate_id": UUID(int=1),
-        "document_id": DOC,
-        "relation": RelationKind.REFERS_TO,
-        "target_type": EntityType.FORM,
-        "target_name": "GSTR-3B",
-        "target_clause_id": clause_id_for(DOC, "en.p3"),
-        "target_span_start": 0,
-        "target_span_end": 4,
-        "evidence_clause_id": clause_id_for(DOC, "en.p3"),
-        "evidence_quote": "a quote of the clause",
-        "quote_score": 1.0,
-        "prompt_version": PROMPT,
-        "confidence": 0.9,
-        "needs_review": False,
-    }
+    base = CANDIDATE_FIELDS
     with pytest.raises(InvariantViolationError, match="extends_deadline"):
         RelationCandidate(**{**base, "period_label": "2026-03"})  # type: ignore[arg-type]
     with pytest.raises(InvariantViolationError, match="8 to 400"):
@@ -659,6 +730,27 @@ def test_candidates_hold_their_invariants() -> None:
     rejected = candidate.reject(CandidateRejectReason.DUPLICATE, decided_by="a", at=NOW)
     with pytest.raises(InvariantViolationError, match="is rejected"):
         rejected.approve(decided_by="a", at=NOW)
+
+
+def test_only_an_approved_candidate_is_reopened_and_it_says_why() -> None:
+    candidate = RelationCandidate(**CANDIDATE_FIELDS)  # type: ignore[arg-type]
+    with pytest.raises(InvariantViolationError, match="only an approved one"):
+        candidate.reopened(note="the draft closed")
+    rejected = candidate.reject(CandidateRejectReason.DUPLICATE, decided_by="a", at=NOW)
+    with pytest.raises(InvariantViolationError, match="only an approved one"):
+        rejected.reopened(note="the draft closed")
+    approved = candidate.approve(decided_by="a", at=NOW, note="checked")
+    with pytest.raises(InvariantViolationError, match="says why"):
+        approved.reopened(note="  ")
+    reopened = approved.reopened(note="the draft closed")
+    assert (
+        reopened.status,
+        reopened.decided_by,
+        reopened.decided_at,
+        reopened.reject_reason,
+        reopened.note,
+    ) == (CandidateStatus.OPEN, "", None, None, "the draft closed")
+    assert reopened.approve(decided_by="b", at=NOW).status is CandidateStatus.APPROVED
 
 
 def test_supersession_cycles_are_found_along_any_path() -> None:
