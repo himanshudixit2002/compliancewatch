@@ -10,7 +10,10 @@ triage's resolution and a dismissal.
   transcript (``pipeline-manual-parse-<task>``), which parses it as ``manual@1``, classifies it
   and, unless the classification sets it aside or holds it for a triage, registers it while
   knowledge is on. When the start fails the task stays resolved and the same request starts it
-  again; a resolved task takes no other transcript.
+  again. The same transcript again replays, also when it arrives while the first is being
+  written (it finds the task resolved once it holds the row lock): nothing is written twice, and
+  the ingest is the first's, started only if it did not start. A resolved task takes no other
+  transcript.
 - ``ResolveTask`` of a triage: the analyst's decision (``domain.classification.TriageDecision``:
   relevant with a type, or irrelevant) is stored on the task's resolution and becomes the
   document's classification, ``certain``, by the ``triage`` classifier; in one transaction with
@@ -177,13 +180,9 @@ class ResolveTask:
         encoded = transcript.encoded()
         digest = hashlib.sha256(encoded).hexdigest()
         if not task.is_open:
-            if (
-                task.status is TaskStatus.RESOLVED
-                and (task.resolution or {}).get("transcript_sha256") == digest
-            ):
-                # The same resolution again: its ingest did not start, or the caller retried.
-                return self._ingest(view, manual_parse_workflow_id(task_id))
-            raise TaskClosedError(f"task {task_id} is {task.status.value}; it does not change")
+            # Resolved before: the same transcript replays (its ingest did not start, or the
+            # caller retried); another one is refused.
+            return self._replay(view, digest)
         source_id = source_id_of(view.document.source_key)
         key = self._raw.put(
             RawDocument.from_bytes(
@@ -198,34 +197,53 @@ class ResolveTask:
             current = unit.tasks.get(task_id, for_update=True)
             if current is None:
                 raise TaskNotFoundError(f"no task has the id {task_id}")
-            resolved = current.resolve(
-                _person(admin.actor),
-                now,
-                {
-                    "transcript_key": key,
-                    "transcript_sha256": digest,
-                    "parser_version": TRANSCRIPT_PARSER,
-                    "clauses": len(transcript.clauses()),
-                },
-                reason,
-            )
-            unit.tasks.save(resolved)
-            unit.audit.write(
-                AuditEntry(
-                    action=RESOLVE_ACTION,
-                    tenant_id=None,
-                    subject_type=TASK_SUBJECT,
-                    subject_id=str(task_id),
-                    actor=admin.actor,
-                    reason=reason,
-                    before=_audited(current),
-                    after=_audited(resolved),
-                    occurred_at=now,
-                    correlation_id=admin.correlation_id,
+            if not current.is_open:
+                # Another request resolved it while this one waited for the row lock: the same
+                # transcript replays that resolution, with the transaction closed first.
+                found = TaskView(current, unit.documents.get(task.document_id) or view.document)
+            else:
+                found = None
+                resolved = current.resolve(
+                    _person(admin.actor),
+                    now,
+                    {
+                        "transcript_key": key,
+                        "transcript_sha256": digest,
+                        "parser_version": TRANSCRIPT_PARSER,
+                        "clauses": len(transcript.clauses()),
+                    },
+                    reason,
                 )
-            )
+                unit.tasks.save(resolved)
+                unit.audit.write(
+                    AuditEntry(
+                        action=RESOLVE_ACTION,
+                        tenant_id=None,
+                        subject_type=TASK_SUBJECT,
+                        subject_id=str(task_id),
+                        actor=admin.actor,
+                        reason=reason,
+                        before=_audited(current),
+                        after=_audited(resolved),
+                        occurred_at=now,
+                        correlation_id=admin.correlation_id,
+                    )
+                )
+        if found is not None:
+            return self._replay(found, digest)
         log.info("pipeline.task_resolved", task_id=str(task_id), transcript_key=key)
         return self._ingest(TaskView(resolved, view.document), manual_parse_workflow_id(task_id))
+
+    def _replay(self, view: TaskView, digest: str) -> Resolution:
+        """A closed manual parse: resolved with the transcript of this digest, its ingest (started
+        now only if it did not start); anything else is refused."""
+        task = view.task
+        if (
+            task.status is TaskStatus.RESOLVED
+            and (task.resolution or {}).get("transcript_sha256") == digest
+        ):
+            return self._ingest(view, manual_parse_workflow_id(task.id))
+        raise TaskClosedError(f"task {task.id} is {task.status.value}; it does not change")
 
     def _triage(
         self, view: TaskView, decision: TriageDecision, admin: AdminAction, reason: str

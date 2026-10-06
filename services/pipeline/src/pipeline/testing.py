@@ -19,7 +19,8 @@ client it is given, the fixture transport of ``recorded_sources``; ``recorded_ty
 registry's types with it. ``MemoryCrawls`` and ``MemoryIngests`` are a crawl and an ingest starter
 that record what they would start and refuse an id they have seen, as Temporal does.
 ``pipeline_settings`` are the app's settings for tests: memory stores and the shared write token
-``WRITE_TOKEN``.
+``WRITE_TOKEN``. ``LockRace`` lets another request in just before a unit of work opens, as a
+request that holds a row lock commits while this one waits for it.
 """
 
 import hashlib
@@ -27,6 +28,7 @@ import json
 import math
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -65,7 +67,7 @@ from pipeline.domain.knowledge import (
     StagingReport,
 )
 from pipeline.domain.ports import CrawlStart, IngestStart
-from pipeline.domain.repository import UnitOfWorkFactory
+from pipeline.domain.repository import UnitOfWork, UnitOfWorkFactory
 from pipeline.infrastructure.adapters._shared import on_or_after, parse_iso_date
 from pipeline.infrastructure.adapters.cbic import CbicAdapter
 from pipeline.infrastructure.adapters.registry import ADAPTER_TYPES, AdapterType, Parameters
@@ -671,3 +673,26 @@ class MemoryIngests:
             return False
         self.started.append(start)
         return True
+
+
+class LockRace:
+    """The memory store's units of work, letting another request in once: what ``let_in``
+    names runs, and commits, just before the ``before``-th unit opened from then on, as a request
+    that took a row lock first commits while this one waits for the lock. A resolution opens its
+    second unit to lock the task."""
+
+    def __init__(self, store: MemoryStore) -> None:
+        self.store = store
+        self._meanwhile: Callable[[], object] | None = None
+        self._left = 0
+
+    def let_in(self, meanwhile: Callable[[], object], *, before: int) -> None:
+        self._meanwhile, self._left = meanwhile, before
+
+    def __call__(self) -> AbstractContextManager[UnitOfWork]:
+        if self._meanwhile is not None:
+            self._left -= 1
+            if self._left == 0:
+                meanwhile, self._meanwhile = self._meanwhile, None
+                meanwhile()
+        return self.store()

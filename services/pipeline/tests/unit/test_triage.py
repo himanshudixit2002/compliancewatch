@@ -7,7 +7,7 @@ document through an ingest of the stored document; irrelevant sets it aside. The
 document's own type is never changed."""
 
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -27,7 +27,6 @@ from pipeline.domain.classification import TRIAGE, Relevance, TriageDecision, Ty
 from pipeline.domain.errors import TaskClosedError
 from pipeline.domain.events import DocumentClassified
 from pipeline.domain.raw_documents import DocumentStatus
-from pipeline.domain.repository import UnitOfWork
 from pipeline.domain.tasks import PipelineTask, TaskKind, TaskStatus
 from pipeline.infrastructure.adapters import RegistryAdapterTypes, RegistryCatalog
 from pipeline.infrastructure.http import PoliteClient
@@ -36,7 +35,13 @@ from pipeline.infrastructure.parsers import ParserChain
 from pipeline.infrastructure.raw_store import MemoryRawStore
 from pipeline.infrastructure.temporal import ingest_payload
 from pipeline.main import build_app
-from pipeline.testing import WRITE_TOKEN, MemoryCrawls, MemoryIngests, pipeline_settings
+from pipeline.testing import (
+    WRITE_TOKEN,
+    LockRace,
+    MemoryCrawls,
+    MemoryIngests,
+    pipeline_settings,
+)
 from pipeline.workflows import IngestRequest
 
 BASE = "/v1/pipeline"
@@ -108,29 +113,6 @@ class Triage:
         """Another analyst's request resolving ``task`` with ``decision``."""
         admin = AdminAction(actor=AuditActor.user(UserId(OTHER_ANALYST)), reason=REASON)
         return lambda: self.resolver().run(task.id, None, admin, triage=decision)
-
-
-class LockRace:
-    """The memory store's units of work, letting another request in once: what ``let_in``
-    names runs, and commits, just before the ``before``-th unit opened from then on, as a request
-    that took a task's row lock first commits while this one waits for the lock. A triage's
-    resolution opens its second unit to lock the task."""
-
-    def __init__(self, store: MemoryStore) -> None:
-        self.store = store
-        self._meanwhile: Callable[[], object] | None = None
-        self._left = 0
-
-    def let_in(self, meanwhile: Callable[[], object], *, before: int) -> None:
-        self._meanwhile, self._left = meanwhile, before
-
-    def __call__(self) -> AbstractContextManager[UnitOfWork]:
-        if self._meanwhile is not None:
-            self._left -= 1
-            if self._left == 0:
-                meanwhile, self._meanwhile = self._meanwhile, None
-                meanwhile()
-        return self.store()
 
 
 @contextmanager
