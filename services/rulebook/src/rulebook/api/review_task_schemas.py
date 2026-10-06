@@ -36,6 +36,7 @@ from rulebook.domain.intake import (
     CandidateSummary,
     RuleCandidateStatus,
     RuleRejectReason,
+    version_closed,
 )
 from rulebook.domain.publication import DecisionAction, RuleVersionDecision, required_approvals
 from rulebook.domain.review_tasks import (
@@ -554,7 +555,13 @@ class ReviewTaskDetailOut(BaseModel):
         url = None if version is None else version.source.get("url")
         return cls(
             task=ReviewTaskOut.from_task(detail.task),
-            rule_version=None if version is None else RuleVersionOut.from_record(version),
+            rule_version=None
+            if version is None
+            else RuleVersionOut.from_record(
+                version,
+                closed=detail.candidate is not None
+                and version_closed(version, detail.candidate.candidate),
+            ),
             specification_described=list(detail.specification_described),
             citations=[CitationOut.from_record(citation) for citation in detail.citations],
             documents=[TaskDocumentOut.from_document(document) for document in detail.documents],

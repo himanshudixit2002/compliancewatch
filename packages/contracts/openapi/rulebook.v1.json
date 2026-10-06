@@ -4455,6 +4455,12 @@
             "title": "Citations",
             "type": "array"
           },
+          "closed": {
+            "default": false,
+            "description": "A draft whose rule candidate was rejected: it stays a draft and never moves on (citing, submitting, approving and publishing it are refused), so a reader that takes a rule's latest version skips it",
+            "title": "Closed",
+            "type": "boolean"
+          },
           "effective_from": {
             "format": "date",
             "title": "Effective From",
@@ -4593,6 +4599,12 @@
       },
       "RuleVersionOut": {
         "properties": {
+          "closed": {
+            "default": false,
+            "description": "A draft whose rule candidate was rejected: it stays a draft and never moves on (citing, submitting, approving and publishing it are refused), so a reader that takes a rule's latest version skips it",
+            "title": "Closed",
+            "type": "boolean"
+          },
           "effective_from": {
             "format": "date",
             "title": "Effective From",
@@ -9413,7 +9425,7 @@
     },
     "/v1/rulebook/rules/{rule_key}/versions": {
       "get": {
-        "description": "The drafts the seed command writes as well as the versions past them: where a workbench\nfinds the version to cite, submit and publish. 404 when no rule has the key.",
+        "description": "The drafts the seed command writes as well as the versions past them: where a workbench\nfinds the version to cite, submit and publish. A closed draft (its rule candidate was\nrejected) is listed with ``closed`` true: it never moves on, so a reader after the rule's\nlatest version skips it. 404 when no rule has the key.",
         "operationId": "list_versions_of_rule_v1_rulebook_rules__rule_key__versions_get",
         "parameters": [
           {

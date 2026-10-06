@@ -42,9 +42,17 @@ class RuleVersionOut(BaseModel):
     todo: list[str]
     published_at: datetime | None
     high_impact: bool = Field(description="Publishing needs two different approvers (ADR-006)")
+    closed: bool = Field(
+        default=False,
+        description=(
+            "A draft whose rule candidate was rejected: it stays a draft and never moves on "
+            "(citing, submitting, approving and publishing it are refused), so a reader that "
+            "takes a rule's latest version skips it"
+        ),
+    )
 
     @classmethod
-    def from_record(cls, record: RuleVersionRecord) -> Self:
+    def from_record(cls, record: RuleVersionRecord, *, closed: bool = False) -> Self:
         return cls(
             rule_version_id=record.rule_version_id.value,
             rule_id=record.rule_id.value,
@@ -65,6 +73,7 @@ class RuleVersionOut(BaseModel):
             todo=list(record.todo),
             published_at=record.published_at,
             high_impact=record.high_impact,
+            closed=closed,
         )
 
 
@@ -106,7 +115,7 @@ class RuleVersionDetailOut(RuleVersionOut):
     @classmethod
     def from_detail(cls, detail: RuleVersionDetail) -> Self:
         return cls(
-            **RuleVersionOut.from_record(detail.record).model_dump(),
+            **RuleVersionOut.from_record(detail.record, closed=detail.closed).model_dump(),
             approved_by=[approver.value for approver in detail.approved_by],
             citations=[CitationOut.from_record(citation) for citation in detail.citations],
         )

@@ -12,8 +12,9 @@ token mode.
 """
 
 from collections.abc import Iterator
-from typing import Any, Final
+from typing import Any, Final, cast
 
+import httpx2
 import pytest
 
 from cw_demo.product.analysts import DRAFTER, FIRST_REVIEWER, NOTE, SECOND_REVIEWER
@@ -210,3 +211,25 @@ def test_the_tool_refuses_outside_local_and_test_and_in_token_mode(
     assert all(seen == ["draft/needs_review"] for seen in by_status(product).values()), (
         "nothing was published"
     )
+
+
+def test_a_closed_draft_is_left_out_so_the_last_version_is_the_one_to_publish() -> None:
+    """A rule candidate's draft that was rejected stays a draft numbered past the published
+    version, flagged ``closed``: ``rule_versions`` leaves it out, so publishing and the product
+    check never take it for the rule's latest version."""
+    listed = [
+        {"rule_version_id": "example-1", "version": 1, "status": "published", "closed": False},
+        {"rule_version_id": "example-2", "version": 2, "status": "draft", "closed": True},
+        {"rule_version_id": "example-3", "version": 3, "status": "draft"},
+    ]
+
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        assert request.url.path == f"/v1/rulebook/rules/{GSTR9}/versions"
+        return httpx2.Response(200, json=listed)
+
+    with httpx2.Client(
+        transport=httpx2.MockTransport(answer), base_url="http://internal.test"
+    ) as internal:
+        product = Product(cast(ProductSettings, None), internal, internal, internal)
+        kept = [version["rule_version_id"] for version in rule_versions(product, GSTR9)]
+    assert kept == ["example-1", "example-3"], "a version without the flag predates it"
