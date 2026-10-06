@@ -199,7 +199,7 @@ ts-dev: check-pnpm ## next dev (:3000) and whatsapp-bot (:8080) with reload
 	$(PNPM) turbo run dev
 
 # ---- Composition (guide sections 13, 17, 19) -------------------------------------------------
-.PHONY: install lint format typecheck test check eval eval-check label demo runbooks-check migrate run worker relay replay seed openapi contracts contracts-check hooks ci-lint crawl-report extract-backlog
+.PHONY: install lint format typecheck test check eval eval-check label demo runbooks-check migrate run worker relay replay seed openapi contracts contracts-check hooks ci-lint crawl-report extract-backlog golden-export
 # The gates `make check` runs. A package adds its own with `CHECKS += <target>` in its section.
 # The prerequisites of check expand a second time when make runs them (.SECONDEXPANSION below),
 # so a `CHECKS +=` line counts wherever it sits in this file.
@@ -278,6 +278,16 @@ backfill: check-uv ## Backfill from a plan through the crawl workflow: make back
 	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3Dpipeline%2Cpublic"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA=pipeline CW_PIPELINE_STORE=postgres CW_LOG_LEVEL=WARNING \
 	  $(UV) run --package compliancewatch-pipeline pipeline-backfill $(ARGS)
+
+# The rule candidates analysts decided since a day, as draft golden extraction cases
+# (rulebook.golden): cases/<id>.yaml and summary.yaml under --out, never inside evals/golden. It
+# reads the database make migrate uses.
+golden-export: check-uv ## Decided rule candidates as draft golden cases: make golden-export ARGS="--since 2026-10-01 --out var/golden-export"
+	@[ -n "$(ARGS)" ] || { echo 'usage: make golden-export ARGS="--since YYYY-MM-DD --out <dir> [--json]"'; exit 1; }
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3Drulebook%2Cpublic"; \
+	CW_DATABASE_URL="$$url" CW_DB_SCHEMA=rulebook CW_LOG_LEVEL=WARNING \
+	  $(UV) run --package compliancewatch-rulebook rulebook-golden-export $(ARGS)
 
 # The crawl's report over the pipeline store and the F1 check (every new CBIC notification detected
 # within 6 hours over the window): exit 0 when F1 is met, 1 when it is not, 2 when the store cannot

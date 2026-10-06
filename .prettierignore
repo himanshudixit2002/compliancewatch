@@ -16,6 +16,7 @@ packages/ontology/
 packages/py-common/
 packages/contracts/clients/python/
 packages/contracts/openapi/
+packages/contracts/golden/
 evals/
 infra/
 docs/

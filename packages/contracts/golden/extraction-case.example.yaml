@@ -1,0 +1,73 @@
+case_id: 05-2000-example-0000a001
+label_status: draft
+labelled_by: 00000000-0000-0000-0000-000000000048
+reviewed_by: ''
+source:
+  source_key: cbic_notifications
+  number: 05/2000-Example
+  title: Example notification 05/2000
+  url: https://example.invalid/notification-05-2000.pdf
+  published_at: '2000-02-25'
+  sha256: 0bdfcaf4debc8056d643e20de9b9c99512ad44034bf71e01e0dc413fcf4be26c
+  fetched_at: '2000-01-03T04:30:00+00:00'
+document:
+  doc_type: notification
+  language: en
+  title: Example notification 05/2000
+  clauses:
+  - ref: en.p1
+    page: 1
+    text: Example notification No. 05/2000 of the example board.
+  - ref: en.p2
+    page: 1
+    text: Every registered person furnishing the example return shall file the example statement for each
+      month by the eleventh day of the following month.
+  - ref: en.p3
+    page: 1
+    text: This example notification shall come into effect from 1st March, 2000.
+expected:
+  title: 'Example: the monthly example statement'
+  summary: An example notification has registered persons file an example statement.
+  doc_kind: notification
+  change_kind: none
+  effective_from: '2000-03-01'
+  effective_to: null
+  references:
+  - Example notification No. 01/2000
+  applies_to:
+  - attribute: registration_type
+    operator: eq
+    value: regular
+    clause_ref: en.p2
+  obligation:
+    title: File the example statement
+    steps:
+    - Furnish the example statement
+    evidence_type: filing_acknowledgement
+    due_in_days: null
+    clause_ref: en.p2
+  recurrence:
+    frequency: monthly
+    due_day: 11
+    due_month_offset: 1
+    clause_ref: en.p2
+  amounts: []
+  citations:
+  - clause_ref: en.p2
+    quote: shall file the example statement for each month by the eleventh day
+  - clause_ref: en.p3
+    quote: shall come into effect from 1st March, 2000
+  confidence: 0.8
+export:
+  candidate_id: 00000000-0000-4000-8000-00000000a001
+  rule_version_id: 00000000-0000-4000-8000-00000000b001
+  rule_key: example_statement_monthly
+  version: 1
+  prompt_version: extraction.rule_candidate@1
+  decided_at: '2000-01-03T04:36:00+00:00'
+  edited:
+  - title
+notes: 'Exported as a draft from the rulebook''s review: expected is the approved version''s content in
+  the candidate shape. doc_kind, change_kind, references and amounts are the model''s, which a version
+  does not hold: check them. A second analyst reviews the case before label_status moves on; nothing here
+  is reviewed.'

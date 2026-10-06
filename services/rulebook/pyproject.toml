@@ -20,6 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
+rulebook-golden-export = "rulebook.golden:main"
 rulebook-seed = "rulebook.seed:main"
 rulebook-quality = "rulebook.quality:main"
 rulebook-transitions = "rulebook.transitions:main"

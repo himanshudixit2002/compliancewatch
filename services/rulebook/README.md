@@ -503,12 +503,38 @@ migrations and the seed calendar, or on a deployed database through the reposito
 violation (exit code 1) also labels it `data-quality`. What to do about a violation:
 `docs/runbooks/rulebook-data-quality.md`.
 
+## Golden export
+
+`rulebook-golden-export` (`make golden-export ARGS="--since 2026-10-01 --out var/golden-export"`)
+reads the rule candidates analysts decided on or after a day and writes them as draft cases of
+the extraction golden set (`application/golden_export.py`), for an analyst to review and copy into
+`evals/golden/extraction/cases` by hand:
+
+- An approved candidate is one case, `<out>/cases/<case id>.yaml`, in the shape
+  `pipeline-label prepare` writes and the eval harness loads: `label_status: draft`,
+  `labelled_by` the analyst who decided it, `reviewed_by` empty, the document's clauses as stored,
+  and `expected` the approved version's content mapped back to the candidate shape (what the
+  analyst corrected is in `export.edited`). The case id is the notification number's slug and the
+  candidate id's last eight hex digits.
+- A rejected candidate is listed in `<out>/summary.yaml` with its reason: the golden shape has no
+  negative case.
+- A candidate whose approved conditions the shape cannot hold (anything but an `all_of` of
+  attribute, operator and value) is skipped, with why, in the summary.
+
+It refuses an `--out` inside `evals/golden` (exit 2): only a person moves a case there, after
+a review, and no exported case is ever marked reviewed. `ARGS` takes `--json` for the summary as
+JSON; exit 1 when the database cannot be read. `make golden-export` reads the local stack's
+`rulebook` schema. `packages/contracts/golden/extraction-case.example.yaml` is one exported case
+from synthetic data: `tests/contract/test_golden_case_shape.py` checks the export against it and
+the eval harness's `tests/unit/test_exported_case.py` loads it, so the two sides agree on the
+shape without importing each other.
+
 ## Layout
 
 ```
 src/rulebook/
   api/             # routers (documents, review, review_tasks, rule_versions, publication, graph, search; changes, the public GET /v1/changes), request/response schemas, the write-token and review-token dependencies
-  application/     # use cases: documents.py, alignment.py, review.py, review_tasks.py (and drafting from a candidate), intake.py (the candidate intake), relations.py, rule_versions.py, publication.py, graph.py, search.py, changes.py; seed_loader.py
+  application/     # use cases: documents.py, alignment.py, review.py, review_tasks.py (and drafting from a candidate), intake.py (the candidate intake), relations.py, rule_versions.py, publication.py, graph.py, search.py, changes.py, golden_export.py (decided candidates as draft golden cases); seed_loader.py
   domain/          # documents.py, alignment.py, review.py, review_tasks.py, intake.py (rule candidates and the draft they propose), drafting.py (the checks of a draft's content), relations.py, rule_versions.py, publication.py (the planner), events.py, graph.py, search.py, changes.py (the feed), runs.py, ids.py, errors.py, repository.py, seed.py
   infrastructure/  # models.py (with the Vector column type), knowledge_repository.py (Postgres unit of work and outbox sink), memory.py, seed_repository.py, review_metrics.py (the gauges of both review queues)
   settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN, CW_RULEBOOK_REVIEW_TOKEN, CW_RULEBOOK_PUBLISH_ENABLED, CW_RULEBOOK_CANDIDATE_INTAKE_ENABLED, CW_RULEBOOK_SEED_ON_START (local and test, memory store)
@@ -518,6 +544,7 @@ src/rulebook/
   seed.py          # rulebook-seed command
   quality.py       # rulebook-quality command: domain/quality.py checks, application/quality.py, infrastructure/quality_reader.py
   transitions.py   # rulebook-transitions command (the daily sweep)
+  golden.py        # rulebook-golden-export command
   main.py          # composition root: build_app(settings), store selection, the seed calendar loaded at start when asked, problem statuses, the review queue gauges when telemetry is on
 seed/gst_calendar.yaml   # the seed calendar
 migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and targets models.Base.metadata
@@ -535,7 +562,7 @@ migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and 
 tests/
   unit/            # domain, use cases and API on the memory store; test_models_vocabulary.py: model CHECKs against the kernel enums
   integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work and its reads; the search index; the publish guard, the outbox and the sweep; the changes feed read by a plain role; review tasks with their checks, index and guard; rule candidates, their tasks and the consumer's transaction
-  contract/        # test_openapi.py: the served schema equals the committed spec; test_events.py: the rule events and rule.rejected match their schemas
+  contract/        # test_openapi.py: the served schema equals the committed spec; test_events.py: the rule events and rule.rejected match their schemas; test_golden_case_shape.py: an exported case equals packages/contracts/golden/extraction-case.example.yaml
 alembic.ini, pyproject.toml, Dockerfile
 ```
 
