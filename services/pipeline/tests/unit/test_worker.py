@@ -65,6 +65,11 @@ def test_the_worker_serves_every_workflow_and_activity_on_the_pipeline_queue() -
     assert not components(settings()).loops()
 
 
+def test_the_worker_needs_the_postgres_store() -> None:
+    with pytest.raises(ValueError, match="CW_PIPELINE_STORE=postgres"):
+        components(settings(pipeline_store="memory"))
+
+
 def test_python_m_pipeline_worker_runs_the_components(monkeypatch: pytest.MonkeyPatch) -> None:
     ran: list[tuple[object, object]] = []
     monkeypatch.setattr(worker, "run_worker_process", lambda s, c, *, version: ran.append((s, c)))

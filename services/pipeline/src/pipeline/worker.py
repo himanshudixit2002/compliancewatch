@@ -91,7 +91,10 @@ def activities(
 
 
 def components(settings: PipelineSettings) -> WorkerComponents:
-    """The Temporal worker of the ``pipeline`` task queue: every workflow and activity."""
+    """The Temporal worker of the ``pipeline`` task queue: every workflow and activity. Its
+    activities record what they fetch in Postgres, so it needs ``CW_PIPELINE_STORE=postgres``."""
+    if settings.pipeline_store != "postgres":
+        raise ValueError("the pipeline worker needs CW_PIPELINE_STORE=postgres")
     return WorkerComponents(
         temporal=(
             TemporalComponent(WorkerConfig(task_queue=TASK_QUEUE), WORKFLOWS, activities(settings)),
