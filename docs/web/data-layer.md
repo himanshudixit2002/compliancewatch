@@ -567,8 +567,11 @@ The routes that require an `Idempotency-Key` are listed in `IDEMPOTENT_ROUTES` i
 `server/api/idempotency.ts`: the business API's `POST /v1/businesses` (`profile.create-business`)
 and `POST /v1/businesses/{business_id}/registrations` (`profile.add-registration`), the
 engine's evaluate, the obligation service's status, assignee and comment writes (under its own
-prefix, which the obligation page uses, and again under the public API's `/v1/obligations`), and
-a CA firm's bulk change card. Without the header they answer 428 (`idempotency-key-required`,
+prefix, which the obligation page uses, and again under the public API's `/v1/obligations`),
+a CA firm's bulk change card, and the pipeline's retry of a stored document
+(`pipeline.retry-document`, which keeps its key on the retry it records: the same request
+replays its attempt for as long as the retry is kept, not for 24 hours). Without the header they
+answer 428 (`idempotency-key-required`,
 kind `precondition_required`); with it they replay the first response for 24 hours with
 `Idempotent-Replayed: true`, answer 422 (`idempotency-key-reused`) when the same key comes with a
 different body, and 409 with `Retry-After` while the first request is still running; a refusal
