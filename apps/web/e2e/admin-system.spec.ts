@@ -29,7 +29,14 @@ test.describe("system", () => {
     await expect(page).toHaveURL(new RegExp(`${PAGE}$`));
     await expect(page.getByRole("heading", { level: 1, name: "System" })).toBeVisible();
     const summary = page.locator("[data-slot='system-summary']");
-    await expect(summary).toContainText(`${SERVICE_NAMES.length} of ${SERVICE_NAMES.length}`);
+    const stat = (label: string) =>
+      summary
+        .locator("[data-slot='stat-card']")
+        .filter({ has: page.getByText(label, { exact: true }) })
+        .locator("dd");
+    const all = `${SERVICE_NAMES.length} of ${SERVICE_NAMES.length}`;
+    await expect(stat("Answer their health check")).toHaveText(all);
+    await expect(stat("Ready to serve")).toHaveText(all);
     await expect(page.locator("tr[data-service]")).toHaveCount(SERVICE_NAMES.length);
     for (const service of SERVICE_NAMES) {
       const response = await fetch(`${serviceUrl(service)}/health`);
