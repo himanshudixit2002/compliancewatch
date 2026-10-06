@@ -16,12 +16,16 @@ import type {
   EntityGroupDecision,
   EntityResolution,
   EntityResolutionDto,
+  MentionGroup,
+  MentionGroupDto,
   MentionedClause,
   MentionedClauseDto,
   RejectInDto,
   RelationCandidate,
   RelationCandidateDto,
   RelationDto,
+  ReviewItem,
+  ReviewItemDto,
   RuleRelation,
   RulebookDocument,
   RulebookDocumentDto,
@@ -30,6 +34,27 @@ import type {
   SearchInDto,
   SearchQuery,
 } from "./types";
+
+export function reviewItemFromDto(dto: ReviewItemDto): ReviewItem {
+  return {
+    reviewId: dto.review_id,
+    documentId: dto.document_id,
+    clauseId: dto.clause_id,
+    mentionText: dto.mention_text,
+    spanStart: dto.span_start,
+    spanEnd: dto.span_end,
+    reason: dto.reason,
+  };
+}
+
+export function mentionGroupFromDto(dto: MentionGroupDto): MentionGroup {
+  return {
+    entityType: dto.entity_type,
+    proposedName: dto.proposed_name,
+    openCount: dto.open_count,
+    examples: dto.examples.map(reviewItemFromDto),
+  };
+}
 
 export function clauseFromDto(dto: ClauseDto): Clause {
   return {

@@ -58,6 +58,84 @@ export type ApproveInDto = Schemas["ApproveIn"];
 export type ApprovalOutDto = Schemas["ApprovalOut"];
 export type RejectInDto = Schemas["RejectIn"];
 export type RelationCandidateDto = Schemas["RelationCandidateOut"];
+export type MentionGroupDto = Schemas["MentionGroupOut"];
+export type ReviewItemDto = Schemas["ReviewItemOut"];
+
+/** domain_kernel's decisions over a mention group, in the spec's order. */
+export const MENTION_DECISIONS = [
+  "create_entity",
+  "add_alias",
+  "reject",
+] as const satisfies readonly MentionDecision[];
+
+/** Why a mention group is rejected (the rulebook's EntityRejectReason), in the spec's order. */
+export const ENTITY_REJECT_REASONS = [
+  "not_an_entity",
+  "wrong_type",
+  "text_artifact",
+  "out_of_scope",
+] as const satisfies readonly EntityRejectReason[];
+
+/** Why a relation candidate is rejected (CandidateRejectReason), in the spec's order. */
+export const CANDIDATE_REJECT_REASONS = [
+  "wrong_kind",
+  "wrong_target",
+  "not_in_text",
+  "duplicate",
+  "out_of_scope",
+] as const satisfies readonly CandidateRejectReason[];
+
+/** The states a relation candidate is listed in (CandidateStatus), in the spec's order. */
+export const CANDIDATE_STATUSES = [
+  "open",
+  "approved",
+  "rejected",
+] as const satisfies readonly CandidateStatus[];
+
+/**
+ * The relations whose target must be a rule version (domain_kernel.knowledge.RULE_VERSION_ONLY):
+ * approving one needs the affected version, as does a candidate that names a target rule key.
+ */
+export const RULE_VERSION_ONLY_RELATIONS = [
+  "supersedes",
+  "extends_deadline",
+  "corrects",
+  "withdraws",
+] as const satisfies readonly RelationKind[];
+
+/**
+ * Why alignment queued a mention for review (the rulebook's ReviewReason): no entity has the
+ * name, several share it as an alias, the name is empty, or a section or rule lacks its statute.
+ */
+export const MENTION_REVIEW_REASONS = [
+  "no_match",
+  "ambiguous_alias",
+  "empty_name",
+  "unqualified",
+] as const;
+
+/** One open mention in a review group, with where it sits (code points, end exclusive). */
+export interface ReviewItem {
+  reviewId: string;
+  documentId: string;
+  clauseId: string;
+  mentionText: string;
+  spanStart: number;
+  spanEnd: number;
+  /** One of MENTION_REVIEW_REASONS, or a reason this app does not know yet. */
+  reason: string;
+}
+
+/**
+ * The open mentions of one (entity type, proposed name): how many, and the first few as
+ * examples. A decision covers every open mention of the group, or the ones it names.
+ */
+export interface MentionGroup {
+  entityType: EntityType;
+  proposedName: string;
+  openCount: number;
+  examples: readonly ReviewItem[];
+}
 
 /**
  * One decision over every open mention of an (entity type, proposed name) group, or over the

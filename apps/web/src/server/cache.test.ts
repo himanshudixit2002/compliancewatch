@@ -45,8 +45,6 @@ describe("tags", () => {
     expect(tags.rulebook.rules()).toBe("rulebook:rules");
     expect(tags.rulebook.document("doc-1")).toBe("rulebook:document:doc-1");
     expect(tags.rulebook.clause("clause-1")).toBe("rulebook:clause:clause-1");
-    expect(tags.rulebook.reviewEntities()).toBe("rulebook:review-entities");
-    expect(tags.rulebook.reviewRelations()).toBe("rulebook:review-relations");
     expect(tags.notification.templates()).toBe("notification:templates");
     expect(tags.llm.prompts()).toBe("llm-gateway:prompts");
     expect(tags.llm.models()).toBe("llm-gateway:models");
@@ -61,8 +59,6 @@ describe("tags", () => {
       tags.rulebook.rules(),
       tags.rulebook.document(TENANT),
       tags.rulebook.clause(TENANT),
-      tags.rulebook.reviewEntities(),
-      tags.rulebook.reviewRelations(),
       tags.notification.templates(),
       tags.llm.prompts(),
       tags.llm.models(),
