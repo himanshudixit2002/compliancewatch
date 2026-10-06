@@ -144,16 +144,27 @@ the API answers. One failed step does not stop the next.
   Nothing is stored or published; the gateway books each ask its cache did not answer at a
   tiny estimated price in its ledger. ``tools/demo/tests/unit/test_extraction_flow.py``
   extracts from a recorded notification.
+- ``operations``: the pipeline's operations routes on the internal listener, read only. ``GET
+  /v1/pipeline/runs`` lists the crawl runs the latest started first, ``GET /v1/pipeline/documents``
+  every source's documents the latest fetched first, each with a known status and the type the
+  pipeline reads it as (a status filter lists that status only), and ``GET
+  /v1/pipeline/outbox/dead`` the outbox's dead rows the newest dead first, without their bodies.
+  Dead rows are reported, not judged: an admin requeues one once its cause is fixed, which the
+  check never does. The public listener answers all three 404 in header mode. Nothing is
+  retried, requeued or written: ``tools/demo/tests/unit/test_pipeline_ops_flow.py`` retries,
+  requeues and replays on memory stores.
 """
 
 import io
 import json
 import re
 import time
+from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Final
 from uuid import UUID, uuid4
@@ -2540,6 +2551,106 @@ def read_task(product: Product, task: Mapping[str, Any]) -> str:
     )
 
 
+# ---------------------------------------------------------------- operations
+
+RUNS: Final = "/v1/pipeline/runs"
+EVERY_DOCUMENT: Final = "/v1/pipeline/documents"
+DEAD_OUTBOX: Final = "/v1/pipeline/outbox/dead"
+OPERATIONS_PAGE: Final = 50
+DOCUMENT_STATUSES: Final = frozenset(
+    {
+        "discovered",
+        "parsed",
+        "failed",
+        "irrelevant",
+        "classified",
+        "triage",
+        "reference",
+        "extracted",
+    }
+)
+
+
+def _latest_first(items: Sequence[Mapping[str, Any]], moment: str, path: str) -> None:
+    """Fail unless the items are the latest first by ``moment``."""
+    moments = [datetime.fromisoformat(str(item[moment])) for item in items if item.get(moment)]
+    if any(later > earlier for earlier, later in pairwise(moments)):
+        raise StepFailedError(f"GET {path} does not list the latest {moment} first")
+
+
+def _counted(counts: Counter[str]) -> str:
+    return ", ".join(f"{count} {name}" for name, count in sorted(counts.items())) or "none"
+
+
+def operations(context: CheckContext) -> list[str]:
+    product = context.product
+    page = {"limit": OPERATIONS_PAGE}
+    runs: list[dict[str, Any]] = ok(product.internal.get(RUNS, params=page))["items"]
+    _latest_first(runs, "started_at", RUNS)
+    documents: list[dict[str, Any]] = ok(product.internal.get(EVERY_DOCUMENT, params=page))["items"]
+    _latest_first(documents, "fetched_at", EVERY_DOCUMENT)
+    odd = [
+        str(item.get("document_id"))
+        for item in documents
+        if item.get("status") not in DOCUMENT_STATUSES or "read_as" not in item
+    ]
+    if odd:
+        raise StepFailedError(
+            f"GET {EVERY_DOCUMENT} listed documents without a known status or the type the "
+            f"pipeline reads them as: {', '.join(odd[:5])}"
+        )
+    filtered_line = f"GET {EVERY_DOCUMENT}?status=: not tried, no document is stored"
+    if documents:
+        status = str(documents[0]["status"])
+        filtered = ok(product.internal.get(EVERY_DOCUMENT, params={**page, "status": status}))[
+            "items"
+        ]
+        if not filtered or any(item.get("status") != status for item in filtered):
+            raise StepFailedError(
+                f"GET {EVERY_DOCUMENT}?status={status} listed another status, or none"
+            )
+        filtered_line = f"GET {EVERY_DOCUMENT}?status={status}: {status} only"
+    dead: list[dict[str, Any]] = ok(product.internal.get(DEAD_OUTBOX, params=page))["items"]
+    _latest_first(dead, "dead_at", DEAD_OUTBOX)
+    bodies = [str(row.get("event_id")) for row in dead if "payload" in row]
+    if bodies:
+        raise StepFailedError(f"GET {DEAD_OUTBOX} listed a body: {', '.join(bodies[:5])}")
+    hidden = [
+        f"{path} {describe(answer)}"
+        for path in (RUNS, EVERY_DOCUMENT, DEAD_OUTBOX)
+        if (answer := product.public.get(path)).status_code != 404
+        or problem_slug(answer) != ROUTE_NOT_FOUND
+    ]
+    if hidden:
+        raise StepFailedError(f"the public listener answered {'; '.join(hidden)}, not 404")
+    latest = (
+        ""
+        if not runs
+        else f"; the latest: {runs[0]['source_key']} {runs[0]['status']}"
+        f" ({runs[0].get('trigger') or 'no trigger'})"
+    )
+    if dead:
+        topics = _counted(Counter(str(row.get("topic")) for row in dead))
+        dead_line = (
+            f"GET {DEAD_OUTBOX}: {len(dead)} dead row(s) on the first page ({topics}), the "
+            f"newest dead first, without their bodies: an admin requeues each once its cause is "
+            f"fixed (POST /v1/pipeline/outbox/{{event_id}}/requeue), which the check never does"
+        )
+    else:
+        dead_line = f"GET {DEAD_OUTBOX}: no dead row"
+    statuses = _counted(Counter(str(item["status"]) for item in documents))
+    return [
+        f"GET {RUNS}: {len(runs)} on the first page, the latest started first{latest}",
+        f"GET {EVERY_DOCUMENT}: {len(documents)} on the first page, the latest fetched first "
+        f"({statuses})",
+        filtered_line,
+        dead_line,
+        f"the public listener: 404 {ROUTE_NOT_FOUND} for all three",
+        "nothing retried, requeued or written: test_pipeline_ops_flow.py retries, requeues and "
+        "replays on memory stores",
+    ]
+
+
 # ---------------------------------------------------------------- the command
 
 STEPS: list[Step] = [
@@ -2599,6 +2710,12 @@ STEPS: list[Step] = [
         "the triage routes answer and the rule extraction asks the gateway with the registered "
         "prompt, ingesting nothing",
         extraction,
+    ),
+    Step(
+        "operations",
+        "the pipeline lists its crawl runs, every source's documents and its dead outbox rows, "
+        "reading only",
+        operations,
     ),
 ]
 """The steps in the order they run. A later package appends its own."""

@@ -17,7 +17,9 @@ once per change and person, that the pipeline lists its sources, refuses to craw
 crawling is off, keeps the statutes upload-only and refuses an upload that is no document,
 that every seed draft waits in the rulebook's review queue, where a task is claimed and read, and
 that the pipeline's triage routes answer and its rule extraction asks the gateway's fake model
-with the registered prompt, ingesting nothing. On a database made for the run (CI), it also
+with the registered prompt, ingesting nothing, and that the pipeline's operations routes list its
+crawl runs, every source's documents and its dead outbox rows, reading only. On a database made
+for the run (CI), it also
 proves that a withdrawn rule closes its obligations in both tenants and sends withdrawal notices.
 
 ```bash
@@ -25,8 +27,8 @@ make product                 # make dev, make migrate, make product-role, the se
                              # cw-mvp serve, cw-mvp worker and next dev; waits until all answer
 make product-seed            # synthetic tenants, the demo publication, the first decisions
 make product-check           # health, honesty, loop, isolation, recompute, fanout, reminders,
-                             # tracking, changes, public, sources, review, extraction: exit 0
-                             # means accepted
+                             # tracking, changes, public, sources, review, extraction,
+                             # operations: exit 0 means accepted
                              # (rollback reports itself skipped; CI runs it with
                              # ARGS="--destructive")
 make product-e2e             # the web app's real-data journey on it (Playwright project product)
@@ -475,6 +477,7 @@ the worker does a few seconds after the API answers, and a failed step does not 
 | sources | the pipeline's source manager on the internal listener lists the eight built-in sources with a name, regulator, cadence, status and freshness each; a fetch of a key no source has is refused as crawling off (with crawling on it would be a 404, and the step stops there without fetching a real source), then a fetch of `cbic_notifications` is refused the same way, 503 `pipeline-crawl-disabled`, and records no crawl run; the public listener answers the list 404 in header mode. No source of the product reads recorded fixtures, so no crawl runs here: `test_pipeline_crawl_flow.py` runs one. The statutes `cgst_act`, `cgst_rules` and `igst_act` read upload-only, `GET /v1/pipeline/tasks?status=open` answers, and an upload of a text file to `cgst_rules` is refused 415 `pipeline-upload-unsupported` with the source's document count unchanged (a stored document is never deleted, so the step keeps none; `test_manual_parse_flow.py` runs uploads and a manual parse) |
 | review | `POST /v1/rulebook/review/tasks/seed` opens a review task for every seed draft that has none waiting, and a second request opens none; every seed draft that needs review then has a task waiting (open or claimed), and a task waiting on a version the publish routes moved on (a seed rule `cw-product publish` published) is reported. The synthetic check analyst (`00000000-0000-4000-8000-00000000a004`) claims one task, the one it holds from an earlier run or the first open draft, and claiming it again changes nothing; the step reads the task (its draft, the specification described, the citations, the history) and `GET /v1/rulebook/review/stats`, and the public listener answers the queue 404 in header mode. Nothing is edited, decided, approved or published, so the shared database's seed drafts stay drafts that need review; `test_review_flow.py` edits, approves and publishes on memory stores |
 | extraction | only while the running gateway's routing table (`GET /v1/llm-gateway/models` on the internal listener) routes the extraction to fake models alone, `fake/...` ids, which the gateway serves in process whatever its provider (`make product` and the image product route it to `fake/echo` while the provider is fake); skipped otherwise, before anything is asked, since no route of the gateway names the provider it answers other ids from. `GET /v1/pipeline/tasks?kind=triage` answers with triage tasks only; a triage resolution of a task id nobody opened is refused 404 `pipeline-task-not-found`, and a relevant one without a type 422 `request-invalid`, so no task changes. The rule extraction's stage, built as the worker builds it, asks the gateway on the internal listener with the registered prompt `extraction.rule_candidate@1` about a synthetic notification stored nowhere: the gateway takes the prompt, the answer must name a `fake/` model, and the fake model's placeholder cites no clause, so it is read as no candidate twice. Nothing is ingested, uploaded, stored or published; the gateway books each ask its cache did not answer at a tiny estimated price in its ledger. `test_extraction_flow.py` extracts from a recorded notification |
+| operations | the pipeline's operations routes on the internal listener, read only: `GET /v1/pipeline/runs` lists the crawl runs the latest started first, `GET /v1/pipeline/documents` every source's documents the latest fetched first, each with a known status and the type the pipeline reads it as (a status filter lists that status only), and `GET /v1/pipeline/outbox/dead` the outbox's dead rows the newest dead first, without their bodies. Dead rows are reported, not judged: an admin requeues one once its cause is fixed (`POST /v1/pipeline/outbox/{event_id}/requeue`, `docs/runbooks/outbox-relay.md`), which the check never does. The public listener answers all three 404. Nothing is retried, requeued or written; `test_pipeline_ops_flow.py` retries, requeues and replays on memory stores |
 
 The fanout, changes and public steps read the business directory, the audit rows (of no tenant,
 and the CA firm's bulk notifications) and the engine's row counts of a tenant, which no route
