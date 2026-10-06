@@ -9,6 +9,7 @@ approvals of a high-impact version come from two people. ``POST .../draft``, whi
 version from a candidate, comes with the pipeline's candidates and is not served yet.
 """
 
+import hashlib
 from typing import Annotated, Final
 from uuid import UUID
 
@@ -63,7 +64,7 @@ def list_review_tasks(
     """Each task with its version's rule, number, title and status, whether it is high impact
     and how many people approved its current round. A task open again after the first of two
     approvals waits for a second, different reviewer."""
-    scope = f"{TASKS_SCOPE}.{status or 'any'}.{regulator or 'any'}"
+    scope = f"{TASKS_SCOPE}.{status or 'any'}.{_regulator_scope(regulator)}"
     after = page.after(scope, TaskCursor)
     found = wired.list_review_tasks.run(
         status=status,
@@ -75,6 +76,13 @@ def list_review_tasks(
     return Page[QueuedTaskOut](
         items=[QueuedTaskOut.from_queued(queued) for queued in kept], next_cursor=cursor
     )
+
+
+def _regulator_scope(regulator: str | None) -> str:
+    """The regulator filter in a cursor's scope, as a short digest so any name fits a cursor."""
+    if regulator is None:
+        return "any"
+    return hashlib.sha256(regulator.encode("utf-8")).hexdigest()[:16]
 
 
 @router.post(

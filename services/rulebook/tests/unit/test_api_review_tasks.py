@@ -175,6 +175,8 @@ def test_seed_tasks_open_once_and_page_through_the_queue(client: TestClient) -> 
     )
     assert queue(client, REVIEW, status="claimed") == []
     assert queue(client, REVIEW, regulator="gstn") == []
+    assert len(queue(client, REVIEW, regulator="cbic", status="open", limit=4)) == 13
+    assert [item["rule_key"] for item in every] == sorted(item["rule_key"] for item in every)
     stale = client.get(TASKS, params={"status": "open", "cursor": page["next_cursor"]})
     assert (stale.status_code, problem(stale)) == (422, "pagination-cursor-invalid")
 

@@ -173,11 +173,13 @@ class OpenSeedReviewTasks:
         self._clock = clock
 
     def run(self) -> SeedTasks:
+        """The drafts are opened a microsecond apart in rule key order, so the queue lists one
+        request's tasks by rule key rather than by their random ids."""
         now = self._clock()
         opened: list[ReviewTask] = []
         with self._unit_of_work() as uow:
-            for draft in uow.review_tasks.drafts_without_task():
-                task = ReviewTask.seed(draft, at=now)
+            for index, draft in enumerate(uow.review_tasks.drafts_without_task()):
+                task = ReviewTask.seed(draft, at=now + index * ONE_MICROSECOND)
                 if uow.review_tasks.add(task):
                     opened.append(task)
         return SeedTasks(tuple(opened))

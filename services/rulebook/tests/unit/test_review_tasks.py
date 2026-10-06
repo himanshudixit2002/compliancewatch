@@ -394,6 +394,8 @@ def test_the_queue_pages_by_regulator_priority_and_age(review: Review) -> None:
     assert [queued.task for queued in every] == sorted(
         (queued.task for queued in every), key=queue_position
     )
+    keys = [queued.rule_key for queued in every]
+    assert keys == sorted(keys), "one request's seed tasks queue by rule key"
     first = review.list.run(limit=5)
     rest = review.list.run(after=TaskKey.of(first[-1].task), limit=201)
     assert [q.task.task_id for q in [*first, *rest]] == [q.task.task_id for q in every]
