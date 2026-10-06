@@ -496,50 +496,60 @@ def test_migration_0011_goes_down_and_up_over_drafted_candidates(
 def test_a_candidate_and_its_task_name_only_the_draft_made_from_it(
     notification: PostgresKnowledgeUnitOfWorkFactory, engine: Engine
 ) -> None:
+    """Three drafts of one rule, written as SQL so no unique index answers first: one with no
+    candidate (a seed draft), one drafted from another candidate, and the candidate's own. Only
+    the candidate's own is taken, and once it is, its candidate_id never changes."""
     factory, clock = notification, Clock(START + timedelta(days=5))
-    drafted = IngestRuleCandidate(factory, clock).run(payload(), uuid4())
-    assert drafted.task is not None
-    ClaimReviewTask(factory, clock).run(drafted.task.task_id, by=ANALYST)
-    detail = DraftFromCandidate(factory, ontology_package.load, clock).run(
-        drafted.task.task_id,
-        by=ANALYST,
-        rule_key="example_keys_drafted",
-        new_rule=NewRule("cbic", AttributeLevel.REGISTRATION),
+    candidate, other, unused = (
+        IngestRuleCandidate(factory, clock).run(payload(), uuid4()) for _ in range(3)
     )
-    assert detail.version is not None
-    other = IngestRuleCandidate(factory, clock).run(payload(), uuid4())
-    assert other.task is not None
+    assert candidate.task is not None
+    rule = uuid4()
+    execute(
+        engine,
+        "INSERT INTO rule (id, rule_key, regulator, level) VALUES (:id, :key, 'cbic', 'entity')",
+        id=rule,
+        key=f"example_keys_{rule.hex[:8]}",
+    )
+    seed_draft, others_draft, own_draft = uuid4(), uuid4(), uuid4()
+    drafted_from = {
+        seed_draft: None,
+        others_draft: other.candidate.candidate_id,
+        own_draft: candidate.candidate.candidate_id,
+    }
+    for number, (version, drafted) in enumerate(drafted_from.items(), start=1):
+        execute(
+            engine,
+            "INSERT INTO rule_version (id, rule_id, version, status, title, specification,"
+            " obligation_template, effective_from, candidate_id) VALUES (:id, :rule, :number,"
+            " 'draft', 'Example draft', '{}', '{}', DATE '2000-02-01', :candidate)",
+            id=version,
+            rule=rule,
+            number=number,
+            candidate=drafted,
+        )
+    point_task = "UPDATE review_task SET rule_version_id = :version WHERE id = :id"
+    point_candidate = (
+        "UPDATE rule_candidate SET status = 'drafted', rule_version_id = :version WHERE id = :id"
+    )
     task_key, candidate_key = KEYS_0011[0], KEYS_0011[1]
-    for version in (detail.version.rule_version_id, _monthly(engine)):
+    for version in (seed_draft, others_draft):
         with pytest.raises(IntegrityError, match=task_key):
-            execute(
-                engine,
-                "UPDATE review_task SET rule_version_id = :version WHERE id = :id",
-                version=version.value,
-                id=other.task.task_id,
-            )
+            execute(engine, point_task, version=version, id=candidate.task.task_id)
         with pytest.raises(IntegrityError, match=candidate_key):
-            execute(
-                engine,
-                "UPDATE rule_candidate SET status = 'drafted', rule_version_id = :version"
-                " WHERE id = :id",
-                version=version.value,
-                id=other.candidate.candidate_id,
-            )
+            execute(engine, point_candidate, version=version, id=candidate.candidate.candidate_id)
+    execute(engine, point_task, version=own_draft, id=candidate.task.task_id)
+    execute(engine, point_candidate, version=own_draft, id=candidate.candidate.candidate_id)
     with pytest.raises(IntegrityError, match=f"{task_key}|{candidate_key}"):
         execute(
             engine,
-            "UPDATE rule_version SET candidate_id = :other WHERE id = :id",
-            other=other.candidate.candidate_id,
-            id=detail.version.rule_version_id.value,
+            "UPDATE rule_version SET candidate_id = :unused WHERE id = :id",
+            unused=unused.candidate.candidate_id,
+            id=own_draft,
         )
     assert (
-        scalar(
-            engine,
-            "SELECT rule_version_id FROM review_task WHERE id = :id",
-            id=other.task.task_id,
-        )
-        is None
+        scalar(engine, "SELECT candidate_id FROM rule_version WHERE id = :id", id=own_draft)
+        == candidate.candidate.candidate_id
     )
 
 
