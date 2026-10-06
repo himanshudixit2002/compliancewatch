@@ -110,7 +110,11 @@ the API answers. One failed step does not stop the next.
   a real source); then a fetch of ``cbic_notifications`` must be refused the same way and record
   no crawl run. The public listener answers the list 404 in header mode. A crawl over recorded
   fixtures runs in ``tools/demo/tests/unit/test_pipeline_crawl_flow.py`` and the pipeline's
-  crawl workflow tests instead.
+  crawl workflow tests instead. The statutes (``cgst_act``, ``cgst_rules``, ``igst_act``) must
+  read upload-only, the task queue (``GET /v1/pipeline/tasks``) must answer, and an upload of a
+  file that is no document must be refused 415 with nothing stored: a stored document is never
+  deleted, so the check uploads none (``tools/demo/tests/unit/test_manual_parse_flow.py`` runs
+  uploads and a manual parse).
 """
 
 import io
@@ -268,6 +272,10 @@ LOOKAHEAD: Final = timedelta(days=365)
 """How far ahead the structured layer looks for the next due date of a form."""
 ROUTE_NOT_FOUND: Final = "route-not-found"
 SOURCES: Final = "/v1/pipeline/sources"
+TASKS: Final = "/v1/pipeline/tasks"
+STATUTE_SOURCES: Final = ("cgst_act", "cgst_rules", "igst_act")
+UPLOAD_UNSUPPORTED: Final = "pipeline-upload-unsupported"
+UPLOAD_REASON: Final = "cw-product check: an upload that is no document must be refused"
 BUILT_IN_SOURCES: Final = (
     "cbic_circulars",
     "cbic_notifications",
@@ -2198,6 +2206,45 @@ def sources(context: CheckContext) -> list[str]:
         f"GET {SOURCES} on the public listener: 404 {ROUTE_NOT_FOUND}",
         "a crawl over recorded fixtures: not configured in the product, which never fetches; "
         "test_pipeline_crawl_flow.py runs one",
+        *_uploads_and_tasks(product, built_in),
+    ]
+
+
+def _uploads_and_tasks(product: Product, built_in: Sequence[Mapping[str, Any]]) -> list[str]:
+    """The statutes are upload-only, the task queue answers, and an upload of a file that is no
+    document is refused with nothing stored."""
+    listable = [
+        item["key"]
+        for item in built_in
+        if item["key"] in STATUTE_SOURCES and item.get("listable") is not False
+    ]
+    if listable:
+        raise StepFailedError(f"the statute sources must be upload-only: {', '.join(listable)}")
+    queue = ok(product.internal.get(TASKS, params={"status": "open"}))["items"]
+    target = STATUTE_SOURCES[1]
+
+    def count() -> int:
+        items = ok(product.internal.get(SOURCES))["items"]
+        return next(int(item["document_count"]) for item in items if item["key"] == target)
+
+    before = count()
+    refused = product.internal.post(
+        f"{SOURCES}/{target}/uploads",
+        files={"file": ("check.txt", b"cw-product check: no document", "text/plain")},
+        data={"actor_id": str(FETCH_ACTOR), "reason": UPLOAD_REASON},
+        headers=product.write_headers(),
+    )
+    if (refused.status_code, problem_slug(refused)) != (415, UPLOAD_UNSUPPORTED):
+        raise StepFailedError(
+            f"POST {SOURCES}/{target}/uploads answered {describe(refused)}, not 415 "
+            f"{UPLOAD_UNSUPPORTED}"
+        )
+    if count() != before:
+        raise StepFailedError(f"the refused upload stored a document under {target}")
+    return [
+        f"statutes upload-only: {', '.join(STATUTE_SOURCES)}",
+        f"GET {TASKS}?status=open: {len(queue)} open on the first page",
+        f"an upload that is no document refused: 415 {UPLOAD_UNSUPPORTED}, nothing stored",
     ]
 
 

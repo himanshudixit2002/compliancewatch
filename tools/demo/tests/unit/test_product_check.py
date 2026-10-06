@@ -647,15 +647,28 @@ def test_the_reminders_step_fails_when_nothing_is_reminded(sink: Path) -> None:
 
 
 class Sources(Scripted):
-    """The pipeline's source manager: the built-in sources, and a fetch answered with
-    ``fetch_status`` (503 crawl-disabled while crawling is off)."""
+    """The pipeline's source manager: the built-in sources, a fetch answered with
+    ``fetch_status`` (503 crawl-disabled while crawling is off), the task queue, and an upload
+    answered with ``upload_status`` (415 for a file that is no document), which stores a
+    document when ``stores`` is set."""
 
-    def __init__(self, *, fetch_status: int = 503, probe_status: int = 503) -> None:
+    def __init__(
+        self,
+        *,
+        fetch_status: int = 503,
+        probe_status: int = 503,
+        upload_status: int = 415,
+        stores: bool = False,
+    ) -> None:
         super().__init__()
         self.fetch_status = fetch_status
         self.probe_status = probe_status
+        self.upload_status = upload_status
+        self.stores = stores
         self.fetched: list[str] = []
+        self.uploaded: list[str] = []
         self.runs: dict[str, str | None] = dict.fromkeys(check.BUILT_IN_SOURCES)
+        self.documents: dict[str, int] = dict.fromkeys(check.BUILT_IN_SOURCES, 0)
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         path = request.url.path
@@ -665,6 +678,22 @@ class Sources(Scripted):
             )
         if path == check.SOURCES:
             return httpx2.Response(200, json={"items": [self.item(key) for key in self.runs]})
+        if path == check.TASKS:
+            assert request.url.params["status"] == "open"
+            return httpx2.Response(200, json={"items": [], "next_cursor": None})
+        if path.endswith("/uploads"):
+            key = path.split("/")[-2]
+            assert request.headers["x-cw-write-token"] == "test-write-token"
+            assert b'filename="check.txt"' in request.content
+            self.uploaded.append(key)
+            if self.stores:
+                self.documents[key] += 1
+            if self.upload_status == 202:
+                return httpx2.Response(202, json={"duplicate": False})
+            slug = check.UPLOAD_UNSUPPORTED
+            return httpx2.Response(
+                self.upload_status, json={"type": f"urn:compliancewatch:problem:{slug}"}
+            )
         if path.endswith("/fetch"):
             key = path.split("/")[-2]
             self.fetched.append(key)
@@ -686,6 +715,8 @@ class Sources(Scripted):
             "status": "healthy",
             "freshness": {"state": "never"},
             "latest_run": None if run is None else {"run_id": run},
+            "listable": key not in check.STATUTE_SOURCES,
+            "document_count": self.documents.get(key, 0),
         }
 
 
@@ -701,7 +732,29 @@ def test_the_sources_step_lists_the_sources_and_proves_the_fetch_refused(sink: P
         "fetch refused while crawling is off: 503 pipeline-crawl-disabled, no crawl run recorded"
     )
     assert lines[2] == "GET /v1/pipeline/sources on the public listener: 404 route-not-found"
+    assert lines[4:] == [
+        "statutes upload-only: cgst_act, cgst_rules, igst_act",
+        "GET /v1/pipeline/tasks?status=open: 0 open on the first page",
+        "an upload that is no document refused: 415 pipeline-upload-unsupported, nothing stored",
+    ]
     assert script.fetched == [check.NO_SOURCE, check.FETCHED_SOURCE]
+    assert script.uploaded == ["cgst_rules"]
+
+
+def test_the_sources_step_fails_when_a_statute_can_be_crawled(sink: Path) -> None:
+    class Crawlable(Sources):
+        def item(self, key: str) -> dict[str, Any]:
+            return {**super().item(key), "listable": True}
+
+    with pytest.raises(StepFailedError, match="must be upload-only: cgst_act, cgst_rules"):
+        check.sources(context_of(with_token(Crawlable(), sink)))
+
+
+def test_the_sources_step_fails_when_an_upload_that_is_no_document_is_taken(sink: Path) -> None:
+    with pytest.raises(StepFailedError, match="uploads answered 202"):
+        check.sources(context_of(with_token(Sources(upload_status=202), sink)))
+    with pytest.raises(StepFailedError, match="the refused upload stored a document"):
+        check.sources(context_of(with_token(Sources(stores=True), sink)))
 
 
 def test_the_sources_step_counts_other_sources_without_judging_them(sink: Path) -> None:
