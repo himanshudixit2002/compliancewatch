@@ -859,3 +859,42 @@ review" when a person has to look (`shared/ui/applicability.tsx`, the badge ever
 uses); a node without a decision says "Not decided", and a read that failed "Not known now"
 without failing the list. Consequences: a page costs one engine read per distinct node and
 version, at most 25.
+
+## D-054: TypeScript 6, jsdom 30 and the React plugin 6; ESLint stays on 9
+
+2026-10-06. One upgrade moved the TypeScript toolchain's majors together: TypeScript 5.9.3 to 6.0.3
+(the root, `apps/web` and `packages/contracts`), jsdom 27.4.0 to 30.1.2 and `@vitejs/plugin-react`
+5.2.0 to 6.1.1. Each is the newest release of its major that was more than a day old (pnpm's 24-hour
+release age refuses the rest): plugin-react 6.1.2 and typescript-eslint 8.71.1 were hours old.
+TypeScript 7.0.2 is npm's `latest`, but it is the native compiler without the JavaScript API that
+typescript-eslint and openapi-typescript load, and typescript-eslint 8.71.0 accepts `<6.1.0`.
+Unchanged: typescript-eslint 8.71.0, `next` and `eslint-config-next` 16.3.8 (the latest), vitest
+4.1.11 and Vite 8.3.1 (which vitest and the plugin share), and `@types/node` 22, the runtime's major
+(`.nvmrc`). TypeScript 6 changed defaults (`types: []`, `strict`, the target and the module) and
+deprecated options for 7. No tsconfig here uses a deprecated one (`baseUrl`, `node10` or `classic`
+resolution, ES5, `outFile`, AMD, UMD or System modules, `downlevelIteration`, an interop flag set to
+`false`). Every package already sets `strict` and its module options, and the app gets Node's types
+and the `*.css` declaration through Next's own types. So `tsc` reports nothing in any package, and
+`next build`, whose checker runs the project's `tsc` in Next 16.3, passes. openapi-typescript
+7.13.0, its latest release, still declares `typescript ^5.x`. On TypeScript 6,
+`make openapi-ts-check` finds the generated types byte for byte unchanged, so `pnpm-workspace.yaml`
+accepts that one peer in `peerDependencyRules` until the package's range covers 6. jsdom 30 raises
+its Node floor to 22.22.2: the root `engines`, the README and `local-dev.md` say so, and CI resolves
+22.23.3 from `.nvmrc`. Its rewritten CSSOM, `getComputedStyle` and focus and selector fixes changed
+no result: the same tests pass with the same coverage and nothing on stderr. plugin-react 6 drops
+its Babel pipeline (no option here used it) and Vite 7. It still forces the automatic JSX runtime
+over Next's `jsx: "preserve"`, which the web vitest config relies on. ESLint stays on 9.39.5.
+`eslint-config-next` 16.3.8, and its latest canary (16.4.0-canary.61), bundle `eslint-plugin-react`
+7.37.5, `eslint-plugin-import` 2.32.0 and `eslint-plugin-jsx-a11y` 6.10.2, whose peer ranges stop at
+ESLint 9. Under ESLint 10.12.0 the web lint crashes on its first file: the React plugin's version
+detection calls `context.getFilename()`, which ESLint 10 removed, and two of its rules
+(`jsx-filename-extension`, `forward-ref-uses-ref`) call removed methods too. Considered and
+rejected: pinning `settings.react.version`, which gets past the crash but lints the app with plugins
+on a major they do not support and a React version kept by hand, and two ESLint majors in one
+workspace (the packages on the root config lint clean on ESLint 10 with `@eslint/js` 10).
+Consequences: npm marks ESLint 9.39.5 as no longer supported, a known gap until an
+`eslint-config-next` release bundles plugins that run on ESLint 10. The move then takes the `eslint`
+and `@eslint/js` ranges, the root `eslint.config.mjs`'s two comments that name ESLint 9 (one says it
+looks the config up from the cwd; ESLint 10 looks it up from each file's directory) and a lint run.
+Vitest 5 is its own change, and TypeScript 7 waits until typescript-eslint and openapi-typescript
+run on it.
