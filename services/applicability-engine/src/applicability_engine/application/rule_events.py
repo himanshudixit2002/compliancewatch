@@ -5,11 +5,14 @@ Like the profile.updated consumer, each event is handled in two phases, so nothi
 process while a transaction is open:
 
 - ``plan_published(event)`` reads, with no transaction open: it drops the rulebook client's
-  cached listing of the versions in force (the recompute sees the new version at once) and reads
-  the version (its status, rule key and level). With the flag ``applicability.fanout`` on it then
+  cached listings of versions (the recompute sees the new version at once) and reads the version
+  (its status, rule key, level and schedule). With the flag ``applicability.fanout`` on it then
   starts the version's workflow (``FanOutWorkflows.start``; a second start of the same version is
-  refused, so a redelivered event starts nothing twice). A version that is no longer published,
-  or that the rulebook does not have, fans out nowhere.
+  refused, so a redelivered event starts nothing twice). A version the rulebook does not have, or
+  that it withdrew, fans out nowhere, and neither does a superseded one, unless it still governs
+  a duty due today (``RuleVersionSpec.still_governs``): an event read after a newer version took
+  over still fans it out to the businesses that owe its last periods. The newer version's own
+  fan-out decides only the newer version.
 - ``plan_withdrawn(event)`` drops the cached listing too: the withdrawn version is no longer in
   force.
 - ``apply(plan, units)`` writes in one unit of work of no tenant, on the consumer's connection so
@@ -22,7 +25,7 @@ process while a transaction is open:
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from applicability_engine.application.fanout import CANCEL_ACTION, run_entry
 from applicability_engine.application.fanout_runs import SYSTEM
@@ -32,6 +35,9 @@ from applicability_engine.domain.repository import FanOutUnitOfWorkFactory
 from domain_kernel.events import utc_now
 from domain_kernel.ids import CorrelationId, EventId, RuleVersionId
 from domain_kernel.status import RuleVersionStatus
+
+IST = timezone(timedelta(hours=5, minutes=30))
+"""Duties fall due on days in India."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,8 +97,11 @@ class RuleEvents:
         version = self._rulebook.rule_version(event.rule_version_id)
         if version is None:
             return RulePlan(published=event, skipped="the rulebook has no such version")
-        if version.status is not RuleVersionStatus.PUBLISHED:
-            return RulePlan(published=event, skipped=f"the version is {version.status.value}")
+        if not version.still_governs(self._clock().astimezone(IST).date()):
+            why = f"the version is {version.status.value}"
+            if version.status is RuleVersionStatus.SUPERSEDED:
+                why += " and governs no duty still due"
+            return RulePlan(published=event, skipped=why)
         if version.level is None or version.rule_key is None:
             return RulePlan(published=event, skipped="the rulebook gave no rule key or level")
         start = FanOutStart(

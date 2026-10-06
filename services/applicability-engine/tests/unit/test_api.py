@@ -163,6 +163,9 @@ class Unavailable:
     def rules_in_force(self, as_of: date, level: AttributeLevel) -> Sequence[RuleInForce]:
         raise DependencyUnavailableError("rulebook answered 502: bad gateway")
 
+    def rules_superseded_since(self, since: date, level: AttributeLevel) -> Sequence[RuleInForce]:
+        raise DependencyUnavailableError("rulebook answered 502: bad gateway")
+
     def forget_in_force(self) -> None:
         return None
 

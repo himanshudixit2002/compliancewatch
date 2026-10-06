@@ -2,7 +2,7 @@
 with no unit of work open while a profile is read, the decisions stored once with their event by
 the emit rule, the review queue kept in step, and flips counted against the superseded version."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -15,20 +15,26 @@ from applicability_engine.domain.errors import (
 )
 from applicability_engine.domain.events import ApplicabilityDecided
 from applicability_engine.domain.fanout import FanOutStart
-from applicability_engine.domain.model import Decision, Trigger
+from applicability_engine.domain.model import Decision, Schedule, Trigger
 from applicability_engine.infrastructure.memory import MemoryBusinessDirectory, MemoryStore
 from applicability_engine.testing import MemoryProfiles, MemoryRulebook, rule_version
 from domain_kernel.confidence import CERTAIN
 from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ids import BusinessId, CorrelationId, DecisionId, EventId, TenantId
 from domain_kernel.ontology import AttributeLevel
+from domain_kernel.periods import EffectivePeriod
 from domain_kernel.predicates import Applicability
 from domain_kernel.profiles import ProfileSnapshot
+from domain_kernel.recurrence import Recurrence
 from domain_kernel.status import RuleVersionStatus
 
 NOW = datetime(2026, 10, 5, 6, 0, tzinfo=UTC)
 REGULAR = {"attribute": "registration_type", "operator": "eq", "value": "regular"}
 FREE_TEXT = {"attribute": "business_category", "free_text": "Example premises shared with a hotel"}
+SEPTEMBER_STILL_DUE = Schedule(
+    EffectivePeriod(date(2026, 4, 1), date(2026, 10, 1)), Recurrence.monthly(20)
+)
+"""A monthly return superseded from 1 October: September, due 20 October, is still its own."""
 
 
 def clock() -> datetime:
@@ -230,6 +236,66 @@ def test_only_a_published_version_fans_out() -> None:
     with pytest.raises(RuleVersionNotFoundError):
         world.batch.run(BatchRequest(start))
     assert world.store.decisions == {}
+
+
+def test_a_fan_out_its_version_was_superseded_under_goes_on_while_a_return_is_still_due() -> None:
+    """Superseded on 1 October, the version still governs September, due 20 October: on 5 October
+    its fan-out decides the businesses it had not reached; on 25 October it ends, and so does a
+    superseded version whose schedule is unknown."""
+    world = World()
+    business = world.business(world.tenants[0])
+    superseded = RuleVersionStatus.SUPERSEDED
+    old = world.rulebook.put(rule_version(REGULAR, status=superseded, schedule=SEPTEMBER_STILL_DUE))
+    start = FanOutStart(
+        old.rule_version_id, "example_rule", AttributeLevel.REGISTRATION, world.event
+    )
+    outcome = world.batch.run(BatchRequest(start))
+    assert (outcome.evaluated, outcome.applies, outcome.appended, outcome.published) == (1, 1, 1, 1)
+    (decision,) = world.store.decisions.values()
+    assert (decision.business_id, decision.rule_version_id, decision.trigger) == (
+        business,
+        old.rule_version_id,
+        Trigger.RULE_PUBLISHED,
+    )
+
+    late = EvaluateBatch(
+        MemoryBusinessDirectory(world.store),
+        world.store,
+        world.profiles,
+        world.rulebook,
+        ontology_package.load(),
+        clock=lambda: datetime(2026, 10, 25, 6, 0, tzinfo=UTC),
+    )
+    with pytest.raises(RuleVersionNotPublishedError, match="superseded"):
+        late.run(BatchRequest(start))
+    unknown = world.rulebook.put(rule_version(REGULAR, status=superseded))
+    with pytest.raises(RuleVersionNotPublishedError):
+        world.batch.run(
+            BatchRequest(
+                FanOutStart(
+                    unknown.rule_version_id,
+                    "example_rule",
+                    AttributeLevel.REGISTRATION,
+                    world.event,
+                )
+            )
+        )
+    assert len(world.store.decisions) == 1
+
+
+def test_the_newer_versions_fan_out_decides_the_newer_version_alone() -> None:
+    """The businesses keep their decisions of the version it supersedes, still due or not:
+    nothing decides that version again."""
+    world = World()
+    for _ in range(2):
+        world.business(world.tenants[0])
+    old = world.rulebook.put(
+        rule_version(REGULAR, status=RuleVersionStatus.SUPERSEDED, schedule=SEPTEMBER_STILL_DUE)
+    )
+    outcome = world.batch.run(BatchRequest(world.start(old.rule_version_id)))
+    assert (outcome.evaluated, outcome.appended) == (2, 2)
+    decided = {d.rule_version_id for d in world.store.decisions.values()}
+    assert decided == {world.version.rule_version_id}
 
 
 def test_the_directory_reads_by_tenant_then_node_and_counts_a_level() -> None:

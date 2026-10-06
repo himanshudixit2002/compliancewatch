@@ -11,6 +11,12 @@ transaction:
   and, with ``lookahead_days``, the ones in force that many days from now: a version published
   to take effect later already makes obligations for the periods of the obligation service's
   window that it governs, so its decision has to follow the profile before it takes effect.
+  With ``superseded_lookback_days`` they also include the versions superseded within that many
+  days that still govern a duty due today or later (``RuleVersionSpec.still_governs``): a
+  version governs the periods whose last day it is in force on, so superseded from 1 October a
+  monthly return's version still governs September, due 20 October, and a business that comes
+  on 5 October owes it under that version, which nothing else would decide for it. On 25
+  October nothing of it is due, and it is left out.
   Locations have no listing route in the profile service, so a change on a registration or an
   entity does not reach the locations under it; a change on a location recomputes the location.
 - ``apply(plan, unit_of_work)`` writes in one unit of work of the tenant: the directory entries
@@ -123,6 +129,7 @@ class ApplyProfileUpdate:
         *,
         enabled: bool,
         lookahead_days: int = 0,
+        superseded_lookback_days: int = 0,
         clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._profiles = profiles
@@ -130,6 +137,9 @@ class ApplyProfileUpdate:
         self._ontology = ontology
         self._enabled = enabled
         self._lookahead = timedelta(days=require_int(lookahead_days, "lookahead_days", minimum=0))
+        self._lookback = timedelta(
+            days=require_int(superseded_lookback_days, "superseded_lookback_days", minimum=0)
+        )
         self._clock = clock
 
     @property
@@ -172,7 +182,7 @@ class ApplyProfileUpdate:
         decisions: list[Decision] = []
         for snapshot, level in nodes:
             if level not in rules:
-                rules[level] = self._rules_in_force(today, level)
+                rules[level] = self._rules(today, level)
             decisions.extend(self._decide(update, snapshot, rule, now) for rule in rules[level])
         return RecomputePlan(
             update,
@@ -218,11 +228,18 @@ class ApplyProfileUpdate:
             reviews=dict(reviews),
         )
 
-    def _rules_in_force(self, today: date, level: AttributeLevel) -> list[RuleInForce]:
+    def _rules(self, today: date, level: AttributeLevel) -> list[RuleInForce]:
+        """The versions a node of ``level`` is decided against today: in force today, in force
+        at the end of the lookahead, and superseded within the lookback while they still govern
+        a duty due today or later; each once, by rule key then start."""
         found = {rule.rule_version_id: rule for rule in self._rulebook.rules_in_force(today, level)}
         if self._lookahead:
             for rule in self._rulebook.rules_in_force(today + self._lookahead, level):
                 found.setdefault(rule.rule_version_id, rule)
+        if self._lookback:
+            for rule in self._rulebook.rules_superseded_since(today - self._lookback, level):
+                if rule.spec.still_governs(today):
+                    found.setdefault(rule.rule_version_id, rule)
         return sorted(found.values(), key=lambda rule: (rule.rule_key, rule.effective_from))
 
     def _decide(

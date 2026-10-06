@@ -11,7 +11,8 @@ The consumer in group ``applicability-engine.profiles`` of profile.updated: each
 - the reads, with no transaction open: the changed node's snapshot and the registrations under
   it at the profile service (``CW_PROFILE_URL``) and, with ``CW_APPLICABILITY_RECOMPUTE_ENABLED``
   (flag ``applicability.recompute``, off by default), the snapshots and the rule versions in
-  force at the rulebook (``CW_RULEBOOK_URL``), evaluated there;
+  force, or superseded but still governing a period due, at the rulebook (``CW_RULEBOOK_URL``),
+  evaluated there;
 - the writes, on units of work in the consumer's own transaction
   (``PostgresUnitOfWorkFactory.on_connection``): the business directory, the decisions with
   their applicability.decided outbox rows, the review items and the ``processed_event`` row
@@ -182,6 +183,7 @@ def recompute_of(
         ontology or load_ontology(),
         enabled=settings.applicability_recompute_enabled,
         lookahead_days=settings.applicability_engine_recompute_lookahead_days,
+        superseded_lookback_days=settings.applicability_engine_superseded_lookback_days,
     )
 
 

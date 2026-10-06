@@ -39,9 +39,15 @@ class RulebookReader(Protocol):
         ``level``, by rule key."""
         ...
 
+    def rules_superseded_since(self, since: date, level: AttributeLevel) -> Sequence[RuleInForce]:
+        """The superseded rule versions whose rules apply to nodes of ``level`` and whose
+        ``effective_to`` is on or after ``since``, by rule key then version, each with its
+        schedule; never a withdrawn one, which governs nothing."""
+        ...
+
     def forget_in_force(self) -> None:
-        """Drop any cached listing of the versions in force, so the next read asks the rulebook:
-        a version was published or withdrawn."""
+        """Drop any cached listing of versions (in force, or superseded since a day), so the
+        next read asks the rulebook: a version was published or withdrawn."""
         ...
 
 

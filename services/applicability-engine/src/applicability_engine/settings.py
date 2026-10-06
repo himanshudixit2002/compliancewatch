@@ -25,8 +25,13 @@ class ApplicabilityEngineSettings(Settings):
     ``applicability.recompute``, off by default) it also evaluates the node and the
     registrations under it against the rule versions in force today and, with
     ``applicability_engine_recompute_lookahead_days``, the ones taking effect within that many
-    days. The rulebook's listing of a day is cached for
-    ``applicability_engine_rules_cache_seconds`` (0 turns the cache off).
+    days. With ``applicability_engine_superseded_lookback_days`` (400, enough for an annual
+    return due months after its year; at most 800, since a period falls due at most about 25
+    months after it ends; 0 turns it off) it also evaluates the versions superseded within that
+    many days that still govern a period due today or later: superseded from 1 October, a
+    monthly return's version still governs September, due 20 October. Each of the
+    rulebook's listings of a day is cached for ``applicability_engine_rules_cache_seconds`` (0
+    turns the cache off).
 
     With ``applicability_fanout_enabled`` (flag ``applicability.fanout``, off by default) the
     worker's consumer of rule.published starts a fan-out of the version over the business
@@ -46,5 +51,6 @@ class ApplicabilityEngineSettings(Settings):
     applicability_recompute_enabled: bool = False
     applicability_engine_rules_cache_seconds: float = Field(default=60.0, ge=0, le=3600)
     applicability_engine_recompute_lookahead_days: int = Field(default=92, ge=0, le=366)
+    applicability_engine_superseded_lookback_days: int = Field(default=400, ge=0, le=800)
     applicability_fanout_enabled: bool = False
     applicability_dry_run_max: int = Field(default=2_000, ge=1, le=100_000)
