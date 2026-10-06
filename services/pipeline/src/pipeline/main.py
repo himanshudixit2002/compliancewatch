@@ -5,10 +5,11 @@ The store picked by ``CW_PIPELINE_STORE`` connects lazily, so importing the modu
 (``make openapi``) needs no database. The built-in sources are added to the store the app reads:
 at once on the memory store, and when the app starts on Postgres (a failure there is logged and
 the app serves all the same; the worker adds them too). With telemetry and crawling on, each
-source's freshness gauges are registered on the app's meter provider.
+source's freshness gauges are registered on the app's meter provider, and with telemetry on the
+open pipeline tasks' gauge.
 """
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -57,9 +58,11 @@ from pipeline.domain.errors import (
 from pipeline.domain.ports import AdapterTypes, CrawlStarter, IngestStarter, RawStore
 from pipeline.domain.repository import UnitOfWorkFactory
 from pipeline.domain.sources import Source
+from pipeline.domain.tasks import TaskKind
 from pipeline.infrastructure.adapters import SOURCES, RegistryAdapterTypes
 from pipeline.infrastructure.memory import MemoryStore
 from pipeline.infrastructure.source_metrics import register_source_gauges
+from pipeline.infrastructure.task_metrics import register_task_gauge
 from pipeline.infrastructure.temporal import TemporalCrawls, TemporalIngests
 from pipeline.settings import PipelineSettings
 from pipeline.stores import ping_of, raw_store_of, unit_of_work_of
@@ -180,6 +183,22 @@ def install_source_metrics(app: FastAPI, wiring: Wiring) -> bool:
     return True
 
 
+def install_task_metrics(app: FastAPI, wiring: Wiring) -> bool:
+    """Register the open-tasks gauge when telemetry is on; whether it did."""
+    telemetry: Telemetry = app.state.telemetry
+    if not (telemetry.enabled and telemetry.meter_provider is not None):
+        return False
+
+    def read() -> Mapping[TaskKind, int]:
+        with wiring.units() as unit:
+            return unit.tasks.open_counts()
+
+    register_task_gauge(
+        read, utc_now, telemetry.meter_provider.get_meter(SERVICE_NAME, __version__)
+    )
+    return True
+
+
 def build_app(
     settings: PipelineSettings | None = None,
     *,
@@ -224,6 +243,7 @@ def build_app(
     )
     app.state.wiring = wiring
     install_source_metrics(app, wiring)
+    install_task_metrics(app, wiring)
     return app
 
 
