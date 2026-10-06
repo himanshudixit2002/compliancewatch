@@ -111,7 +111,7 @@ def test_the_app_registers_the_gauges_only_with_telemetry_and_crawling_on() -> N
     reader = InMemoryMetricReader()
     app.state.telemetry = telemetry(reader)
     assert install_source_metrics(app, app.state.wiring) is True
-    assert len(points(reader, FRESHNESS)) == 5, "the built-in sources"
+    assert len(points(reader, FRESHNESS)) == 5, "the built-in sources that are crawled"
     off = build_app(pipeline_settings())
     off.state.telemetry = telemetry(InMemoryMetricReader())
     assert install_source_metrics(off, off.state.wiring) is False

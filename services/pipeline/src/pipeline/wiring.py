@@ -14,6 +14,7 @@ from pipeline.application.sources import (
     ReadRawDocument,
     SyncSources,
 )
+from pipeline.domain.ports import AdapterTypes
 from pipeline.domain.repository import UnitOfWorkFactory
 from pipeline.settings import PipelineSettings
 
@@ -22,6 +23,7 @@ from pipeline.settings import PipelineSettings
 class Wiring:
     settings: PipelineSettings
     units: UnitOfWorkFactory
+    adapter_types: AdapterTypes
     store_ready: Callable[[], Awaitable[bool]]
     sync_sources: SyncSources
     list_sources: ListSources

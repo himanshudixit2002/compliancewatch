@@ -271,10 +271,14 @@ SOURCES: Final = "/v1/pipeline/sources"
 BUILT_IN_SOURCES: Final = (
     "cbic_circulars",
     "cbic_notifications",
+    "cgst_act",
+    "cgst_rules",
     "gstcouncil_press",
     "gstn_advisories",
+    "igst_act",
     "mahagst_notifications",
 )
+"""The built-in sources; the statutes (cgst_act, cgst_rules, igst_act) are upload-only."""
 SOURCE_STATUSES: Final = frozenset({"healthy", "fetching", "failing", "paused"})
 FRESHNESS_STATES: Final = frozenset({"fresh", "late", "stale", "never"})
 CRAWL_DISABLED: Final = "pipeline-crawl-disabled"

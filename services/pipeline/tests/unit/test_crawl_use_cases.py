@@ -31,6 +31,7 @@ from pipeline.domain.errors import (
     CrawlRunningError,
     CrawlUnavailableError,
     SourceNotFoundError,
+    SourceNotListableError,
 )
 from pipeline.domain.ports import CrawlStart
 from pipeline.domain.raw_documents import RawDocumentRecord
@@ -41,7 +42,7 @@ from pipeline.domain.schedule import (
     scheduled_workflow_id,
 )
 from pipeline.domain.sources import Source, watermark_of
-from pipeline.infrastructure.adapters import SOURCES, StoreCatalog
+from pipeline.infrastructure.adapters import SOURCES, RegistryAdapterTypes, StoreCatalog
 from pipeline.infrastructure.memory import MemoryStore
 from pipeline.infrastructure.raw_store import storage_key_for
 from pipeline.testing import MemoryCrawls, recorded_client, recorded_types
@@ -52,6 +53,9 @@ REASON = "Fetch it now for the test"
 RECORDED = "recorded_cbic"
 NUMBERS = ["01/2026-Central Tax", "17/2025-Central Tax", "15/2025-Central Tax"]
 CBIC_PDF = "https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/notifications/"
+TYPES = RegistryAdapterTypes(recorded_types())
+LISTABLE = {key: spec for key, spec in SOURCES.items() if spec.kind.listable}
+UPLOAD_ONLY = ("cgst_act", "cgst_rules", "igst_act")
 
 
 class Clock:
@@ -86,7 +90,7 @@ def with_recorded(store: MemoryStore, watermark: date | None = None) -> MemorySt
 
 
 def fetch(store: MemoryStore, starter: MemoryCrawls, **overrides: object) -> CrawlStart:
-    values: dict[str, object] = {"enabled": True, "clock": Clock()}
+    values: dict[str, object] = {"enabled": True, "clock": Clock(), "types": TYPES}
     values.update(overrides)
     start = StartCrawl(store, starter, **values)  # type: ignore[arg-type]
     return start.run(FetchRequest("gstn_advisories", ACTOR, REASON, "c0ffee"))
@@ -128,9 +132,23 @@ def test_a_fetch_is_refused_while_crawling_is_off_or_a_crawl_runs() -> None:
     assert len(starter.started) == 1
     assert len(store.audit) == 1
     with pytest.raises(SourceNotFoundError):
-        StartCrawl(store, starter, enabled=True).run(FetchRequest("nowhere", ACTOR, REASON))
+        StartCrawl(store, starter, types=TYPES, enabled=True).run(
+            FetchRequest("nowhere", ACTOR, REASON)
+        )
     with pytest.raises(InvariantViolationError, match="reason"):
-        StartCrawl(store, starter, enabled=True).run(FetchRequest("gstn_advisories", ACTOR, "x"))
+        StartCrawl(store, starter, types=TYPES, enabled=True).run(
+            FetchRequest("gstn_advisories", ACTOR, "x")
+        )
+
+
+def test_an_upload_only_source_is_never_fetched() -> None:
+    store, starter = synced(), MemoryCrawls()
+    for key in UPLOAD_ONLY:
+        with pytest.raises(SourceNotListableError, match="uploads"):
+            StartCrawl(store, starter, types=TYPES, enabled=True).run(
+                FetchRequest(key, ACTOR, REASON)
+            )
+    assert (starter.started, store.crawl_runs, store.audit) == ([], {}, [])
 
 
 def test_a_run_whose_workflow_was_lost_is_closed_and_a_new_one_starts() -> None:
@@ -174,22 +192,23 @@ def test_a_workflow_id_taken_from_before_closes_the_run() -> None:
 def test_the_tick_starts_each_due_source_once_per_slot() -> None:
     store, starter = synced(), MemoryCrawls()
     clock = Clock()
-    schedule = ScheduleCrawls(store, starter, enabled=True, clock=clock)
+    schedule = ScheduleCrawls(store, starter, types=TYPES, enabled=True, clock=clock)
     report = schedule.run()
     assert sorted(report.started) == sorted(
-        scheduled_workflow_id(key, NOW, spec.cadence) for key, spec in SOURCES.items()
+        scheduled_workflow_id(key, NOW, spec.cadence) for key, spec in LISTABLE.items()
     )
     assert schedule.run().started == (), "a double tick starts nothing twice"
     clock.now = NOW + timedelta(seconds=60)
     assert schedule.run().started == ()
-    assert len(starter.started) == len(store.crawl_runs) == len(SOURCES)
+    assert len(starter.started) == len(store.crawl_runs) == len(LISTABLE) == 5
+    assert not {start.source_key for start in starter.started} & set(UPLOAD_ONLY)
     assert {start.trigger for start in starter.started} == {CrawlTrigger.SCHEDULE}
 
 
 def test_two_ticks_that_both_saw_a_source_due_start_it_once() -> None:
     store, starter = synced(), MemoryCrawls()
-    tick_a = ScheduleCrawls(store, starter, enabled=True, clock=Clock())
-    tick_b = ScheduleCrawls(store, starter, enabled=True, clock=Clock())
+    tick_a = ScheduleCrawls(store, starter, types=TYPES, enabled=True, clock=Clock())
+    tick_b = ScheduleCrawls(store, starter, types=TYPES, enabled=True, clock=Clock())
     assert tick_a._start("gstn_advisories", NOW) is not None
     assert tick_b._start("gstn_advisories", NOW) is None
     assert len(starter.started) == 1
@@ -205,7 +224,7 @@ def test_a_run_recorded_under_the_slots_id_is_never_started_twice() -> None:
     finished = store.crawl_runs[run.id].finish(NOW, CrawlCounts())
     with store() as unit:
         unit.crawl_runs.save(finished)
-    tick = ScheduleCrawls(store, starter, enabled=True, clock=Clock())
+    tick = ScheduleCrawls(store, starter, types=TYPES, enabled=True, clock=Clock())
     assert tick._start("gstn_advisories", NOW + timedelta(hours=3)) is not None
     assert len(starter.started) == 1
 
@@ -224,7 +243,7 @@ def test_the_tick_skips_paused_disabled_and_recently_crawled_sources() -> None:
         unit.sources.save(
             listed.crawled(NOW - timedelta(hours=1), listed=True, watermark=None, error="")
         )
-    report = ScheduleCrawls(store, starter, enabled=True, clock=Clock()).run()
+    report = ScheduleCrawls(store, starter, types=TYPES, enabled=True, clock=Clock()).run()
     assert sorted(start.source_key for start in starter.started) == [
         "gstcouncil_press",
         "mahagst_notifications",
@@ -234,7 +253,7 @@ def test_the_tick_skips_paused_disabled_and_recently_crawled_sources() -> None:
 
 def test_the_tick_does_nothing_while_crawling_is_off() -> None:
     store, starter = synced(), MemoryCrawls()
-    assert ScheduleCrawls(store, starter, enabled=False).run().started == ()
+    assert ScheduleCrawls(store, starter, types=TYPES, enabled=False).run().started == ()
     assert starter.started == []
 
 
@@ -248,9 +267,9 @@ def test_a_source_that_fails_to_start_does_not_stop_the_others() -> None:
             return super().start(start)
 
     starter = Flaky()
-    report = ScheduleCrawls(store, starter, enabled=True, clock=Clock()).run()
+    report = ScheduleCrawls(store, starter, types=TYPES, enabled=True, clock=Clock()).run()
     assert report.failed == ("cbic_circulars",)
-    assert len(starter.started) == len(SOURCES) - 1
+    assert len(starter.started) == len(LISTABLE) - 1
     failed = [run for run in store.crawl_runs.values() if run.source_key == "cbic_circulars"]
     assert [run.status for run in failed] == [CrawlStatus.FAILED]
 

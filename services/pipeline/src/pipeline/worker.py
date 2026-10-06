@@ -61,7 +61,7 @@ from pipeline.domain.ports import (
     SourceCatalog,
 )
 from pipeline.domain.repository import UnitOfWorkFactory
-from pipeline.infrastructure.adapters import SOURCES, StoreCatalog
+from pipeline.infrastructure.adapters import SOURCES, RegistryAdapterTypes, StoreCatalog
 from pipeline.infrastructure.gateway import GatewayEmbedder, GatewayProvider
 from pipeline.infrastructure.http import PoliteClient
 from pipeline.infrastructure.parsers import ParserChain
@@ -185,7 +185,12 @@ def components(
     sync = SyncSources(records, [spec.definition() for spec in SOURCES.values()])
     periodic: tuple[PeriodicComponent, ...] = ()
     if settings.pipeline_crawl_enabled:
-        schedule = ScheduleCrawls(records, starter or TemporalCrawls(settings), enabled=True)
+        schedule = ScheduleCrawls(
+            records,
+            starter or TemporalCrawls(settings),
+            types=RegistryAdapterTypes(),
+            enabled=True,
+        )
         periodic = (PeriodicComponent(TICK_JOB, tick_job(schedule), interval_seconds=TICK_SECONDS),)
     return WorkerComponents(
         periodic=periodic,

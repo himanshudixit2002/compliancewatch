@@ -123,7 +123,8 @@ def edit_source(
 def fetch_source(body: FetchIn, admin: SourceWrite, wired: Wired, key: str = SourceKey) -> FetchOut:
     """Record a crawl run and start its workflow; answers 202 with the run and workflow ids at
     once, and the source reads fetching until the crawl ends. A paused or disabled source may be
-    fetched by hand. 409 while a crawl of the source runs; 503 while crawling is off
+    fetched by hand. 409 while a crawl of the source runs, and for an upload-only source
+    (pipeline-source-upload-only), which lists nothing; 503 while crawling is off
     (CW_PIPELINE_CRAWL_ENABLED) or when Temporal does not answer, in which case the run is
     closed as failed with why. Audited as pipeline.source.fetch with the reason."""
     action = _admin(admin, body)

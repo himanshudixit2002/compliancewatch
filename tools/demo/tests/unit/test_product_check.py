@@ -696,7 +696,7 @@ def with_token(script: Sources, sink: Path) -> Product:
 def test_the_sources_step_lists_the_sources_and_proves_the_fetch_refused(sink: Path) -> None:
     script = Sources()
     lines = check.sources(context_of(with_token(script, sink)))
-    assert lines[0].startswith("sources: the 5 built-in ones listed (cbic_circulars healthy, ")
+    assert lines[0].startswith("sources: the 8 built-in ones listed (cbic_circulars healthy, ")
     assert lines[1] == (
         "fetch refused while crawling is off: 503 pipeline-crawl-disabled, no crawl run recorded"
     )

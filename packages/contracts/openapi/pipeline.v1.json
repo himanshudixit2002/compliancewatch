@@ -541,7 +541,7 @@
             "type": "string"
           },
           "adapter_type": {
-            "description": "An adapter type of the registry: cbic, gstcouncil, gstn or mahagst",
+            "description": "An adapter type of the registry: cbic, gstcouncil, gstn, mahagst, or upload for a source whose documents are uploaded",
             "examples": [
               "cbic"
             ],
@@ -576,7 +576,7 @@
           },
           "parameters": {
             "additionalProperties": true,
-            "description": "The adapter type's parameters, which it checks: cbic takes listing (notifications or circulars) and category (one with a recorded listing); the others take none",
+            "description": "The adapter type's parameters, which it checks: cbic takes listing (notifications or circulars) and category (one with a recorded listing); upload takes document_type (statute by default) and regulator (CBIC by default); the others take none",
             "examples": [
               {
                 "category": "Central Tax",
@@ -677,6 +677,11 @@
               }
             ]
           },
+          "listable": {
+            "description": "Whether the source lists documents, so the schedule crawls it; an upload-only source (the statutes) does not, and its documents are uploaded",
+            "title": "Listable",
+            "type": "boolean"
+          },
           "name": {
             "description": "The source's name, or its key when it has none",
             "title": "Name",
@@ -745,6 +750,7 @@
           "regulator",
           "site",
           "doc_type",
+          "listable",
           "cadence_seconds",
           "enabled",
           "paused",
@@ -1512,7 +1518,7 @@
     },
     "/v1/pipeline/sources/{key}/fetch": {
       "post": {
-        "description": "Record a crawl run and start its workflow; answers 202 with the run and workflow ids at\nonce, and the source reads fetching until the crawl ends. A paused or disabled source may be\nfetched by hand. 409 while a crawl of the source runs; 503 while crawling is off\n(CW_PIPELINE_CRAWL_ENABLED) or when Temporal does not answer, in which case the run is\nclosed as failed with why. Audited as pipeline.source.fetch with the reason.",
+        "description": "Record a crawl run and start its workflow; answers 202 with the run and workflow ids at\nonce, and the source reads fetching until the crawl ends. A paused or disabled source may be\nfetched by hand. 409 while a crawl of the source runs, and for an upload-only source\n(pipeline-source-upload-only), which lists nothing; 503 while crawling is off\n(CW_PIPELINE_CRAWL_ENABLED) or when Temporal does not answer, in which case the run is\nclosed as failed with why. Audited as pipeline.source.fetch with the reason.",
         "operationId": "fetch_source_v1_pipeline_sources__key__fetch_post",
         "parameters": [
           {

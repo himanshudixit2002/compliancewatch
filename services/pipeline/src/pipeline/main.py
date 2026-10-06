@@ -39,6 +39,7 @@ from pipeline.domain.errors import (
     SourceExistsError,
     SourceInvalidError,
     SourceNotFoundError,
+    SourceNotListableError,
     WritesDisabledError,
     WriteTokenInvalidError,
 )
@@ -65,6 +66,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     SourceNotFoundError: 404,
     SourceExistsError: 409,
     SourceInvalidError: 422,
+    SourceNotListableError: 409,
     DocumentNotFoundError: 404,
     RawDocumentUnreadableError: 502,
     RawStoreUnavailableError: 503,
@@ -97,13 +99,17 @@ def build_wiring(
     return Wiring(
         settings=settings,
         units=store,
+        adapter_types=types,
         store_ready=store_ready,
         sync_sources=SyncSources(store, [spec.definition() for spec in SOURCES.values()]),
         list_sources=ListSources(store, types),
         add_source=AddSource(store, types),
         edit_source=EditSource(store, types),
         start_crawl=StartCrawl(
-            store, starter or TemporalCrawls(settings), enabled=settings.pipeline_crawl_enabled
+            store,
+            starter or TemporalCrawls(settings),
+            types=types,
+            enabled=settings.pipeline_crawl_enabled,
         ),
         list_documents=ListSourceDocuments(store),
         read_document=ReadDocument(store),
@@ -131,7 +137,8 @@ def install_source_metrics(app: FastAPI, wiring: Wiring) -> bool:
 
     def read() -> list[Source]:
         with wiring.units() as unit:
-            return list(unit.sources.list())
+            sources = unit.sources.list()
+        return [source for source in sources if wiring.adapter_types.listable(source.adapter_type)]
 
     register_source_gauges(
         read,

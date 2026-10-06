@@ -182,7 +182,8 @@ export type paths = {
      * Start a crawl of the source now
      * @description Record a crawl run and start its workflow; answers 202 with the run and workflow ids at
      *     once, and the source reads fetching until the crawl ends. A paused or disabled source may be
-     *     fetched by hand. 409 while a crawl of the source runs; 503 while crawling is off
+     *     fetched by hand. 409 while a crawl of the source runs, and for an upload-only source
+     *     (pipeline-source-upload-only), which lists nothing; 503 while crawling is off
      *     (CW_PIPELINE_CRAWL_ENABLED) or when Temporal does not answer, in which case the run is
      *     closed as failed with why. Audited as pipeline.source.fetch with the reason.
      */
@@ -447,7 +448,7 @@ export type components = {
       actor_id: string;
       /**
        * Adapter Type
-       * @description An adapter type of the registry: cbic, gstcouncil, gstn or mahagst
+       * @description An adapter type of the registry: cbic, gstcouncil, gstn, mahagst, or upload for a source whose documents are uploaded
        * @example cbic
        */
       adapter_type: string;
@@ -467,7 +468,7 @@ export type components = {
       name: string;
       /**
        * Parameters
-       * @description The adapter type's parameters, which it checks: cbic takes listing (notifications or circulars) and category (one with a recorded listing); the others take none
+       * @description The adapter type's parameters, which it checks: cbic takes listing (notifications or circulars) and category (one with a recorded listing); upload takes document_type (statute by default) and regulator (CBIC by default); the others take none
        * @example {
        *       "category": "Central Tax",
        *       "listing": "notifications"
@@ -514,6 +515,11 @@ export type components = {
        */
       last_fetch_at: string | null;
       latest_run: components["schemas"]["CrawlRunOut"] | null;
+      /**
+       * Listable
+       * @description Whether the source lists documents, so the schedule crawls it; an upload-only source (the statutes) does not, and its documents are uploaded
+       */
+      listable: boolean;
       /**
        * Name
        * @description The source's name, or its key when it has none

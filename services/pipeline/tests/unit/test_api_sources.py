@@ -129,11 +129,22 @@ def test_the_built_in_sources_are_listed_with_how_each_stands(header: Wired) -> 
     assert [item["key"] for item in items] == [
         "cbic_circulars",
         "cbic_notifications",
+        "cgst_act",
+        "cgst_rules",
         "gstcouncil_press",
         "gstn_advisories",
+        "igst_act",
         "mahagst_notifications",
     ]
     cbic = items[1]
+    statute = items[3]
+    assert (statute["name"], statute["doc_type"], statute["regulator"], statute["site"]) == (
+        "The Central Goods and Services Tax Rules, 2017",
+        "statute",
+        "CBIC",
+        "upload",
+    )
+    assert (statute["listable"], cbic["listable"]) == (False, True)
     assert (cbic["name"], cbic["regulator"], cbic["doc_type"], cbic["site"]) == (
         "CBIC Central Tax notifications",
         "CBIC",

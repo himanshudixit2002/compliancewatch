@@ -53,13 +53,18 @@ class SourceIn(AdminWriteIn):
     adapter_type: str = Field(
         pattern=ADAPTER_TYPE_PATTERN,
         examples=["cbic"],
-        description="An adapter type of the registry: cbic, gstcouncil, gstn or mahagst",
+        description=(
+            "An adapter type of the registry: cbic, gstcouncil, gstn, mahagst, or upload for a "
+            "source whose documents are uploaded"
+        ),
     )
     parameters: dict[str, Any] = Field(
         default_factory=dict,
         description=(
             "The adapter type's parameters, which it checks: cbic takes listing (notifications "
-            "or circulars) and category (one with a recorded listing); the others take none"
+            "or circulars) and category (one with a recorded listing); upload takes "
+            "document_type (statute by default) and regulator (CBIC by default); the others "
+            "take none"
         ),
         examples=[{"listing": "notifications", "category": "Central Tax"}],
     )
@@ -155,6 +160,12 @@ class SourceOut(BaseModel):
     )
     site: str | None
     doc_type: DocumentType | None
+    listable: bool = Field(
+        description=(
+            "Whether the source lists documents, so the schedule crawls it; an upload-only "
+            "source (the statutes) does not, and its documents are uploaded"
+        )
+    )
     cadence_seconds: int
     enabled: bool
     paused: bool
@@ -186,6 +197,7 @@ class SourceOut(BaseModel):
             regulator=None if kind is None else kind.regulator,
             site=None if kind is None else kind.site,
             doc_type=None if kind is None else kind.doc_type,
+            listable=True if kind is None else kind.listable,
             cadence_seconds=int(source.cadence.total_seconds()),
             enabled=source.enabled,
             paused=source.paused,

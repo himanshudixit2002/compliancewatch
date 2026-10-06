@@ -139,8 +139,11 @@ def test_an_admin_adds_a_source_and_its_crawl_stores_the_recorded_notifications(
         assert built_in == [
             "cbic_circulars",
             "cbic_notifications",
+            "cgst_act",
+            "cgst_rules",
             "gstcouncil_press",
             "gstn_advisories",
+            "igst_act",
             "mahagst_notifications",
         ]
         added = ok(
@@ -243,9 +246,25 @@ def test_an_admin_adds_a_source_and_its_crawl_stores_the_recorded_notifications(
         assert (second["listed"], second["stored"], second["duplicates"]) == (1, 0, 0)
         assert len(pipeline.store.documents) == 3
 
-        tick = ScheduleCrawls(pipeline.store, pipeline.starter, enabled=True)
+        tick = ScheduleCrawls(
+            pipeline.store,
+            pipeline.starter,
+            types=RegistryAdapterTypes(recorded_types()),
+            enabled=True,
+        )
         scheduled = tick.run().started
-        assert len(scheduled) == 5, "the built-in sources; the recorded one was just crawled"
+        assert len(scheduled) == 5, (
+            "the built-in sources but the upload-only statutes; the recorded one was just crawled"
+        )
+        refused = internal.post(
+            f"{BASE}/sources/cgst_rules/fetch",
+            headers=WRITE,
+            json={"actor_id": ACTOR, "reason": "An upload-only source lists nothing"},
+        )
+        assert (refused.status_code, refused.json()["type"]) == (
+            409,
+            "urn:compliancewatch:problem:pipeline-source-upload-only",
+        )
         assert tick.run().started == (), "a second tick starts nothing twice"
 
         for method, path in (

@@ -7,7 +7,8 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
-from domain_kernel.documents import DocumentType
+from domain_kernel.documents import DocumentRef, DocumentType
+from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import SourceId
 from pipeline.domain.errors import UnknownSourceError
 from pipeline.infrastructure.adapters import (
@@ -79,7 +80,7 @@ def test_parameters_an_adapter_type_does_not_take_are_refused(
 
 
 def test_each_source_is_defined_by_its_type_and_parameters() -> None:
-    assert sorted(ADAPTER_TYPES) == ["cbic", "gstcouncil", "gstn", "mahagst"]
+    assert sorted(ADAPTER_TYPES) == ["cbic", "gstcouncil", "gstn", "mahagst", "upload"]
     definitions = {key: spec.definition() for key, spec in SOURCES.items()}
     assert {key: (d.adapter_type, d.regulator, d.doc_type) for key, d in definitions.items()} == {
         "cbic_notifications": ("cbic", "CBIC", DocumentType.NOTIFICATION),
@@ -87,7 +88,15 @@ def test_each_source_is_defined_by_its_type_and_parameters() -> None:
         "gstcouncil_press": ("gstcouncil", "GST Council", DocumentType.PRESS_RELEASE),
         "gstn_advisories": ("gstn", "GSTN", DocumentType.PRESS_RELEASE),
         "mahagst_notifications": ("mahagst", "Maharashtra GST", DocumentType.NOTIFICATION),
+        "cgst_act": ("upload", "CBIC", DocumentType.STATUTE),
+        "cgst_rules": ("upload", "CBIC", DocumentType.STATUTE),
+        "igst_act": ("upload", "CBIC", DocumentType.STATUTE),
     }
+    assert [key for key, spec in SOURCES.items() if not spec.kind.listable] == [
+        "cgst_act",
+        "cgst_rules",
+        "igst_act",
+    ]
     assert definitions["cbic_notifications"].cadence <= timedelta(hours=6), "F1: within 6 h"
     assert {spec.site for spec in SOURCES.values()} >= {"taxinformation.cbic.gov.in"}
 
@@ -216,3 +225,19 @@ def test_an_unrecorded_url_fails_loudly(client: PoliteClient) -> None:
     response = client.get("https://gstcouncil.gov.in/nowhere")
     assert response.status_code == 404
     assert "unrecorded" in response.text
+
+
+def test_an_upload_only_source_lists_and_fetches_nothing(client: PoliteClient) -> None:
+    adapter = SOURCES["cgst_act"].build(client)
+    assert list(adapter.list_documents(datetime(2000, 1, 1, tzinfo=UTC))) == []
+    ref = DocumentRef(source_id_for("cgst_act"), "https://example.invalid/act.pdf")
+    with pytest.raises(InvariantViolationError, match="upload-only"):
+        adapter.fetch(ref)
+    kind = ADAPTER_TYPES["upload"]
+    read = kind.validated({"document_type": "notification", "regulator": "Example GST"})
+    assert (kind.regulator_for(read), kind.doc_type(read)) == (
+        "Example GST",
+        DocumentType.NOTIFICATION,
+    )
+    with pytest.raises(ValidationError):
+        kind.validated({"regulator": " "})

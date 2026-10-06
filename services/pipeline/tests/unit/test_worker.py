@@ -15,7 +15,7 @@ from pipeline.application.knowledge_activities import (
     EmbedRequest,
     ProposeRelations,
 )
-from pipeline.infrastructure.adapters import SOURCES
+from pipeline.infrastructure.adapters import SOURCES, RegistryAdapterTypes
 from pipeline.infrastructure.memory import MemoryStore
 from pipeline.settings import PipelineSettings
 from pipeline.testing import MemoryCrawls, MemoryRulebook, ScriptedEmbedder
@@ -96,9 +96,11 @@ async def test_with_crawling_on_the_tick_starts_the_crawls_that_are_due() -> Non
     assert wired.loops() == (tick,)
     await wired.startup[0].run()
     assert await tick.run_once()
-    assert sorted(start.source_key for start in starter.started) == sorted(SOURCES)
+    listable = sorted(key for key, spec in SOURCES.items() if spec.kind.listable)
+    assert sorted(start.source_key for start in starter.started) == listable
+    assert "cgst_rules" not in listable, "an upload-only source is never crawled"
     assert await tick.run_once()
-    assert len(starter.started) == len(SOURCES), "a second tick starts nothing twice"
+    assert len(starter.started) == len(listable), "a second tick starts nothing twice"
     assert all(run.status.value == "running" for run in store.crawl_runs.values())
 
 
@@ -110,7 +112,9 @@ def test_the_tick_job_runs_the_schedule_once_a_minute() -> None:
             ran.append("tick")
             return ScheduleReport()
 
-    worker.tick_job(Schedule(MemoryStore(), MemoryCrawls(), enabled=True))()
+    worker.tick_job(
+        Schedule(MemoryStore(), MemoryCrawls(), types=RegistryAdapterTypes(), enabled=True)
+    )()
     assert ran == ["tick"]
     assert timedelta(seconds=TICK_SECONDS) == timedelta(minutes=1)
 

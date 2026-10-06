@@ -5,7 +5,10 @@ the parameters it takes (a pydantic model that refuses anything else) and how it
 adapter. A source (``SourceSpec``) is a key, an adapter type with its parameters, and how often
 it is read; its regulator and document type follow from the type and the parameters. The CBIC
 type reads both portal listings, with the listing and the category as parameters; a category
-needs its recorded listing (``cbic.RECORDED_CATEGORIES``).
+needs its recorded listing (``cbic.RECORDED_CATEGORIES``). The ``upload`` type is not listable:
+its sources' documents are uploaded, so the schedule never crawls them; it takes the document
+type and the regulator of what is uploaded as parameters. The statutes the rules cite are
+built-in sources of it.
 
 A source id is derived from its key with UUID v5 (``pipeline.domain.sources.source_id_of``), so
 the same source has the same id in every environment and a fixture recorded for
@@ -21,18 +24,19 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Final, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from domain_kernel.documents import DocumentType
 from domain_kernel.ids import SourceId
 from domain_kernel.protocols import SourceAdapter
 from pipeline.domain.errors import UnknownSourceError
 from pipeline.domain.ports import ResolvedSource
-from pipeline.domain.sources import SourceDefinition, source_id_of
+from pipeline.domain.sources import MAX_CADENCE, SourceDefinition, source_id_of
 from pipeline.infrastructure.adapters.cbic import RECORDED_CATEGORIES, CbicAdapter
 from pipeline.infrastructure.adapters.gstcouncil import GstCouncilAdapter
 from pipeline.infrastructure.adapters.gstn import GstnAdapter
 from pipeline.infrastructure.adapters.mahagst import MahagstAdapter
+from pipeline.infrastructure.adapters.upload import UploadOnlyAdapter
 from pipeline.infrastructure.http import PoliteClient
 
 
@@ -62,8 +66,20 @@ class CbicParameters(Parameters):
         return self
 
 
+class UploadParameters(Parameters):
+    """What an upload-only source holds: documents of ``document_type`` that ``regulator``
+    issues."""
+
+    document_type: DocumentType = DocumentType.STATUTE
+    regulator: str = Field(default="CBIC", min_length=1, max_length=40, pattern=r"^\S(.*\S)?$")
+
+
 @dataclass(frozen=True, slots=True)
 class AdapterType:
+    """``listable``: whether its sources list documents, so the schedule crawls them; an
+    upload-only type's do not. ``regulator_of`` reads the regulator from the parameters of a type
+    that takes it as one; else it is ``regulator``."""
+
     name: str
     regulator: str
     site: str
@@ -71,11 +87,16 @@ class AdapterType:
     build: Callable[[PoliteClient, SourceId, Any], SourceAdapter]
     """Builds the adapter from the client, the source id and the validated parameters."""
     doc_type: Callable[[Any], DocumentType]
+    listable: bool = True
+    regulator_of: Callable[[Any], str] | None = None
 
     def validated(self, parameters: Mapping[str, object]) -> Parameters:
         """The parameters as this type reads them; ``ValueError`` (pydantic's) when they are
         not."""
         return self.parameters.model_validate(dict(parameters))
+
+    def regulator_for(self, parameters: Parameters) -> str:
+        return self.regulator if self.regulator_of is None else self.regulator_of(parameters)
 
 
 def _cbic(client: PoliteClient, source_id: SourceId, parameters: CbicParameters) -> CbicAdapter:
@@ -121,6 +142,16 @@ ADAPTER_TYPES: Final[Mapping[str, AdapterType]] = {
             lambda client, source_id, _: MahagstAdapter(client, source_id),
             lambda _: DocumentType.NOTIFICATION,
         ),
+        AdapterType(
+            "upload",
+            "CBIC",
+            "upload",
+            UploadParameters,
+            lambda _, source_id, __: UploadOnlyAdapter(source_id),
+            lambda parameters: parameters.document_type,
+            listable=False,
+            regulator_of=lambda parameters: parameters.regulator,
+        ),
     )
 }
 
@@ -150,7 +181,7 @@ class SourceSpec:
 
     @property
     def regulator(self) -> str:
-        return self.kind.regulator
+        return self.kind.regulator_for(self.kind.validated(self.parameters))
 
     @property
     def doc_type(self) -> DocumentType:
@@ -206,6 +237,29 @@ SOURCES: Final[Mapping[str, SourceSpec]] = {
             {},
             timedelta(hours=12),
             "Maharashtra GST notifications",
+        ),
+        # The statutes the rules cite, uploaded by an analyst; never crawled, so the cadence
+        # only fills the column.
+        SourceSpec(
+            "cgst_act",
+            "upload",
+            {"document_type": "statute"},
+            MAX_CADENCE,
+            "The Central Goods and Services Tax Act, 2017",
+        ),
+        SourceSpec(
+            "cgst_rules",
+            "upload",
+            {"document_type": "statute"},
+            MAX_CADENCE,
+            "The Central Goods and Services Tax Rules, 2017",
+        ),
+        SourceSpec(
+            "igst_act",
+            "upload",
+            {"document_type": "statute"},
+            MAX_CADENCE,
+            "The Integrated Goods and Services Tax Act, 2017",
         ),
     )
 }

@@ -157,6 +157,7 @@ class SourceCatalog(Protocol):
 class SourceKind:
     """What an adapter type makes of a source's parameters: the parameters as the type reads
     them (JSON values, defaults filled in), and the regulator, site and document type they give.
+    ``listable`` is False for an upload-only type, whose sources the schedule never crawls.
     """
 
     adapter_type: str
@@ -164,6 +165,7 @@ class SourceKind:
     regulator: str
     site: str
     doc_type: DocumentType
+    listable: bool = True
 
 
 class AdapterTypes(Protocol):
@@ -171,6 +173,11 @@ class AdapterTypes(Protocol):
 
     def names(self) -> Sequence[str]:
         """Every adapter type, sorted."""
+        ...
+
+    def listable(self, adapter_type: str) -> bool:
+        """Whether sources of the type list documents (False for an upload-only type); a type
+        the code does not have counts as listable, so its crawl reports what is wrong."""
         ...
 
     def describe(self, adapter_type: str, parameters: Mapping[str, object]) -> SourceKind:
