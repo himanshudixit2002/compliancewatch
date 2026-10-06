@@ -117,6 +117,8 @@ src/server/         server-only modules; every file starts with `import "server-
                     override variables (CW_WEB_FLAG_<NAME>) count in local and test only
                     analytics.ts: track(), a product event as a JSON line and a span event, only while
                     web.analytics_enabled is on and the person's analytics consent is current
+                    telemetry.ts: OpenTelemetry behind web.otel_enabled, decided once when the server starts;
+                    telemetry-redaction.ts: no query and no personal value in an exported span
 src/shared/config/  the screen registry (screens.ts), roles and permissions, flags, navigation, the legal doc list
 src/shared/lib/     IST dates, financial years, money and decimal strings, humanise, identifiers, pagination, urls,
                     action-state (what a server action returns to a form)

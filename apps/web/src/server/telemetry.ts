@@ -3,6 +3,7 @@ import "server-only";
 import type { Configuration } from "@vercel/otel";
 import type { FlagName } from "@/shared/config/flags";
 import { isEnabled } from "./flags";
+import { RedactingSpanProcessor } from "./telemetry-redaction";
 
 /**
  * OpenTelemetry for the web server, behind the flag `web.otel_enabled` (off by default, owned by
@@ -14,7 +15,9 @@ import { isEnabled } from "./flags";
  * `OTEL_EXPORTER_OTLP_ENDPOINT`, OTLP over HTTP; protocol and headers from the standard OTLP
  * variables). Without one no span processor is installed: `@vercel/otel`'s default would export
  * to localhost:4318 whether or not a collector listens there, which is not what "off unless
- * configured" means. A failure here is logged as one line and never stops the server.
+ * configured" means. With one, the redacting processor (server/telemetry-redaction.ts) runs ahead
+ * of the exporting ones, so no URL leaves with its query or a segment that names a person. A
+ * failure here is logged as one line and never stops the server.
  */
 export const OTEL_FLAG: FlagName = "web.otel_enabled";
 
@@ -43,9 +46,15 @@ export async function telemetryPlan(env: Environment = process.env): Promise<Tel
   return { enabled, exporting: enabled && otlpEndpointConfigured(env) };
 }
 
-/** The @vercel/otel configuration for a plan: no span processor without an endpoint. */
+/**
+ * The @vercel/otel configuration for a plan: no span processor without an endpoint; with one, the
+ * redacting processor first and then the exporting ones @vercel/otel builds ("auto").
+ */
 export function otelConfiguration(plan: TelemetryPlan): Configuration {
-  return { serviceName: SERVICE_NAME, spanProcessors: plan.exporting ? ["auto"] : [] };
+  return {
+    serviceName: SERVICE_NAME,
+    spanProcessors: plan.exporting ? [new RedactingSpanProcessor(), "auto"] : [],
+  };
 }
 
 export type Register = (configuration: Configuration) => void;

@@ -75,7 +75,10 @@ ask.
 `registerTelemetry()`), without a tenant. Off, nothing is loaded. On, `@vercel/otel` registers a
 tracer provider, and spans leave the process only when `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or
 `OTEL_EXPORTER_OTLP_ENDPOINT` names a collector (OTLP over HTTP); otherwise no span processor is
-installed (D-057). The system page says which of the three applies.
+installed (D-057). Ahead of the exporter, `server/telemetry-redaction.ts` drops every query from the
+URLs in a span and replaces each segment or value that names a person (a preference's recipient, an
+email, a phone number, a PAN, a GSTIN) with a placeholder. The system page says which of the three
+applies.
 
 ## The reader
 

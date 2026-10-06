@@ -135,7 +135,8 @@ apps/web/
                                reader), analytics.ts (product events behind the flag and the consent),
                                health.ts (the services' /health and /ready probes for the internal tools),
                                telemetry.ts (OpenTelemetry behind web.otel_enabled, an exporter only when one
-                               is configured)
+                               is configured), telemetry-redaction.ts (no query and no personal value in an
+                               exported span)
   src/shared/config/           screens.ts, roles.ts, permissions.ts, flags.ts, nav.ts, services.ts, legal-docs.ts
   src/shared/lib/              dates, financial years, decimal money, humanise, identifiers, pagination, urls, assert
   src/shared/i18n/             messages/en.json and t()

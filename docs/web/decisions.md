@@ -952,8 +952,20 @@ Node.js runtime when `web.otel_enabled` is on (registered off, owned by platform
 Its default span processor exports to `localhost:4318` whether or not a collector listens there, so
 the web server passes an empty processor list unless `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or
 `OTEL_EXPORTER_OTLP_ENDPOINT` is set (OTLP over HTTP; protocol and headers from the standard OTLP
-variables). Its seven OpenTelemetry peers are pinned in `apps/web` at the newest releases more than a
-day old (`@opentelemetry/api` 1.9.1 already was), and none has an install script. A failed
-registration logs one line and never stops the server. Consequences: with the flag on and no
-endpoint, spans (Next.js's own, the fetch instrumentation and the product events) stay in the
-process; turning export on is two variables.
+variables). The addresses the server calls carry personal data (a notification preference's
+WhatsApp number or email is a path segment, and the business search sends what was typed in `q=`),
+and the fetch instrumentation names each span `fetch GET <full URL>` and copies the URL into
+`http.url` and `resource.name`, so a redacting span processor (`server/telemetry-redaction.ts`) runs
+ahead of the exporting ones: every URL and absolute path in a span's name, attributes, events and
+status loses its query, fragment and user; the recipient segment of the preference route becomes
+`{recipient}`; any other segment, or value inside a text, that is an email, a phone number, a PAN or
+a GSTIN becomes `{email}`, `{phone}`, `{pan}` or `{gstin}`. It rewrites at the start through the
+span's API, and again at the end on the finished record, for a name or an attribute set later
+(Next.js names its request span by its route late, and @vercel/otel adds `resource.name` at the
+end). Generic patterns plus the known route were chosen over the instrumentation's `ignoreUrls`,
+which would drop the very spans an operator traces a slow page by. Its seven OpenTelemetry peers are
+pinned in `apps/web` at the newest releases more than a day old (`@opentelemetry/api` 1.9.1 already
+was), and none has an install script. A failed registration logs one line and never stops the
+server. Consequences: with the flag on and no endpoint, spans (Next.js's own, the fetch
+instrumentation and the product events) stay in the process; turning export on is two variables; a
+new route that names a person in its path joins `PERSONAL_ROUTES` with a test.

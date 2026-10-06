@@ -10,6 +10,7 @@ import {
   telemetryPlan,
   type Register,
 } from "./telemetry";
+import { RedactingSpanProcessor } from "./telemetry-redaction";
 
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -40,7 +41,7 @@ describe("the telemetry plan", () => {
     expect(register).toHaveBeenCalledWith({ serviceName: SERVICE_NAME, spanProcessors: [] });
   });
 
-  it("exports over OTLP when an endpoint is configured", async () => {
+  it("exports over OTLP when an endpoint is configured, every span redacted first", async () => {
     flagOn();
     vi.spyOn(console, "info").mockImplementation(() => undefined);
     const register = vi.fn<Register>();
@@ -49,7 +50,10 @@ describe("the telemetry plan", () => {
       enabled: true,
       exporting: true,
     });
-    expect(register).toHaveBeenCalledWith({ serviceName: SERVICE_NAME, spanProcessors: ["auto"] });
+    expect(register).toHaveBeenCalledWith({
+      serviceName: SERVICE_NAME,
+      spanProcessors: [expect.any(RedactingSpanProcessor), "auto"],
+    });
     expect(await telemetryPlan({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://example" })).toEqual({
       enabled: true,
       exporting: true,

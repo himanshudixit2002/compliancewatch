@@ -544,7 +544,8 @@ over `profileClient` with the looked-up tenant as `ClientContext.tenantId`, unca
 `features/system/queries.ts` probes `/health` and `/ready` of every service through
 `server/health.ts` (two seconds each, never throwing) and reads the web server's own settings as
 facts (a token only as set or not). `server/telemetry.ts` decides at startup whether OpenTelemetry
-registers and exports (D-057).
+registers and exports, and `server/telemetry-redaction.ts` takes every query and personal value
+out of a span's URLs before export (D-057).
 
 ## Rule versions, citations and the publish workflow
 
