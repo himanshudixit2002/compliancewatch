@@ -729,3 +729,61 @@ product-logs: ## Show a product process's log: make product-logs PROC=app|worker
 	@case "$(PROC)" in app|worker|web) ;; *) echo "usage: make product-logs PROC=app|worker|web [FOLLOW=0]"; exit 1 ;; esac; \
 	log=$(PRODUCT_DIR)/$(PROC).log; [ -f "$$log" ] || { echo "no $$log: make product starts the $(PROC) process"; exit 1; }; \
 	if [ "$(FOLLOW)" = "0" ]; then tail -n 200 "$$log"; else tail -n 100 -f "$$log"; fi
+
+# ---- The product from its image (ADR-013's one deployable as it ships) ------------------------
+.PHONY: mvp-image product-image product-image-down product-image-logs
+# make product-image runs the product from composition/mvp/Dockerfile's image on the dev stack, in
+# the compose profile mvp (docker-compose.yml): mvp-release runs cw-mvp release (every service's
+# migrations as the database owner, then the topics of composition/mvp/topics.toml), and once it
+# has, mvp-app runs cw-mvp serve on 8000 and 8080 and mvp-worker cw-mvp worker with its health on
+# PRODUCT_WORKER_PORT, with the settings make product passes its processes (x-mvp-env). The image
+# is built first unless MVP_BUILD=0 (CI builds it with buildx and its cache). cw_app is created
+# before the release (make product-role: its default privileges cover the tables the release
+# makes), and the seed calendar is loaded with the image's rulebook-seed afterwards. make
+# product-seed and make product-check then run against it unchanged: the same ports, cw_app, and
+# the sink in var/product, which the containers write as you (CW_MVP_USER is your uid and gid).
+# It uses make product's ports, so one of the two runs at a time. make product-image-down removes
+# the three containers and nothing else.
+MVP_IMAGE ?= compliancewatch-mvp:local
+MVP_BUILD ?= 1
+MVP_COMPOSE = CW_MVP_IMAGE=$(MVP_IMAGE) CW_MVP_USER="$$(id -u):$$(id -g)" \
+  PRODUCT_DB_USER=$(PRODUCT_DB_USER) PRODUCT_DB_PASSWORD=$(PRODUCT_DB_PASSWORD) \
+  PRODUCT_WORKER_PORT=$(PRODUCT_WORKER_PORT) $(COMPOSE) --profile mvp
+# dev-down and dev-reset remove the deployable's containers too.
+PROFILES += --profile mvp
+
+mvp-image: check-docker ## Build the one deployable's image (composition/mvp/Dockerfile) as MVP_IMAGE (compliancewatch-mvp:local)
+	docker build -f composition/mvp/Dockerfile -t $(MVP_IMAGE) .
+
+product-image: check-docker ## The local product from the image: make dev, the image, cw_app, cw-mvp release, serve and worker in containers, the seed calendar: make product-image [MVP_BUILD=0]
+	@for proc in app worker web; do pidfile=$(PRODUCT_DIR)/$$proc.pid; \
+	  if [ -f "$$pidfile" ] && kill -0 "$$(cat "$$pidfile")" 2>/dev/null; then \
+	    echo "error: make product's $$proc is running (pid $$(cat "$$pidfile")); make product-down first"; exit 1; fi; \
+	done
+	@$(MAKE) --no-print-directory dev
+	@if [ "$(MVP_BUILD)" != "0" ]; then $(MAKE) --no-print-directory mvp-image; fi
+	@$(MAKE) --no-print-directory product-role
+	@mkdir -p $(PRODUCT_DIR)
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	echo "product-image: cw-mvp release, then cw-mvp serve and worker from $(MVP_IMAGE)"; \
+	$(MVP_COMPOSE) up -d --wait --wait-timeout $(PRODUCT_WAIT_SECONDS) mvp-app mvp-worker || { \
+	  $(MVP_COMPOSE) logs --no-color --tail 40 mvp-release mvp-app mvp-worker; exit 1; }; \
+	$(MVP_COMPOSE) logs --no-color --no-log-prefix mvp-release; \
+	echo "product-image: the seed calendar's drafts (rulebook-seed in the image)"; \
+	$(MVP_COMPOSE) run --rm --no-deps -e CW_DB_SCHEMA=rulebook -e CW_LOG_LEVEL=WARNING \
+	  -e CW_DATABASE_URL="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@postgres:5432/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3Drulebook%2Cpublic" \
+	  mvp-release rulebook-seed || exit 1; \
+	echo ""; echo "ComplianceWatch product from the image $(MVP_IMAGE)"; \
+	echo "  public listener    http://127.0.0.1:$${CW_MVP_PUBLIC_PORT:-8000}   (the edge's routes; /health, /ready)"; \
+	echo "  internal listener  http://127.0.0.1:$${CW_MVP_INTERNAL_PORT:-8080}   (every route; cw-product calls it)"; \
+	echo "  worker health      http://127.0.0.1:$(PRODUCT_WORKER_PORT)/health   (/loops lists consumers, relays, jobs, task queues)"; \
+	echo "  sink               $(PRODUCT_DIR)/sink.jsonl"; \
+	echo "Next: make product-seed, then make product-check; make product-image-down stops it"
+
+product-image-down: check-docker ## Remove the image product's containers (mvp-release, mvp-app, mvp-worker); the dev stack keeps running
+	$(MVP_COMPOSE) rm --stop --force mvp-worker mvp-app mvp-release
+
+product-image-logs: check-docker ## Show a container's log of the image product: make product-image-logs PROC=app|worker|release [FOLLOW=0]
+	@case "$(PROC)" in app|worker|release) ;; *) echo "usage: make product-image-logs PROC=app|worker|release [FOLLOW=0]"; exit 1 ;; esac; \
+	if [ "$(FOLLOW)" = "0" ]; then $(MVP_COMPOSE) logs --no-color --tail 200 mvp-$(PROC); \
+	else $(MVP_COMPOSE) logs --follow --tail 100 mvp-$(PROC); fi

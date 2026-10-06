@@ -6,9 +6,10 @@
 # example replay and by the Redpanda schema registry; the migration lint's file rules in the ops
 # job and its catalog rules in the dev-stack job), 4 integration tests (testcontainers) for the
 # packages a change affects, an ops job (runbook links, promtool rules, actionlint), a compose
-# dev-stack smoke that also runs the local product (make product, product-seed, product-check:
-# a published rule becomes decisions, obligations and a change card through the one deployable's
-# worker) and the web app's real-data journey on it (make product-e2e), secrets scanning, SAST
+# dev-stack smoke that builds the one deployable's image, runs its release on the fresh stack and
+# the product from it (make product-image, product-seed, product-check: a published rule becomes
+# decisions, obligations and a change card through the image's worker) and the web app's real-data
+# journey on it (make product-e2e), secrets scanning, SAST
 # (semgrep) and a dependency and config scan (trivy), both reported to code scanning, and the web
 # e2e job (Playwright with axe against the built Next.js app, with every service running on memory
 # stores and seeded with the demo tenant). The job "CI gate" needs every other job and is the one
@@ -145,10 +146,11 @@ jobs:
               - 'uv.lock'
               - '.python-version'
               - '.github/workflows/ci.yml'
-              # make product-check runs every service through the deployable and its worker, with
-              # cw-product (tools/demo) publishing from the golden world (evals)
+              # make product-check runs every service through the deployable's image and its
+              # worker, with cw-product (tools/demo) publishing from the golden world (evals)
               - 'services/**'
               - 'composition/**'
+              - 'packages/contracts/clients/python/**' # in the image
               - 'tools/demo/**'
               - 'evals/**'
               # make product-e2e runs the web app's real-data journey on that product
@@ -420,6 +422,7 @@ jobs:
           docker compose --profile observability config -q
           docker compose --profile llm config -q
           docker compose --profile flags config -q
+          docker compose --profile mvp config -q
       - name: Start the stack and wait for health
         run: docker compose up -d --wait --wait-timeout 180
       - name: Schemas, pgvector, Redpanda and Temporal are up
@@ -465,27 +468,45 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.12"
-      - name: Run every service's migrations against the stack
-        run: |
-          uv sync --all-packages --locked
-          make migrate
+      - run: uv sync --all-packages --locked
+      # The one deployable's image (composition/mvp/Dockerfile), built with buildx and its layers
+      # cached in the GitHub Actions cache, then loaded under the tag the compose profile mvp runs.
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the deployable's image (buildx, GitHub Actions cache)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: composition/mvp/Dockerfile
+          tags: compliancewatch-mvp:local
+          load: true
+          cache-from: type=gha,scope=mvp-image
+          cache-to: type=gha,mode=max,scope=mvp-image
+      # The release step a deploy runs, from the image, on the fresh database and broker: every
+      # service's migrations as the database owner (cw-mvp migrate), then the topics of
+      # composition/mvp/topics.toml (cw-mvp topics apply). make product-image runs it once more
+      # before the app and the worker start, which proves it changes nothing the second time.
+      - name: The release from the image (cw-mvp release)
+        run: docker compose --profile mvp run --rm mvp-release
       - name: Tenant tables have forced row-level security (migration lint, catalog rules)
         run: make migrations-catalog
-      # The local product on this stack: the deployable's app and worker with Kafka and Temporal on
-      # (no web app), synthetic tenants and the demo publication, then the check that a published
-      # rule becomes decisions, obligations with citations and a change card through the sink.
-      # The database is fresh, so the check also runs its destructive rollback step, which
-      # withdraws gstr9_annual and sees its obligations closed and the withdrawal notices sent.
-      - name: The local product (make product WEB=0, make product-seed, make product-check)
+      # The product from the image on this stack: the app and the worker in containers with Kafka
+      # and Temporal on (compose profile mvp), the seed calendar from the image, synthetic tenants
+      # and the demo publication, then the check, over HTTP on 8000 and 8080 and in the database
+      # as cw_app, that a published rule becomes decisions, obligations with citations and a change
+      # card through the sink. The database is fresh, so the check also runs its destructive
+      # rollback step, which withdraws gstr9_annual and sees its obligations closed and the
+      # withdrawal notices sent. make product, the local processes, stays the development path.
+      - name: The product from the image (make product-image, make product-seed, make product-check)
         run: |
-          make product WEB=0
+          make product-image MVP_BUILD=0
           make product-seed
           make product-check ARGS="--destructive"
       # The web app on that product: built (no CW_WEB_* variable, as in the typescript job) and
       # started with next start by Playwright against the internal listener (:8080), signed in as
       # the tenant make product-seed recorded, through the obligations, the calendar, an
       # obligation's page and its tracking, the changes feed and ask (Playwright project
-      # product). Chromium comes as the web-e2e job fetches it; nothing else is installed.
+      # product). It talks HTTP only, so the image costs it nothing over the local processes.
+      # Chromium comes as the web-e2e job fetches it; nothing else is installed.
       - name: Workspace and Chromium for the product journey
         run: |
           pnpm install --frozen-lockfile
@@ -495,8 +516,11 @@ jobs:
       - name: Product logs
         if: failure()
         run: |
-          make product-logs PROC=app FOLLOW=0 || true
-          make product-logs PROC=worker FOLLOW=0 || true
+          mkdir -p var/product
+          for proc in release app worker; do
+            make product-image-logs PROC="$proc" FOLLOW=0 > "var/product/$proc.log" 2>&1 || true
+            tail -n 100 "var/product/$proc.log"
+          done
           tail -n 50 var/product/sink.jsonl || true
       - uses: actions/upload-artifact@v7
         if: failure()
@@ -510,7 +534,7 @@ jobs:
           if-no-files-found: ignore
       - name: Stop the product
         if: always()
-        run: make product-down
+        run: make product-image-down
       - name: Observability profile starts and answers (collector, Prometheus, Tempo, Grafana)
         run: |
           docker compose --profile observability up -d --wait --wait-timeout 180 otel-collector prometheus tempo grafana
@@ -545,8 +569,8 @@ jobs:
       - name: Logs and teardown
         if: always()
         run: |
-          docker compose --profile llm --profile observability logs --no-color | tail -200
-          docker compose --profile llm --profile observability down -v --remove-orphans
+          docker compose --profile llm --profile observability --profile mvp logs --no-color | tail -200
+          docker compose --profile llm --profile observability --profile mvp down -v --remove-orphans
 
   gitleaks:
     name: Secrets scan (gitleaks)

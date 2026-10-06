@@ -1,13 +1,24 @@
-# Root build context for every image (services and the whatsapp-bot): keep images small and secrets out.
-# The bot's Dockerfile needs its own sources plus the workspace manifests; apps/web stays out.
+# Root build context for every image (services, the one deployable and the whatsapp-bot): keep
+# images small and secrets out. The bot's Dockerfile needs its own sources plus the workspace
+# manifests; apps/web stays out. The deployable (composition/mvp/Dockerfile) reads the services'
+# prompts, seed calendar and alembic files, composition/mvp/topics.toml, and the eval harness and
+# golden set, all admitted below.
 .git
 .github
+.claude
 docs
-# The eval image carries the harness and its golden sets (services/eval/Dockerfile).
+# The eval and deployable images carry the harness and its golden sets.
 evals/*
 !evals/harness
 !evals/golden
 infra
+tools
+# Local state, reports and scratch: never part of an image.
+var
+output
+tmp
+src
+.pnpm-store
 apps/web/*
 !apps/web/package.json
 packages/ui/*
@@ -29,7 +40,13 @@ apps/whatsapp-bot/.turbo
 **/.hypothesis
 **/.import_linter_cache
 **/*.tsbuildinfo
+**/.coverage
+**/.coverage.*
+**/coverage.xml
+**/*.sarif
 **/.env
 **/.env.*
 !**/.env.example
+**/*.pem
+**/*.key
 **/.DS_Store

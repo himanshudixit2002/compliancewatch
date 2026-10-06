@@ -264,6 +264,7 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | `make label` | Labelling tool for the extraction golden set: `ARGS="check"`, `"index ..."`, `"prepare ..."` |
 | `make demo` | The demo tenant end to end in one process: consent, profile, rules, obligations, a reminder ([docs/onboarding/demo.md](docs/onboarding/demo.md)) |
 | `make product` / `product-seed` / `product-check` / `product-logs PROC=` / `product-down` | The local product: the one deployable's app and worker (Kafka, Temporal on) and the web app on the dev stack; synthetic tenants and the demo publication; the check that a published rule becomes decisions, obligations and a change card ([docs/onboarding/product.md](docs/onboarding/product.md)) |
+| `make mvp-image` / `product-image` / `product-image-logs PROC=` / `product-image-down` | The one deployable's image (`composition/mvp/Dockerfile`), and the same product from it in containers (compose profile `mvp`): its release, the app and the worker; `make product-seed` and `make product-check` run against it unchanged |
 | `make runbooks-check` | Every Prometheus alert links an existing runbook (part of `make check`) |
 | `make dev-backup` / `dev-restore FILE=` | pg_dump and pg_restore of the dev database ([docs/runbooks/backup-restore.md](docs/runbooks/backup-restore.md)) |
 | `make hooks` | Install the pre-commit and commit-msg hooks |
@@ -309,9 +310,13 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 `composition/mvp` is the one-process deploy profile: every service's FastAPI app behind one ASGI dispatcher on two listeners (`cw-mvp serve`), and one worker process (`cw-mvp worker`) that runs every service's background work in a single event loop. Read the full design in [composition/mvp/README.md](composition/mvp/README.md).
 
 ```bash
-cw-mvp serve   # public listener on 8000, internal on 8080
-cw-mvp worker  # background work: consumers, periodic jobs, Temporal workers; health on 8001
+cw-mvp serve          # public listener on 8000, internal on 8080
+cw-mvp worker         # background work: consumers, periodic jobs, Temporal workers; health on 8001
+cw-mvp release        # a deploy's release step: every service's migrations, then the Kafka topics
+cw-mvp check-config   # what this environment lacks for its CW_ENV (staging and production rules)
 ```
+
+One image runs all of them by command (`composition/mvp/Dockerfile`; `make mvp-image`).
 
 Both switches are off by default; enable them with `CW_WORKER_KAFKA_ENABLED=1` (outbox relays and consumers) and `CW_WORKER_TEMPORAL_ENABLED=1` (Temporal workers on one client). The worker calls the app process's internal listener as the `worker` service client; its scopes are in `services/identity/src/identity/identity_dev_clients.toml`.
 
