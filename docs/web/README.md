@@ -43,6 +43,9 @@ Flat; markdown files. Reading order for someone new to the app:
 10. [business-pages.md](business-pages.md): the businesses list and a business's pages: the
     hierarchy and locations, attributes per financial year, the snapshot's origins, the review
     task reasons, and what waits.
+    [obligation-pages.md](obligation-pages.md): a business's obligations (the merged list, the
+    calendar, one obligation with why it applies and its tracking), the changes feed with whether
+    each change applies, ask, and the first-obligation poll after onboarding.
 11. [settings.md](settings.md): the settings index, consents and their withdrawal, the
     recipients remembered per device, notification preferences and quiet hours, billing and
     its "not connected" state, the account page.
@@ -75,7 +78,7 @@ commands; the docs here carry the reasoning and the procedures.
 | A test convention, a coverage exclusion, a make target, a CI step        | `testing.md`                                                                                                   |
 | A message key convention or a shared helper                              | `i18n.md`                                                                                                      |
 | A flag declaration, the reader, a product event                          | `feature-flags.md`                                                                                             |
-| What an owner or CA screen shows, calls, records or waits for            | `onboarding-flow.md`, `business-pages.md`, `settings.md` or `legal-pages.md`                                   |
+| What an owner or CA screen shows, calls, records or waits for            | `onboarding-flow.md`, `business-pages.md`, `obligation-pages.md`, `settings.md` or `legal-pages.md`            |
 | What an internal tool shows, calls or waits for                          | `admin-tools.md`                                                                                               |
 | A choice local to the web app                                            | A `D-0NN` entry in `decisions.md`; a choice that binds other parts of the platform is an ADR under `docs/adr/` |
 

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import {
   BusinessHome,
+  businessFlags,
   businessHeaderLinks,
   getBusinessHome,
   laterScreens,
@@ -40,7 +41,13 @@ export default async function BusinessHomePage({ params }: Props) {
   return (
     <BusinessHome
       view={home.value}
-      header={businessHeaderLinks("owner.business", session, businessId, home.value.header.name)}
+      header={businessHeaderLinks(
+        "owner.business",
+        session,
+        businessId,
+        home.value.header.name,
+        await businessFlags(session),
+      )}
       links={{
         profile: at("owner.business.profile"),
         attributes: at("owner.business.attributes"),

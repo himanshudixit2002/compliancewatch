@@ -548,7 +548,7 @@ web-e2e: check-pnpm ## Build the web app and run Playwright with axe against nex
 	export CW_WEB_RULEBOOK_WRITE_TOKEN="$${CW_WEB_RULEBOOK_WRITE_TOKEN:-$${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}}"; \
 	export CW_WEB_RULEBOOK_REVIEW_TOKEN="$${CW_WEB_RULEBOOK_REVIEW_TOKEN:-$${CW_RULEBOOK_REVIEW_TOKEN:-local-review-token}}"; \
 	$(PNPM) --filter web build && \
-	PORT=$${WEB_PORT:-3000} CW_WEB_ENV=test WEB_STACK_BILLING=$(BILLING) $(PNPM) --filter web e2e
+	PORT=$${WEB_PORT:-3000} CW_WEB_ENV=test WEB_STACK_BILLING=$(BILLING) $(PNPM) --filter web e2e --project=chromium
 
 web-screens: check-pnpm ## Regenerate docs/web/screens.md from the screen registry
 	$(PNPM) --filter web screens:gen
@@ -563,7 +563,7 @@ openapi-ts-check: check-pnpm ## The generated OpenAPI types match the committed 
 	$(PNPM) --filter @compliancewatch/contracts openapi-ts:check
 
 # ---- Product ---------------------------------------------------------------------------------
-.PHONY: product product-role product-start product-wait product-seed product-check product-down product-logs
+.PHONY: product product-role product-start product-wait product-seed product-check product-e2e product-down product-logs
 # The local product (ADR-013 on the dev stack, docs/onboarding/product.md): the one deployable's
 # app and worker processes (composition/mvp) with Kafka and Temporal on, and next dev for the web
 # app. make product-seed fills it with synthetic tenants and the demo publication, and
@@ -691,6 +691,21 @@ product-check: check-uv ## Prove the running product works, step by step (cw-pro
 	$(PRODUCT_ENV) CW_LOG_LEVEL=WARNING \
 	  CW_PRODUCT_RECORDS_URL="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}" \
 	  $(UV) run --package compliancewatch-demo cw-product check $(ARGS)
+
+# The web app's real-data journey (Playwright project product, apps/web/e2e/product): the web app
+# is built into its own directory (.next/e2e-product, so neither the default build nor the
+# .next/product of make product's next dev is touched) and started with next start on
+# PRODUCT_E2E_PORT, every CW_WEB_*_URL at the product's internal listener (CW_E2E_PRODUCT_URL), the
+# fake sign-in and CW_WEB_ENV=test; it signs in as the tenant make product-seed recorded. It
+# writes as that tenant: a probe business of its own, started, completed and commented on.
+PRODUCT_E2E_PORT ?= 3400
+
+product-e2e: check-pnpm ## Build the web app and run the Playwright product project against the running product (after make product and make product-seed): make product-e2e [PRODUCT_E2E_PORT=3400]
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	export WEB_DIST_DIR=.next/e2e-product; \
+	$(PNPM) --filter web build && \
+	PORT=$(PRODUCT_E2E_PORT) CW_WEB_ENV=test CW_E2E_PRODUCT_URL="http://127.0.0.1:$${CW_MVP_INTERNAL_PORT:-8080}" \
+	  $(PNPM) --filter web e2e --project=product
 
 product-down: ## Stop the product's processes: only the pids make product recorded in var/product, with their children (logs stay)
 	@tree() { for child in $$(pgrep -P "$$1" 2>/dev/null); do tree "$$child"; done; echo "$$1"; }; \

@@ -1,160 +1,255 @@
 import type { Route } from "next";
 import Link from "next/link";
-import { Button, KeyValue, PageHeader, type KeyValueItem } from "@compliancewatch/ui";
-import { t } from "@/shared/i18n";
-import { formatDate } from "@/shared/lib/dates";
-import { StatCard } from "@/shared/ui/stat-card";
 import {
-  OBLIGATION_STATUS_FIELDS,
-  closureReasonLabel,
-  dueDateText,
-  duePhrase,
-  evidenceTypeText,
-  isObligationOverdue,
-  obligationStatusLabel,
-  obligationStatusTone,
-  periodText,
-  statusChangeLabel,
-  statusChanges,
-  type ClosureReason,
-  type Obligation,
-  type ObligationStatusChange,
-} from "../model/obligations";
+  Banner,
+  KeyValue,
+  PageHeader,
+  StatusChip,
+  Timeline,
+  type KeyValueItem,
+} from "@compliancewatch/ui";
+import type { Crumb, NavLink } from "@/shared/config/nav";
+import { t } from "@/shared/i18n";
+import { Breadcrumbs } from "@/shared/ui/breadcrumbs";
+import { CitationList } from "@/shared/ui/citation-list";
+import { NotLegalAdvice } from "@/shared/ui/not-legal-advice";
+import { SectionNav } from "@/shared/ui/section-nav";
+import type { ObligationPageView } from "../model/detail";
+import { AssigneePanel, type AssigneeMode } from "./assignee-panel";
+import { CommentForm } from "./comment-form";
+import { StatusPanel } from "./status-panel";
+import type { TrackingAction } from "./tracking-form";
+import { WhyApplies } from "./why-applies";
 
 export interface ObligationDetailViewProps {
-  obligation: Obligation;
-  /** The obligation's evidence page; without it the page shows no evidence link. */
-  evidenceHref?: Route;
-  /**
-   * Moves the obligation to the status read from OBLIGATION_STATUS_FIELDS.status (a server
-   * action). No route changes a status yet, so the buttons show only when the page passes one.
-   */
-  statusAction?: (formData: FormData) => Promise<void>;
-  /** Now, for the due date; tests pass a fixed instant. */
-  now?: Date;
+  view: ObligationPageView;
+  header: { crumbs: readonly Crumb[]; tabs: readonly NavLink[] };
+  listHref: string;
+  /** The signed-in user. */
+  viewerId: string;
+  actions: { status: TrackingAction; assign: TrackingAction; comment: TrackingAction };
+  /** One Idempotency-Key per form, minted for this render. */
+  keys: { status: string; assign: string; comment: string };
+  assignee: { mode: AssigneeMode; text: string };
 }
 
-/** "Completed on 10 Oct 2026"; the date alone when the service names no reason. */
-function closedText(closedAt: string, reason: ClosureReason | null): string {
-  const date = formatDate(closedAt);
-  return reason === null
-    ? date
-    : t("obligations.detail.closedValue", { date, reason: closureReasonLabel(reason) });
-}
-
-/** When it was closed (once it is), then the rule version and decision it came from. */
-function facts(item: Obligation): KeyValueItem[] {
-  const origin: KeyValueItem[] = [
+function facts(view: ObligationPageView, assigneeText: string): KeyValueItem[] {
+  const items: KeyValueItem[] = [
     {
-      key: "rule-version",
-      label: t("obligations.detail.ruleVersion"),
-      value: <code className="font-mono text-xs">{item.ruleVersionId}</code>,
-      copy: item.ruleVersionId,
+      key: "status",
+      label: t("obligation.facts.status"),
+      value: <StatusChip status={view.status} tone={view.statusTone} label={view.statusLabel} />,
     },
     {
-      key: "decision",
-      label: t("obligations.detail.decision"),
-      value: <code className="font-mono text-xs">{item.decisionId}</code>,
-      copy: item.decisionId,
+      key: "due",
+      label: t("obligation.facts.due"),
+      value: (
+        <span>
+          {view.due}
+          {view.dueNote === null ? null : (
+            <span className={view.overdue ? "ml-2 font-medium text-danger" : "ml-2 text-fg-muted"}>
+              {view.dueNote}
+            </span>
+          )}
+        </span>
+      ),
+    },
+    { key: "node", label: t("obligation.facts.node"), value: view.node },
+    { key: "evidence", label: t("obligation.facts.evidence"), value: view.evidence },
+    {
+      key: "assignee",
+      label: t("obligation.facts.assignee"),
+      value: view.assigneeId === null ? t("obligation.assignee.nobodyShort") : assigneeText,
     },
   ];
-  if (item.closedAt === null) return origin;
-  const closed = closedText(item.closedAt, item.closedReason);
-  return [{ key: "closed", label: t("obligations.detail.closed"), value: closed }, ...origin];
-}
-
-function StatusForms({
-  action,
-  changes,
-}: {
-  action: (formData: FormData) => Promise<void>;
-  changes: readonly ObligationStatusChange[];
-}) {
-  return (
-    <section aria-labelledby="obligation-status" className="flex flex-col gap-3">
-      <h2 id="obligation-status" className="text-lg font-semibold text-fg">
-        {t("obligations.detail.updateTitle")}
-      </h2>
-      <div className="flex flex-wrap gap-2">
-        {changes.map((change) => (
-          <form key={change} action={action} data-change={change}>
-            <input type="hidden" name={OBLIGATION_STATUS_FIELDS.status} value={change} />
-            <Button type="submit" variant={change === "done" ? "primary" : "secondary"}>
-              {statusChangeLabel(change)}
-            </Button>
-          </form>
-        ))}
-      </div>
-    </section>
-  );
+  if (view.closed !== null) {
+    items.splice(2, 0, { key: "closed", label: t("obligation.facts.closed"), value: view.closed });
+  }
+  return items;
 }
 
 /**
- * One obligation: its status, due date and the evidence it needs, the steps to meet it and the
- * rule version and decision behind it. The evidence link and the status buttons show only when
- * the page passes them.
+ * One obligation: what to do and by when (in India), for which GSTIN, the evidence it needs,
+ * whether its rule has been reviewed and who approved its publication, the clauses it cites with
+ * their text, why it applies, and its tracking: the status changes its status allows, who it is
+ * given to, the comments and the history, oldest first.
  */
 export function ObligationDetailView({
-  obligation,
-  evidenceHref,
-  statusAction,
-  now = new Date(),
+  view,
+  header,
+  listHref,
+  viewerId,
+  actions,
+  keys,
+  assignee,
 }: ObligationDetailViewProps) {
-  const overdue = isObligationOverdue(obligation, now);
-  const changes = statusChanges(obligation.status);
+  const { review } = view;
   return (
-    <div data-slot="obligation-detail" className="flex flex-col gap-6">
-      <PageHeader
-        title={obligation.title}
-        description={periodText(obligation) ?? t("obligations.detail.oneOff")}
-        actions={
-          evidenceHref === undefined ? undefined : (
-            <Button asChild variant="secondary">
-              <Link href={evidenceHref}>{t("obligations.detail.evidenceLink")}</Link>
-            </Button>
-          )
-        }
-      />
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard
-          label={t("obligations.detail.status")}
-          value={obligationStatusLabel(obligation.status)}
-          tone={obligationStatusTone(obligation.status)}
+    <div data-slot="obligation-detail" className="flex max-w-4xl flex-col gap-8">
+      <div className="flex flex-col gap-4">
+        <PageHeader
+          title={view.title}
+          description={view.period ?? t("obligation.oneOff")}
+          breadcrumbs={<Breadcrumbs crumbs={header.crumbs} />}
         />
-        <StatCard
-          label={t("obligations.detail.due")}
-          value={dueDateText(obligation)}
-          tone={overdue ? "danger" : "neutral"}
-          hint={duePhrase(obligation, now)}
-        />
-        <StatCard
-          label={t("obligations.detail.evidence")}
-          value={evidenceTypeText(obligation.evidenceType)}
-        />
+        <SectionNav items={header.tabs} label={t("business.tabs")} />
       </div>
-      {statusAction === undefined || changes.length === 0 ? null : (
-        <StatusForms action={statusAction} changes={changes} />
-      )}
+      <KeyValue items={facts(view, assignee.text)} aria-label={t("obligation.facts.label")} />
+
+      <StatusPanel
+        action={actions.status}
+        businessId={view.businessId}
+        obligationId={view.id}
+        idempotencyKey={keys.status}
+        actions={view.actions}
+        title={view.title}
+      />
+
       <section aria-labelledby="obligation-steps" className="flex flex-col gap-3">
         <h2 id="obligation-steps" className="text-lg font-semibold text-fg">
-          {t("obligations.detail.stepsTitle")}
+          {t("obligation.steps.heading")}
         </h2>
-        {obligation.steps.length === 0 ? (
-          <p className="text-sm text-fg-muted">{t("obligations.detail.noSteps")}</p>
+        {view.steps.length === 0 ? (
+          <p className="text-sm text-fg-muted">{t("obligation.steps.none")}</p>
         ) : (
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-fg">
-            {obligation.steps.map((step, index) => (
+            {view.steps.map((step, index) => (
               <li key={index}>{step}</li>
             ))}
           </ol>
         )}
       </section>
-      <section aria-labelledby="obligation-facts" className="flex flex-col gap-3">
-        <h2 id="obligation-facts" className="text-lg font-semibold text-fg">
-          {t("obligations.detail.factsTitle")}
+
+      <section
+        aria-labelledby="obligation-rule"
+        data-slot="obligation-rule"
+        className="flex flex-col gap-3"
+      >
+        <h2 id="obligation-rule" className="text-lg font-semibold text-fg">
+          {t("obligation.rule.heading")}
         </h2>
-        <KeyValue items={facts(obligation)} />
+        {review.ruleTitle === null ? (
+          <p className="text-sm text-fg-muted">{t("obligation.rule.unknown")}</p>
+        ) : (
+          <p className="text-sm text-fg">
+            {review.ruleTitle}
+            {review.effective === null ? null : (
+              <span className="block text-xs text-fg-muted">{review.effective}</span>
+            )}
+          </p>
+        )}
+        {review.reviewed ? null : (
+          <Banner
+            tone="warning"
+            title={t("obligation.rule.notReviewedTitle")}
+            data-slot="not-reviewed"
+          >
+            {t("obligation.rule.notReviewedBody")}
+          </Banner>
+        )}
+        <div data-slot="reviewed-by" className="flex flex-col gap-1 text-sm">
+          {review.approvedBy.length === 0 ? (
+            <p className="text-fg-muted">{t("obligation.rule.noApprovers")}</p>
+          ) : (
+            <>
+              <p className="text-fg">
+                {review.publishedAt === null
+                  ? t("obligation.rule.approvedBy", { count: review.approvedBy.length })
+                  : t("obligation.rule.approvedOn", {
+                      count: review.approvedBy.length,
+                      date: review.publishedAt,
+                    })}
+              </p>
+              <ul className="ml-5 list-disc">
+                {review.approvedBy.map((approver) => (
+                  <li key={approver} data-approver={approver}>
+                    <code className="font-mono text-xs">{approver}</code>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
       </section>
+
+      <section aria-labelledby="obligation-citations" className="flex flex-col gap-3">
+        <h2 id="obligation-citations" className="text-lg font-semibold text-fg">
+          {t("obligation.citations.heading")}
+        </h2>
+        <CitationList citations={view.citations} empty={t("obligation.citations.none")} />
+      </section>
+
+      <WhyApplies why={view.why} node={view.node} />
+
+      <AssigneePanel
+        action={actions.assign}
+        businessId={view.businessId}
+        obligationId={view.id}
+        idempotencyKey={keys.assign}
+        assigneeId={view.assigneeId}
+        assigneeText={assignee.text}
+        viewerId={viewerId}
+        mode={assignee.mode}
+        open={view.open}
+      />
+
+      <section aria-labelledby="obligation-comments" className="flex flex-col gap-3">
+        <h2 id="obligation-comments" className="text-lg font-semibold text-fg">
+          {t("obligation.comments.heading")}
+        </h2>
+        {view.comments.length === 0 ? (
+          <p className="text-sm text-fg-muted">{t("obligation.comments.none")}</p>
+        ) : (
+          <ul className="flex flex-col gap-3" data-slot="comments">
+            {view.comments.map((comment) => (
+              <li
+                key={comment.id}
+                data-comment={comment.id}
+                className="rounded-md border border-line p-3"
+              >
+                <p className="text-xs text-fg-muted">
+                  {comment.author} · <time dateTime={comment.dateTime}>{comment.when}</time>
+                </p>
+                <p className="mt-1 text-sm whitespace-pre-wrap text-fg">{comment.body}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+        <CommentForm
+          action={actions.comment}
+          businessId={view.businessId}
+          obligationId={view.id}
+          idempotencyKey={keys.comment}
+        />
+      </section>
+
+      <section aria-labelledby="obligation-history" className="flex flex-col gap-3">
+        <h2 id="obligation-history" className="text-lg font-semibold text-fg">
+          {t("obligation.history.heading")}
+        </h2>
+        {view.history.length === 0 ? (
+          <p className="text-sm text-fg-muted">{t("obligation.history.none")}</p>
+        ) : (
+          <Timeline
+            data-slot="history"
+            events={view.history.map((item) => ({
+              id: item.id,
+              label: item.when,
+              dateTime: item.dateTime,
+              title: item.title,
+              body: item.body ?? undefined,
+              tone: item.tone,
+            }))}
+          />
+        )}
+      </section>
+
+      <p className="text-sm">
+        <Link href={listHref as Route} className="text-primary underline-offset-2 hover:underline">
+          {t("obligation.backToList")}
+        </Link>
+      </p>
+      <NotLegalAdvice />
     </div>
   );
 }

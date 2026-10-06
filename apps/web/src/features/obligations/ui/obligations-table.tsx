@@ -1,12 +1,7 @@
-"use client";
-
+import type { Route } from "next";
 import Link from "next/link";
-import { useId, useState } from "react";
 import {
-  EmptyState,
-  Field,
-  Input,
-  Select,
+  Badge,
   StatusChip,
   Table,
   TableBody,
@@ -16,51 +11,58 @@ import {
   TableHeader,
   TableRow,
   cn,
-  type SelectOption,
 } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
-import {
-  ALL,
-  NO_OBLIGATION_FILTERS,
-  OVERDUE,
-  filterObligations,
-  type ObligationRow,
-} from "./obligation-rows";
+import type { ObligationRow } from "../model/list";
 
 export interface ObligationsTableProps {
   rows: readonly ObligationRow[];
-  /** One option per status, in order; "All statuses" and "Overdue" come first. */
-  statusOptions: readonly SelectOption[];
+  /** Whether a row names the node it is kept for (a business with several registrations). */
+  showNode: boolean;
 }
 
-function Rows({ rows }: { rows: readonly ObligationRow[] }) {
+/**
+ * A page of obligations by due date: the title (which opens the obligation) with its period and
+ * the GSTIN it is kept for, the status, the due date in India with how it relates to today (an
+ * overdue one says so in words), and whether its rule has been reviewed with its citations.
+ */
+export function ObligationsTable({ rows, showNode }: ObligationsTableProps) {
   return (
-    <Table>
-      <TableCaption className="sr-only">{t("obligations.caption")}</TableCaption>
+    <Table data-slot="obligations-table" scrollLabel={t("obligations.tableRegion")}>
+      <TableCaption className="text-left text-sm text-fg-muted">
+        {t("obligations.caption", { count: rows.length })}
+      </TableCaption>
       <TableHeader>
         <TableRow>
           <TableHead scope="col">{t("obligations.column.obligation")}</TableHead>
           <TableHead scope="col">{t("obligations.column.status")}</TableHead>
           <TableHead scope="col">{t("obligations.column.due")}</TableHead>
-          <TableHead scope="col">{t("obligations.column.evidence")}</TableHead>
+          <TableHead scope="col">{t("obligations.column.rule")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {rows.map((row) => (
-          <TableRow key={row.id} data-obligation={row.id}>
-            <TableCell className="whitespace-normal">
-              <Link
-                href={row.href}
-                className="font-medium text-fg underline-offset-4 hover:underline"
-              >
-                {row.title}
-              </Link>
-              {row.period === null ? null : <p className="text-xs text-fg-muted">{row.period}</p>}
+          <TableRow key={row.id} data-obligation={row.id} data-status={row.status}>
+            <TableCell className="align-top whitespace-normal">
+              <div className="flex flex-col gap-1">
+                <Link
+                  href={row.href as Route}
+                  className="font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  {row.title}
+                </Link>
+                {row.period === null ? null : (
+                  <span className="text-xs text-fg-muted">{row.period}</span>
+                )}
+                {showNode && row.node !== null ? (
+                  <span className="text-xs text-fg-muted">{row.node}</span>
+                ) : null}
+              </div>
             </TableCell>
-            <TableCell>
+            <TableCell className="align-top">
               <StatusChip status={row.status} tone={row.statusTone} label={row.statusLabel} />
             </TableCell>
-            <TableCell>
+            <TableCell className="align-top whitespace-nowrap">
               <span className="block">{row.due}</span>
               {row.dueNote === null ? null : (
                 <span
@@ -74,53 +76,19 @@ function Rows({ rows }: { rows: readonly ObligationRow[] }) {
                 </span>
               )}
             </TableCell>
-            <TableCell className="text-fg-muted">{row.evidence}</TableCell>
+            <TableCell className="align-top">
+              <div className="flex flex-col items-start gap-1">
+                <Badge tone={row.review.tone}>{row.review.label}</Badge>
+                <span className="text-xs text-fg-muted">
+                  {row.citations === 1
+                    ? t("obligations.citationsOne")
+                    : t("obligations.citationsMany", { count: row.citations })}
+                </span>
+              </div>
+            </TableCell>
           </TableRow>
         ))}
       </TableBody>
     </Table>
-  );
-}
-
-/**
- * The obligations in a table, narrowed in the browser by status (or to the overdue ones) and by
- * a search over the title and the period. Each title opens the obligation's own page.
- */
-export function ObligationsTable({ rows, statusOptions }: ObligationsTableProps) {
-  const id = useId();
-  const [filters, setFilters] = useState(NO_OBLIGATION_FILTERS);
-  const shown = filterObligations(rows, filters);
-
-  return (
-    <div data-slot="obligations-table" className="flex flex-col gap-4">
-      <div className="grid gap-3 sm:grid-cols-[1fr_14rem]">
-        <Field id={`${id}-search`} label={t("obligations.filter.search")}>
-          <Input
-            type="search"
-            value={filters.search}
-            onChange={(event) => setFilters({ ...filters, search: event.target.value })}
-          />
-        </Field>
-        <Field id={`${id}-status`} label={t("obligations.filter.status")}>
-          <Select
-            value={filters.status}
-            onChange={(event) => setFilters({ ...filters, status: event.target.value })}
-            options={[
-              { value: ALL, label: t("obligations.filter.all") },
-              { value: OVERDUE, label: t("obligations.filter.overdue") },
-              ...statusOptions,
-            ]}
-          />
-        </Field>
-      </div>
-      <p role="status" className="text-sm text-fg-muted">
-        {t("obligations.shown", { shown: shown.length, total: rows.length })}
-      </p>
-      {shown.length === 0 ? (
-        <EmptyState title={t("obligations.noMatch.title")} body={t("obligations.noMatch.body")} />
-      ) : (
-        <Rows rows={shown} />
-      )}
-    </div>
   );
 }

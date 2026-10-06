@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeHref, isActivePath, pathnameOf, safeNext, withQuery } from "./url.ts";
+import { activeHref, isActivePath, pathnameOf, safeHttpUrl, safeNext, withQuery } from "./url.ts";
 
 describe("safeNext", () => {
   it("accepts relative paths inside the app", () => {
@@ -52,5 +52,18 @@ describe("activeHref", () => {
     expect(activeHref(hrefs, "/admin/review/t1")).toBe("/admin/review");
     expect(activeHref(hrefs, "/admin")).toBe("/admin");
     expect(activeHref(hrefs, "/settings")).toBeNull();
+  });
+});
+
+describe("safeHttpUrl", () => {
+  it("keeps an http or https address and drops anything else", () => {
+    expect(safeHttpUrl("https://example.com/a.pdf")).toBe("https://example.com/a.pdf");
+    expect(safeHttpUrl("http://example.com/")).toBe("http://example.com/");
+    expect(safeHttpUrl("javascript:alert(1)")).toBeNull();
+    expect(safeHttpUrl("data:text/html,x")).toBeNull();
+    expect(safeHttpUrl("not a url")).toBeNull();
+    expect(safeHttpUrl("")).toBeNull();
+    expect(safeHttpUrl(null)).toBeNull();
+    expect(safeHttpUrl(undefined)).toBeNull();
   });
 });

@@ -7,6 +7,11 @@ import {
   revisitUnsure,
   summaryViewedEvent,
 } from "@/features/business";
+import {
+  FirstObligationPoll,
+  checkFirstObligation,
+  findFirstObligation,
+} from "@/features/obligations";
 import { track } from "@/server/analytics";
 import { requireScreenSession } from "@/server/dal";
 import { hrefFor, screenById } from "@/shared/config/screens";
@@ -33,6 +38,7 @@ export default async function OnboardingDonePage({ params }: Props) {
     return <ServiceError heading={SCREEN.title} error={summary.error} />;
   }
   await track(session, summaryViewedEvent(summary.value));
+  const first = await findFirstObligation(session, businessId);
   return (
     <DoneSummary
       title={SCREEN.title}
@@ -41,6 +47,13 @@ export default async function OnboardingDonePage({ params }: Props) {
       businessIdField={ANSWER_FIELDS.businessId}
       questionsHref={hrefFor(screenById("owner.onboarding.questions"), { businessId })}
       businessHref={hrefFor(screenById("owner.business"), { businessId })}
+      firstObligation={
+        <FirstObligationPoll
+          check={checkFirstObligation.bind(null, businessId)}
+          initial={first}
+          listHref={hrefFor(screenById("owner.obligations"), { businessId })}
+        />
+      }
     />
   );
 }

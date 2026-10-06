@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { businessHeaderLinks } from "@/features/business";
+import { businessFlags, businessHeaderLinks } from "@/features/business";
 import { RemindersView, getReminders, readHistoryFilter } from "@/features/notifications";
 import { requireScreenSession } from "@/server/dal";
 import { hrefFor, screenById } from "@/shared/config/screens";
@@ -31,7 +31,13 @@ export default async function RemindersPage({ params, searchParams }: Props) {
     <RemindersView
       title={SCREEN.title}
       view={page.value}
-      header={businessHeaderLinks("owner.reminders", session, businessId, page.value.business.name)}
+      header={businessHeaderLinks(
+        "owner.reminders",
+        session,
+        businessId,
+        page.value.business.name,
+        await businessFlags(session),
+      )}
       pageHref={hrefFor(SCREEN, { businessId })}
     />
   );

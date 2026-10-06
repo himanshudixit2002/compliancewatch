@@ -1,3 +1,4 @@
+import type { FlagName } from "@/shared/config/flags";
 import { breadcrumbsFor, businessNavFor, type Crumb, type NavLink } from "@/shared/config/nav";
 import type { Role, TenantKind } from "@/shared/config/roles";
 import {
@@ -27,18 +28,30 @@ export interface BusinessHeaderLinks {
 
 const HOME_ID = "owner.business";
 
+const NO_FLAGS: ReadonlySet<FlagName> = new Set();
+
+/**
+ * The breadcrumbs and the tabs of a business page. A page behind a flag (Ask) has a tab only
+ * when its flag is on for the session's tenant: `flags` is the set `businessFlags` read.
+ */
 export function businessHeaderLinks(
   screenId: ScreenId,
   viewer: BusinessViewer,
   businessId: string,
   businessName: string,
+  flags: ReadonlySet<FlagName> = NO_FLAGS,
 ): BusinessHeaderLinks {
   const params = { businessId };
   return {
     crumbs: breadcrumbsFor(screenId, params).map((crumb) =>
       crumb.id === HOME_ID ? { ...crumb, label: businessName } : crumb,
     ),
-    tabs: businessNavFor({ roles: viewer.roles, tenantKind: viewer.tenantKind, params }),
+    tabs: businessNavFor({
+      roles: viewer.roles,
+      tenantKind: viewer.tenantKind,
+      params,
+      isFlagEnabled: (flag) => flags.has(flag),
+    }),
   };
 }
 

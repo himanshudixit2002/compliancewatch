@@ -1,6 +1,7 @@
 import "server-only";
 
 import type {
+  applicabilityEngine,
   identity,
   llmGateway,
   notification,
@@ -26,8 +27,9 @@ import {
  * tenant-scoped services), an optional tenant override for admin lookups (the only way a
  * request carries a tenant other than the session's), and the fetch to use (tests inject one).
  *
- *   identity, profile, notification, llm-gateway, obligation, qa   x-tenant-id from the session
- *   rulebook                                                        no tenant header
+ *   identity, profile, notification, llm-gateway, obligation, qa,   x-tenant-id from the session
+ *   applicability-engine
+ *   rulebook                                                         no tenant header
  *
  * Rulebook writes go through ./rulebook-write.ts, the only module that sends the write and
  * review tokens. Base URLs and the timeout come from the validated environment (server/env.ts).
@@ -51,6 +53,7 @@ export type NotificationClient = Client<notification.paths>;
 export type LlmGatewayClient = Client<llmGateway.paths>;
 export type ObligationClient = Client<obligation.paths>;
 export type QaClient = Client<qa.paths>;
+export type ApplicabilityEngineClient = Client<applicabilityEngine.paths>;
 export type RulebookClient = Client<rulebook.paths>;
 
 /** The tenant a request acts for: the override, else the session's. */
@@ -102,6 +105,17 @@ export function obligationClient(ctx: ClientContext): ObligationClient {
 
 export function qaClient(ctx: ClientContext): QaClient {
   return createServiceClient<qa.paths>(optionsFor("qa", ctx, tenantHeaders(ctx)));
+}
+
+/**
+ * The engine's decisions and a change's impact are the tenant's: every call carries x-tenant-id.
+ * The fan-out and dry-run routes name no tenant and belong to the admin tools, which do not use
+ * this factory yet.
+ */
+export function applicabilityEngineClient(ctx: ClientContext): ApplicabilityEngineClient {
+  return createServiceClient<applicabilityEngine.paths>(
+    optionsFor("applicability-engine", ctx, tenantHeaders(ctx)),
+  );
 }
 
 /** The rulebook holds regulatory records shared by every tenant: reads carry no tenant header. */

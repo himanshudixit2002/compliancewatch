@@ -3,7 +3,10 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { createElement, type ReactElement } from "react";
 import type { RouteRef } from "@/shared/config/services";
+import { IDEMPOTENCY_KEY_FIELD } from "@/shared/lib/idempotency";
 import { isUuid } from "@/shared/lib/identifiers";
+import { mapResult, type Result } from "../result";
+import { call, type CallOutcome } from "./client";
 
 /**
  * The Idempotency-Key a creating write may carry, so a form submitted twice (a retry after a
@@ -36,7 +39,13 @@ import { isUuid } from "@/shared/lib/identifiers";
 export const IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
 
 /** The hidden input's name; the action reads it from the FormData under this key. */
-export const IDEMPOTENCY_KEY_FIELD = "idempotency_key";
+export { IDEMPOTENCY_KEY_FIELD };
+
+/**
+ * The header a service adds to an answer it replays for a repeated key and request (py-common's
+ * idempotency module): the write happened once, earlier, and this is its first answer again.
+ */
+export const REPLAYED_HEADER = "Idempotent-Replayed";
 
 /**
  * The operations whose route requires Idempotency-Key, named `<service>.<verb>`, with that
@@ -128,6 +137,30 @@ export function idempotencyHeaders(
   if (!isIdempotentOperation(operation, operations)) return {};
   const key = idempotencyKeyOf(formData);
   return key === undefined ? {} : { [IDEMPOTENCY_KEY_HEADER]: key };
+}
+
+/** An idempotent write's answer, and whether the service replayed it for a repeated key. */
+export interface Replayable<T> {
+  value: T;
+  replayed: boolean;
+}
+
+/**
+ * `call()` for a write sent with an Idempotency-Key: the value, plus whether the answer is the
+ * replay of an earlier one (`Idempotent-Replayed: true`), so a form can say that a retry recorded
+ * nothing twice. A failure is the same `ApiError` `call` gives.
+ */
+export async function callIdempotent<T>(
+  promise: Promise<CallOutcome<T>>,
+): Promise<Result<Replayable<T>>> {
+  let replayed = false;
+  const result = await call(
+    promise.then((outcome) => {
+      replayed = outcome.response.headers.get(REPLAYED_HEADER) === "true";
+      return outcome;
+    }),
+  );
+  return mapResult(result, (value) => ({ value, replayed }));
 }
 
 /** A hidden input holding one key for this render of the form; a server component. */

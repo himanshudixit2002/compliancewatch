@@ -705,3 +705,66 @@ with token colours. The SVG is `aria-hidden` with nothing focusable in it, and a
 lists the same relations with their links and evidence, which is what assistive technology reads.
 Consequences: a vector rank appears once the page sends an embedding; a graph past 40 nodes is cut
 short with a notice, and starting from another node shows its part.
+
+## D-045: A business's obligations are merged across its nodes and paged by the last row's key
+
+2026-10-06. The obligation service keeps an obligation for the node it is about (a GSTIN's
+returns for its registration) and lists one node a page at a time with its own cursor; the
+business's pages show the business as one list. The list asks the entity and every registration
+and merges their rows in the service's order (due date, the undated last, then id). A merged page
+cannot carry one opaque cursor per node in its address, so it carries the key of its last row:
+the next page asks each node from that row's due day in India (`due_from`) and drops the rows up
+to the key, following a node's own cursor only while rows on that day stand before the key, and
+reports a node it cannot get past in five requests instead of guessing. The status and the due
+window are a GET form, so a filtered list is an address; the service's 366-day limit on a window
+is said up front and a longer window is refused on its field rather than shortened. The calendar
+reads every node's whole month (a month is well inside the limit). Considered and rejected: one
+list per registration (a business would read as several), reading every obligation up front and
+paging in the web server (no bound without a window), and constructing the service's cursors from
+the key (they are opaque by contract). Consequences: a later page costs one request per node; the
+undated rows come last, so a key without a date walks each node's dated rows first; obligations of
+a location stay off these pages until the profile service lists a registration's locations.
+
+## D-046: A tracking write keeps a request whose answer was lost, and says when it was a replay
+
+2026-10-06. The obligation service's status, assignee and comment writes take an Idempotency-Key
+and replay the first answer to a repeat for 24 hours. Each form on an obligation's page carries a
+key minted for that render; a double submit is one change. When no answer arrives at all (a
+dropped connection, a server that did not answer), the form keeps the request it sent, key
+included, and "Try again" sends exactly it: if the first one reached the service, the service
+answers with its first answer (`Idempotent-Replayed: true`, read by `callIdempotent`) and the page
+says the request had already been recorded, so nothing was recorded twice. A redirect from the
+server (an ended session) is let through to the framework. Considered and rejected: a fresh key on
+retry (it would record a second change when the first one had landed) and hiding the replay (a
+person who clicked twice should learn that one change was made). The product journey proves it
+end to end by dropping the browser's copy of the first answer.
+
+## D-047: The real-data journey is a Playwright project on `make product`
+
+2026-10-06. `make web-stack` has no worker, so no decision becomes an obligation there: the
+obligation, calendar, changes and ask screens can show only their gates, empty states and axe on
+it. The `product` project (`e2e/product`) runs the same app against `make product`'s internal
+listener after `make product-seed`: it signs in as the seeded synthetic business tenant, reads its
+obligations in the list and the calendar, opens one (citations, the synthetic approvers, the
+not-yet-reviewed warning, why it applies), makes a probe business of its own whose first
+obligation the onboarding summary's poll finds, starts and completes that obligation through a
+lost answer and comments on it, finds the annual return's change applying, and asks when the
+monthly return is due. Every assertion compares the page with what the services answer.
+`make product-e2e` builds the app into its own directory and runs the project; CI runs it in the
+dev-stack job after `make product-check`, on the product that job already starts, and the job's
+path filter now includes the web app. The default project (`--project=chromium`) stays the
+memory-stack suite. The spec names the seed calendar's real returns, so the synthetic-fixtures
+guard allows that one file, with its reason. Consequences: a web change runs the dev-stack job;
+each local run adds one synthetic probe business to the dev database, as `make product-check` does.
+
+## D-048: Reads a page repeats from the browser go through server actions
+
+2026-10-06. Two pages read again after they render: the onboarding summary checks for the first
+obligation every few seconds, and the calendar reads another month when the grid moves past its
+edge. Both call a server action that reads (the screen's gate again, then the gateway), because a
+`router.refresh()` would render the whole page again on every check, and a navigation to another
+month remounts the grid, which loses the keyboard's place. Next dispatches actions one at a time,
+which suits a poll and a month read; the calendar puts the month in the address with
+`history.replaceState`, and the previous and next months stay plain links. Consequences: no route
+handler is registered for these reads; a check that fails is shown with its correlation id and
+the poll goes on; the poll stops after 90 seconds and says so.

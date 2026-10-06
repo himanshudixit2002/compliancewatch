@@ -1,70 +1,80 @@
 import type { Route } from "next";
+import Link from "next/link";
 import { EmptyState, PageHeader } from "@compliancewatch/ui";
+import type { Crumb, NavLink } from "@/shared/config/nav";
 import { t } from "@/shared/i18n";
-import {
-  applicabilityLabel,
-  applicabilityOptions,
-  applicabilityTone,
-  changeCounts,
-  changeFacts,
-  reviewStatusLabel,
-  reviewStatusOptions,
-  reviewStatusTone,
-  shortSummary,
-  type ChangeItem,
-} from "../model/changes";
-import type { ChangeRow } from "./change-filters";
-import { ChangesList } from "./changes-list";
+import { Breadcrumbs } from "@/shared/ui/breadcrumbs";
+import { NotLegalAdvice } from "@/shared/ui/not-legal-advice";
+import { SectionNav } from "@/shared/ui/section-nav";
+import type { ChangesView as ChangesViewModel } from "../queries";
+import { ChangeCard } from "./change-card";
 
 export interface ChangesViewProps {
-  changes: readonly ChangeItem[];
-  /** The detail page of one change. */
-  hrefFor: (changeId: string) => Route;
-}
-
-function changeRow(change: ChangeItem, hrefFor: (changeId: string) => Route): ChangeRow {
-  return {
-    id: change.id,
-    title: change.title,
-    regulator: change.regulator,
-    summary: shortSummary(change.summary),
-    href: hrefFor(change.id),
-    applicability: change.applicability,
-    applicabilityLabel: applicabilityLabel(change.applicability),
-    applicabilityTone: applicabilityTone(change.applicability),
-    reviewStatus: change.reviewStatus,
-    reviewLabel: reviewStatusLabel(change.reviewStatus),
-    reviewTone: reviewStatusTone(change.reviewStatus),
-    facts: changeFacts(change),
-    categories: change.categories,
-  };
+  title: string;
+  view: ChangesViewModel;
+  header: { crumbs: readonly Crumb[]; tabs: readonly NavLink[] };
 }
 
 /**
- * The regulatory changes for a business: how many there are, how many apply and how many are
- * still in review, then the filterable list, or an empty state before any change is detected.
+ * The rulebook's published changes, newest first, each as a card with whether it applies to this
+ * business; a page at a time by the service's cursor. Before anything is published the page says
+ * so rather than showing an empty list.
  */
-export function ChangesView({ changes, hrefFor }: ChangesViewProps) {
-  const counts = changeCounts(changes);
+export function ChangesView({ title, view, header }: ChangesViewProps) {
   return (
-    <div data-slot="changes" className="flex flex-col gap-6">
-      <PageHeader
-        title={t("changes.title")}
-        description={t("changes.description", {
-          total: counts.total,
-          applicable: counts.applicable,
-          inReview: counts.inReview,
-        })}
-      />
-      {changes.length === 0 ? (
-        <EmptyState title={t("changes.empty.title")} body={t("changes.empty.body")} />
-      ) : (
-        <ChangesList
-          rows={changes.map((change) => changeRow(change, hrefFor))}
-          applicabilityOptions={applicabilityOptions()}
-          reviewOptions={reviewStatusOptions()}
+    <div data-slot="changes" className="flex max-w-4xl flex-col gap-6">
+      <div className="flex flex-col gap-4">
+        <PageHeader
+          title={title}
+          description={t("business.pageIntro", {
+            name: view.business.name,
+            pan: view.business.pan,
+          })}
+          breadcrumbs={<Breadcrumbs crumbs={header.crumbs} />}
         />
+        <SectionNav items={header.tabs} label={t("business.tabs")} />
+      </div>
+      <p className="max-w-prose text-sm text-fg-muted">{t("changes.intro")}</p>
+      {view.cards.length === 0 ? (
+        view.firstHref === null ? (
+          <EmptyState title={t("changes.empty.title")} body={t("changes.empty.body")} />
+        ) : (
+          <EmptyState title={t("changes.end.title")} body={t("changes.end.body")} />
+        )
+      ) : (
+        <div className="flex flex-col gap-4" data-slot="change-cards">
+          {view.cards.map((card) => (
+            <ChangeCard key={card.id} card={card} />
+          ))}
+        </div>
       )}
+      {view.nextHref === null && view.firstHref === null ? null : (
+        <nav aria-label={t("changes.pager")}>
+          <ul className="flex flex-wrap gap-4 text-sm">
+            {view.firstHref === null ? null : (
+              <li>
+                <Link
+                  href={view.firstHref as Route}
+                  className="text-primary underline-offset-2 hover:underline"
+                >
+                  {t("changes.newest")}
+                </Link>
+              </li>
+            )}
+            {view.nextHref === null ? null : (
+              <li>
+                <Link
+                  href={view.nextHref as Route}
+                  className="text-primary underline-offset-2 hover:underline"
+                >
+                  {t("changes.older")}
+                </Link>
+              </li>
+            )}
+          </ul>
+        </nav>
+      )}
+      <NotLegalAdvice />
     </div>
   );
 }

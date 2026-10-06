@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import {
   ANSWER_FIELDS,
   AttributesView,
+  businessFlags,
   businessHeaderLinks,
   getAttributesPage,
   isAttributeKey,
@@ -58,6 +59,7 @@ export default async function BusinessAttributesPage({ params, searchParams }: P
         session,
         businessId,
         view.header.name,
+        await businessFlags(session),
       )}
       pageHref={pageHref}
       nodeHref={(nodeId) => withQuery(pageHref, { node: nodeId, fy: view.fy })}
