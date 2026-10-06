@@ -229,7 +229,6 @@ export function checkTree(files: readonly SourceFile[]): Violation[] {
 export const PARKED_FEATURES: Readonly<Record<string, readonly string[]>> = {
   "admin-audit": ["admin.audit"],
   "admin-error-reports": ["admin.error-reports"],
-  "admin-pipeline": ["admin.pipeline"],
   "admin-qa-triage": ["admin.qa-triage"],
   "admin-sources": ["admin.sources"],
   "admin-tenants": ["admin.tenants"],
