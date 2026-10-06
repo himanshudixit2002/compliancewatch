@@ -18,7 +18,7 @@ import asyncio
 import threading
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 from uuid import UUID
@@ -39,6 +39,7 @@ from applicability_engine.testing import LocalFanOuts
 from cw_demo.product import check
 from cw_demo.product.check import BULK_ACTION, CONTACT_PREFIX, CheckContext, NotYetError
 from cw_demo.product.client import Product, ProductSettings, as_tenant, ok
+from cw_demo.product.evaluate import IST
 from cw_demo.product.publish import DEFAULT_RULES, publish
 from cw_demo.product.records import AuditRecord
 from cw_demo.product.seed import seed
@@ -368,6 +369,21 @@ def gstr9_obligations(product: Product, registration: str, version_id: str) -> i
     return len(listed)
 
 
+def monthly_due_next(now: datetime) -> str:
+    """The structured layer's answer for a monthly GSTR-3B filer decided on ``now``'s day in
+    India: the return due next that day, from the seed calendar, which is the previous month's
+    while it is still due (September's, due 20 October, on 6 October)."""
+    (monthly,) = [r for r in load_calendar(load_ontology()).rules if r.rule_key == "gstr3b_monthly"]
+    assert monthly.recurrence is not None
+    today = now.astimezone(IST).date()
+    period = next(
+        p for p in monthly.recurrence.periods_due(today, 1) if p.end > monthly.effective_from
+    )
+    due = monthly.recurrence.due_date(period)
+    title = monthly.obligation_template.title
+    return f"Your next GSTR-3B is due on {due.day} {due:%B %Y}: {title} ({period.label})."
+
+
 def test_the_public_api_lists_answers_and_bulk_notifies(tmp_path: Path) -> None:
     sink = tmp_path / "sink.jsonl"
     with running_app(service_overrides=services(sink)) as app:
@@ -408,7 +424,9 @@ def test_the_public_api_lists_answers_and_bulk_notifies(tmp_path: Path) -> None:
     assert first[0].startswith(f"GET /v1/businesses/{seeded['demo_traders']}/obligations")
     assert "pages of one alike" in first[0]
     assert first[1].endswith("404 obligation-business-not-found")
-    assert first[2].startswith("POST /v1/qa 'When is my GSTR-3B due?': Your next GSTR-3B is due")
+    assert first[2].startswith(
+        f"POST /v1/qa 'When is my GSTR-3B due?': {monthly_due_next(datetime.now(UTC))} "
+    ), "decided today, the registration's next return is the one due next today"
     assert "(structured layer," in first[2]
     assert first[3].endswith("404 qa-business-not-found")
     bulk_line = first[4]

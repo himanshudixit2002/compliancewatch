@@ -59,13 +59,16 @@ the API answers. One failed step does not stop the next.
   a database where it was withdrawn already, it checks what followed. Never run it against a
   database whose seed rules others rely on: only four seed rules can be published at all.
 - ``tracking``: a new synthetic business in the business tenant (``POST /v1/businesses``, a
-  monthly GSTR-3B filer) gets its obligations of the monthly rule from profile.updated; the step
-  starts the first one due, assigns it to the tenant's synthetic owner, and completes it twice with
-  one Idempotency-Key: one closure, and the second answer is the first, replayed. The detail then
-  shows the history (created, started, assigned, closed), the rule version's reviewed-by data
-  naming both synthetic reviewers while its seed status stays needs_review, and verified
-  citations; a comment is added and listed. Each run spends a business of its own, so the seeded
-  registration's obligations stay for the reminders step and a later check passes again.
+  monthly GSTR-3B filer) gets its obligations of the monthly rule from profile.updated. The first
+  one due must be the return it files next from the day it was decided, which is the previous
+  month's while that is still due (September's, due 20 October, when decided on 6 October;
+  ``Recurrence.periods_due``). The step starts it, assigns it to the tenant's synthetic owner, and
+  completes it twice with one Idempotency-Key: one closure, and the second answer is the first,
+  replayed. The detail then shows the history (created, started, assigned, closed), the rule
+  version's reviewed-by data naming both synthetic reviewers while its seed status stays
+  needs_review, and verified citations; a comment is added and listed. Each run spends a business
+  of its own, so the seeded registration's obligations stay for the reminders step and a later
+  check passes again.
 - ``changes``: the version of gstr9_annual the fanout step published. ``GET /v1/changes`` lists its
   publication (read from its ``published_at`` on) with both synthetic reviewers as its approvers,
   the seed status needs_review and verified citations. ``GET /v1/changes/{id}/impact`` as the CA
@@ -84,20 +87,23 @@ the API answers. One failed step does not stop the next.
   pages of one follow one another, each item carries its rule's title, ``status`` keeps what it
   names, a window of 367 days is a 422, and the CA firm reading it gets a 404. ``POST /v1/qa``
   asks "When is my GSTR-3B due?": with the knowledge graph off the structured layer answers it from
-  the obligations, naming the first open monthly return due from today, with verified citations;
-  the CA firm asking about the registration gets a 404. As the CA firm, ``POST /v1/notification/
-  bulk`` sends the change card of gstr9_annual (of the quarterly return of the client's state once
-  a rollback check withdrew it) to the clients its impact lists: a synthetic client contact made
-  for the step (an owner who follows those clients, on an ``.invalid`` mailbox) gets one card per
-  client, the firm's own admin none; the same Idempotency-Key answers the same, and a new key finds
-  every card queued already. Each request that ran wrote one ``notification.bulk`` row of the firm
-  (found by its correlation id through ``records``), the contact's card goes out through the sink,
-  and the contact is removed afterwards (with any an interrupted check left). A service-to-service
-  route, ``POST /v1/notification/send``, answers 404 on the public listener.
+  the obligations, naming the earliest open GSTR-3B obligation due from today that the public
+  listing holds just before the question, with verified citations (both are read again if a
+  decision changes the listing meanwhile); the CA firm asking about the registration gets a 404.
+  As the CA firm, ``POST /v1/notification/bulk`` sends the change card of gstr9_annual (of the
+  quarterly return of the client's state once a rollback check withdrew it) to the clients its
+  impact lists: a synthetic client contact made for the step (an owner who follows those clients,
+  on an ``.invalid`` mailbox) gets one card per client, the firm's own admin none; the same
+  Idempotency-Key answers the same, and a new key finds every card queued already. Each request
+  that ran wrote one ``notification.bulk`` row of the firm (found by its correlation id through
+  ``records``), the contact's card goes out through the sink, and the contact is removed afterwards
+  (with any an interrupted check left). A service-to-service route, ``POST /v1/notification/send``,
+  answers 404 on the public listener.
 """
 
 import io
 import json
+import re
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -134,6 +140,7 @@ from cw_demo.product.tenants import (
 )
 from cw_evals.qa.world import load_world
 from cw_mvp.registry import entry_named, service_settings
+from domain_kernel.recurrence import Period, Recurrence
 from notification.infrastructure.sink import MESSAGE_ID_PREFIX
 from obligation.sweep import main as sweep_main
 from ontology import load as load_ontology
@@ -1337,12 +1344,12 @@ def tracking(context: CheckContext) -> list[str]:
     product = context.product
     headers = as_tenant(BUSINESS_TENANT.tenant_id)
     versions = {
-        str(version["rule_key"]): str(version["rule_version_id"])
+        str(version["rule_key"]): version
         for version in published_in_force(product, today_in_india(context.now()))
     }
     if MONTHLY not in versions:
         raise StepFailedError(f"{MONTHLY} is not published: run cw-product seed")
-    monthly = versions[MONTHLY]
+    monthly = str(versions[MONTHLY]["rule_version_id"])
     probe = make_probe(context, headers, "Tracking")
 
     def first_due() -> dict[str, Any]:
@@ -1362,6 +1369,13 @@ def tracking(context: CheckContext) -> list[str]:
         return due[0]
 
     target = poll(first_due, timeout=context.timeout, interval=context.interval)
+    decided, period, due_on = due_next(context, probe, versions[MONTHLY])
+    if (target["period_label"], _ist_day(str(target["due_at"]))) != (period.label, due_on):
+        raise StepFailedError(
+            f"the first {MONTHLY} obligation of {probe.name}, decided on {decided}, is "
+            f"{target['period_label']} due {target['due_at']}, not {period.label} due {due_on}, "
+            "the return it has to file next"
+        )
     route = f"{OBLIGATIONS}/{target['obligation_id']}"
     owner = str(BUSINESS_TENANT.owner_id)
     started = ok(
@@ -1387,7 +1401,8 @@ def tracking(context: CheckContext) -> list[str]:
     review = tracked_detail(detail, comment)
     return [
         f"probe: {probe.name}, registration {probe.registration_id}; {MONTHLY} "
-        f"{target['period_label']} due {target['due_at']}",
+        f"{target['period_label']} due {target['due_at']}, the return due next on {decided}, "
+        "the day it was decided",
         f"started, assigned to {BUSINESS_TENANT.owner_name} and completed "
         f"({completed['status']}); the same complete again with its Idempotency-Key was "
         f"replayed ({REPLAYED_HEADER}: {replayed}) with the same answer",
@@ -1396,6 +1411,43 @@ def tracking(context: CheckContext) -> list[str]:
         f"{detail['rule_version']['seed_status']}; {len(detail['citations'])} verified citations",
         f"comment by {comment['author_label']}: {comment['body']}",
     ]
+
+
+def due_next(
+    context: CheckContext, probe: Probe, version: Mapping[str, Any]
+) -> tuple[date, Period, date]:
+    """The day in India the probe was first decided to file ``version``'s return, the period
+    whose return it files next from that day, and its due date: the first period still due that
+    day which the version governs (it is in force on the period's last day), where the obligation
+    service's window starts (``Recurrence.periods_due``). On 6 October that is September, due 20
+    October; on 25 October, October, due 20 November."""
+    page = ok(
+        context.product.internal.get(
+            f"{ENGINE}/businesses/{probe.registration_id}/decisions",
+            params={"rule_version_id": str(version["rule_version_id"]), "limit": 200},
+            headers=as_tenant(BUSINESS_TENANT.tenant_id),
+        )
+    )
+    days = [
+        today_in_india(datetime.fromisoformat(str(item["decided_at"])))
+        for item in page["items"]
+        if item["result"] == APPLIES
+    ]
+    if not days or version["recurrence"] is None:
+        raise StepFailedError(
+            f"{probe.name} has obligations of {version['rule_key']} but no decision that it "
+            "applies, or the version does not recur"
+        )
+    decided = min(days)
+    recurrence = Recurrence.from_mapping(version["recurrence"])
+    effective_from = date.fromisoformat(str(version["effective_from"]))
+    governed = [p for p in recurrence.periods_due(decided, 1) if p.end > effective_from]
+    if not governed:
+        raise StepFailedError(
+            f"{version['rule_key']} is in force from {effective_from}, after {probe.name} was "
+            f"decided on {decided}"
+        )
+    return decided, governed[0], recurrence.due_date(governed[0])
 
 
 def complete_twice(
@@ -1635,17 +1687,15 @@ def public(context: CheckContext) -> list[str]:
             "CW_PRODUCT_RECORDS_URL (make product-check passes it)"
         )
     registration = the_registration(context)
-    listed, lines = public_obligations(context, registration)
-    lines += public_answer(context, registration, listed)
+    lines = public_obligations(context, registration)
+    lines += public_answer(context, registration)
     lines += public_bulk(context, records)
     lines += internal_hidden(context)
     return lines
 
 
-def public_obligations(
-    context: CheckContext, registration: SeededRegistration
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """The registration's obligations through the public listener, and what the step saw."""
+def public_obligations(context: CheckContext, registration: SeededRegistration) -> list[str]:
+    """The registration's obligations through the public listener: what the step saw."""
     product = context.product
     headers = as_tenant(BUSINESS_TENANT.tenant_id)
     path = f"{BUSINESSES}/{registration.registration_id}/obligations"
@@ -1690,7 +1740,7 @@ def public_obligations(
             f"{CA_FIRM_TENANT.name} reading {path} answered {theirs.status_code}, not 404"
         )
     rule = titled[0]["rule_version"]
-    return items, [
+    return [
         f"GET {path} on the public listener: {len(items)} obligations by due date, pages of one "
         f"alike; {len(titled)} with their rule's title ({rule['title']}, seed status "
         f"{rule['seed_status']}); {len(still_open)} open or in progress",
@@ -1699,54 +1749,71 @@ def public_obligations(
     ]
 
 
-def public_answer(
-    context: CheckContext, registration: SeededRegistration, listed: Sequence[Mapping[str, Any]]
-) -> list[str]:
-    """``POST /v1/qa`` through the public listener answers the monthly return's next due date
-    from the structured layer, as the product (the knowledge graph off) should."""
+def public_answer(context: CheckContext, registration: SeededRegistration) -> list[str]:
+    """``POST /v1/qa`` through the public listener answers when the registration's GSTR-3B is due
+    next, from the structured layer, as the product (the knowledge graph off) should.
+
+    The expected sentence names the earliest open obligation due from today (within a year) of
+    a version in force whose title, or its rule's, names the form, as the public listing has it
+    just before the question: the return due next on whatever day the check runs, which is the
+    previous period's while its due date is still ahead (September's, due 20 October, on 6
+    October). When a decision made meanwhile changes the listing, both are read again."""
     product = context.product
+    headers = as_tenant(BUSINESS_TENANT.tenant_id)
     today = today_in_india(context.now())
-    monthly = {
-        str(version["rule_version_id"])
-        for version in published_in_force(product, today)
-        if version["rule_key"] == MONTHLY
+    in_force = {str(version["rule_version_id"]) for version in published_in_force(product, today)}
+    path = f"{BUSINESSES}/{registration.registration_id}/obligations"
+    window: dict[str, str | int | list[str]] = {
+        "status": list(OPEN),
+        "due_from": today.isoformat(),
+        "due_to": (today + LOOKAHEAD).isoformat(),
+        "limit": 200,
     }
-    due = sorted(
-        (
-            (_ist_day(str(item["due_at"])), str(item["title"]))
-            for item in listed
-            if item["rule_version_id"] in monthly
-            and item["status"] in OPEN
-            and item["due_at"]
-            and today <= _ist_day(str(item["due_at"])) <= today + LOOKAHEAD
-        ),
-    )
-    if not due:
-        raise StepFailedError(
-            f"{registration.business.name} has no open {MONTHLY} obligation due within a year: "
-            "run the loop step first"
-        )
-    day, title = due[0]
     body = {
         "question": PUBLIC_QUESTION,
         "as_of": today.isoformat(),
         "business_node_id": registration.registration_id,
     }
-    answer: dict[str, Any] = ok(
-        product.public.post(QA, json=body, headers=as_tenant(BUSINESS_TENANT.tenant_id))
-    )
-    expected = f"Your next {GSTR3B_FORM} is due on {day.day} {day:%B %Y}: {title}."
-    if (answer["outcome"], answer["layer"]) != ("answered", "structured"):
-        raise StepFailedError(
-            f"POST {QA} answered {answer['outcome']} from the {answer['layer']} layer "
-            f"({answer['reason']}); with the knowledge graph off the structured layer answers it "
-            "from the obligations"
+
+    def earliest() -> tuple[date, str]:
+        page = ok(product.public.get(path, params=window, headers=headers))
+        due = sorted(
+            (_ist_day(str(item["due_at"])), str(item["title"]))
+            for item in page["items"]
+            if item["rule_version_id"] in in_force
+            and item["due_at"]
+            and (
+                names_form(str(item["title"]), GSTR3B_FORM)
+                or names_form(str((item["rule_version"] or {}).get("title", "")), GSTR3B_FORM)
+            )
         )
-    if answer["answer"] != expected or not answer["citations"]:
-        raise StepFailedError(
-            f"POST {QA} answered {answer['answer']!r} with {len(answer['citations'])} citations, "
-            f"not {expected!r} with at least one"
-        )
+        if not due:
+            raise StepFailedError(
+                f"{registration.business.name} has no open {GSTR3B_FORM} obligation due within a "
+                "year: run the loop step first"
+            )
+        return due[0]
+
+    def answered_alike() -> dict[str, Any]:
+        day, title = earliest()
+        answer: dict[str, Any] = ok(product.public.post(QA, json=body, headers=headers))
+        if (answer["outcome"], answer["layer"]) != ("answered", "structured"):
+            raise StepFailedError(
+                f"POST {QA} answered {answer['outcome']} from the {answer['layer']} layer "
+                f"({answer['reason']}); with the knowledge graph off the structured layer answers "
+                "it from the obligations"
+            )
+        expected = f"Your next {GSTR3B_FORM} is due on {day.day} {day:%B %Y}: {title}."
+        if answer["answer"] != expected:
+            raise NotYetError(
+                f"POST {QA} answered {answer['answer']!r}, not {expected!r}, the earliest open "
+                f"{GSTR3B_FORM} obligation the listing has due from {today}"
+            )
+        if not answer["citations"]:
+            raise StepFailedError(f"POST {QA} answered {expected!r} without a citation")
+        return answer
+
+    answer = poll(answered_alike, timeout=context.timeout, interval=context.interval)
     foreign = product.public.post(QA, json=body, headers=as_tenant(CA_FIRM_TENANT.tenant_id))
     if (foreign.status_code, problem_slug(foreign)) != (404, "qa-business-not-found"):
         raise StepFailedError(
@@ -1763,6 +1830,14 @@ def public_answer(
 
 def _ist_day(instant: str) -> date:
     return datetime.fromisoformat(instant).astimezone(IST).date()
+
+
+def names_form(title: str, form: str) -> bool:
+    """Whether ``title`` names the form as a whole code (GSTR-3B, not GSTR-3), as the structured
+    layer reads a title."""
+    folded = title.casefold().replace(" - ", "-")
+    code = re.escape(form.casefold())
+    return re.search(rf"(?<![a-z0-9-]){code}(?![a-z0-9-])", folded) is not None
 
 
 def public_bulk(context: CheckContext, records: ProductRecords) -> list[str]:

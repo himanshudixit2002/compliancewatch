@@ -246,12 +246,13 @@ def rule_event(topic: str, example: str, **payload: Any) -> InboundRecord:
 
 
 async def held_by_two_tenants(app: Worker, version: RuleVersionId) -> tuple[TenantId, TenantId]:
-    """Both periods of ``version`` for one business of each of two new tenants, made by the
-    decision consumer, which caches the version."""
+    """The window of 1 October of ``version`` (September, still due, then October and November)
+    for one business of each of two new tenants, made by the decision consumer, which caches the
+    version."""
     first, second = TenantId.new(), TenantId.new()
     for tenant in (first, second):
         assert await app.decide(tenant, BusinessId.new(), version) is Outcome.PROCESSED
-    assert [len(app.obligations(t)) for t in (first, second)] == [2, 2]
+    assert [len(app.obligations(t)) for t in (first, second)] == [3, 3]
     return first, second
 
 
@@ -272,7 +273,7 @@ async def test_a_withdrawal_closes_both_tenants_obligations_and_each_reads_its_o
         assert {(row["status"], row["closed_reason"]) for row in seen} == {
             ("closed_not_applicable", "rule_withdrawn")
         }
-        assert app.outbox(tenant, "obligation.closed") == 2
+        assert app.outbox(tenant, "obligation.closed") == 3
     with app_engine.begin() as connection:
         hidden: int = connection.execute(text("SELECT count(*) FROM obligation")).scalar_one()
         status: str = connection.execute(
@@ -284,13 +285,13 @@ async def test_a_withdrawal_closes_both_tenants_obligations_and_each_reads_its_o
     assert await app.rule_events.process(withdrawn) is Outcome.SKIPPED, "a redelivery"
     replayed = rule_event("rule.withdrawn", "withdrawn-by-an-analyst", rule_version_id=version)
     assert await app.rule_events.process(replayed) is Outcome.PROCESSED
-    assert [app.outbox(t, "obligation.closed") for t in (first, second)] == [2, 2], (
+    assert [app.outbox(t, "obligation.closed") for t in (first, second)] == [3, 3], (
         "replaying the event changes nothing"
     )
 
     late = await app.decide(first, BusinessId.new(), version)
     assert late is Outcome.PROCESSED
-    assert len(app.obligations(first)) == 2, "the guard refused the late decision"
+    assert len(app.obligations(first)) == 3, "the guard refused the late decision"
     assert app.producer.sent == []
 
 
@@ -310,6 +311,7 @@ async def test_a_supersession_closes_the_periods_the_newer_version_takes_over(
     assert await app.rule_events.process(superseded) is Outcome.PROCESSED
     for tenant in (first, second):
         assert [(row["period_label"], row["closed_reason"]) for row in app.obligations(tenant)] == [
+            ("2026-09", None),
             ("2026-10", None),
             ("2026-11", "rule_superseded"),
         ]
@@ -322,7 +324,9 @@ async def test_a_supersession_closes_the_periods_the_newer_version_takes_over(
     late = await app.decide(second, BusinessId.new(), version)
     assert late is Outcome.PROCESSED
     labels = [row["period_label"] for row in app.obligations(second)]
-    assert sorted(labels) == ["2026-10", "2026-10", "2026-11"], "only October for a new business"
+    assert sorted(labels) == ["2026-09", "2026-09", "2026-10", "2026-10", "2026-11"], (
+        "only September, still due, and October for a new business"
+    )
 
 
 async def test_a_deadline_change_reschedules_both_tenants(app_engine: Engine) -> None:
@@ -427,6 +431,7 @@ async def test_the_sweep_command_runs_once_as_of_now(app_engine: Engine, app_url
     assert app.outbox(tenant, "obligation.due_soon") == 1
     assert app.outbox(other, "obligation.due_soon") == 0, "a tenant not named is left alone"
     assert sorted(row["period_label"] for row in app.obligations(tenant)) == [
+        "2026-09",
         "2026-10",
         "2026-11",
         "2026-12",

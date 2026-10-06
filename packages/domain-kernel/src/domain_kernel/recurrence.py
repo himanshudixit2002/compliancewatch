@@ -11,11 +11,17 @@ The due date is ``due_day`` of the month that is ``due_month_offset`` months aft
 which the period ends (offset 0 is the month right after the period). ``due_day`` is clamped to
 the length of that month, so 31 means the last day. The concrete values for a duty come from the
 seed calendar and its cited notification, not from this module.
+
+A period falls due after it ends, so on any day the duty due next may belong to a period that has
+already ended: on 5 October, September's monthly return (due 20 October) is still ahead.
+``periods_due`` lists the periods still due on a day: those earlier periods, then the one the day
+falls in and the ones after it. Due dates rise from one period to the next, so the periods still
+due on a day are every period from the first one due on or after it.
 """
 
 import calendar
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from enum import StrEnum
 from typing import Self
 
@@ -159,6 +165,11 @@ class Recurrence:
         require_instance(period, Period, "period")
         return self.period_containing(period.end)
 
+    def previous_period(self, period: Period) -> Period:
+        """The period that ends when ``period`` starts."""
+        require_instance(period, Period, "period")
+        return self.period_containing(period.start - timedelta(days=1))
+
     def periods(self, from_day: date, count: int) -> tuple[Period, ...]:
         """``count`` consecutive periods starting with the one containing ``from_day``."""
         require_int(count, "count", minimum=0)
@@ -168,6 +179,27 @@ class Recurrence:
             result.append(period)
             period = self.next_period(period)
         return tuple(result)
+
+    def periods_due(self, as_of: date, count: int) -> tuple[Period, ...]:
+        """The periods whose duty is still ahead on ``as_of``, up to the ``count`` periods that
+        start with the one containing it.
+
+        Every period of ``periods(as_of, count)`` is due after ``as_of``, since a period falls
+        due after it ends; before them come the earlier periods due on or after ``as_of``, oldest
+        first (on 5 October a monthly return due on the 20th adds September, due 20 October; on
+        25 October it adds nothing). A period due before ``as_of`` is never listed. Empty when
+        ``count`` is 0.
+        """
+        require_date(as_of, "as_of")
+        ahead = self.periods(as_of, count)
+        if not ahead:
+            return ()
+        earlier: list[Period] = []
+        period = self.previous_period(ahead[0])
+        while self.due_date(period) >= as_of:
+            earlier.append(period)
+            period = self.previous_period(period)
+        return (*reversed(earlier), *ahead)
 
     def due_date(self, period: Period) -> date:
         """When the duty for ``period`` falls due."""

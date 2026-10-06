@@ -5,7 +5,7 @@ import pytest
 
 from domain_kernel.ids import ObligationId, RuleVersionId, UserId
 from domain_kernel.recurrence import Recurrence
-from domain_kernel.status import ClosureReason, ObligationStatus
+from domain_kernel.status import ClosureReason, ObligationStatus, RuleVersionStatus
 from obligation.application.audit import record
 from obligation.application.changes import (
     ApplyDeadlineChange,
@@ -27,7 +27,7 @@ from obligation.domain.events import (
 )
 from obligation.domain.history import ChangeKind
 from obligation.infrastructure.memory import MemoryStore
-from obligation.testing import BUSINESS, DECISION, NOW, OTHER_TENANT, TENANT, clock, rule
+from obligation.testing import BUSINESS, DECISION, NOW, OTHER_TENANT, TENANT, clock, ref_of, rule
 
 AS_OF = date(2026, 9, 28)
 
@@ -74,9 +74,114 @@ def test_materialise_is_idempotent_and_rolls_the_window() -> None:
     assert again.existing == 2
     later = use_case.run(request(rule=the_rule, as_of=date(2026, 10, 5)))
     assert len(later.created) == 1
-    assert later.existing == 1
+    assert later.existing == 2, "September, due 20 October, is still in the window"
     assert [o.period_label for o in store.of_tenant(TENANT)] == ["2026-09", "2026-10", "2026-11"]
     assert len(store.events) == 3
+
+
+def labels_and_due_days(store: MemoryStore) -> list[tuple[str, date]]:
+    return [
+        (o.period_label or "one-off", o.due_at.astimezone(IST).date())
+        for o in store.of_tenant(TENANT)
+        if o.due_at is not None
+    ]
+
+
+def test_a_decision_on_5_october_makes_septembers_return_due_20_october() -> None:
+    store = MemoryStore()
+    result = MaterialiseObligations(store, window=2, clock=clock).run(
+        request(as_of=date(2026, 10, 5))
+    )
+    assert (len(result.created), result.existing, result.skipped_before_effective) == (3, 0, 0)
+    assert labels_and_due_days(store) == [
+        ("2026-09", date(2026, 10, 20)),
+        ("2026-10", date(2026, 11, 20)),
+        ("2026-11", date(2026, 12, 20)),
+    ]
+
+
+def test_a_decision_on_25_october_starts_with_octobers_return_due_20_november() -> None:
+    store = MemoryStore()
+    result = MaterialiseObligations(store, window=2, clock=clock).run(
+        request(as_of=date(2026, 10, 25))
+    )
+    assert len(result.created) == 2
+    assert labels_and_due_days(store) == [
+        ("2026-10", date(2026, 11, 20)),
+        ("2026-11", date(2026, 12, 20)),
+    ], "September was due on 20 October: nothing overdue is made"
+
+
+def test_a_return_due_on_the_decision_day_is_still_made() -> None:
+    store = MemoryStore()
+    MaterialiseObligations(store, window=1, clock=clock).run(request(as_of=date(2026, 10, 20)))
+    assert labels_and_due_days(store) == [
+        ("2026-09", date(2026, 10, 20)),
+        ("2026-10", date(2026, 11, 20)),
+    ]
+
+
+def test_a_quarterly_return_still_due_is_made_and_one_overdue_is_not() -> None:
+    store, group_a = MemoryStore(), rule(recurrence=Recurrence.quarterly(22))
+    use_case = MaterialiseObligations(store, window=2, clock=clock)
+    use_case.run(request(rule=group_a, as_of=date(2026, 10, 5)))
+    assert labels_and_due_days(store) == [
+        ("2026-27 Q2", date(2026, 10, 22)),
+        ("2026-27 Q3", date(2027, 1, 22)),
+        ("2026-27 Q4", date(2027, 4, 22)),
+    ]
+    late = MemoryStore()
+    MaterialiseObligations(late, window=2, clock=clock).run(
+        request(rule=group_a, as_of=date(2026, 10, 23))
+    )
+    assert [label for label, _ in labels_and_due_days(late)] == ["2026-27 Q3", "2026-27 Q4"]
+
+
+def test_a_period_ending_before_the_version_is_in_force_is_skipped_though_still_due() -> None:
+    """In force from 15 October: September is due 20 October but ended before the version took
+    effect, so an earlier version governs it; October's last day is the version's."""
+    store, mid_october = MemoryStore(), rule(effective_from=date(2026, 10, 15))
+    use_case = MaterialiseObligations(store, window=2, clock=clock)
+    early = use_case.run(request(rule=mid_october, as_of=date(2026, 10, 5)))
+    assert (len(early.created), early.skipped_before_effective) == (2, 1)
+    later = use_case.run(request(rule=mid_october, as_of=date(2026, 10, 16)))
+    assert (later.created, later.existing, later.skipped_before_effective) == ((), 2, 1)
+    assert [o.period_label for o in store.of_tenant(TENANT)] == ["2026-10", "2026-11"]
+
+
+def test_a_superseded_version_and_its_replacement_share_the_window_without_a_gap() -> None:
+    """Superseded from 1 October and decided on 5 October: the old version still governs
+    September, due 20 October; the new one makes October and November."""
+    store = MemoryStore()
+    old, new = rule(), rule(effective_from=date(2026, 10, 1))
+    cut = ref_of(old, status=RuleVersionStatus.SUPERSEDED, effective_to=date(2026, 10, 1))
+    use_case = MaterialiseObligations(store, window=2, clock=clock)
+    kept = use_case.run(request(rule=old, as_of=date(2026, 10, 5), ref=cut))
+    assert (len(kept.created), kept.refused) == (1, ("2026-10", "2026-11"))
+    taken = use_case.run(request(rule=new, as_of=date(2026, 10, 5), ref=ref_of(new)))
+    assert (len(taken.created), taken.skipped_before_effective, taken.refused) == (2, 1, ())
+    made = sorted(
+        (o.period_label or "", o.rule_version_id == old.rule_version_id)
+        for o in store.of_tenant(TENANT)
+    )
+    assert made == [("2026-09", True), ("2026-10", False), ("2026-11", False)]
+
+
+def test_replays_and_later_days_make_each_period_once() -> None:
+    store, the_rule = MemoryStore(), rule()
+    use_case = MaterialiseObligations(store, window=2, clock=clock)
+    runs = [
+        use_case.run(request(rule=the_rule, as_of=day))
+        for day in (date(2026, 10, 5), date(2026, 10, 5), date(2026, 10, 25), date(2026, 11, 2))
+    ]
+    assert [(len(r.created), r.existing) for r in runs] == [(3, 0), (0, 3), (0, 2), (1, 2)]
+    assert [o.period_label for o in store.of_tenant(TENANT)] == [
+        "2026-09",
+        "2026-10",
+        "2026-11",
+        "2026-12",
+    ]
+    assert len(store.events) == 4
 
 
 def test_periods_before_the_rule_is_in_force_are_skipped() -> None:

@@ -187,6 +187,35 @@ def test_use_cases_run_end_to_end_with_the_outbox(app_engine: Engine) -> None:
     ]
 
 
+def test_the_return_still_due_is_stored_once_and_nothing_overdue(app_engine: Engine) -> None:
+    """Decided on 5 October, a business gets September, due 20 October; a replay and the window
+    of 25 October add nothing; a business decided on 25 October starts with October."""
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    tenant, early, late, the_rule = TenantId.new(), BusinessId.new(), BusinessId.new(), rule()
+    use_case = MaterialiseObligations(factory, window=2)
+
+    def run(business: BusinessId, day: date) -> tuple[int, int]:
+        result = use_case.run(MaterialiseRequest(tenant, business, DecisionId.new(), the_rule, day))
+        return len(result.created), result.existing
+
+    days = (date(2026, 10, 5), date(2026, 10, 5), date(2026, 10, 25))
+    assert [run(early, day) for day in days] == [(3, 0), (0, 3), (0, 2)]
+    assert run(late, date(2026, 10, 25)) == (2, 0)
+
+    def due(business: BusinessId) -> list[tuple[str | None, date | None]]:
+        return [
+            (o.period_label, None if o.due_at is None else o.due_at.astimezone(IST).date())
+            for o in ListObligations(factory).run(ObligationQuery(tenant, business))
+        ]
+
+    assert due(early) == [
+        ("2026-09", date(2026, 10, 20)),
+        ("2026-10", date(2026, 11, 20)),
+        ("2026-11", date(2026, 12, 20)),
+    ]
+    assert due(late) == [("2026-10", date(2026, 11, 20)), ("2026-11", date(2026, 12, 20))]
+
+
 def test_listing_a_business_under_row_level_security(app_engine: Engine) -> None:
     factory = PostgresUnitOfWorkFactory(app_engine)
     tenant, other = TenantId.new(), TenantId.new()

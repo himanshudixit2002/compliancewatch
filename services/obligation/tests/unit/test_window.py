@@ -65,13 +65,15 @@ def test_the_window_makes_the_period_that_entered_it_once() -> None:
     decided(store, reader, one_off, tenant, business)
     decided(store, reader, the_rule, other, flipped)
     decided(store, reader, the_rule, other, flipped, Applicability.NOT_APPLICABLE)
-    assert labels(store, tenant) == ["2026-10", "2026-11", "one-off"]
+    assert labels(store, tenant) == ["2026-09", "2026-10", "2026-11", "one-off"]
 
     roll = RollWindow(store, store, reader, clock=lambda: NEXT_MONTH)
     rolled = roll.run()
     assert (rolled.tenants, len(rolled.created), rolled.refused, rolled.failed) == (2, 1, (), ())
-    assert labels(store, tenant) == ["2026-10", "2026-11", "2026-12", "one-off"]
-    assert labels(store, other) == ["2026-10", "2026-11"], "no longer applies: nothing new"
+    assert labels(store, tenant) == ["2026-09", "2026-10", "2026-11", "2026-12", "one-off"]
+    assert labels(store, other) == ["2026-09", "2026-10", "2026-11"], (
+        "no longer applies: nothing new"
+    )
     (made,) = [store.obligations[o] for o in rolled.created]
     assert made.business_id == business
     assert made.profile_version == 7, "the profile version of the decision it rolls"
@@ -131,7 +133,7 @@ def test_run_once_sweeps_reminders_and_rolls_the_window_as_of_now() -> None:
     assert report.failed == {}
     assert report.as_json()["now"] == now.isoformat()
     assert report.lines()[0].startswith("obligation-sweep as of 2026-11-15T04:00:00+00:00")
-    assert len(store.of_tenant(other)) == 2, "another tenant is left alone"
+    assert len(store.of_tenant(other)) == 3, "another tenant is left alone: its decision's three"
 
     reader.down = True
     failed = sweep.run_once(store, store, reader, now=now)

@@ -196,10 +196,15 @@ def test_another_tenant_reads_nothing_and_gets_404(
     assert as_a.status_code == 200, as_a.text
     assert len(as_a.json()["items"]) == 2
     assert as_a.json()["next_cursor"]
-    assert as_a.json()["items"][0]["rule_version"] is not None
     assert rest.status_code == 200
     assert rest.json()["next_cursor"] is None
     assert rest.json()["items"][-1]["due_at"] is None
+    facts = {
+        item["rule_version_id"]: item["rule_version"]
+        for item in as_a.json()["items"] + rest.json()["items"]
+    }
+    assert facts[str(MONTHLY.rule_version_id)] is not None, "the cached version's facts"
+    assert facts[str(QUARTERLY_SAME_DAY.rule_version_id)] is None, "not cached: null"
     assert as_b.status_code == 404, as_b.text
     assert as_b.json()["type"].endswith(":obligation-business-not-found")
     assert foreign_cursor.status_code == 404, "a cursor reads nothing of another tenant"

@@ -1,13 +1,14 @@
 """The rolling window (ADR-015): once a day, the periods that entered the window since the last
 run get their obligations.
 
-A decision that applies materialises the period it was made in and the next one. Time moves the
+A decision that applies materialises the window as of the day it was made: every period still due
+that day, through the period it was made in and the next one (``materialise``). Time moves the
 window on: ``RollWindow.run`` visits every tenant of the tenant directory (or those named in
 ``only``) and, for each business whose latest decision of a recurring rule version applies
-(``obligation_decision``), materialises the window as of today in India with
-``MaterialiseObligations``. That is idempotent on (business, rule version, period), so it creates
-exactly the periods that entered the window since a decision or a run last made them, and a
-period closed meanwhile stays closed.
+(``obligation_decision``), materialises the window as of today in India with the same rule, so a
+period is made only while its due date is today or later. That is idempotent on (business, rule
+version, period), so it creates exactly the periods that entered the window since a decision or a
+run last made them, and a period closed meanwhile stays closed.
 
 Each tenant takes three steps, so no unit of work is open while the rulebook is read: a unit
 reads the decisions that apply, the reader reads their rule versions (a one-off version is left
@@ -132,6 +133,13 @@ class RollWindow:
 
 
 def _retired(ref: RuleVersionRef, as_of: date) -> bool:
-    """Whether the version stopped governing before ``as_of``: every period of the window is
-    the newer version's, so there is nothing to roll and nothing unusual to report."""
+    """Whether the version stopped governing before ``as_of``, so there is nothing to roll and
+    nothing unusual to report.
+
+    Each period the version governs ends by its ``effective_to``, so it contains a day the
+    version was in force, and the decision or the run of such a day made it (a decision made
+    later makes what it governs that is still due). A period it governs can still be due after
+    ``effective_to`` (superseded from 1 December, it governs November, due 20 December), but a
+    period enters the window only at its far end, so every period that enters it from then on is
+    the newer version's."""
     return ref.effective_to is not None and as_of >= ref.effective_to

@@ -35,9 +35,12 @@ confirms it against the cited notification.
 
 ## Minute 3: the calendar
 
-The obligation service materialises two periods per recurring rule (GSTR-1, GSTR-3B, the
-annual return where the turnover band asks for it) with due dates at the end of the day in
-IST, idempotent on (business, rule version, period): run it again and nothing duplicates.
+The obligation service materialises each recurring rule's periods still due on the demo's day
+(28 September 2026), through the period it falls in and the next: two per rule here (GSTR-1,
+GSTR-3B, the annual return where the turnover band asks for it), since August's returns were
+due before it. A business onboarded on 5 October would also get September's returns, due in
+October; nothing already overdue is made. Due dates are at the end of the day in IST,
+idempotent on (business, rule version, period): run it again and nothing duplicates.
 Point out: a deadline extension notification later reschedules the open period
 (`obligation.rescheduled`), it never creates a second obligation.
 

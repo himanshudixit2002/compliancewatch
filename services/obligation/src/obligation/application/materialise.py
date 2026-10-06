@@ -1,17 +1,31 @@
 """Create the obligations a rule version implies for one business (ADR-015).
 
-A recurring rule gets one obligation per period inside a rolling window (the period that
-contains ``as_of`` and the ones after it, ``window`` in total), idempotent on (business, rule
-version, period): running it again creates nothing new. A one-off rule gets one obligation due
-``due_in_days`` after ``as_of``. Periods that end before the rule version is in force are
-skipped. Every created obligation is written together with its ``obligation.created`` event
-and the change log row that records it.
+``as_of`` is a day in India: the day the decision was made, or today for the rolling window. A
+recurring rule gets one obligation per period of its window on that day, which holds every period
+whose due date is on or after ``as_of``, through the period that contains ``as_of`` and the
+``window - 1`` after it (``Recurrence.periods_due``). So the return a business must file next is
+always there: decided on 5 October, a monthly return due on the 20th makes September (due 20
+October), October and November; decided on 25 October, October and November. A period whose due
+date is before ``as_of`` is never made, so a business new to the service starts with no overdue
+history. Of the window's periods:
 
-A request that carries the version's cached facts (``ref``) is guarded too: a period the
-version no longer governs, because it ends after the version's ``effective_to``, and a one-off
-due on that day or later, are refused and reported (``domain.rule_versions.holds_period`` and
-``holds_due``); the version that replaced it makes them. ``materialise_in`` does the work in a
-unit of work the caller holds.
+- one that ends on or before the version's ``effective_from`` is skipped, even when its due date
+  is still ahead: the version in force on its last day, an earlier one, makes it;
+- with ``ref``, one that ends after the version's ``effective_to`` is refused and reported, for
+  the version that replaced it makes it (``domain.rule_versions.holds_period``);
+- one already made for the business and the version is left as it is, whatever its status, so a
+  replay creates nothing new (idempotent on business, rule version and period).
+
+So a version governs exactly the periods whose last day it is in force on, the rule the rule
+events apply when they close the periods a newer version takes over (``taken_over``).
+
+A one-off rule gets one obligation due ``due_in_days`` after ``as_of``, or undated without them;
+with ``ref`` it is refused when it falls due on or after the version's ``effective_to``
+(``holds_due``). Its due day is never before the decision's day, and one applied after that day
+has passed (a consumer far behind on its topic) is still made, overdue, as it always was.
+
+Every created obligation is written together with its ``obligation.created`` event and the change
+log row that records it. ``materialise_in`` does the work in a unit of work the caller holds.
 """
 
 from collections.abc import Callable
@@ -125,7 +139,7 @@ def _plan(
         return [(None, due)]
     return [
         (period, due_at_end_of_day(recurrence.due_date(period), IST))
-        for period in recurrence.periods(as_of, window)
+        for period in recurrence.periods_due(as_of, window)
     ]
 
 
