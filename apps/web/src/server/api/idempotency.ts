@@ -19,8 +19,11 @@ import { call, type CallOutcome } from "./client";
  * without it and replay the first response for 24 hours (py-common's idempotency module): the
  * business API's two creating POSTs, the applicability engine's evaluate, which appends a
  * decision each time, the obligation service's status, assignee and comment writes, which the
- * public API serves under `/v1/obligations` as well, and a CA firm's bulk change card. The other
- * creating writes are safe to repeat without it because each has a natural key on the service:
+ * public API serves under `/v1/obligations` as well, and a CA firm's bulk change card. The
+ * pipeline's retry of a stored document reads it too, but keeps the key on the retry it records:
+ * the same request replays its attempt for as long as the retry is kept, not for 24 hours. The
+ * other creating writes are safe to repeat without it because each has a natural key on the
+ * service:
  *
  *   profile registration     the GSTIN: a second POST returns the existing node, created false
  *   profile entity           the PAN, the same way
