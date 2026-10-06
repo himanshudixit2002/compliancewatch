@@ -27,7 +27,7 @@ table is enforced, not advisory.
 | `entities/<name>/`          | Pure domain types and DTO-to-view mappers: `types.ts`, `mappers.ts`, `mappers.test.ts`. No React, no `next`, no fetch.          | `shared/lib`, its own directory                                       |
 | `server/`                   | Server-only modules; every file starts with `import "server-only"`.                                                             | `server`, `shared`, `entities`                                        |
 | `shared/`                   | Isomorphic code: `config/` (registry, roles, permissions, flags, navigation), `lib/`, `i18n/`, `ui/` (app-level compositions).  | `shared` only; never `server-only`, `next/headers`, `next/server`, `node:` |
-| root (`proxy.ts`, `instrumentation.ts`) | Framework hooks: the optimistic check before a render, the error hook.                                              | `server`, `shared`, `entities`                                        |
+| root (`proxy.ts`, `instrumentation.ts`) | Framework hooks: the optimistic check before a render, OpenTelemetry behind its flag, the error hook.               | `server`, `shared`, `entities`                                        |
 
 Three more rules apply across layers. A feature never imports another feature (shared pieces go
 to `shared/ui` or `entities`). A client component (`"use client"`) imports `shared`, `entities`
@@ -87,10 +87,11 @@ apps/web/
     admin/                     (home)/ for /admin (the counts, the services summary and the tool list, with its
                                loading skeleton), the admin layout behind requireAdmin, its error and not-found
                                boundaries, rulebook/documents (open by id) and its [documentId] viewer,
-                               rulebook/versions ((list) and [ruleVersionId]), rulebook/entities/canonical
-                               ((resolve) and [entityId]), rulebook/search, rulebook/relations/graph,
-                               decisions, fan-outs ((list) and [ruleVersionId]), impact, the catch-all
-                               [...slug]
+                               rulebook/versions ((list) and [ruleVersionId]), rulebook/entities ((queue),
+                               group, canonical ((resolve) and [entityId])), rulebook/relations ((queue),
+                               [candidateId], graph), rulebook/rules, rulebook/search, decisions, fan-outs
+                               ((list) and [ruleVersionId]), impact, llm/prompts, llm/models, llm/usage,
+                               profiles/review-tasks, system, the catch-all [...slug]
     sign-out/route.ts          POST: clears the session cookie
     api/health/route.ts        {status, version, commit}
     error.tsx, global-error.tsx, not-found.tsx
@@ -107,13 +108,20 @@ apps/web/
                                fan-outs (the runs, the hold, a run's controls and the rollback),
                                decision-review (a tenant's review items and settling one), impact-explorer
                                (the dry run), change-impact (a CA firm's affected clients and the bulk
-                               change card); the parked folders above, which no page imports yet
+                               change card), entity-review (the queue and a group's decision),
+                               relation-review (the queue, a candidate read through the list's keyset,
+                               approve and reject), rulebook-rules (the rule list), llm-registry (the
+                               gateway's prompts, model routes and usage), profile-review-tasks (a tenant's
+                               node, its review tasks and snapshot), system (the probes, the registry's
+                               view, the web server's facts); the parked folders above, which no page
+                               imports yet
   src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims),
                                ontology/ (the attributes and their wording from GET /v1/ontology),
                                business/ (a business, its nodes and values, onboarding, review tasks, snapshots),
                                consent/ (consent records), notification/ (a channel preference, a bulk change card),
-                               rulebook/ (a rulebook document and its clauses, the review decisions, entities,
-                               resolutions, relations, clauses with their document, search hits),
+                               rulebook/ (a rulebook document and its clauses, the review queues and
+                               decisions, entities, resolutions, relations, clauses with their document,
+                               search hits), llm/ (the gateway's prompts, model routes and usage),
                                rule-version/ (rules, rule versions with their condition tree, citations, a
                                step's lifecycle and a publication), obligation/ (obligations with their rule's
                                facts, citations, history and comments), applicability/ (decisions, a
@@ -125,19 +133,23 @@ apps/web/
                                POST handler), auth/ (the provider port and the fake adapter), legal.ts,
                                ontology.ts (the ontology read, cached an hour by tag), flags.ts (the flag
                                reader), analytics.ts (product events behind the flag and the consent),
-                               health.ts (the services' /health probes for the internal tools)
+                               health.ts (the services' /health and /ready probes for the internal tools),
+                               telemetry.ts (OpenTelemetry behind web.otel_enabled, an exporter only when one
+                               is configured)
   src/shared/config/           screens.ts, roles.ts, permissions.ts, flags.ts, nav.ts, services.ts, legal-docs.ts
   src/shared/lib/              dates, financial years, decimal money, humanise, identifiers, pagination, urls, assert
   src/shared/i18n/             messages/en.json and t()
   src/shared/ui/               TenantShell, InternalShell, RouterLink, Breadcrumbs, ScreenStatusChip, SessionMenu,
-                               SignOutButton, ServiceError, RefreshButton, RuleVersionStatusChip,
+                               SignOutButton, ServiceError, RefreshButton, KeysetPager, FilterChips,
+                               RuleVersionStatusChip,
                                SeedStatusChip, CitationList (verified quotes with their clause and source) and
                                NotLegalAdvice (the footer of every page that says what applies)
   src/test/                    vitest setup, the architecture rules and their test with the parked folder map,
                                the screens.md drift test, the synthetic fixtures guard, fake-fetch.ts and
                                fake-cookies.ts
   src/proxy.ts                 the optimistic redirect to /sign-in for gated screens without a cookie
-  src/instrumentation.ts       onRequestError: one JSON line per server error
+  src/instrumentation.ts       register: OpenTelemetry on the Node.js runtime behind web.otel_enabled;
+                               onRequestError: one JSON line per server error
   scripts/screens-doc.mts      generates docs/web/screens.md; --check and --audit modes
   scripts/seed/                the demo-tenant seed over the services' HTTP APIs (make web-seed)
   e2e/                         Playwright specs and the axe fixture
