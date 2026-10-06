@@ -719,7 +719,8 @@ from `.env` or the placeholders `local-write-token` and `local-review-token`, as
 passes them (D-020, D-042). On the memory store the rulebook starts with the seed calendar's
 draft rule versions (`CW_RULEBOOK_SEED_ON_START`, honoured in local and test only), every one
 needing review; with `STORE=postgres`, `make seed SERVICE=rulebook` writes them. `make web-e2e`
-gives the web app the same two tokens and the e2e config turns `web.publish_actions` on.
+gives the web app the same two tokens and the e2e config turns `web.publish_actions`,
+`web.admin_rulebook_writes` and `web.qa_enabled` on.
 `make web-stack-wait` waits for every `/health`; `make web-stack-down` stops them, and the
 memory stores forget their rows (the rule versions an e2e run moved included).
 

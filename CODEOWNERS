@@ -20,6 +20,10 @@
 /apps/web/src/app/admin/         @himanshudixit2002 # team: Regulatory Intelligence (the /admin internal tools; tenant admin routes go to Identity and Partner once they exist)
 /apps/web/src/app/admin/llm/     @himanshudixit2002 # team: AI Platform (the LLM gateway's prompts, model routes and usage)
 /apps/web/src/features/llm-registry/ @himanshudixit2002 # team: AI Platform
+/apps/web/src/entities/llm/      @himanshudixit2002 # team: AI Platform
+/apps/web/e2e/admin-llm.spec.ts  @himanshudixit2002 # team: AI Platform
+/apps/web/src/instrumentation.ts @himanshudixit2002 # team: Platform and Infrastructure (owner of web.otel_enabled)
+/apps/web/src/server/telemetry*  @himanshudixit2002 # team: Platform and Infrastructure (OpenTelemetry and its span redaction)
 /apps/whatsapp-bot/              @himanshudixit2002 # team: Core Product
 
 # ---- Services ---------------------------------------------------------------

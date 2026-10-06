@@ -56,7 +56,7 @@ files together.
 
 | Name                        | Owner                   | What it will gate                                                             |
 | --------------------------- | ----------------------- | ----------------------------------------------------------------------------- |
-| `web.admin_rulebook_writes` | regulatory-intelligence | Entity and relation decisions from `/admin` through a server-side write token |
+| `web.admin_rulebook_writes` | regulatory-intelligence | Entity and relation decisions from `/admin`, sent with the review token       |
 | `web.analytics_enabled`     | core-product            | Product events for sessions that granted the analytics consent                |
 | `web.otel_enabled`          | platform                | OpenTelemetry registration in `instrumentation.ts`                            |
 | `web.publish_actions`       | regulatory-intelligence | Citations and the publish workflow on a rule version's page                   |
