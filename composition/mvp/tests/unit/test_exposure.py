@@ -91,6 +91,16 @@ def test_the_source_manager_is_the_regulatory_teams() -> None:
     assert pipeline["POST /v1/pipeline/sources/{key}/uploads"] is ADMIN
 
 
+def test_the_rule_review_tasks_are_the_regulatory_teams() -> None:
+    rulebook = EXPOSURE["rulebook"]
+    tasks = {key: exposure for key, exposure in rulebook.items() if "/review/tasks" in key}
+    assert len(tasks) == 6, "the queue, the seed tasks, one task, claim, draft edit, decide"
+    assert set(tasks.values()) == {ADMIN}
+    assert rulebook["GET /v1/rulebook/review/stats"] is ADMIN
+    assert served_publicly(rulebook["POST /v1/rulebook/review/tasks/{task_id}/decide"], "token")
+    assert not served_publicly(rulebook["GET /v1/rulebook/review/tasks"], "header")
+
+
 def test_the_review_queue_is_the_regulatory_teams_and_public_only_in_token_mode() -> None:
     engine = EXPOSURE["applicability-engine"]
     for key in (f"GET {ENGINE}/review-items", f"POST {ENGINE}/review-items/{{item_id}}/resolve"):

@@ -367,6 +367,159 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/rulebook/review/stats": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The review queue in numbers: counts, decisions, time to decide and queue age */
+    get: operations["review_stats_v1_rulebook_review_stats_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/rulebook/review/tasks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * The review queue: by regulator, higher priority first, then oldest first
+     * @description Each task with its version's rule, number, title and status, whether it is high impact
+     *     and how many people approved its current round. A task open again after the first of two
+     *     approvals waits for a second, different reviewer.
+     */
+    get: operations["list_review_tasks_v1_rulebook_review_tasks_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/rulebook/review/tasks/{task_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * A review task with its version, citations, documents and history
+     * @description The version's content with its specification described, every citation with its
+     *     verification, the documents they cite, the approvers of its current round, its decision
+     *     audit and every task it has had.
+     */
+    get: operations["read_review_task_v1_rulebook_review_tasks__task_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/rulebook/review/tasks/{task_id}/claim": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Claim a review task; the claimant claiming again changes nothing
+     * @description 409 rulebook-review-task-claimed when someone else holds it, 409
+     *     rulebook-review-task-closed when it was decided.
+     */
+    post: operations["claim_review_task_v1_rulebook_review_tasks__task_id__claim_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/rulebook/review/tasks/{task_id}/decide": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Approve, return or reject; the version's transition commits with the decision
+     * @description approve submits a draft and approves it: the approval that completes the round (one
+     *     approver, two different ones when high impact) approves the version and decides the task,
+     *     an earlier one leaves the task open for another reviewer, and the same person twice is 409
+     *     rulebook-duplicate-approver. Approving never publishes; POST .../rule-versions/{id}/publish
+     *     does. return sends the version back to draft and opens the next task for it; reject closes
+     *     the task and leaves the version a draft. Both need a note.
+     */
+    post: operations["decide_review_task_v1_rulebook_review_tasks__task_id__decide_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/rulebook/review/tasks/{task_id}/draft": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Edit the draft of a claimed task: its content and citations, every quote verified
+     * @description Only the analyst who claimed the task (409 rulebook-review-task-not-claimed), only while
+     *     the version is a draft (409 rulebook-rule-version-not-editable). Content is checked against
+     *     the ontology as the seed calendar is, and citations go through the citation step: a quote
+     *     not in its clause is 422 rulebook-citation-not-verified and nothing is stored. The edit is
+     *     recorded in the version's decision audit as edited.
+     */
+    patch: operations["edit_review_draft_v1_rulebook_review_tasks__task_id__draft_patch"];
+    trace?: never;
+  };
+  "/v1/rulebook/review/tasks/seed": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Open a review task for every seed draft that has none waiting
+     * @description One task of kind seed per draft that needs review and has no task open or claimed.
+     *     Idempotent: a second request opens nothing new. A draft whose task was rejected gets a new
+     *     one here.
+     */
+    post: operations["open_seed_tasks_v1_rulebook_review_tasks_seed_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/rulebook/rule-versions": {
     parameters: {
       query?: never;
@@ -660,6 +813,31 @@ export type components = {
      * @enum {string}
      */
     AttributeLevel: "entity" | "registration" | "location";
+    /**
+     * AuditEntryOut
+     * @description A row of the version's decision audit.
+     */
+    AuditEntryOut: {
+      action: components["schemas"]["DecisionAction"];
+      /** Actor Id */
+      actor_id: string | null;
+      /** Caused By Rule Version Id */
+      caused_by_rule_version_id: string | null;
+      /**
+       * Decided At
+       * Format: date-time
+       */
+      decided_at: string;
+      /**
+       * Decision Id
+       * Format: uuid
+       */
+      decision_id: string;
+      from_status: components["schemas"]["RuleVersionStatus"];
+      /** Note */
+      note: string;
+      to_status: components["schemas"]["RuleVersionStatus"];
+    };
     /** CandidateIn */
     CandidateIn: {
       /** Confidence */
@@ -768,6 +946,15 @@ export type components = {
       /** Unchanged */
       unchanged: number;
     };
+    /** ClaimIn */
+    ClaimIn: {
+      /**
+       * Actor Id
+       * Format: uuid
+       * @description The analyst claiming the task; a signed-in user's token overrides it
+       */
+      actor_id: string;
+    };
     /** ClauseDetailOut */
     ClauseDetailOut: {
       /**
@@ -865,6 +1052,49 @@ export type components = {
        * Format: uuid
        */
       rule_version_id: string;
+    };
+    /** DecideIn */
+    DecideIn: {
+      /**
+       * Actor Id
+       * Format: uuid
+       * @description Who decides; a signed-in user's token overrides it
+       */
+      actor_id: string;
+      decision: components["schemas"]["ReviewDecision"];
+      /**
+       * High Impact
+       * @description With approve: tag the version high impact before this approval counts, so it needs two different approvers; a tag, once set, stays
+       * @default false
+       */
+      high_impact?: boolean;
+      /**
+       * Note
+       * @description Why; required to return or reject
+       * @default
+       */
+      note?: string;
+    };
+    /**
+     * DecisionAction
+     * @description What a row of the append-only ``rule_version_decision`` audit records. ``edited`` is an
+     *     analyst's change to a draft through its review task (content or citations); the version
+     *     stays a draft, and the note names what changed.
+     * @enum {string}
+     */
+    DecisionAction:
+      "submitted" | "returned" | "approved" | "published" | "withdrawn" | "superseded" | "edited";
+    /**
+     * DecisionCountsOut
+     * @description The decided tasks by their decision.
+     */
+    DecisionCountsOut: {
+      /** Approved */
+      approved: number;
+      /** Rejected */
+      rejected: number;
+      /** Returned */
+      returned: number;
     };
     /**
      * DecisionIn
@@ -997,6 +1227,62 @@ export type components = {
      * @enum {string}
      */
     DocumentType: "notification" | "circular" | "press_release" | "act_amendment" | "statute";
+    /**
+     * DraftEditIn
+     * @description The fields to change, each one optional: a field left out keeps its value, and null
+     *     clears ``recurrence`` or ``effective_to``. ``citations`` are added, never removed, and every
+     *     quote must be in its clause. At least one field or one citation.
+     */
+    DraftEditIn: {
+      /**
+       * Actor Id
+       * Format: uuid
+       * @description The analyst who claimed the task; a signed-in user's token overrides it
+       */
+      actor_id: string;
+      /** Citations */
+      citations?: components["schemas"]["CitationIn"][] | null;
+      /** Effective From */
+      effective_from?: string | null;
+      /**
+       * Effective To
+       * @description Exclusive; null: open-ended
+       */
+      effective_to?: string | null;
+      /**
+       * Note
+       * @description Why, for the audit
+       * @default
+       */
+      note?: string;
+      /** Obligation Template */
+      obligation_template?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Recurrence
+       * @description null: no recurrence
+       */
+      recurrence?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Specification
+       * @description The kernel's predicate tree mapping
+       */
+      specification?: {
+        [key: string]: unknown;
+      } | null;
+      /** Summary */
+      summary?: string | null;
+      /** Title */
+      title?: string | null;
+      /**
+       * Todo
+       * @description The open questions, all of them
+       */
+      todo?: string[] | null;
+    };
     /** EmbeddingIn */
     EmbeddingIn: {
       /**
@@ -1282,6 +1568,16 @@ export type components = {
       /** Mentions */
       mentions: components["schemas"]["MentionIn"][];
     };
+    /** Page[QueuedTaskOut] */
+    Page_QueuedTaskOut_: {
+      /** Items */
+      items: components["schemas"]["QueuedTaskOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
     /** Page[RuleChangeOut] */
     Page_RuleChangeOut_: {
       /** Items */
@@ -1380,6 +1676,70 @@ export type components = {
       /** Version */
       version: number;
     };
+    /** QueuedTaskOut */
+    QueuedTaskOut: {
+      /**
+       * Approvals
+       * @description Distinct approvers of the version's current review round
+       */
+      approvals: number;
+      /** Claimed At */
+      claimed_at: string | null;
+      /**
+       * Claimed By
+       * @description The analyst who claimed the task
+       */
+      claimed_by: string | null;
+      /** Decided At */
+      decided_at: string | null;
+      /** Decided By */
+      decided_by: string | null;
+      decision: components["schemas"]["ReviewDecision"] | null;
+      /** High Impact */
+      high_impact: boolean;
+      /** @description seed: a draft the seed calendar wrote */
+      kind: components["schemas"]["ReviewTaskKind"];
+      /**
+       * Note
+       * @description The decision's note
+       */
+      note: string;
+      /**
+       * Opened At
+       * Format: date-time
+       */
+      opened_at: string;
+      /**
+       * Priority
+       * @description Higher comes first within a regulator
+       */
+      priority: number;
+      /** Regulator */
+      regulator: string;
+      /**
+       * Required Approvals
+       * @description One, or two different ones when high impact
+       */
+      required_approvals: number;
+      /** Rule Key */
+      rule_key: string;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+      status: components["schemas"]["ReviewTaskStatus"];
+      /**
+       * Task Id
+       * Format: uuid
+       */
+      task_id: string;
+      /** Title */
+      title: string;
+      /** Version */
+      version: number;
+      version_status: components["schemas"]["RuleVersionStatus"];
+    };
     /** ReadyResponse */
     ReadyResponse: {
       /** Checks */
@@ -1416,6 +1776,17 @@ export type components = {
        * @example pdf@1
        */
       parser_version: string;
+    };
+    /** RegulatorCountsOut */
+    RegulatorCountsOut: {
+      /** Claimed */
+      claimed: number;
+      /** Decided */
+      decided: number;
+      /** Open */
+      open: number;
+      /** Regulator */
+      regulator: string;
     };
     /** RejectIn */
     RejectIn: {
@@ -1598,6 +1969,14 @@ export type components = {
      * @enum {string}
      */
     ResolutionStatus: "resolved" | "ambiguous" | "not_found" | "unqualified" | "empty";
+    /**
+     * ReviewDecision
+     * @description What a reviewer decides. ``approve`` counts as an approval of the version's round;
+     *     ``return`` sends the version back to draft for rework and opens the next task for it;
+     *     ``reject`` closes the task and leaves the version a draft.
+     * @enum {string}
+     */
+    ReviewDecision: "approve" | "return" | "reject";
     /** ReviewItemOut */
     ReviewItemOut: {
       /**
@@ -1624,6 +2003,127 @@ export type components = {
       /** Span Start */
       span_start: number;
     };
+    /** ReviewStatsOut */
+    ReviewStatsOut: {
+      /** By Regulator */
+      by_regulator: components["schemas"]["RegulatorCountsOut"][];
+      by_status: components["schemas"]["StatusCountsOut"];
+      decisions: components["schemas"]["DecisionCountsOut"];
+      /**
+       * Median Seconds To Decide
+       * @description From a task's opening to its decision, over every decided task
+       */
+      median_seconds_to_decide: number | null;
+      /**
+       * Oldest Open Age Seconds
+       * @description Its age now; 0 when none waits
+       */
+      oldest_open_age_seconds: number;
+      /**
+       * Oldest Open At
+       * @description The oldest task not decided yet
+       */
+      oldest_open_at: string | null;
+    };
+    /** ReviewTaskDetailOut */
+    ReviewTaskDetailOut: {
+      /**
+       * Approved By
+       * @description Approvers of the version's current round
+       */
+      approved_by: string[];
+      /**
+       * Citations
+       * @description With each quote's verification
+       */
+      citations: components["schemas"]["CitationOut"][];
+      /**
+       * Decisions
+       * @description The version's decision audit
+       */
+      decisions: components["schemas"]["AuditEntryOut"][];
+      /**
+       * Documents
+       * @description The documents the citations cite
+       */
+      documents: components["schemas"]["TaskDocumentOut"][];
+      /** Required Approvals */
+      required_approvals: number;
+      rule_version: components["schemas"]["RuleVersionOut"];
+      /**
+       * Source Url
+       * @description The link the seed calendar gives, if any
+       */
+      source_url: string | null;
+      /**
+       * Specification Described
+       * @description The predicate tree as lines, two spaces deeper per level
+       */
+      specification_described: string[];
+      task: components["schemas"]["ReviewTaskOut"];
+      /**
+       * Tasks
+       * @description Every task of the version, oldest first
+       */
+      tasks: components["schemas"]["ReviewTaskOut"][];
+    };
+    /**
+     * ReviewTaskKind
+     * @description What a task reviews. ``seed``: a draft the seed calendar wrote. The pipeline's candidates
+     *     get a kind of their own when their intake is built.
+     * @enum {string}
+     */
+    ReviewTaskKind: "seed";
+    /** ReviewTaskOut */
+    ReviewTaskOut: {
+      /** Claimed At */
+      claimed_at: string | null;
+      /**
+       * Claimed By
+       * @description The analyst who claimed the task
+       */
+      claimed_by: string | null;
+      /** Decided At */
+      decided_at: string | null;
+      /** Decided By */
+      decided_by: string | null;
+      decision: components["schemas"]["ReviewDecision"] | null;
+      /** @description seed: a draft the seed calendar wrote */
+      kind: components["schemas"]["ReviewTaskKind"];
+      /**
+       * Note
+       * @description The decision's note
+       */
+      note: string;
+      /**
+       * Opened At
+       * Format: date-time
+       */
+      opened_at: string;
+      /**
+       * Priority
+       * @description Higher comes first within a regulator
+       */
+      priority: number;
+      /** Regulator */
+      regulator: string;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+      status: components["schemas"]["ReviewTaskStatus"];
+      /**
+       * Task Id
+       * Format: uuid
+       */
+      task_id: string;
+    };
+    /**
+     * ReviewTaskStatus
+     * @enum {string}
+     */
+    ReviewTaskStatus: "open" | "claimed" | "decided";
     /**
      * RuleChangeCitationOut
      * @description A verified quote of the clause the version cites.
@@ -1985,6 +2485,16 @@ export type components = {
      * @enum {string}
      */
     SeedStatus: "needs_review" | "reviewed";
+    /** SeedTasksOut */
+    SeedTasksOut: {
+      /**
+       * Opened
+       * @description Tasks this request opened; 0 when every draft has one
+       */
+      opened: number;
+      /** Task Ids */
+      task_ids: string[];
+    };
     /** StagingOut */
     StagingOut: {
       /** Candidate Ids */
@@ -1993,6 +2503,15 @@ export type components = {
       created: number;
       /** Unchanged */
       unchanged: number;
+    };
+    /** StatusCountsOut */
+    StatusCountsOut: {
+      /** Claimed */
+      claimed: number;
+      /** Decided */
+      decided: number;
+      /** Open */
+      open: number;
     };
     /** SubmitIn */
     SubmitIn: {
@@ -2013,6 +2532,40 @@ export type components = {
        * @default
        */
       note?: string;
+    };
+    /** TaskDecisionOut */
+    TaskDecisionOut: {
+      /**
+       * Next Task Id
+       * @description The task a return opened for the rework
+       */
+      next_task_id: string | null;
+      /** @description Decided, or open again when the round needs another approver */
+      task: components["schemas"]["ReviewTaskOut"];
+      version: components["schemas"]["LifecycleOut"];
+    };
+    /**
+     * TaskDocumentOut
+     * @description A document the version cites: its stored clauses are at ``GET /v1/rulebook/documents/
+     *     {document_id}``, its file at the pipeline's ``GET /v1/pipeline/documents/{document_id}/raw``.
+     */
+    TaskDocumentOut: {
+      doc_type: components["schemas"]["DocumentType"];
+      /**
+       * Document Id
+       * Format: uuid
+       */
+      document_id: string;
+      /** External Ref */
+      external_ref: string;
+      /** Published At */
+      published_at: string | null;
+      /** Regulator */
+      regulator: string;
+      /** Title */
+      title: string;
+      /** Url */
+      url: string;
     };
     /** TransitionOut */
     TransitionOut: {
@@ -3259,6 +3812,493 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  review_stats_v1_rulebook_review_stats_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReviewStatsOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  list_review_tasks_v1_rulebook_review_tasks_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Only this regulator's */
+        regulator?: string | null;
+        /** @description Only tasks of this status */
+        status?: components["schemas"]["ReviewTaskStatus"] | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_QueuedTaskOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  read_review_task_v1_rulebook_review_tasks__task_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        task_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReviewTaskDetailOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  claim_review_task_v1_rulebook_review_tasks__task_id__claim_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
+        "x-cw-review-token"?: string | null;
+      };
+      path: {
+        task_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ClaimIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReviewTaskOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  decide_review_task_v1_rulebook_review_tasks__task_id__decide_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
+        "x-cw-review-token"?: string | null;
+      };
+      path: {
+        task_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DecideIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskDecisionOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  edit_review_draft_v1_rulebook_review_tasks__task_id__draft_patch: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
+        "x-cw-review-token"?: string | null;
+      };
+      path: {
+        task_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DraftEditIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReviewTaskDetailOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  open_seed_tasks_v1_rulebook_review_tasks_seed_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
+        "x-cw-review-token"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SeedTasksOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

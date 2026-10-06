@@ -25,6 +25,7 @@ from rulebook.domain.graph import (
 from rulebook.domain.publication import PendingReplacement, RuleVersionDecision
 from rulebook.domain.relations import CandidateStatus, RelationCandidate
 from rulebook.domain.review import EntityReviewItem, MentionGroup, ReviewQueueStats
+from rulebook.domain.review_tasks import QueuedTask, ReviewTask, ReviewTaskStats, TaskQuery
 from rulebook.domain.rule_versions import CitationRecord, RuleVersionRecord, VersionPage
 from rulebook.domain.runs import ExtractionRun, RuleSummary
 from rulebook.domain.search import CitedClause, ClauseEmbedding
@@ -219,8 +220,18 @@ class RuleVersionRepository(Protocol):
         ``effective_to``, ``published_at``, ``submitted_at`` and ``high_impact``."""
         ...
 
+    def save_draft(self, record: RuleVersionRecord) -> None:
+        """Write the content an analyst edits in a draft (``review_tasks.EDITABLE_FIELDS``):
+        title, summary, specification, obligation template, recurrence, the effective period
+        and the open questions."""
+        ...
+
     def record_decision(self, decision: RuleVersionDecision) -> None:
         """Append one row to the version's decision audit."""
+        ...
+
+    def decisions(self, rule_version_id: RuleVersionId) -> tuple[RuleVersionDecision, ...]:
+        """The version's decision audit, oldest first."""
         ...
 
     def approvers(self, rule_version_id: RuleVersionId, since: datetime) -> frozenset[UserId]:
@@ -258,6 +269,43 @@ class CitationRepository(Protocol):
 
     def add(self, citation: CitationRecord) -> bool:
         """Insert unless a citation with the id exists; whether this call inserted it."""
+        ...
+
+
+class ReviewTaskRepository(Protocol):
+    def add(self, task: ReviewTask) -> bool:
+        """Insert unless the version has a task that is not decided; whether this call
+        inserted it."""
+        ...
+
+    def get(self, task_id: UUID) -> ReviewTask | None: ...
+
+    def lock(self, task_id: UUID) -> ReviewTask | None:
+        """The task, locked for the rest of the transaction."""
+        ...
+
+    def save(self, task: ReviewTask) -> None:
+        """Write the task's status, claim and decision. A decided task never changes
+        (``ReviewTaskClosedError``; the table's trigger refuses it too)."""
+        ...
+
+    def page(self, query: TaskQuery) -> Sequence[QueuedTask]:
+        """The tasks ``query`` admits, in queue order (``review_tasks.queue_position``), at most
+        ``query.limit``, each with its version's summary."""
+        ...
+
+    def of_version(self, rule_version_id: RuleVersionId) -> tuple[ReviewTask, ...]:
+        """Every task of the version, oldest first."""
+        ...
+
+    def drafts_without_task(self) -> Sequence[RuleVersionRecord]:
+        """The drafts that need review (seed status needs_review) and have no task that is not
+        decided, by rule key and version."""
+        ...
+
+    def stats(self) -> ReviewTaskStats:
+        """Tasks per regulator and status, the decisions made, the median time to decide and
+        when the oldest task not decided yet was opened."""
         ...
 
 
@@ -345,6 +393,9 @@ class KnowledgeUnitOfWork(Protocol):
 
     @property
     def citations(self) -> CitationRepository: ...
+
+    @property
+    def review_tasks(self) -> ReviewTaskRepository: ...
 
     @property
     def index(self) -> ClauseIndex: ...

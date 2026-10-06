@@ -6,12 +6,22 @@ public API outside that prefix (``GET /v1/changes``).
 
 from fastapi import APIRouter
 
-from rulebook.api import changes, documents, graph, publication, review, rule_versions, search
+from rulebook.api import (
+    changes,
+    documents,
+    graph,
+    publication,
+    review,
+    review_tasks,
+    rule_versions,
+    search,
+)
 
 router = APIRouter(prefix="/v1/rulebook", tags=["rulebook"])
 public_router = changes.public_router
 router.include_router(documents.router)
 router.include_router(review.router)
+router.include_router(review_tasks.router)
 router.include_router(rule_versions.router)
 router.include_router(publication.router)
 # Before graph: /clauses/unembedded must match ahead of /clauses/{clause_id}.

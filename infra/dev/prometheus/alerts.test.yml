@@ -216,6 +216,43 @@ tests:
         alertname: EntityReviewQueueBacklog
         exp_alerts: []
 
+  # RuleReviewQueueStale. Two replicas report the same oldest waiting task, 47 hours old at the
+  # start and a minute older every minute: above 48 hours from 61m, so pending for an hour and
+  # firing from 121m, once.
+  - interval: 1m
+    input_series:
+      - series: 'rulebook_review_task_oldest_open_age_seconds{service_instance_id="a"}'
+        values: "169200+60x180"
+      - series: 'rulebook_review_task_oldest_open_age_seconds{service_instance_id="b"}'
+        values: "169200+60x180"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: RuleReviewQueueStale
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: RuleReviewQueueStale
+        exp_alerts: []
+      - eval_time: 122m
+        alertname: RuleReviewQueueStale
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              team: regulatory-intelligence
+            exp_annotations:
+              summary: "The oldest rule review task has waited more than 48 hours for a decision"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/rule-review-queue.md
+
+  # The queue is worked: the oldest task is 47 hours old and decided at 30m, after which the next
+  # one is 2 hours old. No alert.
+  - interval: 1m
+    input_series:
+      - series: 'rulebook_review_task_oldest_open_age_seconds{service_instance_id="a"}'
+        values: "169200+60x30 7200+60x150"
+    alert_rule_test:
+      - eval_time: 180m
+        alertname: RuleReviewQueueStale
+        exp_alerts: []
+
   # WhatsApp: 3 of 100 finished notifications failed for good each minute (3%), with retries on
   # top that do not count. Email: 1 in 200 (0.5%). The rule needs 15 minutes above 1%.
   - interval: 1m

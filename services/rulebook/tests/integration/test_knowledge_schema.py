@@ -47,6 +47,7 @@ DOCUMENT_TABLES = {"document", "clause", "citation"}
 REVIEW_TABLES = {"extraction_run", "entity_review", "relation_candidate"}
 SEARCH_TABLES = {"clause_embedding"}
 PUBLISH_TABLES = {"rule_version_decision"}
+REVIEW_TASK_TABLES = {"review_task"}
 OUTBOX_TABLES = {"outbox_event"}
 """py-common's table, created by migration 0007 but not part of the rulebook's metadata."""
 ALL_TABLES = (
@@ -56,6 +57,7 @@ ALL_TABLES = (
     | REVIEW_TABLES
     | SEARCH_TABLES
     | PUBLISH_TABLES
+    | REVIEW_TASK_TABLES
     | OUTBOX_TABLES
     | {"alembic_version"}
 )
@@ -209,7 +211,7 @@ def test_upgrade_head_creates_the_knowledge_tables(migrated: Config, engine: Eng
         version: str = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-    assert version == "0008"
+    assert version == "0009"
 
 
 def test_indexes_by_name_and_access_method(migrated: Config, engine: Engine) -> None:

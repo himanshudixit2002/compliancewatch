@@ -2,11 +2,12 @@
 
 Guide section 11: wiring of interfaces to implementations happens here, never inside the layers.
 The engine behind the Postgres store connects lazily, so importing the module (``make openapi``)
-needs no database. With telemetry on, the entity review queue gauges are registered on the
-app's meter provider. With ``CW_RULEBOOK_SEED_ON_START`` (local and test, memory store only)
-the memory store starts with the seed calendar's drafts.
+needs no database. With telemetry on, the gauges of the entity review queue and of the review
+tasks are registered on the app's meter provider. With ``CW_RULEBOOK_SEED_ON_START`` (local and
+test, memory store only) the memory store starts with the seed calendar's drafts.
 """
 
+import functools
 import logging
 from collections.abc import Callable
 
@@ -16,6 +17,7 @@ from starlette.concurrency import run_in_threadpool
 import ontology as ontology_package
 from domain_kernel.errors import DomainError, InvalidRelationError, InvalidTransitionError
 from domain_kernel.events import utc_now
+from domain_kernel.ontology import Ontology
 from py_common.app import create_app, module_app
 from py_common.auth.fastapi import Authenticator
 from py_common.telemetry import Telemetry
@@ -53,6 +55,15 @@ from rulebook.application.review import (
     ListMentionGroups,
     ReadReviewQueueStats,
 )
+from rulebook.application.review_tasks import (
+    ClaimReviewTask,
+    DecideReviewTask,
+    EditReviewDraft,
+    ListReviewTasks,
+    OpenSeedReviewTasks,
+    ReadReviewStats,
+    ReadReviewTask,
+)
 from rulebook.application.rule_versions import (
     ListCitations,
     ListEndedVersions,
@@ -85,6 +96,10 @@ from rulebook.domain.errors import (
     ReviewGroupClosedError,
     ReviewGroupNotFoundError,
     ReviewsDisabledError,
+    ReviewTaskClaimedError,
+    ReviewTaskClosedError,
+    ReviewTaskNotClaimedError,
+    ReviewTaskNotFoundError,
     ReviewTokenInvalidError,
     RuleVersionNotEditableError,
     SupersessionCycleError,
@@ -104,7 +119,10 @@ from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
 from rulebook.domain.seed import SeedOutcome
 from rulebook.infrastructure.knowledge_repository import PostgresKnowledgeUnitOfWorkFactory
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
-from rulebook.infrastructure.review_metrics import register_review_queue_gauges
+from rulebook.infrastructure.review_metrics import (
+    register_review_queue_gauges,
+    register_review_task_gauges,
+)
 from rulebook.settings import RulebookSettings
 from rulebook.wiring import Wiring
 
@@ -151,7 +169,17 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     DeadlineDetailMissingError: 409,
     OverlappingVersionError: 409,
     PublishingDisabledError: 503,
+    ReviewTaskNotFoundError: 404,
+    ReviewTaskClosedError: 409,
+    ReviewTaskClaimedError: 409,
+    ReviewTaskNotClaimedError: 409,
 }
+
+
+@functools.cache
+def packaged_ontology() -> Ontology:
+    """The packaged ontology, read once when a draft edit first needs it."""
+    return ontology_package.load()
 
 
 def seed_memory_store(memory: MemoryKnowledgeStore) -> SeedOutcome:
@@ -221,19 +249,25 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
         withdraw_version=WithdrawVersion(unit_of_work, enabled=publishing),
         apply_transitions=ApplyDueTransitions(unit_of_work, enabled=publishing),
         list_changes=ListChanges(unit_of_work),
+        open_seed_tasks=OpenSeedReviewTasks(unit_of_work),
+        list_review_tasks=ListReviewTasks(unit_of_work),
+        claim_review_task=ClaimReviewTask(unit_of_work),
+        read_review_task=ReadReviewTask(unit_of_work),
+        edit_review_draft=EditReviewDraft(unit_of_work, packaged_ontology),
+        decide_review_task=DecideReviewTask(unit_of_work),
+        read_review_stats=ReadReviewStats(unit_of_work),
     )
 
 
 def install_review_metrics(app: FastAPI, wiring: Wiring) -> bool:
-    """Register the review queue gauges when telemetry is on; whether it did."""
+    """Register the gauges of the entity review queue and of the review tasks when telemetry
+    is on; whether it did."""
     telemetry: Telemetry = app.state.telemetry
     if not telemetry.enabled or telemetry.meter_provider is None:
         return False
-    register_review_queue_gauges(
-        ReadReviewQueueStats(wiring.unit_of_work).run,
-        utc_now,
-        telemetry.meter_provider.get_meter(SERVICE_NAME, __version__),
-    )
+    meter = telemetry.meter_provider.get_meter(SERVICE_NAME, __version__)
+    register_review_queue_gauges(ReadReviewQueueStats(wiring.unit_of_work).run, utc_now, meter)
+    register_review_task_gauges(wiring.read_review_stats.run, utc_now, meter)
     return True
 
 

@@ -1,16 +1,17 @@
 """SQLAlchemy models for the rulebook tables: regulator documents and clauses, rules and rule
-versions, citations, the knowledge tables (canonical entities, mentions, relations) and the clause
-search index (a full-text column on ``clause`` and the ``clause_embedding`` vectors).
+versions, citations, the knowledge tables (canonical entities, mentions, relations), the clause
+search index (a full-text column on ``clause`` and the ``clause_embedding`` vectors) and the
+review tasks.
 
 Table names are unqualified: the connection's search_path (CW_DB_SCHEMA, set by ``make migrate``
 and ``make run``) puts them in the ``rulebook`` schema. The migrations under
 ``migrations/versions`` are written by hand and mirror these models constraint for constraint;
 the integration test compares the two. Triggers are not modelled: migration 0004 makes
 ``document`` and ``clause`` append-only and fixes a citation's identity, migration 0006 makes
-``clause_embedding`` refuse updates, and migration 0007 makes ``rule_version_decision``
+``clause_embedding`` refuse updates, migration 0007 makes ``rule_version_decision``
 append-only and guards ``rule_version`` (inserted as drafts, status moves, frozen content,
-publish preconditions).
-The ``outbox_event`` table of the same migration belongs to py-common's metadata, not this one.
+publish preconditions), and migration 0009 keeps a decided ``review_task`` as it is.
+The ``outbox_event`` table of 0007 belongs to py-common's metadata, not this one.
 
 The vocabulary in the CHECK constraints is the kernel's (``domain_kernel.knowledge``), and so are
 the rules on ``rule_relation``: the relations in ``RULE_VERSION_ONLY`` target a rule version,
@@ -62,6 +63,7 @@ from rulebook.domain.documents import CLAUSE_REF_PATTERN
 from rulebook.domain.publication import DecisionAction
 from rulebook.domain.relations import CandidateRejectReason, CandidateStatus
 from rulebook.domain.review import EntityRejectReason, Resolution, ReviewStatus
+from rulebook.domain.review_tasks import ReviewDecision, ReviewTaskKind, ReviewTaskStatus
 
 ENTITY_TYPES: Final[tuple[str, ...]] = tuple(kind.value for kind in EntityType)
 """The ten entity types a canonical entity can have: ``EntityType`` in the kernel."""
@@ -606,6 +608,77 @@ class RuleVersionDecisionRow(Base):
     caused_by_rule_version_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     note: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+REVIEW_TASK_KINDS: Final[tuple[str, ...]] = tuple(kind.value for kind in ReviewTaskKind)
+REVIEW_TASK_STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in ReviewTaskStatus)
+REVIEW_DECISIONS: Final[tuple[str, ...]] = tuple(decision.value for decision in ReviewDecision)
+UNDECIDED_TASK = "status IN ('open', 'claimed')"
+"""The tasks still in the queue; a version has at most one of them."""
+
+
+class ReviewTaskRow(Base):
+    """A rule version waiting for an analyst's decision: opened, claimed, then decided once."""
+
+    __tablename__ = "review_task"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_review_task"),
+        ForeignKeyConstraint(
+            ["rule_version_id"],
+            ["rule_version.id"],
+            name="fk_review_task_rule_version_id_rule_version",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(sql_in_list("kind", REVIEW_TASK_KINDS), name="ck_review_task_kind"),
+        CheckConstraint(sql_in_list("status", REVIEW_TASK_STATUSES), name="ck_review_task_status"),
+        CheckConstraint(
+            f"decision IS NULL OR {sql_in_list('decision', REVIEW_DECISIONS)}",
+            name="ck_review_task_decision",
+        ),
+        CheckConstraint("priority BETWEEN 0 AND 1000", name="ck_review_task_priority"),
+        CheckConstraint("(claimed_by IS NULL) = (claimed_at IS NULL)", name="ck_review_task_claim"),
+        CheckConstraint(
+            "(status = 'open' AND claimed_by IS NULL AND decision IS NULL"
+            " AND decided_by IS NULL AND decided_at IS NULL)"
+            " OR (status = 'claimed' AND claimed_by IS NOT NULL AND decision IS NULL"
+            " AND decided_by IS NULL AND decided_at IS NULL)"
+            " OR (status = 'decided' AND decision IS NOT NULL AND decided_by IS NOT NULL"
+            " AND decided_at IS NOT NULL)",
+            name="ck_review_task_state",
+        ),
+        Index(
+            "uq_review_task_undecided_version",
+            "rule_version_id",
+            unique=True,
+            postgresql_where=text(UNDECIDED_TASK),
+        ),
+        Index("ix_review_task_rule_version", "rule_version_id", "opened_at"),
+        Index("ix_review_task_queue", "status", "regulator", "priority", "opened_at"),
+        {
+            "comment": (
+                "Review tasks: one decision (approve, return, reject) asked about one rule "
+                "version, queued by regulator and priority. A version has at most one task "
+                "that is not decided; a decided task never changes (trigger). Global "
+                "regulatory work: no tenant, no row-level security."
+            )
+        },
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid)
+    rule_version_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    regulator: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="open")
+    claimed_by: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    decided_by: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    note: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
 
 
 class CitationRow(Base):

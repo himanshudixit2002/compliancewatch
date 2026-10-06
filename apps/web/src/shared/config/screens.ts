@@ -192,6 +192,15 @@ const NOTIFICATION = uses(
 const BUDGET_ALARMS = servicesTrack("WP27", "eval", "GET", "/v1/eval/budget-alarms");
 const QA_COVERAGE = servicesTrack("WP28", "eval", "GET", "/v1/eval/qa-coverage");
 const REVIEW_STATS = servicesTrack("WP21", "rulebook", "GET", "/v1/rulebook/review/stats");
+/** The rulebook's review tasks (M2-4): the queue, the seed tasks, a task, its claim, its draft's
+ * edit and its decision, and the stats. Drafting a version from a candidate comes later. */
+const REVIEW_TASKS = uses("rulebook", "GET", "/v1/rulebook/review/tasks");
+const REVIEW_SEED = uses("rulebook", "POST", "/v1/rulebook/review/tasks/seed");
+const REVIEW_TASK = uses("rulebook", "GET", "/v1/rulebook/review/tasks/{task_id}");
+const REVIEW_CLAIM = uses("rulebook", "POST", "/v1/rulebook/review/tasks/{task_id}/claim");
+const REVIEW_EDIT = uses("rulebook", "PATCH", "/v1/rulebook/review/tasks/{task_id}/draft");
+const REVIEW_DECIDE = uses("rulebook", "POST", "/v1/rulebook/review/tasks/{task_id}/decide");
+const REVIEW_STATS_READ = uses("rulebook", "GET", "/v1/rulebook/review/stats");
 
 const SCREEN_LIST = [
   // ---- system -----------------------------------------------------------------------------
@@ -1466,14 +1475,14 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [REVIEW_TASKS, REVIEW_CLAIM, REVIEW_SEED, REVIEW_STATS_READ],
     awaits: [
       servicesTrack("WP21", "rulebook", "GET", "/v1/rulebook/review/tasks"),
       servicesTrack("WP21", "rulebook", "POST", "/v1/rulebook/review/tasks/{task_id}/claim"),
       servicesTrack("WP21", "rulebook", "POST", "/v1/rulebook/review/tasks/seed"),
       REVIEW_STATS,
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15; F4; ADR-006",
     nav: { group: "review", order: 1 },
@@ -1492,6 +1501,10 @@ const SCREEN_LIST = [
       RULE_VERSION,
       uses("profile", "GET", "/v1/ontology"),
       STORED_BYTES,
+      REVIEW_TASK,
+      REVIEW_CLAIM,
+      REVIEW_EDIT,
+      REVIEW_DECIDE,
     ],
     awaits: [
       servicesTrack("WP21", "rulebook", "GET", "/v1/rulebook/review/tasks/{task_id}"),
@@ -1514,9 +1527,9 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [REVIEW_STATS_READ],
     awaits: [REVIEW_STATS],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15",
     nav: { group: "review", order: 2 },
