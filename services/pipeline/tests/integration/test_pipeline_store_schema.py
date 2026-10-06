@@ -423,7 +423,8 @@ def test_the_crawl_finds_known_urls_and_pages_documents_on_postgres(
         assert unit.documents.known_urls(council.key, urls) == frozenset(urls[:2])
         assert unit.documents.counts()[council.key] == 2 + len(dated)
         everything = unit.documents.page(council.key, after=None, limit=50)
-        pages, after = [], None
+        pages: list[RawDocumentRecord] = []
+        after: DocumentKey | None = None
         while page := unit.documents.page(council.key, after=after, limit=2):
             pages.extend(page)
             after = DocumentKey.of(page[-1])
