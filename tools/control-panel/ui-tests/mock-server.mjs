@@ -678,6 +678,10 @@ async function api(req, res, url) {
       : problem(res, 404, "not-found", "No such document.");
   }
   if (head === "github" && method === "GET") return json(res, 200, githubOf(world));
+  if (head === "quit" && method === "POST") {
+    // the mock is shared by every spec: it says it would stop, and goes on
+    return json(res, 202, { ok: true, quitting: false });
+  }
   if (head === "heartbeat" && method === "POST") {
     return json(res, 200, { ok: true, idle_exit_in: 600 });
   }

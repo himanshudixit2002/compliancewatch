@@ -262,7 +262,8 @@ def test_launchservices_forgets_the_paths_an_install_leaves(tmp_path: Path) -> N
     assert done.returncode == 0, done.stdout + done.stderr
     calls = (fakes / "lsregister.log").read_text().splitlines()
     assert calls[0] == "-dump"
-    forgotten = [call.removeprefix("-u ") for call in calls[1:]]
+    assert calls[-1] == f"-f {app}"  # registered again: Finder and the Dock read the new icon
+    forgotten = [call.removeprefix("-u ") for call in calls[1:-1]]
     assert str(elsewhere) in forgotten
     assert str(gone) in forgotten
     assert any(

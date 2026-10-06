@@ -2100,7 +2100,9 @@ class BackgroundManager:
 # ---- probes ------------------------------------------------------------------------------------
 
 _LOCAL = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="probe")
+_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="probe")
+"""The health checks' threads, kept between probes: eight answer every URL of a probe within its
+deadline (a URL that does not answer gives up after 0.8 s), and bound the helper's threads."""
 
 
 def http_ok(url: str, timeout: float = 0.8) -> bool:
@@ -3569,12 +3571,15 @@ class Runner:
         self._busy = False
         self._plan: Plan | None = None
         self._proc: subprocess.Popen[bytes] | None = None
+        self._thread: threading.Thread | None = None
         self._timed_out = False
 
     @property
     def busy(self) -> bool:
+        """A plan is running: its thread is alive (a thread that died without ending its plan
+        does not count)."""
         with self._lock:
-            return self._busy
+            return self._busy and (self._thread is None or self._thread.is_alive())
 
     @property
     def plan(self) -> Plan | None:
@@ -3592,12 +3597,22 @@ class Runner:
         with self._lock:
             running = self._plan.title if self._busy and self._plan else None
             if running is None:
-                self._busy, self._plan = True, plan
+                self._busy, self._plan, self._thread = True, plan, None
         if running is not None:
             self.line(f"{running} is still running; wait for it or cancel it", "err")
             return False
         self.cancel_event.clear()
-        threading.Thread(target=self._work, args=(plan,), daemon=True, name=self.name).start()
+        thread = threading.Thread(target=self._work, args=(plan,), daemon=True, name=self.name)
+        try:
+            thread.start()
+        except RuntimeError as exc:  # no thread to be had: the plan never starts
+            with self._lock:
+                self._busy, self._plan = False, None
+            self.line(f"error: {plan.title} could not start: {exc}", "err")
+            return False
+        with self._lock:
+            if self._plan is plan:
+                self._thread = thread
         return True
 
     def cancel(self) -> bool:

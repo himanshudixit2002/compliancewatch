@@ -858,12 +858,13 @@ class DemoRunner:
         self.cancel_event = threading.Event()
         self._lock = threading.Lock()
         self._plan: core.Plan | None = None
+        self._thread: threading.Thread | None = None
         self._action = ""
 
     @property
     def busy(self) -> bool:
         with self._lock:
-            return self._plan is not None
+            return self._plan is not None and (self._thread is None or self._thread.is_alive())
 
     @property
     def plan(self) -> core.Plan | None:
@@ -879,12 +880,21 @@ class DemoRunner:
         with self._lock:
             if self._plan is not None:
                 return False
-            self._plan = plan
+            self._plan, self._thread = plan, None
             action, self._action = self._action, ""
         self.cancel_event.clear()
-        threading.Thread(
+        thread = threading.Thread(
             target=self._work, args=(plan, action), daemon=True, name=f"demo-{self.name}"
-        ).start()
+        )
+        try:
+            thread.start()
+        except RuntimeError:
+            with self._lock:
+                self._plan = None
+            return False
+        with self._lock:
+            if self._plan is plan:
+                self._thread = thread
         return True
 
     def cancel(self) -> bool:
