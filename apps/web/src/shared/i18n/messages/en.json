@@ -2285,5 +2285,21 @@
   "relationReview.error.targetRequired": "Choose the version this relation points at.",
   "relationReview.error.targetVersion": "This is not a rule version's id.",
   "relationReview.error.reason": "Choose why the candidate is rejected.",
-  "relationReview.error.noteTooLong": "A note has at most {max} characters."
+  "relationReview.error.noteTooLong": "A note has at most {max} characters.",
+  "rules.intro": "Every rule the rulebook holds, by key, with its regulator and the title of its latest version. A rule arrives with its first version; its versions move through review on the rule version pages.",
+  "rules.emptyTitle": "The rulebook holds no rule yet",
+  "rules.emptyBody": "A rule arrives with its first version: the seed command writes the calendar's drafts, and the review workbench drafts one from a rule candidate.",
+  "rules.filter": "Filter the rules",
+  "rules.filterHelp": "Every word must appear in the rule key, the title or the regulator.",
+  "rules.shown": "{shown} of {total} rules shown.",
+  "rules.noMatch": "No rule matches every word typed.",
+  "rules.tableRegion": "Rules",
+  "rules.caption": "{count} rules by key.",
+  "rules.column.rule": "Rule key",
+  "rules.column.title": "Title of the latest version",
+  "rules.column.regulator": "Regulator",
+  "rules.column.id": "Rule id",
+  "rules.column.versions": "Versions",
+  "rules.copyId": "Copy the id of {rule}",
+  "rules.versions": "Every version of {rule}"
 }

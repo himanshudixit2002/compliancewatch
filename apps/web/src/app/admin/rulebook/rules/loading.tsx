@@ -1,0 +1,14 @@
+import { Skeleton, SkeletonGroup } from "@compliancewatch/ui";
+import { t } from "@/shared/i18n";
+
+export default function RulesLoading() {
+  return (
+    <SkeletonGroup label={t("common.loading")} className="max-w-6xl">
+      <Skeleton className="h-4 w-48" />
+      <Skeleton className="h-8 w-40" />
+      <Skeleton className="h-4 w-full max-w-prose" />
+      <Skeleton className="h-10 w-full max-w-md" />
+      <Skeleton className="h-96 w-full" />
+    </SkeletonGroup>
+  );
+}
