@@ -1,6 +1,6 @@
 # pipeline service
 
-Part of the ComplianceWatch monorepo. **Health routes; the pipeline store (sources, fetched documents, crawl runs, the tasks people work, the outbox) and the raw store on disk or S3; the crawl, which reads every source at its cadence from its watermark (a 60-second tick in the worker, behind `CW_PIPELINE_CRAWL_ENABLED`) and ingests what is new in child workflows; the source manager API (the sources with how each stands, an admin's additions, edits and fetches, the documents and their stored files); uploads of a document to a source; the ingest workflow, whose `FetchAndStore` keeps each fetched file once and announces it with `document.discovered`, whose parse goes through the parser chain (the PDF's text layer, a table-aware PDF parser, HTML and table-aware HTML) and announces `document.parsed`, and whose classify step records what each document is with `document.classified` and holds a conflict for a person's triage; manual parse, where a document no parser reads opens a task an analyst resolves with a transcript; the rule extraction in the workflow, behind `CW_PIPELINE_EXTRACTION_ENABLED`, which stores one rule candidate per classified document and announces it with `rule.candidate.created`; source adapters by type with parameters (CBIC notifications and circulars, GST Council press releases, GSTN advisories, Maharashtra GST notifications, and upload-only statutes: the CGST Act, the CGST Rules, the IGST Act), a change detector, a backfill command, the crawl report (the F1 check), the rule extractor with its validators behind the llm-gateway, and the labelling tool for the extraction golden set.**
+Part of the ComplianceWatch monorepo. **Health routes; the pipeline store (sources, fetched documents, crawl runs, the tasks people work, the outbox) and the raw store on disk or S3; the crawl, which reads every source at its cadence from its watermark (a 60-second tick in the worker, behind `CW_PIPELINE_CRAWL_ENABLED`) and ingests what is new in child workflows; the source manager API (the sources with how each stands, an admin's additions, edits and fetches, the documents and their stored files); uploads of a document to a source; the ingest workflow, whose `FetchAndStore` keeps each fetched file once and announces it with `document.discovered`, whose parse goes through the parser chain (the PDF's text layer, a table-aware PDF parser, HTML and table-aware HTML) and announces `document.parsed`, and whose classify step records what each document is with `document.classified` and holds a conflict for a person's triage; manual parse, where a document no parser reads opens a task an analyst resolves with a transcript; the rule extraction in the workflow, behind `CW_PIPELINE_EXTRACTION_ENABLED`, which stores one rule candidate per classified document and announces it with `rule.candidate.created`; source adapters by type with parameters (CBIC notifications and circulars, GST Council press releases, GSTN advisories, Maharashtra GST notifications, and upload-only statutes: the CGST Act, the CGST Rules, the IGST Act), a change detector, the backfill from a plan through the crawl workflow with its report, the sweep of the classified backlog into the extraction, the operations API (every source's crawl runs and documents, a person's retry of a stored document, the outbox's dead rows and their requeue), the crawl report (the F1 check), the rule extractor with its validators behind the llm-gateway, and the labelling tool for the extraction golden set.**
 Design reference: Project Foundation guide, sections 5, 7, 8, 11 and 14.
 
 - **Owns:** The regulatory intelligence pipeline as Temporal workers: source-crawler (source registry, fetch schedule, raw document store), change-detector (document classification, links to prior documents), doc-parser (clause-level structured text, OCR fallback), rule-extractor (schema-validated RuleCandidates with verified citations), review-service (ReviewTasks, decisions, edit diffs, two-person rule)
@@ -25,6 +25,10 @@ src/pipeline/
   application/classify.py # ClassifyDocument: the classify step and its triage task
   application/extraction.py  # ExtractRules (the model, no write), StoreExtraction (the candidate
                              # and its event), RuleExtractionStage (once more when not a candidate)
+  application/operations.py  # ListRuns, ListDocuments, RetryDocument, ListDeadEvents, RequeueEvent
+  application/backlog.py  # ExtractionBacklog: the documents waiting as classified, per source
+  application/backfill.py # PlanDryRun, RunBackfill (crawls through the workflow), BackfillReport
+  api/operations.py, operations_schemas.py  # the operations routes: runs, documents, retry, dead outbox
   domain/          # entities, value objects, domain events, repository protocols
   domain/sources.py, raw_documents.py, crawl.py  # Source, RawDocumentRecord, CrawlRun: the rows
   domain/crawl.py          # also where a listing starts and how the watermark moves
@@ -34,6 +38,9 @@ src/pipeline/
   domain/tasks.py          # PipelineTask: a manual parse or a triage, open, resolved, dismissed
   domain/classification.py # Classification, its route and status, a triage's decision
   domain/extraction.py     # RuleExtraction, its candidate id, its event, a suggested rule key
+  domain/retry.py          # DocumentRetry: a person's retry of a stored document, its stage, its ingest's id
+  domain/outbox.py         # OutboxEvent as the operations routes read it, the dead rows' keyset
+  domain/backfill.py       # BackfillRow: a plan's row, its listing window and its limits
   domain/structure.py      # blocks (headings, paragraphs, tables) and the clauses they become
   domain/transcripts.py    # an analyst's transcript: its JSON shape, its checks, manual@1
   domain/language.py       # en, hi or mul from the letters of a text
@@ -59,12 +66,14 @@ src/pipeline/
   workflows/       # Temporal workflows; ingest_document.py: discover, fetch, parse, register
   workflows/crawl_source.py  # list from the watermark, ingest the new documents, record the run
   workflows/extract_rules.py # ask the model, wait out a used-up budget, store the candidate
+  workflows/extract_backlog.py # the sweep: each waiting document's extraction as a child
   application/knowledge_activities.py  # RegisterDocument: hand the parsed document to the rulebook
   domain/knowledge.py, domain/ports.py # DocumentRecord and the KnowledgeSink port
   infrastructure/rulebook_client.py    # HttpRulebook: the rulebook's write API as a KnowledgeSink
   settings.py      # PipelineSettings: the stores, CW_PIPELINE_KNOWLEDGE_ENABLED, CW_RULEBOOK_URL, ...
   stores.py        # the store and the raw store the settings pick
-  backfill.py      # pipeline-backfill: list, fetch, store, parse and detect from the command line
+  backfill.py      # pipeline-backfill: a plan's dry run, its crawls through the workflow, the report
+  extract_backlog.py  # pipeline-extract-backlog: count the classified backlog, start the sweep
   crawl_report.py  # pipeline-crawl-report: the crawl per source over a window, and the F1 check
   wiring.py        # what the API gets from main: use cases and protocols
   embed.py         # pipeline-embed: embed the stored clauses that have no vector yet
@@ -77,7 +86,8 @@ prompts/           # extraction.rule_candidate.v1.md (owner regulatory-intellige
   testing.py       # FixtureTransport (replays tests/fixtures), ScriptedProvider, AnswersInTurn, ScriptedEmbedder, MemoryRulebook, StubS3, sample_activities
   worker.py        # python -m pipeline.worker: the Temporal worker on task queue "pipeline"
   main.py          # composition root: create_app(...) from py-common
-migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA); 0001: source, raw_document, crawl_run, outbox_event; 0002: source names, the URL index; 0003: pipeline_task, the parse of each document; 0004: document_classification, rule_extraction, the statuses of a classified document
+migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA); 0001: source, raw_document, crawl_run, outbox_event; 0002: source names, the URL index; 0003: pipeline_task, the parse of each document; 0004: document_classification, rule_extraction, the statuses of a classified document; 0005: crawl runs' trigger and workflow id, document_retry, a retry's classification
+backfill-plan.yaml # the backfill plan: the notifications the seed rules cite, then about 200 recent ones
 tests/
   unit/            # domain and application with fakes; adapter conformance over recorded fixtures
   fixtures/        # responses recorded from the regulator sites, and workflow histories (README lists what and when)
@@ -250,6 +260,13 @@ schedule; no Temporal schedule holds a copy.
 - **By hand.** `POST /v1/pipeline/sources/{key}/fetch` does the same for one source at once,
   under `pipeline-crawl-<key>-manual-<request>`, and answers 202 with the run's id; 409 while a
   crawl of the source runs, 503 while the flag is off. A paused source may be fetched by hand.
+- **A backfill.** `pipeline-backfill --workflow` starts the same workflow for each row of a plan
+  with the trigger `backfill` ([Operations](#operations)): behind the patch
+  `pipeline-backfill-v1`, the crawl lists the row's own window (from a date below the watermark,
+  up to another, only the references the row names) and ingests up to the row's limit (500 at
+  most) instead of 50, and its end never moves the watermark back. A crawl that names no window
+  records no marker, so every other crawl's history replays as it was. Each run says its
+  `trigger` (`schedule`, `manual` or `backfill`) and its workflow id.
 - **The workflow** `pipeline.crawl_source` (`CrawlSourceWorkflow`, two hours at most):
   1. `pipeline.list_new_documents` lists the source since a week before its watermark (the last
      30 days for a source without one), with no transaction open, and leaves out the URLs a
@@ -304,7 +321,7 @@ tenant, in the transaction of the change.
 | `PATCH /v1/pipeline/sources/{key}` | change its name, cadence, enabled or paused switch, or parameters; audited as `pipeline.source.edit` with the source before and after, unless nothing changed |
 | `POST /v1/pipeline/sources/{key}/fetch` | start a crawl now: 202 with the run and workflow ids; audited as `pipeline.source.fetch` |
 | `GET /v1/pipeline/sources/{key}/documents` | the source's documents a page at a time (`limit`, `cursor`), newest publication first, undated last |
-| `GET /v1/pipeline/documents/{document_id}` | one stored document's record |
+| `GET /v1/pipeline/documents/{document_id}` | one stored document's record, with the type the pipeline reads it as, its classification, its extraction by the current prompt and its retries ([Operations](#operations)) |
 | `GET /v1/pipeline/documents/{document_id}/raw` | its bytes from the raw store with the content type it was fetched with, served only when their SHA-256 is the record's (502 otherwise), with the digest as the ETag, inline, sandboxed and never sniffed |
 | `POST /v1/pipeline/sources/{key}/uploads` | upload a document to the source ([Manual parse and uploads](#manual-parse-and-uploads)): 202 with the stored document and its ingest's workflow id; audited as `pipeline.document.upload` |
 | `GET /v1/pipeline/tasks` | the tasks people work on stored documents, of a `status` (`open`, `resolved`, `dismissed`) and a `kind` (`manual_parse`, `triage`), both optional, a page at a time, oldest first, each with its document |
@@ -411,8 +428,16 @@ whether or not knowledge is on and its registration succeeded (the ingest's resu
 `extracted` says an extraction is stored, whatever its `outcome` (`rule_extraction`), so a
 document the model gave no candidate for is `extracted` too.
 
-A document classified before keeps its classification: a retry, a second ingest of the same bytes
-and a triage's continuation find it and write nothing. A triage is resolved through
+A document classified before keeps its classification: a second ingest of the same bytes, a
+triage's continuation and a retry from the parse or the extract stage find it and write nothing.
+A retry from the classify stage has the detector read the document again (`fresh`, behind the
+patch `pipeline-reclassify-v1`): a reading that differs replaces the detector's earlier one, with
+the status, a `document.classified` and, for a conflict, a triage task. A person's decision (a
+triage's, a type given on a retry) is never read again. A type an admin gives on a retry
+([Operations](#operations)) is the document's classification from then on: relevant, of that
+type, `certain`, classifier `retry`, the admin in `decided_by`, written with the status and a
+`document.classified` in the retry's transaction. It is the way back for a document the detector
+set aside or whose triage was dismissed. A triage is resolved through
 `POST /v1/pipeline/tasks/{task_id}/resolve` with `triage`:
 
 ```json
@@ -432,6 +457,113 @@ again replays it and starts that ingest if it did not start (503 when Temporal d
 also when two requests send it at once: the second finds the task resolved once it holds its row
 lock, writes nothing and answers 200 like the first. Another decision is a 409. A relevant
 triage needs a type and an irrelevant one takes none (422).
+
+## Operations
+
+The regulatory team's view of the whole pipeline, with the source manager's access (composition
+class admin: the internal listener, and the public one in `token` mode only). The reads need a
+regulatory role (analyst, reviewer or admin) a token names; the writes an admin, or in `header`
+and `dual` mode the shared write token, and each names its actor and a reason of ten characters
+or more and writes its `audit.event` row, of no tenant, in the transaction of the change. The
+admin screen `admin.pipeline` (`apps/web/src/shared/config/screens.ts`) is ready for them; no UI
+reads them yet.
+
+| Route | What |
+| --- | --- |
+| `GET /v1/pipeline/runs` | every source's crawl runs, the latest started first, a page at a time (`limit`, `cursor`), of a `source_key`, a `status` (`running`, `completed`, `failed`) and a `trigger` (`schedule`, `manual`, `backfill`): each run's counts, error, trigger and workflow id (null on runs recorded before migration 0005) |
+| `GET /v1/pipeline/documents` | every source's documents, the latest first fetch first, of a `status`, a `source_key`, a `doc_type` and publication dates (`published_from`, `published_to`, which leave undated documents out); each with `read_as` (its classification's type, else its uploader's, else its source's), its classification and its extraction by the current prompt |
+| `GET /v1/pipeline/documents/{document_id}` | one document as above, with the retries people asked for |
+| `POST /v1/pipeline/documents/{document_id}/retry` | `{actor_id, reason, stage, doc_type?}` with an `Idempotency-Key`: run the stored document again from a stage, without a new fetch; 202 with the attempt and its ingest's workflow id; audited as `pipeline.document.retry` |
+| `GET /v1/pipeline/outbox/dead` | the outbox's dead rows, the newest dead first, of a `topic`: topic, key, attempts, last error, when it went dead and a summary of the payload (document, source, candidate, type) without its body |
+| `POST /v1/pipeline/outbox/{event_id}/requeue` | `{actor_id, reason}`: a dead row back to pending (attempts reset, due at once, `last_error` kept until a send succeeds); `requeued: false` and nothing written for a row that is not dead; audited as `pipeline.outbox.requeue` |
+
+**A retry** (`application/operations.py`, `domain/retry.py`) runs the ingest of the stored bytes
+again under `pipeline-retry-<document>-<attempt>`, the attempt counted per document from 1:
+
+- `stage: parse` is the whole ingest as an upload's runs it: parse (a document no parser read
+  before is parsed again, which closes its manual parse when a parser added since reads it),
+  classify (a classification stands), register while knowledge is on, and extract a
+  notification, circular or act amendment while the extraction is on;
+- `stage: classify` is the same with the detector reading the document again (`fresh`); a
+  person's decision stands;
+- `stage: extract` is for a document classified on its way to the extraction whose extraction
+  failed or never started: 409 `pipeline-retry-refused` when it is not on its way to the
+  extraction or one is stored for the current prompt, 422 `pipeline-retry-invalid` for a type no
+  rule is extracted from.
+
+A `doc_type` reclassifies the document first, whatever the stage: relevant, of that type,
+`certain`, classifier `retry`, the admin in `decided_by` ([Classification and
+triage](#classification-and-triage)). It beats the detector, and it is the way back for a
+document set aside as irrelevant or whose triage was dismissed: a typed re-upload of the same
+bytes is a duplicate and changes nothing. The attempt, the classification and the audit row are
+written in one transaction with the document's row locked; the ingest starts once it closed. The
+same request again under its `Idempotency-Key` answers its attempt (`Idempotent-Replayed: true`)
+and starts its ingest only if it did not start (503 when Temporal did not answer: send it again);
+the key with another body is a 422, a request without one a 428. A retry is refused with 409
+`pipeline-ingest-running` while an ingest of the document runs (its earlier retries', its
+crawl's, its tasks' resolutions' and its rule extraction's, the ids that follow from the
+document; an upload's ingest has an id of its own that the check does not see), and with 409
+`pipeline-retry-refused` while a triage task holds the document (decide or dismiss the task
+first).
+
+**A dead row** is one the relay gave up on after eight failed sends; its message is also on
+`<topic>.dlq`. Requeue it once the cause is fixed, and the relay sends it on its next pass and
+marks it published. A message a consumer gave up on is on `<topic>.<group>.dlq` instead:
+`make replay` lists that topic and sends a message back to its origin
+([docs/runbooks/outbox-relay.md](../../docs/runbooks/outbox-relay.md)).
+
+**The classified backlog.** The documents the ingest classified while the extraction was off wait
+as `classified`; turning the flag on extracts only what is classified from then on.
+`pipeline-extract-backlog` counts them per source, leaving out the ones extracted for the current
+prompt, and starts the sweep `pipeline.extract_backlog` on the worker, which runs each one's
+extraction as a child, three at a time (`--concurrency`, 10 at most), under the id the ingest's
+own extraction would have, so nothing is extracted twice. At most `--limit` documents (1,000 at
+most) go into one sweep, the first fetched first; run it again for the rest. It refuses while
+`CW_PIPELINE_EXTRACTION_ENABLED` is off; `--dry-run` only counts.
+
+```bash
+make extract-backlog ARGS="--dry-run"                               # per source, what waits
+make extract-backlog ARGS="--source cbic_notifications --limit 200" # start one sweep
+```
+
+**The backfill** (`backfill.py`, `application/backfill.py`) fills the store with a regulator's
+history through the crawl workflow, from a plan: `backfill-plan.yaml` lists, first, the
+notifications the seed rules cite (`tests/unit/test_backfill_plan.py` keeps the list equal to the
+seed calendar's), each in the window of the year its number names, then about 200 recent
+notifications. A row names its source, `since`, and optionally `until`, the `refs` it takes (as
+the listing writes them), `limit` (documents per crawl, 500 at most), `max_documents` and a
+`note`; `--row N` runs only the Nth.
+
+- `--dry-run` lists each row's window through its source's adapter and counts the documents new to
+  the store and the ones it holds already; it fetches and writes nothing. **It reads the live
+  regulator site**, so a person runs it; no test or check does.
+- `--workflow --reason "<why>"` starts `pipeline.crawl_source` per row with the trigger `backfill`,
+  the row's window and limit, on the running pipeline worker (task queue `pipeline`), waits for
+  it, and crawls again while new documents are left (at most `--max-rounds`, 20); each crawl is a
+  run with its `pipeline.source.backfill` audit row, naming `--actor-id` or the system's backfill.
+  The worker fetches from the live sites, so the command refuses unless
+  `CW_PIPELINE_CRAWL_ENABLED` is on in its own environment; the worker needs no flag for it (the
+  flag also starts the worker's tick, which crawls every source at its cadence).
+- `--report` counts per source, from the store, the documents stored, parsed, unread by any
+  parser, set aside, waiting as classified, held for triage, kept for reference and extracted,
+  with the current prompt's candidates and unparseable answers, and the share no parser read (more
+  than 5% asks for OCR); then it asks the rulebook at `CW_RULEBOOK_URL`
+  (`GET /v1/rulebook/review/stats`, `http://localhost:8003` by default) how analysts decided the
+  candidates, and says so when the rulebook does not answer or refuses (in `token` mode the read
+  wants an analyst's token). `--json` prints the dry run or the report as JSON.
+
+The commands a person runs on the dev stack, which `make backfill` points at the local database's
+`pipeline` schema (see [docs/runbooks/pipeline-backfill.md](../../docs/runbooks/pipeline-backfill.md)
+before running them):
+
+```bash
+make backfill ARGS="--plan services/pipeline/backfill-plan.yaml --dry-run"   # lists the live sites, fetches nothing
+make backfill ARGS="--plan services/pipeline/backfill-plan.yaml --report"    # the store, and the rulebook's acceptance
+make worker SERVICE=pipeline   # another shell, unless a pipeline worker runs on the dev stack's Temporal
+CW_PIPELINE_CRAWL_ENABLED=true make backfill ARGS="--plan services/pipeline/backfill-plan.yaml --workflow --reason 'Backfill the notifications the seed rules cite'"
+```
+
+`--legacy` keeps the command this one replaced ([Sources](#sources)).
 
 ## The store
 
@@ -643,17 +775,21 @@ extension or none), the canonical names of the notifications and circulars it ci
 `domain_kernel.knowledge.normalise_name`), and whether the document is a press release
 announcing something not yet in force.
 
+The backfill goes through the crawl workflow from a plan ([Operations](#operations)). The command
+it replaced stays behind `--legacy`, for recording fixtures: it fetches straight from a site into a
+local raw store (`--store`, `var/raw`, under the same content keys, never overwritten), outside
+the pipeline's store and its workflow, and records nothing:
+
 ```bash
-make backfill SERVICE=pipeline ARGS="--source cbic_notifications --since 2026-01-01 --limit 5"
-make backfill SERVICE=pipeline ARGS="--source gstcouncil_press --list-only"
+make backfill ARGS="--legacy --source cbic_notifications --since 2026-01-01 --limit 5"
+make backfill ARGS="--legacy --source gstcouncil_press --list-only"
 ```
 
-The backfill keeps raw files in a local raw store (`--store`, `var/raw`), under the same
-content keys, never overwritten. The adapter tests replay `tests/fixtures/` through
+The adapter tests replay `tests/fixtures/` through
 `pipeline.testing.FixtureTransport`; nothing in the test suite reaches the network. The crawl's
 tests use the test adapter type `recorded` (`pipeline.testing.RECORDED_TYPE`), which lists
 recorded CBIC notifications from the recorded listings and fetches their recorded PDFs. What is
-not done: OCR; a claim route for a task; events from the backfill (it writes none, and it
+not done: OCR; a claim route for a task; events from the legacy backfill (it writes none, and it
 classifies with the detector but records nothing); and adapters for the other states.
 
 ## Extraction
@@ -714,9 +850,10 @@ workflow sleeps on a durable timer for the `Retry-After`, kept between 15 minute
 raised budget takes effect before the month ends), and asks again, at most 160 times. Any other
 failure (a gateway or rulebook outage past six tries over some 15 minutes) fails the child; the
 document stays `classified` until a re-ingest of it (an upload of the same bytes, say) finds its
-classification and starts the extraction again. The same goes for the documents that waited as
-`classified` while the flag was off: turning the flag on extracts none of them, since a sweep of
-that backlog is not built yet, and the backfill command never extracts.
+classification and starts the extraction again, as a retry from the `extract` stage does
+([Operations](#operations)). The documents that waited as `classified` while the flag was off are
+not extracted by turning it on: `make extract-backlog` sweeps them. A backfill's crawls classify
+and, with the flag on, extract like any other crawl.
 
 `rule.candidate.created` 1.1 keeps the fields of 1.0.0 and adds `outcome`, `candidate` (the
 model's candidate in `CANDIDATE_SCHEMA`'s shape, which the schema file keeps under `$defs`: a
@@ -760,7 +897,10 @@ make run SERVICE=pipeline           # http://localhost:8010/health, /ready, /v1/
 make worker SERVICE=pipeline      # the Temporal worker of the crawl and the ingest; with
                                   # CW_PIPELINE_CRAWL_ENABLED=true it crawls the live sites
 make crawl-report ARGS="--days 30"  # the crawl per source and the F1 check
-make relay SERVICE=pipeline       # publishes document.discovered from the outbox
+make extract-backlog ARGS="--dry-run"  # the documents waiting as classified, per source
+make backfill ARGS="--plan services/pipeline/backfill-plan.yaml --report"  # where a backfill got to
+make relay SERVICE=pipeline       # publishes the pipeline's events from the outbox
+make replay ARGS="list --topic rule.candidate.created.rulebook.rule-candidates.dlq"  # dead letters
 make test                         # unit + contract tests with the coverage gate
 docker build -f services/pipeline/Dockerfile -t compliancewatch-pipeline .
 ```

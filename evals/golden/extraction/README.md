@@ -11,6 +11,8 @@ analyst has reviewed it against the clauses in the same file.
 3. The analyst writes `expected` (the shape below), sets `labelled_by`, and `label_status: reviewed`. A second analyst sets `reviewed_by` and `label_status: approved`.
 4. `make label ARGS="check"` confirms every `expected` is a well-formed candidate that cites clauses in its own document and passes the validators (quotes present, numbers and dates written in the cited clauses, predicates over ontology attributes). CI runs the same check.
 
+Drafts can also come from the rulebook's review: `make golden-export ARGS="--since 2026-10-01 --out var/golden-export"` writes each rule candidate an analyst approved since that day as a case of this shape, `label_status: draft`, `labelled_by` the analyst who decided it, `reviewed_by` empty, with the stored document's clauses and the approved version's content as `expected` (rejected candidates are only listed in its `summary.yaml`; the shape has no negative case). It never writes here: an analyst reviews a draft and copies it into `<source>/cases/` by hand, then it follows step 3 (`services/rulebook/README.md`, Golden export).
+
 ## `expected`
 
 The same JSON shape the extractor asks the model for (`pipeline.domain.candidate.CANDIDATE_SCHEMA`):

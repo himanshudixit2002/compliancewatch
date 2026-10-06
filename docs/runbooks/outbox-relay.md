@@ -46,13 +46,50 @@ counted at start and every 15 seconds.
 
 ## A row is `dead`
 
-1. Read `last_error` on the row and the message on `<topic>.dlq`
-   (`docker compose exec redpanda rpk topic consume <topic>.dlq -n 1`).
+The relay keeps when a row went dead in its `available_at` (it never claims a dead row), and the
+same message sits on `<topic>.dlq`.
+
+1. List the dead rows and read `last_error`. For the pipeline, `GET /v1/pipeline/outbox/dead`
+   (internal listener; a regulatory role in token mode) lists them, the newest dead first, with the
+   topic, key, attempts, last error, when each went dead and a summary of the payload without its
+   body. For another schema: `select id, topic, attempts, available_at as dead_at, last_error from
+   <schema>.outbox_event where status = 'dead' order by available_at desc` through
+   `make dev-psql`. The copy on the dead-letter topic: `make replay ARGS="list --topic
+   <topic>.dlq"`, which reads the topic with no consumer group and commits nothing.
 2. Fix the cause (broker, topic configuration, message size).
-3. Replay by hand until the admin replay tool exists: set the row back to `pending`,
-   `update <schema>.outbox_event set status = 'pending', attempts = 0, available_at = now()
-   where id = '<event id>'`. The relay publishes it on its next pass. Consumers deduplicate on
-   `event_id`, so a message that did get through before the row was marked dead is harmless.
+3. Requeue the row, so the relay sends it again on its next pass and marks it `published`:
+   - pipeline: `POST /v1/pipeline/outbox/{event_id}/requeue` with `{"actor_id": "<admin>",
+     "reason": "<why, ten characters or more>"}` (an admin, or the shared write token in header
+     mode). It moves only a dead row (back to `pending`, attempts reset, due now; `last_error`
+     stays until a send succeeds), answers `requeued: false` for a row that is not dead, and
+     writes its `pipeline.outbox.requeue` row to `audit.event` in the same transaction;
+   - another schema, until it has a route: `update <schema>.outbox_event set status = 'pending',
+     attempts = 0, available_at = now() where id = '<event id>' and status = 'dead'`.
+
+   Consumers deduplicate on `event_id`, so a message that did get through before the row was
+   marked dead is harmless.
+
+Replaying the `<topic>.dlq` copy (`make replay ARGS="send --topic <topic>.dlq --event-id <id>"`)
+publishes the same message too, but leaves the row `dead`: prefer the requeue, which keeps the
+row the source of truth.
+
+## A consumer dead-lettered a message
+
+A consumer group sends what its handler could not process after three attempts to
+`<topic>.<group>.dlq` and moves on (the headers say `origin_topic`, `consumer_group`, `attempts`
+and `error`). The message was delivered; the fix lives in the consumer or what it reads.
+
+1. List the topic: `make replay ARGS="list --topic <topic>.<group>.dlq"` (or `--json`): one line
+   per message with its event id, origin, group, attempts and error. Listing is read only.
+2. Fix the cause: the handler, the data it needs (the rulebook takes a rule candidate in only once
+   its document is registered), the database it writes to.
+3. Send the message back to its origin: `make replay ARGS="send --topic <topic>.<group>.dlq
+   --event-id <id>"` (`--dry-run` says what it would send). It goes to the `origin_topic` header's
+   topic (`--to` names another; a dead-letter topic is refused) with its key, value and headers
+   less the dead-letter ones. Every group of the origin topic reads it again: the groups that took
+   it in skip it (they deduplicate on the event id), and the one that failed runs its handler
+   again. An event id the topic does not hold answers `holds no message with event id ...` and
+   exits 1; a broker that does not answer exits 2.
 
 ## Ordering
 
@@ -65,5 +102,5 @@ the state the message describes, not from its position.
 
 `published` rows are kept for auditing. Prune them on a schedule the service owner picks, for
 example `delete from <schema>.outbox_event where status = 'published' and published_at <
-now() - interval '30 days'`. `dead` rows are deleted only after they were replayed or written
-off.
+now() - interval '30 days'`. `dead` rows are deleted only after they were requeued and published,
+or written off.
