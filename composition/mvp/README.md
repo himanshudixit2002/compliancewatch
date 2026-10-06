@@ -313,6 +313,7 @@ registers it here in the same change: the route's class in `exposure.py`, the re
 `registry.py`. `tests/unit/test_exposure.py` and `tests/unit/test_registry.py` fail until it
 does. A store setting is named `<service>_store`, so the worker finds it, and goes into
 `cw_mvp.testing.MEMORY_SERVICES`; a setting that picks where a service keeps files rather than
-its state ends in `_raw_store` (`pipeline_raw_store`), and check-config has a rule for it. A new event topic or consumer group goes into `topics.toml`
-(`tests/unit/test_topics_file.py`), and a file a service reads at runtime stays beside its
-sources and inside the build context (`.dockerignore`).
+its state ends in `_raw_store` (`pipeline_raw_store`), and check-config has a rule for it. A new
+event topic or consumer group goes into `topics.toml` (`tests/unit/test_topics_file.py`), and a
+file a service reads at runtime stays beside its sources and inside the build context
+(`.dockerignore`).

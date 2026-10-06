@@ -109,10 +109,11 @@ With `IngestRequest(knowledge=True, regulator="CBIC")` and `CW_PIPELINE_KNOWLEDG
 the workflow runs a fourth activity, `pipeline.register_document`: it reads the bytes back from
 the raw store, parses them again and stores the document and its clauses in the rulebook through
 `PUT /v1/rulebook/documents/{id}` (ADR-018), with the raw store's URI of the file, then checks
-that the rulebook answered with the clause ids the kernel derives. The step sits behind `workflow.patched("kag-register-v1")`, so histories
-recorded before it replay unchanged. The flag is off by default (owner regulatory-intelligence;
-it goes when ADR-017 is accepted); off, the activity answers `skipped` without a call. With the
-flag on, the request must name the regulator. A registration that fails (a refused write, a
+that the rulebook answered with the clause ids the kernel derives. The step sits behind
+`workflow.patched("kag-register-v1")`, so histories recorded before it replay unchanged. The
+flag is off by default (owner regulatory-intelligence; it goes when ADR-017 is accepted); off,
+the activity answers `skipped` without a call. With the flag on, the request must name the
+regulator. A registration that fails (a refused write, a
 rulebook outage longer than the retries) does not fail the ingest: the result says
 `registered=False` with the reason in `registration_error`. A different parse of stored bytes,
 which a parser change can cause, is refused and never retried; the stored clauses stay, since
