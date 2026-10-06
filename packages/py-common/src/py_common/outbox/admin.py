@@ -9,6 +9,8 @@ audit row:
 - ``dead(topic=..., after=..., limit=...)``: the dead rows, the newest dead first (then by id from
   the highest), a page at a time after ``after``;
 - ``get(event_id)``: one row whatever its status, None for an id the table does not hold;
+  ``for_update`` holds the row until the transaction ends, so a requeue reads the row it moves
+  as no other request can change it meanwhile;
 - ``requeue(event_id, at=...)``: a dead row back to ``pending`` with its attempts reset and due at
   ``at``, so the relay sends it again on its next pass; ``last_error`` stays until a send
   succeeds. False, with nothing changed, for a row that is not dead.
@@ -102,7 +104,7 @@ class DeadRows(Protocol):
         self, *, topic: str | None = None, after: DeadKey | None = None, limit: int = 50
     ) -> Sequence[OutboxRow]: ...
 
-    def get(self, event_id: UUID) -> OutboxRow | None: ...
+    def get(self, event_id: UUID, *, for_update: bool = False) -> OutboxRow | None: ...
 
     def requeue(self, event_id: UUID, *, at: datetime) -> bool: ...
 
@@ -140,10 +142,11 @@ class OutboxAdmin:
         ).limit(limit)
         return [_row(found) for found in self._connection.execute(statement)]
 
-    def get(self, event_id: UUID) -> OutboxRow | None:
-        found = self._connection.execute(
-            select(outbox_event).where(outbox_event.c.id == event_id)
-        ).first()
+    def get(self, event_id: UUID, *, for_update: bool = False) -> OutboxRow | None:
+        statement = select(outbox_event).where(outbox_event.c.id == event_id)
+        if for_update:
+            statement = statement.with_for_update()
+        found = self._connection.execute(statement).first()
         return None if found is None else _row(found)
 
     def requeue(self, event_id: UUID, *, at: datetime) -> bool:

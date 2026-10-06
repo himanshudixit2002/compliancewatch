@@ -169,7 +169,8 @@ class MemoryOutboxStore:
             found = [row for row in found if (row.available_at, row.event_id.int) < start]
         return found[:limit]
 
-    def get(self, event_id: UUID) -> OutboxRow | None:
+    def get(self, event_id: UUID, *, for_update: bool = False) -> OutboxRow | None:
+        """One row; ``for_update`` changes nothing in memory, where nothing runs beside."""
         row = self.rows.get(event_id)
         return None if row is None else row.view()
 

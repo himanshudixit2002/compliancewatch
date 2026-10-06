@@ -30,6 +30,7 @@ from sqlalchemy import (
     select,
     text,
 )
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 from testcontainers.community.kafka import RedpandaContainer
@@ -193,6 +194,31 @@ def test_tables_landed_in_the_service_schema(database_url: str) -> None:
                 {"s": SCHEMA},
             ).scalar_one()
         assert jsonb == "jsonb"
+    finally:
+        engine.dispose()
+
+
+def test_a_row_read_for_update_is_held_until_the_transaction_ends(database_url: str) -> None:
+    """What a requeue reads first is locked: another request's lock waits for the first's
+    transaction, so it then reads the row as the first left it."""
+
+    @dataclass(frozen=True, slots=True, kw_only=True)
+    class Held(DomainEvent):
+        topic: ClassVar[str] = "obligation.held"
+        title: str
+
+    engine = create_engine(database_url, poolclass=NullPool)
+    try:
+        with engine.begin() as writing:
+            written = OutboxWriter().write(writing, Held(tenant_id=TenantId.new(), title="held"))
+        with engine.begin() as first, engine.connect() as second:
+            found = OutboxAdmin(first).get(written.event_id, for_update=True)
+            assert found is not None
+            busy = select(outbox_event).where(outbox_event.c.id == written.event_id)
+            with pytest.raises(OperationalError, match="could not obtain lock"):
+                second.execute(busy.with_for_update(nowait=True))
+            second.rollback()
+            assert OutboxAdmin(second).get(written.event_id) is not None, "a plain read waits not"
     finally:
         engine.dispose()
 

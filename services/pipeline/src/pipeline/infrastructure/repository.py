@@ -913,8 +913,8 @@ class SqlAlchemyOutboxRepository:
             outbox_event_of(row) for row in self._admin.dead(topic=topic, after=key, limit=limit)
         ]
 
-    def get(self, event_id: UUID) -> OutboxEvent | None:
-        row = self._admin.get(event_id)
+    def get(self, event_id: UUID, *, for_update: bool = False) -> OutboxEvent | None:
+        row = self._admin.get(event_id, for_update=for_update)
         return None if row is None else outbox_event_of(row)
 
     def requeue(self, event_id: UUID, *, at: datetime) -> bool:

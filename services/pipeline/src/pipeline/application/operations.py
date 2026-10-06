@@ -20,7 +20,9 @@ documents, a person's retry of a stored document, and the outbox's dead rows wit
   key, is a new attempt). The same key with another body is refused.
 - ``ListDeadEvents`` and ``RequeueEvent``: the outbox's dead rows, the newest dead first, and a
   dead row put back to pending (attempts reset, due at once) with its ``pipeline.outbox.requeue``
-  audit row, in one transaction. A row that is not dead is answered as it stands, unchanged.
+  audit row, in one transaction that reads the row under its lock first, so two requeues at once
+  move it once and the second answers it as the first left it. A row that is not dead is
+  answered as it stands, unchanged.
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -549,7 +551,7 @@ class RequeueEvent:
         reason = require_reason(admin.reason)
         now = self._clock()
         with self._units() as unit:
-            before = unit.outbox.get(event_id)
+            before = unit.outbox.get(event_id, for_update=True)
             if before is None:
                 raise OutboxEventNotFoundError(f"the pipeline's outbox holds no event {event_id}")
             if not unit.outbox.requeue(event_id, at=now):

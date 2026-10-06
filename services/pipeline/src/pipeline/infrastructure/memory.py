@@ -569,8 +569,8 @@ class MemoryOutboxRepository:
         rows = self._outbox.dead(topic=topic, after=key, limit=limit + len(self.requeued))
         return [outbox_event_of(row) for row in rows if row.event_id not in self.requeued][:limit]
 
-    def get(self, event_id: UUID) -> OutboxEvent | None:
-        row = self._outbox.get(event_id)
+    def get(self, event_id: UUID, *, for_update: bool = False) -> OutboxEvent | None:
+        row = self._outbox.get(event_id, for_update=for_update)
         if row is None:
             return None
         if event_id in self.requeued:

@@ -362,8 +362,8 @@ class OutboxRepository(Protocol):
         """The dead rows (of ``topic``), the newest dead first (``DeadEventKey``)."""
         ...
 
-    def get(self, event_id: UUID) -> OutboxEvent | None:
-        """One row, whatever its status."""
+    def get(self, event_id: UUID, *, for_update: bool = False) -> OutboxEvent | None:
+        """One row, whatever its status; ``for_update`` holds it until the unit ends."""
         ...
 
     def requeue(self, event_id: UUID, *, at: datetime) -> bool:
