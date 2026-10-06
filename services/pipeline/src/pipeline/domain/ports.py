@@ -20,16 +20,45 @@ from pipeline.domain.knowledge import (
     RuleKey,
     StagingReport,
 )
+from pipeline.domain.raw_documents import RawDocumentRecord
 from pipeline.domain.schedule import CrawlTrigger
 from pipeline.domain.sources import SourceDefinition
+from pipeline.domain.transcripts import Transcript
+
+
+@dataclass(frozen=True, slots=True)
+class ParseHints:
+    """How to parse one document: as ``doc_type`` (None: its source's type); with
+    ``parser_version`` first, the parser that parsed it before, which the chain then uses as it
+    always did and never lets give way, so a document's clauses and their ids stay what they
+    were while the code has that parser; or from ``transcript``, an analyst's, as ``manual@1``
+    instead of from the bytes."""
+
+    doc_type: DocumentType | None = None
+    parser_version: str = ""
+    transcript: Transcript | None = None
+
+
+class DocumentParsers(Protocol):
+    """The parser chain (``infrastructure.parsers.ParserChain``): text-layer PDF, table-aware
+    PDF, HTML, table-aware HTML, each document taken by the first parser for its media type
+    that reads it."""
+
+    def parse_as(self, raw: RawDocument, hints: ParseHints) -> ParsedDocument:
+        """The document's clauses, by the hints. ``UnsupportedDocumentError`` when no parser
+        takes the media type, ``UnparsedDocumentError`` when none of those that do can read the
+        bytes."""
+        ...
 
 
 class KnowledgeSink(Protocol):
     """Where parsed regulator documents and the knowledge found in them go: the rulebook."""
 
     def register_document(self, record: DocumentRecord) -> RegisteredDocument:
-        """Store the document and its clauses; idempotent for the same parse. Raises
-        ``RulebookConflictError`` for a different parse of stored bytes."""
+        """Store the document and its clauses; idempotent for the same parse. A parse by
+        another parser version is answered with the parse stored first (``parser_version`` of
+        the answer names it); ``RulebookConflictError`` for a different parse by the same
+        parser version."""
         ...
 
     def submit_mentions(self, submission: MentionSubmission) -> AlignmentReport:
@@ -131,6 +160,7 @@ class SourceCatalog(Protocol):
 class SourceKind:
     """What an adapter type makes of a source's parameters: the parameters as the type reads
     them (JSON values, defaults filled in), and the regulator, site and document type they give.
+    ``listable`` is False for an upload-only type, whose sources the schedule never crawls.
     """
 
     adapter_type: str
@@ -138,6 +168,7 @@ class SourceKind:
     regulator: str
     site: str
     doc_type: DocumentType
+    listable: bool = True
 
 
 class AdapterTypes(Protocol):
@@ -145,6 +176,11 @@ class AdapterTypes(Protocol):
 
     def names(self) -> Sequence[str]:
         """Every adapter type, sorted."""
+        ...
+
+    def listable(self, adapter_type: str) -> bool:
+        """Whether sources of the type list documents (False for an upload-only type); a type
+        the code does not have counts as listable, so its crawl reports what is wrong."""
         ...
 
     def describe(self, adapter_type: str, parameters: Mapping[str, object]) -> SourceKind:
@@ -171,4 +207,31 @@ class CrawlStarter(Protocol):
         """Start the workflow; False when a workflow with its id exists already, running or
         not (it is never started twice). ``CrawlUnavailableError`` when Temporal does not
         answer."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class IngestStart:
+    """An ingest of a stored document to start (``pipeline.ingest_document`` with
+    ``IngestRequest.stored``): the workflow's id; the document as its record holds it, under the
+    source it is stored for (its id and regulator) and where the raw store keeps it; whether
+    those bytes were stored before; the analyst's transcript to parse it from, if any; and
+    whether the knowledge steps run."""
+
+    workflow_id: str
+    record: RawDocumentRecord
+    source_id: SourceId
+    regulator: str
+    raw_uri: str
+    duplicate: bool = False
+    transcript_key: str = ""
+    knowledge: bool = False
+
+
+class IngestStarter(Protocol):
+    """Starts the ingest of a stored document on Temporal (an upload's, a resolution's)."""
+
+    def start(self, start: IngestStart) -> bool:
+        """Start the workflow; False when a workflow with its id runs or has completed (one
+        that failed may run again). ``IngestUnavailableError`` when Temporal does not answer."""
         ...

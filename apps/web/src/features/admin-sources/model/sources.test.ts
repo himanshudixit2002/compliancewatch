@@ -41,12 +41,14 @@ describe("source labels and tones", () => {
       "circular",
       "press_release",
       "act_amendment",
+      "statute",
     ];
     expect(types.map(documentTypeLabel)).toEqual([
       "Notifications",
       "Circulars",
       "Press releases",
       "Act amendments",
+      "Statutes",
     ]);
   });
 });

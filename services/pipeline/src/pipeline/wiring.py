@@ -14,6 +14,9 @@ from pipeline.application.sources import (
     ReadRawDocument,
     SyncSources,
 )
+from pipeline.application.tasks import DismissTask, ListTasks, ResolveTask
+from pipeline.application.uploads import UploadDocument
+from pipeline.domain.ports import AdapterTypes
 from pipeline.domain.repository import UnitOfWorkFactory
 from pipeline.settings import PipelineSettings
 
@@ -22,6 +25,7 @@ from pipeline.settings import PipelineSettings
 class Wiring:
     settings: PipelineSettings
     units: UnitOfWorkFactory
+    adapter_types: AdapterTypes
     store_ready: Callable[[], Awaitable[bool]]
     sync_sources: SyncSources
     list_sources: ListSources
@@ -31,3 +35,7 @@ class Wiring:
     list_documents: ListSourceDocuments
     read_document: ReadDocument
     read_raw: ReadRawDocument
+    upload_document: UploadDocument
+    list_tasks: ListTasks
+    resolve_task: ResolveTask
+    dismiss_task: DismissTask

@@ -50,6 +50,7 @@ def test_register_then_register_again(client: TestClient) -> None:
             "en.p2": str(clause_id_for(DOCUMENT_ID, "en.p2")),
         },
         "metadata_differs": [],
+        "parser_version": "pdf@1",
     }
     again = client.put(URL, json=body(title="Renamed"), headers=AUTH)
     assert again.status_code == 200
@@ -77,12 +78,27 @@ def test_reading_an_unknown_document_is_404(client: TestClient) -> None:
     assert response.json()["type"].endswith("rulebook-document-not-found")
 
 
-def test_a_different_parse_is_409(client: TestClient) -> None:
+def test_a_different_parse_by_the_same_parser_is_409(client: TestClient) -> None:
     client.put(URL, json=body(), headers=AUTH)
     changed = body(clauses=[{"clause_ref": "en.p1", "text": "other text"}])
     response = client.put(URL, json=changed, headers=AUTH)
     assert response.status_code == 409
     assert response.json()["type"].endswith("rulebook-document-conflict")
+
+
+def test_a_parse_by_a_newer_parser_is_answered_with_the_stored_one(client: TestClient) -> None:
+    first = client.put(URL, json=body(), headers=AUTH).json()
+    newer = body(
+        parser_version="pdf-tables@1",
+        clauses=[{"clause_ref": "en.p1", "text": "S. No. | Example item | 5%"}],
+    )
+    response = client.put(URL, json=newer, headers=AUTH)
+    assert response.status_code == 200
+    answer = response.json()
+    assert (answer["created"], answer["parser_version"]) == (False, "pdf@1")
+    assert answer["clause_ids"] == first["clause_ids"]
+    assert answer["metadata_differs"] == ["parser_version"]
+    assert client.get(URL).json()["parser_version"] == "pdf@1"
 
 
 def test_a_path_id_that_is_not_the_digest_is_422(client: TestClient) -> None:

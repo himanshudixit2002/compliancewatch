@@ -1,14 +1,15 @@
 """The crawl: starting one, the worker's tick that starts the ones due, and the two activities of
 the crawl workflow (``workflows.crawl_source``).
 
-- ``StartCrawl``: an admin's fetch. In one transaction it locks the source, closes a run left
-  over from a lost workflow (``schedule.ABANDONED_AFTER``), refuses while a crawl runs, records
-  the new run and its ``pipeline.source.fetch`` audit entry; then, with the transaction closed,
-  it starts the workflow.
-- ``ScheduleCrawls``: the tick. For each source ``schedule.is_due`` names, it locks the source,
-  checks again, records the run under the id derived from the source's cadence slot and starts
-  the workflow of that slot. A second tick in the same slot finds the run recorded (or Temporal
-  refuses the id), so it starts nothing.
+- ``StartCrawl``: an admin's fetch. In one transaction it locks the source, refuses an
+  upload-only one (it lists nothing), closes a run left over from a lost workflow
+  (``schedule.ABANDONED_AFTER``), refuses while a crawl runs, records the new run and its
+  ``pipeline.source.fetch`` audit entry; then, with the transaction closed, it starts the
+  workflow.
+- ``ScheduleCrawls``: the tick. For each source ``schedule.is_due`` names (never an upload-only
+  one), it locks the source, checks again, records the run under the id derived from the
+  source's cadence slot and starts the workflow of that slot. A second tick in the same slot
+  finds the run recorded (or Temporal refuses the id), so it starts nothing.
 - ``ListNewDocuments`` (``pipeline.list_new_documents``): the source's listing since a week
   before its watermark, through its adapter, with no transaction open; the URLs the store holds
   are skipped, and at most the crawl's limit of the rest come back, newest first.
@@ -56,8 +57,9 @@ from pipeline.domain.errors import (
     CrawlRunningError,
     CrawlUnavailableError,
     SourceNotFoundError,
+    SourceNotListableError,
 )
-from pipeline.domain.ports import CrawlStart, CrawlStarter, SourceCatalog
+from pipeline.domain.ports import AdapterTypes, CrawlStart, CrawlStarter, SourceCatalog
 from pipeline.domain.repository import UnitOfWork, UnitOfWorkFactory
 from pipeline.domain.schedule import (
     ABANDONED_AFTER,
@@ -146,20 +148,23 @@ def launch(
 
 
 class StartCrawl:
-    """An admin's fetch now: refused while crawling is off (503) or while a crawl of the source
-    runs (409); a paused or disabled source may still be fetched by hand."""
+    """An admin's fetch now: refused while crawling is off (503), for an upload-only source
+    (409) or while a crawl of the source runs (409); a paused or disabled source may still be
+    fetched by hand."""
 
     def __init__(
         self,
         units: UnitOfWorkFactory,
         starter: CrawlStarter,
         *,
+        types: AdapterTypes,
         enabled: bool,
         clock: Callable[[], datetime] = utc_now,
         request_ids: Callable[[], UUID] = uuid4,
     ) -> None:
         self._units = units
         self._starter = starter
+        self._types = types
         self._enabled = enabled
         self._clock = clock
         self._request_ids = request_ids
@@ -177,8 +182,14 @@ class StartCrawl:
         start = CrawlStart(workflow_id, run_id_for(workflow_id), key, CrawlTrigger.MANUAL)
         now = self._clock()
         with self._units() as unit:
-            if unit.sources.get(key, for_update=True) is None:
+            source = unit.sources.get(key, for_update=True)
+            if source is None:
                 raise SourceNotFoundError(f"no source has the key {key!r}")
+            if not self._types.listable(source.adapter_type):
+                raise SourceNotListableError(
+                    f"{key} is upload-only ({source.adapter_type}): it lists nothing to crawl; "
+                    f"upload its documents to /v1/pipeline/sources/{key}/uploads"
+                )
             running = close_abandoned(unit, key, now)
             if running:
                 raise CrawlRunningError(
@@ -217,11 +228,13 @@ class ScheduleCrawls:
         units: UnitOfWorkFactory,
         starter: CrawlStarter,
         *,
+        types: AdapterTypes,
         enabled: bool,
         clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._units = units
         self._starter = starter
+        self._types = types
         self._enabled = enabled
         self._clock = clock
 
@@ -235,7 +248,8 @@ class ScheduleCrawls:
         started: list[str] = []
         failed: list[str] = []
         for source in sources:
-            if not is_due(source, latest.get(source.key), now):
+            listable = self._types.listable(source.adapter_type)
+            if not is_due(source, latest.get(source.key), now, listable=listable):
                 continue
             try:
                 start = self._start(source.key, now)
@@ -259,7 +273,8 @@ class ScheduleCrawls:
             if source is None:
                 return None
             close_abandoned(unit, key, now)
-            if not is_due(source, unit.crawl_runs.latest(key), now):
+            listable = self._types.listable(source.adapter_type)
+            if not is_due(source, unit.crawl_runs.latest(key), now, listable=listable):
                 return None
             workflow_id = scheduled_workflow_id(key, now, source.cadence)
             start = CrawlStart(workflow_id, run_id_for(workflow_id), key, CrawlTrigger.SCHEDULE)

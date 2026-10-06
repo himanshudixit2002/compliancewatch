@@ -1,6 +1,74 @@
 {
   "components": {
     "schemas": {
+      "Body_upload_document_v1_pipeline_sources__key__uploads_post": {
+        "properties": {
+          "actor_id": {
+            "description": "The admin taking the step; a signed-in user's token overrides it, and the audit entry names whoever acted",
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "document_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What it is; the source's document type when left out"
+          },
+          "external_ref": {
+            "default": "",
+            "description": "Its own reference, such as a notification number or the Act's name",
+            "maxLength": 200,
+            "title": "External Ref",
+            "type": "string"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "The document: a PDF or an HTML page",
+            "title": "File",
+            "type": "string"
+          },
+          "published_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it was published",
+            "title": "Published On"
+          },
+          "reason": {
+            "description": "Why: kept verbatim in the audit entry",
+            "maxLength": 2000,
+            "minLength": 10,
+            "title": "Reason",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "description": "Its title",
+            "maxLength": 2000,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "actor_id",
+          "reason"
+        ],
+        "title": "Body_upload_document_v1_pipeline_sources__key__uploads_post",
+        "type": "object"
+      },
       "CrawlRunOut": {
         "properties": {
           "duplicates": {
@@ -81,11 +149,47 @@
         "title": "CrawlTrigger",
         "type": "string"
       },
+      "DismissIn": {
+        "additionalProperties": false,
+        "description": "A task dismissed; the reason is why it needs no work.",
+        "properties": {
+          "actor_id": {
+            "description": "The admin taking the step; a signed-in user's token overrides it, and the audit entry names whoever acted",
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why: kept verbatim in the audit entry",
+            "maxLength": 2000,
+            "minLength": 10,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id",
+          "reason"
+        ],
+        "title": "DismissIn",
+        "type": "object"
+      },
       "DocumentOut": {
         "properties": {
           "content_type": {
             "title": "Content Type",
             "type": "string"
+          },
+          "doc_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The type its uploader gave; null when it is its source's"
           },
           "document_id": {
             "format": "uuid",
@@ -100,6 +204,11 @@
             "description": "When the bytes were first fetched",
             "format": "date-time",
             "title": "Fetched At",
+            "type": "string"
+          },
+          "parser_version": {
+            "description": "The parser of the document's last parse (pdf@1, pdf-tables@1, html@1, html-tables@1, manual@1 for an analyst's transcript); empty before one",
+            "title": "Parser Version",
             "type": "string"
           },
           "published_on": {
@@ -160,6 +269,8 @@
           "sha256",
           "storage_key",
           "status",
+          "parser_version",
+          "doc_type",
           "raw_path"
         ],
         "title": "DocumentOut",
@@ -177,11 +288,13 @@
         "type": "string"
       },
       "DocumentType": {
+        "description": "What a regulator document is. A ``statute`` is an Act or the Rules made under it (the\nCGST Act, the CGST Rules): the law the other documents amend and the rules cite. An analyst\nuploads it; it is registered and its clauses embedded, but no rule is extracted from it.",
         "enum": [
           "notification",
           "circular",
           "press_release",
-          "act_amendment"
+          "act_amendment",
+          "statute"
         ],
         "title": "DocumentType",
         "type": "string"
@@ -294,6 +407,41 @@
         "title": "FreshnessState",
         "type": "string"
       },
+      "HeadingIn": {
+        "additionalProperties": false,
+        "properties": {
+          "page": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The page it is on, from 1",
+            "title": "Page"
+          },
+          "text": {
+            "maxLength": 50000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "heading",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ],
+        "title": "HeadingIn",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "service": {
@@ -344,6 +492,77 @@
           "next_cursor"
         ],
         "title": "Page[DocumentOut]",
+        "type": "object"
+      },
+      "Page_TaskOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Send as cursor to read the next page; null on the last page",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[TaskOut]",
+        "type": "object"
+      },
+      "ParagraphIn": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "default": "",
+            "description": "The paragraph's numbering as printed: 1., (2), (a)",
+            "maxLength": 20,
+            "title": "Number",
+            "type": "string"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The page it is on, from 1",
+            "title": "Page"
+          },
+          "text": {
+            "maxLength": 50000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "paragraph",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ],
+        "title": "ParagraphIn",
         "type": "object"
       },
       "Problem": {
@@ -440,6 +659,64 @@
           "checks"
         ],
         "title": "ReadyResponse",
+        "type": "object"
+      },
+      "ResolutionOut": {
+        "description": "The resolved task and the ingest that parses its transcript: ``started`` is false when it\nwas started before (it runs, or it is done).",
+        "properties": {
+          "started": {
+            "title": "Started",
+            "type": "boolean"
+          },
+          "task": {
+            "$ref": "#/components/schemas/TaskOut"
+          },
+          "workflow_id": {
+            "title": "Workflow Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task",
+          "workflow_id",
+          "started"
+        ],
+        "title": "ResolutionOut",
+        "type": "object"
+      },
+      "ResolveIn": {
+        "additionalProperties": false,
+        "description": "The resolution of a task: a manual parse takes the analyst's transcript.",
+        "properties": {
+          "actor_id": {
+            "description": "The admin taking the step; a signed-in user's token overrides it, and the audit entry names whoever acted",
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why: kept verbatim in the audit entry",
+            "maxLength": 2000,
+            "minLength": 10,
+            "title": "Reason",
+            "type": "string"
+          },
+          "transcript": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TranscriptIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "actor_id",
+          "reason"
+        ],
+        "title": "ResolveIn",
         "type": "object"
       },
       "SourceEditIn": {
@@ -539,7 +816,7 @@
             "type": "string"
           },
           "adapter_type": {
-            "description": "An adapter type of the registry: cbic, gstcouncil, gstn or mahagst",
+            "description": "An adapter type of the registry: cbic, gstcouncil, gstn, mahagst, or upload for a source whose documents are uploaded",
             "examples": [
               "cbic"
             ],
@@ -574,7 +851,7 @@
           },
           "parameters": {
             "additionalProperties": true,
-            "description": "The adapter type's parameters, which it checks: cbic takes listing (notifications or circulars) and category (one with a recorded listing); the others take none",
+            "description": "The adapter type's parameters, which it checks: cbic takes listing (notifications or circulars) and category (one with a recorded listing); upload takes document_type (statute by default) and regulator (CBIC by default); the others take none",
             "examples": [
               {
                 "category": "Central Tax",
@@ -675,6 +952,11 @@
               }
             ]
           },
+          "listable": {
+            "description": "Whether the source lists documents, so the schedule crawls it; an upload-only source (the statutes) does not, and its documents are uploaded",
+            "title": "Listable",
+            "type": "boolean"
+          },
           "name": {
             "description": "The source's name, or its key when it has none",
             "title": "Name",
@@ -743,6 +1025,7 @@
           "regulator",
           "site",
           "doc_type",
+          "listable",
           "cadence_seconds",
           "enabled",
           "paused",
@@ -784,6 +1067,261 @@
           "items"
         ],
         "title": "SourcesOut",
+        "type": "object"
+      },
+      "TableIn": {
+        "additionalProperties": false,
+        "properties": {
+          "header": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The header row, if the table has one",
+            "title": "Header"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The page it is on, from 1",
+            "title": "Page"
+          },
+          "rows": {
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "minItems": 1,
+              "type": "array"
+            },
+            "maxItems": 2000,
+            "minItems": 1,
+            "title": "Rows",
+            "type": "array"
+          },
+          "type": {
+            "const": "table",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "rows"
+        ],
+        "title": "TableIn",
+        "type": "object"
+      },
+      "TaskKind": {
+        "enum": [
+          "manual_parse",
+          "triage"
+        ],
+        "title": "TaskKind",
+        "type": "string"
+      },
+      "TaskOut": {
+        "properties": {
+          "claimed_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed By"
+          },
+          "document": {
+            "$ref": "#/components/schemas/DocumentOut"
+          },
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskKind",
+            "description": "manual_parse (no parser reads the document) or triage"
+          },
+          "note": {
+            "description": "The resolver's or dismisser's reason",
+            "title": "Note",
+            "type": "string"
+          },
+          "opened_at": {
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why it opened: each parser's reason, for a manual parse",
+            "title": "Reason",
+            "type": "string"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the resolution did: for a manual parse, the transcript's storage key and digest, the parser (manual@1) and the clause count",
+            "title": "Resolution"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who resolved or dismissed it; null for one the pipeline closed itself",
+            "title": "Resolved By"
+          },
+          "source_key": {
+            "title": "Source Key",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "kind",
+          "status",
+          "document_id",
+          "source_key",
+          "opened_at",
+          "reason",
+          "claimed_by",
+          "resolved_by",
+          "resolved_at",
+          "resolution",
+          "note",
+          "document"
+        ],
+        "title": "TaskOut",
+        "type": "object"
+      },
+      "TaskStatus": {
+        "enum": [
+          "open",
+          "resolved",
+          "dismissed"
+        ],
+        "title": "TaskStatus",
+        "type": "string"
+      },
+      "TranscriptIn": {
+        "additionalProperties": false,
+        "description": "A document typed by hand in the shape of the parsers' blocks: headings, numbered\nparagraphs and tables in document order. Each heading and paragraph becomes a clause, each\ntable row one (its cells joined by ' | '), numbered en.p1, hi.p1, ... per language.",
+        "properties": {
+          "blocks": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "heading": "#/components/schemas/HeadingIn",
+                  "paragraph": "#/components/schemas/ParagraphIn",
+                  "table": "#/components/schemas/TableIn"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/HeadingIn"
+                },
+                {
+                  "$ref": "#/components/schemas/ParagraphIn"
+                },
+                {
+                  "$ref": "#/components/schemas/TableIn"
+                }
+              ]
+            },
+            "maxItems": 2000,
+            "minItems": 1,
+            "title": "Blocks",
+            "type": "array"
+          },
+          "title": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blocks"
+        ],
+        "title": "TranscriptIn",
+        "type": "object"
+      },
+      "UploadOut": {
+        "description": "The uploaded document as stored, and the ingest that parses it. For bytes stored before,\n``duplicate`` is true and ``document`` is the record stored first (it may be another\nsource's).",
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/DocumentOut"
+          },
+          "duplicate": {
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "workflow_id": {
+            "description": "The ingest started for it, pipeline-upload-<key>-<id>",
+            "title": "Workflow Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document",
+          "duplicate",
+          "workflow_id"
+        ],
+        "title": "UploadOut",
         "type": "object"
       },
       "ValidationIssue": {
@@ -1510,7 +2048,7 @@
     },
     "/v1/pipeline/sources/{key}/fetch": {
       "post": {
-        "description": "Record a crawl run and start its workflow; answers 202 with the run and workflow ids at\nonce, and the source reads fetching until the crawl ends. A paused or disabled source may be\nfetched by hand. 409 while a crawl of the source runs; 503 while crawling is off\n(CW_PIPELINE_CRAWL_ENABLED) or when Temporal does not answer, in which case the run is\nclosed as failed with why. Audited as pipeline.source.fetch with the reason.",
+        "description": "Record a crawl run and start its workflow; answers 202 with the run and workflow ids at\nonce, and the source reads fetching until the crawl ends. A paused or disabled source may be\nfetched by hand. 409 while a crawl of the source runs, and for an upload-only source\n(pipeline-source-upload-only), which lists nothing; 503 while crawling is off\n(CW_PIPELINE_CRAWL_ENABLED) or when Temporal does not answer, in which case the run is\nclosed as failed with why. Audited as pipeline.source.fetch with the reason.",
         "operationId": "fetch_source_v1_pipeline_sources__key__fetch_post",
         "parameters": [
           {
@@ -1642,6 +2180,558 @@
           }
         ],
         "summary": "Start a crawl of the source now",
+        "tags": [
+          "pipeline"
+        ]
+      }
+    },
+    "/v1/pipeline/sources/{key}/uploads": {
+      "post": {
+        "description": "Store the file under the source, record it with its document.discovered and start its\ningest, which parses it and, while knowledge is on, registers it in the rulebook. Answers\n202 at once with the stored document and the ingest's workflow id; a document no parser\nreads opens a manual-parse task (GET /v1/pipeline/tasks). Bytes stored before are a\nduplicate: nothing is recorded again and the ingest runs again. 413 past the upload limit,\n415 for a file that is not a PDF or an HTML page, 404 for an unknown source, 503 when\nTemporal does not answer (the document stays stored: upload it again). Audited as\npipeline.document.upload with the reason.",
+        "operationId": "upload_document_v1_pipeline_sources__key__uploads_post",
+        "parameters": [
+          {
+            "description": "The source's key",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "description": "The source's key",
+              "pattern": "^[a-z][a-z0-9_]{0,62}$",
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role",
+            "in": "header",
+            "name": "x-cw-write-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role",
+              "title": "X-Cw-Write-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_document_v1_pipeline_sources__key__uploads_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upload a document to a source",
+        "tags": [
+          "pipeline"
+        ]
+      }
+    },
+    "/v1/pipeline/tasks": {
+      "get": {
+        "description": "The tasks of a status and a kind (both optional), a page at a time, oldest first (then\nby id), each with its document: open manual parses are documents no parser reads, waiting\nfor an analyst's transcript.",
+        "operationId": "list_tasks_v1_pipeline_tasks_get",
+        "parameters": [
+          {
+            "description": "Only tasks of this status",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TaskStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks of this status",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Only tasks of this kind",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TaskKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks of this kind",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 200",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Items per page, 1 to 200",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page; absent for the first page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_cursor of the previous page; absent for the first page",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_TaskOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the pipeline's tasks, oldest first",
+        "tags": [
+          "pipeline"
+        ]
+      }
+    },
+    "/v1/pipeline/tasks/{task_id}/dismiss": {
+      "post": {
+        "description": "Close an open task without the work: the reason says why (a duplicate scan, not a\nregulatory document). A dismissed manual parse leaves its document failed and unregistered.\nAudited as pipeline.task.dismiss. 409 for a closed task.",
+        "operationId": "dismiss_task_v1_pipeline_tasks__task_id__dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role",
+            "in": "header",
+            "name": "x-cw-write-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role",
+              "title": "X-Cw-Write-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DismissIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Dismiss a task with a reason",
+        "tags": [
+          "pipeline"
+        ]
+      }
+    },
+    "/v1/pipeline/tasks/{task_id}/resolve": {
+      "post": {
+        "description": "Resolve an open manual-parse task with the document typed by hand: headings, numbered\nparagraphs and tables in document order, checked first (422 names each problem). The\ntranscript is kept in the raw store, the task is resolved and audited as\npipeline.task.resolve, and an ingest starts that parses the document from it as manual@1\nand, while knowledge is on, registers it in the rulebook; from then on the document is\nparsed from its transcript. 409 for a closed task (the same transcript again starts the\ningest if it did not start); 422 for a resolution that does not fit the task (a manual parse\nwithout a transcript, a triage task, which its own step resolves); 503 when Temporal does\nnot answer, in which case the task stays resolved and the same request starts the ingest\nagain.",
+        "operationId": "resolve_task_v1_pipeline_tasks__task_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role",
+            "in": "header",
+            "name": "x-cw-write-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role",
+              "title": "X-Cw-Write-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolutionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resolve a task: a manual parse with the analyst's transcript",
         "tags": [
           "pipeline"
         ]

@@ -989,6 +989,7 @@
   "adminSources.type.circular": "Circulars",
   "adminSources.type.pressRelease": "Press releases",
   "adminSources.type.actAmendment": "Act amendments",
+  "adminSources.type.statute": "Statutes",
   "adminSources.caption": "Sources the pipeline fetches from",
   "adminSources.column.source": "Source",
   "adminSources.column.type": "Document type",

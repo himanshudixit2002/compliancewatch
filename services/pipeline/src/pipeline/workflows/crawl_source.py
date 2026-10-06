@@ -26,7 +26,6 @@ from temporalio import workflow
 from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import (
     ActivityError,
-    ApplicationError,
     ChildWorkflowError,
     WorkflowAlreadyStartedError,
 )
@@ -46,24 +45,14 @@ with workflow.unsafe.imports_passed_through():
     )
     from pipeline.domain.crawl import Outcome
     from pipeline.domain.schedule import CHILD_CONCURRENCY, INGEST_TIMEOUT, ingest_workflow_id
-    from pipeline.workflows.ingest_document import IngestDocumentWorkflow, IngestRequest
+    from pipeline.workflows.ingest_document import (
+        IngestDocumentWorkflow,
+        IngestRequest,
+        failure_text,
+    )
 
 CRAWL_WORKFLOW = "pipeline.crawl_source"
 MAX_ERROR_CHARS = 1_000
-
-
-def failure_text(error: BaseException) -> str:
-    """What failed, as ``Type: message``: the first cause below the activity and child workflow
-    wrappers, which is the error the activity or the child raised (a timeout, say, or the
-    application error its exception became)."""
-    cause: BaseException = error
-    while isinstance(cause, ActivityError | ChildWorkflowError) and cause.cause is not None:
-        cause = cause.cause
-    if isinstance(cause, ApplicationError) and cause.type:
-        text = f"{cause.type}: {cause.message}"
-    else:
-        text = f"{type(cause).__name__}: {cause}"
-    return text.strip()
 
 
 @workflow.defn(name=CRAWL_WORKFLOW)

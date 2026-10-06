@@ -40,7 +40,7 @@ from pipeline.application.sources import SyncSources
 from pipeline.domain.crawl import CrawlStatus
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.sources import Source, watermark_of
-from pipeline.infrastructure.adapters import SOURCES, StoreCatalog
+from pipeline.infrastructure.adapters import SOURCES, RegistryAdapterTypes, StoreCatalog
 from pipeline.infrastructure.memory import MemoryStore
 from pipeline.infrastructure.raw_store import MemoryRawStore, storage_key_for
 from pipeline.infrastructure.temporal import TemporalCrawls
@@ -61,6 +61,7 @@ CBIC_PDF = "https://taxinformation.cbic.gov.in/content/pdf/tax_repository/gst/no
 ACTOR = AuditActor.user(UserId(UUID(int=7)))
 TODAY = datetime(2026, 10, 6, 6, 0, tzinfo=UTC)
 SETTINGS = PipelineSettings(_env_file=None, service_name="pipeline-worker")
+TYPES = RegistryAdapterTypes(recorded_types())
 
 
 @pytest.fixture
@@ -115,7 +116,7 @@ class Pipeline:
             yield task_queue
 
     def fetch_now(self, key: str = KEY) -> UUID:
-        start = StartCrawl(self.store, MemoryCrawls(), enabled=True).run(
+        start = StartCrawl(self.store, MemoryCrawls(), types=TYPES, enabled=True).run(
             FetchRequest(key, ACTOR, "Crawl the recorded source for the test")
         )
         return start.run_id.value
@@ -168,9 +169,11 @@ async def test_a_crawl_stores_what_is_new_skips_what_is_known_and_moves_the_wate
     assert result.watermark == date(2026, 4, 21)
     stored = [d for d in pipeline.documents() if d.source_url != known]
     assert [d.external_ref for d in stored] == ["01/2026-Central Tax", "17/2025-Central Tax"]
-    assert all(d.status is DocumentStatus.DISCOVERED for d in stored)
+    assert all(d.status is DocumentStatus.PARSED for d in stored)
+    assert {d.parser_version for d in stored} == {"pdf@1"}, "prose stays with the text layer"
     assert all(pipeline.raw.files[d.storage_key].startswith(b"%PDF") for d in stored)
-    assert len(pipeline.store.events) == 2, "one document.discovered per new document"
+    topics = sorted(event.topic for event in pipeline.store.events)
+    assert topics == ["document.discovered"] * 2 + ["document.parsed"] * 2, "one each per new"
     (run,) = [r for r in pipeline.store.crawl_runs.values() if r.source_key == KEY]
     assert (run.status, run.counts.listed, run.counts.stored) == (CrawlStatus.COMPLETED, 3, 2)
     source = pipeline.store.sources[KEY]
@@ -205,13 +208,20 @@ async def test_a_double_tick_starts_each_crawl_once(environment: WorkflowEnviron
         _env_file=None, service_name="pipeline-worker", temporal_address=target
     )
     ticks = [
-        ScheduleCrawls(pipeline.store, TemporalCrawls(settings), enabled=True, clock=lambda: TODAY)
+        ScheduleCrawls(
+            pipeline.store,
+            TemporalCrawls(settings),
+            types=TYPES,
+            enabled=True,
+            clock=lambda: TODAY,
+        )
         for _ in range(2)
     ]
     first, second = await asyncio.gather(*(asyncio.to_thread(tick.run) for tick in ticks))
     started = [*first.started, *second.started]
     assert sorted(started) == sorted(set(started)), "no workflow id was started twice"
-    assert len(started) == len(SOURCES) + 1
+    listable = [key for key, spec in SOURCES.items() if spec.kind.listable]
+    assert len(started) == len(listable) + 1, "the upload-only sources are never crawled"
     assert (first.failed, second.failed) == ((), ())
     for workflow_id in started:
         described = await environment.client.get_workflow_handle(workflow_id).describe()

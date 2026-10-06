@@ -185,23 +185,28 @@ def test_the_source_id_is_the_registrys() -> None:
 
 def test_a_source_is_due_once_its_cadence_has_passed_since_its_last_crawl() -> None:
     fresh = source()
-    assert is_due(fresh, None, NOW), "never crawled"
+    assert is_due(fresh, None, NOW, listable=True), "never crawled"
     ran = CrawlRun.start(fresh.key, NOW - timedelta(minutes=30)).finish(
         NOW - timedelta(minutes=29), CrawlCounts()
     )
-    assert not is_due(fresh, ran, NOW)
-    assert is_due(fresh, ran, NOW + timedelta(minutes=90))
+    assert not is_due(fresh, ran, NOW, listable=True)
+    assert is_due(fresh, ran, NOW + timedelta(minutes=90), listable=True)
     listed = source(last_fetch_at=NOW - timedelta(hours=1))
-    assert not is_due(listed, None, NOW)
-    assert is_due(listed, None, NOW + timedelta(hours=1))
+    assert not is_due(listed, None, NOW, listable=True)
+    assert is_due(listed, None, NOW + timedelta(hours=1), listable=True)
 
 
 def test_a_paused_or_disabled_source_or_one_being_crawled_is_not_due() -> None:
-    assert not is_due(source(paused=True), None, NOW)
-    assert not is_due(source(enabled=False), None, NOW)
+    assert not is_due(source(paused=True), None, NOW, listable=True)
+    assert not is_due(source(enabled=False), None, NOW, listable=True)
     running = CrawlRun.start("cbic_notifications", NOW - timedelta(hours=2, minutes=30))
-    assert not is_due(source(), running, NOW)
-    assert is_due(source(), running, running.started_at + ABANDONED_AFTER), "abandoned"
+    assert not is_due(source(), running, NOW, listable=True)
+    assert is_due(source(), running, running.started_at + ABANDONED_AFTER, listable=True)
+
+
+def test_an_upload_only_source_is_never_due() -> None:
+    assert not is_due(source(), None, NOW, listable=False), "never crawled, and never will be"
+    assert not is_due(source(), None, NOW + timedelta(days=400), listable=False)
 
 
 def test_how_a_source_stands() -> None:

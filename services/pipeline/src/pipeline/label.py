@@ -40,7 +40,7 @@ from pipeline.application.validators import validate
 from pipeline.domain.candidate import CandidateParseError, candidate_from_mapping
 from pipeline.infrastructure.adapters import SOURCES, build_adapter
 from pipeline.infrastructure.http import ClientConfig, PoliteClient
-from pipeline.infrastructure.parsers import HtmlParser, PdfParser
+from pipeline.infrastructure.parsers import parsers_for
 from pipeline.infrastructure.parsers.pdf import UnparsedDocumentError
 
 LABEL_STATUSES = ("draft", "reviewed", "approved")
@@ -268,10 +268,7 @@ def _prepare(
 ) -> int:
     index = read_index(index_path)
     spec = SOURCES[str(index["source_key"])]
-    parsers: list[DocumentParser] = [
-        PdfParser(doc_type=spec.doc_type),
-        HtmlParser(doc_type=spec.doc_type),
-    ]
+    parsers = parsers_for(spec.doc_type)
     cases_dir = index_path.parent / "cases"
     done = 0
     with PoliteClient(ClientConfig()) as client:

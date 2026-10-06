@@ -385,3 +385,51 @@ tests:
             exp_annotations:
               summary: "No crawl has listed cbic_notifications for more than two cadences"
               runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/source-stale.md
+
+  # ParseFailureQueueHigh. Two replicas report the same count of open manual parses: 15 for the
+  # first 20 minutes (normal work), then 25 from 20m. Above 20 from 20m, so pending for 30
+  # minutes and firing at 50m, once. Open triage tasks above 20 never fire it.
+  - interval: 1m
+    input_series:
+      - series: 'pipeline_open_tasks{kind="manual_parse", service_instance_id="a"}'
+        values: "15x19 25x60"
+      - series: 'pipeline_open_tasks{kind="manual_parse", service_instance_id="b"}'
+        values: "15x19 25x60"
+      - series: 'pipeline_open_tasks{kind="triage", service_instance_id="a"}'
+        values: "40x80"
+    alert_rule_test:
+      - eval_time: 19m
+        alertname: ParseFailureQueueHigh
+        exp_alerts: []
+      - eval_time: 49m
+        alertname: ParseFailureQueueHigh
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: ParseFailureQueueHigh
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              team: regulatory-intelligence
+            exp_annotations:
+              summary: "More than 20 documents no parser reads have waited 30 minutes for a manual parse"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/parse-failures.md
+
+  # ParseFailureQueueHigh resolves once analysts work the queue down: 25 open for 40 minutes,
+  # then 12; nothing fires after the count falls.
+  - interval: 1m
+    input_series:
+      - series: 'pipeline_open_tasks{kind="manual_parse", service_instance_id="a"}'
+        values: "25x40 12x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: ParseFailureQueueHigh
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              team: regulatory-intelligence
+            exp_annotations:
+              summary: "More than 20 documents no parser reads have waited 30 minutes for a manual parse"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/parse-failures.md
+      - eval_time: 45m
+        alertname: ParseFailureQueueHigh
+        exp_alerts: []

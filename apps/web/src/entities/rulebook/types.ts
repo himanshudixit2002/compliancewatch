@@ -166,6 +166,7 @@ export const DOCUMENT_TYPES = [
   "circular",
   "press_release",
   "act_amendment",
+  "statute",
 ] as const satisfies readonly DocumentType[];
 
 /** The kinds a relation has (domain_kernel.knowledge.RelationKind), in the spec's order. */

@@ -85,7 +85,7 @@ class StoreCatalog:
                     adapter_type=row.adapter_type,
                     parameters=parameters.model_dump(mode="json"),
                     cadence=row.cadence,
-                    regulator=kind.regulator,
+                    regulator=kind.regulator_for(parameters),
                     doc_type=kind.doc_type(parameters),
                     name=row.name,
                 ),
@@ -103,6 +103,10 @@ class RegistryAdapterTypes:
 
     def names(self) -> Sequence[str]:
         return sorted(self._types)
+
+    def listable(self, adapter_type: str) -> bool:
+        kind = self._types.get(adapter_type)
+        return kind is None or kind.listable
 
     def describe(self, adapter_type: str, parameters: Mapping[str, object]) -> SourceKind:
         kind = self._types.get(adapter_type)
@@ -127,7 +131,8 @@ class RegistryAdapterTypes:
         return SourceKind(
             adapter_type=adapter_type,
             parameters=read.model_dump(mode="json"),
-            regulator=kind.regulator,
+            regulator=kind.regulator_for(read),
             site=kind.site,
             doc_type=kind.doc_type(read),
+            listable=kind.listable,
         )

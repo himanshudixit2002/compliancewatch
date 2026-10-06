@@ -1,0 +1,20 @@
+{
+  "event_id": "b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e",
+  "topic": "document.parsed",
+  "schema_version": "1.1.0",
+  "occurred_at": "2026-10-06T06:15:00Z",
+  "tenant_id": null,
+  "correlation_id": "e4f5a6b7-c8d9-4e0f-8a1b-2c3d4e5f6a7b",
+  "causation_id": null,
+  "payload": {
+    "document_id": "2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f",
+    "source_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    "doc_type": "statute",
+    "title": "Example statute",
+    "language": "en",
+    "published_at": null,
+    "clause_count": 2,
+    "clause_refs": ["en.p1", "en.p2"],
+    "parser_version": "manual@1"
+  }
+}

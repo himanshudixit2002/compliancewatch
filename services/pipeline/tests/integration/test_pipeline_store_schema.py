@@ -1,6 +1,6 @@
-"""Migrations 0001 and 0002 on Postgres: the tables, the unit of work with the outbox and the
-audit log, the rules the tables keep, the crawl's queries, the catalog lint, and a downgrade
-back to nothing. Needs Docker.
+"""Migrations 0001 to 0003 on Postgres: the tables, the unit of work with the outbox and the
+audit log, the rules the tables keep, the crawl's queries, the parse of a document and the tasks
+on it, the catalog lint, and a downgrade back to nothing. Needs Docker.
 
 The repositories run as a plain database role with the grants infra/dev/postgres/50-app-role.sql
 gives the product's cw_app: it owns nothing and is not a superuser. ``audit.event`` is made as
@@ -31,8 +31,9 @@ from pipeline.application.sources import AddSource, AdminAction, NewSource
 from pipeline.domain.crawl import CrawlCounts, CrawlRun, CrawlStatus
 from pipeline.domain.events import DocumentDiscovered
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
-from pipeline.domain.repository import DocumentKey
+from pipeline.domain.repository import DocumentKey, TaskKey
 from pipeline.domain.sources import Source, SourceDefinition
+from pipeline.domain.tasks import PipelineTask, TaskKind, TaskStatus
 from pipeline.infrastructure.adapters import RegistryAdapterTypes
 from pipeline.infrastructure.models import Base
 from pipeline.infrastructure.repository import PostgresUnitOfWorkFactory
@@ -41,7 +42,7 @@ from py_common.audit.testing import install_audit_table, read_audit_entries
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "pipeline"
-STORE_TABLES = {"source", "raw_document", "crawl_run"}
+STORE_TABLES = {"source", "raw_document", "crawl_run", "pipeline_task"}
 TABLES = {*STORE_TABLES, "outbox_event", "alembic_version"}
 APP_ROLE = "pipeline_app"
 APP_PASSWORD = "app-role-for-tests"
@@ -156,11 +157,17 @@ def test_migration_creates_the_tables_without_tenant_columns(engine: Engine) -> 
         assert "tenant_id" not in columns, "the pipeline's data is regulatory"
     with engine.connect() as connection:
         version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    assert version == "0002"
+    assert version == "0003"
     names = {column["name"] for column in inspector.get_columns("source", schema=SCHEMA)}
     assert "name" in names
     indexes = {index["name"] for index in inspector.get_indexes("raw_document", schema=SCHEMA)}
     assert "ix_raw_document_source_url" in indexes
+    parse = {column["name"] for column in inspector.get_columns("raw_document", schema=SCHEMA)}
+    assert {"parser_version", "doc_type", "transcript_key"} <= parse
+    task_indexes = {
+        index["name"]: index for index in inspector.get_indexes("pipeline_task", schema=SCHEMA)
+    }
+    assert task_indexes["uq_pipeline_task_open"]["unique"]
 
 
 def test_models_and_migration_agree(engine: Engine) -> None:
@@ -489,7 +496,113 @@ def test_an_admins_change_and_its_audit_row_commit_together(
         assert len(read_audit_entries(connection, action="pipeline.source.add")) == 1
 
 
+def test_a_parse_is_recorded_once_and_a_transcript_stays(
+    units: PostgresUnitOfWorkFactory, engine: Engine
+) -> None:
+    stored = record(b"%PDF-1.7 parsed", doc_type=DocumentType.STATUTE)
+    with units() as unit:
+        unit.sources.add(Source.of(DEFINITION, NOW))
+        unit.documents.add(stored)
+    with units() as unit:
+        assert unit.documents.record_parse(stored.document_id, "pdf-tables@1")
+        assert not unit.documents.record_parse(stored.document_id, "pdf-tables@1")
+        assert unit.documents.record_parse(stored.document_id, "manual@1", transcript_key="t/1")
+        assert not unit.documents.record_parse(stored.document_id, "manual@1", transcript_key="t/2")
+        assert not unit.documents.record_parse(record(b"never stored").document_id, "pdf@1")
+    with units() as unit:
+        parsed = unit.documents.get(stored.document_id)
+    assert parsed is not None
+    assert (parsed.status, parsed.parser_version, parsed.transcript_key) == (
+        DocumentStatus.PARSED,
+        "manual@1",
+        "t/1",
+    )
+    assert parsed.doc_type is DocumentType.STATUTE
+    for statement, check in (
+        ("UPDATE raw_document SET doc_type = 'circular' WHERE id = :id", "raw_document"),
+        ("UPDATE raw_document SET parser_version = 'pdf' WHERE id = :id", "parser_version"),
+        ("UPDATE raw_document SET transcript_key = '' WHERE id = :id", "transcript_key"),
+    ):
+        with pytest.raises(DBAPIError, match=check), engine.begin() as connection:
+            connection.execute(text(statement), {"id": stored.document_id.value})
+
+
+def test_tasks_open_once_per_document_and_kind_and_page_oldest_first(
+    units: PostgresUnitOfWorkFactory, engine: Engine
+) -> None:
+    documents = [record(f"%PDF-1.7 scan {n}".encode()) for n in range(3)]
+    with units() as unit:
+        unit.sources.add(Source.of(DEFINITION, NOW))
+        for document in documents:
+            unit.documents.add(document)
+    opened = [
+        PipelineTask.opened(
+            TaskKind.MANUAL_PARSE,
+            document.document_id,
+            DEFINITION.key,
+            at=NOW + timedelta(minutes=n),
+            reason="pdf@1: the PDF has no text layer",
+        )
+        for n, document in enumerate(documents)
+    ]
+    with units() as unit:
+        for task in opened:
+            assert unit.tasks.open(task) == task
+        again = PipelineTask.opened(
+            TaskKind.MANUAL_PARSE, documents[0].document_id, DEFINITION.key, at=NOW
+        )
+        assert unit.tasks.open(again) == opened[0], "one open manual parse per document"
+        triage = PipelineTask.opened(
+            TaskKind.TRIAGE, documents[0].document_id, DEFINITION.key, at=NOW
+        )
+        assert unit.tasks.open(triage) == triage
+    closed = opened[1].resolve(
+        UserId.new().value, NOW + timedelta(hours=1), {"transcript_key": "t/1"}, "Transcribed"
+    )
+    with units() as unit:
+        assert unit.tasks.get(opened[1].id, for_update=True) == opened[1]
+        unit.tasks.save(closed)
+        assert unit.tasks.open_counts() == {TaskKind.MANUAL_PARSE: 2, TaskKind.TRIAGE: 1}
+        assert unit.tasks.open_for(documents[1].document_id, TaskKind.MANUAL_PARSE) is None
+        reopened = PipelineTask.opened(
+            TaskKind.MANUAL_PARSE,
+            documents[1].document_id,
+            DEFINITION.key,
+            at=NOW + timedelta(minutes=30),
+        )
+        assert unit.tasks.open(reopened) == reopened, "a closed task leaves room for a new one"
+    with units() as unit:
+        assert unit.tasks.get(opened[1].id) == closed
+        pages: list[PipelineTask] = []
+        after: TaskKey | None = None
+        while page := unit.tasks.page(
+            status=TaskStatus.OPEN, kind=TaskKind.MANUAL_PARSE, after=after, limit=2
+        ):
+            pages.extend(page)
+            after = TaskKey.of(page[-1])
+        everything = unit.tasks.page(status=None, kind=None, after=None, limit=50)
+    assert [task.id for task in pages] == [opened[0].id, opened[2].id, reopened.id]
+    assert len(everything) == 5
+    with (
+        pytest.raises(IntegrityError, match="ck_pipeline_task_resolved"),
+        engine.begin() as connection,
+    ):
+        connection.execute(
+            text("UPDATE pipeline_task SET status = 'dismissed' WHERE id = :id"),
+            {"id": opened[0].id.value},
+        )
+
+
 def test_downgrade_removes_everything(engine: Engine, migrated: Config) -> None:
+    command.downgrade(migrated, "0002")
+    try:
+        assert "pipeline_task" not in inspect(engine).get_table_names(schema=SCHEMA)
+        columns = {
+            column["name"] for column in inspect(engine).get_columns("raw_document", schema=SCHEMA)
+        }
+        assert not {"parser_version", "doc_type", "transcript_key"} & columns
+    finally:
+        command.upgrade(migrated, "head")
     command.downgrade(migrated, "0001")
     try:
         names = {column["name"] for column in inspect(engine).get_columns("source", schema=SCHEMA)}

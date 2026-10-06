@@ -12,13 +12,14 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 class DocType(StrEnum):
     """
-    Document type decided by the detector.
+    Document type: the source's, or the one the uploader gave. A statute (an Act or the Rules under it) is registered and embedded but nothing is extracted from it.
     """
 
     notification = "notification"
     circular = "circular"
     press_release = "press_release"
     act_amendment = "act_amendment"
+    statute = "statute"
 
 
 class ClauseRef(RootModel[str]):
@@ -27,7 +28,7 @@ class ClauseRef(RootModel[str]):
 
 class DocumentParsedV1(BaseModel):
     """
-    The parser split a classified document into clauses with stable references; clause text is read from the store, not carried here. Producer: pipeline (document parser). Consumers: pipeline (rule extractor), rulebook.
+    The pipeline parsed a stored document into clauses with stable references, the first time or with another parser. Clause text is not carried here: read it from the rulebook once the document is registered (GET /v1/rulebook/documents/{document_id}). Producer: pipeline (the ingest's parse). Consumers: none yet; the rulebook once registration moves to events (ADR-018).
     """
 
     model_config = ConfigDict(
@@ -35,7 +36,12 @@ class DocumentParsedV1(BaseModel):
     )
     document_id: Annotated[UUID, Field(description="The parsed document.")]
     source_id: Annotated[UUID, Field(description="The source it came from.")]
-    doc_type: Annotated[DocType, Field(description="Document type decided by the detector.")]
+    doc_type: Annotated[
+        DocType,
+        Field(
+            description="Document type: the source's, or the one the uploader gave. A statute (an Act or the Rules under it) is registered and embedded but nothing is extracted from it."
+        ),
+    ]
     title: Annotated[str, Field(description="Title of the document.", min_length=1)]
     language: Annotated[
         str,
@@ -54,5 +60,8 @@ class DocumentParsedV1(BaseModel):
     ]
     parser_version: Annotated[
         str,
-        Field(description="Version of the parser that produced the clauses.", min_length=1),
+        Field(
+            description="The parser that produced the clauses, as name@version: pdf@1, pdf-tables@1, html@1, html-tables@1, or manual@1 for an analyst's transcript.",
+            min_length=1,
+        ),
     ]

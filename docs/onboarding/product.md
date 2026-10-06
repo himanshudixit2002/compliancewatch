@@ -13,9 +13,10 @@ changes feed lists the publication with its synthetic approvers, the impact of t
 the CA firm's affected client, and a dry run counts what the fan-out decided while writing
 nothing but its audit row, and that the public listener lists a business's obligations a page
 at a time, answers a question from them with citations, and sends a CA firm's bulk change card
-once per change and person, and that the pipeline lists its sources and refuses to crawl while
-crawling is off. On a database made for the run (CI), it also proves that a withdrawn rule closes
-its obligations in both tenants and sends withdrawal notices.
+once per change and person, and that the pipeline lists its sources, refuses to crawl while
+crawling is off, keeps the statutes upload-only and refuses an upload that is no document. On a
+database made for the run (CI), it also proves that a withdrawn rule closes its obligations in
+both tenants and sends withdrawal notices.
 
 ```bash
 make product                 # make dev, make migrate, make product-role, the seed calendar, then
@@ -83,6 +84,14 @@ An admin's fetch (`POST /v1/pipeline/sources/{key}/fetch` with the shared write 
 product is pointed at recorded fixtures, so nothing here crawls them either: the crawl over
 recorded notifications runs in `tools/demo/tests/unit/test_pipeline_crawl_flow.py` and the
 pipeline's crawl workflow tests.
+
+The statutes (`cgst_act`, `cgst_rules`, `igst_act`) are upload-only sources (`listable` false):
+no crawl lists them, and their documents come only from an admin's upload
+(`POST /v1/pipeline/sources/{key}/uploads`, multipart, with the same token). A stored document is
+never deleted, so the product check uploads nothing it keeps: it sends a text file, which is
+refused 415 `pipeline-upload-unsupported` before anything is stored, and reads the task queue
+(`GET /v1/pipeline/tasks`). An upload, the manual-parse task of a document no parser reads and
+its transcript run in `tools/demo/tests/unit/test_manual_parse_flow.py`.
 
 ## The product from its image
 
@@ -434,7 +443,7 @@ the worker does a few seconds after the API answers, and a failed step does not 
 | tracking | makes a new synthetic business in the business tenant with `POST /v1/businesses` (a monthly GSTR-3B filer, named "Tracking probe" with the time it was made) and waits for its gstr3b_monthly obligations from profile.updated; starts the first one due, assigns it to the tenant's synthetic owner, and sends the same complete twice with one Idempotency-Key: one closure, and the second answer is the first with `Idempotent-Replayed: true`. The detail must show the history created, started, assigned, closed, both synthetic reviewers in `approved_by` while the seed status stays needs_review, and verified citations; then a comment is added and listed. Each run spends a business of its own, so the seeded registration's obligations stay open for the reminders step and a later check passes again |
 | changes | on the gstr9_annual version the fanout step published: `GET /v1/changes` (read from its `published_at`) must list its publication with both synthetic reviewers in `approved_by`, the seed status needs_review and verified citations; `GET /v1/changes/{id}/impact?result=applies` as the CA firm must list exactly the firm's registrations the answers call for, each under its client, with the fan-out completed; and a dry run of the version scoped to the CA firm must count what the firm's latest decisions of it count for the registrations the directory lists, every one decided and none skipped, write one `applicability.dry_run` row of no tenant (found by the request's correlation id) and not one decision, review item or outbox row of the firm. After the rollback step (CI) the publication stays in the feed and the dry run reads the withdrawn version |
 | public | through the public listener: as the business tenant, `GET /v1/businesses/{id}/obligations` lists the seeded registration's obligations by due date, pages of one follow one another, each carries its rule's title, `status=open&status=in_progress` keeps those, a window of 367 days is a 422, and the CA firm reading it gets a 404. `POST /v1/qa` asks "When is my GSTR-3B due?" and must be answered by the structured layer with the first open monthly return due from today and verified citations; the CA firm asking gets a 404. As the CA firm, it registers a synthetic client contact (an owner on a `public-check-…@demo-ca-associates.invalid` mailbox, opted in, following the clients the change affects) and sends `POST /v1/notification/bulk` of gstr9_annual (of gstr3b_quarterly_group_a once the rollback step withdrew it) to the clients its impact lists: one card per client to the contact and none to the firm's admin; the same Idempotency-Key answers the same with `Idempotent-Replayed: true`, and a new key finds every card queued already. Each request that ran wrote one `notification.bulk` row of the firm (found by its correlation id), the contact's card goes through the sink, and the contact is removed (with any an interrupted check left). `POST /v1/notification/send` answers 404 on the public listener |
-| sources | the pipeline's source manager on the internal listener lists the five built-in sources with a name, regulator, cadence, status and freshness each; a fetch of a key no source has is refused as crawling off (with crawling on it would be a 404, and the step stops there without fetching a real source), then a fetch of `cbic_notifications` is refused the same way, 503 `pipeline-crawl-disabled`, and records no crawl run; the public listener answers the list 404 in header mode. No source of the product reads recorded fixtures, so no crawl runs here: `test_pipeline_crawl_flow.py` runs one |
+| sources | the pipeline's source manager on the internal listener lists the eight built-in sources with a name, regulator, cadence, status and freshness each; a fetch of a key no source has is refused as crawling off (with crawling on it would be a 404, and the step stops there without fetching a real source), then a fetch of `cbic_notifications` is refused the same way, 503 `pipeline-crawl-disabled`, and records no crawl run; the public listener answers the list 404 in header mode. No source of the product reads recorded fixtures, so no crawl runs here: `test_pipeline_crawl_flow.py` runs one. The statutes `cgst_act`, `cgst_rules` and `igst_act` read upload-only, `GET /v1/pipeline/tasks?status=open` answers, and an upload of a text file to `cgst_rules` is refused 415 `pipeline-upload-unsupported` with the source's document count unchanged (a stored document is never deleted, so the step keeps none; `test_manual_parse_flow.py` runs uploads and a manual parse) |
 
 The fanout, changes and public steps read the business directory, the audit rows (of no tenant,
 and the CA firm's bulk notifications) and the engine's row counts of a tenant, which no route

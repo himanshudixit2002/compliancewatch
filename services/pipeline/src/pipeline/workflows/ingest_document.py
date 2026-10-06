@@ -4,7 +4,20 @@ the rulebook, embed its clauses for search and extract its knowledge in a child 
 A crawl (``workflows.crawl_source``) starts one ingest per new document it listed and hands it
 the document as listed (``IngestRequest.discovered``): that ingest skips the discovery, behind
 ``workflow.patched(GIVEN_PATCH)``. A request without it discovers the first document since
-``since``, as before.
+``since``, as before. An upload, and a manual parse's resolution, start an ingest of a document
+stored already (``IngestRequest.stored``): it skips the discovery and the fetch and parses at
+once, behind ``workflow.patched(STORED_PATCH)``; the resolution's ingest names the analyst's
+transcript (``transcript_key``), which is parsed instead of the bytes.
+
+A stored document no parser of the chain reads (``UnparsedDocumentError``, or
+``UnsupportedDocumentError`` for a media type no parser takes) no longer fails the ingest, behind
+``workflow.patched(PARSE_PATCH)``: ``pipeline.open_manual_parse`` sets the document ``failed``
+and opens its manual-parse task, and the ingest ends there with ``parse_failed``, so nothing of
+it is registered. A workflow that failed on its parse before the patch replays as it ran.
+
+Statutes are registered and their clauses embedded like any document, so rules can cite them,
+but nothing is extracted from them (``domain.candidate.is_extracted``): the extraction child is
+not started for one, and the rule extraction step that is to follow it asks the same.
 
 Each step is an activity with its own retries and timeouts; the workflow itself does no I/O.
 The fetch is ``FetchAndStore``: the bytes go to the raw store, the document's row and its
@@ -19,10 +32,15 @@ than failing the ingest.
 from typing import Self
 
 from temporalio import workflow
-from temporalio.exceptions import ActivityError, ChildWorkflowError, WorkflowAlreadyStartedError
+from temporalio.exceptions import (
+    ActivityError,
+    ApplicationError,
+    ChildWorkflowError,
+    WorkflowAlreadyStartedError,
+)
 
 with workflow.unsafe.imports_passed_through():
-    from pydantic import model_validator
+    from pydantic import Field, model_validator
 
     from pipeline.application.activities import (
         DiscoverDocument,
@@ -31,8 +49,11 @@ with workflow.unsafe.imports_passed_through():
         FetchAndStore,
         FetchDocument,
         Frozen,
+        OpenManualParse,
         ParseDocument,
+        ParseFailure,
         ParseRequest,
+        Stored,
         document_id_for,
     )
     from pipeline.application.knowledge_activities import (
@@ -41,6 +62,8 @@ with workflow.unsafe.imports_passed_through():
         RegisterDocument,
         RegisterRequest,
     )
+    from pipeline.domain.candidate import is_extracted
+    from pipeline.domain.tasks import MAX_REASON_CHARS
     from pipeline.workflows.extract_knowledge import (
         ExtractKnowledgeWorkflow,
         KnowledgeRequest,
@@ -53,18 +76,46 @@ from uuid import UUID
 TASK_QUEUE = "pipeline"
 STORE_PATCH = "pipeline-store-v1"
 GIVEN_PATCH = "pipeline-crawl-v1"
+STORED_PATCH = "pipeline-stored-v1"
+PARSE_PATCH = "pipeline-parse-v1"
 REGISTER_PATCH = "kag-register-v1"
 EMBED_PATCH = "kag-embed-v1"
 EXTRACT_PATCH = "kag-extract-v1"
+PARSE_FAILURES = frozenset({"UnparsedDocumentError", "UnsupportedDocumentError"})
+"""What a parse fails with when no parser of the chain reads the document."""
+
+
+def failure_text(error: BaseException) -> str:
+    """What failed, as ``Type: message``: the first cause below the activity and child workflow
+    wrappers, which is the error the activity or the child raised (a timeout, say, or the
+    application error its exception became)."""
+    cause: BaseException = error
+    while isinstance(cause, ActivityError | ChildWorkflowError) and cause.cause is not None:
+        cause = cause.cause
+    if isinstance(cause, ApplicationError) and cause.type:
+        text = f"{cause.type}: {cause.message}"
+    else:
+        text = f"{type(cause).__name__}: {cause}"
+    return text.strip()
+
+
+def unparsed(error: ActivityError) -> bool:
+    """Whether the parse failed because no parser reads the document."""
+    cause = error.cause
+    return isinstance(cause, ApplicationError) and cause.type in PARSE_FAILURES
 
 
 class IngestRequest(Frozen):
-    """``discovered``: the document a crawl listed, to ingest as it is; without it the ingest
-    discovers the first document the source lists since ``since``."""
+    """The document to ingest: ``discovered``, as a crawl listed it; ``stored``, stored already
+    (an upload, a manual parse's resolution), with ``transcript_key`` naming the analyst's
+    transcript to parse it from; or neither, and the ingest discovers the first document the
+    source lists since ``since``."""
 
     source_id: UUID
     since: datetime | None = None
     discovered: Discovered | None = None
+    stored: Stored | None = None
+    transcript_key: str = Field(default="", max_length=1_024)
     knowledge: bool = False
     regulator: str = ""
 
@@ -76,10 +127,15 @@ class IngestRequest(Frozen):
 
     @model_validator(mode="after")
     def _a_document_or_a_time(self) -> Self:
-        if self.since is None and self.discovered is None:
+        if self.since is None and self.discovered is None and self.stored is None:
             raise ValueError("an ingest request names the document, or a time to discover since")
-        if self.discovered is not None and self.discovered.source_id != self.source_id:
+        if self.discovered is not None and self.stored is not None:
+            raise ValueError("an ingest request names its document once: listed or stored")
+        given = self.discovered or self.stored
+        if given is not None and given.source_id != self.source_id:
             raise ValueError("the document belongs to another source")
+        if self.transcript_key and self.stored is None:
+            raise ValueError("a transcript is parsed for a stored document only")
         return self
 
     def discover_since(self) -> datetime:
@@ -90,7 +146,10 @@ class IngestRequest(Frozen):
 
 class IngestResult(Frozen):
     """``storage_key`` is where the raw store keeps the bytes (empty for a workflow started
-    before the store); ``duplicate`` says they were stored by an earlier fetch."""
+    before the store); ``duplicate`` says they were stored by an earlier fetch.
+    ``parser_version`` names the parser of the clauses. ``parse_failed`` says no parser read the
+    document: its manual-parse task is ``task_id`` (None when none opened), and it has no
+    clauses and was not registered."""
 
     document_id: UUID
     sha256: str
@@ -99,6 +158,9 @@ class IngestResult(Frozen):
     clause_refs: list[str]
     storage_key: str = ""
     duplicate: bool = False
+    parser_version: str = ""
+    parse_failed: bool = False
+    task_id: UUID | None = None
     registered: bool = False
     registration_error: str = ""
     clauses_embedded: int = 0
@@ -113,32 +175,43 @@ class IngestResult(Frozen):
 class IngestDocumentWorkflow:
     @workflow.run
     async def run(self, request: IngestRequest) -> IngestResult:
-        discovered: Discovered
-        if request.discovered is not None and workflow.patched(GIVEN_PATCH):
-            discovered = request.discovered
-        else:
-            discovered = await DiscoverDocument.schedule(
-                DiscoverRequest(source_id=request.source_id, since=request.discover_since())
-            )
-        storage_key, duplicate = "", False
-        if workflow.patched(STORE_PATCH):
-            stored = await FetchAndStore.schedule(discovered)
+        if request.stored is not None and workflow.patched(STORED_PATCH):
             parse_request = ParseRequest(
-                document_id=stored.document_id,
-                stored=stored,
-                title=discovered.title,
-                published_at=discovered.published_at,
+                document_id=request.stored.document_id,
+                stored=request.stored,
+                title=request.stored.title,
+                published_at=request.stored.published_at,
+                transcript_key=request.transcript_key,
             )
-            storage_key, duplicate = stored.storage_key, stored.duplicate
         else:
-            fetched = await FetchDocument.schedule(discovered)
-            parse_request = ParseRequest(
-                document_id=document_id_for(fetched).value,
-                fetched=fetched,
-                title=discovered.title,
-                published_at=discovered.published_at,
+            parse_request = await self._fetch(request)
+        storage_key = "" if parse_request.stored is None else parse_request.stored.storage_key
+        duplicate = parse_request.stored is not None and parse_request.stored.duplicate
+        try:
+            parsed = await ParseDocument.schedule(parse_request)
+        except ActivityError as error:
+            if (
+                parse_request.stored is None
+                or not unparsed(error)
+                or not workflow.patched(PARSE_PATCH)
+            ):
+                raise
+            reason = failure_text(error)[:MAX_REASON_CHARS]
+            workflow.logger.warning("no parser reads the document: %s", reason)
+            opened = await OpenManualParse.schedule(
+                ParseFailure(document_id=parse_request.document_id, reason=reason)
             )
-        parsed = await ParseDocument.schedule(parse_request)
+            return IngestResult(
+                document_id=parse_request.document_id,
+                sha256=parse_request.sha256,
+                url=parse_request.url,
+                clause_count=0,
+                clause_refs=[],
+                storage_key=storage_key,
+                duplicate=duplicate,
+                parse_failed=True,
+                task_id=opened.task_id,
+            )
         registered, registration_error = False, ""
         if request.knowledge and workflow.patched(REGISTER_PATCH):
             try:
@@ -160,7 +233,8 @@ class IngestDocumentWorkflow:
                 embedding_error = str(error.cause or error)[:500]
                 workflow.logger.warning("clause embedding failed: %s", embedding_error)
         knowledge, knowledge_error = KnowledgeResult(relations_outcome="disabled"), ""
-        if registered and workflow.patched(EXTRACT_PATCH):
+        # A statute is registered and embedded, never extracted (domain.candidate.is_extracted).
+        if registered and is_extracted(parsed.doc_type) and workflow.patched(EXTRACT_PATCH):
             try:
                 knowledge = await workflow.execute_child_workflow(
                     ExtractKnowledgeWorkflow.run,
@@ -183,6 +257,7 @@ class IngestDocumentWorkflow:
             clause_refs=parsed.clause_refs,
             storage_key=storage_key,
             duplicate=duplicate,
+            parser_version=parsed.parser_version,
             registered=registered,
             registration_error=registration_error,
             clauses_embedded=clauses_embedded,
@@ -191,4 +266,30 @@ class IngestDocumentWorkflow:
             relations_outcome=knowledge.relations_outcome,
             relations_staged=knowledge.relations_staged,
             knowledge_error=knowledge_error,
+        )
+
+    async def _fetch(self, request: IngestRequest) -> ParseRequest:
+        """The listed (or discovered) document, fetched and stored (or, in a workflow from
+        before the store, fetched and carried), as the request of its parse."""
+        discovered: Discovered
+        if request.discovered is not None and workflow.patched(GIVEN_PATCH):
+            discovered = request.discovered
+        else:
+            discovered = await DiscoverDocument.schedule(
+                DiscoverRequest(source_id=request.source_id, since=request.discover_since())
+            )
+        if workflow.patched(STORE_PATCH):
+            stored = await FetchAndStore.schedule(discovered)
+            return ParseRequest(
+                document_id=stored.document_id,
+                stored=stored,
+                title=discovered.title,
+                published_at=discovered.published_at,
+            )
+        fetched = await FetchDocument.schedule(discovered)
+        return ParseRequest(
+            document_id=document_id_for(fetched).value,
+            fetched=fetched,
+            title=discovered.title,
+            published_at=discovered.published_at,
         )

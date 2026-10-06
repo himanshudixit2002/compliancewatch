@@ -38,7 +38,7 @@ from pipeline.domain.crawl import Outcome
 from pipeline.domain.sources import watermark_of
 from pipeline.infrastructure.adapters import RegistryAdapterTypes, StoreCatalog
 from pipeline.infrastructure.memory import MemoryStore
-from pipeline.infrastructure.parsers import SourceParsers
+from pipeline.infrastructure.parsers import ParserChain
 from pipeline.infrastructure.raw_store import MemoryRawStore
 from pipeline.testing import MemoryCrawls, recorded_client, recorded_types
 
@@ -77,7 +77,7 @@ class Pipeline:
             ListRequest(source_key="recorded_cbic", run_id=UUID(run_id))
         )
         fetch = FetchAndStore(StoreDocument(self.catalog, self.store, self.raw))
-        parse = ParseDocument(SourceParsers(self.catalog), self.raw)
+        parse = ParseDocument(ParserChain(self.catalog), self.raw)
         outcomes = []
         for document in listing.new:
             stored = await fetch.run(document)
@@ -139,8 +139,11 @@ def test_an_admin_adds_a_source_and_its_crawl_stores_the_recorded_notifications(
         assert built_in == [
             "cbic_circulars",
             "cbic_notifications",
+            "cgst_act",
+            "cgst_rules",
             "gstcouncil_press",
             "gstn_advisories",
+            "igst_act",
             "mahagst_notifications",
         ]
         added = ok(
@@ -243,9 +246,25 @@ def test_an_admin_adds_a_source_and_its_crawl_stores_the_recorded_notifications(
         assert (second["listed"], second["stored"], second["duplicates"]) == (1, 0, 0)
         assert len(pipeline.store.documents) == 3
 
-        tick = ScheduleCrawls(pipeline.store, pipeline.starter, enabled=True)
+        tick = ScheduleCrawls(
+            pipeline.store,
+            pipeline.starter,
+            types=RegistryAdapterTypes(recorded_types()),
+            enabled=True,
+        )
         scheduled = tick.run().started
-        assert len(scheduled) == 5, "the built-in sources; the recorded one was just crawled"
+        assert len(scheduled) == 5, (
+            "the built-in sources but the upload-only statutes; the recorded one was just crawled"
+        )
+        refused = internal.post(
+            f"{BASE}/sources/cgst_rules/fetch",
+            headers=WRITE,
+            json={"actor_id": ACTOR, "reason": "An upload-only source lists nothing"},
+        )
+        assert (refused.status_code, refused.json()["type"]) == (
+            409,
+            "urn:compliancewatch:problem:pipeline-source-upload-only",
+        )
         assert tick.run().started == (), "a second tick starts nothing twice"
 
         for method, path in (

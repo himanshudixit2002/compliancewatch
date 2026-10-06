@@ -23,8 +23,13 @@ from temporalio.common import RetryPolicy
 from domain_kernel.documents import clause_id_for
 from domain_kernel.ids import DocumentId, SourceId
 from domain_kernel.knowledge import EntityType, RelationKind
-from domain_kernel.protocols import DocumentParser
-from pipeline.application.activities import Frozen, ParseRequest, on_thread, parse_request
+from pipeline.application.activities import (
+    Frozen,
+    ParseRequest,
+    hints_for,
+    on_thread,
+    parse_request,
+)
 from pipeline.application.detector import detect
 from pipeline.application.embedding import EmbeddingStage
 from pipeline.application.mentions import MentionInput, MentionStage
@@ -38,8 +43,12 @@ from pipeline.domain.knowledge import (
     RelationSubmission,
     StagedRelation,
 )
-from pipeline.domain.ports import KnowledgeSink, RawStore, RulebookReader
+from pipeline.domain.ports import DocumentParsers, KnowledgeSink, RawStore, RulebookReader
+from pipeline.domain.repository import UnitOfWorkFactory
+from py_common.logging import get_logger
 from py_common.temporal import ActivityBase
+
+log = get_logger(__name__)
 
 
 class RegisterRequest(Frozen):
@@ -48,14 +57,21 @@ class RegisterRequest(Frozen):
 
 
 class Registered(Frozen):
+    """``parser_version`` names the parser whose clauses the rulebook keeps: this parse's, or
+    the first parse's when another parser version registered the document before (ADR-018);
+    ``clause_count`` counts those clauses."""
+
     document_id: UUID
     clause_count: int = 0
     created: bool = False
     skipped: bool = False
+    parser_version: str = ""
 
 
 class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
-    """Store the parsed document in the rulebook; idempotent, so a retry is harmless."""
+    """Store the parsed document in the rulebook; idempotent, so a retry is harmless. It parses
+    the bytes again the way the parse did (``hints_for`` over the record the parse just wrote),
+    so it sends the same clauses and the parser that gave them."""
 
     name: ClassVar[str] = "pipeline.register_document"
     input_type: ClassVar[type[RegisterRequest]] = RegisterRequest
@@ -71,6 +87,8 @@ class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
             "RulebookRejectedError",
             "KnowledgeContractError",
             "UnsupportedDocumentError",
+            "UnparsedDocumentError",
+            "TranscriptInvalidError",
             "RawObjectMissingError",
             "RawObjectCorruptError",
         ],
@@ -78,16 +96,18 @@ class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
 
     def __init__(
         self,
-        parser: DocumentParser,
+        parser: DocumentParsers,
         sink: KnowledgeSink,
         *,
         enabled: bool,
         raw_store: RawStore | None = None,
+        units: UnitOfWorkFactory | None = None,
     ) -> None:
         self._parser = parser
         self._sink = sink
         self._enabled = enabled
         self._raw = raw_store
+        self._units = units
 
     async def run(self, input: RegisterRequest) -> Registered:
         if not self._enabled:
@@ -96,7 +116,8 @@ class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
 
     def _register(self, input: RegisterRequest) -> Registered:
         request = input.parse
-        parsed = parse_request(self._parser, request, self._raw)
+        _, hints = hints_for(request, self._units, self._raw)
+        parsed = parse_request(self._parser, request, self._raw, hints)
         parsed = dataclasses.replace(
             parsed,
             title=request.title or parsed.title,
@@ -115,18 +136,33 @@ class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
                 raw_uri=request.raw_uri,
             )
         )
-        expected = {
-            clause.clause_ref: clause_id_for(parsed.document_id, clause.clause_ref)
-            for clause in parsed.clauses
-        }
-        if registered.document_id != parsed.document_id or dict(registered.clause_ids) != expected:
+        kept = registered.parser_version or parsed.parser_version
+        if kept == parsed.parser_version:
+            refs = [clause.clause_ref for clause in parsed.clauses]
+        else:
+            # The rulebook keeps the clauses another parser version registered first: they are
+            # not this parse's, but their ids must still be the kernel's for their refs.
+            refs = list(registered.clause_ids)
+            log.info(
+                "pipeline.registration_kept",
+                document_id=str(parsed.document_id),
+                parsed_by=parsed.parser_version,
+                kept=kept,
+            )
+        expected = {ref: clause_id_for(parsed.document_id, ref) for ref in refs}
+        if (
+            registered.document_id != parsed.document_id
+            or not expected
+            or dict(registered.clause_ids) != expected
+        ):
             raise KnowledgeContractError(
                 f"the rulebook's ids for document {parsed.document_id} differ from the kernel's"
             )
         return Registered(
             document_id=parsed.document_id.value,
-            clause_count=len(parsed.clauses),
+            clause_count=len(expected),
             created=registered.created,
+            parser_version=kept,
         )
 
 

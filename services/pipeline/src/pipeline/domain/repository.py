@@ -18,6 +18,7 @@ from pipeline.domain.crawl import CrawlRun, CrawlRunId
 from pipeline.domain.events import DocumentEvent
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.sources import Source
+from pipeline.domain.tasks import PipelineTask, TaskId, TaskKind, TaskStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,19 @@ class DocumentKey:
     @classmethod
     def of(cls, record: RawDocumentRecord) -> "DocumentKey":
         return cls(record.published_on, record.fetched_at, record.document_id)
+
+
+@dataclass(frozen=True, slots=True)
+class TaskKey:
+    """Where a page of tasks starts: after the task opened at ``opened_at`` with ``task_id``.
+    Tasks come oldest first, then by id."""
+
+    opened_at: datetime
+    task_id: TaskId
+
+    @classmethod
+    def of(cls, task: PipelineTask) -> "TaskKey":
+        return cls(task.opened_at, task.id)
 
 
 class SourceRepository(Protocol):
@@ -65,6 +79,14 @@ class RawDocumentRepository(Protocol):
 
     def set_status(self, document_id: DocumentId, status: DocumentStatus) -> bool:
         """Move a stored document to ``status``; False when there is no such document."""
+        ...
+
+    def record_parse(
+        self, document_id: DocumentId, parser_version: str, *, transcript_key: str = ""
+    ) -> bool:
+        """Set the document ``parsed`` by ``parser_version`` (from the transcript under
+        ``transcript_key``, when one is given; a transcript once named stays); True when that
+        changed anything, False when it stood so already or there is no such document."""
         ...
 
     def recent(self, source_key: str, *, limit: int) -> Sequence[RawDocumentRecord]:
@@ -125,6 +147,41 @@ class CrawlRunRepository(Protocol):
         ...
 
 
+class TaskRepository(Protocol):
+    def open(self, task: PipelineTask) -> PipelineTask:
+        """Insert the open task unless its document has an open task of its kind already, and
+        return the open one: this task, or the one found."""
+        ...
+
+    def get(self, task_id: TaskId, *, for_update: bool = False) -> PipelineTask | None:
+        """The task; ``for_update`` holds it until the unit ends."""
+        ...
+
+    def save(self, task: PipelineTask) -> None:
+        """Write the status, claim, resolution and note of an existing task."""
+        ...
+
+    def open_for(self, document_id: DocumentId, kind: TaskKind) -> PipelineTask | None:
+        """The document's open task of ``kind``, if any."""
+        ...
+
+    def page(
+        self,
+        *,
+        status: TaskStatus | None,
+        kind: TaskKind | None,
+        after: TaskKey | None,
+        limit: int,
+    ) -> Sequence[PipelineTask]:
+        """The tasks of ``status`` and ``kind`` (None: any) in ``TaskKey`` order, after
+        ``after``."""
+        ...
+
+    def open_counts(self) -> Mapping[TaskKind, int]:
+        """How many tasks of each kind are open; a kind with none is absent."""
+        ...
+
+
 class EventSink(Protocol):
     """Where events go inside the transaction: the outbox, keyed by the event's source."""
 
@@ -140,6 +197,9 @@ class UnitOfWork(Protocol):
 
     @property
     def crawl_runs(self) -> CrawlRunRepository: ...
+
+    @property
+    def tasks(self) -> TaskRepository: ...
 
     @property
     def events(self) -> EventSink: ...

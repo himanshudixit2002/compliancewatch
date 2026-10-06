@@ -13,7 +13,21 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+from domain_kernel.documents import DocumentType
+
 DOC_KINDS = ("notification", "circular", "press_release", "act_amendment")
+"""The kinds of document a rule is extracted from: every document type but ``statute``."""
+
+
+def is_extracted(doc_type: DocumentType | str) -> bool:
+    """Whether the extraction steps read a document of this type. A statute (the CGST Act,
+    the CGST Rules) is registered and its clauses embedded, so rules can cite it, but no rule
+    or relation is extracted from it: it is the law the other documents act on. The ingest
+    asks this before its knowledge extraction, and the rule extraction step that comes next
+    asks it too."""
+    return DocumentType(doc_type).value in DOC_KINDS
+
+
 CHANGE_KINDS = ("none", "corrigendum", "withdrawal", "amendment", "extension")
 FREQUENCIES = ("monthly", "quarterly", "half_yearly", "annual")
 OPERATORS = ("eq", "neq", "in", "not_in", "gt", "gte", "lt", "lte", "contains", "contains_any")

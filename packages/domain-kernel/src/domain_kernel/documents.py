@@ -53,10 +53,15 @@ def clause_id_for(document_id: DocumentId, clause_ref: str) -> ClauseId:
 
 
 class DocumentType(StrEnum):
+    """What a regulator document is. A ``statute`` is an Act or the Rules made under it (the
+    CGST Act, the CGST Rules): the law the other documents amend and the rules cite. An analyst
+    uploads it; it is registered and its clauses embedded, but no rule is extracted from it."""
+
     NOTIFICATION = "notification"
     CIRCULAR = "circular"
     PRESS_RELEASE = "press_release"
     ACT_AMENDMENT = "act_amendment"
+    STATUTE = "statute"
 
 
 @dataclass(frozen=True, slots=True)

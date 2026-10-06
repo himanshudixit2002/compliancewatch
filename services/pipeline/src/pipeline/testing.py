@@ -5,8 +5,9 @@ a rulebook, an S3 endpoint, a recorded adapter type and a crawl starter.
 answers 404 for anything else, so a test that reaches an unrecorded URL fails loudly instead of
 touching the network. Routes are exact matches on method and URL; the CBIC listing routes also
 insist on the token header the real site wants. ``MemoryRulebook`` stands in for the rulebook's
-write API with the same rules: ids from the kernel, a different parse of stored bytes refused,
-a clause's first vector from a model kept. ``StubS3`` answers the raw store's S3 calls the way
+write API with the same rules: ids from the kernel, the first parse of a document kept (another
+parser version's parse is answered with it, the same version's different parse refused), a
+clause's first vector from a model kept. ``StubS3`` answers the raw store's S3 calls the way
 S3 does, signature checks included, from a dict. ``sample_activities`` are the worker's
 activities on the sample notification's source, the plain-text parser and memory stores.
 
@@ -14,9 +15,10 @@ The crawl's tests and demos read recorded sources only: ``RECORDED_TYPE`` is an 
 ``recorded``, whose adapter lists the CBIC notifications its ``numbers`` parameter names from
 the recorded listing files (whatever today's date) and fetches their recorded PDFs through the
 client it is given, the fixture transport of ``recorded_sources``; ``recorded_types()`` are the
-registry's types with it. ``MemoryCrawls`` is a crawl starter that records what it would start
-and refuses an id it has seen, as Temporal does. ``pipeline_settings`` are the app's settings
-for tests: memory stores and the shared write token ``WRITE_TOKEN``.
+registry's types with it. ``MemoryCrawls`` and ``MemoryIngests`` are a crawl and an ingest starter
+that record what they would start and refuse an id they have seen, as Temporal does.
+``pipeline_settings`` are the app's settings for tests: memory stores and the shared write token
+``WRITE_TOKEN``.
 """
 
 import hashlib
@@ -61,7 +63,7 @@ from pipeline.domain.knowledge import (
     RuleKey,
     StagingReport,
 )
-from pipeline.domain.ports import CrawlStart
+from pipeline.domain.ports import CrawlStart, IngestStart
 from pipeline.domain.repository import UnitOfWorkFactory
 from pipeline.infrastructure.adapters._shared import on_or_after, parse_iso_date
 from pipeline.infrastructure.adapters.cbic import CbicAdapter
@@ -264,17 +266,23 @@ class MemoryRulebook:
         self.calls += 1
         document = record.document
         stored = self.records.get(document.document_id)
-        if stored is not None and _clauses(stored.document) != _clauses(document):
+        if (
+            stored is not None
+            and stored.document.parser_version == document.parser_version
+            and _clauses(stored.document) != _clauses(document)
+        ):
             raise RulebookConflictError(f"409: document {document.document_id} differs")
         if stored is None:
             self.records[document.document_id] = record
+        kept = (stored or record).document
         return RegisteredDocument(
             document_id=document.document_id,
             created=stored is None,
             clause_ids={
                 clause.clause_ref: clause_id_for(document.document_id, clause.clause_ref)
-                for clause in document.clauses
+                for clause in kept.clauses
             },
+            parser_version=kept.parser_version,
         )
 
     def submit_mentions(self, submission: MentionSubmission) -> AlignmentReport:
@@ -615,6 +623,25 @@ class MemoryCrawls:
     fail: Exception | None = None
 
     def start(self, start: CrawlStart) -> bool:
+        if self.fail is not None:
+            error, self.fail = self.fail, None
+            raise error
+        if any(seen.workflow_id == start.workflow_id for seen in self.started):
+            return False
+        self.started.append(start)
+        return True
+
+
+@dataclass
+class MemoryIngests:
+    """An ``IngestStarter`` that keeps what it starts and refuses an id it has seen, as
+    Temporal's ALLOW_DUPLICATE_FAILED_ONLY does for a running or completed workflow; ``fail``
+    makes the next start raise it."""
+
+    started: list[IngestStart] = field(default_factory=list)
+    fail: Exception | None = None
+
+    def start(self, start: IngestStart) -> bool:
         if self.fail is not None:
             error, self.fail = self.fail, None
             raise error

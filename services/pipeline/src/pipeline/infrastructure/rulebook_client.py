@@ -97,6 +97,8 @@ class HttpRulebook:
                 str(ref): ClauseId(UUID(str(clause_id)))
                 for ref, clause_id in dict(data["clause_ids"]).items()
             },
+            # A rulebook from before it named the kept parser refused any other parse (409).
+            parser_version=str(data.get("parser_version") or document.parser_version),
         )
 
     def submit_mentions(self, submission: MentionSubmission) -> AlignmentReport:

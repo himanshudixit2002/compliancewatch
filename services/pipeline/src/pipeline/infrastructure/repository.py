@@ -1,4 +1,4 @@
-"""The Postgres unit of work: one transaction with the source, document and crawl-run
+"""The Postgres unit of work: one transaction with the source, document, crawl-run and task
 repositories on it, the outbox writer as the event sink and the audit writer as the audit sink,
 so a stored document and the outbox row of its document.discovered commit or roll back together,
 and so does an admin's change and its ``audit.event`` row. There is no tenant setting: the
@@ -31,13 +31,15 @@ from sqlalchemy.dialects.postgresql import distinct_on, insert
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
+from domain_kernel.documents import DocumentType
 from domain_kernel.ids import DocumentId
 from pipeline.domain.crawl import CrawlCounts, CrawlRun, CrawlRunId, CrawlStatus
 from pipeline.domain.events import DocumentEvent
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
-from pipeline.domain.repository import DocumentKey, UnitOfWork, UnitOfWorkFactory
+from pipeline.domain.repository import DocumentKey, TaskKey, UnitOfWork, UnitOfWorkFactory
 from pipeline.domain.sources import Source
-from pipeline.infrastructure.models import CrawlRunRow, RawDocumentRow, SourceRow
+from pipeline.domain.tasks import PipelineTask, TaskId, TaskKind, TaskStatus
+from pipeline.infrastructure.models import CrawlRunRow, PipelineTaskRow, RawDocumentRow, SourceRow
 from py_common.audit.writer import PostgresAuditSink
 from py_common.outbox import OutboxWriter
 
@@ -141,6 +143,9 @@ class SqlAlchemyRawDocumentRepository:
                 storage_key=record.storage_key,
                 title=record.title,
                 status=record.status.value,
+                parser_version=record.parser_version,
+                doc_type=None if record.doc_type is None else record.doc_type.value,
+                transcript_key=record.transcript_key or None,
             )
             .on_conflict_do_nothing()
             .returning(RawDocumentRow.id)
@@ -152,6 +157,28 @@ class SqlAlchemyRawDocumentRepository:
             update(RawDocumentRow)
             .where(RawDocumentRow.id == document_id.value)
             .values(status=status.value)
+            .returning(RawDocumentRow.id)
+        )
+        return self._session.execute(statement).first() is not None
+
+    def record_parse(
+        self, document_id: DocumentId, parser_version: str, *, transcript_key: str = ""
+    ) -> bool:
+        values: dict[str, object] = {
+            "status": DocumentStatus.PARSED.value,
+            "parser_version": parser_version,
+        }
+        changed = or_(
+            RawDocumentRow.status != DocumentStatus.PARSED.value,
+            RawDocumentRow.parser_version != parser_version,
+        )
+        if transcript_key:
+            values["transcript_key"] = func.coalesce(RawDocumentRow.transcript_key, transcript_key)
+            changed = or_(changed, RawDocumentRow.transcript_key.is_(None))
+        statement = (
+            update(RawDocumentRow)
+            .where(RawDocumentRow.id == document_id.value, changed)
+            .values(values)
             .returning(RawDocumentRow.id)
         )
         return self._session.execute(statement).first() is not None
@@ -252,6 +279,9 @@ def _to_record(row: RawDocumentRow) -> RawDocumentRecord:
         title=row.title,
         published_on=row.published_on,
         status=DocumentStatus(row.status),
+        parser_version=row.parser_version,
+        doc_type=None if row.doc_type is None else DocumentType(row.doc_type),
+        transcript_key=row.transcript_key or "",
     )
 
 
@@ -355,6 +385,117 @@ def _utc(moment: datetime | None) -> datetime | None:
     return None if moment is None else moment.astimezone(UTC)
 
 
+class SqlAlchemyTaskRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def open(self, task: PipelineTask) -> PipelineTask:
+        statement = (
+            insert(PipelineTaskRow)
+            .values(**_task_values(task))
+            .on_conflict_do_nothing(
+                index_elements=["document_id", "kind"],
+                index_where=PipelineTaskRow.status == TaskStatus.OPEN.value,
+            )
+            .returning(PipelineTaskRow.id)
+        )
+        if self._session.execute(statement).first() is not None:
+            return task
+        found = self.open_for(task.document_id, task.kind)
+        if found is None:
+            raise RuntimeError(
+                f"document {task.document_id} had an open {task.kind.value} task, then none"
+            )
+        return found
+
+    def get(self, task_id: TaskId, *, for_update: bool = False) -> PipelineTask | None:
+        statement = select(PipelineTaskRow).where(PipelineTaskRow.id == task_id.value)
+        if for_update:
+            statement = statement.with_for_update()
+        row = self._session.scalars(statement.execution_options(populate_existing=True)).first()
+        return None if row is None else _to_task(row)
+
+    def save(self, task: PipelineTask) -> None:
+        values = _task_values(task)
+        for fixed in ("id", "kind", "document_id", "source_key", "opened_at", "reason"):
+            del values[fixed]
+        self._session.execute(
+            update(PipelineTaskRow).where(PipelineTaskRow.id == task.id.value).values(values)
+        )
+
+    def open_for(self, document_id: DocumentId, kind: TaskKind) -> PipelineTask | None:
+        statement = select(PipelineTaskRow).where(
+            PipelineTaskRow.document_id == document_id.value,
+            PipelineTaskRow.kind == kind.value,
+            PipelineTaskRow.status == TaskStatus.OPEN.value,
+        )
+        row = self._session.scalars(statement).first()
+        return None if row is None else _to_task(row)
+
+    def page(
+        self,
+        *,
+        status: TaskStatus | None,
+        kind: TaskKind | None,
+        after: TaskKey | None,
+        limit: int,
+    ) -> Sequence[PipelineTask]:
+        statement = select(PipelineTaskRow)
+        if status is not None:
+            statement = statement.where(PipelineTaskRow.status == status.value)
+        if kind is not None:
+            statement = statement.where(PipelineTaskRow.kind == kind.value)
+        if after is not None:
+            statement = statement.where(
+                tuple_(PipelineTaskRow.opened_at, PipelineTaskRow.id)
+                > tuple_(after.opened_at, after.task_id.value)
+            )
+        statement = statement.order_by(PipelineTaskRow.opened_at, PipelineTaskRow.id).limit(limit)
+        return [_to_task(row) for row in self._session.scalars(statement).all()]
+
+    def open_counts(self) -> Mapping[TaskKind, int]:
+        statement = (
+            select(PipelineTaskRow.kind, func.count())
+            .where(PipelineTaskRow.status == TaskStatus.OPEN.value)
+            .group_by(PipelineTaskRow.kind)
+        )
+        return {TaskKind(kind): int(count) for kind, count in self._session.execute(statement)}
+
+
+def _task_values(task: PipelineTask) -> dict[str, object]:
+    return {
+        "id": task.id.value,
+        "kind": task.kind.value,
+        "document_id": task.document_id.value,
+        "source_key": task.source_key,
+        "status": task.status.value,
+        "opened_at": task.opened_at,
+        "reason": task.reason,
+        "claimed_by": task.claimed_by,
+        "resolved_by": task.resolved_by,
+        "resolved_at": task.resolved_at,
+        "resolution": None if task.resolution is None else dict(task.resolution),
+        "note": task.note,
+    }
+
+
+def _to_task(row: PipelineTaskRow) -> PipelineTask:
+    return PipelineTask(
+        id=TaskId(row.id),
+        kind=TaskKind(row.kind),
+        document_id=DocumentId(row.document_id),
+        source_key=row.source_key,
+        opened_at=row.opened_at.astimezone(UTC),
+        status=TaskStatus(row.status),
+        reason=row.reason,
+        claimed_by=row.claimed_by,
+        resolved_by=row.resolved_by,
+        resolved_at=_utc(row.resolved_at),
+        resolution=row.resolution,
+        note=row.note,
+    )
+
+
 class OutboxSink:
     """Writes each event into ``outbox_event`` on the unit of work's connection, keyed by its
     source, so the event commits or rolls back with the change it describes."""
@@ -372,6 +513,7 @@ class SqlAlchemyUnitOfWork:
         self.sources = SqlAlchemySourceRepository(session)
         self.documents = SqlAlchemyRawDocumentRepository(session)
         self.crawl_runs = SqlAlchemyCrawlRunRepository(session)
+        self.tasks = SqlAlchemyTaskRepository(session)
         self.events = OutboxSink(session.connection(), writer)
         self.audit = PostgresAuditSink(session.connection())
 

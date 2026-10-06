@@ -104,3 +104,35 @@ no person, still names the actor in the body. Regulatory sessions carry a second
 identity enforces when it issues them. The consequence above about approver ids asserted by the
 caller therefore holds only while an environment runs `header` mode, or `dual` mode without a
 token.
+
+## Addendum 2026-10-06: the parser version, and the first parse is kept
+
+The pipeline now parses through a chain of parsers (the PDF's text layer `pdf@1`, a table-aware
+`pdf-tables@1`, `html@1`, a table-aware `html-tables@1`, and `manual@1` for an analyst's
+transcript of a document no parser reads), so the same stored bytes can be parsed by more than
+one parser over time. This is the first parser change that alters clause text, and it settles
+the decision left open above: **stored documents are kept as parsed**.
+
+- The pipeline records the parser of each document's parse on its own row
+  (`raw_document.parser_version`, `name@version`) and sends it with every registration
+  (`parser_version`, as it always did). It parses a stored document again with the parser it
+  recorded, as long as the code has that parser, so a re-registration sends the same clauses.
+- The rulebook keeps the first parse it stores. A registration of a stored document by another
+  parser version (a newer parser, a version bump that left the old one behind, or an analyst's
+  transcript of a document parsed before) is answered `200` with the stored clauses' ids, the
+  stored `parser_version` in the new response field `parser_version`, and `parser_version` among
+  `metadata_differs`. Nothing is written and nothing is refused, so re-registering a document a
+  newer parser parsed never gets a 409. The pipeline checks that the kept clauses carry the ids
+  the kernel derives for their refs, which still catches a version skew.
+- A different parse by the **same** parser version is still a 409: that parser changed what it
+  gives for the same bytes without a new version, which is a bug. Bump a parser's version with
+  any change that can alter its clause text or refs for the same bytes.
+- The parser version stays out of the clause id. Clause refs stay `<language>.p<n>` for every
+  parser, so the rulebook's ref pattern and its clause ids are unchanged, and mention spans and
+  citations keep pointing at the clauses they were made on.
+
+This changes the rulebook's semantics: before, any different parse of stored bytes was a 409.
+A better parse of a document stored before is therefore not applied by itself; storing a second
+clause set under a new parser version, as a new version of the document, is a decision for when
+an analyst needs one. `document.parsed` 1.1.0 now carries each parse with its parser, but the
+registration stays on HTTP, since the event carries no clause text.

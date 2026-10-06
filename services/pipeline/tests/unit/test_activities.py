@@ -135,6 +135,7 @@ async def test_parse_splits_paragraphs_into_clauses(adapter: FakeSourceAdapter) 
         language="en",
         clause_count=3,
         clause_refs=["p1", "p2", "p3"],
+        parser_version="fake@1",
     )
     assert parsed.document_id == document_id_for(fetched).value
 

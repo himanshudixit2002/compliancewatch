@@ -1,9 +1,10 @@
 """When a source is crawled, under which ids, and how it stands.
 
 The ``source`` table is the only schedule: no Temporal schedule holds a copy. Every minute the
-worker's tick asks ``is_due`` of each source, and a source is due when it is enabled and not
-paused, no crawl of it is running, and its cadence has passed since its last crawl started
-(since its last listing, before its first run). A crawl's workflow id names the source and the
+worker's tick asks ``is_due`` of each source, and a source is due when its adapter type lists
+documents (an upload-only source never is), it is enabled and not paused, no crawl of it is
+running, and its cadence has passed since its last crawl started (since its last listing, before
+its first run). A crawl's workflow id names the source and the
 cadence slot the tick saw it due in (``scheduled_workflow_id``), so two ticks of the same slot
 ask Temporal for the same workflow, and the second is refused. A crawl an admin starts by hand
 has an id of its own (``manual_workflow_id``). Either way the crawl run's id is derived from the
@@ -108,9 +109,10 @@ def last_attempt(source: Source, latest: CrawlRun | None) -> datetime | None:
     return source.last_fetch_at
 
 
-def is_due(source: Source, latest: CrawlRun | None, now: datetime) -> bool:
-    """Whether the tick starts a crawl of the source now."""
-    if not source.crawlable or is_running(latest, now):
+def is_due(source: Source, latest: CrawlRun | None, now: datetime, *, listable: bool) -> bool:
+    """Whether the tick starts a crawl of the source now. ``listable`` is whether its adapter
+    type lists documents: an upload-only source is never due."""
+    if not listable or not source.crawlable or is_running(latest, now):
         return False
     attempted = last_attempt(source, latest)
     return attempted is None or now - attempted >= source.cadence

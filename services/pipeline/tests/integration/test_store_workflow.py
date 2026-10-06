@@ -1,7 +1,7 @@
 """``FetchAndStore`` in the ingest workflow on a local Temporal dev server: a new run takes the
-patched path, the bytes stay out of the history, a refetch is a duplicate announced once, and the
-new history replays. The replay of histories recorded before the store is in
-tests/unit/test_workflow_replay.py.
+patched path, the bytes stay out of the history, the parse is recorded with its document.parsed,
+a refetch is a duplicate announced once, and the new history replays. The replay of histories
+recorded before the store is in tests/unit/test_workflow_replay.py.
 """
 
 import base64
@@ -17,7 +17,8 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer
 
-from pipeline.domain.events import DocumentDiscovered
+from pipeline.domain.events import DocumentDiscovered, DocumentParsed
+from pipeline.domain.raw_documents import DocumentStatus
 from pipeline.infrastructure.fakes import SAMPLE_TEXT
 from pipeline.infrastructure.memory import MemoryStore
 from pipeline.infrastructure.raw_store import MemoryRawStore
@@ -126,9 +127,12 @@ async def test_a_new_run_stores_the_document_and_passes_on_its_key(
     assert raw_store.files == {result.storage_key: SAMPLE_TEXT.encode()}
     (record,) = store.documents.values()
     assert record.document_id.value == result.document_id
-    (event,) = store.events
-    assert isinstance(event, DocumentDiscovered)
-    assert event.document_id.value == result.document_id
+    assert (record.status, record.parser_version) == (DocumentStatus.PARSED, "fake@1")
+    discovered, parsed = store.events
+    assert isinstance(discovered, DocumentDiscovered)
+    assert discovered.document_id.value == result.document_id
+    assert isinstance(parsed, DocumentParsed)
+    assert (parsed.parser_version, parsed.clause_count) == ("fake@1", 3)
 
     assert patches(history) == [STORE_PATCH]
     activities = scheduled(history)
@@ -159,5 +163,6 @@ async def test_a_refetch_is_a_duplicate_announced_once(environment: WorkflowEnvi
     assert (first.duplicate, again.duplicate) == (False, True)
     assert (again.document_id, again.storage_key) == (first.document_id, first.storage_key)
     assert again.clause_refs == first.clause_refs, "the duplicate still parses from the store"
-    assert len(store.documents) == len(store.events) == 1
+    assert len(store.documents) == 1
+    assert [type(event) for event in store.events] == [DocumentDiscovered, DocumentParsed]
     assert raw_store.puts == 1

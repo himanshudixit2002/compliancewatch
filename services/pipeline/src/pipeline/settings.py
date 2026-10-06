@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Final, Literal, Self
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, model_validator
 
 from py_common.settings import Settings
 
@@ -57,6 +57,10 @@ class PipelineSettings(Settings):
     ``pipeline_prompts_dir`` is where the prompt files are when the package is installed away
     from the source tree (the image sets ``CW_PIPELINE_PROMPTS_DIR=/app/prompts``); the worker
     reads them only with the flag on.
+
+    ``pipeline_upload_max_bytes`` is the largest file an analyst may upload
+    (``CW_PIPELINE_UPLOAD_MAX_BYTES``, 25 MB by default, 100 MB at most); the upload route refuses
+    a larger body before it reads it (413).
     """
 
     pipeline_store: Store = "postgres"
@@ -77,6 +81,7 @@ class PipelineSettings(Settings):
     rulebook_write_token: SecretStr | None = None
     llm_gateway_url: str = "http://localhost:8008"
     pipeline_prompts_dir: Path | None = None
+    pipeline_upload_max_bytes: int = Field(default=25_000_000, ge=1, le=100_000_000)
 
     @model_validator(mode="after")
     def _s3_needs_its_bucket_and_key(self) -> Self:

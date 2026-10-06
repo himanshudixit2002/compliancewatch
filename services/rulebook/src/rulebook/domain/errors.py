@@ -9,8 +9,10 @@ class DocumentIdMismatchError(DomainError, ValueError):
 
 
 class DocumentConflictError(DomainError, ValueError):
-    """The document is stored already, and the clauses submitted now differ from the stored
-    ones. Documents are append-only, so the new parse is refused, never applied."""
+    """The document is stored already, and the clauses its own parser version submits now differ
+    from the stored ones: the parser changed without a new version. Documents are append-only,
+    so the new parse is refused, never applied. (Another parser version's parse is answered with
+    the stored one instead.)"""
 
     type_slug = "rulebook-document-conflict"
     title = "Document already stored with different clauses"
