@@ -968,6 +968,7 @@ pinned in `apps/web` at the newest releases more than a day old (`@opentelemetry
 was), and none has an install script. A failed registration logs one line and never stops the
 server. What registration did is kept on `globalThis` (the instrumentation bundle and the pages'
 bundle each have their own copy of the module, in one process), and the system page shows that
-rather than reading the flag again, which would show a state that never registered. Consequences: with the flag on and no endpoint, spans (Next.js's own, the fetch
-instrumentation and the product events) stay in the process; turning export on is two variables; a
-new route that names a person in its path joins `PERSONAL_ROUTES` with a test.
+rather than reading the flag again, which would show a state that never registered. Consequences:
+with the flag on and no endpoint, spans (Next.js's own, the fetch instrumentation and the product
+events) stay in the process; turning export on is two variables; a new route that names a person
+in its path joins `PERSONAL_ROUTES` with a test.
