@@ -4,8 +4,12 @@ Revision ID: 0004
 Revises: 0003
 Create Date: 2026-10-06
 
-Hand-written; mirrors pipeline.infrastructure.models. Expand only, so the image before it keeps
-working:
+Hand-written; mirrors pipeline.infrastructure.models. The schema only expands, but the image
+before it does not survive a rollback over it: the code from this revision on writes the new
+statuses into ``raw_document.status``, and that image reads the column as its
+``DocumentStatus``, which has none of them, so it fails on those rows. Rolling back to it needs
+``alembic downgrade 0003`` on the pipeline schema first, after a backup
+(infra/deploy/README.md, "Promotion and rollback"):
 
 - ``raw_document.status`` admits ``classified`` (on its way to the rule extraction), ``triage``
   (held for a person), ``reference`` (a press release or a statute: registered, nothing
@@ -18,7 +22,8 @@ working:
   rule.candidate.created is written in the same transaction. A trigger keeps it as written.
 
 Regulatory data, no tenant: ``pipeline`` is a global schema in infra/scripts/migration_lint.toml.
-The downgrade moves the documents of the new statuses back to ``parsed``.
+The downgrade drops both tables, so every classification (a triage's decision included) and
+every extraction record is lost, and moves the documents of the new statuses back to ``parsed``.
 """
 
 from collections.abc import Sequence

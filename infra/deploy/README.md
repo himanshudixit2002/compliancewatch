@@ -156,6 +156,17 @@ rolls back. The migration release command runs before the new machines start, so
 must be backward compatible with the previous image (add columns, never drop in the same
 release). Vercel keeps every deployment; promote or roll back from its dashboard.
 
+Pipeline migration 0004 is the exception to rolling back with the schema left at head. From it
+on, the pipeline writes the statuses `classified`, `triage`, `reference` and `extracted` into
+`raw_document.status`, and an image built before 0004 fails on every row that has one. Rolling
+back to such an image needs `alembic downgrade 0003` on the pipeline schema first: take a backup
+(or note the PITR point), run `alembic -c alembic.ini downgrade 0003` from the current pipeline
+image (`fly ssh console`) as the role that owns the schema, with `CW_DB_SCHEMA=pipeline`, then
+deploy the previous image. The downgrade drops `document_classification` and `rule_extraction`,
+so the classifications, the triage decisions among them, and every extraction record are lost
+(a resolved triage task keeps only its resolution), and those documents go back to `parsed`;
+only the backup brings them back.
+
 ## What the MVP profile does not give
 
 Canary rollouts with automatic rollback on SLO breach, network policies and mTLS, node pools for
