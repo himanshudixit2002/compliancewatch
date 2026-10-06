@@ -2136,15 +2136,14 @@ const SCREEN_LIST = [
       uses("profile", "GET", "/v1/profile/nodes/{node_id}"),
       NODE_REVIEW_TASKS,
       uses("profile", "GET", "/v1/profile/nodes/{node_id}/snapshot"),
+      uses("profile", "GET", "/v1/ontology"),
     ],
     awaits: [],
-    status: "ready",
-    e2e: [],
+    status: "live",
+    e2e: ["admin-profile-review-tasks.spec.ts", "a11y.spec.ts"],
     guideRef: "15",
     nav: { group: "identity", order: 2 },
     parent: "admin.home",
-    notes:
-      "A node looked up by tenant id and node id, the one admin read for another tenant; a tenant-wide list waits for GET /v1/profile/admin/attribute-usage (services track, WP30).",
   },
   {
     id: "admin.system",
