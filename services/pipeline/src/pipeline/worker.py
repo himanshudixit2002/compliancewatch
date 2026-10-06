@@ -38,6 +38,7 @@ from pipeline.application.activities import (
     OpenManualParse,
     ParseDocument,
 )
+from pipeline.application.classify import ClassifyDocument
 from pipeline.application.crawl import FinishCrawl, ListNewDocuments, ScheduleCrawls
 from pipeline.application.embedding import EmbeddingStage
 from pipeline.application.knowledge_activities import (
@@ -149,6 +150,7 @@ def activities(
         FetchAndStore(store),
         ParseDocument(parsers, raw, units=records),
         OpenManualParse(records),
+        ClassifyDocument(parsers, raw, records, extraction=settings.pipeline_extraction_enabled),
         RegisterDocument(parsers, rulebook, enabled=enabled, raw_store=raw, units=records),
         EmbedClauses(embedding, enabled=enabled),
         ExtractMentions(rulebook, rulebook, enabled=enabled),

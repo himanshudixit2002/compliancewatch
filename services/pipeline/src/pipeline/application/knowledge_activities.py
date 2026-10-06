@@ -20,7 +20,7 @@ from uuid import UUID
 from pydantic import Field
 from temporalio.common import RetryPolicy
 
-from domain_kernel.documents import clause_id_for
+from domain_kernel.documents import DocumentType, clause_id_for
 from domain_kernel.ids import DocumentId, SourceId
 from domain_kernel.knowledge import EntityType, RelationKind
 from pipeline.application.activities import (
@@ -52,8 +52,12 @@ log = get_logger(__name__)
 
 
 class RegisterRequest(Frozen):
+    """``doc_type`` is the type the classify step placed the document as (a person's, after a
+    triage); None in the requests recorded before that step, which register the parse's."""
+
     parse: ParseRequest
     regulator: str = Field(min_length=1)
+    doc_type: DocumentType | None = None
 
 
 class Registered(Frozen):
@@ -71,7 +75,8 @@ class Registered(Frozen):
 class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
     """Store the parsed document in the rulebook; idempotent, so a retry is harmless. It parses
     the bytes again the way the parse did (``hints_for`` over the record the parse just wrote),
-    so it sends the same clauses and the parser that gave them."""
+    so it sends the same clauses and the parser that gave them, as the type the classify step
+    placed it as."""
 
     name: ClassVar[str] = "pipeline.register_document"
     input_type: ClassVar[type[RegisterRequest]] = RegisterRequest
@@ -117,6 +122,8 @@ class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
     def _register(self, input: RegisterRequest) -> Registered:
         request = input.parse
         _, hints = hints_for(request, self._units, self._raw)
+        if input.doc_type is not None:
+            hints = dataclasses.replace(hints, doc_type=input.doc_type)
         parsed = parse_request(self._parser, request, self._raw, hints)
         parsed = dataclasses.replace(
             parsed,

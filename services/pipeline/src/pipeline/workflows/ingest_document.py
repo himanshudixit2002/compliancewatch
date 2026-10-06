@@ -15,6 +15,13 @@ A stored document no parser of the chain reads (``UnparsedDocumentError``, or
 and opens its manual-parse task, and the ingest ends there with ``parse_failed``, so nothing of
 it is registered. A workflow that failed on its parse before the patch replays as it ran.
 
+After its parse, a stored document is classified, behind ``workflow.patched(CLASSIFY_PATCH)``
+(``pipeline.classify_document``, ``application.classify``): its type, how sure that is, and
+whether it is a regulatory document, recorded with its status and its ``document.classified``.
+An irrelevant document is set aside and a conflict (its text names another type than its source
+publishes) waits for a person's ``triage`` task; the ingest ends there for both, so nothing of
+them is registered. Everything else is registered as the type it was classified as.
+
 Statutes are registered and their clauses embedded like any document, so rules can cite them,
 but nothing is extracted from them (``domain.candidate.is_extracted``): the extraction child is
 not started for one, and the rule extraction step that is to follow it asks the same.
@@ -42,6 +49,7 @@ from temporalio.exceptions import (
 with workflow.unsafe.imports_passed_through():
     from pydantic import Field, model_validator
 
+    from domain_kernel.documents import DocumentType
     from pipeline.application.activities import (
         DiscoverDocument,
         Discovered,
@@ -56,6 +64,7 @@ with workflow.unsafe.imports_passed_through():
         Stored,
         document_id_for,
     )
+    from pipeline.application.classify import Classified, ClassifyDocument, ClassifyRequest
     from pipeline.application.knowledge_activities import (
         EmbedClauses,
         EmbedRequest,
@@ -63,6 +72,7 @@ with workflow.unsafe.imports_passed_through():
         RegisterRequest,
     )
     from pipeline.domain.candidate import is_extracted
+    from pipeline.domain.classification import Route
     from pipeline.domain.tasks import MAX_REASON_CHARS
     from pipeline.workflows.extract_knowledge import (
         ExtractKnowledgeWorkflow,
@@ -78,6 +88,7 @@ STORE_PATCH = "pipeline-store-v1"
 GIVEN_PATCH = "pipeline-crawl-v1"
 STORED_PATCH = "pipeline-stored-v1"
 PARSE_PATCH = "pipeline-parse-v1"
+CLASSIFY_PATCH = "pipeline-classify-v1"
 REGISTER_PATCH = "kag-register-v1"
 EMBED_PATCH = "kag-embed-v1"
 EXTRACT_PATCH = "kag-extract-v1"
@@ -149,7 +160,10 @@ class IngestResult(Frozen):
     before the store); ``duplicate`` says they were stored by an earlier fetch.
     ``parser_version`` names the parser of the clauses. ``parse_failed`` says no parser read the
     document: its manual-parse task is ``task_id`` (None when none opened), and it has no
-    clauses and was not registered."""
+    clauses and was not registered. ``classification`` is the classify step's route
+    (``extract``, ``reference``, ``irrelevant``, ``triage``; empty before the step) and
+    ``doc_type`` the type it placed the document as; a document held for triage names its task
+    in ``task_id``, and neither it nor an irrelevant one is registered."""
 
     document_id: UUID
     sha256: str
@@ -161,6 +175,8 @@ class IngestResult(Frozen):
     parser_version: str = ""
     parse_failed: bool = False
     task_id: UUID | None = None
+    classification: str = ""
+    doc_type: str = ""
     registered: bool = False
     registration_error: str = ""
     clauses_embedded: int = 0
@@ -212,11 +228,36 @@ class IngestDocumentWorkflow:
                 parse_failed=True,
                 task_id=opened.task_id,
             )
+        classified: Classified | None = None
+        if parse_request.stored is not None and workflow.patched(CLASSIFY_PATCH):
+            classified = await ClassifyDocument.schedule(ClassifyRequest(parse=parse_request))
+            if classified.stops:
+                workflow.logger.info(
+                    "the document stops at its classification: %s", classified.route
+                )
+                return IngestResult(
+                    document_id=parsed.document_id,
+                    sha256=parse_request.sha256,
+                    url=parse_request.url,
+                    clause_count=parsed.clause_count,
+                    clause_refs=parsed.clause_refs,
+                    storage_key=storage_key,
+                    duplicate=duplicate,
+                    parser_version=parsed.parser_version,
+                    task_id=classified.task_id if classified.route == Route.TRIAGE else None,
+                    classification=classified.route,
+                    doc_type=classified.doc_type,
+                )
+        doc_type = parsed.doc_type if classified is None else classified.doc_type
         registered, registration_error = False, ""
         if request.knowledge and workflow.patched(REGISTER_PATCH):
             try:
                 outcome = await RegisterDocument.schedule(
-                    RegisterRequest(parse=parse_request, regulator=request.regulator)
+                    RegisterRequest(
+                        parse=parse_request,
+                        regulator=request.regulator,
+                        doc_type=None if classified is None else DocumentType(doc_type),
+                    )
                 )
                 registered = not outcome.skipped
             except ActivityError as error:
@@ -234,7 +275,7 @@ class IngestDocumentWorkflow:
                 workflow.logger.warning("clause embedding failed: %s", embedding_error)
         knowledge, knowledge_error = KnowledgeResult(relations_outcome="disabled"), ""
         # A statute is registered and embedded, never extracted (domain.candidate.is_extracted).
-        if registered and is_extracted(parsed.doc_type) and workflow.patched(EXTRACT_PATCH):
+        if registered and is_extracted(doc_type) and workflow.patched(EXTRACT_PATCH):
             try:
                 knowledge = await workflow.execute_child_workflow(
                     ExtractKnowledgeWorkflow.run,
@@ -258,6 +299,8 @@ class IngestDocumentWorkflow:
             storage_key=storage_key,
             duplicate=duplicate,
             parser_version=parsed.parser_version,
+            classification="" if classified is None else classified.route,
+            doc_type="" if classified is None else classified.doc_type,
             registered=registered,
             registration_error=registration_error,
             clauses_embedded=clauses_embedded,

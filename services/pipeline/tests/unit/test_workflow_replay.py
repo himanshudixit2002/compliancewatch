@@ -40,8 +40,14 @@ from pipeline.application.activities import (
     ParseFailure,
     ParseRequest,
 )
+from pipeline.application.classify import ClassifyDocument, ClassifyRequest
 from pipeline.workflows import ExtractKnowledgeWorkflow, IngestDocumentWorkflow, IngestRequest
-from pipeline.workflows.ingest_document import GIVEN_PATCH, STORE_PATCH, IngestResult
+from pipeline.workflows.ingest_document import (
+    GIVEN_PATCH,
+    STORE_PATCH,
+    STORED_PATCH,
+    IngestResult,
+)
 
 HISTORIES = Path(__file__).resolve().parents[1] / "fixtures" / "histories"
 BEFORE_THE_STORE = [
@@ -218,5 +224,34 @@ class IngestWithoutTheParseGuard:
 async def test_without_the_parse_guard_a_failed_parse_would_not_replay() -> None:
     replayed = await replayer(IngestWithoutTheParseGuard).replay_workflow(
         history(UNPARSED), raise_on_replay_failure=False
+    )
+    assert isinstance(replayed.replay_failure, workflow.NondeterminismError)
+
+
+@workflow.defn(name="pipeline.ingest_document", sandboxed=False)
+class IngestWithoutTheClassifyGuard:
+    """The ingest as it would be had the classify step followed the parse without
+    ``CLASSIFY_PATCH``."""
+
+    @workflow.run
+    async def run(self, request: IngestRequest) -> IngestResult:
+        assert request.stored is not None
+        workflow.patched(STORED_PATCH)
+        parse = ParseRequest(document_id=request.stored.document_id, stored=request.stored)
+        parsed = await ParseDocument.schedule(parse)
+        await ClassifyDocument.schedule(ClassifyRequest(parse=parse))
+        return IngestResult(
+            document_id=parsed.document_id,
+            sha256=request.stored.sha256,
+            url=request.stored.url,
+            clause_count=parsed.clause_count,
+            clause_refs=parsed.clause_refs,
+        )
+
+
+async def test_without_the_classify_guard_an_upload_before_it_would_not_replay() -> None:
+    upload = BEFORE_THE_CLASSIFY_STEP[2]
+    replayed = await replayer(IngestWithoutTheClassifyGuard).replay_workflow(
+        history(upload), raise_on_replay_failure=False
     )
     assert isinstance(replayed.replay_failure, workflow.NondeterminismError)
