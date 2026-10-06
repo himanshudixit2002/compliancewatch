@@ -46,10 +46,10 @@ browser except the form and its pending state.
 ## Generated types
 
 `make openapi-ts` writes `packages/contracts/clients/typescript/openapi/<service>.v1.d.ts` for
-every committed spec (`identity`, `llm-gateway`, `notification`, `obligation`, `profile`, `qa`,
-`rulebook`) with `openapi-typescript`, formatted with prettier, plus an `index.ts` that exports
-each file as a namespace (`identity`, `llmGateway`, `notification`, `obligation`, `profile`,
-`qa`, `rulebook`). `make openapi-ts-check` (in `make check` and in the `web-e2e` CI job)
+every committed spec (`applicability-engine`, `eval`, `identity`, `llm-gateway`, `notification`,
+`obligation`, `profile`, `qa`, `rulebook`) with `openapi-typescript`, formatted with prettier,
+plus an `index.ts` that exports each file as a namespace (`applicabilityEngine`, `eval`,
+`identity`, `llmGateway`, `notification`, `obligation`, `profile`, `qa`, `rulebook`). `make openapi-ts-check` (in `make check` and in the `web-e2e` CI job)
 regenerates in memory and fails on any difference, so a spec change lands with its types. App
 code imports them type-only:
 
@@ -58,9 +58,9 @@ import type { profile } from "@compliancewatch/contracts/openapi";
 type Snapshot = profile.components["schemas"]["SnapshotOut"];
 ```
 
-`applicability-engine`, `eval` and `pipeline` have no committed spec, so the app has no client
-for them; a screen that needs one of their routes is a waiting entry in the registry until the
-spec lands. There is no hand-written or untyped client.
+`pipeline` has no committed spec, so the app has no client for it; a screen that needs one of
+its routes is a waiting entry in the registry until the spec lands. There is no hand-written or
+untyped client.
 
 ## Configuration
 
@@ -94,6 +94,7 @@ lists every variable; none is `NEXT_PUBLIC_*`.
 | `llmGatewayClient(ctx)`                       | llm-gateway  | yes                               |                                                   |
 | `obligationClient(ctx)`                       | obligation   | yes                               |                                                   |
 | `qaClient(ctx)`                               | qa           | yes                               |                                                   |
+| `applicabilityEngineClient(ctx)`              | applicability-engine | yes                       |                                                   |
 | `rulebookClient(ctx?)`                        | rulebook     | never (records shared by tenants) |                                                   |
 | `rulebookAdmin(ctx)` returns `Result<Client>` | rulebook     | never                             | `x-cw-write-token`, after a regulatory-role check |
 
@@ -476,6 +477,23 @@ lookup names (`ClientContext.tenantId`). `entities/notification` maps `Notificat
 generated type has it, with no subject or body. [business-pages.md](business-pages.md) has the
 reminders pages and [admin-tools.md](admin-tools.md) the console.
 
+## Obligations, changes and answers
+
+`features/obligations/gateway.ts` reads one profile node's obligations a page at a time (the
+public `GET /v1/businesses/{node}/obligations` with `status`, `due_from`, `due_to`, `limit` and
+the service's `cursor`), one obligation (`GET /v1/obligation/obligations/{id}`), the engine's
+latest decision of a rule version for a node (`GET
+/v1/applicability-engine/businesses/{node}/decisions?rule_version_id=&limit=1`), the tenant's
+users (`GET /v1/identity/users`, for a tenant admin only), a cited clause (cached under its tag)
+and the business (`GET /v1/businesses/{id}`), and sends the three tracking writes with the form's
+key through `callIdempotent`. A business's lists merge its entity's and its registrations'
+obligations by due date and page by the key of the last row (D-045).
+`features/changes/gateway.ts` reads the rulebook's feed (`GET /v1/changes`, no tenant, uncached),
+a change's impact for the tenant (`GET /v1/changes/{rule_version_id}/impact`, uncached) and the
+cited clauses; `features/ask/gateway.ts` asks `POST /v1/qa` with the question and the node in the
+body and reads the cited documents (cached under their tag). Every tenant read is uncached.
+[obligation-pages.md](obligation-pages.md) has the pages.
+
 ## Rule versions, citations and the publish workflow
 
 `features/rule-versions/gateway.ts` reads the rulebook's rules (`GET /v1/rulebook/rules`), each
@@ -522,17 +540,25 @@ the provider's checkout page takes payment.
 
 ## Idempotency and natural keys
 
-Two routes on `main` require an `Idempotency-Key`: the business API's `POST /v1/businesses`
-(`profile.create-business`) and `POST /v1/businesses/{business_id}/registrations`
-(`profile.add-registration`). Without the header they answer 428 (`idempotency-key-required`,
-kind `precondition_required`); with it they replay the first response for 24 hours, answer 422
-(`idempotency-key-reused`) when the same key comes with a different body, and 409 with
-`Retry-After` while the first request is still running. `IDEMPOTENT_ROUTES` in
-`server/api/idempotency.ts` lists them, and `idempotencyHeaders(formData, operation)` sends the
-key only for an operation there (D-019); `idempotency.test.ts` compares the list with the
-committed specs both ways, so a route that starts or stops requiring the header fails the tests
-until the list follows. Every other creating write the screens make is safe to repeat without a
-key, because each has a natural key on the service:
+The routes that require an `Idempotency-Key` are listed in `IDEMPOTENT_ROUTES` in
+`server/api/idempotency.ts`: the business API's `POST /v1/businesses` (`profile.create-business`)
+and `POST /v1/businesses/{business_id}/registrations` (`profile.add-registration`), the
+engine's evaluate, the obligation service's status, assignee and comment writes (under its own
+prefix, which the obligation page uses, and again under the public API's `/v1/obligations`), and
+a CA firm's bulk change card. Without the header they answer 428 (`idempotency-key-required`,
+kind `precondition_required`); with it they replay the first response for 24 hours with
+`Idempotent-Replayed: true`, answer 422 (`idempotency-key-reused`) when the same key comes with a
+different body, and 409 with `Retry-After` while the first request is still running; a refusal
+the route raises releases the key, so the corrected retry runs. `idempotencyHeaders(formData,
+operation)` sends the key only for an operation in the list (D-019); `idempotency.test.ts`
+compares the list with the committed specs both ways, so a route that starts or stops requiring
+the header fails the tests until the list follows. `callIdempotent(promise)` is `call()` that
+also says whether the answer was a replay, so a form can say that a retry recorded nothing twice;
+the hidden field's name (`IDEMPOTENCY_KEY_FIELD`) lives in `shared/lib/idempotency.ts`, where a
+client form that builds its own FormData can reach it. The obligation page's forms keep a request
+whose answer never arrived (a dropped connection) whole, key included, and "Try again" sends
+exactly it (D-046). Every other creating write the screens make is safe to repeat without a key,
+because each has a natural key on the service:
 
 | Write                                  | Natural key and repeat behaviour                                            |
 | -------------------------------------- | --------------------------------------------------------------------------- |

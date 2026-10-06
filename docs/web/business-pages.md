@@ -33,8 +33,10 @@ PAN, the registrations' GSTINs and when the business last changed.
 
 The business id is the id of its legal entity node, as the business API returns it. Every page
 of a business shares one header (breadcrumbs with the business's name, then a row of tabs built
-from the registry's business group), so the screens not built yet (Changes, Obligations, Ask)
-appear as tabs that lead to their "not available yet" notices.
+from the registry's business group). The Changes, Obligations, Calendar and Ask tabs lead to the
+obligation pages ([obligation-pages.md](obligation-pages.md)); Ask is a tab only while
+`web.qa_enabled` is on for the tenant (`businessFlags` reads the flags of the business's pages
+for every page's tabs).
 
 A business that does not exist, belongs to another tenant (the service answers 404 for it), or
 whose id is not a UUID is the not-found page. The pages stream behind their `loading.tsx`, so
@@ -47,7 +49,7 @@ given a name of its own, so the identifier is what tells nodes apart.
 
 | Page                          | What it shows                                                                                                                                                        |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/b/[businessId]`             | The name, PAN and registrations, "Add another business", the onboarding progress from the checklist with a link back to the questions, a tile per page, and the screens not built yet |
+| `/b/[businessId]`             | The name, PAN and registrations, "Add another business", the onboarding progress from the checklist with a link back to the questions, a tile per page, and any screen of the business not built yet |
 | `/b/[businessId]/profile`     | The hierarchy: the entity, each registration, a form per registration to add a location, and a form to add another GSTIN of the business                             |
 | `/b/[businessId]/attributes`  | One node and one financial year: the node's own values, the values it inherits, what is not answered yet, and changing an answer                                  |
 | `/b/[businessId]/snapshot`    | One node and one financial year: every value the engine evaluates and where it comes from                                                                           |
@@ -155,7 +157,5 @@ to the owner's number.
 ## What waits
 
 - Listing a registration's locations: a children route on the profile service.
-- The changes of a business: its tab leads to the "not available yet" notice that names the routes
-  it waits for. The obligation list, the calendar and ask arrive with the
-  obligation and qa routes, and the obligation dashboard on the home page with them.
+- An obligation summary on the business's home page: the obligation pages are tabs of their own.
 - Resolving a review task from these pages: an unplanned profile route.

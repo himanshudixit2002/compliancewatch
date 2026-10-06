@@ -21,7 +21,8 @@ src/app/            route files only: page.tsx is gate, query, render; layouts, 
   (app)/            tenant screens under the session-aware shell: /account, /onboarding (the consent step),
                     /onboarding/business (the business step), /onboarding/[businessId]/questions and
                     /onboarding/[businessId]/done, /businesses and /b/[businessId] with /profile,
-                    /attributes, /snapshot, /review-tasks, /reminders and /reminders/[notificationId], each with
+                    /attributes, /snapshot, /review-tasks, /reminders and /reminders/[notificationId],
+                    /obligations and /obligations/[obligationId], /calendar, /changes and /ask, each with
                     loading.tsx; [...slug] serves
                     unbuilt tenant screens behind the entry's roles
   admin/            /admin home and layout under AdminShell, behind requireAdmin; rulebook/documents and the
@@ -52,8 +53,13 @@ src/features/       one directory per screen family: model/, ui/, index.ts (port
                     citations and the publish workflow through server/api/rulebook-write.ts),
                     rulebook-entities (the resolve tool and an entity's page), clause-search (posted,
                     each leg's rank, the words marked), relations-graph (the walk, an inline SVG and the
-                    table beside it); and the parked folders of screens
-                    not built yet, which no page imports (docs/web/architecture.md, "Parked feature folders")
+                    table beside it), obligations (a business's obligations merged across its nodes and
+                    paged by key, the calendar with its month loader, an obligation's page with why it
+                    applies and its status, assignee and comment writes, the first-obligation poll),
+                    changes (the feed with each change's impact for the business), ask (the public ask
+                    behind web.qa_enabled, its citations read from their documents); and the parked
+                    folders of screens not built yet, which no page imports (docs/web/architecture.md,
+                    "Parked feature folders")
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
                     problem/ types the RFC 9457 body every service returns (from the generated contracts);
                     session/ the session claims, the render-safe view and the time helpers;
@@ -63,7 +69,9 @@ src/entities/       pure domain types and DTO-to-view mappers (no React, no fetc
                     review tasks and snapshots, with the mappers both ways; consent/ consent records,
                     states and purposes; notification/ a channel preference; rulebook/ documents,
                     decisions, entities, relations, clauses and search hits; rule-version/ rules, rule
-                    versions with their condition tree, citations and a step's lifecycle
+                    versions with their condition tree, citations and a step's lifecycle; obligation/
+                    obligations with their rule's facts, citations, history and comments; applicability/
+                    decisions and a change's impact; change/ the changes feed; answer/ an answer of the ask
 src/server/         server-only modules; every file starts with `import "server-only"`
                     env.ts validates every CW_WEB_* variable (zod; parsed at the first request, never at build)
                     session.ts: the encrypted cw_session cookie (jose), its options, set and clear (actions only)
@@ -121,11 +129,13 @@ scripts/seed/       the demo-tenant seed (pnpm --filter web seed, make web-seed)
                     record.py)
 e2e/                fixtures.ts (the axe check failing on serious or critical, the personas signed in through
                     the fake form, the seed-state reader, the stack's service URLs) and one spec per live page, plus a11y.spec.ts over
-                    every registered page; tsconfig.scripts.json type-checks them
+                    every registered page; product/ holds the real-data journey the product project runs against
+                    make product (make product-e2e); tsconfig.scripts.json type-checks them
 next.config.ts      typed routes, security headers; eslint.config.mjs: Next flat config plus repo rules
 vitest.config.mts   jsdom, Testing Library, 80% coverage floor (route files and proxy.ts are covered by e2e)
 playwright.config.ts  Playwright against `next start` on PORT with CW_WEB_ENV=test, the fake provider and a fixed
-                    session secret; chromium only
+                    session secret; chromium only; two projects: chromium (the memory stack) and product
+                    (e2e/product against make product, CW_E2E_PRODUCT_URL)
 .env.example        every CW_WEB_* variable the app reads, with its default; copy to .env.local
 ```
 

@@ -48,10 +48,10 @@ components to `shared`, `entities` and their own directory.
 
 ## Parked feature folders
 
-A feature folder exists for a screen that a page renders. Eleven folders under `features/`
+A feature folder exists for a screen that a page renders. Nine folders under `features/`
 hold the model and the views of screens that are not built yet (the team, activity and
-data-rights settings, a business's obligations and changes, and the source, pipeline, audit,
-error-report, tenant and Q&A triage tools): no route file
+data-rights settings, and the source, pipeline, audit, error-report, tenant and Q&A triage
+tools): no route file
 imports them, so no bundle carries them; their unit tests run with the rest. Each one is
 parked: `PARKED_FEATURES` in `src/test/architecture.ts` maps the folder to the registry ids
 of the screens it will serve, and `architecture.test.ts` holds the map to the tree and the
@@ -99,7 +99,10 @@ apps/web/
                                anchors and marked spans), rule-versions (the version list, a version's page
                                with its citations and the publish workflow), rulebook-entities (the resolve
                                tool and an entity's page), clause-search, relations-graph (the walk, the SVG
-                               layout and the table); the parked folders above, which no page imports yet
+                               layout and the table), obligations (the list merged across a business's nodes,
+                               the calendar, an obligation's page with its tracking writes, the first-obligation
+                               poll), changes (the feed with each change's impact), ask (the public ask); the
+                               parked folders above, which no page imports yet
   src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims),
                                ontology/ (the attributes and their wording from GET /v1/ontology),
                                business/ (a business, its nodes and values, onboarding, review tasks, snapshots),
@@ -107,7 +110,9 @@ apps/web/
                                rulebook/ (a rulebook document and its clauses, the review decisions, entities,
                                resolutions, relations, clauses with their document, search hits),
                                rule-version/ (rules, rule versions with their condition tree, citations, a
-                               step's lifecycle and a publication)
+                               step's lifecycle and a publication), obligation/ (obligations with their rule's
+                               facts, citations, history and comments), applicability/ (decisions and a
+                               change's impact), change/ (the changes feed), answer/ (an answer of the ask)
   src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError, webError),
                                api/ (typed clients, problem parsing, idempotency), cache.ts (tags and revalidation),
                                session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a
@@ -119,8 +124,9 @@ apps/web/
   src/shared/lib/              dates, financial years, decimal money, humanise, identifiers, pagination, urls, assert
   src/shared/i18n/             messages/en.json and t()
   src/shared/ui/               TenantShell, InternalShell, RouterLink, Breadcrumbs, ScreenStatusChip, SessionMenu,
-                               SignOutButton, ServiceError, RefreshButton, RuleVersionStatusChip and
-                               SeedStatusChip
+                               SignOutButton, ServiceError, RefreshButton, RuleVersionStatusChip,
+                               SeedStatusChip, CitationList (verified quotes with their clause and source) and
+                               NotLegalAdvice (the footer of every page that says what applies)
   src/test/                    vitest setup, the architecture rules and their test with the parked folder map,
                                the screens.md drift test, the synthetic fixtures guard, fake-fetch.ts and
                                fake-cookies.ts

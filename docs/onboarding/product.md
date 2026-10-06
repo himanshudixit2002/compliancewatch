@@ -23,6 +23,7 @@ make product-seed            # synthetic tenants, the demo publication, the firs
 make product-check           # health, honesty, loop, isolation, recompute, fanout, reminders,
                              # tracking, changes, public: exit 0 means accepted (rollback reports
                              # itself skipped; CI runs it with ARGS="--destructive")
+make product-e2e             # the web app's real-data journey on it (Playwright project product)
 make product-logs PROC=worker   # app, worker or web; FOLLOW=0 prints the end and returns
 make product-down            # stops only what make product started
 ```
@@ -333,13 +334,17 @@ at any hour. The firm's admin hears by the daily digest (09:00 IST), as every CA
 After `make product-seed`, open the sign-in page of the product's web app, choose "Use the last
 seeded tenant" (it reads `var/seed/last.json`, which the seed writes in the shape the web seed
 does), a role and a display name, and sign in: the business page of Demo Traders (synthetic)
-opens. For the CA firm, choose the tenant kind CA firm and paste its id from the table above.
-The obligations screen is not built yet; the obligations are in the API:
+opens, with its obligations, calendar, changes and (with `CW_WEB_FLAG_QA_ENABLED=true` in
+`apps/web/.env.local`) Ask as tabs ([docs/web/obligation-pages.md](../web/obligation-pages.md)).
+For the CA firm, choose the tenant kind CA firm and paste its id from the table above.
 
-```bash
-curl -s 'http://127.0.0.1:8080/v1/obligation/obligations?business_id=<registration id>' \
-  -H 'x-tenant-id: 00000000-0000-4000-8000-0000000d0001'
-```
+`make product-e2e` runs the web app's real-data journey on the running product: it builds the app
+into `apps/web/.next/e2e-product`, starts it with `next start` on `PRODUCT_E2E_PORT` (3400) against
+the internal listener, and runs the Playwright project `product` (signed in as the seeded business
+tenant: the obligations in the list and the calendar, an obligation's citations and synthetic
+approvers, a probe business's first obligation started, completed and commented on, the annual
+return's change applying, and a cited answer). The CI dev-stack job runs it after `make
+product-check`. Each run adds one synthetic probe business to the database, as the check does.
 
 Cookies ignore the port. With `make web-dev` on `localhost:3000`, run the product's app on
 another port and open it at `127.0.0.1` (`make product WEB_PORT=3400`, then

@@ -48,9 +48,11 @@ IGST, SGST, Acme and Asha. Exempt: the recorded rulebook fixtures under
 `apps/web/scripts/seed/fixtures`, which were recorded from a real notification and which the seed
 replays and hashes byte for byte (there are no recorded e2e fixtures; the specs read what the seed
 wrote at run time). Allowed, each with its reason in the test: the guard itself and the design
-catalogue's `fixtures.test.ts`, which name the tokens in order to reject them. A new test uses the
-example forms above; a live page whose test seems to need a realistic token gets synthetic data
-instead, or one narrow entry in the allow list with the reason.
+catalogue's `fixtures.test.ts`, which name the tokens in order to reject them, and the product
+journey (`e2e/product/journey-product.spec.ts`), which asks the seeded product the question
+`cw-product check` asks and finds the seed calendar's annual return by its rule key (D-047). A
+new test uses the example forms above; a live page whose test seems to need a realistic token
+gets synthetic data instead, or one narrow entry in the allow list with the reason.
 
 **Coverage.** Both packages hold 80% for lines, functions, branches and statements. In `apps/web`
 the route files (`page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`,
@@ -87,10 +89,13 @@ outside `src` and outside the floor.
 `apps/web/playwright.config.ts` runs the specs in `apps/web/e2e` against `next start` on `PORT`
 (3000 unless set) with `CW_WEB_ENV=test`, `CW_WEB_AUTH_PROVIDER=fake` and a fixed session
 secret (32 bytes of `e2e`; it keys the cookies of one run and is not a secret), chromium only,
-and waits for `/api/health` before the first test. Outside CI it reuses a server already
-listening on that port. On CI it retries once and writes the HTML report. `e2e/fixtures.ts`
-extends `test` with `checkA11y(selector?)`, which runs `AxeBuilder` on the page (or one
-selector) and fails on any finding of impact `serious` or `critical` (moderate and minor
+and waits for `/api/health` before the first test. It has two projects: `chromium`, every spec but
+`e2e/product`, against the memory stack (`make web-e2e` and the `web-e2e` job run it with
+`--project=chromium`), and `product`, the real-data journey against `make product` (below). The
+config turns `web.publish_actions` and `web.qa_enabled` on for the run. Outside CI it reuses a
+server already listening on that port. On CI it retries once and writes the HTML report.
+`e2e/fixtures.ts` extends `test` with `checkA11y(selector?)`, which runs `AxeBuilder` on the page
+(or one selector) and fails on any finding of impact `serious` or `critical` (moderate and minor
 findings are the unit level's business), and with `signIn(persona)`: the personas (`OWNER`,
 `COMPLIANCE_LEAD`, `CA_ADMIN`, `ANALYST`, `REVIEWER`, `ADMIN`) are signed in once per worker through the
 fake form and their cookies are added to the test's context, so a spec that needs a session
@@ -138,6 +143,10 @@ The specs on `main`:
 | `journey-owner.spec.ts` | one owner of a new tenant screen after screen against the stack, axe on each: the empty list, the privacy notice read from the consent step and back, the consents with a WhatsApp number and analytics, the demo business with its lookup values, one Not sure, one value and one Does not apply, the summary, the business's five pages by their tabs (the not-applicable task read back from the service), the list now opening the one business, whose home links to adding another and whose profile adds a second GSTIN of the same PAN (no lookup answer, a review task opened), analytics withdrawn on the consents page, the quiet hours of the number opted in at onboarding, a subscribe in the stack's billing state, and signing out |
 | `journey-ca-firm.spec.ts` | one CA admin of a new firm against the stack, axe on each screen: the empty client list, the consents without a WhatsApp box, two clients added through onboarding (the demo GSTIN, and one the lookup does not know), both on the list and the second found by a posted search, its `verify_registration` task, the firm's consents and billing |
 | `journey-visitor.spec.ts` | a visitor without a session: each legal document from the home page under its draft banner and on paper, `/onboarding` sending them to sign in and back, and the consent step naming the documents at the versions their pages showed (needs the seed for the consent step's read) |
+| `owner-obligations.spec.ts` | the obligation list, the calendar and an obligation's page on the memory stack, each test in a new tenant with a business made on the service (the stack has no worker, so no obligation appears): the list from the business's tabs with why it is empty, the filters in the address, a 547-day window refused on its field with nothing listed and a 366-day one asked, clearing the filters; the calendar of February 2000 with its arrow keys, Enter choosing a day, Page Down reading March in place with focus kept and the address following, the month links; the onboarding summary still looking for the first obligation; an unknown, a malformed or another tenant's obligation or business as the not-found page; a compliance lead reading the list, a visitor sent to sign in and an analyst to `/forbidden`; axe on each state |
+| `owner-changes.spec.ts` | the changes feed on the memory stack: the feed read from the rulebook first, so the page says nothing is published yet (the stack's rulebook starts with drafts) or shows the newest change as not decided for a business no fan-out has seen; another tenant's, an unknown and a malformed business as the not-found page; a visitor sent to sign in; axe |
+| `owner-ask.spec.ts` | ask on the memory stack with `web.qa_enabled` on: the Ask tab, an empty question refused on its field, the registration offered first, a question asked and the page compared with the qa service's answer to the same question (outcome, text, citations), the question kept in its field; not-found for other businesses; axe |
+| `product/journey-product.spec.ts` | project `product`, against `make product` after `make product-seed` (needs `CW_E2E_PRODUCT_URL`; `make product-e2e` sets it): signed in as the seeded synthetic business tenant through "Use the last seeded tenant", the obligation list compared with the service's merged lists and filtered to the ones still to do, the calendar of the first open obligation's month opening it; an obligation's page with its citations and whole clause, both synthetic approvers, the not-yet-reviewed warning and why it applies; a probe business made on the service whose first obligation the onboarding summary's poll finds, started, completed through a dropped answer and "Try again" (the replay said, one closure in the service's history) and commented on; the annual return's change applying to the business in the feed; "When is my GSTR-3B due?" answered from the business's obligations with the service's text and citations; axe on each |
 
 Every live page entry in the registry names its spec files in `e2e`, and `screens.test.ts`
 checks they exist. A spec is named after what it covers, not after the registry id. The
@@ -156,6 +165,23 @@ as a new user of the seeded tenant (a fresh display name is a fresh user id, so 
 run's consents are on file), and reads back what the page wrote with `serviceUrl(service)` in
 `fixtures.ts` (`CW_WEB_<SERVICE>_URL`, else `SERVICE_PORT_BASE` plus the service's position,
 as `make web-stack` assigns them).
+
+## The product project
+
+The `product` project runs `e2e/product` against the local product rather than the memory stack:
+`make product` (the one deployable with its worker on the dev infrastructure; `WEB=0` leaves its
+own `next dev` out) and `make product-seed` first, then
+
+```bash
+make product-e2e                  # builds the app into .next/e2e-product and runs --project=product
+```
+
+which starts `next start` on `PRODUCT_E2E_PORT` (3400) with every `CW_WEB_*_URL` at the internal
+listener (`CW_E2E_PRODUCT_URL=http://127.0.0.1:8080`; the config turns it into the app's service
+URLs). The spec reads the seed's state file (`var/seed/last.json`, or `CW_WEB_SEED_STATE_PATH`) for
+the tenant and its nodes and compares each page with the services' answers, read from the same
+listener. It writes as the seeded tenant only to a probe business of its own. Without
+`CW_E2E_PRODUCT_URL` or the state file it is skipped locally and fails on CI.
 
 ## Running things
 
@@ -218,13 +244,19 @@ TypeScript part; `pnpm format` is the prettier check.
 
 ## CI
 
-Two jobs in `.github/workflows/ci.yml` cover the app, both keyed on the `typescript` path filter
-(`apps/**`, `packages/ui/**`, `packages/contracts/**`, the workspace files, and `docs/legal/**`
-and `docs/web/**` because the build renders the legal drafts and the tests compare
-`docs/web/screens.md` with the registry); `web-e2e` also runs on the `python` filter:
+Three jobs in `.github/workflows/ci.yml` cover the app. Two are keyed on the `typescript` path
+filter (`apps/**`, `packages/ui/**`, `packages/contracts/**`, the workspace files, and
+`docs/legal/**` and `docs/web/**` because the build renders the legal drafts and the tests compare
+`docs/web/screens.md` with the registry); `web-e2e` also runs on the `python` filter, and
+`dev-stack` on its own `devstack` filter:
 
 - `typescript` runs `pnpm format` and `pnpm turbo run lint typecheck test build` for every
   package. No `CW_WEB_*` variable is set there, so the web build must not need one.
+- `dev-stack` (the compose smoke and the local product) also runs the product project: after
+  `make product-check` it installs the workspace and Chromium as `web-e2e` does and runs
+  `make product-e2e` on the product it started, uploading the Playwright report, the product's
+  logs and the seed state on failure. Its path filter includes `apps/web/**`, `packages/ui/**`
+  and `pnpm-lock.yaml`, so a web change runs it too (D-047).
 - `web-e2e` installs the workspace (pnpm, and uv with Python 3.12 and `uv sync --all-packages
   --locked`, because the services run from the uv workspace), runs `make web-screens-check
   openapi-ts-check` (no other job compares those generated files), starts every service with
@@ -232,12 +264,12 @@ and `docs/web/**` because the build renders the legal drafts and the tests compa
   downloads Chromium (`pnpm --filter web e2e:install`; the package has no install script, so
   `strictDepBuilds` stays satisfied) and builds the app with no `CW_WEB_*` variable while the
   services start, waits for their `/health` (`make web-stack-wait`, 120 seconds), seeds them
-  (`make web-seed`, which fails the job on any failed step), runs `pnpm --filter web e2e` with
-  `PORT=3000` and `CW_WEB_ENV=test`, then always prints the tail of every service log and stops
-  the stack. On failure it uploads the Playwright report, the test results, the service logs
-  and the seed state.
+  (`make web-seed`, which fails the job on any failed step), runs
+  `pnpm --filter web e2e --project=chromium` with `PORT=3000` and `CW_WEB_ENV=test`, then always
+  prints the tail of every service log and stops the stack. On failure it uploads the Playwright
+  report, the test results, the service logs and the seed state.
 
-Both are in the `needs` of the `CI gate` job, the one check branch protection requires;
+All three are in the `needs` of the `CI gate` job, the one check branch protection requires;
 `make ci-gate-check` fails when a job is missing from that list. Because `web-e2e` starts the
 services with the Makefile's recipes and seeds them over HTTP, it also runs when the `python`
 filter matches (`services/**`, the shared Python packages, `pyproject.toml`, `uv.lock`, the
