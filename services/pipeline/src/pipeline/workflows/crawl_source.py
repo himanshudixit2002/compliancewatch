@@ -17,12 +17,13 @@ by the worker's tick or an admin's fetch with the run their start recorded
 
 A backfill's crawl (trigger ``backfill``) lists its own window instead of the watermark's: from a
 date below the watermark, up to another, only the references its plan names, behind
-``workflow.patched(BACKFILL_PATCH)``; its end never moves the watermark back. A crawl that names
-no window records no marker, so the histories of every other crawl stay as they were.
+``workflow.patched(BACKFILL_PATCH)``; its end records the run only, and the source keeps its
+watermark, last listing and error. A crawl that names no window records no marker, so the
+histories of every other crawl stay as they were.
 
 A failure is recorded, not raised: a listing that fails ends the run as failed with the error on
-the run and the source, and a child that fails counts as failed. The workflow does no I/O
-itself.
+the run and (unless the crawl is a backfill) the source, and a child that fails counts as failed.
+The workflow does no I/O itself.
 """
 
 import asyncio

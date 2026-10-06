@@ -16,9 +16,12 @@ publication date stored, never past a document that was listed and not stored (o
 one beyond the cap, one another crawl is ingesting), so the next crawl lists it again
 (``next_watermark``). Undated documents are listed by every crawl and never hold it back.
 
-A backfill lists below the watermark on purpose, from a date its plan names (and up to another,
-of the references the plan names), so it never moves the watermark back: it may only move it
-forward, as the schedule's crawl does (``settled_watermark``).
+A backfill (``CrawlTrigger.BACKFILL``) lists history on purpose, from a date its plan names, up to
+another, and only the references the plan names, so it is none of the source's crawls: its end
+leaves the source's watermark as it found it (None included), and its last listing and error
+too. A watermark it moved forward would skip the documents between the old one and the newest it
+stored, and a first one it set would have the schedule's first crawl list years of the live site;
+the schedule's crawls go on from where they were.
 """
 
 import re
@@ -270,19 +273,6 @@ def next_watermark(
     if newest is None:
         return previous
     return newest if previous is None else max(previous, newest)
-
-
-def settled_watermark(
-    previous: date | None, computed: date | None, *, trigger: CrawlTrigger | None
-) -> date | None:
-    """The watermark a finished crawl leaves: ``computed`` (``next_watermark``), except that a
-    backfill, which lists below the watermark on purpose, never moves it back: the schedule's
-    crawl goes on from where it was."""
-    if trigger is not CrawlTrigger.BACKFILL or previous is None:
-        return computed
-    if computed is None or computed < previous:
-        return previous
-    return computed
 
 
 def failure_summary(outcomes: Sequence[DocumentOutcome]) -> str:

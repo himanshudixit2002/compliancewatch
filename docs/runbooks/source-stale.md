@@ -29,6 +29,8 @@ never pages.
    with an analyst's, reviewer's or admin's access token). `status` is `failing` with
    `last_error` when crawls run and fail, `fetching` when one runs now, `healthy` with an old
    `last_fetch_at` when no crawl starts at all. `latest_run` has the last run's counts and error.
+   A backfill (`trigger` `backfill`) is none of the source's crawls: it neither freshens the
+   source nor records its errors on it, so a stale source that was just backfilled is still stale.
 3. Is the tick running: the worker's `/loops` must list `pipeline/pipeline-crawl-tick` (with
    the crawl flag on) and the `pipeline` task queue; `worker.job_failed` with
    `job=pipeline-crawl-tick` or `pipeline.crawl_schedule_failed` in the worker's log says why a

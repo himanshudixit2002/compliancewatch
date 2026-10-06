@@ -18,7 +18,8 @@ the crawl workflow (``workflows.crawl_source``).
 - ``FinishCrawl`` (``pipeline.finish_crawl``): the run's counts and end, and the source's last
   listing, watermark and error, in one transaction. A document whose ingest failed or was busy
   elsewhere is looked up by its URL first, since its bytes may be stored all the same. A
-  backfill never moves the watermark back (``crawl.settled_watermark``).
+  backfill's end records its run only: the source keeps its watermark, last listing and error
+  as the schedule's crawls left them (``domain.crawl``).
 
 Neither the tick nor a start ever fetches inside a transaction: the workflow does the fetching,
 in its child ingests (``FetchAndStore``).
@@ -56,7 +57,6 @@ from pipeline.domain.crawl import (
     failure_summary,
     listing_since,
     next_watermark,
-    settled_watermark,
     tally,
 )
 from pipeline.domain.errors import (
@@ -368,7 +368,7 @@ class ChildOutcome(Frozen):
 class FinishRequest(Frozen):
     """The crawl's end: ``error`` when the listing failed, otherwise what it listed and what
     became of each new document, and how many new ones it left for a later crawl. A backfill's
-    (``trigger``) never moves the watermark back."""
+    (``trigger``) leaves its source as it found it."""
 
     source_key: str = Field(pattern=SOURCE_KEY_PATTERN)
     run_id: UUID
@@ -561,26 +561,12 @@ class FinishCrawl(ActivityBase[FinishRequest, CrawlResult]):
                 log.warning("pipeline.crawl_finished_late", source=key, run_id=str(run_id))
                 return _result(run, source, None, input.deferred)
             now = max(self._clock(), run.started_at)
-            if input.error:
-                finished = run.finish(now, counts, error=input.error)
-                updated = source.crawled(now, listed=False, watermark=None, error=input.error)
-            else:
-                finished = run.finish(now, counts)
-                watermark = settled_watermark(
-                    source.watermark_date,
-                    next_watermark(
-                        source.watermark_date,
-                        outcomes,
-                        known_newest=input.known_newest,
-                        deferred_oldest=input.deferred_oldest,
-                    ),
-                    trigger=input.trigger,
-                )
-                updated = source.crawled(
-                    now, listed=True, watermark=watermark, error=failure_summary(outcomes)
-                )
+            finished = run.finish(now, counts, error=input.error)
             unit.crawl_runs.save(finished)
-            unit.sources.save(updated)
+            updated = source
+            if input.trigger is not CrawlTrigger.BACKFILL:
+                updated = _crawled(source, input, outcomes, now)
+                unit.sources.save(updated)
         log.info(
             "pipeline.crawl_finished",
             source=key,
@@ -613,6 +599,23 @@ class FinishCrawl(ActivityBase[FinishRequest, CrawlResult]):
                 outcome = Outcome.DUPLICATE
             settled.append(DocumentOutcome(item.url, outcome, item.published_at, item.error))
         return settled
+
+
+def _crawled(
+    source: Source, input: FinishRequest, outcomes: Sequence[DocumentOutcome], now: datetime
+) -> Source:
+    """The source after the schedule's crawl or an admin's fetch: reached or not, its watermark
+    (``next_watermark``) and its error. A backfill's never comes here: it lists history, so the
+    source's watermark (None included), last listing and error stay the schedule's."""
+    if input.error:
+        return source.crawled(now, listed=False, watermark=None, error=input.error)
+    watermark = next_watermark(
+        source.watermark_date,
+        outcomes,
+        known_newest=input.known_newest,
+        deferred_oldest=input.deferred_oldest,
+    )
+    return source.crawled(now, listed=True, watermark=watermark, error=failure_summary(outcomes))
 
 
 def _result(run: CrawlRun, source: Source, watermark: date | None, deferred: int) -> CrawlResult:

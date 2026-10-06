@@ -6,8 +6,9 @@ references ``refs`` it takes; ``crawl.ListingWindow``), the most documents one c
 backfill runs each row's crawls one after the other (``CrawlSourceWorkflow`` with the trigger
 ``backfill``), and starts another round while the last one left new documents for a later crawl
 and stored something (``next_limit``), so a row ends once nothing is new, once nothing more could
-be stored, at its ``max_documents``, or after ``max_rounds``. A backfill never moves a source's
-watermark back (``crawl.settled_watermark``).
+be stored, at its ``max_documents``, or after ``max_rounds``. A backfill's crawls leave the
+source's watermark, last listing and error as they found them (``domain.crawl``): the schedule's
+crawls go on from where they were.
 """
 
 from dataclasses import dataclass

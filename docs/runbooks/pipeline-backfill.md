@@ -59,10 +59,13 @@ crawl, and ends each row once nothing new is left, the last crawl kept nothing, 
 `max_documents` were stored, or after `--max-rounds` (20) crawls; then a table of the rows. Exit
 1 when a row's crawl failed or could not start.
 
-A backfill never moves a source's watermark back, so the schedule's crawls go on from where they
-were. Interrupting the command stops it waiting, not the crawl it started: that one ends on the
-worker and is recorded; run the command again (with `--row N` from the row it stopped at) and
-what is stored already is known and skipped.
+A backfill is none of the source's crawls: each one records its run and leaves the source as it
+found it. Its watermark stays where the schedule's crawls left it (a source the schedule never
+crawled keeps none), and so do its last listing (its freshness, which the `SourceStale` alert
+reads), its last error and its status, so the schedule's crawls go on from where they were.
+Interrupting the command stops it waiting, not the crawl it started: that one ends on the worker and is recorded;
+run the command again (with `--row N` from the row it stopped at) and what is stored already is
+known and skipped.
 
 Watching it: `GET /v1/pipeline/runs?trigger=backfill` on the internal listener (the runs, the
 latest first, with their counts and errors), the Temporal UI for the workflows, and
@@ -92,8 +95,9 @@ and why. `--json` prints JSON. It writes nothing.
 - A document the detector set aside or misread: retry it with a type
   (`POST /v1/pipeline/documents/{document_id}/retry` with `stage` and `doc_type`, an admin's
   reason and an `Idempotency-Key`), which is audited.
-- Rows that failed: read the run's error (`GET /v1/pipeline/runs?status=failed`) and the
-  source's `last_error`; a site that blocks the crawler is in [source-stale.md](source-stale.md).
+- Rows that failed: read the run's error (`GET /v1/pipeline/runs?trigger=backfill&status=failed`;
+  a backfill leaves the source's `last_error` to the schedule's crawls); a site that blocks the
+  crawler is in [source-stale.md](source-stale.md).
 
 `--legacy` keeps the command this one replaced, which fetches into a local raw store (`var/raw`)
 outside the pipeline's store and records nothing: for recording fixtures only.

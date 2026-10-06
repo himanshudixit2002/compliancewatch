@@ -33,8 +33,8 @@ from pipeline.domain.crawl import (
     CrawlStatus,
     ListingWindow,
     Outcome,
+    listing_since,
     ref_key,
-    settled_watermark,
 )
 from pipeline.domain.errors import (
     CrawlDisabledError,
@@ -585,14 +585,84 @@ def test_a_window_reads_references_without_spaces_or_case() -> None:
         ListingWindow(refs=tuple(str(n) for n in range(MAX_REFS + 1)))
 
 
-def test_settled_watermark_keeps_a_backfill_from_moving_it_back() -> None:
-    ahead, behind = date(2026, 4, 21), date(2025, 1, 2)
-    assert settled_watermark(ahead, behind, trigger=CrawlTrigger.SCHEDULE) == behind
-    assert settled_watermark(ahead, behind, trigger=CrawlTrigger.BACKFILL) == ahead
-    assert settled_watermark(behind, ahead, trigger=CrawlTrigger.BACKFILL) == ahead
-    assert settled_watermark(None, behind, trigger=CrawlTrigger.BACKFILL) == behind
-    assert settled_watermark(ahead, None, trigger=CrawlTrigger.BACKFILL) == ahead
-    assert settled_watermark(ahead, None, trigger=None) is None
+def backfilled(store: MemoryStore, **request: object) -> None:
+    """A backfill crawl of the recorded source, ended with ``request``."""
+    run = CrawlRun(
+        id=CrawlRunId.new(),
+        source_key=RECORDED,
+        started_at=NOW,
+        trigger=CrawlTrigger.BACKFILL,
+        workflow_id="pipeline-crawl-recorded_cbic-backfill-1",
+    )
+    with store() as unit:
+        unit.crawl_runs.add(run)
+    values: dict[str, object] = {
+        "source_key": RECORDED,
+        "run_id": run.id.value,
+        "trigger": CrawlTrigger.BACKFILL,
+    }
+    values.update(request)
+    FinishCrawl(store, clock=Clock(NOW + timedelta(minutes=5))).finish(
+        FinishRequest.model_validate(values)
+    )
+
+
+def test_a_backfill_of_named_references_never_moves_the_watermark_forward() -> None:
+    """A row naming one recent notification lists that one alone: had its end moved the
+    watermark to its date, the schedule would skip what was published between the two."""
+    store = with_recorded(synced(), watermark=date(2026, 4, 1))
+    backfilled(
+        store,
+        listed=1,
+        known_newest=date(2026, 9, 1),
+        outcomes=[child(CBIC_PDF + "recent.pdf", Outcome.STORED, date(2026, 9, 20))],
+    )
+    source = store.sources[RECORDED]
+    assert source.watermark_date == date(2026, 4, 1)
+    assert listing_since(source.watermark_date, NOW.date()) == date(2026, 3, 25), (
+        "the schedule's next crawl lists from a week before the old watermark"
+    )
+
+
+def test_a_backfill_sets_no_first_watermark_on_a_source_never_crawled() -> None:
+    """A backfill of 2020 on a source the schedule never crawled leaves it with no watermark:
+    a first one in 2020 would have the schedule's first crawl list six years of the live site."""
+    store = with_recorded(synced())
+    backfilled(
+        store,
+        listed=2,
+        outcomes=[
+            child(CBIC_PDF + "82-2020.pdf", Outcome.STORED, date(2020, 11, 10)),
+            child(CBIC_PDF + "83-2020.pdf", Outcome.DUPLICATE, date(2020, 11, 10)),
+        ],
+    )
+    source = store.sources[RECORDED]
+    assert (source.watermark, source.last_fetch_at) == (None, None)
+    assert listing_since(source.watermark_date, NOW.date()) == NOW.date() - timedelta(days=30)
+
+
+def test_a_backfill_leaves_the_last_listing_and_error_to_the_schedule() -> None:
+    """A backfill's failures stay on its run: the source's freshness and status are the
+    schedule's crawls'."""
+    store = with_recorded(synced(), watermark=date(2026, 4, 1))
+    listed_at = NOW - timedelta(hours=1)
+    with store() as unit:
+        before = unit.sources.get(RECORDED)
+        assert before is not None
+        unit.sources.save(
+            before.crawled(listed_at, listed=True, watermark=date(2026, 4, 1), error="")
+        )
+    kept = store.sources[RECORDED]
+    backfilled(
+        store,
+        listed=1,
+        outcomes=[child(CBIC_PDF + "old.pdf", Outcome.FAILED, date(2020, 1, 2), "Timeout")],
+    )
+    backfilled(store, error="ListingError: the site did not answer")
+    assert store.sources[RECORDED] == kept
+    runs = [run for run in store.crawl_runs.values() if run.trigger is CrawlTrigger.BACKFILL]
+    assert sorted(run.status for run in runs) == [CrawlStatus.COMPLETED, CrawlStatus.FAILED]
+    assert {run.error for run in runs} == {"", "ListingError: the site did not answer"}
 
 
 def test_a_run_keeps_its_trigger_and_workflow_when_it_ends() -> None:

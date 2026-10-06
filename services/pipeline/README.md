@@ -264,9 +264,11 @@ schedule; no Temporal schedule holds a copy.
   with the trigger `backfill` ([Operations](#operations)): behind the patch
   `pipeline-backfill-v1`, the crawl lists the row's own window (from a date below the watermark,
   up to another, only the references the row names) and ingests up to the row's limit (500 at
-  most) instead of 50, and its end never moves the watermark back. A crawl that names no window
-  records no marker, so every other crawl's history replays as it was. Each run says its
-  `trigger` (`schedule`, `manual` or `backfill`) and its workflow id.
+  most) instead of 50. A backfill lists only part of history, so it is none of the source's
+  crawls: its end records its run and leaves the source as it was, its watermark (none
+  included), last listing and error, and the schedule's crawls go on from where they were. A
+  crawl that names no window records no marker, so every other crawl's history replays as it was.
+  Each run says its `trigger` (`schedule`, `manual` or `backfill`) and its workflow id.
 - **The workflow** `pipeline.crawl_source` (`CrawlSourceWorkflow`, two hours at most):
   1. `pipeline.list_new_documents` lists the source since a week before its watermark (the last
      30 days for a source without one), with no transaction open, and leaves out the URLs a
@@ -278,8 +280,8 @@ schedule; no Temporal schedule holds a copy.
      abandoned, not cancelled, when the crawl ends early: what they store stays stored;
   3. `pipeline.finish_crawl` records the run's counts (`listed`; `stored`, `duplicates` and
      `failed` of the new documents) and end, and the source's last listing (`last_fetch_at`),
-     watermark and `last_error`, in one transaction. A child that failed after its bytes were
-     stored (a parse failure) counts as stored.
+     watermark and `last_error` (a backfill's, the run alone), in one transaction. A child that
+     failed after its bytes were stored (a parse failure) counts as stored.
 - **The watermark** moves to the newest publication date stored, never past a listed document
   that is not stored (failed, beyond the cap of 50, or busy in another crawl), so the next crawl
   lists that one again. Undated documents are listed by every crawl and never hold it back. A
