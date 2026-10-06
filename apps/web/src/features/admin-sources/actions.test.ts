@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { randomBytes } from "node:crypto";
-import { revalidatePath } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionWindow } from "@/entities/session/mappers";
@@ -11,10 +11,10 @@ import { fakeCookies } from "@/test/fake-cookies";
 import { fakeFetch, jsonResponse, problemResponse } from "@/test/fake-fetch";
 import { ACTOR_ID, SOURCE_KEY, sourceDto } from "@/test/pipeline-fixture";
 import { editSource, fetchSource } from "./actions";
-import { FETCH_FIELDS, SETTINGS_FIELDS } from "./ui/source-shared";
+import { FETCH_FIELDS, SETTINGS_FIELDS, SETTINGS_RENDERED_FIELDS } from "./ui/source-shared";
 
 vi.mock("next/headers", async () => (await import("@/test/fake-cookies")).nextHeadersMock());
-vi.mock("next/cache", () => ({ updateTag: vi.fn(), revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => ({ updateTag: vi.fn(), revalidatePath: vi.fn(), refresh: vi.fn() }));
 
 const KEY = new Uint8Array(randomBytes(32));
 const IDLE = { status: "idle" } as const;
@@ -36,6 +36,10 @@ async function signedInAs(roles: SessionClaims["roles"]): Promise<void> {
   fakeCookies.set("cw_session", await encryptSession(claims, KEY));
 }
 
+/**
+ * The settings form as the page renders it for `sourceDto()` (its hidden fields say so), changed by
+ * `overrides`.
+ */
 function settingsForm(overrides: Record<string, string | null> = {}): FormData {
   const values: Record<string, string | null> = {
     [SETTINGS_FIELDS.name]: "Example notices",
@@ -44,6 +48,11 @@ function settingsForm(overrides: Record<string, string | null> = {}): FormData {
     [SETTINGS_FIELDS.paused]: null,
     [SETTINGS_FIELDS.parameters]: '{"listing": "notices"}',
     [SETTINGS_FIELDS.reason]: REASON,
+    [SETTINGS_RENDERED_FIELDS.name]: "Example notices",
+    [SETTINGS_RENDERED_FIELDS.cadence]: "7200",
+    [SETTINGS_RENDERED_FIELDS.enabled]: "on",
+    [SETTINGS_RENDERED_FIELDS.paused]: "off",
+    [SETTINGS_RENDERED_FIELDS.parameters]: '{\n  "listing": "notices"\n}',
     ...overrides,
   };
   const data = new FormData();
@@ -105,13 +114,14 @@ describe("editSource", () => {
     await signedInAs(["analyst"]);
     const fake = fakeFetch(() => jsonResponse(200, { items: [sourceDto()] }));
     vi.stubGlobal("fetch", fake.fetchImpl);
-    expect(await editSource(SOURCE_KEY, IDLE, settingsForm())).toMatchObject({
+    const changed = settingsForm({ [SETTINGS_FIELDS.cadence]: "3600" });
+    expect(await editSource(SOURCE_KEY, IDLE, changed)).toMatchObject({
       status: "error",
       formErrors: ["Only an admin changes a source"],
     });
     await signedInAs(["admin"]);
-    expect((await editSource("Bad-Key", IDLE, settingsForm())).status).toBe("error");
-    expect(await editSource("example_unknown", IDLE, settingsForm())).toMatchObject({
+    expect((await editSource("Bad-Key", IDLE, changed)).status).toBe("error");
+    expect(await editSource("example_unknown", IDLE, changed)).toMatchObject({
       status: "error",
       formErrors: ["The pipeline holds no source under this key"],
     });
@@ -122,7 +132,70 @@ describe("editSource", () => {
     expect(
       await editSource(SOURCE_KEY, IDLE, settingsForm({ [SETTINGS_FIELDS.reason]: "short" })),
     ).toMatchObject({ status: "error", fieldErrors: { reason: [expect.any(String)] } });
+    expect(
+      await editSource(
+        SOURCE_KEY,
+        IDLE,
+        settingsForm({
+          [SETTINGS_FIELDS.cadence]: "3600",
+          [SETTINGS_RENDERED_FIELDS.paused]: null,
+        }),
+      ),
+    ).toMatchObject({
+      status: "error",
+      formErrors: [expect.stringMatching(/^The form did not say which settings it showed/)],
+    });
     expect(fake.requests.some((request) => request.method === "PATCH")).toBe(false);
+  });
+
+  it("keeps another admin's pause when a form rendered before it changes only the cadence", async () => {
+    // Admin A opened the source unpaused; admin B paused it; A changed only the cadence and saved.
+    await signedInAs(["admin"]);
+    const fake = fakeFetch((request) =>
+      request.method === "GET"
+        ? jsonResponse(200, { items: [sourceDto({ paused: true })] })
+        : jsonResponse(200, sourceDto({ paused: true, cadence_seconds: 3600 })),
+    );
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await editSource(
+      SOURCE_KEY,
+      IDLE,
+      settingsForm({ [SETTINGS_FIELDS.cadence]: "3600" }),
+    );
+    expect(state).toMatchObject({
+      status: "ok",
+      value: { message: "Saved: cadence.", changed: ["cadenceSeconds"] },
+    });
+    const patch = fake.requests.find((request) => request.method === "PATCH");
+    expect(patch?.body).toEqual({ actor_id: ACTOR_ID, reason: REASON, cadence_seconds: 3600 });
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("refuses a change to a setting someone else changed meanwhile, sends nothing and renders again", async () => {
+    // B set the cadence to four hours after A's form rendered two; A asked for one.
+    await signedInAs(["admin"]);
+    const fake = fakeFetch(() =>
+      jsonResponse(200, { items: [sourceDto({ cadence_seconds: 14_400, paused: true })] }),
+    );
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await editSource(
+      SOURCE_KEY,
+      IDLE,
+      settingsForm({
+        [SETTINGS_FIELDS.cadence]: "3600",
+        [SETTINGS_FIELDS.name]: "Example renamed",
+      }),
+    );
+    expect(state).toEqual({
+      status: "error",
+      formErrors: [
+        "The cadence changed meanwhile: it is now 14400 seconds (4 h).",
+        "Nothing was saved. The form now shows the source as the pipeline holds it: make your change again if it still applies.",
+      ],
+    });
+    expect(fake.requests.map((request) => request.method)).toEqual(["GET"]);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 
   it("says the parameters were refused under their field, and passes a failed read on", async () => {
@@ -146,8 +219,12 @@ describe("editSource", () => {
       problem: { title: "The pipeline refused the parameters", detail: "listing: Example refusal" },
       fieldErrors: { parameters: [expect.any(String)] },
     });
-    vi.stubGlobal("fetch", fakeFetch(() => problemResponse(503)).fetchImpl);
-    expect((await editSource(SOURCE_KEY, IDLE, settingsForm())).status).toBe("error");
+    const away = fakeFetch(() => problemResponse(503));
+    vi.stubGlobal("fetch", away.fetchImpl);
+    expect(
+      await editSource(SOURCE_KEY, IDLE, settingsForm({ [SETTINGS_FIELDS.cadence]: "3600" })),
+    ).toMatchObject({ status: "error", problem: { title: "Test problem 503" } });
+    expect(away.requests.map((request) => request.method)).toEqual(["GET"]);
   });
 });
 

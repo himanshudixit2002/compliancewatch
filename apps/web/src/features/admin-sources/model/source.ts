@@ -1,7 +1,7 @@
 import type { Tone } from "@compliancewatch/ui";
 import type { Page, PipelineSource, SourceEdit, StoredDocument } from "@/entities/pipeline/types";
 import { hrefFor, screenById } from "@/shared/config/screens";
-import { t } from "@/shared/i18n";
+import { t, type MessageKey } from "@/shared/i18n";
 import type { FieldErrors } from "@/shared/lib/action-state";
 import { formatDate, formatDateTime } from "@/shared/lib/dates";
 import { withQuery } from "@/shared/lib/url";
@@ -15,11 +15,14 @@ import {
   REASON_MAX_LENGTH,
   REASON_MIN_LENGTH,
   SETTINGS_FIELDS,
+  SETTINGS_RENDERED_FIELDS,
+  UNCHECKED,
   type SettingsDefaults,
 } from "../ui/source-shared";
 import {
   cadenceText,
   formatCount,
+  formatSeconds,
   freshnessLabel,
   freshnessText,
   freshnessTone,
@@ -33,7 +36,8 @@ import {
 /**
  * One source's page: its facts and settings as the pipeline holds them, its stored documents a
  * page at a time (newest publication first, by the pipeline's cursor in the address), and the
- * settings form's parse, which sends only what changed.
+ * settings form's parse, which sends only what the admin changed from the values the form was
+ * rendered with, and the check that none of those changed meanwhile.
  */
 export const SOURCE_PARAMS = { cursor: "cursor" } as const;
 
@@ -265,16 +269,74 @@ export const SETTING_LABELS = {
   parameters: "adminSources.settings.parameters",
 } as const;
 
+export type SettingKey = keyof typeof SETTING_LABELS;
+
+/** The settings the form showed: the source as the pipeline held it when the page rendered. */
+export interface RenderedSettings {
+  name: string;
+  cadenceSeconds: number;
+  enabled: boolean;
+  paused: boolean;
+  parameters: Readonly<Record<string, unknown>>;
+}
+
+/** A JSON object written as text, or null for anything else. */
+function jsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(text.trim() === "" ? "{}" : text);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A rendered switch: on or off, and nothing else. */
+function renderedSwitch(value: string): boolean | null {
+  return value === CHECKED ? true : value === UNCHECKED ? false : null;
+}
+
+/**
+ * The settings the form says it was rendered with (its hidden fields), or null when one is
+ * missing or out of shape: a form that cannot say what it showed cannot say what changed.
+ */
+export function renderedSettingsOf(formData: FormData): RenderedSettings | null {
+  const name = formData.get(SETTINGS_RENDERED_FIELDS.name);
+  const cadence = textOf(formData, SETTINGS_RENDERED_FIELDS.cadence);
+  const enabled = renderedSwitch(textOf(formData, SETTINGS_RENDERED_FIELDS.enabled));
+  const paused = renderedSwitch(textOf(formData, SETTINGS_RENDERED_FIELDS.paused));
+  const parameters = formData.get(SETTINGS_RENDERED_FIELDS.parameters);
+  if (typeof name !== "string" || typeof parameters !== "string") return null;
+  const parsed = jsonObject(parameters);
+  if (!/^\d+$/.test(cadence) || enabled === null || paused === null || parsed === null) return null;
+  return { name, cadenceSeconds: Number(cadence), enabled, paused, parameters: parsed };
+}
+
 export type ParsedSettings =
-  | { ok: true; edit: SourceEdit; reason: string; changed: (keyof typeof SETTING_LABELS)[] }
+  | {
+      ok: true;
+      edit: SourceEdit;
+      reason: string;
+      /** The settings the admin changed, in the form's order. */
+      changed: SettingKey[];
+      rendered: RenderedSettings;
+    }
   | { ok: false; fieldErrors: FieldErrors; formError?: string };
 
 /**
- * The settings form against the source as the pipeline holds it now: each field's shape (a name
- * of 1 to 200 characters, a whole cadence from a minute to 31 days, the parameters as a JSON
- * object), the reason, and only the settings that differ, so an unchanged form sends nothing.
+ * The settings form against the values it was rendered with (its hidden fields): each field's
+ * shape (a name of 1 to 200 characters, a whole cadence from a minute to 31 days, the parameters
+ * as a JSON object), the reason, and only the settings whose value differs from what the form
+ * showed. A setting the admin left alone is never sent, whatever the pipeline holds for it now,
+ * so a form opened before someone else's change does not undo it; an unchanged form sends
+ * nothing.
  */
-export function parseSettings(formData: FormData, current: PipelineSource): ParsedSettings {
+export function parseSettings(formData: FormData): ParsedSettings {
+  const rendered = renderedSettingsOf(formData);
+  if (rendered === null) {
+    return { ok: false, fieldErrors: {}, formError: t("adminSources.error.staleForm") };
+  }
   const errors: Record<string, string[]> = {};
   const name = textOf(formData, SETTINGS_FIELDS.name).trim();
   if (name === "" || name.length > NAME_MAX_LENGTH) {
@@ -289,16 +351,7 @@ export function parseSettings(formData: FormData, current: PipelineSource): Pars
   }
   const enabled = textOf(formData, SETTINGS_FIELDS.enabled) === CHECKED;
   const paused = textOf(formData, SETTINGS_FIELDS.paused) === CHECKED;
-  let parameters: Record<string, unknown> | null = null;
-  const parametersText = textOf(formData, SETTINGS_FIELDS.parameters).trim();
-  try {
-    const parsed: unknown = JSON.parse(parametersText === "" ? "{}" : parametersText);
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      parameters = parsed as Record<string, unknown>;
-    }
-  } catch {
-    parameters = null;
-  }
+  const parameters = jsonObject(textOf(formData, SETTINGS_FIELDS.parameters));
   if (parameters === null)
     errors[SETTINGS_FIELDS.parameters] = [t("adminSources.error.parameters")];
   const reason = reasonOf(formData, SETTINGS_FIELDS.reason);
@@ -307,35 +360,86 @@ export function parseSettings(formData: FormData, current: PipelineSource): Pars
     return { ok: false, fieldErrors: errors };
   }
   const edit: SourceEdit = {};
-  const changed: (keyof typeof SETTING_LABELS)[] = [];
-  if (name !== current.name) {
+  const changed: SettingKey[] = [];
+  if (name !== rendered.name.trim()) {
     edit.name = name;
     changed.push("name");
   }
-  if (cadence !== current.cadenceSeconds) {
+  if (cadence !== rendered.cadenceSeconds) {
     edit.cadenceSeconds = cadence;
     changed.push("cadenceSeconds");
   }
-  if (enabled !== current.enabled) {
+  if (enabled !== rendered.enabled) {
     edit.enabled = enabled;
     changed.push("enabled");
   }
-  if (paused !== current.paused) {
+  if (paused !== rendered.paused) {
     edit.paused = paused;
     changed.push("paused");
   }
-  if (!sameJson(parameters, current.parameters)) {
+  if (!sameJson(parameters, rendered.parameters)) {
     edit.parameters = parameters;
     changed.push("parameters");
   }
   if (changed.length === 0) {
     return { ok: false, fieldErrors: {}, formError: t("adminSources.error.nothingChanged") };
   }
-  return { ok: true, edit, reason: reason.reason, changed };
+  return { ok: true, edit, reason: reason.reason, changed, rendered };
+}
+
+/**
+ * The settings the admin changed that the pipeline holds otherwise than the form showed: someone
+ * else changed them since the page rendered, so saving would overwrite a change the admin never
+ * saw. Settings the admin left alone are not looked at; they are not sent.
+ */
+export function changedMeanwhile(
+  changed: readonly SettingKey[],
+  rendered: RenderedSettings,
+  live: PipelineSource,
+): SettingKey[] {
+  const differs: Readonly<Record<SettingKey, () => boolean>> = {
+    name: () => live.name.trim() !== rendered.name.trim(),
+    cadenceSeconds: () => live.cadenceSeconds !== rendered.cadenceSeconds,
+    enabled: () => live.enabled !== rendered.enabled,
+    paused: () => live.paused !== rendered.paused,
+    parameters: () => !sameJson(live.parameters, rendered.parameters),
+  };
+  return changed.filter((setting) => differs[setting]());
+}
+
+const MEANWHILE: Readonly<Record<SettingKey, MessageKey>> = {
+  name: "adminSources.settings.meanwhile.name",
+  cadenceSeconds: "adminSources.settings.meanwhile.cadence",
+  enabled: "adminSources.settings.meanwhile.enabled",
+  paused: "adminSources.settings.meanwhile.paused",
+  parameters: "adminSources.settings.meanwhile.parameters",
+};
+
+function switchText(on: boolean): string {
+  return on ? t("adminSources.settings.switchOn") : t("adminSources.settings.switchOff");
+}
+
+/** "The cadence changed meanwhile: it is now 3600 seconds (1 h).": a setting and its value now. */
+export function changedMeanwhileText(setting: SettingKey, live: PipelineSource): string {
+  switch (setting) {
+    case "name":
+      return t(MEANWHILE.name, { value: live.name });
+    case "cadenceSeconds":
+      return t(MEANWHILE.cadenceSeconds, {
+        seconds: live.cadenceSeconds,
+        duration: formatSeconds(live.cadenceSeconds),
+      });
+    case "enabled":
+      return t(MEANWHILE.enabled, { value: switchText(live.enabled) });
+    case "paused":
+      return t(MEANWHILE.paused, { value: switchText(live.paused) });
+    case "parameters":
+      return t(MEANWHILE.parameters, { value: JSON.stringify(live.parameters) });
+  }
 }
 
 /** "the name and the cadence": the settings a change named, in words. */
-export function changedText(changed: readonly (keyof typeof SETTING_LABELS)[]): string {
+export function changedText(changed: readonly SettingKey[]): string {
   const labels = changed.map((key) => t(SETTING_LABELS[key]).toLowerCase());
   if (labels.length <= 1) return labels.join("");
   return t("adminSources.settings.andList", {

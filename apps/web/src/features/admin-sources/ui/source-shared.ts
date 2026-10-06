@@ -12,6 +12,19 @@ export const SETTINGS_FIELDS = {
   reason: "reason",
 } as const;
 
+/**
+ * The settings the form was rendered with, posted beside the edited ones as hidden fields: the
+ * action sends only what the admin changed from these, and refuses a change to a setting someone
+ * else changed since.
+ */
+export const SETTINGS_RENDERED_FIELDS = {
+  name: "rendered_name",
+  cadence: "rendered_cadence_seconds",
+  enabled: "rendered_enabled",
+  paused: "rendered_paused",
+  parameters: "rendered_parameters",
+} as const;
+
 export const FETCH_FIELDS = { reason: "reason" } as const;
 
 /** The fewest characters of a reason, once trimmed: the pipeline's rule for every write. */
@@ -30,6 +43,9 @@ export const CADENCE_MAX_SECONDS = 2_678_400;
 /** A checkbox's value when it is ticked. */
 export const CHECKED = "on";
 
+/** A rendered switch that was off (an unticked box sends nothing; a rendered one says so). */
+export const UNCHECKED = "off";
+
 /** What a settings change answered: the sentence to announce and the settings it changed. */
 export interface SettingsResult {
   message: string;
@@ -44,7 +60,10 @@ export interface FetchResult {
 /** Whether a write may be offered, and why not (the refusal names the role or the variable). */
 export type AccessView = { allowed: true } | { allowed: false; title: string; detail?: string };
 
-/** The settings form's starting values: the source as the pipeline holds it. */
+/**
+ * The settings form's starting values: the source as the pipeline held it when the page rendered.
+ * The form posts them back as its hidden fields (`SETTINGS_RENDERED_FIELDS`).
+ */
 export interface SettingsDefaults {
   name: string;
   cadenceSeconds: number;

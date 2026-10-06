@@ -53,9 +53,58 @@ describe("SettingsPanel", () => {
         paused: "on",
         parameters: DEFAULTS.parameters,
         reason: "Example reason of enough length",
+        rendered_name: "Example notices",
+        rendered_cadence_seconds: "7200",
+        rendered_enabled: "on",
+        rendered_paused: "off",
+        rendered_parameters: DEFAULTS.parameters,
       },
     ]);
     expect(await runAxe(container)).toHaveNoViolations();
+  });
+
+  it("starts again from the source when the page renders it otherwise, keeping the last answer", async () => {
+    const action = vi.fn<WriteAction<SettingsResult>>(async () => ({
+      status: "ok",
+      value: { message: "Saved: cadence.", changed: ["cadenceSeconds"] },
+      message: "Saved: cadence.",
+    }));
+    const { rerender } = render(<SettingsPanel action={action} defaults={DEFAULTS} listable />);
+    const user = userEvent.setup();
+    const cadence = () => screen.getByLabelText(/^Cadence/) as HTMLInputElement;
+    await user.clear(cadence());
+    await user.type(cadence(), "3600");
+    // The same settings rendered again (a refresh that found nothing new) keep the edit.
+    rerender(<SettingsPanel action={action} defaults={{ ...DEFAULTS }} listable />);
+    expect(cadence().value).toBe("3600");
+    await user.type(screen.getByLabelText(/^Why/), "Example reason of enough length");
+    await user.click(screen.getByRole("button", { name: "Save the settings" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save the settings" }),
+    );
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved: cadence."));
+    expect(action.mock.calls[0]?.[1].get("rendered_cadence_seconds")).toBe("7200");
+    // The page renders the source as saved, paused meanwhile by someone else: the form shows it.
+    const after = { ...DEFAULTS, cadenceSeconds: 3600, paused: true };
+    rerender(<SettingsPanel action={action} defaults={after} listable />);
+    expect(cadence().value).toBe("3600");
+    expect(screen.getByRole("checkbox", { name: /^Paused/ }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect((screen.getByLabelText(/^Why/) as HTMLTextAreaElement).value).toBe("");
+    expect(screen.getByRole("status").textContent).toBe("Saved: cadence.");
+    await user.click(screen.getByRole("checkbox", { name: /^Enabled/ }));
+    await user.type(screen.getByLabelText(/^Why/), "Example second reason, long enough");
+    await user.click(screen.getByRole("button", { name: "Save the settings" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save the settings" }),
+    );
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(2));
+    const second = action.mock.calls[1]?.[1];
+    expect(second?.get("rendered_cadence_seconds")).toBe("3600");
+    expect(second?.get("rendered_paused")).toBe("on");
+    expect(second?.get("paused")).toBe("on");
+    expect(second?.get("enabled")).toBeNull();
   });
 
   it("puts a refusal's field messages under their fields", async () => {

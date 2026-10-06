@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { sourceFromDto, storedDocumentFromDto } from "@/entities/pipeline/mappers";
 import { DOCUMENT_ID, documentDto, sourceDto, uploadSourceDto } from "@/test/pipeline-fixture";
-import { SETTINGS_FIELDS } from "../ui/source-shared";
+import { SETTINGS_FIELDS, SETTINGS_RENDERED_FIELDS } from "../ui/source-shared";
 import {
+  changedMeanwhile,
+  changedMeanwhileText,
   changedText,
   contentLabel,
   documentRow,
@@ -11,6 +13,7 @@ import {
   parseSettings,
   readCursor,
   reasonOf,
+  renderedSettingsOf,
   sameJson,
   settingsDefaults,
   sourceFacts,
@@ -26,6 +29,15 @@ function form(values: Record<string, string>): FormData {
 
 const SOURCE = sourceFromDto(sourceDto());
 
+/** What the form posts for the settings it was rendered with: SOURCE's, as the page shows them. */
+const RENDERED: Record<string, string> = {
+  [SETTINGS_RENDERED_FIELDS.name]: SOURCE.name,
+  [SETTINGS_RENDERED_FIELDS.cadence]: String(SOURCE.cadenceSeconds),
+  [SETTINGS_RENDERED_FIELDS.enabled]: "on",
+  [SETTINGS_RENDERED_FIELDS.paused]: "off",
+  [SETTINGS_RENDERED_FIELDS.parameters]: JSON.stringify(SOURCE.parameters, null, 2),
+};
+
 /** The form as the page renders it for SOURCE, changed by `overrides`. */
 function settings(overrides: Record<string, string | null> = {}): FormData {
   const values: Record<string, string | null> = {
@@ -35,6 +47,7 @@ function settings(overrides: Record<string, string | null> = {}): FormData {
     [SETTINGS_FIELDS.paused]: null,
     [SETTINGS_FIELDS.parameters]: JSON.stringify(SOURCE.parameters, null, 2),
     [SETTINGS_FIELDS.reason]: REASON,
+    ...RENDERED,
     ...overrides,
   };
   return form(
@@ -151,7 +164,7 @@ describe("the forms", () => {
     expect(sameJson("x", "x")).toBe(true);
   });
 
-  it("sends only the settings that changed", () => {
+  it("sends only the settings that differ from what the form showed", () => {
     const parsed = parseSettings(
       settings({
         [SETTINGS_FIELDS.name]: " Example renamed ",
@@ -160,7 +173,6 @@ describe("the forms", () => {
         [SETTINGS_FIELDS.paused]: "on",
         [SETTINGS_FIELDS.parameters]: '{"listing": "circulars"}',
       }),
-      SOURCE,
     );
     expect(parsed).toEqual({
       ok: true,
@@ -173,47 +185,110 @@ describe("the forms", () => {
         paused: true,
         parameters: { listing: "circulars" },
       },
+      rendered: {
+        name: "Example notices",
+        cadenceSeconds: 7200,
+        enabled: true,
+        paused: false,
+        parameters: { listing: "notices" },
+      },
     });
     const parameters = parseSettings(
       settings({ [SETTINGS_FIELDS.parameters]: '{ "listing" : "notices" }' }),
-      SOURCE,
     );
     expect(parameters).toMatchObject({
       ok: false,
       formError: expect.stringMatching(/^Nothing to save/),
     });
     const empty = parseSettings(
-      settings({ [SETTINGS_FIELDS.parameters]: "" }),
-      sourceFromDto(sourceDto({ parameters: {} })),
+      settings({
+        [SETTINGS_FIELDS.parameters]: "",
+        [SETTINGS_RENDERED_FIELDS.parameters]: "{}",
+      }),
     );
     expect(empty.ok).toBe(false);
   });
 
-  it("names each field whose shape is wrong", () => {
+  it("leaves alone a setting the admin did not touch, whatever it was rendered as", () => {
+    // The form was rendered paused; the admin changed only the cadence, so paused is not sent
+    // even though the form posts it, and a pause or a resume made meanwhile stands.
     const parsed = parseSettings(
       settings({
-        [SETTINGS_FIELDS.name]: "",
-        [SETTINGS_FIELDS.cadence]: "59",
-        [SETTINGS_FIELDS.parameters]: "[1]",
-        [SETTINGS_FIELDS.reason]: "short",
+        [SETTINGS_FIELDS.paused]: "on",
+        [SETTINGS_RENDERED_FIELDS.paused]: "on",
+        [SETTINGS_FIELDS.cadence]: "3600",
       }),
-      SOURCE,
     );
-    expect(parsed.ok).toBe(false);
-    if (parsed.ok) return;
-    expect(Object.keys(parsed.fieldErrors).sort()).toEqual(
-      ["cadence_seconds", "name", "parameters", "reason"].sort(),
+    expect(parsed).toMatchObject({
+      ok: true,
+      changed: ["cadenceSeconds"],
+      edit: { cadenceSeconds: 3600 },
+    });
+    expect(parsed.ok && Object.keys(parsed.edit)).toEqual(["cadenceSeconds"]);
+  });
+
+  it("refuses a form that does not say what it showed", () => {
+    for (const missing of Object.values(SETTINGS_RENDERED_FIELDS)) {
+      const form = settings({ [SETTINGS_FIELDS.cadence]: "3600", [missing]: null });
+      expect(parseSettings(form), missing).toMatchObject({
+        ok: false,
+        formError: expect.stringMatching(/^The form did not say which settings it showed/),
+      });
+    }
+    expect(renderedSettingsOf(settings({ [SETTINGS_RENDERED_FIELDS.enabled]: "yes" }))).toBeNull();
+    expect(renderedSettingsOf(settings({ [SETTINGS_RENDERED_FIELDS.cadence]: "1.5" }))).toBeNull();
+    expect(
+      renderedSettingsOf(settings({ [SETTINGS_RENDERED_FIELDS.parameters]: "[1]" })),
+    ).toBeNull();
+    expect(renderedSettingsOf(settings())).toEqual({
+      name: "Example notices",
+      cadenceSeconds: 7200,
+      enabled: true,
+      paused: false,
+      parameters: { listing: "notices" },
+    });
+  });
+
+  it("finds the changed settings someone else changed since the form rendered, and words them", () => {
+    const parsed = parseSettings(
+      settings({
+        [SETTINGS_FIELDS.name]: "Example renamed",
+        [SETTINGS_FIELDS.cadence]: "3600",
+        [SETTINGS_FIELDS.enabled]: null,
+        [SETTINGS_FIELDS.paused]: "on",
+        [SETTINGS_FIELDS.parameters]: '{"listing": "circulars"}',
+      }),
     );
-    const text = parseSettings(
-      settings({ [SETTINGS_FIELDS.parameters]: "not json", [SETTINGS_FIELDS.cadence]: "1.5" }),
-      SOURCE,
+    if (!parsed.ok) throw new Error("the form should parse");
+    expect(changedMeanwhile(parsed.changed, parsed.rendered, SOURCE)).toEqual([]);
+    const live = sourceFromDto(
+      sourceDto({
+        name: "Example notices, renamed meanwhile",
+        cadence_seconds: 14_400,
+        enabled: false,
+        paused: true,
+        parameters: { listing: "orders" },
+      }),
     );
-    expect(text.ok || Object.keys(text.fieldErrors).sort()).toEqual([
-      "cadence_seconds",
-      "parameters",
+    const meanwhile = changedMeanwhile(parsed.changed, parsed.rendered, live);
+    expect(meanwhile).toEqual(["name", "cadenceSeconds", "enabled", "paused", "parameters"]);
+    expect(meanwhile.map((setting) => changedMeanwhileText(setting, live))).toEqual([
+      'The name changed meanwhile: it is now "Example notices, renamed meanwhile".',
+      "The cadence changed meanwhile: it is now 14400 seconds (4 h).",
+      "The enabled switch changed meanwhile: it is now off.",
+      "The paused switch changed meanwhile: it is now on.",
+      'The parameters changed meanwhile: they are now {"listing":"orders"}.',
     ]);
-    expect(parseSettings(settings({ [SETTINGS_FIELDS.cadence]: "2678401" }), SOURCE).ok).toBe(
-      false,
+    // Only the settings the admin changed are looked at: a pause made meanwhile, with only the
+    // cadence changed in the form, is no conflict and is not sent.
+    const cadenceOnly = parseSettings(settings({ [SETTINGS_FIELDS.cadence]: "3600" }));
+    if (!cadenceOnly.ok) throw new Error("the form should parse");
+    const pausedMeanwhile = sourceFromDto(sourceDto({ paused: true }));
+    expect(changedMeanwhile(cadenceOnly.changed, cadenceOnly.rendered, pausedMeanwhile)).toEqual(
+      [],
+    );
+    expect(changedMeanwhileText("enabled", sourceFromDto(sourceDto({ enabled: true })))).toBe(
+      "The enabled switch changed meanwhile: it is now on.",
     );
   });
 

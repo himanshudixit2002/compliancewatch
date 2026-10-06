@@ -21,6 +21,8 @@ import {
   REASON_MAX_LENGTH,
   REASON_MIN_LENGTH,
   SETTINGS_FIELDS,
+  SETTINGS_RENDERED_FIELDS,
+  UNCHECKED,
   type SettingsDefaults,
   type SettingsResult,
 } from "./source-shared";
@@ -35,36 +37,30 @@ export interface SettingsPanelProps {
 
 const FIELD_NAMES = Object.values(SETTINGS_FIELDS);
 
+/** The form's identity: the settings it was rendered with. Other settings make another form. */
+export function renderedKey(defaults: SettingsDefaults): string {
+  return JSON.stringify([
+    defaults.name,
+    defaults.cadenceSeconds,
+    defaults.enabled,
+    defaults.paused,
+    defaults.parameters,
+  ]);
+}
+
 /**
  * An admin's change of a source's settings: its name, cadence, the enabled and paused switches,
  * and its adapter type's parameters (all of them, as JSON; the pipeline checks them again), with
- * the reason the pipeline keeps in its audit entry. Only the settings that differ from the source
- * as the pipeline holds it are sent; a dialog says what is recorded before anything is.
+ * the reason the pipeline keeps in its audit entry. The form posts the values it was rendered with
+ * beside the edited ones, so only what the admin changed is sent, and a change to a setting
+ * someone else changed since is refused by name; a dialog says what is recorded before anything
+ * is. The fields start again from the source whenever the page renders it with other settings (a
+ * save, a refresh, a refusal because it changed meanwhile): the form is keyed on them, while the
+ * answer of the last save stays where focus lands.
  */
 export function SettingsPanel({ action, defaults, listable }: SettingsPanelProps) {
   const id = useId();
-  const [name, setName] = useState(defaults.name);
-  const [cadence, setCadence] = useState(String(defaults.cadenceSeconds));
-  const [enabled, setEnabled] = useState(defaults.enabled);
-  const [paused, setPaused] = useState(defaults.paused);
-  const [parameters, setParameters] = useState(defaults.parameters);
-  const [reason, setReason] = useState("");
-  const [confirming, setConfirming] = useState(false);
   const { attempt, send, pending, outcomeRef } = useWriteAction(action);
-  const state: ActionState<SettingsResult> = attempt.last;
-
-  const submit = () => {
-    const formData = new FormData();
-    formData.set(SETTINGS_FIELDS.name, name);
-    formData.set(SETTINGS_FIELDS.cadence, cadence.trim());
-    if (enabled) formData.set(SETTINGS_FIELDS.enabled, CHECKED);
-    if (paused) formData.set(SETTINGS_FIELDS.paused, CHECKED);
-    formData.set(SETTINGS_FIELDS.parameters, parameters);
-    formData.set(SETTINGS_FIELDS.reason, reason.trim());
-    setConfirming(false);
-    send(formData);
-  };
-
   return (
     <section
       aria-labelledby={`${id}-heading`}
@@ -77,6 +73,64 @@ export function SettingsPanel({ action, defaults, listable }: SettingsPanelProps
       <p className="max-w-prose text-sm text-fg-muted">
         {listable ? t("adminSources.settings.intro") : t("adminSources.settings.introUploadOnly")}
       </p>
+      <SettingsForm
+        key={renderedKey(defaults)}
+        id={id}
+        defaults={defaults}
+        state={attempt.last}
+        pending={pending}
+        send={send}
+      />
+      <WriteOutcome
+        attempt={attempt}
+        pending={pending}
+        onResend={send}
+        outcomeRef={outcomeRef}
+        slot="settings-outcome"
+        fieldNames={FIELD_NAMES}
+      />
+    </section>
+  );
+}
+
+interface SettingsFormProps {
+  id: string;
+  defaults: SettingsDefaults;
+  state: ActionState<SettingsResult>;
+  pending: boolean;
+  send: (formData: FormData) => void;
+}
+
+/** The fields, starting from the settings the form was rendered with, and the save. */
+function SettingsForm({ id, defaults, state, pending, send }: SettingsFormProps) {
+  const [name, setName] = useState(defaults.name);
+  const [cadence, setCadence] = useState(String(defaults.cadenceSeconds));
+  const [enabled, setEnabled] = useState(defaults.enabled);
+  const [paused, setPaused] = useState(defaults.paused);
+  const [parameters, setParameters] = useState(defaults.parameters);
+  const [reason, setReason] = useState("");
+  const [confirming, setConfirming] = useState(false);
+
+  const submit = () => {
+    const formData = new FormData();
+    formData.set(SETTINGS_FIELDS.name, name);
+    formData.set(SETTINGS_FIELDS.cadence, cadence.trim());
+    if (enabled) formData.set(SETTINGS_FIELDS.enabled, CHECKED);
+    if (paused) formData.set(SETTINGS_FIELDS.paused, CHECKED);
+    formData.set(SETTINGS_FIELDS.parameters, parameters);
+    formData.set(SETTINGS_FIELDS.reason, reason.trim());
+    // What the form showed, so the action sends only what differs from it.
+    formData.set(SETTINGS_RENDERED_FIELDS.name, defaults.name);
+    formData.set(SETTINGS_RENDERED_FIELDS.cadence, String(defaults.cadenceSeconds));
+    formData.set(SETTINGS_RENDERED_FIELDS.enabled, defaults.enabled ? CHECKED : UNCHECKED);
+    formData.set(SETTINGS_RENDERED_FIELDS.paused, defaults.paused ? CHECKED : UNCHECKED);
+    formData.set(SETTINGS_RENDERED_FIELDS.parameters, defaults.parameters);
+    setConfirming(false);
+    send(formData);
+  };
+
+  return (
+    <>
       <Field
         id={`${id}-name`}
         label={t("adminSources.settings.name")}
@@ -170,14 +224,6 @@ export function SettingsPanel({ action, defaults, listable }: SettingsPanelProps
           {t("adminSources.settings.save")}
         </Button>
       </div>
-      <WriteOutcome
-        attempt={attempt}
-        pending={pending}
-        onResend={send}
-        outcomeRef={outcomeRef}
-        slot="settings-outcome"
-        fieldNames={FIELD_NAMES}
-      />
       {confirming ? (
         <ConfirmDialog
           open
@@ -192,6 +238,6 @@ export function SettingsPanel({ action, defaults, listable }: SettingsPanelProps
           onConfirm={submit}
         />
       ) : null}
-    </section>
+    </>
   );
 }

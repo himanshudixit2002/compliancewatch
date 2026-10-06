@@ -1,6 +1,8 @@
 import { ADMIN, ANALYST, IS_CI, OWNER, expect, seededTenantId, test } from "./fixtures";
 import {
+  STAGED_SOURCE_PREFIX,
   crawlIsOff,
+  editStagedSource,
   pipelineGet,
   sources,
   stageUpload,
@@ -61,9 +63,18 @@ test.describe("sources", () => {
       await expect(banner).toContainText("Crawling (pipeline.crawl)");
       await expect(banner).toContainText("Crawling is off by default");
       await expect(banner).toContainText("CW_PIPELINE_CRAWL_ENABLED");
-      await expect(page.locator("tr[data-source]")).toHaveCount(held.length);
+      // Tests running beside this one stage sources of their own (and rename one), so the page may
+      // hold more than the pipeline listed a moment before: every source listed is on it, and the
+      // built-in ones are exactly those.
+      const builtIn = held.filter((source) => !source.key.startsWith(STAGED_SOURCE_PREFIX));
+      expect(builtIn.length).toBeGreaterThan(0);
+      await expect(
+        page.locator(`tr[data-source]:not([data-source^='${STAGED_SOURCE_PREFIX}'])`),
+      ).toHaveCount(builtIn.length);
       for (const source of held) {
         const row = page.locator(`tr[data-source='${source.key}']`);
+        await expect(row).toHaveCount(1);
+        if (source.key.startsWith(STAGED_SOURCE_PREFIX)) continue;
         await expect(row).toContainText(source.name);
         await expect(row).toContainText(source.adapter_type);
         if (!source.listable) await expect(row).toContainText("Uploaded, never crawled");
@@ -168,6 +179,53 @@ test.describe("sources", () => {
         .getByRole("button", { name: "Save the settings" })
         .click();
       await expect(page.locator("[data-slot='settings-outcome']")).toContainText("Nothing to save");
+    });
+
+    test("a form opened before another admin's change saves only what this admin changed, and refuses a setting changed meanwhile", async ({
+      page,
+      signIn,
+      checkA11y,
+    }) => {
+      const staged = await stageUploadSource();
+      await signIn(ADMIN);
+      await page.goto(`${LIST}/${staged.key}`);
+      const panel = page.locator("[data-slot='settings-panel']");
+      const outcome = page.locator("[data-slot='settings-outcome']");
+      const pausedBox = panel.getByRole("checkbox", { name: /^Paused/ });
+      await expect(pausedBox).not.toBeChecked();
+      // Another admin pauses the source while this form still shows it running.
+      await editStagedSource(staged.key, { paused: true });
+      const renamed = `${staged.name} kept paused`;
+      await panel.getByLabel(/^Name/).fill(renamed);
+      await panel.getByLabel(/^Why/).fill("Example rename from a form opened earlier");
+      await panel.getByRole("button", { name: "Save the settings" }).click();
+      await page
+        .getByRole("dialog", { name: "Save these settings?" })
+        .getByRole("button", { name: "Save the settings" })
+        .click();
+      await expect(outcome).toContainText("Saved: name.");
+      let now = (await sources()).find((source) => source.key === staged.key);
+      expect(now?.name).toBe(renamed);
+      expect(now?.paused, "the other admin's pause stands").toBe(true);
+      // The page rendered the source again, so the form shows the pause it did not know of.
+      await expect(pausedBox).toBeChecked();
+      // Another admin sets the cadence; this form, showing the old one, asks for another.
+      await editStagedSource(staged.key, { cadence_seconds: 14_400 });
+      await panel.getByLabel(/^Cadence/).fill("3600");
+      await panel.getByLabel(/^Why/).fill("Example cadence from a form opened earlier");
+      await panel.getByRole("button", { name: "Save the settings" }).click();
+      await page
+        .getByRole("dialog", { name: "Save these settings?" })
+        .getByRole("button", { name: "Save the settings" })
+        .click();
+      await expect(outcome).toContainText(
+        "The cadence changed meanwhile: it is now 14400 seconds (4 h).",
+      );
+      await expect(outcome).toContainText("Nothing was saved.");
+      now = (await sources()).find((source) => source.key === staged.key);
+      expect(now?.cadence_seconds).toBe(14_400);
+      await expect(panel.getByLabel(/^Cadence/)).toHaveValue("14400");
+      await checkA11y();
     });
 
     test("an admin uploads a document to a staged statute source, and its stored bytes stream back", async ({

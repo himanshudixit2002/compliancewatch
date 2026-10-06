@@ -494,8 +494,12 @@ missing):
 
 - **Settings**: the name, the cadence, the enabled and paused switches and the parameters (as JSON,
   which the pipeline checks against the adapter type), with a reason of ten characters or more.
-  Only what differs from the source as the pipeline holds it now is sent (`PATCH`), the dialog
-  says what is recorded, and saving nothing says so without a request.
+  The form posts the values it was rendered with beside the edited ones, and only the settings the
+  admin changed from those are sent (`PATCH`): a setting someone else changed since, which this
+  admin left alone, stands. A setting this admin changed that someone else changed since is
+  refused by name with its value now, nothing is sent, and the page renders again so the form
+  shows the source as it is (the fields start again whenever the page renders other settings). The
+  dialog says what is recorded, and saving nothing says so without a request.
 - **Fetch now**, for a source that lists documents: a crawl started at once (`POST .../fetch`,
   202 with its run and workflow), a paused source included. The panel says up front that while
   crawling is off the pipeline refuses, reads no site and records no run, and a refusal says

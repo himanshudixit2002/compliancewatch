@@ -18,9 +18,17 @@ export interface SourceRow {
   listable: boolean;
   paused: boolean;
   enabled: boolean;
+  cadence_seconds: number;
   status: string;
   document_count: number;
 }
+
+/**
+ * The prefix of a source a spec staged (`example_<nine digits>`): the specs run in parallel and
+ * stage their own, so a page of every source holds more than one test read before it rendered,
+ * and a staged source's name may change under another test.
+ */
+export const STAGED_SOURCE_PREFIX = "example_";
 
 export interface DocumentRow {
   document_id: string;
@@ -89,7 +97,7 @@ export function syntheticHtml(title: string): SyntheticFile {
 
 /** A synthetic upload-only source of this run's own: no site, nothing listed, statutes. */
 export async function stageUploadSource(): Promise<SourceRow> {
-  const key = `example_${randomInt(100_000_000, 999_999_999)}`;
+  const key = `${STAGED_SOURCE_PREFIX}${randomInt(100_000_000, 999_999_999)}`;
   const response = await fetch(`${serviceUrl("pipeline")}/v1/pipeline/sources`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-cw-write-token": WRITE_TOKEN() },
@@ -104,6 +112,28 @@ export async function stageUploadSource(): Promise<SourceRow> {
     }),
   });
   expect(response.status, `POST a staged source: ${await response.clone().text()}`).toBe(201);
+  return (await response.json()) as SourceRow;
+}
+
+/**
+ * Another admin's change of a staged source while a page shows it, straight through the
+ * pipeline's route with the write token. Only a source a spec staged is ever changed.
+ */
+export async function editStagedSource(
+  key: string,
+  change: Readonly<Record<string, unknown>>,
+): Promise<SourceRow> {
+  if (!key.startsWith(STAGED_SOURCE_PREFIX)) throw new Error(`${key} is not a staged source`);
+  const response = await fetch(`${serviceUrl("pipeline")}/v1/pipeline/sources/${key}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "x-cw-write-token": WRITE_TOKEN() },
+    body: JSON.stringify({
+      actor_id: STAGING_ACTOR,
+      reason: "Example change by another admin, staged by the end-to-end suite",
+      ...change,
+    }),
+  });
+  expect(response.status, `PATCH a staged source: ${await response.clone().text()}`).toBe(200);
   return (await response.json()) as SourceRow;
 }
 

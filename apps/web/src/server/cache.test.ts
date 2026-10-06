@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { revalidatePath, updateTag } from "next/cache";
+import { refresh, revalidatePath, updateTag } from "next/cache";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CacheTagError,
@@ -9,10 +9,11 @@ import {
   cacheTag,
   cachedRead,
   tags,
+  renderAgain,
   uncachedRead,
 } from "./cache";
 
-vi.mock("next/cache", () => ({ updateTag: vi.fn(), revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => ({ updateTag: vi.fn(), revalidatePath: vi.fn(), refresh: vi.fn() }));
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -113,6 +114,15 @@ describe("afterMutation", () => {
   it("does nothing with an empty invalidation", () => {
     afterMutation({});
     afterMutation({ tags: [], paths: [] });
+    expect(updateTag).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("renderAgain", () => {
+  it("refreshes the page and expires nothing", () => {
+    renderAgain();
+    expect(refresh).toHaveBeenCalledTimes(1);
     expect(updateTag).not.toHaveBeenCalled();
     expect(revalidatePath).not.toHaveBeenCalled();
   });

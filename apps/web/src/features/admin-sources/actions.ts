@@ -2,7 +2,7 @@
 
 import { isProblemOf } from "@/entities/problem/mappers";
 import { pipelineWrites } from "@/server/api/pipeline-write";
-import { afterMutation } from "@/server/cache";
+import { afterMutation, renderAgain } from "@/server/cache";
 import { requireScreenSession } from "@/server/dal";
 import { toActionState } from "@/server/result";
 import { can } from "@/shared/config/permissions";
@@ -15,7 +15,13 @@ import {
   type ActionState,
 } from "@/shared/lib/action-state";
 import { sourcesGateway } from "./gateway";
-import { changedText, parseSettings, reasonOf } from "./model/source";
+import {
+  changedMeanwhile,
+  changedMeanwhileText,
+  changedText,
+  parseSettings,
+  reasonOf,
+} from "./model/source";
 import { plainRefusal } from "./refusals";
 import {
   FETCH_FIELDS,
@@ -25,9 +31,9 @@ import {
 } from "./ui/source-shared";
 
 /**
- * A source's writes: its settings (PATCH, only what changed) and a crawl started by hand. Each
- * runs the page's gate again (the proxy is not on an action's path), refuses anyone but an admin
- * (`admin.sources.write`) before any request, checks the form's shape, and goes through
+ * A source's writes: its settings (PATCH, only what the admin changed) and a crawl started by
+ * hand. Each runs the page's gate again (the proxy is not on an action's path), refuses anyone but
+ * an admin (`admin.sources.write`) before any request, checks the form's shape, and goes through
  * `server/api/pipeline-write.ts`, which sends the shared write token and names the session's user
  * as the actor; the pipeline keeps the reason in its audit entry. Its refusals are said plainly,
  * a fetch refused while crawling is off above all. On success the list and the source's page
@@ -50,7 +56,13 @@ function unknownSource<T>(): ActionState<T> {
   return actionFailure(t("adminSources.refusal.notFound"));
 }
 
-/** Saves the settings that changed, against the source as the pipeline holds it now. */
+/**
+ * Saves the settings the admin changed from the values the form was rendered with (its hidden
+ * fields), and nothing else: a setting someone else changed since, which the admin left alone,
+ * stays as they left it. When a setting the admin changed was changed meanwhile too, nothing is
+ * sent: the answer names it with its value now, and the page renders again so the form shows the
+ * source as it is.
+ */
 export async function editSource(
   key: string,
   _state: ActionState<SettingsResult>,
@@ -59,15 +71,23 @@ export async function editSource(
   const session = await requireScreenSession(PAGE, { key });
   if (!can(session, "admin.sources.write")) return adminOnly();
   if (!SOURCE_KEY.test(key)) return unknownSource();
-  const sources = await sourcesGateway().sources();
-  if (!sources.ok) return toActionState<SettingsResult>({ ok: false, error: sources.error });
-  const current = sources.value.find((source) => source.key === key);
-  if (current === undefined) return unknownSource();
-  const parsed = parseSettings(formData, current);
+  const parsed = parseSettings(formData);
   if (!parsed.ok) {
     return parsed.formError === undefined
       ? fieldFailure(parsed.fieldErrors)
       : actionFailure(parsed.formError, parsed.fieldErrors);
+  }
+  const sources = await sourcesGateway().sources();
+  if (!sources.ok) return toActionState<SettingsResult>({ ok: false, error: sources.error });
+  const live = sources.value.find((source) => source.key === key);
+  if (live === undefined) return unknownSource();
+  const meanwhile = changedMeanwhile(parsed.changed, parsed.rendered, live);
+  if (meanwhile.length > 0) {
+    renderAgain();
+    return actionFailure([
+      ...meanwhile.map((setting) => changedMeanwhileText(setting, live)),
+      t("adminSources.settings.meanwhile.nothingSaved"),
+    ]);
   }
   const result = await pipelineWrites({ session }, "admin.sources.write").editSource(
     key,
