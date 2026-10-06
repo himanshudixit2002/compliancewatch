@@ -1,11 +1,20 @@
-"""What a parsed document is and what it does to earlier documents.
+"""What a parsed document is, how sure that reading is, and what it does to earlier documents.
 
 The detector runs before extraction and needs no model: it reads the title and the first
-clauses for the words regulators use. It answers three questions. Which kind of document is
-this (a notification, a circular, a press release, an advisory)? Does it change an earlier one,
-and how (a corrigendum corrects, a rescission withdraws, an amendment amends, an extension moves
-a due date)? Which earlier documents does it name? A press release announces what the Council
-recommended, which is not in force until a notification says so, and the detector marks it.
+clauses for the words regulators use. It answers these questions. Which kind of document is
+this (a notification, a circular, a press release, an act amendment), and how sure is that: the
+opening names the type its source publishes (``certain``), names no type at all so the source's
+is taken (``default``), or names another type (``conflict``, which a person triages)? Is it a
+regulatory document at all, or a portal user manual listed among the notices (``relevance``)?
+Does it change an earlier document, and how (a corrigendum corrects, a rescission withdraws, an
+amendment amends, an extension moves a due date)? Which earlier documents does it name? A press
+release announces what the Council recommended, which is not in force until a notification says
+so, and the detector marks it.
+
+The type is the one the opening names first: a notification that later quotes "the
+recommendations of the Council" is a notification. A type a person gave (an uploader's, a
+triage's) is taken as it is, and so is a statute source's: no marker overrules a person, and an
+Act or the Rules quote notifications throughout.
 """
 
 import re
@@ -16,6 +25,7 @@ from enum import StrEnum
 from domain_kernel.citations import DASHES
 from domain_kernel.documents import DocumentType, ParsedDocument
 from domain_kernel.knowledge import EntityType, normalise_name
+from pipeline.domain.classification import Relevance, TypeConfidence, reasons_of
 
 CLAUSES_TO_READ = 6
 
@@ -30,12 +40,18 @@ class ChangeKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Detection:
+    """``confidence`` says how sure ``doc_type`` is and ``relevance`` whether the document is a
+    regulatory one; ``reasons`` say why, in words, the type's reason first."""
+
     doc_type: DocumentType
     change_kind: ChangeKind
     references: tuple[str, ...] = field(default=())
     announced_not_in_force: bool = False
     is_advisory: bool = False
     is_user_manual: bool = False
+    confidence: TypeConfidence = TypeConfidence.DEFAULT
+    relevance: Relevance = Relevance.RELEVANT
+    reasons: tuple[str, ...] = field(default=())
 
 
 _CORRIGENDUM = re.compile(r"\bcorrigend(?:um|a)\b", re.IGNORECASE)
@@ -59,27 +75,47 @@ _CIRCULAR_REF = re.compile(
     re.IGNORECASE,
 )
 _PRESS_RELEASE = re.compile(
-    r"\b(?:press release|recommendations? of the|council (?:meeting|held))\b", re.IGNORECASE
+    r"\bpress release\b|\bby pib\b|\bpib delhi\b|\b(?:gst )?council (?:meeting|held)\b"
+    r"|\bmeeting of the gst council\b|\brecommendations? of the \d+\s*(?:st|nd|rd|th)\b",
+    re.IGNORECASE,
 )
+"""What a press release says of itself. "On the recommendations of the Council", which nearly
+every notification says, is not among them."""
 _ADVISORY = re.compile(r"\badvisory\b", re.IGNORECASE)
 _USER_MANUAL = re.compile(r"\b(?:user manual|how to|faq|frequently asked)\b", re.IGNORECASE)
+_NOT_REGULATORY = re.compile(
+    r"\b(?:user manual|user guide|how to|step[- ]by[- ]step|tutorial)\b", re.IGNORECASE
+)
+"""A title that reads as help for the portal, not a regulator's document. An FAQ explains the
+law and stays relevant."""
 _CIRCULAR = re.compile(r"\bcircular\b", re.IGNORECASE)
 _NOTIFICATION = re.compile(r"\bnotification\b", re.IGNORECASE)
 _OWN_NUMBER = re.compile(r"^\s*(?:notification|circular)\s+(?:no\.?\s*)?\d", re.IGNORECASE)
 _ACT_AMENDMENT = re.compile(r"\b(?:amendment )?act,? \d{4}\b.*\bamend", re.IGNORECASE | re.DOTALL)
+OPENING_CHARS = 400
+"""How much of the head the type markers are looked for in."""
 
 
 def detect(
-    doc: ParsedDocument, *, default_type: DocumentType | None = None, own_ref: str = ""
+    doc: ParsedDocument,
+    *,
+    default_type: DocumentType | None = None,
+    own_ref: str = "",
+    given_type: DocumentType | None = None,
 ) -> Detection:
     """Read ``doc`` and classify it.
 
-    ``default_type`` is what the source usually publishes; ``own_ref`` is the document's own
-    number as the source listed it ("01/2026-Central Tax"), so a gazette text that repeats its
-    own number does not cite itself.
+    ``default_type`` is what the source usually publishes (``doc.doc_type`` when not given);
+    ``given_type`` is a type a person gave (an uploader's, a triage's), which is taken as it is;
+    ``own_ref`` is the document's own number as the source listed it ("01/2026-Central Tax"),
+    so a gazette text that repeats its own number does not cite itself.
     """
     head = " ".join([doc.title, *(clause.text for clause in doc.clauses[:CLAUSES_TO_READ])])
-    doc_type = _doc_type(head, default_type or doc.doc_type)
+    expected = given_type or default_type or doc.doc_type
+    doc_type, confidence, type_reason = _doc_type(
+        opening_of(doc), expected, given=given_type is not None
+    )
+    relevance, relevance_reason = _relevance(doc.title, expected, given=given_type is not None)
     change = _change_kind(head)
     references = tuple(_references(head, exclude=doc.title, own_ref=own_ref))
     return Detection(
@@ -89,20 +125,98 @@ def detect(
         announced_not_in_force=doc_type is DocumentType.PRESS_RELEASE,
         is_advisory=bool(_ADVISORY.search(doc.title)),
         is_user_manual=bool(_USER_MANUAL.search(doc.title)),
+        confidence=confidence,
+        relevance=relevance,
+        reasons=reasons_of((type_reason, relevance_reason)),
     )
 
 
-def _doc_type(head: str, default: DocumentType) -> DocumentType:
-    opening = head[:400]
-    if _PRESS_RELEASE.search(opening):
-        return DocumentType.PRESS_RELEASE
-    if _ACT_AMENDMENT.search(opening) and "act" in opening.lower()[:120]:
-        return DocumentType.ACT_AMENDMENT
-    if _CIRCULAR.search(opening[:200]) and not _NOTIFICATION.search(opening[:120]):
-        return DocumentType.CIRCULAR
-    if _NOTIFICATION.search(opening[:200]):
-        return DocumentType.NOTIFICATION
-    return default
+def _named(doc_type: DocumentType) -> str:
+    return doc_type.value.replace("_", " ")
+
+
+def opening_of(doc: ParsedDocument) -> str:
+    """The first ``OPENING_CHARS`` of the title and the first clauses, where the type markers
+    are looked for. A title the first clause starts with (a PDF's title is its first line, cut
+    short) is read once, in the clause."""
+    clauses = [clause.text for clause in doc.clauses[:CLAUSES_TO_READ]]
+    title = doc.title.strip()
+    lead = [] if title and clauses and clauses[0].strip().startswith(title) else [doc.title]
+    return " ".join([*lead, *clauses])[:OPENING_CHARS]
+
+
+def _doc_type(
+    opening: str, expected: DocumentType, *, given: bool
+) -> tuple[DocumentType, TypeConfidence, str]:
+    """The type, how sure it is, and why."""
+    if given:
+        return (
+            expected,
+            TypeConfidence.CERTAIN,
+            f"a person gave its type: {_named(expected)}",
+        )
+    if expected is DocumentType.STATUTE:
+        return (
+            expected,
+            TypeConfidence.CERTAIN,
+            "its source holds statutes, which an analyst uploads",
+        )
+    found = marked_type(opening)
+    if found is None:
+        return (
+            expected,
+            TypeConfidence.DEFAULT,
+            f"nothing in its opening names its type, so it is taken as its source's: "
+            f"{_named(expected)}",
+        )
+    if found is expected:
+        return (
+            found,
+            TypeConfidence.CERTAIN,
+            f"its opening names it a {_named(found)}, the type its source publishes",
+        )
+    return (
+        found,
+        TypeConfidence.CONFLICT,
+        f"its opening names it a {_named(found)}, but its source publishes the type "
+        f"{_named(expected)}",
+    )
+
+
+def marked_type(opening: str) -> DocumentType | None:
+    """The type ``opening`` names first, or None when it names none: a press release by what
+    one says of itself, an act amendment by an Act and its year with an amendment, a circular or
+    a notification by its name."""
+    opening = opening[:OPENING_CHARS]
+    found: list[tuple[int, DocumentType]] = []
+    press = _PRESS_RELEASE.search(opening)
+    if press is not None:
+        found.append((press.start(), DocumentType.PRESS_RELEASE))
+    act = _ACT_AMENDMENT.search(opening)
+    if act is not None and "act" in opening.lower()[:120]:
+        found.append((act.start(), DocumentType.ACT_AMENDMENT))
+    circular = _CIRCULAR.search(opening)
+    if circular is not None:
+        found.append((circular.start(), DocumentType.CIRCULAR))
+    notification = _NOTIFICATION.search(opening)
+    if notification is not None:
+        found.append((notification.start(), DocumentType.NOTIFICATION))
+    return min(found, key=lambda item: item[0])[1] if found else None
+
+
+def _relevance(title: str, expected: DocumentType, *, given: bool) -> tuple[Relevance, str]:
+    """Whether the document is a regulatory one, and why."""
+    if given:
+        return Relevance.RELEVANT, f"a person placed it as a {_named(expected)}"
+    if expected is DocumentType.STATUTE:
+        return Relevance.RELEVANT, "a statute is the law the other documents act on"
+    if _NOT_REGULATORY.search(title):
+        return (
+            Relevance.IRRELEVANT,
+            "its title reads as a user manual or a how-to guide for the portal, not a "
+            "regulator's document",
+        )
+    return Relevance.RELEVANT, "its title does not read as a user manual or a how-to guide"
 
 
 def _change_kind(head: str) -> ChangeKind:
