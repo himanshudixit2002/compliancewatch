@@ -253,11 +253,11 @@ schedule; no Temporal schedule holds a copy.
 - **The tick.** With the flag on, the worker runs `pipeline-crawl-tick` every 60 seconds
   (`ScheduleCrawls`). A source is due when it is enabled and not paused, no crawl of it runs (a
   backfill's included), and its cadence has passed since its last crawl that was not a backfill
-  started (`domain/schedule.py`). For each one the
-  tick locks the source's row, records a crawl run whose id is derived from the workflow id
-  `pipeline-crawl-<key>-<cadence slot start>`, and only then, with the transaction closed, starts
-  the workflow with the id reuse policy `REJECT_DUPLICATE`. A second tick in the same slot finds
-  the run recorded (and Temporal would refuse the id), so a double tick starts nothing twice.
+  started (`domain/schedule.py`). For each one the tick locks the source's row, records a crawl
+  run whose id is derived from the workflow id `pipeline-crawl-<key>-<cadence slot start>`, and
+  only then, with the transaction closed, starts the workflow with the id reuse policy
+  `REJECT_DUPLICATE`. A second tick in the same slot finds the run recorded (and Temporal would
+  refuse the id), so a double tick starts nothing twice.
 - **By hand.** `POST /v1/pipeline/sources/{key}/fetch` does the same for one source at once,
   under `pipeline-crawl-<key>-manual-<request>`, and answers 202 with the run's id; 409 while a
   crawl of the source runs, 503 while the flag is off. A paused source may be fetched by hand.
@@ -509,12 +509,12 @@ same request again under its `Idempotency-Key` answers its attempt (`Idempotent-
 and starts its ingest only if it never started (503 when Temporal did not answer: send it again).
 The attempt's workflow id is used once (`REJECT_DUPLICATE`), so an ingest of it that failed or
 timed out is not run again under the same attempt and audit row: a new request, with a new key,
-is a new attempt. The key with another body is a 422, a request without one a 428. A retry is refused with 409
-`pipeline-ingest-running` while an ingest of the document runs (its earlier retries', its
-crawl's, its tasks' resolutions' and its rule extraction's, the ids that follow from the
-document; an upload's ingest has an id of its own that the check does not see), and with 409
-`pipeline-retry-refused` while a triage task holds the document (decide or dismiss the task
-first).
+is a new attempt. The key with another body is a 422, a request without one a 428. A retry is
+refused with 409 `pipeline-ingest-running` while an ingest of the document runs (its earlier
+retries', its crawl's, its tasks' resolutions' and its rule extraction's, the ids that follow
+from the document; an upload's ingest has an id of its own that the check does not see), and
+with 409 `pipeline-retry-refused` while a triage task holds the document (decide or dismiss the
+task first).
 
 **A dead row** is one the relay gave up on after eight failed sends; its message is also on
 `<topic>.dlq`. Requeue it once the cause is fixed, and the relay sends it on its next pass and
