@@ -183,3 +183,28 @@ def reasons_of(texts: Sequence[str]) -> tuple[str, ...]:
     fit, at most ``MAX_REASONS``."""
     kept = [text.strip()[:MAX_REASON_CHARS] for text in texts if text.strip()]
     return tuple(kept[:MAX_REASONS])
+
+
+@dataclass(frozen=True, slots=True)
+class TriageDecision:
+    """A person's triage of a conflict: the document is ``relevant`` and of ``doc_type``, or
+    ``irrelevant`` (no type: the classifier's reading stays on record)."""
+
+    relevance: Relevance
+    doc_type: DocumentType | None = None
+
+    def __post_init__(self) -> None:
+        require_instance(self.relevance, Relevance, "relevance")
+        if self.doc_type is not None:
+            require_instance(self.doc_type, DocumentType, "doc_type")
+        if (self.relevance is Relevance.RELEVANT) != (self.doc_type is not None):
+            raise InvariantViolationError(
+                "a relevant document is triaged with its type, an irrelevant one without"
+            )
+
+    def resolution(self) -> dict[str, object]:
+        """What the task's resolution records of it."""
+        return {
+            "relevance": self.relevance.value,
+            "doc_type": None if self.doc_type is None else self.doc_type.value,
+        }

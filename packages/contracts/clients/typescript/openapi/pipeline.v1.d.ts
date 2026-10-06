@@ -255,8 +255,9 @@ export type paths = {
     /**
      * Dismiss a task with a reason
      * @description Close an open task without the work: the reason says why (a duplicate scan, not a
-     *     regulatory document). A dismissed manual parse leaves its document failed and unregistered.
-     *     Audited as pipeline.task.dismiss. 409 for a closed task.
+     *     regulatory document). A dismissed manual parse leaves its document failed and unregistered,
+     *     a dismissed triage leaves it held for triage and unregistered. Audited as
+     *     pipeline.task.dismiss. 409 for a closed task.
      */
     post: operations["dismiss_task_v1_pipeline_tasks__task_id__dismiss_post"];
     delete?: never;
@@ -275,15 +276,27 @@ export type paths = {
     get?: never;
     put?: never;
     /**
-     * Resolve a task: a manual parse with the analyst's transcript
-     * @description Resolve an open manual-parse task with the document typed by hand: headings, numbered
+     * Resolve a task: a manual parse with a transcript, a triage with a decision
+     * @description Resolve an open task.
+     *
+     *     A manual parse takes the document typed by hand (``transcript``): headings, numbered
      *     paragraphs and tables in document order, checked first (422 names each problem). The
      *     transcript is kept in the raw store, the task is resolved and audited as
      *     pipeline.task.resolve, and an ingest starts that parses the document from it as manual@1
      *     and, while knowledge is on, registers it in the rulebook; from then on the document is
-     *     parsed from its transcript. 409 for a closed task (the same transcript again starts the
-     *     ingest if it did not start); 422 for a resolution that does not fit the task (a manual parse
-     *     without a transcript, a triage task, which its own step resolves); 503 when Temporal does
+     *     parsed from its transcript.
+     *
+     *     A triage takes the analyst's decision (``triage``): relevant with the document's type, or
+     *     irrelevant. It is stored on the task's resolution and becomes the document's classification
+     *     (certain, by triage), with its status and a document.classified, audited as
+     *     pipeline.task.resolve; the stored document's own type is never changed. A relevant document
+     *     continues through an ingest (pipeline-triage-<task>) that registers it as that type while
+     *     knowledge is on and, for a notification, circular or act amendment, extracts its rule
+     *     candidate while the extraction is on; an irrelevant one is set aside and nothing starts.
+     *
+     *     409 for a closed task (the same transcript or decision again starts the ingest if it did not
+     *     start); 422 for a resolution that does not fit the task (a manual parse without a
+     *     transcript, a triage without a decision, or either with the other's); 503 when Temporal does
      *     not answer, in which case the task stays resolved and the same request starts the ingest
      *     again.
      */
@@ -437,11 +450,22 @@ export type components = {
     };
     /**
      * DocumentStatus
-     * @description Where a stored document stands: just discovered, parsed into clauses, failed to parse,
-     *     or set aside as not a regulatory document (a user manual listed among notifications).
+     * @description Where a stored document stands: just discovered; parsed into clauses; failed to parse
+     *     (a manual parse waits); set aside as not a regulatory document (a user manual listed among
+     *     notifications); classified and on its way to the rule extraction; held for a person's
+     *     triage; kept for reference (a press release, a statute: registered, nothing extracted); or
+     *     extracted, its rule candidate made.
      * @enum {string}
      */
-    DocumentStatus: "discovered" | "parsed" | "failed" | "irrelevant";
+    DocumentStatus:
+      | "discovered"
+      | "parsed"
+      | "failed"
+      | "irrelevant"
+      | "classified"
+      | "triage"
+      | "reference"
+      | "extracted";
     /**
      * DocumentType
      * @description What a regulator document is. A ``statute`` is an Act or the Rules made under it (the
@@ -612,20 +636,31 @@ export type components = {
       status: string;
     };
     /**
+     * Relevance
+     * @enum {string}
+     */
+    Relevance: "relevant" | "irrelevant";
+    /**
      * ResolutionOut
-     * @description The resolved task and the ingest that parses its transcript: ``started`` is false when it
-     *     was started before (it runs, or it is done).
+     * @description The resolved task and the ingest it starts (a manual parse's parses the transcript, a
+     *     relevant triage's continues the document as its type): ``started`` is false when it was
+     *     started before (it runs, or it is done). An irrelevant triage starts none, and
+     *     ``workflow_id`` is empty.
      */
     ResolutionOut: {
       /** Started */
       started: boolean;
       task: components["schemas"]["TaskOut"];
-      /** Workflow Id */
+      /**
+       * Workflow Id
+       * @description pipeline-manual-parse-<task> or pipeline-triage-<task>; empty for an irrelevant triage
+       */
       workflow_id: string;
     };
     /**
      * ResolveIn
-     * @description The resolution of a task: a manual parse takes the analyst's transcript.
+     * @description The resolution of a task: a manual parse takes the analyst's transcript, a triage the
+     *     analyst's decision.
      */
     ResolveIn: {
       /**
@@ -640,6 +675,7 @@ export type components = {
        */
       reason: string;
       transcript?: components["schemas"]["TranscriptIn"] | null;
+      triage?: components["schemas"]["TriageIn"] | null;
     };
     /**
      * SourceEditIn
@@ -837,7 +873,7 @@ export type components = {
        * Format: uuid
        */
       document_id: string;
-      /** @description manual_parse (no parser reads the document) or triage */
+      /** @description manual_parse (no parser reads the document) or triage (the classify step found another type in the text than its source publishes) */
       kind: components["schemas"]["TaskKind"];
       /**
        * Note
@@ -851,12 +887,12 @@ export type components = {
       opened_at: string;
       /**
        * Reason
-       * @description Why it opened: each parser's reason, for a manual parse
+       * @description Why it opened: each parser's reason, for a manual parse; the classifier's, for a triage
        */
       reason: string;
       /**
        * Resolution
-       * @description What the resolution did: for a manual parse, the transcript's storage key and digest, the parser (manual@1) and the clause count
+       * @description What the resolution did: for a manual parse, the transcript's storage key and digest, the parser (manual@1) and the clause count; for a triage, the relevance, the type and the route it gave the document (extract, reference or irrelevant)
        */
       resolution: {
         [key: string]: unknown;
@@ -900,6 +936,17 @@ export type components = {
        * @default
        */
       title?: string;
+    };
+    /**
+     * TriageIn
+     * @description A triage's decision: the document is relevant and of a type, or irrelevant (its type
+     *     left as the classifier read it). The reason is the request's own.
+     */
+    TriageIn: {
+      /** @description Its type, for a relevant document: a notification, circular or act amendment goes on to the rule extraction; a press release or a statute is kept for reference */
+      doc_type?: components["schemas"]["DocumentType"] | null;
+      /** @description relevant: a regulator's document, of doc_type; irrelevant: set it aside */
+      relevance: components["schemas"]["Relevance"];
     };
     /**
      * UploadOut
