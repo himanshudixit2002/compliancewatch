@@ -392,12 +392,19 @@ In one transaction the classification is recorded (`document_classification`, on
 document), the document's status moves on and `document.classified` 1.0.0 is written; a conflict
 also opens its `triage` task, whose reason is the classifier's. Where the document goes:
 
-| Classification | Status | Then |
+| Classification | Status (its route) | Then |
 | --- | --- | --- |
 | irrelevant (whatever its type) | `irrelevant` | the ingest ends; nothing is registered |
 | relevant, `conflict` | `triage` | the ingest ends, unregistered, until a person decides |
-| a press release or a statute | `reference` | registered and embedded, nothing extracted |
-| a notification, circular or act amendment | `classified` | registered as that type, then its rule candidate is extracted while the extraction is on (`extracted` once stored) |
+| a press release or a statute | `reference` | registered and embedded while knowledge is on, nothing extracted |
+| a notification, circular or act amendment | `classified` | registered as that type while knowledge is on, then its rule candidate is extracted while the extraction is on; `extracted` once an extraction is stored, an `unparseable` one too |
+
+A status is the route the document was sent, set when it is classified and before anything is
+registered, not what became of it. A `reference` or `classified` document keeps its status
+whether or not knowledge is on and its registration succeeded (the ingest's result says
+`registered`); a `classified` one stays so while the extraction is off or after it failed; and
+`extracted` says an extraction is stored, whatever its `outcome` (`rule_extraction`), so a
+document the model gave no candidate for is `extracted` too.
 
 A document classified before keeps its classification: a retry, a second ingest of the same bytes
 and a triage's continuation find it and write nothing. A triage is resolved through

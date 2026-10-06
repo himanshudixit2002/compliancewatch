@@ -17,6 +17,20 @@ person's triage (a ``triage`` task), a press release or a statute is kept for re
 (registered and embedded, nothing extracted), and a notification, circular or act amendment
 goes on to the rule extraction. A person's triage replaces a conflict with their decision,
 ``certain``, by the ``triage`` classifier.
+
+A document's status names its route, not what became of it. The classify step sets it before
+anything is registered, in the transaction of the classification:
+
+- ``irrelevant`` and ``triage``: the ingest ends there and nothing is registered;
+- ``reference``: on its way to be registered and embedded, nothing extracted. It is registered
+  only while knowledge is on and its registration succeeds, so a ``reference`` document may be
+  in no rulebook (the ingest's result says ``registered``);
+- ``classified``: on its way to the rule extraction, registered the same way, and extracted only
+  once registered and while the extraction is on; a document stays ``classified`` while the
+  extraction is off, when it failed, and when knowledge is off;
+- ``extracted``, set by the stored extraction: an extraction is stored, whatever its outcome,
+  so an ``unparseable`` one, with no candidate for an analyst to review, is ``extracted`` too
+  (``domain.extraction``).
 """
 
 from collections.abc import Sequence
@@ -78,7 +92,8 @@ class Route(StrEnum):
 
     @property
     def status(self) -> DocumentStatus:
-        """The document's status on this route."""
+        """The document's status on this route, set when it is classified, before anything is
+        registered: the route it takes, not an outcome."""
         return _STATUS[self]
 
     @property

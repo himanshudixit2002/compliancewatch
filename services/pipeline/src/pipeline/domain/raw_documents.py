@@ -38,8 +38,10 @@ class DocumentStatus(StrEnum):
     """Where a stored document stands: just discovered; parsed into clauses; failed to parse
     (a manual parse waits); set aside as not a regulatory document (a user manual listed among
     notifications); classified and on its way to the rule extraction; held for a person's
-    triage; kept for reference (a press release, a statute: registered, nothing extracted); or
-    extracted, its rule candidate made."""
+    triage; kept for reference (a press release, a statute: on its way to be registered, nothing
+    extracted); or extracted, its extraction stored, a candidate or an unparseable answer. The
+    statuses a classification sets are its route, not outcomes (``domain.classification``): a
+    ``reference`` or ``classified`` document is registered only while knowledge is on."""
 
     DISCOVERED = "discovered"
     PARSED = "parsed"
