@@ -221,7 +221,11 @@ def test_an_admin_adds_a_source_and_its_crawl_stores_the_recorded_notifications(
         assert refs == NUMBERS, "newest publication first"
         assert rest["next_cursor"] is None
         document = first["items"][0]
-        assert ok(internal.get(f"{BASE}/documents/{document['document_id']}")) == document
+        detail = ok(internal.get(f"{BASE}/documents/{document['document_id']}"))
+        assert {key: detail[key] for key in document} == document, "the record as listed"
+        assert (detail["read_as"], detail["retries"]) == ("notification", []), (
+            "with how the pipeline reads it and no retry"
+        )
         raw = internal.get(document["raw_path"])
         assert raw.status_code == 200
         assert raw.headers["content-type"] == "application/pdf"
