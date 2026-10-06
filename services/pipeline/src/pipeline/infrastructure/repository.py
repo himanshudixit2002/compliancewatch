@@ -27,7 +27,7 @@ from sqlalchemy import (
     tuple_,
     update,
 )
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import distinct_on, insert
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
@@ -293,7 +293,7 @@ class SqlAlchemyCrawlRunRepository:
     def latest_by_source(self) -> Mapping[str, CrawlRun]:
         statement = (
             select(CrawlRunRow)
-            .distinct(CrawlRunRow.source_key)
+            .ext(distinct_on(CrawlRunRow.source_key))
             .order_by(CrawlRunRow.source_key, CrawlRunRow.started_at.desc(), CrawlRunRow.id.desc())
         )
         return {row.source_key: _to_run(row) for row in self._session.scalars(statement).all()}
