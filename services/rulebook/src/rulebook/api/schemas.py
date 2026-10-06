@@ -88,6 +88,14 @@ class RegisteredOut(BaseModel):
     metadata_differs: list[str] = Field(
         description="Fields whose submitted value differs from the stored one; the stored wins"
     )
+    parser_version: str = Field(
+        description=(
+            "The parser whose clauses are stored: the submitted one, or for a document another "
+            "parser version registered first, that one (the first parse is kept, and "
+            "clause_ids are its clauses)"
+        ),
+        examples=["pdf@1"],
+    )
 
     @classmethod
     def from_registration(cls, registration: Registration) -> Self:
@@ -96,6 +104,7 @@ class RegisteredOut(BaseModel):
             created=registration.created,
             clause_ids={ref: clause_id.value for ref, clause_id in registration.clause_ids.items()},
             metadata_differs=list(registration.metadata_differs),
+            parser_version=registration.parser_version,
         )
 
 

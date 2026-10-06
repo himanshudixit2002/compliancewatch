@@ -1,10 +1,15 @@
 """Register a parsed regulator document and read it back.
 
 Registration is idempotent: the same document with the same clauses returns what is stored, so
-a retried pipeline activity is harmless. A different parse of stored bytes is refused: documents
-and clauses are append-only, and mention spans and citations point into the stored text. What
-happens to stored documents after a parser change is an open decision (ADR-018), never an
-overwrite.
+a retried pipeline activity is harmless. Documents and clauses are append-only, since mention
+spans and citations point into the stored text, so the first parse of a document is kept
+(ADR-018, addendum of 2026-10-06):
+
+- a parse of stored bytes by another parser version (a newer parser, or an analyst's transcript)
+  is answered with what is stored: the stored clause ids, the stored parser version, and
+  ``parser_version`` among ``metadata_differs``. Nothing is written and nothing is refused;
+- a different parse by the same parser version is refused (``DocumentConflictError``, a 409):
+  that parser changed what it gives for the same bytes without a new version, which is a bug.
 """
 
 from collections.abc import Mapping, Sequence
@@ -25,10 +30,14 @@ from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
 
 @dataclass(frozen=True, slots=True)
 class Registration:
+    """What a registration came to. ``parser_version`` names the parser whose clauses are stored:
+    the submitted one, or the one that parsed the document first when another submits it."""
+
     document_id: DocumentId
     created: bool
     clause_ids: Mapping[str, ClauseId]
     metadata_differs: tuple[str, ...] = ()
+    parser_version: str = ""
 
 
 class RegisterDocument:
@@ -41,18 +50,26 @@ class RegisterDocument:
             stored = uow.documents.get(document.document_id)
             if stored is None and uow.documents.add(document):
                 uow.documents.add_clauses(submitted)
-                return _registration(document.document_id, submitted, created=True)
+                return _registration(
+                    document.document_id,
+                    submitted,
+                    created=True,
+                    parser_version=document.parser_version,
+                )
             # Stored before, or a concurrent registration won the insert just now.
             stored = stored or uow.documents.get(document.document_id)
             current = uow.documents.clauses(document.document_id)
-            if not same_clauses(current, submitted):
+            kept = document.parser_version if stored is None else stored.parser_version
+            if kept == document.parser_version and not same_clauses(current, submitted):
                 raise DocumentConflictError(
-                    f"document {document.document_id} is stored with other clauses: "
-                    f"{len(current)} stored, {len(submitted)} submitted by "
-                    f"{document.parser_version}"
+                    f"document {document.document_id} is stored with other clauses by the same "
+                    f"parser {kept}: {len(current)} stored, {len(submitted)} submitted; a parser "
+                    "that changes what it gives for the same bytes needs a new version"
                 )
             differs = () if stored is None else metadata_differences(stored, document)
-            return _registration(document.document_id, current, created=False, differs=differs)
+            return _registration(
+                document.document_id, current, created=False, differs=differs, parser_version=kept
+            )
 
 
 class ReadDocument:
@@ -72,6 +89,7 @@ def _registration(
     clauses: Sequence[StoredClause],
     *,
     created: bool,
+    parser_version: str,
     differs: tuple[str, ...] = (),
 ) -> Registration:
     return Registration(
@@ -79,4 +97,5 @@ def _registration(
         created=created,
         clause_ids={clause.clause_ref: clause.clause_id for clause in clauses},
         metadata_differs=differs,
+        parser_version=parser_version,
     )

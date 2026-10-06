@@ -281,9 +281,12 @@ export type components = {
     DocumentStatus: "discovered" | "parsed" | "failed" | "irrelevant";
     /**
      * DocumentType
+     * @description What a regulator document is. A ``statute`` is an Act or the Rules made under it (the
+     *     CGST Act, the CGST Rules): the law the other documents amend and the rules cite. An analyst
+     *     uploads it; it is registered and its clauses embedded, but no rule is extracted from it.
      * @enum {string}
      */
-    DocumentType: "notification" | "circular" | "press_release" | "act_amendment";
+    DocumentType: "notification" | "circular" | "press_release" | "act_amendment" | "statute";
     /**
      * FetchIn
      * @description An admin's fetch of the source now.

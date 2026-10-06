@@ -80,6 +80,7 @@ describe("parseSearchForm", () => {
       "Circular",
       "Press release",
       "Act amendment",
+      "Statute",
     ]);
     expect(hitCountOptions().map((option) => option.value)).toEqual(["8", "20", "50"]);
   });

@@ -108,14 +108,36 @@ def test_metadata_differences_are_reported_and_the_stored_row_wins(
         (CLAUSES[0], Clause("en.p2", CLAUSES[1].text, page=2)),
     ],
 )
-def test_a_different_parse_of_stored_bytes_is_refused(
+def test_a_different_parse_by_the_same_parser_is_refused(
     store: MemoryKnowledgeStore, clauses: Sequence[Clause]
 ) -> None:
     RegisterDocument(store).run(document(), CLAUSES)
-    with pytest.raises(DocumentConflictError, match="stored with other clauses"):
-        RegisterDocument(store).run(document(parser_version="pdf@2"), clauses)
+    with pytest.raises(DocumentConflictError, match="by the same parser pdf@1"):
+        RegisterDocument(store).run(document(), clauses)
     _, stored = ReadDocument(store).run(document_id_for(DIGEST))
     assert [c.text for c in stored] == [c.text for c in CLAUSES]
+
+
+@pytest.mark.parametrize(
+    "clauses",
+    [
+        (CLAUSES[0],),
+        (CLAUSES[0], Clause("en.p2", "different text"), Clause("en.p3", "a table row | 5%")),
+        CLAUSES,
+    ],
+)
+def test_a_parse_by_another_parser_is_answered_with_the_first_one(
+    store: MemoryKnowledgeStore, clauses: Sequence[Clause]
+) -> None:
+    first = RegisterDocument(store).run(document(), CLAUSES)
+    again = RegisterDocument(store).run(document(parser_version="pdf-tables@1"), clauses)
+    assert (again.created, again.parser_version) == (False, "pdf@1")
+    assert again.clause_ids == first.clause_ids
+    assert again.metadata_differs == ("parser_version",)
+    stored, kept = ReadDocument(store).run(document_id_for(DIGEST))
+    assert stored.parser_version == "pdf@1"
+    assert [c.text for c in kept] == [c.text for c in CLAUSES]
+    assert first.parser_version == "pdf@1"
 
 
 def test_reading_an_unknown_document_is_a_lookup_error(store: MemoryKnowledgeStore) -> None:

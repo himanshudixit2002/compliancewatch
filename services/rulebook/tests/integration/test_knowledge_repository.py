@@ -92,11 +92,26 @@ def test_a_different_parse_is_refused_and_changes_nothing(
 ) -> None:
     RegisterDocument(factory).run(_document(), CLAUSES)
     with pytest.raises(DocumentConflictError):
-        RegisterDocument(factory).run(
-            _document(parser_version="pdf@2"), (*CLAUSES, Clause("en.p3", "extra"))
-        )
+        RegisterDocument(factory).run(_document(), (*CLAUSES, Clause("en.p3", "extra")))
+    kept = RegisterDocument(factory).run(
+        _document(parser_version="pdf@2"), (*CLAUSES, Clause("en.p3", "extra"))
+    )
+    assert (kept.created, kept.parser_version) == (False, "pdf@1")
     _, clauses = ReadDocument(factory).run(document_id_for(DIGEST))
     assert len(clauses) == len(CLAUSES)
+
+
+def test_a_statute_is_stored(factory: PostgresKnowledgeUnitOfWorkFactory) -> None:
+    digest = hashlib.sha256(b"Example Act, 2000").hexdigest()
+    statute = _document(
+        sha256=digest,
+        document_id=document_id_for(digest),
+        doc_type=DocumentType.STATUTE,
+        parser_version="manual@1",
+    )
+    assert RegisterDocument(factory).run(statute, CLAUSES).created is True
+    stored, _ = ReadDocument(factory).run(document_id_for(digest))
+    assert stored.doc_type is DocumentType.STATUTE
 
 
 def test_an_unknown_document_is_reported(factory: PostgresKnowledgeUnitOfWorkFactory) -> None:

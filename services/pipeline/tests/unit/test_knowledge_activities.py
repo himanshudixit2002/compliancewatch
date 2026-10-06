@@ -163,6 +163,33 @@ async def test_a_conflict_is_passed_on() -> None:
         await activity.run(request())
 
 
+async def test_the_rulebook_keeps_the_first_parse_of_another_parser() -> None:
+    rulebook = MemoryRulebook()
+    activity = RegisterDocument(FakePlainTextParser(), rulebook, enabled=True)
+    await activity.run(request())
+    stored = next(iter(rulebook.records.values()))
+    first = dataclasses.replace(
+        stored.document, clauses=stored.document.clauses[:1], parser_version="older@1"
+    )
+    rulebook.records[stored.document.document_id] = dataclasses.replace(stored, document=first)
+    kept = await activity.run(request())
+    assert (kept.created, kept.parser_version, kept.clause_count) == (False, "older@1", 1)
+    assert rulebook.records[stored.document.document_id].document == first
+
+
+class KeptWithWrongIds(MemoryRulebook):
+    def register_document(self, record: DocumentRecord) -> RegisteredDocument:
+        doc_id = record.document.document_id
+        return RegisteredDocument(doc_id, False, {"p1": clause_id_for(doc_id, "p2")}, "older@1")
+
+
+async def test_kept_clauses_still_carry_the_kernels_ids() -> None:
+    with pytest.raises(KnowledgeContractError, match="differ from the kernel"):
+        await RegisterDocument(FakePlainTextParser(), KeptWithWrongIds(), enabled=True).run(
+            request()
+        )
+
+
 def test_the_activity_declares_what_a_retry_cannot_fix() -> None:
     policy = RegisterDocument.retry_policy
     assert set(policy.non_retryable_error_types or ()) == {

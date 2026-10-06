@@ -5,8 +5,9 @@ a rulebook, an S3 endpoint, a recorded adapter type and a crawl starter.
 answers 404 for anything else, so a test that reaches an unrecorded URL fails loudly instead of
 touching the network. Routes are exact matches on method and URL; the CBIC listing routes also
 insist on the token header the real site wants. ``MemoryRulebook`` stands in for the rulebook's
-write API with the same rules: ids from the kernel, a different parse of stored bytes refused,
-a clause's first vector from a model kept. ``StubS3`` answers the raw store's S3 calls the way
+write API with the same rules: ids from the kernel, the first parse of a document kept (another
+parser version's parse is answered with it, the same version's different parse refused), a
+clause's first vector from a model kept. ``StubS3`` answers the raw store's S3 calls the way
 S3 does, signature checks included, from a dict. ``sample_activities`` are the worker's
 activities on the sample notification's source, the plain-text parser and memory stores.
 
@@ -264,17 +265,23 @@ class MemoryRulebook:
         self.calls += 1
         document = record.document
         stored = self.records.get(document.document_id)
-        if stored is not None and _clauses(stored.document) != _clauses(document):
+        if (
+            stored is not None
+            and stored.document.parser_version == document.parser_version
+            and _clauses(stored.document) != _clauses(document)
+        ):
             raise RulebookConflictError(f"409: document {document.document_id} differs")
         if stored is None:
             self.records[document.document_id] = record
+        kept = (stored or record).document
         return RegisteredDocument(
             document_id=document.document_id,
             created=stored is None,
             clause_ids={
                 clause.clause_ref: clause_id_for(document.document_id, clause.clause_ref)
-                for clause in document.clauses
+                for clause in kept.clauses
             },
+            parser_version=kept.parser_version,
         )
 
     def submit_mentions(self, submission: MentionSubmission) -> AlignmentReport:

@@ -30,11 +30,15 @@ class DocumentRecord:
 
 @dataclass(frozen=True, slots=True)
 class RegisteredDocument:
-    """The rulebook's answer: whether it stored the document now, and the id of each clause."""
+    """The rulebook's answer: whether it stored the document now, the id of each clause it
+    keeps, and the parser whose clauses those are. The rulebook keeps the first parse of a
+    document (ADR-018): when another parser version registered it first, ``parser_version`` names
+    that one and ``clause_ids`` are its clauses. Empty from a rulebook older than the rule."""
 
     document_id: DocumentId
     created: bool
     clause_ids: Mapping[str, ClauseId] = field(default_factory=dict)
+    parser_version: str = ""
 
 
 @dataclass(frozen=True, slots=True)

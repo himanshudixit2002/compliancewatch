@@ -39,7 +39,10 @@ from pipeline.domain.knowledge import (
     StagedRelation,
 )
 from pipeline.domain.ports import KnowledgeSink, RawStore, RulebookReader
+from py_common.logging import get_logger
 from py_common.temporal import ActivityBase
+
+log = get_logger(__name__)
 
 
 class RegisterRequest(Frozen):
@@ -48,10 +51,15 @@ class RegisterRequest(Frozen):
 
 
 class Registered(Frozen):
+    """``parser_version`` names the parser whose clauses the rulebook keeps: this parse's, or
+    the first parse's when another parser version registered the document before (ADR-018);
+    ``clause_count`` counts those clauses."""
+
     document_id: UUID
     clause_count: int = 0
     created: bool = False
     skipped: bool = False
+    parser_version: str = ""
 
 
 class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
@@ -115,18 +123,33 @@ class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
                 raw_uri=request.raw_uri,
             )
         )
-        expected = {
-            clause.clause_ref: clause_id_for(parsed.document_id, clause.clause_ref)
-            for clause in parsed.clauses
-        }
-        if registered.document_id != parsed.document_id or dict(registered.clause_ids) != expected:
+        kept = registered.parser_version or parsed.parser_version
+        if kept == parsed.parser_version:
+            refs = [clause.clause_ref for clause in parsed.clauses]
+        else:
+            # The rulebook keeps the clauses another parser version registered first: they are
+            # not this parse's, but their ids must still be the kernel's for their refs.
+            refs = list(registered.clause_ids)
+            log.info(
+                "pipeline.registration_kept",
+                document_id=str(parsed.document_id),
+                parsed_by=parsed.parser_version,
+                kept=kept,
+            )
+        expected = {ref: clause_id_for(parsed.document_id, ref) for ref in refs}
+        if (
+            registered.document_id != parsed.document_id
+            or not expected
+            or dict(registered.clause_ids) != expected
+        ):
             raise KnowledgeContractError(
                 f"the rulebook's ids for document {parsed.document_id} differ from the kernel's"
             )
         return Registered(
             document_id=parsed.document_id.value,
-            clause_count=len(parsed.clauses),
+            clause_count=len(expected),
             created=registered.created,
+            parser_version=kept,
         )
 
 

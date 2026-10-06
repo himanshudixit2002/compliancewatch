@@ -991,9 +991,12 @@ export type components = {
     };
     /**
      * DocumentType
+     * @description What a regulator document is. A ``statute`` is an Act or the Rules made under it (the
+     *     CGST Act, the CGST Rules): the law the other documents amend and the rules cite. An analyst
+     *     uploads it; it is registered and its clauses embedded, but no rule is extracted from it.
      * @enum {string}
      */
-    DocumentType: "notification" | "circular" | "press_release" | "act_amendment";
+    DocumentType: "notification" | "circular" | "press_release" | "act_amendment" | "statute";
     /** EmbeddingIn */
     EmbeddingIn: {
       /**
@@ -1407,6 +1410,12 @@ export type components = {
        * @description Fields whose submitted value differs from the stored one; the stored wins
        */
       metadata_differs: string[];
+      /**
+       * Parser Version
+       * @description The parser whose clauses are stored: the submitted one, or for a document another parser version registered first, that one (the first parse is kept, and clause_ids are its clauses)
+       * @example pdf@1
+       */
+      parser_version: string;
     };
     /** RejectIn */
     RejectIn: {

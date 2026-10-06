@@ -22,11 +22,11 @@ Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architectur
 
 ## What is in the database today
 
-Migrations `0001` to `0007` create fourteen tables in schema `rulebook`:
+Migrations `0001` to `0007` create fourteen tables in schema `rulebook`, and `0008` lets a document be a statute:
 
 | Table | Purpose | Keys |
 | --- | --- | --- |
-| `document` | A regulator document, one row per distinct file: source, digest, regulator, type, URL, title, language, parser version, publication and fetch time | pk `id` = first 32 hex digits of `sha256` (CHECK); unique `sha256`; append-only (trigger) |
+| `document` | A regulator document, one row per distinct file: source, digest, regulator, type (`notification`, `circular`, `press_release`, `act_amendment` or `statute`, the last from migration 0008), URL, title, language, parser version, publication and fetch time | pk `id` = first 32 hex digits of `sha256` (CHECK); unique `sha256`; append-only (trigger) |
 | `clause` | The clauses of a document in order, verbatim as parsed, with `search_vector`, a stored generated `to_tsvector('english', text)` | pk `id` = `clause_id_for(document id, clause_ref)`; unique (`document_id`, `clause_ref`) and (`document_id`, `ordinal`); fk `document_id`; GIN index on `search_vector`; append-only (trigger) |
 | `clause_embedding` | One clause's embedding from one model: `embedding vector(512)` (the kernel's `EMBEDDING_DIMS`) | pk (`clause_id`, `model`); fk `clause_id`; HNSW index for cosine distance; never updated (trigger), a new model means a new row |
 | `citation` | A rule version's quote of a clause, with a one-way verification (`verified`, `match_score >= 0.85`, `verified_at`) | pk `id`; fks to `rule_version` and `clause`; identity columns fixed by trigger |
@@ -66,7 +66,7 @@ literal pairs to the kernel.
 
 | Route | What it does |
 | --- | --- |
-| `PUT /v1/rulebook/documents/{document_id}` | Store a parsed document and its clauses. Needs `x-cw-write-token`. 201 when stored now, 200 when the same parse was stored already (with `metadata_differs` naming fields that differ; the stored row wins), 409 for a different parse of stored bytes, 422 when the id is not the digest's first half |
+| `PUT /v1/rulebook/documents/{document_id}` | Store a parsed document and its clauses. Needs `x-cw-write-token`. 201 when stored now, 200 when the same parse was stored already (with `metadata_differs` naming fields that differ; the stored row wins). The first parse is kept (ADR-018): a parse by another parser version (`parser_version`, such as `pdf-tables@1` or an analyst's `manual@1`) is answered 200 with the stored clauses' ids, the stored `parser_version` and `parser_version` among `metadata_differs`, and nothing is written; 409 for a different parse by the same parser version; 422 when the id is not the digest's first half |
 | `GET /v1/rulebook/documents/{document_id}` | The document with its clauses in order and their ids |
 | `PUT /v1/rulebook/documents/{document_id}/mentions` | Align the mentions an extractor found: each is checked against the stored clause text at its span and must carry a canonical name; resolved ones go to `clause_entity`, the rest to `entity_review`. Needs the write token |
 | `PUT /v1/rulebook/documents/{document_id}/relation-candidates` | Stage the relations a run proposed, with the run's issues; idempotent per proposal. Needs the write token |
@@ -359,6 +359,7 @@ migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and 
   versions/20260928_0005_review_queue_relation_candidates.py   # extraction runs, entity review, relation candidates
   versions/20260929_0006_clause_search_index.py   # clause.search_vector, clause_embedding, pgvector in public
   versions/20260929_0007_publish_flow.py   # high_impact, submitted_at, rule_version_decision, the rule_version guard, outbox_event
+  versions/20261006_0008_statute_document_type.py  # ck_document_doc_type admits statute
 tests/
   unit/            # domain, use cases and API on the memory store; test_models_vocabulary.py: model CHECKs against the kernel enums
   integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work and its reads; the search index; the publish guard, the outbox and the sweep; the changes feed read by a plain role

@@ -66,6 +66,7 @@ const TYPE_LABEL: Readonly<Record<SourceDocumentType, MessageKey>> = {
   circular: "adminSources.type.circular",
   press_release: "adminSources.type.pressRelease",
   act_amendment: "adminSources.type.actAmendment",
+  statute: "adminSources.type.statute",
 };
 
 const COUNT_FORMAT = new Intl.NumberFormat(LOCALE);

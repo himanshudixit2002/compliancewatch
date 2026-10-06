@@ -102,6 +102,17 @@ def test_without_a_token_no_header_is_sent() -> None:
     assert "x-cw-write-token" not in seen[0].headers
 
 
+def test_it_reads_which_parse_the_rulebook_keeps() -> None:
+    def kept(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json={**REGISTERED, "created": False, "parser_version": "x@1"})
+
+    def older(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json={**REGISTERED, "created": False})
+
+    assert client(kept).register_document(RECORD).parser_version == "x@1"
+    assert client(older).register_document(RECORD).parser_version == "pdf@1", "the submitted one"
+
+
 @pytest.mark.parametrize(
     ("status", "body", "error"),
     [
