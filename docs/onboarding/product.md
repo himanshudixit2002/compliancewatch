@@ -28,9 +28,10 @@ make product-logs PROC=worker   # app, worker or web; FOLLOW=0 prints the end an
 make product-down            # stops only what make product started
 ```
 
-`WEB=0` leaves the web app out (CI does), `WEB_PORT=3400` puts it on another port. Run
+`WEB=0` leaves the web app out, `WEB_PORT=3400` puts it on another port. Run
 `make product` again at any time: it starts only what is not running. Everything it writes stays
-in the dev database until `make dev-reset`.
+in the dev database until `make dev-reset`. `make product-image` runs the same product from the
+deployable's image instead, as CI does (below).
 
 ## What runs
 
@@ -63,6 +64,49 @@ card on (`CW_NOTIFICATION_BULK_ENABLED`), rule publishing on with the placeholde
 `local-write-token` and `local-review-token` (not secrets; values in `.env` win), the profile's
 static GSTIN lookup, the notification sink in place of the real channels with a five-second
 batching window, and message links to the product's web app.
+
+## The product from its image
+
+`make product-image` runs the product from the image a deploy ships
+(`composition/mvp/Dockerfile`, [composition/mvp/README.md](../../composition/mvp/README.md)), in
+the compose profile `mvp` on the dev stack, with the settings `make product` passes its processes:
+
+```bash
+make product-image           # make dev, the image, make product-role, then mvp-release, mvp-app
+                             # and mvp-worker in containers, and the seed calendar from the image
+make product-seed            # unchanged: the same ports, cw_app and var/product/sink.jsonl
+make product-check
+make product-image-logs PROC=worker   # app, worker or release; FOLLOW=0 prints the end and returns
+make product-image-down      # removes the three containers; the dev stack keeps running
+```
+
+| Container | What |
+| --- | --- |
+| `mvp-release` | `cw-mvp release`, once, before the others start: every service's migrations as the database's owner (`CW_MIGRATION_DATABASE_URL`, the dev stack's superuser), then the topics of `composition/mvp/topics.toml`. It prints what it migrated and created, and a second run changes nothing |
+| `mvp-app` | `cw-mvp serve`, published on `127.0.0.1:8000` and `127.0.0.1:8080`, connecting as `cw_app` |
+| `mvp-worker` | `cw-mvp worker`, calling the app at `http://mvp-app:8080`; its health published on `127.0.0.1:8081` |
+
+`make product-image` builds the image first (`make mvp-image`; `MVP_BUILD=0` uses the one there,
+as CI does after building it with buildx), creates `cw_app` before the release (its default
+privileges cover the tables the release makes), and loads the seed calendar's drafts with the
+image's `rulebook-seed` once the app is up. The containers mount `var/product` and run as your
+user (`CW_MVP_USER`, your uid and gid), so the sink file they write is yours to read, as
+`make product-check` does. The repo's `.env` is not passed to them: its URLs name `localhost`.
+`docker-compose.yml` (`x-mvp-env`) holds their settings, the rulebook's tokens from `.env` when it
+sets them.
+
+It and `make product` share the ports, so one runs at a time; `make product-image` refuses while
+`make product`'s processes run. Both share the dev database and broker, and so the consumer
+groups' offsets: either picks up where the other stopped. On the dev stack the release reports
+the topics that Redpanda created by itself before (one partition, a week of retention) as
+differing from the file; it leaves them as they are.
+
+CI's dev-stack job builds the image with buildx and the GitHub Actions cache, runs
+`cw-mvp release` on its fresh database and broker, then `make product-image MVP_BUILD=0` (whose
+release changes nothing), `make product-seed`, `make product-check ARGS="--destructive"` and the
+web journey (`make product-e2e`) against it. The web journey only talks HTTP to the internal
+listener, so it costs the same against the image as against the local processes. `make product`
+stays the development path: it runs the checkout's code as it is, with no image to build.
 
 ## From a published rule to a change card
 
@@ -399,7 +443,11 @@ keys). The web stack connects as the superuser and so reads across tenants; the 
   holds it. Move the web app with `WEB_PORT`, the worker's health with `PRODUCT_WORKER_PORT`, the
   listeners with `CW_MVP_PUBLIC_PORT` and `CW_MVP_INTERNAL_PORT` (and `CW_MVP_INTERNAL_URL`).
 - **A process exited while starting.** `make product-wait` prints the end of its log;
-  `make product-logs PROC=app FOLLOW=0` prints more.
+  `make product-logs PROC=app FOLLOW=0` prints more. From the image, `make product-image` prints
+  the containers' last lines when one does not come up, and
+  `make product-image-logs PROC=release FOLLOW=0` (or `app`, `worker`) the rest. A release that
+  stops at a migration names the service and alembic's error; one that stops at the topics names
+  the broker.
 - **`cw-product` is refused.** `CW_ENV` must be local or test and `CW_AUTH_MODE` header or dual,
   in the environment or `.env`.
 - **The loop waits for obligations.** The worker's `/loops` must run

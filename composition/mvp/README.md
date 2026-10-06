@@ -178,7 +178,126 @@ worker's health on 8081, the services connecting as `cw_app` so row-level securi
 notification sink in place of the real channels, and the web app beside them;
 `make product-seed` and `make product-check` fill it and prove the chain from a published rule
 to a change card, and from a profile change to new decisions and obligations
-([docs/onboarding/product.md](../../docs/onboarding/product.md)).
+([docs/onboarding/product.md](../../docs/onboarding/product.md)). `make product-image` runs the
+same product from the image below, in containers.
+
+## The image
+
+`composition/mvp/Dockerfile` builds one image for both processes and the release step, chosen
+by command:
+
+```bash
+docker build -f composition/mvp/Dockerfile -t compliancewatch-mvp:local .   # or make mvp-image
+docker run ... compliancewatch-mvp:local                    # cw-mvp serve, the default
+docker run ... compliancewatch-mvp:local cw-mvp worker      # the worker
+docker run ... compliancewatch-mvp:local cw-mvp release     # once per version, before both
+docker run ... compliancewatch-mvp:local cw-mvp check-config
+```
+
+It follows the services' images: a uv builder stage that installs the locked third-party
+dependencies first and the workspace second, without the dev group, and a `python:3.12-slim`
+runtime with the virtual environment, no uv, and the user `app` (uid 10001). The code belongs to
+root, so the process cannot change it. Ports: 8000 (public), 8080 (internal), 8001 (the
+worker's health).
+
+The services read files beside their sources at runtime, so, as the eval image does, the
+workspace is installed editable and the sources keep their paths under `/app`: the gateway's
+prompt registry (`services/llm-gateway/prompts`), the qa and pipeline prompts, the rulebook's seed
+calendar (`services/rulebook/seed`), every service's `alembic.ini` and migrations, this
+directory's `topics.toml`, and the eval harness (`evals/harness`) with the golden set
+(`evals/golden`), which the eval service runs in a child process. The ontology's YAML and the
+contracts client (`cw_contracts`) are inside their packages. Tests, docs, `infra`, `tools`, the
+web app, `var`, `output` and every `.env` stay out of the build context (`.dockerignore`), and the
+image holds no secret: everything sensitive comes from the environment.
+
+It is about 118 MB compressed and 420 MB unpacked: the Python base is 150 MB of that and the
+virtual environment 274 MB (temporalio, SQLAlchemy, the OpenAI SDK, gRPC and uvloop are the
+largest), the sources and data under 7 MB.
+
+## Releasing: `cw-mvp release`
+
+`cw-mvp release` is the step a deploy runs once per version, before the new app and worker
+start: `cw-mvp migrate`, then `cw-mvp topics apply`, and nothing else. Both parts are idempotent,
+so a second release changes nothing. With `CW_WORKER_KAFKA_ENABLED` off it skips the topics:
+nothing reads or writes them, and a deployment without a broker still releases. Each command
+exits 1 with the reason on stderr; settings a settings class refuses are listed the way
+`check-config` lists them.
+
+### `cw-mvp migrate [--service NAME]`
+
+Runs `alembic upgrade head` for every service schema in the registry's order (identity first,
+since its migration creates `audit.event`), or for one service, each in a child process with its
+own `alembic.ini`, as `make migrate` does. It connects as the role that owns the schemas,
+`CW_MIGRATION_DATABASE_URL` (a secret), and never as the app's runtime role
+(`CW_DATABASE_URL`): it refuses to run without the owner's URL, and outside local and test it
+refuses when both URLs connect as the same role to the same database. A schema the database lacks
+is created first, so a new managed database needs nothing else (the rulebook's migration creates
+the `vector` extension; the owner needs the right to). It reports what ran:
+
+```
+migrate: as cw on compliancewatch at postgres:5432 (CW_MIGRATION_DATABASE_URL)
+  identity               schema identity       at 0005, nothing to run
+  rulebook               schema rulebook       0006 -> 0007
+  qa                     schema qa             no migrations
+  ...
+migrate: 10 services, 1 migrated, 9 unchanged
+```
+
+A failed migration stops the run with the end of alembic's output; the services after it are
+not migrated. A migration must keep working with the previous image, which serves until the new
+one starts (expand, then contract in a later release).
+
+### Topics: `cw-mvp topics plan|apply`
+
+`topics.toml` lists the Kafka topics as code: every contract topic
+(`packages/contracts/events/schemas`) and the dead-letter topic of every consumer group the
+worker hosts (`<topic>.<group>.dlq`), each with its partitions, retention and cleanup policy, and
+one replication factor (3, capped at the brokers the cluster reports, so 1 on the dev stack).
+`tests/unit/test_topics_file.py` fails when a contract topic or a consumer group's dead-letter
+topic is missing, or when the file lists a topic that is neither.
+
+| Topics | Partitions | Retention | Why |
+| --- | --- | --- | --- |
+| tenant events: `applicability.decided`, `obligation.*`, `profile.updated`, `notification.*`, `tenant.*`, `user.role.changed` | 3 | 7 days | keyed by tenant, so three workers can share a group without re-keying; a week covers a worker down over a long weekend |
+| regulatory and platform events: `rule.*`, `rule.candidate.created`, `document.*`, `eval.run.completed` | 1 | 30 days | a few a day, kept in publication order; a consumer that fell behind still sees a month of changes |
+| dead letters, `<topic>.<group>.dlq` | 1 | 30 days | time to read, fix and replay |
+
+Every topic is a log of events with `cleanup.policy=delete`. A consumer group made later reads
+only what a topic still holds, the engine's business directory (built from `profile.updated`)
+among it. The relay's own dead letters, `<topic>.dlq`, are not listed: a row whose topic cannot be
+reached stays in its outbox and is retried, so nothing is lost while one is missing.
+
+`cw-mvp topics plan` compares the file with the broker of `CW_KAFKA_*` (SASL and TLS included,
+through `py_common.kafka.KafkaClientConfig`); `cw-mvp topics apply` creates the topics the broker
+lacks. Neither deletes or changes a topic: one the file does not list is left alone, and one whose
+partitions, `retention.ms` or `cleanup.policy` differ is reported and left as it is, since adding
+partitions moves keys between them. An operator settles those with `rpk topic add-partitions` or
+`rpk topic alter-config`. `--file` reads another file.
+
+### `cw-mvp check-config`
+
+Checks the environment (and `.env`) against its `CW_ENV` and lists every problem as
+`<where>: <problem>`, exiting 1 when there is one; it prints no secret. Run it where the deploy's
+settings are, before the release. It builds the settings as the app does, so each settings class
+reports its own rules in its own words: production takes only `CW_AUTH_MODE=token` and refuses
+identity's `fake` sign-in, staging and production need `CW_IDENTITY_SIGNING_KEYS`, the dev
+clients' secret, the notification `sink`, and the seed calendar loaded at start are for local and
+test only, and a provider that needs credentials (Supabase, Vercel's gateway, the HTTP GSTIN
+lookup, Unleash, Kafka over SASL, a Temporal certificate) has them. A class stops at its first
+refusal, so fixing one can bring the next to light. In staging and production it also refuses:
+
+- `CW_AUTH_MODE=header` in staging, which runs `dual` and then `token` before production;
+- fake providers: `CW_LLM_PROVIDER=fake`, `CW_AUTH_PROVIDER=fake` in staging,
+  `CW_PROFILE_GSTIN_LOOKUP=static` (the demo table) and `CW_BILLING_PROVIDER=memory`;
+- memory stores: every `CW_<SERVICE>_STORE=memory` and `CW_LLM_LEDGER=memory`;
+- a rulebook that would accept synthetic approvals;
+- placeholder secrets: `local-write-token`, `local-review-token`, or a `dev-only` value in any
+  secret setting;
+- missing secrets an enabled feature needs: WhatsApp's number id and token
+  (`CW_WHATSAPP_ENABLED`), email's host, sender, feedback token and, with a username, password
+  (`CW_EMAIL_ENABLED`), Razorpay's keys, `CW_RULEBOOK_REVIEW_TOKEN` for publishing and
+  `CW_RULEBOOK_WRITE_TOKEN` for the pipeline's knowledge step outside token mode, and in token
+  mode the worker's `CW_SERVICE_CLIENT_SECRET` while its Kafka or Temporal switch is on.
 
 ## Adding to a service
 
@@ -186,4 +305,6 @@ A change that adds a route, `build_app` argument, worker component or URL of ano
 registers it here in the same change: the route's class in `exposure.py`, the rest in
 `registry.py`. `tests/unit/test_exposure.py` and `tests/unit/test_registry.py` fail until it
 does. A store setting is named `<service>_store`, so the worker finds it, and goes into
-`cw_mvp.testing.MEMORY_SERVICES`.
+`cw_mvp.testing.MEMORY_SERVICES`. A new event topic or consumer group goes into `topics.toml`
+(`tests/unit/test_topics_file.py`), and a file a service reads at runtime stays beside its
+sources and inside the build context (`.dockerignore`).

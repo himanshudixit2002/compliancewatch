@@ -84,7 +84,28 @@ Package M1-2 runs both processes together on the dev stack with Kafka and Tempor
 `make product`, with the web app beside them (`docs/onboarding/product.md`). The services connect
 as a role that row-level security applies to, the notification channels are a sink that records
 each message, and `cw-product check` proves that a rule published by synthetic analysts (still
-needs_review) becomes decisions, obligations with citations and a change card. Not built yet: the
-engine's own trigger (evaluation is a command until it consumes profile.updated and
-rule.published), the container image and the platform, and migrations and the seed as release
-steps.
+needs_review) becomes decisions, obligations with citations and a change card. The engine's own
+triggers came later (M1-3 and M1-5): it consumes profile.updated and fans rule.published out.
+
+As of 2026-10-06 (package M1-9) the deployable ships as one image
+(`composition/mvp/Dockerfile`, about 118 MB compressed), run by command as the app, the worker
+and the release step, with three commands for a deploy (`composition/mvp/README.md`):
+
+- `cw-mvp release`, run once per version before the new processes start: every service's
+  migrations as the role that owns the schemas (`CW_MIGRATION_DATABASE_URL`; the app's runtime
+  role never migrates, and outside local and test the two must differ), then the Kafka topics of
+  `composition/mvp/topics.toml`. Topics are code: every contract topic and every consumer group's
+  dead-letter topic with partitions, retention and cleanup policy; the apply creates what the
+  broker lacks and never deletes or changes a topic. Both steps are idempotent.
+- `cw-mvp check-config`, which refuses, in staging and production, what the settings classes do
+  not: header mode in staging, fake providers, memory stores, synthetic approvals, the dev
+  stack's placeholder tokens and missing secrets of enabled features.
+- `cw-mvp migrate` and `cw-mvp topics plan|apply` on their own.
+
+The compose profile `mvp` runs the image on the dev stack (`make product-image`), and CI's
+dev-stack job builds it with buildx, releases it on a fresh database and broker, and runs the
+product check and the web journey against it. The seed calendar stays a separate step
+(`rulebook-seed`, also in the image), as the synthetic demo publication does (`cw-product`,
+local and test only). Not built yet: the platform itself (the Fly.io configuration still has one
+app per service; package M5-2 consolidates it into this image's app and worker with `cw-mvp
+release` as the release command).

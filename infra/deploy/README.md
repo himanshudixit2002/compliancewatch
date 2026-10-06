@@ -18,6 +18,18 @@ Nothing in this directory has been applied: every account is the maintainer's to
 | Observability | Grafana Cloud (OTLP endpoint) | `CW_OTEL_ENDPOINT` and its auth header; the dev dashboard JSON imports as is |
 | Model provider | Vercel AI Gateway | `CW_AI_GATEWAY_API_KEY` on the llm-gateway only |
 
+## The one image
+
+ADR-013's deployable now ships as one image, `composition/mvp/Dockerfile`
+(`composition/mvp/README.md`), run by command: `cw-mvp serve` (the app: public 8000, internal
+8080), `cw-mvp worker` (health on 8001) and `cw-mvp release`, which a deploy runs once per
+version before the new processes start: every service's migrations as the role that owns the
+schemas (`CW_MIGRATION_DATABASE_URL`, a secret distinct from `CW_DATABASE_URL`), then the Kafka
+topics of `composition/mvp/topics.toml` (created when missing, never deleted). Run
+`cw-mvp check-config` with the environment's settings first: it lists what staging or production
+refuses. The Fly files below still describe one app per service; package M5-2 replaces them with
+one app of two process groups on this image, with `cw-mvp release` as its release command.
+
 ## Manual steps (in order)
 
 1. Accounts: Fly.io organisation, Vercel team, Postgres provider, Redpanda Cloud or Upstash,
