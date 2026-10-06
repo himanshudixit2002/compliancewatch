@@ -1,9 +1,10 @@
-"""In-memory source adapter and parser for the sample workflow and the tests."""
+"""In-memory source adapter, parser and source catalog for the sample workflow and the
+tests."""
 
 import hashlib
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from domain_kernel.documents import (
@@ -17,6 +18,9 @@ from domain_kernel.documents import (
 )
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import SourceId
+from pipeline.domain.errors import UnknownSourceError
+from pipeline.domain.ports import ResolvedSource
+from pipeline.domain.sources import SourceDefinition
 
 PARSER_VERSION = "fake@1"
 
@@ -74,3 +78,37 @@ class FakePlainTextParser:
             language="en",
             parser_version=PARSER_VERSION,
         )
+
+
+SAMPLE_SOURCE = SourceDefinition(
+    key="sample",
+    adapter_type="fake",
+    parameters={},
+    cadence=timedelta(hours=1),
+    regulator="CBIC",
+    doc_type=DocumentType.NOTIFICATION,
+)
+"""The source the sample notification is listed at."""
+
+
+@dataclass(frozen=True)
+class StaticCatalog:
+    """The sources it was given, by id."""
+
+    sources: Mapping[SourceId, ResolvedSource]
+
+    @classmethod
+    def of(cls, *resolved: ResolvedSource) -> "StaticCatalog":
+        return cls({source.source_id: source for source in resolved})
+
+    def resolve(self, source_id: SourceId) -> ResolvedSource:
+        found = self.sources.get(source_id)
+        if found is None:
+            raise UnknownSourceError(f"no source has the id {source_id}")
+        return found
+
+
+def sample_catalog(adapter: FakeSourceAdapter | None = None) -> StaticCatalog:
+    """The sample notification's source (``UUID(int=1)``, key ``sample``) and nothing else."""
+    sample = adapter or FakeSourceAdapter.with_sample()
+    return StaticCatalog.of(ResolvedSource(sample.source_id, SAMPLE_SOURCE, sample))

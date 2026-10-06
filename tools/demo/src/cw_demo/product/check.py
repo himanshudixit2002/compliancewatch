@@ -9,7 +9,8 @@ the API answers. One failed step does not stop the next.
 
 - ``health``: the internal listener's ``/ready`` has every service's checks ok, the public
   listener answers ``/health``, and the worker's ``/loops`` lists the consumer groups, outbox
-  relays, periodic jobs and Temporal task queue the chain needs, each of them running.
+  relays, periodic jobs and Temporal task queue the chain needs, each of them running, and the
+  pipeline's relay, which publishes document.discovered.
 - ``honesty``: every published seed rule is one the golden world cites from a recorded quote and
   still reads needs_review, every other seed rule is still a draft, no version of any seed rule is
   marked reviewed, and the golden world and the extraction cases it cites are drafts nobody
@@ -166,6 +167,7 @@ RELAYS: Final = (
     "applicability-engine/outbox-relay",
     "obligation/outbox-relay",
     "notification/outbox-relay",
+    "pipeline/outbox-relay",
 )
 JOBS: Final = (
     "notification/notification-dispatch",

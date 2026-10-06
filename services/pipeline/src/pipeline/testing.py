@@ -7,7 +7,8 @@ touching the network. Routes are exact matches on method and URL; the CBIC listi
 insist on the token header the real site wants. ``MemoryRulebook`` stands in for the rulebook's
 write API with the same rules: ids from the kernel, a different parse of stored bytes refused,
 a clause's first vector from a model kept. ``StubS3`` answers the raw store's S3 calls the way
-S3 does, signature checks included, from a dict.
+S3 does, signature checks included, from a dict. ``sample_activities`` are the worker's
+activities on the sample notification's source, the plain-text parser and memory stores.
 """
 
 import hashlib
@@ -18,6 +19,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote, urlsplit
 
 import httpx2
@@ -43,7 +45,13 @@ from pipeline.domain.knowledge import (
     RuleKey,
     StagingReport,
 )
+from pipeline.domain.repository import UnitOfWorkFactory
+from pipeline.infrastructure.fakes import FakePlainTextParser, sample_catalog
+from pipeline.infrastructure.memory import MemoryStore
+from pipeline.infrastructure.raw_store import MemoryRawStore
 from pipeline.infrastructure.s3 import S3Credentials, sign
+from pipeline.settings import PipelineSettings
+from py_common.temporal import ActivityBase
 
 Responder = Callable[[httpx2.Request], httpx2.Response]
 
@@ -438,3 +446,26 @@ class StubS3:
 def _s3_error(status: int, code: str) -> httpx2.Response:
     body = f'<?xml version="1.0" encoding="UTF-8"?><Error><Code>{code}</Code></Error>'
     return httpx2.Response(status, text=body, headers={"content-type": "application/xml"})
+
+
+def sample_activities(
+    settings: PipelineSettings | None = None,
+    *,
+    units: UnitOfWorkFactory | None = None,
+    raw_store: MemoryRawStore | None = None,
+    **overrides: Any,
+) -> list[ActivityBase[Any, Any]]:
+    """``pipeline.worker.activities`` on the sample notification's source (``UUID(int=1)``),
+    the plain-text parser and memory stores; pass ``units`` and ``raw_store`` to read them."""
+    # Imported here: the eval harness imports this module at run time and needs none of the
+    # worker's wiring.
+    from pipeline.worker import activities
+
+    return activities(
+        settings,
+        sources=sample_catalog(),
+        parser=FakePlainTextParser(),
+        units=units or MemoryStore(),
+        raw_store=raw_store or MemoryRawStore(),
+        **overrides,
+    )

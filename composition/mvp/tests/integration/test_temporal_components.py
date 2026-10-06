@@ -16,7 +16,7 @@ from temporalio.testing import WorkflowEnvironment
 from cw_mvp.testing import mvp_settings
 from cw_mvp.worker import run_worker
 from pipeline.settings import PipelineSettings
-from pipeline.worker import activities
+from pipeline.testing import sample_activities
 from pipeline.workflows import IngestDocumentWorkflow, IngestRequest, IngestResult
 from py_common.runtime import ComponentRegistry, TemporalComponent, WorkerComponents
 from py_common.temporal.client import default_interceptors
@@ -39,7 +39,7 @@ async def environment() -> AsyncIterator[WorkflowEnvironment]:
 def _hosting(task_queue: str) -> WorkerComponents:
     settings = PipelineSettings(_env_file=None, service_name="pipeline")
     worker = TemporalComponent(
-        WorkerConfig(task_queue=task_queue), (IngestDocumentWorkflow,), activities(settings)
+        WorkerConfig(task_queue=task_queue), (IngestDocumentWorkflow,), sample_activities(settings)
     )
     return WorkerComponents(temporal=(worker,))
 

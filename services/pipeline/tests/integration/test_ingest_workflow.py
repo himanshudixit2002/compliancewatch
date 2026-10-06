@@ -1,4 +1,5 @@
-"""The ingest workflow end to end on a local Temporal dev server.
+"""The ingest workflow end to end on a local Temporal dev server, on the sample notification's
+source, the plain-text parser and memory stores (``pipeline.testing.sample_activities``).
 
 ``WorkflowEnvironment.start_local`` downloads the Temporal CLI once (native on Apple Silicon;
 the time-skipping test server is x86-only and needs Rosetta, so it is not used).
@@ -18,8 +19,12 @@ from pipeline.domain.errors import RulebookRejectedError
 from pipeline.domain.knowledge import DocumentRecord, RegisteredDocument
 from pipeline.domain.prompt import PromptText
 from pipeline.settings import PipelineSettings
-from pipeline.testing import MemoryRulebook, ScriptedEmbedder, ScriptedProvider
-from pipeline.worker import activities
+from pipeline.testing import (
+    MemoryRulebook,
+    ScriptedEmbedder,
+    ScriptedProvider,
+    sample_activities,
+)
 from pipeline.workflows import (
     ExtractKnowledgeWorkflow,
     IngestDocumentWorkflow,
@@ -45,7 +50,7 @@ async def test_ingest_workflow_runs_all_three_activities(environment: WorkflowEn
         environment.client,
         WorkerConfig(task_queue=task_queue),
         workflows=[IngestDocumentWorkflow],
-        activities=activities(),
+        activities=sample_activities(),
     )
     request = IngestRequest(source_id=uuid.UUID(int=1), since=datetime(2026, 9, 1, tzinfo=UTC))
     async with worker:
@@ -60,6 +65,7 @@ async def test_ingest_workflow_runs_all_three_activities(environment: WorkflowEn
     assert result.clause_refs == ["p1", "p2", "p3"]
     assert result.url == "https://example.invalid/notifications/17-2026"
     assert result.document_id == uuid.UUID(result.sha256[:32])
+    assert result.storage_key == f"{result.sha256[:2]}/{result.sha256}"
     assert result.registered is False
 
 
@@ -97,7 +103,9 @@ async def ingest(
         environment.client,
         WorkerConfig(task_queue=task_queue),
         workflows=[IngestDocumentWorkflow, ExtractKnowledgeWorkflow],
-        activities=activities(settings, sink=rulebook, stage=scripted_stage(), embedder=embedder),
+        activities=sample_activities(
+            settings, sink=rulebook, stage=scripted_stage(), embedder=embedder
+        ),
     )
     async with worker:
         return await environment.client.execute_workflow(

@@ -1,10 +1,12 @@
 """Activities that hand the pipeline's output to the rulebook, which owns regulator records.
 
-``RegisterDocument`` stores a parsed document and its clauses. It parses the fetched bytes again
-rather than carrying clause text through the workflow history, and checks that the rulebook
-derived the same clause ids the kernel gives here. ``ExtractMentions`` runs the mention grammar
-over the stored document and hands the mentions to alignment; ``ProposeRelations`` asks the
-model which of them the document acts on, and ``SubmitRelations`` stages the answer for review.
+``RegisterDocument`` stores a parsed document and its clauses. It parses the document's bytes
+again, read from the raw store (or carried in the request by workflows started before the
+store), rather than carrying clause text through the workflow history, and checks that the
+rulebook derived the same clause ids the kernel gives here. ``ExtractMentions`` runs the mention
+grammar over the stored document and hands the mentions to alignment; ``ProposeRelations`` asks
+the model which of them the document acts on, and ``SubmitRelations`` stages the answer for
+review.
 ``EmbedClauses`` stores a vector for each of the document's clauses, for the rulebook's search.
 All five sit behind ``CW_PIPELINE_KNOWLEDGE_ENABLED``: disabled, they answer ``skipped`` without
 a call.
@@ -22,7 +24,7 @@ from domain_kernel.documents import clause_id_for
 from domain_kernel.ids import DocumentId, SourceId
 from domain_kernel.knowledge import EntityType, RelationKind
 from domain_kernel.protocols import DocumentParser
-from pipeline.application.activities import Frozen, ParseRequest, parse_fetched
+from pipeline.application.activities import Frozen, ParseRequest, on_thread, parse_request
 from pipeline.application.detector import detect
 from pipeline.application.embedding import EmbeddingStage
 from pipeline.application.mentions import MentionInput, MentionStage
@@ -36,7 +38,7 @@ from pipeline.domain.knowledge import (
     RelationSubmission,
     StagedRelation,
 )
-from pipeline.domain.ports import KnowledgeSink, RulebookReader
+from pipeline.domain.ports import KnowledgeSink, RawStore, RulebookReader
 from py_common.temporal import ActivityBase
 
 
@@ -69,20 +71,32 @@ class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
             "RulebookRejectedError",
             "KnowledgeContractError",
             "UnsupportedDocumentError",
+            "RawObjectMissingError",
+            "RawObjectCorruptError",
         ],
     )
 
-    def __init__(self, parser: DocumentParser, sink: KnowledgeSink, *, enabled: bool) -> None:
+    def __init__(
+        self,
+        parser: DocumentParser,
+        sink: KnowledgeSink,
+        *,
+        enabled: bool,
+        raw_store: RawStore | None = None,
+    ) -> None:
         self._parser = parser
         self._sink = sink
         self._enabled = enabled
+        self._raw = raw_store
 
     async def run(self, input: RegisterRequest) -> Registered:
         if not self._enabled:
             return Registered(document_id=input.parse.document_id, skipped=True)
+        return await on_thread(self, lambda: self._register(input))
+
+    def _register(self, input: RegisterRequest) -> Registered:
         request = input.parse
-        fetched = request.fetched
-        parsed = parse_fetched(self._parser, fetched)
+        parsed = parse_request(self._parser, request, self._raw)
         parsed = dataclasses.replace(
             parsed,
             title=request.title or parsed.title,
@@ -91,13 +105,14 @@ class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
         registered = self._sink.register_document(
             DocumentRecord(
                 document=parsed,
-                source_id=SourceId(fetched.source_id),
-                sha256=fetched.sha256,
+                source_id=SourceId(request.source_id),
+                sha256=request.sha256,
                 regulator=input.regulator,
-                url=fetched.url,
-                media_type=fetched.media_type,
-                fetched_at=fetched.fetched_at,
-                external_ref=fetched.external_ref,
+                url=request.url,
+                media_type=request.media_type,
+                fetched_at=request.fetched_at,
+                external_ref=request.external_ref,
+                raw_uri=request.raw_uri,
             )
         )
         expected = {

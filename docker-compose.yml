@@ -26,8 +26,9 @@ name: compliancewatch
 # connecting as cw_app (make product-role) so row-level security applies, the worker's Kafka and
 # Temporal switches, the reminder sweep, recompute, fan-out, the rule events and the bulk change
 # card on, rule publishing with the placeholder tokens (not secrets; values in .env win), the
-# static GSTIN lookup, and the notification sink recording into var/product/sink.jsonl, the file
-# make product-check reads. The repo's .env is not passed: its URLs name localhost.
+# static GSTIN lookup, the notification sink recording into var/product/sink.jsonl, the file
+# make product-check reads, and the pipeline's fetched files in var/product/raw, which the
+# containers can write. The repo's .env is not passed: its URLs name localhost.
 x-mvp-env: &mvp-env
   CW_ENV: local
   CW_AUTH_MODE: header
@@ -49,6 +50,7 @@ x-mvp-env: &mvp-env
   CW_NOTIFICATION_CHANNELS: sink
   CW_NOTIFICATION_SINK_PATH: var/product/sink.jsonl
   CW_NOTIFICATION_BATCH_WINDOW_SECONDS: "5"
+  CW_PIPELINE_RAW_DIR: var/product/raw
   CW_WEB_BASE_URL: http://localhost:${WEB_PORT:-3000}
 
 services:

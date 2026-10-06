@@ -1,13 +1,14 @@
-"""Ingest one document: discover, fetch, parse, and with ``knowledge`` register it in the
-rulebook, embed its clauses for search and extract its knowledge in a child workflow. The
-sample workflow of the pipeline worker.
+"""Ingest one document: discover, fetch and store, parse, and with ``knowledge`` register it in
+the rulebook, embed its clauses for search and extract its knowledge in a child workflow.
 
-The real ingest adds the detector, the extractor, the outbox write of ``document.discovered``
-and ``document.parsed``, and a store for the raw file; this one shows the shape: each step is an
-activity with its own retries and timeouts, the workflow itself does no I/O. The registration,
-embedding and extraction steps sit behind ``workflow.patched`` so histories recorded before them
-replay unchanged, and a failed registration, embedding or extraction is reported in the result
-rather than failing the ingest.
+Each step is an activity with its own retries and timeouts; the workflow itself does no I/O.
+The fetch is ``FetchAndStore``: the bytes go to the raw store, the document's row and its
+``document.discovered`` to the pipeline's store in one transaction, and the workflow passes on the
+storage key, never the bytes. It sits behind ``workflow.patched(STORE_PATCH)``: a workflow
+started before it replays its ``FetchDocument``, whose result carries the bytes, unchanged. The
+registration, embedding and extraction steps sit behind patches of their own for the same
+reason, and a failed registration, embedding or extraction is reported in the result rather
+than failing the ingest.
 """
 
 from typing import Self
@@ -22,6 +23,7 @@ with workflow.unsafe.imports_passed_through():
         DiscoverDocument,
         Discovered,
         DiscoverRequest,
+        FetchAndStore,
         FetchDocument,
         Frozen,
         ParseDocument,
@@ -44,6 +46,7 @@ from datetime import datetime
 from uuid import UUID
 
 TASK_QUEUE = "pipeline"
+STORE_PATCH = "pipeline-store-v1"
 REGISTER_PATCH = "kag-register-v1"
 EMBED_PATCH = "kag-embed-v1"
 EXTRACT_PATCH = "kag-extract-v1"
@@ -63,11 +66,16 @@ class IngestRequest(Frozen):
 
 
 class IngestResult(Frozen):
+    """``storage_key`` is where the raw store keeps the bytes (empty for a workflow started
+    before the store); ``duplicate`` says they were stored by an earlier fetch."""
+
     document_id: UUID
     sha256: str
     url: str
     clause_count: int
     clause_refs: list[str]
+    storage_key: str = ""
+    duplicate: bool = False
     registered: bool = False
     registration_error: str = ""
     clauses_embedded: int = 0
@@ -85,13 +93,24 @@ class IngestDocumentWorkflow:
         discovered: Discovered = await DiscoverDocument.schedule(
             DiscoverRequest(source_id=request.source_id, since=request.since)
         )
-        fetched = await FetchDocument.schedule(discovered)
-        parse_request = ParseRequest(
-            document_id=document_id_for(fetched).value,
-            fetched=fetched,
-            title=discovered.title,
-            published_at=discovered.published_at,
-        )
+        storage_key, duplicate = "", False
+        if workflow.patched(STORE_PATCH):
+            stored = await FetchAndStore.schedule(discovered)
+            parse_request = ParseRequest(
+                document_id=stored.document_id,
+                stored=stored,
+                title=discovered.title,
+                published_at=discovered.published_at,
+            )
+            storage_key, duplicate = stored.storage_key, stored.duplicate
+        else:
+            fetched = await FetchDocument.schedule(discovered)
+            parse_request = ParseRequest(
+                document_id=document_id_for(fetched).value,
+                fetched=fetched,
+                title=discovered.title,
+                published_at=discovered.published_at,
+            )
         parsed = await ParseDocument.schedule(parse_request)
         registered, registration_error = False, ""
         if request.knowledge and workflow.patched(REGISTER_PATCH):
@@ -120,7 +139,7 @@ class IngestDocumentWorkflow:
                     ExtractKnowledgeWorkflow.run,
                     KnowledgeRequest(
                         document_id=parsed.document_id,
-                        own_ref=fetched.external_ref,
+                        own_ref=parse_request.external_ref,
                         regulator=request.regulator,
                     ),
                     id=f"extract-knowledge-{parsed.document_id}",
@@ -131,10 +150,12 @@ class IngestDocumentWorkflow:
                 workflow.logger.warning("knowledge extraction failed: %s", knowledge_error)
         return IngestResult(
             document_id=parsed.document_id,
-            sha256=fetched.sha256,
-            url=fetched.url,
+            sha256=parse_request.sha256,
+            url=parse_request.url,
             clause_count=parsed.clause_count,
             clause_refs=parsed.clause_refs,
+            storage_key=storage_key,
+            duplicate=duplicate,
             registered=registered,
             registration_error=registration_error,
             clauses_embedded=clauses_embedded,
