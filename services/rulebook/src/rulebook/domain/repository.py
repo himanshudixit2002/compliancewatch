@@ -272,8 +272,9 @@ class RuleVersionRepository(Protocol):
 
     def lock_rule(self, rule_key: str) -> RuleHead | None:
         """The rule with this key, locked for the rest of the transaction so two writers of its
-        next version never take one number, with the highest number its versions have, a closed
-        draft's included; None when no rule has the key."""
+        next version (drafts from candidates, and the seed command, which takes the same lock)
+        never take one number, with the highest number its versions have, a closed draft's
+        included; None when no rule has the key."""
         ...
 
     def add_rule_and_version(self, record: RuleVersionRecord, *, new_rule: bool) -> None:

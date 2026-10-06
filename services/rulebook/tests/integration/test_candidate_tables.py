@@ -7,6 +7,8 @@ Needs Docker."""
 
 import hashlib
 import json
+import threading
+import time
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -56,7 +58,7 @@ from rulebook.domain.events import RuleRejected
 from rulebook.domain.intake import RuleCandidateStatus, RuleRejectReason
 from rulebook.domain.relations import RelationCandidate
 from rulebook.domain.review_tasks import ReviewDecision, ReviewTaskStatus
-from rulebook.domain.seed import SeedCalendar
+from rulebook.domain.seed import SeedCalendar, SeedOutcome
 from rulebook.infrastructure.knowledge_repository import PostgresKnowledgeUnitOfWorkFactory
 from rulebook.infrastructure.seed_repository import SqlAlchemySeedRepository
 
@@ -638,6 +640,81 @@ def test_a_rejected_candidates_draft_is_closed_on_postgres(
         )
         == "draft"
     )
+
+
+def _waits_for_a_lock(engine: Engine, seconds: float = 20.0) -> None:
+    """Until a session of the database waits for a lock another holds."""
+    deadline = time.monotonic() + seconds
+    waiting = (
+        "SELECT count(*) FROM pg_stat_activity"
+        " WHERE wait_event_type = 'Lock' AND datname = current_database()"
+    )
+    while scalar(engine, waiting) == 0:
+        assert time.monotonic() < deadline, "the seed never waited for the rule's lock"
+        time.sleep(0.05)
+
+
+def test_the_seed_waits_for_a_draft_holding_the_rule_and_numbers_after_it(
+    notification: PostgresKnowledgeUnitOfWorkFactory, engine: Engine
+) -> None:
+    """A draft from a candidate holds its rule's lock until it commits. A seed run meanwhile
+    waits for the lock, then reads the draft, where it once read the versions without a lock
+    and took the draft's number (a unique violation when the second of them committed)."""
+    seeded, candidate = "cmp08_quarterly", uuid4()
+    execute(
+        engine,
+        "UPDATE rule_version SET status = 'in_review', submitted_at = now() FROM rule"
+        " WHERE rule.id = rule_version.rule_id AND rule.rule_key = :rule AND version = 1",
+        rule=seeded,
+    )
+    execute(
+        engine,
+        "INSERT INTO rule_candidate (id, document_id, regulator, model, prompt_version,"
+        " confidence, citation_count, needs_review, outcome, status, event_id) VALUES"
+        " (:id, :doc, 'cbic', 'fake/echo', 'extraction.rule_candidate@1', 0.9, 0, false,"
+        " 'extracted', 'open', :event)",
+        id=candidate,
+        doc=DOC.value,
+        event=uuid4(),
+    )
+    seeds: list[SeedOutcome | BaseException] = []
+
+    def seed() -> None:
+        calendar = _retitled(load_calendar(ontology_package.load()), seeded, "Example: edited")
+        try:
+            seeds.append(SqlAlchemySeedRepository(engine).apply(calendar))
+        except BaseException as exc:  # handed to the test below
+            seeds.append(exc)
+
+    with engine.connect() as drafting, drafting.begin():
+        rule = drafting.execute(
+            text("SELECT id FROM rule WHERE rule_key = :rule FOR UPDATE"), {"rule": seeded}
+        ).scalar_one()
+        drafting.execute(
+            text(
+                "INSERT INTO rule_version (id, rule_id, version, status, title, specification,"
+                " obligation_template, effective_from, candidate_id) VALUES (:id, :rule, 2,"
+                " 'draft', 'Example draft from a candidate', '{}', '{}', DATE '2000-02-01',"
+                " :candidate)"
+            ),
+            {"id": uuid4(), "rule": rule, "candidate": candidate},
+        )
+        thread = threading.Thread(target=seed)
+        thread.start()
+        _waits_for_a_lock(engine)
+    thread.join(timeout=60)
+    assert not thread.is_alive()
+    (outcome,) = seeds
+    assert isinstance(outcome, SeedOutcome), outcome
+    assert seeded in outcome.kept_edited, "the candidate's draft is the rule's latest version"
+    versions = (
+        "SELECT v.version, v.status, v.candidate_id IS NOT NULL FROM rule_version v"
+        f" JOIN rule r ON r.id = v.rule_id WHERE r.rule_key = '{seeded}' ORDER BY v.version"
+    )
+    assert [tuple(row) for row in _rows(engine, versions)] == [
+        (1, "in_review", False),
+        (2, "draft", True),
+    ]
 
 
 # ---------------------------------------------------------------- the consumer

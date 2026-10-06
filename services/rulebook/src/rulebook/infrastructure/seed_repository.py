@@ -14,12 +14,18 @@ numbered past it. Otherwise a rule whose latest version an analyst edited throug
 task (an ``edited`` row in its decision audit), or drafted from a rule candidate (its
 ``candidate_id``), is the analyst's: the seed neither overwrites that version nor adds one after
 it, and reports the rule in ``kept_edited``; so is a seed draft an analyst edited.
+
+Each rule's row is locked (``SELECT ... FOR UPDATE``) before its versions are read, as drafting a
+version from a rule candidate locks it, so a seed and a draft running at once never take one
+version number: the second waits for the first and numbers past what it wrote. A rule the seed
+creates is inserted with ``ON CONFLICT DO NOTHING``, so one a draft created meanwhile is used.
 """
 
 import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import Engine, create_engine, select, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
@@ -56,20 +62,24 @@ class SqlAlchemySeedRepository:
         kept: list[str] = []
         with Session(self._engine, expire_on_commit=False) as session, session.begin():
             for rule in calendar.rules:
-                row = session.scalars(
-                    select(RuleRow).where(RuleRow.rule_key == rule.rule_key)
-                ).first()
+                row = _locked_rule(session, rule.rule_key)
                 if row is None:
-                    row = RuleRow(
-                        id=uuid.uuid4(),
-                        rule_key=rule.rule_key,
-                        regulator=rule.regulator,
-                        level=rule.level.value,
-                        created_at=now,
-                    )
-                    session.add(row)
-                    session.flush()
-                    created_rules.append(rule.rule_key)
+                    created = session.execute(
+                        insert(RuleRow)
+                        .values(
+                            id=uuid.uuid4(),
+                            rule_key=rule.rule_key,
+                            regulator=rule.regulator,
+                            level=rule.level.value,
+                            created_at=now,
+                        )
+                        .on_conflict_do_nothing()
+                        .returning(RuleRow.id)
+                    ).first()
+                    if created is not None:
+                        created_rules.append(rule.rule_key)
+                    row = _locked_rule(session, rule.rule_key)
+                    assert row is not None, "the rule was inserted, here or by another writer"
                 versions = session.execute(
                     select(RuleVersionRow, closed_version().label("closed"))
                     .where(RuleVersionRow.rule_id == row.id)
@@ -110,6 +120,14 @@ class SqlAlchemySeedRepository:
         with self._engine.connect() as connection:
             connection.execute(text("SELECT 1"))
         return True
+
+
+def _locked_rule(session: Session, rule_key: str) -> RuleRow | None:
+    """The rule, locked for the rest of the seed's transaction as drafting a version from a rule
+    candidate locks it (``lock_rule``), so the two never number a version alike."""
+    return session.scalars(
+        select(RuleRow).where(RuleRow.rule_key == rule_key).with_for_update()
+    ).first()
 
 
 def _edited(session: Session, row: RuleVersionRow) -> bool:
