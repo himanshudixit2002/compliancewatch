@@ -189,23 +189,12 @@ afterEach(() => {
 });
 
 describe("uploadResponse: who may upload", () => {
-  it("refuses another site, no session, a tenant role and an analyst before reading the body", async () => {
+  it("refuses a session without the source writes before reading the body", async () => {
+    // The origin, the session and the entry's roles are the route's gate's (gate.test.ts); the
+    // write client refuses a session without admin.sources.write again.
     const fake = fakeFetch([]);
     const deps = { fetchImpl: fake.fetchImpl };
     const body = multipart({ reason: REASON });
-    const cross = await uploadResponse(
-      request(body, { "sec-fetch-site": "cross-site" }),
-      UPLOAD_SOURCE_KEY,
-      ADMIN,
-      deps,
-    );
-    expect(cross.status).toBe(403);
-    expect((await problemOf(cross)).type).toBe(
-      "urn:compliancewatch:problem:web-cross-origin-request",
-    );
-    expect((await uploadResponse(request(body), UPLOAD_SOURCE_KEY, null, deps)).status).toBe(401);
-    const owner = claims(["owner"], "business");
-    expect((await uploadResponse(request(body), UPLOAD_SOURCE_KEY, owner, deps)).status).toBe(404);
     const analyst = await uploadResponse(
       request(body),
       UPLOAD_SOURCE_KEY,

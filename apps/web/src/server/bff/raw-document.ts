@@ -4,9 +4,6 @@ import type { pipeline } from "@compliancewatch/contracts/openapi";
 import { storedDocumentFromDto } from "@/entities/pipeline/mappers";
 import type { StoredDocument } from "@/entities/pipeline/types";
 import type { SessionClaims } from "@/entities/session/types";
-import { signInHref } from "@/shared/config/nav";
-import { hasRole } from "@/shared/config/roles";
-import { screenById } from "@/shared/config/screens";
 import { t } from "@/shared/i18n";
 import { isHexUuid } from "@/shared/lib/identifiers";
 import { call, createServiceClient, type FetchImpl } from "../api/client";
@@ -19,9 +16,10 @@ import { apiErrorResponse, problemResponse } from "./problem";
  * `GET /api-bff/pipeline/documents/{documentId}/raw` (system.raw-document): a stored document's
  * bytes from the pipeline's raw store, streamed to the browser as they arrive, never held whole.
  *
- * - The gate: a visitor without a session goes to the sign-in page and comes back; a session
- *   without a regulatory role is answered as if the route did not exist (404), as the admin tools
- *   answer a tenant role. The pipeline checks the role again once it reads tokens.
+ * - The gate is the route file's, run before this (server/bff/gate.ts with the registry entry): a
+ *   visitor without a session goes to the sign-in page and comes back, and a session without a
+ *   regulatory role is answered as if the route did not exist (404), as the admin tools answer a
+ *   tenant role. The pipeline checks the role again once it reads tokens.
  * - The document's record is read first (`GET /v1/pipeline/documents/{id}`), so the content type
  *   and the file name come from the stored metadata, and an id the pipeline does not hold is a
  *   plain 404; the answer's headers are built from it before the bytes are asked for; then the
@@ -179,20 +177,16 @@ function bytesClient(deps: RawDocumentDeps): Client {
   });
 }
 
-const SCREEN = screenById("system.raw-document");
-
-/** The handler's answer for a session (or none) asking for a document's bytes. */
+/**
+ * The handler's answer to a request for a document's bytes, for the session the route's gate let
+ * through (`_session`: the gate checked its roles; the pipeline names no reader).
+ */
 export async function rawDocumentResponse(
   request: Request,
   documentId: string,
-  session: SessionClaims | null,
+  _session: SessionClaims,
   deps: RawDocumentDeps = {},
 ): Promise<Response> {
-  if (session === null) {
-    const { pathname } = new URL(request.url);
-    return new Response(null, { status: 303, headers: { location: signInHref(pathname) } });
-  }
-  if (SCREEN.roles === "public" || !hasRole(session, SCREEN.roles)) return notFound();
   if (!isHexUuid(documentId)) return notFound();
   const id = documentId.toLowerCase();
   const record = await call(

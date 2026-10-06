@@ -1004,22 +1004,47 @@ under `/api-bff/pipeline/` take the work instead: `system.raw-document` streams 
 bytes, and `system.uploads` streams an admin's file on to the pipeline. The proxy is left off that
 prefix (its matcher skips `api-bff/`): Next 16 buffers a request body for the proxy and cuts it at
 `proxyClientMaxBodySize` (10 MB) with only a warning, which would have truncated an upload silently.
-Each handler gates itself: the session (`verifySession`), the role, and for the upload the origin
-check of the sign-out handler and the write token. The raw handler reads the document's record
-first, so the content type and the file name come from the stored metadata rather than the byte
-stream; the bytes' time limit covers only the wait for the response to start; the answer is
-`nosniff` and `private, no-store`, inline for a PDF or an HTML page and an attachment otherwise,
-named by the id with the title in `filename*`. An HTML page is served under `sandbox; default-src
-'none'`, so a regulator's page runs no script under this origin and loads nothing (the e2e suite
-checks both); a PDF is not, because Chrome's PDF viewer does not render under a sandbox. The app's
-static headers still apply: `X-Frame-Options: DENY`, and the app's referrer policy replaces any a
-handler sets. The upload form sends its fields first and the file last; the handler reads at most
-64 KiB of fields, checks them as the pipeline does, and sends a new multipart body with the
-session's user as `actor_id` and the file part streamed through, counted against the limit and
-hashed on the way, so nothing is held whole and a file past the limit stops with a 413. The limit
-and the types are the pipeline's, and a test reads them from the service's code. Consequences: a
-proxy in front of the app must allow bodies of the upload limit on `/api-bff/`; a page that wants
-to show a stored PDF inside itself needs a framing decision first.
+So every handler there runs one gate first, `gateHandler` (`server/bff/gate.ts`) with its own
+registry entry: for a method that writes, the sign-out handler's origin check; then the session (a
+read without one goes to sign in and back, a write is a 401); then the entry's roles and tenant
+kinds (a tenant role gets a 404 for a regulatory tool, any other role short of the entry a 403).
+`src/test/handler-gate.test.ts` fails, naming the file, for any `route.ts` under `app/api-bff/`
+whose exported methods do not start with that gate given the entry of their route. The upload
+then needs the write token, as every pipeline write does. The proxy's other duties arrive with the
+identity work (W3) and run only for the paths it sees, so these handlers must then do them
+themselves, in the gate: refreshing a token about to expire, re-reading `/me` when the session's
+check is old, revoking a session whose version is stale, and the `/admin` IP allow-list
+(`CW_WEB_ADMIN_IP_ALLOWLIST`), which covers the tools' bytes and uploads as much as their pages.
+
+The raw handler reads the document's record first, so the content type and the file name come
+from the stored metadata rather than the byte stream, and builds the answer's headers from it
+before asking for the bytes; if the answer still cannot be built once the bytes are open, their
+stream is cancelled. The bytes' time limit covers only the wait for the response to start; the
+answer is `nosniff` and `private, no-store`, inline for a PDF or an HTML page and an attachment
+otherwise, named by the id with the title in `filename*` (made well formed and cut at 100
+characters by code point, so no title fails the encoding). An HTML page is served under `sandbox;
+default-src 'none'`, so a regulator's page runs no script under this origin and loads nothing (the
+e2e suite checks both). A PDF is served inline, from this origin and without a sandbox: Chrome's
+PDF viewer does not render a document served under a sandbox, and the scripts a PDF may carry run
+in the browser's PDF viewer (Chrome's and Firefox's alike), outside the page's origin, not as a page
+of this site. The two ways to take a PDF off this origin, if a viewer ever stops keeping its scripts
+to itself, are to serve it as an attachment (saved, never shown in the browser) or from a separate
+origin of its own, which shares no cookie or storage with the app. The app's static headers still
+apply: `X-Frame-Options: DENY`, and the app's referrer policy replaces any a handler sets.
+
+The upload form sends its fields first and the file last; the handler reads at most 64 KiB of
+fields, checks them as the pipeline does, and sends a new multipart body with the session's user as
+`actor_id` and the file part streamed through, counted against the limit and hashed on the way, so
+nothing is held whole and a file past this server's limit stops with a 413 that names that limit.
+A pipeline configured lower refuses on its own, and that refusal keeps the pipeline's detail, which
+names its own limit. The limit and the types are the pipeline's, and a test reads them from the
+service's code. The upload is not timed as one exchange, which cut a 25 MB file on a link under
+about 1.8 Mbit/s every time: while the file streams on, only a stall stops it (no byte from the
+browser for 30 seconds, a 400 that says nothing was stored), and once the closing delimiter is sent
+the pipeline has 60 seconds to answer (a 504 that says the file may be stored). Consequences: a
+proxy in front of the app must allow bodies of the upload limit on `/api-bff/`, and its own time
+limits bound an upload as Node's do (`next start` keeps Node's 300 seconds for receiving a whole
+request); a page that wants to show a stored PDF inside itself needs a framing decision first.
 
 ## D-060: The web stack's pipeline has no Temporal, and the specs stage their own sources
 

@@ -5,13 +5,11 @@ import { DOCUMENT_TYPES, type DocumentType, type UploadFormDto } from "@/entitie
 import { isProblemOf } from "@/entities/problem/mappers";
 import type { ValidationIssue } from "@/entities/problem/types";
 import type { SessionClaims } from "@/entities/session/types";
-import { isRegulatory } from "@/shared/config/roles";
 import { t } from "@/shared/i18n";
 import { isDateKey } from "@/shared/lib/dates";
 import { call, type FetchImpl } from "../api/client";
 import { explainPipelineTokenProblem, pipelineWriteClient } from "../api/pipeline-write";
 import { getEnv } from "../env";
-import { isSameOriginRequest } from "../origin";
 import { mapBody, type ApiError } from "../result";
 import {
   UploadFormError,
@@ -29,11 +27,13 @@ import { apiErrorResponse, problemResponse } from "./problem";
  * to a source, forwarded to the pipeline's `POST /v1/pipeline/sources/{key}/uploads` as it
  * arrives. The checks, in order, before a byte of the body is read:
  *
- * - a request from another site is refused (`server/origin.ts`, the sign-out handler's check), so a
- *   foreign page cannot make an admin's browser upload;
- * - no session is a 401, a tenant role a 404 (the tool does not exist for it), a regulatory role
- *   other than the admin a 403, and a server without the write token a 503, from
- *   `server/api/pipeline-write.ts`, the only module that sends the pipeline that token;
+ * - the route file's gate, run before this (server/bff/gate.ts with the registry entry): a request
+ *   from another site is refused (the sign-out handler's origin check), so a foreign page cannot
+ *   make an admin's browser upload; no session is a 401, a tenant role a 404 (the tool does not
+ *   exist for it) and a regulatory role other than the admin a 403;
+ * - a server without the write token is a 503, from `server/api/pipeline-write.ts`, the only module
+ *   that sends the pipeline that token (and which refuses a session without
+ *   `admin.sources.write`, as the gate already has);
  * - a key that cannot be a source's is a 404, a body that is not multipart a 415, and a declared
  *   length past the limit a 413.
  *
@@ -325,39 +325,14 @@ function refused(error: ApiError, sha256: string | null): Response {
   return apiErrorResponse(explained);
 }
 
-/** The handler's answer to an upload request. */
+/** The handler's answer to an upload request, for the session the route's gate let through. */
 export async function uploadResponse(
   request: Request,
   key: string,
-  session: SessionClaims | null,
+  session: SessionClaims,
   deps: UploadDeps = {},
 ): Promise<Response> {
   const env = getEnv();
-  if (
-    !isSameOriginRequest(request.headers, { trustForwardedHost: env.CW_WEB_TRUST_FORWARDED_IP })
-  ) {
-    return problemResponse({
-      slug: "web-cross-origin-request",
-      status: 403,
-      title: t("upload.error.crossOrigin"),
-      detail: t("upload.error.crossOriginDetail"),
-    });
-  }
-  if (session === null) {
-    return problemResponse({
-      slug: "web-sign-in-required",
-      status: 401,
-      title: t("upload.error.signIn"),
-      detail: t("upload.error.signInDetail"),
-    });
-  }
-  if (!isRegulatory(session)) {
-    return problemResponse({
-      slug: "web-not-found",
-      status: 404,
-      title: t("upload.error.notFound"),
-    });
-  }
   const max = env.CW_WEB_PIPELINE_UPLOAD_MAX_BYTES;
   const timing: UploadTiming = { ...UPLOAD_TIMING, ...deps.timing };
   // No limit of the client's own: the clock below times the stream and the answer.

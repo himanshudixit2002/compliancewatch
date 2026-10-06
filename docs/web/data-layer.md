@@ -590,15 +590,20 @@ on as they came. Client forms use `shared/ui/write-outcome.tsx` (`useWriteAction
 `WriteOutcome`): the answer where focus lands, a request whose answer never came kept whole for
 "Try again", and "Send the same request again" for a refusal that asks for it.
 
-Two route handlers stream what an action cannot carry, outside the proxy (D-059):
-`server/bff/raw-document.ts` behind `GET /api-bff/pipeline/documents/[documentId]/raw` reads the
-document's record and then its bytes with `parseAs: "stream"` and `timeoutScope:
-"response-start"`, and passes the body on untouched with headers built from the record;
-`server/bff/upload.ts` behind `POST /api-bff/pipeline/sources/[key]/uploads` checks the origin, the
-session, the key and the declared length, reads the form's fields (`server/bff/multipart.ts`: at
+Two route handlers stream what an action cannot carry, outside the proxy (D-059). Each route file
+runs `gateHandler` (`server/bff/gate.ts`) with its registry entry first: the origin for a write,
+the session and the entry's roles. Then `server/bff/raw-document.ts` behind
+`GET /api-bff/pipeline/documents/[documentId]/raw` reads the document's record, builds the answer's
+headers from it, then reads the bytes with `parseAs: "stream"` and `timeoutScope:
+"response-start"` and passes the body on untouched (cancelling it if the answer cannot be built);
+`server/bff/upload.ts` behind `POST /api-bff/pipeline/sources/[key]/uploads` checks the write
+token, the key and the declared length, reads the form's fields (`server/bff/multipart.ts`: at
 most 64 KiB before the file part, the fields first and the file last, as the upload form sends
 them), and sends the pipeline a new multipart body whose file part is the incoming bytes streamed
-through, counted against the limit and hashed on the way (`duplex: "half"`). Both answer problems
+through, counted against the limit and hashed on the way (`duplex: "half"`). Its client has
+`timeoutScope: "caller"`: the handler's own clock aborts the call when no byte has come from the
+browser for 30 seconds while the file streams, or when the pipeline has not answered 60 seconds
+after the closing delimiter, never for the time a large file takes to arrive. Both answer problems
 as `application/problem+json` (`server/bff/problem.ts`). [admin-tools.md](admin-tools.md) has the
 pages and the handlers.
 

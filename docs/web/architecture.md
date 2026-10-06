@@ -92,8 +92,9 @@ apps/web/
                                ((list) and [ruleVersionId]), impact, llm/prompts, llm/models, llm/usage,
                                profiles/review-tasks, system, sources ((list) and [key]), pipeline
                                ((operations), documents/[documentId], tasks), the catch-all [...slug]
-    api-bff/pipeline/          route handlers outside the proxy: documents/[documentId]/raw (GET, a stored
-                               document's bytes streamed) and sources/[key]/uploads (POST, an upload streamed on)
+    api-bff/pipeline/          route handlers outside the proxy, each starting with the shared gate
+                               (server/bff/gate.ts): documents/[documentId]/raw (GET, a stored document's
+                               bytes streamed) and sources/[key]/uploads (POST, an upload streamed on)
     sign-out/route.ts          POST: clears the session cookie
     api/health/route.ts        {status, version, commit}
     error.tsx, global-error.tsx, not-found.tsx
@@ -136,8 +137,8 @@ apps/web/
                                tasks, outbox rows, uploads)
   src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError, webError),
                                api/ (typed clients, problem parsing, idempotency, the rulebook's and the
-                               pipeline's write clients), bff/ (the raw and upload handlers' logic: the
-                               multipart reader, problem answers), cache.ts (tags and revalidation),
+                               pipeline's write clients), bff/ (the handlers' gate, the raw and upload
+                               handlers' logic, the multipart reader, problem answers), cache.ts (tags and revalidation),
                                session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a
                                POST handler), auth/ (the provider port and the fake adapter), legal.ts,
                                ontology.ts (the ontology read, cached an hour by tag), flags.ts (the flag
@@ -156,6 +157,7 @@ apps/web/
                                SeedStatusChip, CitationList (verified quotes with their clause and source) and
                                NotLegalAdvice (the footer of every page that says what applies)
   src/test/                    vitest setup, the architecture rules and their test with the parked folder map,
+                               the handler gate rule (every /api-bff/ route file gates first) and its test,
                                the screens.md drift test, the synthetic fixtures guard, fake-fetch.ts and
                                fake-cookies.ts
   src/proxy.ts                 the optimistic redirect to /sign-in for gated screens without a cookie; it

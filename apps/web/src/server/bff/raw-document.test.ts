@@ -116,19 +116,9 @@ describe("rawDocumentResponse", () => {
     expect(response.headers.get("content-security-policy")).toBe(RAW_CONTENT_SECURITY_POLICY);
   });
 
-  it("sends a visitor without a session to sign in and back, and hides the route from a tenant", async () => {
+  it("answers an id that cannot be a document's as not found, asking the pipeline nothing", async () => {
+    // The session and the role are the route's gate's (gate.test.ts).
     const fake = fakeFetch([]);
-    const anonymous = await rawDocumentResponse(get(), DOCUMENT_ID, null, {
-      fetchImpl: fake.fetchImpl,
-    });
-    expect(anonymous.status).toBe(303);
-    expect(anonymous.headers.get("location")).toBe(
-      `/sign-in?next=${encodeURIComponent(`/api-bff/pipeline/documents/${DOCUMENT_ID}/raw`)}`,
-    );
-    const owner = await rawDocumentResponse(get(), DOCUMENT_ID, claims(["owner"], "business"), {
-      fetchImpl: fake.fetchImpl,
-    });
-    expect(owner.status).toBe(404);
     const malformed = await rawDocumentResponse(get("nope"), "nope", ANALYST, {
       fetchImpl: fake.fetchImpl,
     });

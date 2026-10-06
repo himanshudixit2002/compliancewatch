@@ -569,25 +569,30 @@ that does not fit the task and an invalid transcript are said plainly.
 ## Stored files and uploads: `/api-bff/pipeline/...`
 
 Two route handlers carry what a server action cannot: a document's bytes to the browser and a
-file to the pipeline, each streamed rather than held whole (D-059).
+file to the pipeline, each streamed rather than held whole (D-059). The proxy never sees them, so
+each starts with the shared gate (`server/bff/gate.ts`) and its registry entry's roles.
 
 - `GET /api-bff/pipeline/documents/[documentId]/raw` (`system.raw-document`): for a regulatory
   role (a visitor goes to sign in, a tenant role gets a 404), the document's record first (its
   content type and title), then its bytes from the raw store as they arrive, with the stored type
   (a PDF, an HTML page; anything else as `application/octet-stream`), `Content-Disposition`
   (inline for a PDF or an HTML page, an attachment otherwise; named by the id, with the title in
-  `filename*`), `nosniff` and `private, no-store`. An HTML page is served under `sandbox;
-  default-src 'none'`: its scripts do not run and it loads nothing. An unknown document, the role,
-  a file missing or altered in the raw store and the raw store away are each a plain problem.
+  `filename*`, well formed and at most 100 characters), `nosniff` and `private, no-store`. An HTML
+  page is served under `sandbox; default-src 'none'`: its scripts do not run and it loads nothing.
+  An unknown document, the role, a file missing or altered in the raw store and the raw store away
+  are each a plain problem.
 - `POST /api-bff/pipeline/sources/[key]/uploads` (`system.uploads`): for an admin only, from this
-  site only (the origin check of the sign-out handler), with the write token set. It checks the
-  key, that the body is a form with a file, the declared length, the file's type (a PDF or an HTML
-  page, 415 otherwise) and the fields (the reason of 10 to 2000 characters, the title, reference,
-  date and type, a 422 naming each), then sends the pipeline a new form (the session's user as
-  `actor_id`, the checked fields, the file's bytes streamed through, counted against the limit) and
-  answers the stored document or a plain problem. The limit is the pipeline's
+  site only (the gate's origin check, the sign-out handler's), with the write token set. It checks
+  the key, that the body is a form with a file, the declared length, the file's type (a PDF or an
+  HTML page, 415 otherwise) and the fields (the reason of 10 to 2000 characters, the title,
+  reference, date and type, a 422 naming each), then sends the pipeline a new form (the session's
+  user as `actor_id`, the checked fields, the file's bytes streamed through, counted against the
+  limit) and answers the stored document or a plain problem. The limit is the pipeline's
   (`CW_PIPELINE_UPLOAD_MAX_BYTES`, mirrored as `CW_WEB_PIPELINE_UPLOAD_MAX_BYTES`, 25 MB by default)
-  and the types are its own; `upload.test.ts` reads both from the service's code.
+  and the types are its own; `upload.test.ts` reads both from the service's code. A pipeline set
+  lower refuses on its own, and the page shows its detail, which names its limit. A slow upload is
+  never cut for its length: it stops only when no byte arrives for 30 seconds (nothing is stored),
+  and the pipeline then has 60 seconds to answer.
 
 ## System: `/admin/system`
 
