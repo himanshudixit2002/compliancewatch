@@ -40,6 +40,14 @@ run with knowledge off and one with registration, embedding and the extraction c
   (`https://example.invalid/notifications/18-2026-scanned`) and the real parsers, whose parse
   failed with `UnparsedDocumentError` and failed the ingest. Its failures' stack traces were
   emptied after recording, so no local path is committed; replay never reads them.
+- `ingest-with-parse*.json`, recorded on 2026-10-06 with the parser chain, uploads and manual
+  parse, before the classify step and rule extraction: `ingest-with-parse.json` and
+  `-knowledge.json`, handed the sample notification as a crawl hands it, with knowledge off and on;
+  `-upload.json`, an upload's stored document (`STORED_PATCH`) with knowledge on;
+  `-statute.json`, an analyst's transcript of a stored statute, registered and embedded and never
+  extracted; and `-unparsed.json`, handed a synthetic PDF with no text layer
+  (`https://example.invalid/notifications/18-2026-scanned`) and the real parsers, whose parse
+  failure opened its manual-parse task (`PARSE_PATCH`). Stack traces emptied the same way.
 
 The worker's identity in them reads `1@pipeline-history`. `tests/unit/test_workflow_replay.py`
 replays them on today's workflow; record a new pair (`WorkflowHandle.fetch_history()`,
