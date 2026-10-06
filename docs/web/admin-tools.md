@@ -10,9 +10,10 @@ The admin layout runs `requireAdmin()` before anything renders, so a tenant role
 404 with no admin markup; each page calls its gate again on its first line
 (`requireScreenSession`), and a regulatory role a tool's entry does not list gets the not-found
 page as well ([auth-and-roles.md](auth-and-roles.md)). The flags, ontology, notification,
-template and rulebook pages each have a sibling `loading.tsx` with a skeleton (the console's sits
-in the route group `(console)`, the rule version list's in `(list)` and the resolve tool's in
-`(resolve)`, so each wraps that page alone, as the home's sits in `(home)`); under one, a
+template, rulebook, decision review, fan-out and impact pages each have a sibling `loading.tsx`
+with a skeleton (the console's sits in the route group `(console)`, the rule version list's and
+the fan-out list's in `(list)` and the resolve tool's in `(resolve)`, so each wraps that page
+alone, as the home's sits in `(home)`); under one, a
 not-found answer (an unknown id, a regulatory role the tool does not list) is streamed with status
 200 and a `noindex` tag rather than a 404 status, as on the business pages (D-029 in
 [decisions.md](decisions.md)). A tenant role still gets the real 404 from the layout's gate. The
@@ -32,6 +33,10 @@ document tool has no loading boundary, so its unknown ids stay real 404s (D-037)
 | Canonical entity    | `/admin/rulebook/entities/canonical/[id]`| every regulatory role   | the entity, the clauses that mention it, the relations to it and their versions |
 | Clause search       | `/admin/rulebook/search`                 | every regulatory role   | `POST /v1/rulebook/search` (the words posted, never in the address)   |
 | Relations graph     | `/admin/rulebook/relations/graph`        | every regulatory role   | `GET /v1/rulebook/relations` and each version it reaches              |
+| Decision review     | `/admin/decisions`                       | every regulatory role reads; a reviewer or an admin settles | `GET /v1/applicability-engine/review-items`, `POST .../{item_id}/resolve`, for the tenant looked up; each version from the rulebook |
+| Fan-outs            | `/admin/fan-outs`                        | every regulatory role reads; an admin holds | `GET /v1/applicability-engine/fan-outs`, `GET` and `PUT .../fan-out-hold`; each version from the rulebook |
+| Fan-out control     | `/admin/fan-outs/[ruleVersionId]`        | every regulatory role reads; an admin controls | the run, the hold, `POST .../fan-outs/{id}/pause`, `/resume`, `/cancel`; the version and its withdraw (`server/api/rulebook-write.ts`, `web.publish_actions`) |
+| Impact explorer     | `/admin/impact`                          | `admin`                 | `POST /v1/applicability-engine/dry-runs`; the ontology for the attributes |
 
 ## Internal tools: `/admin`
 
@@ -236,6 +241,71 @@ from assistive technology; a table beside it lists the same relations with their
 evidence. No graph library is used (D-044). An id the rulebook does not hold is answered on the
 form's field.
 
+## Decision review: `/admin/decisions`
+
+The decisions the applicability engine could not settle by itself, one tenant at a time. The
+review routes act for the tenant named in `x-tenant-id` (on these two routes a regulatory user
+names the tenant reviewed), so the screen is a lookup like the notification console: a GET form
+takes the tenant id and the status to list (open by default, resolved, every item), and the
+engine's cursor pages on in the query string (D-051).
+
+- Each item names the rule version it is about (from the rulebook, linked to its page), the node
+  it was decided for, why it needs a person (a condition in words nobody judged, or a judgement
+  below the review threshold) and when it opened; the decision under review with its result,
+  confidence, trigger and profile version; and each condition of the rule as the engine judged it,
+  with its outcome, confidence and reason.
+- A resolved item says how it was settled (it applies, it does not apply, dismissed, or a later
+  decision that needed no review), by whom, when, with the note and the decision it appended.
+- A reviewer or an admin settles an open item: the result and a note (1 to 2000 characters), then
+  a dialog that says what follows. Applies and does-not-apply append a decision with the reviewer
+  as `resolved_by` (the session's user) and the obligation service makes or closes the
+  obligations; dismiss closes the item and appends nothing. An analyst reads; a refusal (an item
+  already settled) is shown with the engine's problem.
+- Empty lists say why: nothing waits for a reviewer, nothing settled yet, or no item at all.
+
+## Fan-outs: `/admin/fan-outs`
+
+Every rule version's fan-out, newest first, 25 to a page by the engine's cursor: the version (its
+rule key and number from the rulebook, linked to its run), the level, the status in words with
+its last change (by whom and why), how many businesses of the level it decided and how many it
+applies to, its flips against the version it supersedes, and when it started and last moved or
+finished. Above the list, the global hold: while it is set, a danger banner names the reason, who
+set it and when; an admin sets it or releases it through a dialog that asks for a reason (D-050).
+Before any version is published to the engine the list says so.
+
+## Fan-out control: `/admin/fan-outs/[ruleVersionId]`
+
+One version's fan-out for the regulatory team, read-only for anyone but an admin (D-049):
+
+- **The hold**, as on the list.
+- **The run**: its status and what the status means, a progress bar of the businesses decided, the
+  level, how many it applies to, the flips, the versions it supersedes (each opening its own run),
+  when it started and last moved or finished, its last change, the publication event, and a failed
+  run's error. A version with no run says why by its status: not published yet, or published with
+  no run (the runbook's case of a worker that did not handle the publication).
+- **Controls**, for an admin: pause and cancel ask for a reason (`ReasonDialog`; cancelling is
+  destructive and says the decisions stay), resume takes one if given; only the controls the run's
+  status allows are offered, and a finished run has none. The engine's refusal shows under them.
+- **Roll back**, for an admin and a published version: the rulebook's withdraw through
+  `server/api/rulebook-write.ts`, behind `web.publish_actions` and the review token, with the admin
+  as the actor and a warning that says what follows (D-050). A version in any other status says
+  only a published one can be rolled back.
+- **The version**, from the rulebook: its name (linking to its page), title, status, period and
+  publication, and for an admin a link to dry-run it in the impact explorer.
+
+## Impact explorer: `/admin/impact`
+
+The admin's dry run (D-049): a rule version in any status by its id (or named in the address,
+`?rule_version_id=`), or a specification no version holds yet as the kernel's predicate tree in
+JSON with the level it is decided at; every tenant's businesses or one tenant's; up to 50 sample
+decisions. The form checks the shape first (an id, a JSON object, a level with a specification, a
+UUID, a whole number) and keeps what was sent. The report says what ran over which businesses and
+the financial year read, how many were in scope, decided and skipped, the counts by result and how
+many would need review (each with its share of those decided), the attributes that decided the
+results (each by key with the ontology's meaning), and the sample decisions with each condition's
+outcome. A scope over the engine's maximum is its 422 `applicability-dry-run-too-large`, shown with
+the way to narrow it; nothing is stored but the engine's audit entry.
+
 ## What waits
 
 - The usage counts per attribute on the ontology browser: `GET /v1/profile/admin/attribute-usage`
@@ -252,3 +322,7 @@ form's field.
   screens are not built, so on a fresh stack every name resolves to not found, unqualified or empty.
 - The vector leg of the clause search: it needs a query embedding from the LLM gateway, which the
   page does not ask for.
+- Browsing review items across tenants: no route lists the tenants with open items, so the
+  decision review is a lookup by tenant.
+- The admin's name in the engine's audit rows for a hold or a control: the engine reads no token
+  in `header` mode and records the system until identity issues tokens.

@@ -95,6 +95,7 @@ lists every variable; none is `NEXT_PUBLIC_*`.
 | `obligationClient(ctx)`                       | obligation   | yes                               |                                                   |
 | `qaClient(ctx)`                               | qa           | yes                               |                                                   |
 | `applicabilityEngineClient(ctx)`              | applicability-engine | yes                       |                                                   |
+| `applicabilityEngineAdminClient(ctx)`         | applicability-engine | never (fan-outs, the hold and dry runs belong to no tenant) |                    |
 | `rulebookClient(ctx?)`                        | rulebook     | never (records shared by tenants) |                                                   |
 | `rulebookAdmin(ctx)` returns `Result<Client>` | rulebook     | never                             | `x-cw-write-token`, after a regulatory-role check |
 
@@ -492,7 +493,29 @@ obligations by due date and page by the key of the last row (D-045).
 a change's impact for the tenant (`GET /v1/changes/{rule_version_id}/impact`, uncached) and the
 cited clauses; `features/ask/gateway.ts` asks `POST /v1/qa` with the question and the node in the
 body and reads the cited documents (cached under their tag). Every tenant read is uncached.
-[obligation-pages.md](obligation-pages.md) has the pages.
+[obligation-pages.md](obligation-pages.md) has the pages. The obligation list also reads the
+engine's latest decision of each row's rule version for its node, once per node and version on
+the page (D-053).
+
+## Fan-outs, decisions, dry runs and a change's affected clients
+
+`features/fan-outs/gateway.ts` reads the engine's runs (`GET /v1/applicability-engine/fan-outs`
+with `limit` and `cursor`), one run, the global hold, and sends the hold (`PUT .../fan-out-hold`
+with `held` and the reason) and a run's pause, resume and cancel, each with its reason, over
+`applicabilityEngineAdminClient` (no tenant header), plus each version from the rulebook; nothing
+is cached. The rollback is the rulebook's withdraw through `server/api/rulebook-write.ts`
+(`rulebookWorkflow`), so the review token and `web.publish_actions` are checked there.
+`features/decision-review/gateway.ts` reads and settles a tenant's review items over
+`applicabilityEngineClient` with the looked-up tenant as `ClientContext.tenantId` (the review
+routes' cross-tenant exception, D-051), `resolved_by` filled from the session.
+`features/impact-explorer/gateway.ts` posts a dry run (`POST /v1/applicability-engine/dry-runs`)
+over the admin client, the attributes named from the cached ontology.
+`features/change-impact/gateway.ts` reads a change's impact for the session's tenant (with
+`result`, `limit` and `cursor`), the version and each client's business, and sends the bulk change
+card (`POST /v1/notification/bulk`) with the form's key through `callIdempotent` (D-052). The
+actions check the role before any request (`admin.fan_outs.control`, `admin.decisions.resolve`,
+`admin.impact`; D-049), since the engine trusts a caller without a token in `header` mode.
+[admin-tools.md](admin-tools.md) and [obligation-pages.md](obligation-pages.md) have the pages.
 
 ## Rule versions, citations and the publish workflow
 
@@ -572,7 +595,9 @@ because each has a natural key on the service:
 | notification recipient                 | PUT by the recipient id the form was rendered with: a replacement           |
 
 For a listed route, a page renders `<IdempotencyKeyInput />` inside the form (one UUID per
-render, so a double submit or a retry after a lost response sends the same key), and the action
+render, so a double submit or a retry after a lost response sends the same key; a CA firm's bulk
+change card renders its businesses into the same form, so the whole request is fixed at render),
+and the action
 spreads `idempotencyHeaders(formData, "profile.create-business")` into the call's headers. A
 form value that is not a UUID is ignored, so the hidden field cannot inject a header. The
 business gateway's `create` and `addRegistration` take those headers as an argument and pass

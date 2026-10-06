@@ -22,15 +22,17 @@ src/app/            route files only: page.tsx is gate, query, render; layouts, 
                     /onboarding/business (the business step), /onboarding/[businessId]/questions and
                     /onboarding/[businessId]/done, /businesses and /b/[businessId] with /profile,
                     /attributes, /snapshot, /review-tasks, /reminders and /reminders/[notificationId],
-                    /obligations and /obligations/[obligationId], /calendar, /changes and /ask, each with
-                    loading.tsx; [...slug] serves
+                    /obligations and /obligations/[obligationId], /calendar, /changes and /ask, a CA
+                    firm's /changes/[ruleVersionId]/impact, each with loading.tsx; [...slug] serves
                     unbuilt tenant screens behind the entry's roles
   admin/            /admin home and layout under AdminShell, behind requireAdmin; rulebook/documents and the
                     viewer, rulebook/versions (the list and a version's page with its citations and the
                     publish workflow), rulebook/entities/canonical (the resolve tool and an entity's
                     page), rulebook/search, rulebook/relations/graph, flags (the flag console), ontology
                     (the browser), notifications (the console by tenant and business, a notification,
-                    the message templates); [...slug] serves unbuilt tools
+                    the message templates), decisions (the review queue by tenant), fan-outs (the runs
+                    and a version's run with the hold, the controls and the rollback), impact (the dry
+                    run); [...slug] serves unbuilt tools
   sign-out/         POST handler: clears the session cookie and returns to /sign-in (GET is a 405)
   api/health/       liveness handler {status, version, commit}
 src/features/       one directory per screen family: model/, ui/, index.ts (ports, gateway, queries and
@@ -57,7 +59,11 @@ src/features/       one directory per screen family: model/, ui/, index.ts (port
                     paged by key, the calendar with its month loader, an obligation's page with why it
                     applies and its status, assignee and comment writes, the first-obligation poll),
                     changes (the feed with each change's impact for the business), ask (the public ask
-                    behind web.qa_enabled, its citations read from their documents); and the parked
+                    behind web.qa_enabled, its citations read from their documents), fan-outs (the
+                    engine's runs and the global hold, a run's pause, resume and cancel, the rollback
+                    through the rulebook's withdraw), decision-review (one tenant's review items and
+                    settling one), impact-explorer (the admin's dry run), change-impact (a CA firm's
+                    affected clients and the bulk change card with its key); and the parked
                     folders of screens not built yet, which no page imports (docs/web/architecture.md,
                     "Parked feature folders")
 src/entities/       pure domain types and DTO-to-view mappers (no React, no fetch, no next imports);
@@ -67,11 +73,12 @@ src/entities/       pure domain types and DTO-to-view mappers (no React, no fetc
                     GET /v1/ontology, and the lookups over them (by key, by level, answerable, labels);
                     business/ a business, its registrations and nodes, stored values, onboarding, prefill,
                     review tasks and snapshots, with the mappers both ways; consent/ consent records,
-                    states and purposes; notification/ a channel preference; rulebook/ documents,
+                    states and purposes; notification/ a channel preference, recipients, the notification history and a bulk change card; rulebook/ documents,
                     decisions, entities, relations, clauses and search hits; rule-version/ rules, rule
                     versions with their condition tree, citations and a step's lifecycle; obligation/
                     obligations with their rule's facts, citations, history and comments; applicability/
-                    decisions and a change's impact; change/ the changes feed; answer/ an answer of the ask
+                    decisions, a change's impact, review items, fan-out runs, the global hold and dry runs;
+                    change/ the changes feed; answer/ an answer of the ask
 src/server/         server-only modules; every file starts with `import "server-only"`
                     env.ts validates every CW_WEB_* variable (zod; parsed at the first request, never at build)
                     session.ts: the encrypted cw_session cookie (jose), its options, set and clear (actions only)

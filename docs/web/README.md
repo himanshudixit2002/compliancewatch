@@ -54,6 +54,10 @@ Flat; markdown files. Reading order for someone new to the app:
     and adding a document.
 13. [admin-tools.md](admin-tools.md): the internal tools under `/admin` that are built: what
     each shows and calls, who may open it, and what waits.
+    [product-loop.md](product-loop.md): how a published rule reaches a business on screen (the
+    fan-out, decisions, obligations, change cards and reminders) and the oversight tools that
+    watch it. [runbook-admin.md](runbook-admin.md): the operator's steps on those tools: the
+    hold, pausing or cancelling a run, rolling a version back, a dry run, settling a decision.
 14. [decisions.md](decisions.md): the log of decisions local to the web app, `D-001` onward.
     The platform-level one, that the browser never calls a service and the session is an
     encrypted cookie, is [ADR-019](../adr/ADR-019-web-server-layer-and-stateless-session.md).
@@ -80,6 +84,7 @@ commands; the docs here carry the reasoning and the procedures.
 | A flag declaration, the reader, a product event                          | `feature-flags.md`                                                                                             |
 | What an owner or CA screen shows, calls, records or waits for            | `onboarding-flow.md`, `business-pages.md`, `obligation-pages.md`, `settings.md` or `legal-pages.md`            |
 | What an internal tool shows, calls or waits for                          | `admin-tools.md`                                                                                               |
+| A step of the product loop, or an operator's step on the oversight tools | `product-loop.md` or `runbook-admin.md`                                                                        |
 | A choice local to the web app                                            | A `D-0NN` entry in `decisions.md`; a choice that binds other parts of the platform is an ADR under `docs/adr/` |
 
 ## How to run

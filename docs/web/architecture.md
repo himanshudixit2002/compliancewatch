@@ -81,14 +81,16 @@ apps/web/
   src/app/
     layout.tsx                 <html lang="en">, globals.css, the Toaster
     (public)/                  home, /sitemap, /legal/[doc], /forbidden, /design, /sign-in; the visitor shell
-    (app)/                     tenant screens under the session-aware shell: /account, /onboarding and the
+    (app)/                     tenant screens under the session-aware shell: /account, /onboarding, a
+                               business's pages, a CA firm's /changes/[ruleVersionId]/impact and the
                                catch-all [...slug]
     admin/                     (home)/ for /admin (the counts, the services summary and the tool list, with its
                                loading skeleton), the admin layout behind requireAdmin, its error and not-found
                                boundaries, rulebook/documents (open by id) and its [documentId] viewer,
                                rulebook/versions ((list) and [ruleVersionId]), rulebook/entities/canonical
-                               ((resolve) and [entityId]), rulebook/search, rulebook/relations/graph, the
-                               catch-all [...slug]
+                               ((resolve) and [entityId]), rulebook/search, rulebook/relations/graph,
+                               decisions, fan-outs ((list) and [ruleVersionId]), impact, the catch-all
+                               [...slug]
     sign-out/route.ts          POST: clears the session cookie
     api/health/route.ts        {status, version, commit}
     error.tsx, global-error.tsx, not-found.tsx
@@ -101,18 +103,22 @@ apps/web/
                                tool and an entity's page), clause-search, relations-graph (the walk, the SVG
                                layout and the table), obligations (the list merged across a business's nodes,
                                the calendar, an obligation's page with its tracking writes, the first-obligation
-                               poll), changes (the feed with each change's impact), ask (the public ask); the
-                               parked folders above, which no page imports yet
+                               poll), changes (the feed with each change's impact), ask (the public ask),
+                               fan-outs (the runs, the hold, a run's controls and the rollback),
+                               decision-review (a tenant's review items and settling one), impact-explorer
+                               (the dry run), change-impact (a CA firm's affected clients and the bulk
+                               change card); the parked folders above, which no page imports yet
   src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims),
                                ontology/ (the attributes and their wording from GET /v1/ontology),
                                business/ (a business, its nodes and values, onboarding, review tasks, snapshots),
-                               consent/ (consent records), notification/ (a channel preference),
+                               consent/ (consent records), notification/ (a channel preference, a bulk change card),
                                rulebook/ (a rulebook document and its clauses, the review decisions, entities,
                                resolutions, relations, clauses with their document, search hits),
                                rule-version/ (rules, rule versions with their condition tree, citations, a
                                step's lifecycle and a publication), obligation/ (obligations with their rule's
-                               facts, citations, history and comments), applicability/ (decisions and a
-                               change's impact), change/ (the changes feed), answer/ (an answer of the ask)
+                               facts, citations, history and comments), applicability/ (decisions, a
+                               change's impact, review items, fan-out runs, the hold and dry runs), change/
+                               (the changes feed), answer/ (an answer of the ask)
   src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError, webError),
                                api/ (typed clients, problem parsing, idempotency), cache.ts (tags and revalidation),
                                session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a
