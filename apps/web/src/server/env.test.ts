@@ -34,6 +34,7 @@ describe("loadEnv", () => {
     expect(env.CW_WEB_SESSION_TTL_SECONDS).toBe(28_800);
     expect(env.CW_WEB_REQUEST_TIMEOUT_MS).toBe(10_000);
     expect(env.CW_WEB_RULEBOOK_WRITE_TOKEN).toBeUndefined();
+    expect(env.CW_WEB_PIPELINE_UPLOAD_MAX_BYTES).toBe(25_000_000);
     expect(env.CW_WEB_RULEBOOK_REVIEW_TOKEN).toBeUndefined();
     expect(env.CW_WEB_ADMIN_IP_ALLOWLIST).toEqual([]);
     expect(env.CW_WEB_TRUST_FORWARDED_IP).toBe(false);
@@ -109,6 +110,12 @@ describe("loadEnv", () => {
     );
     expect(() => loadEnv({ CW_WEB_REQUEST_TIMEOUT_MS: "1.5" })).toThrow(
       /CW_WEB_REQUEST_TIMEOUT_MS/,
+    );
+    expect(
+      loadEnv({ CW_WEB_PIPELINE_UPLOAD_MAX_BYTES: "1000" }).CW_WEB_PIPELINE_UPLOAD_MAX_BYTES,
+    ).toBe(1000);
+    expect(() => loadEnv({ CW_WEB_PIPELINE_UPLOAD_MAX_BYTES: "100000001" })).toThrow(
+      /CW_WEB_PIPELINE_UPLOAD_MAX_BYTES/,
     );
   });
 

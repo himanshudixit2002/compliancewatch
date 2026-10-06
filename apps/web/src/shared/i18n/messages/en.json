@@ -2488,5 +2488,13 @@
   "system.telemetryLocal": "On, with no exporter configured: spans stay in this server",
   "system.telemetryExporting": "On, exporting over OTLP, with every query and personal value taken out of the spans",
   "system.telemetryFailed": "Off: registration failed at startup (telemetry_registration_failed in the server's log)",
-  "system.telemetryUnknown": "Not known: no registration was recorded in this server process"
+  "system.telemetryUnknown": "Not known: no registration was recorded in this server process",
+  "pipelineWrites.adminRequired": "Only an admin changes the pipeline",
+  "pipelineWrites.adminRequiredDetail": "Analysts and reviewers read the sources and the pipeline; an admin edits a source, fetches one, uploads a document, retries a document, requeues an outbox row and resolves or dismisses a task.",
+  "pipelineWrites.tokenMissing": "The write token is not configured",
+  "pipelineWrites.tokenMissingDetail": "Set CW_WEB_RULEBOOK_WRITE_TOKEN to the shared write token the pipeline reads as its CW_RULEBOOK_WRITE_TOKEN.",
+  "pipelineWrites.tokenInvalid": "The pipeline refused the write token",
+  "pipelineWrites.tokenInvalidDetail": "The pipeline rejected CW_WEB_RULEBOOK_WRITE_TOKEN. Check that it matches the pipeline's CW_RULEBOOK_WRITE_TOKEN.",
+  "pipelineWrites.writesDisabled": "The pipeline takes no writes",
+  "pipelineWrites.writesDisabledDetail": "The pipeline has no CW_RULEBOOK_WRITE_TOKEN set, so it refuses every write. Set it on the pipeline, and set CW_WEB_RULEBOOK_WRITE_TOKEN here to the same value."
 }

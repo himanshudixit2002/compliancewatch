@@ -6,6 +6,7 @@ import type {
   llmGateway,
   notification,
   obligation,
+  pipeline,
   profile,
   qa,
   rulebook,
@@ -32,9 +33,11 @@ import {
  *   applicability-engine's admin routes (fan-outs, the hold, dry      no tenant header
  *   runs), through applicabilityEngineAdminClient
  *   rulebook                                                         no tenant header
+ *   pipeline                                                         no tenant header
  *
- * Rulebook writes go through ./rulebook-write.ts, the only module that sends the write and
- * review tokens. Base URLs and the timeout come from the validated environment (server/env.ts).
+ * Rulebook writes go through ./rulebook-write.ts, the only module that sends the review token,
+ * and the pipeline's writes through ./pipeline-write.ts, the only one that sends it the shared
+ * write token. Base URLs and the timeout come from the validated environment (server/env.ts).
  */
 export interface ClientPrincipal extends Principal {
   userId: string;
@@ -57,6 +60,7 @@ export type ObligationClient = Client<obligation.paths>;
 export type QaClient = Client<qa.paths>;
 export type ApplicabilityEngineClient = Client<applicabilityEngine.paths>;
 export type RulebookClient = Client<rulebook.paths>;
+export type PipelineClient = Client<pipeline.paths>;
 
 /** The tenant a request acts for: the override, else the session's. */
 export function tenantIdOf(ctx: ClientContext): string | undefined {
@@ -137,4 +141,12 @@ export function applicabilityEngineAdminClient(
 /** The rulebook holds regulatory records shared by every tenant: reads carry no tenant header. */
 export function rulebookClient(ctx: Pick<ClientContext, "fetchImpl"> = {}): RulebookClient {
   return createServiceClient<rulebook.paths>(optionsFor("rulebook", ctx, {}));
+}
+
+/**
+ * The pipeline's source manager and operations routes hold regulatory records of no tenant:
+ * reads carry no tenant header. Its writes go through ./pipeline-write.ts.
+ */
+export function pipelineClient(ctx: Pick<ClientContext, "fetchImpl"> = {}): PipelineClient {
+  return createServiceClient<pipeline.paths>(optionsFor("pipeline", ctx, {}));
 }

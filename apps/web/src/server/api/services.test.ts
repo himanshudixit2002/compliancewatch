@@ -10,6 +10,7 @@ import {
   llmGatewayClient,
   notificationClient,
   obligationClient,
+  pipelineClient,
   profileClient,
   qaClient,
   rulebookClient,
@@ -120,5 +121,16 @@ describe("rulebookClient", () => {
     expect(fake.requests[0]?.headers[TENANT_HEADER]).toBeUndefined();
     expect(fake.requests[0]?.headers[WRITE_TOKEN_HEADER]).toBeUndefined();
     expect(fake.requests[0]?.headers.accept).toBe("application/json");
+  });
+});
+
+describe("pipelineClient", () => {
+  it("reads the pipeline with neither a tenant header nor the write token", async () => {
+    vi.stubEnv("CW_WEB_RULEBOOK_WRITE_TOKEN", "example-write-token");
+    const fake = fakeFetch([{ path: "/v1/pipeline/sources", body: { items: [] } }]);
+    await pipelineClient({ fetchImpl: fake.fetchImpl }).GET("/v1/pipeline/sources");
+    expect(fake.requests[0]?.url).toBe("http://localhost:8010/v1/pipeline/sources");
+    expect(fake.requests[0]?.headers[TENANT_HEADER]).toBeUndefined();
+    expect(fake.requests[0]?.headers[WRITE_TOKEN_HEADER]).toBeUndefined();
   });
 });

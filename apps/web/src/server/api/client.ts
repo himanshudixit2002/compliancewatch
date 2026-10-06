@@ -52,6 +52,12 @@ export interface ServiceClientOptions {
   service: ServiceName;
   baseUrl: string;
   timeoutMs: number;
+  /**
+   * What the time limit covers: the whole exchange (the default: the call fails when the body has
+   * not arrived in time either), or only the wait for the response to start, for a body streamed
+   * on to the browser (a stored document's bytes), which may take longer than any limit.
+   */
+  timeoutScope?: "exchange" | "response-start";
   fetchImpl?: FetchImpl;
   /** Headers every request of this client sends, on top of accept and x-request-id. */
   headers?: Readonly<Record<string, string>>;
@@ -91,6 +97,31 @@ function fetchInit(request: Request, timeoutMs: number): RequestInit {
   return init;
 }
 
+/**
+ * A fetch whose time limit ends once the response starts: the timer aborts the request only while
+ * no response has arrived, and the call's own signal (a browser that went away) still ends the
+ * body afterwards.
+ */
+async function fetchUntilResponse(
+  fetchImpl: FetchImpl,
+  request: Request,
+  timeoutMs: number,
+): Promise<Response> {
+  const timer = new AbortController();
+  const handle = setTimeout(
+    () => timer.abort(new DOMException(`no response within ${timeoutMs} ms`, "TimeoutError")),
+    timeoutMs,
+  );
+  const init: RequestInit = { signal: AbortSignal.any([request.signal, timer.signal]) };
+  const next = (request as CacheableRequest).next;
+  if (next !== undefined) init.next = next;
+  try {
+    return await fetchImpl(request, init);
+  } finally {
+    clearTimeout(handle);
+  }
+}
+
 export function createServiceClient<Paths extends object>(
   options: ServiceClientOptions,
 ): Client<Paths> {
@@ -98,7 +129,10 @@ export function createServiceClient<Paths extends object>(
   const client = createClient<Paths>({
     baseUrl: options.baseUrl,
     headers: { accept: "application/json", ...options.headers },
-    fetch: (request) => fetchImpl(request, fetchInit(request, options.timeoutMs)),
+    fetch: (request) =>
+      options.timeoutScope === "response-start"
+        ? fetchUntilResponse(fetchImpl, request, options.timeoutMs)
+        : fetchImpl(request, fetchInit(request, options.timeoutMs)),
   });
   client.use({
     onRequest({ request }) {

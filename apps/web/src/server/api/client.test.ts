@@ -71,6 +71,37 @@ describe("createServiceClient", () => {
     await expect(client.GET("/v1/identity/billing/plans")).rejects.toBeInstanceOf(NetworkFailure);
   });
 
+  it("limits only the wait for the response when the body streams on", async () => {
+    const hanging = hangingFetch();
+    const waiting = createServiceClient<identity.paths>({
+      service: "identity",
+      baseUrl: BASE,
+      timeoutMs: 20,
+      timeoutScope: "response-start",
+      fetchImpl: hanging.fetchImpl,
+    });
+    await expect(waiting.GET("/v1/identity/billing/plans")).rejects.toBeInstanceOf(NetworkFailure);
+
+    // A response that starts in time keeps its body readable past the limit.
+    let signal: AbortSignal | null | undefined;
+    const slow = createServiceClient<identity.paths>({
+      service: "identity",
+      baseUrl: BASE,
+      timeoutMs: 20,
+      timeoutScope: "response-start",
+      fetchImpl: async (_input, init) => {
+        signal = init?.signal;
+        return jsonResponse(200, []);
+      },
+    });
+    const answered = await slow.GET("/v1/identity/billing/plans", {
+      next: { revalidate: 300, tags: ["identity:plans"] },
+    });
+    expect(answered.response.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(signal?.aborted).toBe(false);
+  });
+
   it("gives a cached read a request id made of its tags and hands next on to fetch", async () => {
     const fake = fakeFetch([{ method: "GET", path: "/v1/identity/billing/plans", body: [] }]);
     const client = identityClient(fake.fetchImpl);
