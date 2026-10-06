@@ -298,8 +298,8 @@ select {
 }
 
 .brand-mark svg {
-  border-radius: 8px;
-  box-shadow: 0 1px 2px rgb(16 24 40 / 0.2);
+  border-radius: 7px;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 0.25);
 }
 
 .brand-text {
@@ -379,12 +379,51 @@ select {
 }
 
 .sidebar-foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
   margin-top: auto;
   padding: var(--s3) var(--s2) 0;
   border-top: 1px solid var(--card-line);
   font-size: 12px;
   line-height: 17px;
   color: var(--fg-muted);
+}
+
+.sidebar-foot p {
+  margin: 0;
+}
+
+.quit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid var(--card-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.quit-btn:hover {
+  background: var(--hover, rgb(127 127 127 / 0.08));
+}
+
+.quit-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.quit-btn .icon-box,
+.quit-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 .main-col {

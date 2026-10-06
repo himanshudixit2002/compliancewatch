@@ -300,6 +300,47 @@ function updateDemo() {
   $("demo-chip").hidden = !store.state.hello.demo;
 }
 
+/**
+ * Quit, for the window's own button: in the app, the app quits (it shows "Quitting…" and stops
+ * the helper); in a browser, the helper stops and the tab says so. A task still running is
+ * named first, since quitting stops it partway through.
+ */
+async function quitApp() {
+  const running = store.activeRun();
+  if (running) {
+    const choice = await openDialog({
+      title: `${running.title} is still running`,
+      tone: "warning",
+      iconName: "power",
+      build: () => [
+        h("p", {
+          text: "Quitting stops it now, partway through. Anything it already did stays done.",
+        }),
+      ],
+      actions: [
+        { label: "Keep running", value: null, autofocus: true, key: "keep" },
+        { label: "Quit and stop it", value: "quit", variant: "danger", key: "quit" },
+      ],
+    });
+    if (choice !== "quit") return;
+  }
+  const bridge = window.webkit?.messageHandlers?.cwControl;
+  if (bridge) {
+    bridge.postMessage("quit");
+    return;
+  }
+  try {
+    await api.quit();
+  } catch {
+    // the helper may already be gone: the tab says it stopped either way
+  }
+  events?.close();
+  showLocked(
+    "ComplianceWatch Control has stopped",
+    "You can close this tab. Open the app again to start it.",
+  );
+}
+
 function showLocked(title, text) {
   const app = $("app");
   app.inert = true;
@@ -557,6 +598,21 @@ async function boot() {
       loadActions();
     },
   });
+  // one stream per window, and none while it is hidden or after it went away: a reload or a
+  // window closed into the background leaves no stream behind in the helper
+  if (document.visibilityState === "hidden") events.pause();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") events?.pause();
+    else events?.resume();
+  });
+  window.addEventListener("pagehide", (event) => {
+    if (event.persisted) events?.pause();
+    else events?.close();
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) events?.resume();
+  });
+  $("quit-btn")?.addEventListener("click", () => quitApp());
   Promise.all([loadStatus(), loadActions()]).then(async () => {
     loadHistory();
     const saved = await prefs();

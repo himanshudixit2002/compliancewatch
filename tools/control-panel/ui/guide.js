@@ -659,6 +659,16 @@ export const TROUBLE = [
     fix: "Wait a few seconds; it reconnects by itself. If it does not, quit the app and open it again.",
   },
   {
+    title: "The app asks to use your Desktop folder, or says it is waiting for macOS",
+    why: "Your checkout is in a folder macOS keeps private (Desktop, Documents or Downloads). macOS asks once, and again after each new build of the app.",
+    fix: "Click Allow. If you clicked Don't Allow: System Settings, Privacy & Security, Files & Folders, turn on the folder under ComplianceWatch Control, then press Try again.",
+  },
+  {
+    title: "Closing the window asks what to do",
+    why: "Something is still running, and closing the window would stop it.",
+    fix: "Keep Running in Background closes the window and lets it finish; click ComplianceWatch Control in the Dock to bring the window back. Quit stops it now. Quit at the bottom of the sidebar, or ⌘Q, always quits.",
+  },
+  {
     title: 'The window says "Open this window from the app"',
     why: "The page was reloaded without the key the app gives it.",
     fix: "Open the app again (or run make control-panel again).",
