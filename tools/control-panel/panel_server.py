@@ -1187,7 +1187,7 @@ class App:
         self.snapshot: core.ProcessSnapshot | None = None
         self.git: core.GitState | None = None
         self._status_body: dict[str, Any] | None = None
-        self._signature: tuple[Any, ...] = ()
+        self._catalog_fingerprint: tuple[Any, ...] = ()
         self.kafka_snapshot: core.KafkaSnapshot | None = None
         self.kafka_limit = core.RateLimit(core.KAFKA_MIN_SECONDS, clock)
         self._cached: dict[str, tuple[float, Any]] = {}
@@ -1230,9 +1230,9 @@ class App:
                 k: v for k, v in previous.items() if k != "taken_at"
             }
             self._status_body = body
-            signature = self._catalog_signature()
-            catalog_changed = signature != self._signature
-            self._signature = signature
+            fingerprint = self._catalog_fingerprint_now()
+            catalog_changed = fingerprint != self._catalog_fingerprint
+            self._catalog_fingerprint = fingerprint
         if changed:
             self.hub.publish("status", body)
         if kind == "processes":
@@ -1240,7 +1240,7 @@ class App:
         if catalog_changed:
             self.hub.publish("actions", {})
 
-    def _catalog_signature(self) -> tuple[Any, ...]:
+    def _catalog_fingerprint_now(self) -> tuple[Any, ...]:
         status = self.status
         return (
             status.docker if status else None,
