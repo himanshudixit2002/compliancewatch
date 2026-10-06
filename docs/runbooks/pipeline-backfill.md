@@ -62,8 +62,10 @@ crawl, and ends each row once nothing new is left, the last crawl kept nothing, 
 A backfill is none of the source's crawls: each one records its run and leaves the source as it
 found it. Its watermark stays where the schedule's crawls left it (a source the schedule never
 crawled keeps none), and so do its last listing (its freshness, which the `SourceStale` alert
-reads), its last error and its status, so the schedule's crawls go on from where they were.
-Interrupting the command stops it waiting, not the crawl it started: that one ends on the worker and is recorded;
+reads), its last error and its status, so the schedule's crawls go on from where they were. While
+a backfill's crawl runs the tick starts no crawl of that source; once it ends, the schedule's next
+crawl is due a cadence after the schedule's last one, not after the backfill. Interrupting the
+command stops it waiting, not the crawl it started: that one ends on the worker and is recorded;
 run the command again (with `--row N` from the row it stopped at) and what is stored already is
 known and skipped.
 
@@ -98,6 +100,9 @@ and why. `--json` prints JSON. It writes nothing.
 - Rows that failed: read the run's error (`GET /v1/pipeline/runs?trigger=backfill&status=failed`;
   a backfill leaves the source's `last_error` to the schedule's crawls); a site that blocks the
   crawler is in [source-stale.md](source-stale.md).
+- The crawl report (`make crawl-report`) leaves the backfill out: its runs, and the documents
+  fetched while one ran, count in no total, close no gap and take no part in the detection
+  delay.
 
 `--legacy` keeps the command this one replaced, which fetches into a local raw store (`var/raw`)
 outside the pipeline's store and records nothing: for recording fixtures only.

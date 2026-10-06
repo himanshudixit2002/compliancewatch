@@ -236,12 +236,14 @@ class CrawlRunRepository(Protocol):
         """Write the status, end, counts and error of an existing run."""
         ...
 
-    def latest(self, source_key: str) -> CrawlRun | None:
-        """The source's most recently started run."""
+    def latest(self, source_key: str, *, backfills: bool = True) -> CrawlRun | None:
+        """The source's most recently started run; with ``backfills`` False, the most recent
+        that was not a backfill's (a run recorded before triggers were is not)."""
         ...
 
-    def latest_by_source(self) -> Mapping[str, CrawlRun]:
-        """Each source's most recently started run."""
+    def latest_by_source(self, *, backfills: bool = True) -> Mapping[str, CrawlRun]:
+        """Each source's most recently started run; with ``backfills`` False, the most recent
+        that was not a backfill's."""
         ...
 
     def running(self, source_key: str) -> Sequence[CrawlRun]:

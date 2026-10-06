@@ -7,7 +7,9 @@ ended, the documents stored and failed, the longest gap between successful listi
 window's start up to now) and, where documents carry a publication date, the detection delay
 from the start of that day in India to the first fetch (``application.report``). The F1 line
 judges ``--f1-source``: met when the source was listed all through the window with no gap above
-``--target-hours`` and its last crawl recorded no error. ``--json`` prints the same as JSON.
+``--target-hours`` and its last crawl recorded no error. A backfill's runs, and the documents
+fetched while one ran, are left out, and so are documents published before the window.
+``--json`` prints the same as JSON.
 
 Exit status: 0 when F1 is met, 1 when it is not (or the source is unknown), 2 when the store
 cannot be read.

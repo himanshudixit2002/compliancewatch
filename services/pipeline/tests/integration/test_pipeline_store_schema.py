@@ -809,6 +809,22 @@ def test_runs_keep_their_trigger_and_page_the_latest_first(
         assert [run.id for run in backfills] == [runs[2].id]
         running = unit.crawl_runs.page(RunQuery(status=CrawlStatus.RUNNING, limit=50))
         assert {run.id for run in runs} <= {run.id for run in running}
+        assert unit.crawl_runs.latest(DEFINITION.key) == runs[2]
+        assert unit.crawl_runs.latest(DEFINITION.key, backfills=False) == runs[1]
+        assert unit.crawl_runs.latest_by_source()[DEFINITION.key] == runs[2]
+        crawled = unit.crawl_runs.latest_by_source(backfills=False)
+        assert crawled[DEFINITION.key] == runs[1], "the backfill is no crawl of the source"
+    other = replace(DEFINITION, key="other_source")
+    before, backfill = (replace(runs[0], id=CrawlRunId.new(), source_key=other.key), runs[2])
+    with units() as unit:
+        unit.sources.add(Source.of(other, NOW))
+        unit.crawl_runs.add(before)
+        unit.crawl_runs.add(replace(backfill, id=CrawlRunId.new(), source_key=other.key))
+    with units() as unit:
+        assert unit.crawl_runs.latest(other.key, backfills=False) == before, (
+            "a run recorded before triggers is a crawl of the source"
+        )
+        assert unit.crawl_runs.latest_by_source(backfills=False)[other.key] == before
 
 
 def test_documents_are_searched_tallied_and_found_waiting_for_extraction(

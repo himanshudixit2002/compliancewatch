@@ -434,21 +434,22 @@ class SqlAlchemyCrawlRunRepository:
         self._session.merge(_to_run_row(run))
         self._session.flush()
 
-    def latest(self, source_key: str) -> CrawlRun | None:
-        statement = (
-            select(CrawlRunRow)
-            .where(CrawlRunRow.source_key == source_key)
-            .order_by(CrawlRunRow.started_at.desc(), CrawlRunRow.id.desc())
-            .limit(1)
+    def latest(self, source_key: str, *, backfills: bool = True) -> CrawlRun | None:
+        statement = select(CrawlRunRow).where(CrawlRunRow.source_key == source_key)
+        if not backfills:
+            statement = statement.where(_NOT_BACKFILL)
+        statement = statement.order_by(CrawlRunRow.started_at.desc(), CrawlRunRow.id.desc()).limit(
+            1
         )
         row = self._session.scalars(statement).first()
         return None if row is None else _to_run(row)
 
-    def latest_by_source(self) -> Mapping[str, CrawlRun]:
-        statement = (
-            select(CrawlRunRow)
-            .ext(distinct_on(CrawlRunRow.source_key))
-            .order_by(CrawlRunRow.source_key, CrawlRunRow.started_at.desc(), CrawlRunRow.id.desc())
+    def latest_by_source(self, *, backfills: bool = True) -> Mapping[str, CrawlRun]:
+        statement = select(CrawlRunRow).ext(distinct_on(CrawlRunRow.source_key))
+        if not backfills:
+            statement = statement.where(_NOT_BACKFILL)
+        statement = statement.order_by(
+            CrawlRunRow.source_key, CrawlRunRow.started_at.desc(), CrawlRunRow.id.desc()
         )
         return {row.source_key: _to_run(row) for row in self._session.scalars(statement).all()}
 
@@ -488,6 +489,10 @@ class SqlAlchemyCrawlRunRepository:
             query.limit
         )
         return [_to_run(row) for row in self._session.scalars(statement).all()]
+
+
+_NOT_BACKFILL: Final = CrawlRunRow.trigger.is_distinct_from(CrawlTrigger.BACKFILL.value)
+"""A run that was not a backfill's: a run recorded before triggers were has none."""
 
 
 def _run_values(run: CrawlRun) -> dict[str, object]:

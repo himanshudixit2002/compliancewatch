@@ -262,6 +262,36 @@ def test_the_tick_skips_paused_disabled_and_recently_crawled_sources() -> None:
     assert len(report.started) == 2
 
 
+def test_a_backfill_holds_the_tick_back_while_it_runs_and_not_after() -> None:
+    """gstn_advisories (every three hours) was crawled by the schedule four hours ago and
+    backfilled since: the tick waits while the backfill runs, then starts the schedule's crawl at
+    once, without a cadence counted from the backfill."""
+    store, starter = synced(), MemoryCrawls()
+    key = "gstn_advisories"
+    scheduled = CrawlRun.start(key, NOW - timedelta(hours=4)).finish(
+        NOW - timedelta(hours=4) + timedelta(minutes=3), CrawlCounts(listed=4)
+    )
+    backfill = CrawlRun(
+        id=CrawlRunId.new(),
+        source_key=key,
+        started_at=NOW - timedelta(minutes=10),
+        trigger=CrawlTrigger.BACKFILL,
+        workflow_id=backfill_workflow_id(key, UUID(int=3)),
+    )
+    with store() as unit:
+        unit.crawl_runs.add(scheduled)
+        unit.crawl_runs.add(backfill)
+    tick = ScheduleCrawls(store, starter, types=TYPES, enabled=True, clock=Clock())
+    tick.run()
+    assert key not in {start.source_key for start in starter.started}, "the backfill runs"
+    with store() as unit:
+        unit.crawl_runs.save(backfill.finish(NOW, CrawlCounts(listed=50, stored=50)))
+    tick.run()
+    assert [start.trigger for start in starter.started if start.source_key == key] == [
+        CrawlTrigger.SCHEDULE
+    ]
+
+
 def test_the_tick_does_nothing_while_crawling_is_off() -> None:
     store, starter = synced(), MemoryCrawls()
     assert ScheduleCrawls(store, starter, types=TYPES, enabled=False).run().started == ()

@@ -25,7 +25,7 @@ from domain_kernel.audit import AuditEntry
 from domain_kernel.events import utc_now
 from domain_kernel.ids import DocumentId
 from pipeline.domain.classification import Classification
-from pipeline.domain.crawl import CrawlRun, CrawlRunId, CrawlStatus
+from pipeline.domain.crawl import CrawlRun, CrawlRunId, CrawlStatus, CrawlTrigger
 from pipeline.domain.events import DocumentEvent
 from pipeline.domain.extraction import ExtractionOutcome, RuleExtraction
 from pipeline.domain.outbox import DeadEventKey, OutboxEvent
@@ -285,14 +285,19 @@ class MemoryCrawlRunRepository:
             raise KeyError(f"no crawl run {run.id} to save")
         self._runs[run.id] = run
 
-    def latest(self, source_key: str) -> CrawlRun | None:
-        found = [run for run in self._runs.values() if run.source_key == source_key]
+    def latest(self, source_key: str, *, backfills: bool = True) -> CrawlRun | None:
+        found = [
+            run
+            for run in self._runs.values()
+            if run.source_key == source_key and (backfills or not _backfill(run))
+        ]
         return max(found, key=_started, default=None)
 
-    def latest_by_source(self) -> Mapping[str, CrawlRun]:
+    def latest_by_source(self, *, backfills: bool = True) -> Mapping[str, CrawlRun]:
         latest: dict[str, CrawlRun] = {}
         for run in sorted(self._runs.values(), key=_started):
-            latest[run.source_key] = run
+            if backfills or not _backfill(run):
+                latest[run.source_key] = run
         return latest
 
     def running(self, source_key: str) -> Sequence[CrawlRun]:
@@ -328,6 +333,10 @@ class MemoryCrawlRunRepository:
 
 def _started(run: CrawlRun) -> tuple[datetime, int]:
     return (run.started_at, run.id.value.int)
+
+
+def _backfill(run: CrawlRun) -> bool:
+    return run.trigger is CrawlTrigger.BACKFILL
 
 
 def _started_key(key: RunKey) -> tuple[datetime, int]:

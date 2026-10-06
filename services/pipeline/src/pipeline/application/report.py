@@ -9,6 +9,12 @@ the longest gap is the detection bound. Where documents carry a publication date
 the detection delay, from the start of the publication day in India to the first fetch: an upper
 bound, since regulators date their documents and not the hour.
 
+A backfill lists history, not what is new, so it is none of the source's crawls here: its runs
+are left out of the counts and the listings (a backfill never closes a gap), and so are the
+documents first fetched while one of the source's backfills ran (no other crawl of a source runs
+beside a backfill). The detection delay also leaves out the documents published before the
+window: they were not new in it.
+
 ``F1`` is met for a source when it was listed successfully all through the window with no gap
 above ``target`` and its last crawl recorded no error.
 """
@@ -21,7 +27,7 @@ from statistics import median
 from typing import Final
 
 from domain_kernel.events import utc_now
-from pipeline.domain.crawl import CrawlRun, CrawlStatus
+from pipeline.domain.crawl import CrawlRun, CrawlStatus, CrawlTrigger
 from pipeline.domain.raw_documents import RawDocumentRecord
 from pipeline.domain.repository import UnitOfWorkFactory
 from pipeline.domain.schedule import INDIA
@@ -33,7 +39,8 @@ DEFAULT_DAYS: Final = 30
 
 @dataclass(frozen=True, slots=True)
 class Detection:
-    """The detection delays of the documents first fetched in the window with a date."""
+    """The detection delays of the documents first fetched in the window by the source's
+    crawls, published in it."""
 
     documents: int
     within_target: int
@@ -90,6 +97,14 @@ def longest_gap(listings: Sequence[datetime], since: datetime, until: datetime) 
     return max(later - earlier for earlier, later in pairwise(moments))
 
 
+def backfilled(record: RawDocumentRecord, backfills: Sequence[CrawlRun], until: datetime) -> bool:
+    """Whether a backfill of the document's source ran when it was first fetched (one still
+    running counts up to ``until``): the backfill fetched it, not one of the source's crawls."""
+    return any(
+        run.started_at <= record.fetched_at <= (run.finished_at or until) for run in backfills
+    )
+
+
 def _detection(records: Sequence[RawDocumentRecord], target: timedelta) -> Detection | None:
     delays = [delay for delay in map(detection_delay, records) if delay is not None]
     if not delays:
@@ -111,24 +126,34 @@ def _source_report(
     until: datetime,
     target: timedelta,
 ) -> SourceReport:
-    completed = [run for run in runs if run.status is CrawlStatus.COMPLETED]
+    crawls = [run for run in runs if run.trigger is not CrawlTrigger.BACKFILL]
+    backfills = [run for run in runs if run.trigger is CrawlTrigger.BACKFILL]
+    completed = [run for run in crawls if run.status is CrawlStatus.COMPLETED]
     listings = [run.finished_at for run in completed if run.finished_at is not None]
+    first_day = since.astimezone(INDIA).date()
+    detected = [
+        record
+        for record in records
+        if record.published_on is not None
+        and record.published_on >= first_day
+        and not backfilled(record, backfills, until)
+    ]
     return SourceReport(
         key=source.key,
         name=source.label,
         enabled=source.enabled,
         paused=source.paused,
-        runs=len(runs),
+        runs=len(crawls),
         completed=len(completed),
-        failed_runs=sum(run.status is CrawlStatus.FAILED for run in runs),
-        stored=sum(run.counts.stored for run in runs),
-        duplicates=sum(run.counts.duplicates for run in runs),
-        failed_documents=sum(run.counts.failed for run in runs),
+        failed_runs=sum(run.status is CrawlStatus.FAILED for run in crawls),
+        stored=sum(run.counts.stored for run in crawls),
+        duplicates=sum(run.counts.duplicates for run in crawls),
+        failed_documents=sum(run.counts.failed for run in crawls),
         first_listing=min(listings, default=None),
         last_listing=max(listings, default=None),
         longest_gap=longest_gap(listings, since, until),
         last_error=source.last_error,
-        detection=_detection(records, target),
+        detection=_detection(detected, target),
     )
 
 

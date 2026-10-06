@@ -7,9 +7,10 @@ the crawl workflow (``workflows.crawl_source``).
   ``pipeline.source.fetch`` audit entry; then, with the transaction closed, it starts the
   workflow.
 - ``ScheduleCrawls``: the tick. For each source ``schedule.is_due`` names (never an upload-only
-  one), it locks the source, checks again, records the run under the id derived from the
-  source's cadence slot and starts the workflow of that slot. A second tick in the same slot
-  finds the run recorded (or Temporal refuses the id), so it starts nothing.
+  one, none while a crawl of it runs, a backfill's included; the cadence counted from its last
+  crawl that was not a backfill), it locks the source, checks again, records the run under the
+  id derived from the source's cadence slot and starts the workflow of that slot. A second tick
+  in the same slot finds the run recorded (or Temporal refuses the id), so it starts nothing.
 - ``ListNewDocuments`` (``pipeline.list_new_documents``): the source's listing since a week
   before its watermark, through its adapter, with no transaction open; the URLs the store holds
   are skipped, and at most the crawl's limit of the rest come back, newest first. A backfill
@@ -259,11 +260,19 @@ class ScheduleCrawls:
         with self._units() as unit:
             sources = unit.sources.list()
             latest = unit.crawl_runs.latest_by_source()
+            crawled = unit.crawl_runs.latest_by_source(backfills=False)
         started: list[str] = []
         failed: list[str] = []
         for source in sources:
             listable = self._types.listable(source.adapter_type)
-            if not is_due(source, latest.get(source.key), now, listable=listable):
+            due = is_due(
+                source,
+                latest.get(source.key),
+                now,
+                listable=listable,
+                last_crawl=crawled.get(source.key),
+            )
+            if not due:
                 continue
             try:
                 start = self._start(source.key, now)
@@ -287,8 +296,14 @@ class ScheduleCrawls:
             if source is None:
                 return None
             close_abandoned(unit, key, now)
-            listable = self._types.listable(source.adapter_type)
-            if not is_due(source, unit.crawl_runs.latest(key), now, listable=listable):
+            due = is_due(
+                source,
+                unit.crawl_runs.latest(key),
+                now,
+                listable=self._types.listable(source.adapter_type),
+                last_crawl=unit.crawl_runs.latest(key, backfills=False),
+            )
+            if not due:
                 return None
             workflow_id = scheduled_workflow_id(key, now, source.cadence)
             start = CrawlStart(workflow_id, run_id_for(workflow_id), key, CrawlTrigger.SCHEDULE)

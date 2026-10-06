@@ -251,8 +251,9 @@ The tests and the journey crawl recorded responses only. The `source` table is t
 schedule; no Temporal schedule holds a copy.
 
 - **The tick.** With the flag on, the worker runs `pipeline-crawl-tick` every 60 seconds
-  (`ScheduleCrawls`). A source is due when it is enabled and not paused, no crawl of it runs, and
-  its cadence has passed since its last crawl started (`domain/schedule.py`). For each one the
+  (`ScheduleCrawls`). A source is due when it is enabled and not paused, no crawl of it runs (a
+  backfill's included), and its cadence has passed since its last crawl that was not a backfill
+  started (`domain/schedule.py`). For each one the
   tick locks the source's row, records a crawl run whose id is derived from the workflow id
   `pipeline-crawl-<key>-<cadence slot start>`, and only then, with the transaction closed, starts
   the workflow with the id reuse policy `REJECT_DUPLICATE`. A second tick in the same slot finds
@@ -303,8 +304,10 @@ source has not been listed for more than two cadences
 F1 check: per source the runs and failures in the window, the longest gap between successful
 listings from the window's start to now, and where documents carry a date the detection delay from
 the start of that day in India to the first fetch (an upper bound: regulators date documents, not
-hours). F1 is met for `--f1-source` (`cbic_notifications`) when no gap passed `--target-hours`
-(6) and the last crawl recorded no error; the command exits 0 then, 1 otherwise.
+hours). A backfill's runs, and the documents fetched while one ran, are left out (a backfill
+closes no gap), and so are documents published before the window. F1 is met for `--f1-source`
+(`cbic_notifications`) when no gap passed `--target-hours` (6) and the last crawl recorded no
+error; the command exits 0 then, 1 otherwise.
 
 ## The source manager
 
