@@ -1,6 +1,6 @@
 # pipeline service
 
-Part of the ComplianceWatch monorepo. **Health routes; the pipeline store (sources, fetched documents, crawl runs, the outbox) and the raw store on disk or S3; the ingest workflow, whose `FetchAndStore` keeps each fetched file once and announces it with `document.discovered`; source adapters by type with parameters (CBIC notifications and circulars, GST Council press releases, GSTN advisories, Maharashtra GST notifications), PDF and HTML parsers, a change detector, a backfill command, the rule extractor with its validators behind the llm-gateway, and the labelling tool for the extraction golden set.**
+Part of the ComplianceWatch monorepo. **Health routes; the pipeline store (sources, fetched documents, crawl runs, the outbox) and the raw store on disk or S3; the crawl, which reads every source at its cadence from its watermark (a 60-second tick in the worker, behind `CW_PIPELINE_CRAWL_ENABLED`) and ingests what is new in child workflows; the source manager API (the sources with how each stands, an admin's additions, edits and fetches, the documents and their stored files); the ingest workflow, whose `FetchAndStore` keeps each fetched file once and announces it with `document.discovered`; source adapters by type with parameters (CBIC notifications and circulars, GST Council press releases, GSTN advisories, Maharashtra GST notifications), PDF and HTML parsers, a change detector, a backfill command, the crawl report (the F1 check), the rule extractor with its validators behind the llm-gateway, and the labelling tool for the extraction golden set.**
 Design reference: Project Foundation guide, sections 5, 7, 8, 11 and 14.
 
 - **Owns:** The regulatory intelligence pipeline as Temporal workers: source-crawler (source registry, fetch schedule, raw document store), change-detector (document classification, links to prior documents), doc-parser (clause-level structured text, OCR fallback), rule-extractor (schema-validated RuleCandidates with verified citations), review-service (ReviewTasks, decisions, edit diffs, two-person rule)
@@ -13,10 +13,16 @@ Design reference: Project Foundation guide, sections 5, 7, 8, 11 and 14.
 ```
 src/pipeline/
   api/             # routers, request/response schemas, auth dependencies
+  api/sources.py, schemas.py, deps.py  # the source manager's routes, bodies and guards
   application/     # use cases, event handlers, unit of work; activities.py: the ingest activities
   application/store_document.py  # StoreDocument: fetch, keep the bytes, record once (FetchAndStore)
+  application/sources.py  # the source manager: sync, list, add, edit, documents, stored bytes
+  application/crawl.py    # StartCrawl, ScheduleCrawls (the tick), ListNewDocuments, FinishCrawl
+  application/report.py   # CrawlReport: runs, failures, gaps, detection delays (the F1 check)
   domain/          # entities, value objects, domain events, repository protocols
   domain/sources.py, raw_documents.py, crawl.py  # Source, RawDocumentRecord, CrawlRun: the rows
+  domain/crawl.py          # also where a listing starts and how the watermark moves
+  domain/schedule.py       # when a source is due, the crawl's ids, a source's status and freshness
   domain/events.py         # DocumentDiscovered (document.discovered), keyed by its source
   domain/repository.py     # the unit of work and the repositories the store implements
   application/detector.py  # document type, change kind, referenced notifications
@@ -30,14 +36,20 @@ src/pipeline/
     raw_store.py   # content-addressed raw file store: S3, local disk, memory
     s3.py          # S3Client: HEAD, PUT and GET signed with Signature Version 4 over httpx2
     adapters/      # one SourceAdapter per regulator site; registry.py: adapter types, sources, catalog
+    adapters/catalog.py  # StoreCatalog: the store's sources, adapters built from their rows
+    temporal.py    # TemporalCrawls: starts pipeline.crawl_source, one workflow per id
+    source_metrics.py  # the freshness gauges SourceStale reads
     parsers/       # PdfParser (pypdf text layer), HtmlParser, SourceParsers, language, clause split
   workflows/       # Temporal workflows; ingest_document.py: discover, fetch, parse, register
+  workflows/crawl_source.py  # list from the watermark, ingest the new documents, record the run
   application/knowledge_activities.py  # RegisterDocument: hand the parsed document to the rulebook
   domain/knowledge.py, domain/ports.py # DocumentRecord and the KnowledgeSink port
   infrastructure/rulebook_client.py    # HttpRulebook: the rulebook's write API as a KnowledgeSink
   settings.py      # PipelineSettings: the stores, CW_PIPELINE_KNOWLEDGE_ENABLED, CW_RULEBOOK_URL, ...
   stores.py        # the store and the raw store the settings pick
   backfill.py      # pipeline-backfill: list, fetch, store, parse and detect from the command line
+  crawl_report.py  # pipeline-crawl-report: the crawl per source over a window, and the F1 check
+  wiring.py        # what the API gets from main: use cases and protocols
   embed.py         # pipeline-embed: embed the stored clauses that have no vector yet
   application/embedding.py  # EmbeddingStage: unembedded clauses to the gateway, vectors to the rulebook
   domain/embedding.py       # embedding_text: the clause with its context header
@@ -48,7 +60,7 @@ prompts/           # extraction.rule_candidate.v1.md (owner regulatory-intellige
   testing.py       # FixtureTransport (replays tests/fixtures), ScriptedProvider, ScriptedEmbedder, MemoryRulebook, StubS3, sample_activities
   worker.py        # python -m pipeline.worker: the Temporal worker on task queue "pipeline"
   main.py          # composition root: create_app(...) from py-common
-migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA); 0001: source, raw_document, crawl_run, outbox_event
+migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA); 0001: source, raw_document, crawl_run, outbox_event; 0002: source names, the URL index
 tests/
   unit/            # domain and application with fakes; adapter conformance over recorded fixtures
   fixtures/        # responses recorded from the regulator sites, and workflow histories (README lists what and when)
@@ -64,7 +76,9 @@ no I/O, and the activities do their blocking work (HTTP, the raw store, the data
 parser) on a thread while they heartbeat, so the worker's event loop never waits on it:
 
 1. `pipeline.discover_document` lists the source through the kernel's `SourceAdapter` protocol
-   and returns the first document since `since`;
+   and returns the first document since `since`. An ingest a crawl starts is handed its document
+   as listed (`IngestRequest.discovered`) and skips this step, behind
+   `workflow.patched("pipeline-crawl-v1")` (`GIVEN_PATCH`);
 2. `pipeline.fetch_and_store` (`FetchAndStore`, the use case `StoreDocument`) fetches the bytes,
    keeps them in the raw store under their digest, and records the document with its
    `document.discovered` in one transaction ([the store](#the-store)). It returns the storage key
@@ -74,19 +88,22 @@ parser) on a thread while they heartbeat, so the worker's event loop never waits
 3. `pipeline.parse_document` reads the bytes back from the raw store and splits them into
    clauses through `DocumentParser`.
 
-The worker resolves a request's `source_id` through the registry's built-in sources
-(`RegistryCatalog`, [Sources](#sources)), all over one polite client, and parses each document
-with the parsers of its source's document type (`SourceParsers`: the PDF parser, then the HTML
-one). An unknown source is refused and not retried.
+The worker resolves a request's `source_id` through the sources the store holds (`StoreCatalog`,
+[Sources](#sources)): it finds the row whose key gives the id and builds the adapter from the
+row's adapter type and parameters (`ADAPTER_TYPES[...].validated()`), all over one polite client,
+and parses each document with the parsers of its source's document type (`SourceParsers`: the PDF
+parser, then the HTML one). An unknown source, or a row the code cannot read (a type it lacks,
+parameters the type refuses), is refused and not retried.
 
 `FetchAndStore` replaced `pipeline.fetch_document`, which carried the bytes in its result, behind
 `workflow.patched("pipeline-store-v1")` (`STORE_PATCH`): a workflow started before it replays
 `FetchDocument` and finishes on the bytes in its history, so `FetchDocument` stays registered and
 `ParseRequest` takes either `fetched` (the bytes) or `stored` (the key).
-`tests/fixtures/histories` holds two runs recorded before the change, and
-`tests/unit/test_workflow_replay.py` replays them on today's workflow (and shows that a workflow
-without the guard would not replay them). Remove `FetchDocument` and the old branch once no
-workflow started before the store is open (Temporal's UI lists the running ones).
+`tests/fixtures/histories` holds two runs recorded before the change and two recorded with the
+store and before `GIVEN_PATCH`, and `tests/unit/test_workflow_replay.py` replays all four on
+today's workflow (and shows that a workflow without the store's guard would not replay the
+first two). Remove `FetchDocument` and the old branch once no workflow started before the store
+is open (Temporal's UI lists the running ones).
 
 ```bash
 make dev                        # Temporal at localhost:7233
@@ -121,26 +138,107 @@ mentions and citations point into them. Bump the parser's `PARSER_VERSION` with 
 can alter clause text, so the refusal names both versions; what to do with stored documents
 after such a change is an open decision (ADR-018). Deploy the rulebook before the pipeline.
 
+## The crawl
+
+`CW_PIPELINE_CRAWL_ENABLED` (flag `pipeline.crawl`, owner regulatory-intelligence, default off)
+turns the crawl on. **A crawl reads the live regulator sites**: leave it off on a laptop, in
+`make product` (which passes `CW_PIPELINE_CRAWL_ENABLED=false` whatever `.env` says) and in CI.
+The tests and the journey crawl recorded responses only. The `source` table is the only
+schedule; no Temporal schedule holds a copy.
+
+- **The tick.** With the flag on, the worker runs `pipeline-crawl-tick` every 60 seconds
+  (`ScheduleCrawls`). A source is due when it is enabled and not paused, no crawl of it runs, and
+  its cadence has passed since its last crawl started (`domain/schedule.py`). For each one the
+  tick locks the source's row, records a crawl run whose id is derived from the workflow id
+  `pipeline-crawl-<key>-<cadence slot start>`, and only then, with the transaction closed, starts
+  the workflow with the id reuse policy `REJECT_DUPLICATE`. A second tick in the same slot finds
+  the run recorded (and Temporal would refuse the id), so a double tick starts nothing twice.
+- **By hand.** `POST /v1/pipeline/sources/{key}/fetch` does the same for one source at once,
+  under `pipeline-crawl-<key>-manual-<request>`, and answers 202 with the run's id; 409 while a
+  crawl of the source runs, 503 while the flag is off. A paused source may be fetched by hand.
+- **The workflow** `pipeline.crawl_source` (`CrawlSourceWorkflow`, two hours at most):
+  1. `pipeline.list_new_documents` lists the source since a week before its watermark (the last
+     30 days for a source without one), with no transaction open, and leaves out the URLs a
+     stored document of the source was listed at (`known_urls`, on migration 0002's index); at
+     most 50 of the rest come back, newest first;
+  2. each new document is ingested by a child `pipeline.ingest_document` that takes it as listed,
+     at most three at a time, under the id `pipeline-ingest-<key>-<URL digest>` that may be
+     reused only after a failure, so a document two crawls list is ingested once. Children are
+     abandoned, not cancelled, when the crawl ends early: what they store stays stored;
+  3. `pipeline.finish_crawl` records the run's counts (`listed`; `stored`, `duplicates` and
+     `failed` of the new documents) and end, and the source's last listing (`last_fetch_at`),
+     watermark and `last_error`, in one transaction. A child that failed after its bytes were
+     stored (a parse failure) counts as stored.
+- **The watermark** moves to the newest publication date stored, never past a listed document
+  that is not stored (failed, beyond the cap of 50, or busy in another crawl), so the next crawl
+  lists that one again. Undated documents are listed by every crawl and never hold it back. A
+  document whose bytes change behind a URL already stored is not fetched again by the crawl.
+- **Failures are recorded, not raised.** A listing that fails ends the run as failed with the
+  error on the run and on the source (`status: failing`), and leaves `last_fetch_at` and the
+  watermark as they were; the next tick tries again after a cadence. Documents that fail leave
+  the run completed and name themselves in the source's `last_error`. A run whose workflow was
+  lost (a timeout, a worker gone, a start that never happened) is closed as abandoned by the next
+  start three hours after it began. A start Temporal refuses closes its run with why.
+
+The app reports each source's freshness while crawling is on (`infrastructure/source_metrics.py`):
+`pipeline_source_freshness_seconds{source}`, the time since a crawl last listed it (since it was
+added, before), and `pipeline_source_cadence_seconds{source}`. The `SourceStale` alert pages when a
+source has not been listed for more than two cadences
+([docs/runbooks/source-stale.md](../../docs/runbooks/source-stale.md)).
+
+`pipeline-crawl-report --days 30` (`make crawl-report ARGS="--days 30"` on the dev stack) is the
+F1 check: per source the runs and failures in the window, the longest gap between successful
+listings from the window's start to now, and where documents carry a date the detection delay from
+the start of that day in India to the first fetch (an upper bound: regulators date documents, not
+hours). F1 is met for `--f1-source` (`cbic_notifications`) when no gap passed `--target-hours`
+(6) and the last crawl recorded no error; the command exits 0 then, 1 otherwise.
+
+## The source manager
+
+The routes are the regulatory team's (composition class admin, so the public listener serves them
+in `token` mode only). The reads need a regulatory role (analyst, reviewer or admin) a token names;
+the writes an admin, or in `header` and `dual` mode without a bearer the shared write token
+(`CW_RULEBOOK_WRITE_TOKEN` in `x-cw-write-token`; unset, writes answer 503
+`pipeline-writes-disabled`). Every write names its actor (`actor_id`, which a user's token
+overrides) and a reason of at least ten characters, and writes its `audit.event` row, of no
+tenant, in the transaction of the change.
+
+| Route | What |
+| --- | --- |
+| `GET /v1/pipeline/sources` | every source with its name, adapter type and parameters, regulator, site, document type, cadence, switches, `status` (`fetching` while a crawl runs, else `paused`, `failing` or `healthy`), document count, last listing, `freshness` (`fresh`, `late`, `stale` or `never`, the age in seconds and in cadences), last error, watermark and latest run |
+| `POST /v1/pipeline/sources` | add a source of a registry adapter type with that type's parameters, which it checks (422); 409 for a key taken; audited as `pipeline.source.add` |
+| `PATCH /v1/pipeline/sources/{key}` | change its name, cadence, enabled or paused switch, or parameters; audited as `pipeline.source.edit` with the source before and after, unless nothing changed |
+| `POST /v1/pipeline/sources/{key}/fetch` | start a crawl now: 202 with the run and workflow ids; audited as `pipeline.source.fetch` |
+| `GET /v1/pipeline/sources/{key}/documents` | the source's documents a page at a time (`limit`, `cursor`), newest publication first, undated last |
+| `GET /v1/pipeline/documents/{document_id}` | one stored document's record |
+| `GET /v1/pipeline/documents/{document_id}/raw` | its bytes from the raw store with the content type it was fetched with, served only when their SHA-256 is the record's (502 otherwise), with the digest as the ETag, inline, sandboxed and never sniffed |
+
+The spec is `packages/contracts/openapi/pipeline.v1.json` (`make openapi SERVICE=pipeline`).
+
 ## The store
 
-Migration 0001 creates the `pipeline` schema's tables. They hold regulatory data, the same for
-every tenant: no `tenant_id` and no row-level security, and `infra/scripts/migration_lint.toml`
-exempts the three with the reason.
+Migration 0001 creates the `pipeline` schema's tables and 0002 adds the sources' names and the
+index the crawl looks known URLs up by (`source_key`, `source_url`). They hold regulatory data,
+the same for every tenant: no `tenant_id` and no row-level security, and
+`infra/scripts/migration_lint.toml` exempts the three with the reason.
 
 | Table | One row per | Columns |
 | --- | --- | --- |
-| `source` | source the pipeline reads | `key`, `adapter_type`, `parameters` (JSON), `cadence`, `enabled`, `paused`, `last_fetch_at`, `watermark` (JSON), `last_error`, `created_at`, `updated_at` |
+| `source` | source the pipeline reads | `key`, `name`, `adapter_type`, `parameters` (JSON), `cadence`, `enabled`, `paused`, `last_fetch_at`, `watermark` (JSON, `{"published_on": "2026-10-01"}`), `last_error`, `created_at`, `updated_at` |
 | `raw_document` | fetched file, by content | `id` (the first half of the SHA-256, checked by a constraint), `source_key`, `source_url`, `external_ref`, `fetched_at`, `published_on`, `content_type`, `size`, `sha256` (unique), `storage_key`, `title`, `status` (`discovered`, `parsed`, `failed`, `irrelevant`) |
 | `crawl_run` | crawl of one source | `id`, `source_key`, `started_at`, `finished_at`, `status` (`running`, `completed`, `failed`), the counts `listed`, `stored`, `duplicates`, `failed`, and `error` |
 | `outbox_event` | event to publish | py-common's outbox (ADR-005) |
 
 A raw document never changes but for its status and is never deleted: a trigger refuses the
-rest. `FetchAndStore` adds a source's row the first time it stores one of its documents, from the
-registry's definition, and never changes a row that exists. Crawl runs, the watermark and the
-pause are written by the crawl, which is not built yet.
+rest. The worker adds the built-in sources the table lacks when it starts (`SyncSources`, which
+also names a built-in row stored before names and changes nothing else), and so does the app on
+its store; `FetchAndStore` adds a source's row the first time it stores one of its documents.
+None of them changes a row that exists: an admin's edits stay. Crawl runs, `last_fetch_at`, the
+watermark and `last_error` are written by the crawl ([The crawl](#the-crawl)).
 
-The unit of work (`domain/repository.py`) has a repository per table and the outbox as its event
-sink: `infrastructure/repository.py` on Postgres, one transaction with no tenant setting
+The unit of work (`domain/repository.py`) has a repository per table, the outbox as its event
+sink and `audit.event` as its audit sink (py-common's `AuditWriter`): `infrastructure/repository.py`
+on Postgres, one transaction with no tenant setting
 (`PostgresUnitOfWorkFactory`, and `on_connection` for a consumer's transaction), and
 `infrastructure/memory.py` in memory for tests. `CW_PIPELINE_STORE` picks one (`postgres` by
 default, `memory`); the worker refuses `memory`, since its activities record what they fetch.
@@ -265,23 +363,25 @@ uv run --package compliancewatch-pipeline pipeline-embed --model voyage/voyage-3
 An adapter type reads one regulator site (`infrastructure/adapters/registry.py`,
 `ADAPTER_TYPES`): its regulator, its site, the parameters it takes, which a pydantic model checks
 (anything it does not name is refused), and how it builds the adapter. A source is a key, an
-adapter type with its parameters, and a cadence; its regulator and document type follow from the
-type and the parameters. The built-in sources (`SOURCES`) are the registry's; a source's row in
-the store is added from them the first time one of its documents is stored.
+adapter type with its parameters, a cadence and a name; its regulator and document type follow
+from the type and the parameters. The built-in sources (`SOURCES`) are the registry's; the worker
+adds their rows to the store when it starts, and an admin adds others through the source manager.
+The worker reads every source from the store (`StoreCatalog`), so a new source or an edit takes
+effect at the next activity.
 
-| Key | Adapter type and parameters | Cadence | Lists | Fetches | Document type |
+| Key (name) | Adapter type and parameters | Cadence | Lists | Fetches | Document type |
 | --- | --- | --- | --- | --- | --- |
-| `cbic_notifications` | `cbic`: `listing` notifications, `category` Central Tax | 2 h | notifications per year, newest first, through the portal's JSON API (anonymous token from `POST /api/authenticate-token`, sent as `Authorization1: homeToken ...`) | the English PDF, unwrapped from the `{"data": base64}` envelope; the Hindi PDF path is kept as an alternate | notification |
-| `cbic_circulars` | `cbic`: `listing` circulars, `category` Circulars CGST | 6 h | circulars, same API | PDF | circular |
-| `gstcouncil_press` | `gstcouncil` | 6 h | the press-release archive table, page by page until `since` | the PDF, or the Press Information Bureau page a row links to | press_release (announced, not in force) |
-| `gstn_advisories` | `gstn` | 3 h | the JSON feed behind News and Updates | the advisory's HTML from the feed item | press_release (advisory) |
-| `mahagst_notifications` | `mahagst` | 12 h | the notifications page (undated rows, user manuals mixed in) | PDF | notification |
+| `cbic_notifications` (CBIC Central Tax notifications) | `cbic`: `listing` notifications, `category` Central Tax | 2 h | notifications per year, newest first, through the portal's JSON API (anonymous token from `POST /api/authenticate-token`, sent as `Authorization1: homeToken ...`) | the English PDF, unwrapped from the `{"data": base64}` envelope; the Hindi PDF path is kept as an alternate | notification |
+| `cbic_circulars` (CBIC CGST circulars) | `cbic`: `listing` circulars, `category` Circulars CGST | 6 h | circulars, same API | PDF | circular |
+| `gstcouncil_press` (GST Council press releases) | `gstcouncil` | 6 h | the press-release archive table, page by page until `since` | the PDF, or the Press Information Bureau page a row links to | press_release (announced, not in force) |
+| `gstn_advisories` (GSTN advisories) | `gstn` | 3 h | the JSON feed behind News and Updates | the advisory's HTML from the feed item | press_release (advisory) |
+| `mahagst_notifications` (Maharashtra GST notifications) | `mahagst` | 12 h | the notifications page (undated rows, user manuals mixed in) | PDF | notification |
 
 The CBIC type is one adapter for both portal listings: `listing` picks the API path and the
 fields of its items, `category` the portal's category. A category is accepted only when its
 listing is recorded under `tests/fixtures/cbic` (`cbic.RECORDED_CATEGORIES`), so another
-category comes with its fixture. The cadences are what the crawl will read each source at; the
-crawl is not built yet.
+category comes with its fixture. The cadences are what the crawl reads each source at, until an
+admin changes them.
 
 Every adapter goes through `PoliteClient`: the crawler user agent, `robots.txt` once per host,
 one request per second per host (across the threads the activities fetch on), five tries with
@@ -304,10 +404,13 @@ make backfill SERVICE=pipeline ARGS="--source gstcouncil_press --list-only"
 
 The backfill keeps raw files in a local raw store (`--store`, `var/raw`), under the same
 content keys, never overwritten. The adapter tests replay `tests/fixtures/` through
-`pipeline.testing.FixtureTransport`; nothing in the test suite reaches the network. What is not
-done: OCR; the crawl, which reads the sources at their cadence from the watermark; managing
-sources in the store; `document.parsed` (the ingest's `FetchAndStore` writes
-`document.discovered`, the backfill writes no event); and adapters for the other states.
+`pipeline.testing.FixtureTransport`; nothing in the test suite reaches the network. The crawl's
+tests use the test adapter type `recorded` (`pipeline.testing.RECORDED_TYPE`), which lists
+recorded CBIC notifications from the recorded listings and fetches their recorded PDFs. What is
+not done: OCR; a parser chain and a queue for documents that do not parse (a crawl counts such a
+document as stored and its ingest fails); uploads; `document.parsed` (the ingest's
+`FetchAndStore` writes `document.discovered`, the backfill writes no event); and adapters for the
+other states.
 
 ## Extraction
 
@@ -350,8 +453,10 @@ From the repo root:
 ```bash
 make dev                          # infrastructure (Docker Compose)
 make migrate SERVICE=pipeline     # source, raw_document, crawl_run, outbox_event
-make run SERVICE=pipeline           # http://localhost:8010/health, /ready, /v1/pipeline/ping
-make worker SERVICE=pipeline      # the Temporal worker of the ingest
+make run SERVICE=pipeline           # http://localhost:8010/health, /ready, /v1/pipeline/sources
+make worker SERVICE=pipeline      # the Temporal worker of the crawl and the ingest; with
+                                  # CW_PIPELINE_CRAWL_ENABLED=true it crawls the live sites
+make crawl-report ARGS="--days 30"  # the crawl per source and the F1 check
 make relay SERVICE=pipeline       # publishes document.discovered from the outbox
 make test                         # unit + contract tests with the coverage gate
 docker build -f services/pipeline/Dockerfile -t compliancewatch-pipeline .
