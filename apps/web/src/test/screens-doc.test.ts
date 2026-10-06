@@ -71,14 +71,14 @@ const servicesWithSpec = readdirSync(SPEC_DIR)
 
 describe("awaits audit", () => {
   it("lists awaited routes absent from the committed specs, sorted by service and path", () => {
-    const stats = screenById("admin.review.stats");
+    const reports = screenById("admin.error-reports");
     const rows = auditAwaits(SCREENS, committedRoutes());
-    const statsRow = rows.find((row) => row.screenId === stats.id);
-    expect(statsRow).toMatchObject({
+    const reportsRow = rows.find((row) => row.screenId === reports.id);
+    expect(reportsRow).toMatchObject({
       service: "rulebook",
       method: "GET",
-      path: "/v1/rulebook/review/stats",
-      owner: "services track, WP21",
+      path: "/v1/rulebook/error-reports",
+      owner: "services track, WP24",
       unconfirmed: false,
       specExists: true,
     });
@@ -160,7 +160,7 @@ describe("awaits audit", () => {
       uses: [{ service: "profile", method: "GET", path: "/v1/ontology" }],
       awaits: [{ service: "profile", method: "GET", path: "/v1/ontology", owner: "plan-a" }],
     };
-    expect(readyEntries([withAwait, screenById("admin.review.stats")])).toEqual([
+    expect(readyEntries([withAwait, screenById("admin.error-reports")])).toEqual([
       { screenId: "admin.llm.prompts", items: ["GET /v1/ontology"] },
     ]);
     const text = renderAudit([], readyEntries([withFile]));

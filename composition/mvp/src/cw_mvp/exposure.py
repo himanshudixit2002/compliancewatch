@@ -3,10 +3,10 @@
 Every route a hosted service serves has one class:
 
 - ``public``: user-facing routes, served on both listeners;
-- ``admin``: the regulatory team's and operators' routes (rulebook review and publishing, the
-  engine's review queue and fan-out controls, the gateway's prompts, models and usage,
-  notification resends, the stored eval runs, the pipeline's source manager, uploads and task
-  queue). The public listener serves them only when
+- ``admin``: the regulatory team's and operators' routes (rulebook review, its review tasks
+  and publishing, the engine's review queue and fan-out controls, the gateway's prompts, models
+  and usage, notification resends, the stored eval runs, the pipeline's source manager, uploads
+  and task queue). The public listener serves them only when
   ``CW_AUTH_MODE=token``, where each route itself requires an analyst, reviewer or admin a
   verified token names; in ``header`` and ``dual`` mode a request without a token could reach
   them, so they stay internal;
@@ -118,6 +118,15 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "POST /v1/rulebook/rule-versions/{rule_version_id}/publish": ADMIN,
         "POST /v1/rulebook/rule-versions/{rule_version_id}/withdraw": ADMIN,
         "POST /v1/rulebook/maintenance/transitions": ADMIN,
+        # The review tasks: the queue a regulatory user reads, the seed tasks an analyst,
+        # reviewer or admin opens, the claim and the draft edit of an analyst, and the decisions.
+        "GET /v1/rulebook/review/tasks": ADMIN,
+        "POST /v1/rulebook/review/tasks/seed": ADMIN,
+        "GET /v1/rulebook/review/tasks/{task_id}": ADMIN,
+        "POST /v1/rulebook/review/tasks/{task_id}/claim": ADMIN,
+        "PATCH /v1/rulebook/review/tasks/{task_id}/draft": ADMIN,
+        "POST /v1/rulebook/review/tasks/{task_id}/decide": ADMIN,
+        "GET /v1/rulebook/review/stats": ADMIN,
         # What the pipeline writes and reads back.
         "PUT /v1/rulebook/documents/{document_id}": INTERNAL,
         "PUT /v1/rulebook/documents/{document_id}/mentions": INTERNAL,
