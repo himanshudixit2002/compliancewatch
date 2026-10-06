@@ -1,4 +1,8 @@
-import type { ReviewItem } from "@/entities/rulebook/types";
+import {
+  MENTION_REVIEW_REASONS,
+  type MentionReviewReason,
+  type ReviewItem,
+} from "@/entities/rulebook/types";
 import { hrefFor, screenById } from "@/shared/config/screens";
 import { t, type MessageKey } from "@/shared/i18n";
 import { humanise } from "@/shared/lib/humanise";
@@ -9,16 +13,19 @@ import { withQuery } from "@/shared/lib/url";
  * does not know yet is shown as sent, read as a sentence. The decisions and the reject reasons
  * are worded in ui/decision-shared.ts, which the client panel reads too.
  */
-const REASONS: Readonly<Record<string, MessageKey>> = {
+const REASONS: Readonly<Record<MentionReviewReason, MessageKey>> = {
   no_match: "entityReview.reason.noMatch",
   ambiguous_alias: "entityReview.reason.ambiguousAlias",
   empty_name: "entityReview.reason.emptyName",
   unqualified: "entityReview.reason.unqualified",
 };
 
+function isMentionReviewReason(reason: string): reason is MentionReviewReason {
+  return (MENTION_REVIEW_REASONS as readonly string[]).includes(reason);
+}
+
 export function reviewReasonLabel(reason: string): string {
-  const key = REASONS[reason];
-  return key === undefined ? humanise(reason) : t(key);
+  return isMentionReviewReason(reason) ? t(REASONS[reason]) : humanise(reason);
 }
 
 /** The document viewer with the mention marked: `?clause_id=&start=&end=` in code points. */

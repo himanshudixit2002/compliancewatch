@@ -1,4 +1,5 @@
 import type { llmGateway } from "@compliancewatch/contracts/openapi";
+import { membersOf } from "@/shared/lib/union";
 
 /**
  * The LLM gateway's registries and spend as the gateway reports them: the prompts it serves, the
@@ -14,15 +15,19 @@ export type UsageDto = Schemas["UsageOut"];
 export type LlmFeature = Schemas["Feature"];
 export type BudgetScope = Schemas["BudgetScope"];
 
-/** What a call is for (the gateway's Feature): routes, budgets and the ledger are keyed by it. */
-export const LLM_FEATURES = [
-  "extraction",
-  "judgement",
-  "qa",
-  "classification",
-  "smoke",
-  "retrieval",
-] as const satisfies readonly LlmFeature[];
+/**
+ * What a call is for (the gateway's Feature): routes, budgets and the ledger are keyed by it. Every
+ * feature of the spec, in its order, checked against the union (a feature the gateway adds breaks
+ * the build here instead of missing from the usage overview).
+ */
+export const LLM_FEATURES = membersOf<LlmFeature>({
+  extraction: true,
+  judgement: true,
+  qa: true,
+  classification: true,
+  smoke: true,
+  retrieval: true,
+});
 
 export interface Prompt {
   name: string;

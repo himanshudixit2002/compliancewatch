@@ -58,6 +58,12 @@ import type { profile } from "@compliancewatch/contracts/openapi";
 type Snapshot = profile.components["schemas"]["SnapshotOut"];
 ```
 
+A list of a spec enum's values (the gateway's features, a candidate's statuses, the entity types)
+is written as `membersOf<Union>({ value: true, ... })` from `shared/lib/union.ts`: the record is
+checked against the generated union both ways, so a value a service adds breaks the build in the
+entity's `types.ts` instead of going missing from a filter, a form or a page. A list that is a
+subset on purpose (the relations that only point at a version) stays `as const satisfies`.
+
 `pipeline` has no committed spec, so the app has no client for it; a screen that needs one of
 its routes is a waiting entry in the registry until the spec lands. There is no hand-written or
 untyped client.

@@ -1,4 +1,5 @@
 import type { rulebook } from "@compliancewatch/contracts/openapi";
+import { membersOf } from "@/shared/lib/union";
 
 /**
  * Rulebook documents as the rulebook service stores them: one parsed source document (a
@@ -61,36 +62,42 @@ export type RelationCandidateDto = Schemas["RelationCandidateOut"];
 export type MentionGroupDto = Schemas["MentionGroupOut"];
 export type ReviewItemDto = Schemas["ReviewItemOut"];
 
-/** domain_kernel's decisions over a mention group, in the spec's order. */
-export const MENTION_DECISIONS = [
-  "create_entity",
-  "add_alias",
-  "reject",
-] as const satisfies readonly MentionDecision[];
+/*
+ * The lists below hold every member of their spec enum, in the spec's order, each checked against
+ * the union by `membersOf` (shared/lib/union.ts): a value the rulebook adds breaks the build here
+ * instead of going missing from a form, a filter or a status chip.
+ */
 
-/** Why a mention group is rejected (the rulebook's EntityRejectReason), in the spec's order. */
-export const ENTITY_REJECT_REASONS = [
-  "not_an_entity",
-  "wrong_type",
-  "text_artifact",
-  "out_of_scope",
-] as const satisfies readonly EntityRejectReason[];
+/** domain_kernel's decisions over a mention group. */
+export const MENTION_DECISIONS = membersOf<MentionDecision>({
+  create_entity: true,
+  add_alias: true,
+  reject: true,
+});
 
-/** Why a relation candidate is rejected (CandidateRejectReason), in the spec's order. */
-export const CANDIDATE_REJECT_REASONS = [
-  "wrong_kind",
-  "wrong_target",
-  "not_in_text",
-  "duplicate",
-  "out_of_scope",
-] as const satisfies readonly CandidateRejectReason[];
+/** Why a mention group is rejected (the rulebook's EntityRejectReason). */
+export const ENTITY_REJECT_REASONS = membersOf<EntityRejectReason>({
+  not_an_entity: true,
+  wrong_type: true,
+  text_artifact: true,
+  out_of_scope: true,
+});
 
-/** The states a relation candidate is listed in (CandidateStatus), in the spec's order. */
-export const CANDIDATE_STATUSES = [
-  "open",
-  "approved",
-  "rejected",
-] as const satisfies readonly CandidateStatus[];
+/** Why a relation candidate is rejected (CandidateRejectReason). */
+export const CANDIDATE_REJECT_REASONS = membersOf<CandidateRejectReason>({
+  wrong_kind: true,
+  wrong_target: true,
+  not_in_text: true,
+  duplicate: true,
+  out_of_scope: true,
+});
+
+/** The states a relation candidate is listed in (CandidateStatus). */
+export const CANDIDATE_STATUSES = membersOf<CandidateStatus>({
+  open: true,
+  approved: true,
+  rejected: true,
+});
 
 /**
  * The relations whose target must be a rule version (domain_kernel.knowledge.RULE_VERSION_ONLY):
@@ -106,6 +113,8 @@ export const RULE_VERSION_ONLY_RELATIONS = [
 /**
  * Why alignment queued a mention for review (the rulebook's ReviewReason): no entity has the
  * name, several share it as an alias, the name is empty, or a section or rule lacks its statute.
+ * The spec types the reason as text, so this list is the web app's own; the entity review words
+ * each of these and shows any other reason as sent.
  */
 export const MENTION_REVIEW_REASONS = [
   "no_match",
@@ -113,6 +122,8 @@ export const MENTION_REVIEW_REASONS = [
   "empty_name",
   "unqualified",
 ] as const;
+
+export type MentionReviewReason = (typeof MENTION_REVIEW_REASONS)[number];
 
 /** One open mention in a review group, with where it sits (code points, end exclusive). */
 export interface ReviewItem {
@@ -215,48 +226,51 @@ export type ClauseDetailDto = Schemas["ClauseDetailOut"];
 export type SearchInDto = Schemas["SearchIn"];
 export type SearchHitDto = Schemas["SearchHitOut"];
 
-/** domain_kernel.knowledge.EntityType: the ten kinds of entity the knowledge tables hold. */
-export const ENTITY_TYPES = [
-  "notification",
-  "circular",
-  "section",
-  "rule",
-  "form",
-  "hsn_code",
-  "sac_code",
-  "tax_rate",
-  "threshold",
-  "state",
-] as const satisfies readonly EntityType[];
+/**
+ * domain_kernel.knowledge.EntityType: the ten kinds of entity the knowledge tables hold, every one
+ * in the spec's order and checked against the union like the lists above.
+ */
+export const ENTITY_TYPES = membersOf<EntityType>({
+  notification: true,
+  circular: true,
+  section: true,
+  rule: true,
+  form: true,
+  hsn_code: true,
+  sac_code: true,
+  tax_rate: true,
+  threshold: true,
+  state: true,
+});
 
-/** How a name resolves (`GET /v1/rulebook/entities/resolve`), in the spec's order. */
-export const RESOLUTION_STATUSES = [
-  "resolved",
-  "ambiguous",
-  "not_found",
-  "unqualified",
-  "empty",
-] as const satisfies readonly ResolutionStatus[];
+/** How a name resolves (`GET /v1/rulebook/entities/resolve`). */
+export const RESOLUTION_STATUSES = membersOf<ResolutionStatus>({
+  resolved: true,
+  ambiguous: true,
+  not_found: true,
+  unqualified: true,
+  empty: true,
+});
 
 /** domain_kernel.documents.DocumentType: what a regulator document is. */
-export const DOCUMENT_TYPES = [
-  "notification",
-  "circular",
-  "press_release",
-  "act_amendment",
-  "statute",
-] as const satisfies readonly DocumentType[];
+export const DOCUMENT_TYPES = membersOf<DocumentType>({
+  notification: true,
+  circular: true,
+  press_release: true,
+  act_amendment: true,
+  statute: true,
+});
 
-/** The kinds a relation has (domain_kernel.knowledge.RelationKind), in the spec's order. */
-export const RELATION_KINDS = [
-  "supersedes",
-  "amends",
-  "refers_to",
-  "exempts",
-  "extends_deadline",
-  "corrects",
-  "withdraws",
-] as const satisfies readonly RelationKind[];
+/** The kinds a relation has (domain_kernel.knowledge.RelationKind). */
+export const RELATION_KINDS = membersOf<RelationKind>({
+  supersedes: true,
+  amends: true,
+  refers_to: true,
+  exempts: true,
+  extends_deadline: true,
+  corrects: true,
+  withdraws: true,
+});
 
 /** The problem slug the entity routes answer for an id the rulebook does not hold. */
 export const ENTITY_NOT_FOUND = "rulebook-entity-not-found";
