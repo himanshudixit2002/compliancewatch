@@ -291,7 +291,7 @@ async def test_a_read_that_does_not_reach_every_partitions_end_is_a_timeout(
     reader = AiokafkaTopicReader("localhost:1", timeout_seconds=0.05)
     ends = {TopicPartition(RELAY_DLQ, 0): 3, TopicPartition(RELAY_DLQ, 1): 0}
     with pytest.raises(TimeoutError, match=r"partition\(s\) 0 not read to their end"):
-        await reader._until(Stalled(), RELAY_DLQ, ends)  # type: ignore[arg-type]
+        await reader._until(Stalled(), RELAY_DLQ, ends)
 
     class Partial:
         async def read(self, topic: str) -> list[InboundRecord]:
