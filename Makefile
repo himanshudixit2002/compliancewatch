@@ -483,7 +483,11 @@ web-dev: check-pnpm ## next dev on WEB_PORT from .env; /admin lists the internal
 # GSTIN lookup (the demo GSTIN pre-fills), the billing provider "none" (subscribe answers 503;
 # BILLING=memory starts subscriptions in memory for a manual demo, and make web-e2e takes the
 # same BILLING so the billing spec expects that state), the KAG layer off, the pipeline's crawl
-# off (it would read the live regulator sites), the inter-service URLs
+# off (it would read the live regulator sites), the pipeline pointed at a Temporal address
+# nothing listens on (the stack has no worker: an upload, a retry or a task's resolution is
+# stored and answers that its ingest did not start, rather than queueing a workflow on a
+# developer's Temporal for some other worker to run against another store) with its raw files in
+# memory on the memory store, the inter-service URLs
 # on the same base, and the rulebook's two tokens from .env or the placeholders local-write-token
 # and local-review-token (not secrets), as make product passes them. The rulebook publishes
 # (CW_RULEBOOK_PUBLISH_ENABLED=true) and, on the memory store, starts with the seed calendar's
@@ -503,7 +507,7 @@ web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_B
 	[ "$(BILLING)" = "none" ] || [ "$(BILLING)" = "memory" ] || { echo "usage: make web-stack [BILLING=none|memory]"; exit 1; }; \
 	mkdir -p $(WEB_STACK_DIR); base=$${SERVICE_PORT_BASE:-8000}; i=0; \
 	token="$${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}"; review="$${CW_RULEBOOK_REVIEW_TOKEN:-local-review-token}"; \
-	seed=false; if [ "$(STORE)" = "memory" ]; then seed=true; fi; \
+	seed=false; raw=local; if [ "$(STORE)" = "memory" ]; then seed=true; raw=memory; fi; \
 	echo "web stack: services on $$((base+1))-$$((base+10)), $(STORE) stores, billing provider $(BILLING), rulebook publishing on"; \
 	for svc in $(SERVICES); do \
 	  i=$$((i+1)); port=$$((base+i)); pidfile=$(WEB_STACK_DIR)/$$svc.pid; \
@@ -515,7 +519,8 @@ web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_B
 	  if [ "$(STORE)" = "postgres" ]; then \
 	    url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$${schema}%2Cpublic"; \
 	  fi; \
-	  CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$$schema" \
+	  temporal="$${CW_TEMPORAL_ADDRESS:-localhost:7233}"; if [ "$$svc" = pipeline ]; then temporal=127.0.0.1:1; fi; \
+	  CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$$schema" CW_TEMPORAL_ADDRESS="$$temporal" CW_PIPELINE_RAW_STORE=$$raw \
 	  CW_IDENTITY_STORE=$(STORE) CW_PROFILE_STORE=$(STORE) CW_RULEBOOK_STORE=$(STORE) CW_OBLIGATION_STORE=$(STORE) CW_NOTIFICATION_STORE=$(STORE) CW_EVAL_STORE=$(STORE) CW_APPLICABILITY_ENGINE_STORE=$(STORE) CW_PIPELINE_STORE=$(STORE) CW_LLM_LEDGER=$(STORE) \
 	  CW_PROFILE_GSTIN_LOOKUP=static CW_BILLING_PROVIDER=$(BILLING) CW_RULEBOOK_PUBLISH_ENABLED=true CW_QA_KAG_ENABLED=false CW_PIPELINE_CRAWL_ENABLED=false \
 	  CW_RULEBOOK_SEED_ON_START=$$seed CW_RULEBOOK_WRITE_TOKEN="$$token" CW_RULEBOOK_REVIEW_TOKEN="$$review" \
