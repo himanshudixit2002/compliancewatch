@@ -473,12 +473,14 @@ date, clause count and refs and the parser's name and version; the parse writes 
 records a first parse, or a parse by another parser. The clause text is not in it: it is read
 from the rulebook once the document is registered. `document.classified` 1.0.0 carries the
 source's key, the type, relevance, confidence and reasons, the classifier, and the triage task
-and the analyst when there are; `rule.candidate.created` 1.1.0 the candidate
+and the analyst when there are; `rule.candidate.created` 1.1.1 the candidate
 ([Extraction in the workflow](#extraction-in-the-workflow)). None has a tenant, and the outbox
 keys all four by the source. The outbox relay publishes them: `make relay SERVICE=pipeline`, or
 `cw-mvp worker`, which runs a relay for every schema with an outbox table while
-`CW_WORKER_KAFKA_ENABLED` is on. Nothing consumes the topics yet; the rulebook's candidate
-intake, not built yet, is to consume `rule.candidate.created`.
+`CW_WORKER_KAFKA_ENABLED` is on. The rulebook's candidate intake consumes
+`rule.candidate.created` (group `rulebook.rule-candidates`, behind its own flag
+`rulebook.candidate_intake`) and queues each candidate once for an analyst's review; nothing
+consumes the other three yet.
 
 ## The raw store
 
@@ -716,7 +718,7 @@ classification and starts the extraction again. The same goes for the documents 
 `classified` while the flag was off: turning the flag on extracts none of them, since a sweep of
 that backlog is not built yet, and the backfill command never extracts.
 
-`rule.candidate.created` 1.1.0 keeps the fields of 1.0.0 and adds `outcome`, `candidate` (the
+`rule.candidate.created` 1.1 keeps the fields of 1.0.0 and adds `outcome`, `candidate` (the
 model's candidate in `CANDIDATE_SCHEMA`'s shape, which the schema file keeps under `$defs`: a
 contract test holds the two equal; null when unparseable), `issues`, `suggested_rule_key`,
 `clause_ids` (the cited clauses' ids as the kernel derives them), `doc_type`, `source_id`,

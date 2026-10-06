@@ -1,0 +1,18 @@
+{
+  "event_id": "4c5d6e7f-8a9b-4c0d-9e1f-2a3b4c5d6e7f",
+  "topic": "rule.rejected",
+  "schema_version": "1.0.0",
+  "occurred_at": "2000-01-03T05:20:00Z",
+  "tenant_id": null,
+  "correlation_id": "5d6e7f8a-9b0c-4d1e-8f2a-3b4c5d6e7f8a",
+  "causation_id": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d",
+  "payload": {
+    "candidate_id": "2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f",
+    "document_id": "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e",
+    "regulator": "cbic",
+    "reason": "not_a_rule",
+    "prompt_version": "extraction.rule_candidate@1",
+    "model": "fake/echo",
+    "rule_version_id": null
+  }
+}

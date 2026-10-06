@@ -178,7 +178,7 @@ class RuleCandidateCreated(DocumentEvent):
     extraction schema's shape, None when it was not a candidate (``outcome`` unparseable)."""
 
     topic: ClassVar[str] = "rule.candidate.created"
-    schema_version: ClassVar[str] = "1.1.0"
+    schema_version: ClassVar[str] = "1.1.1"
 
     candidate_id: CandidateId
     regulator: str

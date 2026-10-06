@@ -294,7 +294,7 @@ def test_rule_candidate_created_matches_its_schema(overrides: dict[str, object])
     EventEnvelopeV1.model_validate(message.model_dump(mode="json"))
     spec = TOPICS[message.topic]
     assert (message.topic, message.schema_version) == ("rule.candidate.created", spec.version)
-    assert spec.version == "1.1.0"
+    assert spec.version == "1.1.1"
     assert message.tenant_id is None
     strict("rule.candidate.created").validate(message.payload)
     payload = RuleCandidateCreatedV1.model_validate(message.payload)

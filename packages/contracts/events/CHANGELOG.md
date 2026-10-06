@@ -6,6 +6,9 @@ patch. Every line names the topic and its version.
 
 ## 2026-10-06
 
+- rule.rejected 1.0.0: first version; the rulebook's review of a rule candidate produces it
+- rule.candidate.created 1.1.1: wording: the rulebook's candidate intake consumes it, in group
+  rulebook.rule-candidates
 - document.classified 1.0.0: first version; the pipeline's classify step and a triage's
   resolution produce it
 - rule.candidate.created 1.1.0: optional source_id, source_key, doc_type, outcome, the candidate

@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:compliancewatch:event:rule.candidate.created:v1",
   "title": "rule.candidate.created",
-  "description": "The extractor produced a rule candidate from a parsed document: the model's answer to the registered extraction prompt, read as a candidate and checked by the validators. The pipeline stores the extraction, keyed by the document and the prompt version, and writes this event in the same transaction. Since 1.1.0 it carries the candidate itself, how the extraction ended, the issues found, a suggested rule key and the cited clauses' ids. Producer: pipeline (rule extractor). Consumers: none yet; the rulebook's candidate intake once it is built.",
+  "description": "The extractor produced a rule candidate from a parsed document: the model's answer to the registered extraction prompt, read as a candidate and checked by the validators. The pipeline stores the extraction, keyed by the document and the prompt version, and writes this event in the same transaction. Since 1.1.0 it carries the candidate itself, how the extraction ended, the issues found, a suggested rule key and the cited clauses' ids. Producer: pipeline (rule extractor). Consumers: rulebook (candidate intake, group rulebook.rule-candidates), which queues each candidate once for an analyst's review.",
   "type": "object",
-  "x-version": "1.1.0",
+  "x-version": "1.1.1",
   "x-producer": "pipeline (rule extractor)",
   "x-tenant-scoped": false,
   "$defs": {

@@ -21,6 +21,7 @@ from cw_contracts.events.profile_updated_v1 import ProfileUpdatedV1
 from cw_contracts.events.rule_candidate_created_v1 import RuleCandidateCreatedV1
 from cw_contracts.events.rule_deadline_changed_v1 import RuleDeadlineChangedV1
 from cw_contracts.events.rule_published_v1 import RulePublishedV1
+from cw_contracts.events.rule_rejected_v1 import RuleRejectedV1
 from cw_contracts.events.rule_superseded_v1 import RuleSupersededV1
 from cw_contracts.events.rule_withdrawn_v1 import RuleWithdrawnV1
 from cw_contracts.events.tenant_created_v1 import TenantCreatedV1
@@ -129,7 +130,7 @@ TOPICS: Mapping[str, TopicSpec] = MappingProxyType(
         ),
         "rule.candidate.created": TopicSpec(
             topic="rule.candidate.created",
-            version="1.1.0",
+            version="1.1.1",
             model=RuleCandidateCreatedV1,
             tenant_scoped=False,
             schema_file="rule.candidate.created.v1.json",
@@ -147,6 +148,13 @@ TOPICS: Mapping[str, TopicSpec] = MappingProxyType(
             model=RulePublishedV1,
             tenant_scoped=False,
             schema_file="rule.published.v1.json",
+        ),
+        "rule.rejected": TopicSpec(
+            topic="rule.rejected",
+            version="1.0.0",
+            model=RuleRejectedV1,
+            tenant_scoped=False,
+            schema_file="rule.rejected.v1.json",
         ),
         "rule.superseded": TopicSpec(
             topic="rule.superseded",
