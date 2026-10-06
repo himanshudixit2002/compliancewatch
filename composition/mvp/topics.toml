@@ -1,0 +1,61 @@
+# Kafka topics as code (composition/mvp/README.md, "Topics"). `cw-mvp topics plan` compares this
+# file with the broker, and `cw-mvp topics apply`, which `cw-mvp release` runs, creates the topics
+# the broker lacks. Neither deletes or changes a topic: one whose partitions or settings differ is
+# reported and left as it is. tests/unit/test_topics_file.py fails when a contract topic
+# (packages/contracts/events/schemas) or the dead-letter topic of a consumer group the worker hosts
+# is missing here, or when a topic here is neither.
+#
+# Each topic gives its partitions, retention_days (retention.ms) and cleanup_policy
+# (cleanup.policy). Every topic is an event log, never a table of current state, so none is
+# compacted. Partitions are chosen once: adding some later moves keys between them, and the
+# producers key each event by its tenant (the rulebook's by the rule) so that a key's events stay
+# in order. The relay's own dead letters, <topic>.dlq, are not listed: a row whose topic stays
+# unreachable is kept in its outbox and retried, so nothing is lost while one is missing
+# (docs/runbooks/outbox-relay.md).
+
+# Capped at the brokers the cluster has: one on the dev stack's Redpanda.
+replication_factor = 3
+
+[topics]
+# Tenant events, keyed by tenant. Three partitions let up to three workers share a consumer group
+# without re-keying; a week covers a worker that was down over a long weekend. A consumer group
+# made later reads only what a topic still holds, the engine's business directory (built from
+# profile.updated) among it.
+"applicability.decided" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
+"notification.failed" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
+"notification.sent" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
+"obligation.closed" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
+"obligation.created" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
+"obligation.due_soon" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
+"obligation.rescheduled" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
+"profile.updated" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
+"tenant.created" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
+"tenant.deletion.requested" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
+"user.role.changed" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
+
+# Regulatory and platform events, of no tenant: a few a day at most, so one partition keeps them
+# in the order they were published, and a month lets a consumer that fell behind, or a new one,
+# still see every recent change to the rules.
+"document.discovered" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"document.parsed" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"eval.run.completed" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"rule.candidate.created" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"rule.deadline_changed" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"rule.published" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"rule.superseded" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"rule.withdrawn" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+
+# Dead letters of the worker's consumer groups, <topic>.<group>.dlq: what a handler could not
+# process after three attempts, kept a month to read, fix and replay.
+"applicability.decided.obligation.decisions.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"obligation.closed.notification.obligations.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"obligation.created.notification.obligations.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"obligation.due_soon.notification.obligations.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"obligation.rescheduled.notification.obligations.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"profile.updated.applicability-engine.profiles.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"rule.deadline_changed.obligation.rules.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"rule.published.applicability-engine.rules.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"rule.published.obligation.rules.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"rule.superseded.obligation.rules.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"rule.withdrawn.applicability-engine.rules.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"rule.withdrawn.obligation.rules.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
