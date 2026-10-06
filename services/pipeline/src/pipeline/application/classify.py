@@ -3,7 +3,8 @@ and where it goes next.
 
 ``ClassifyDocument`` parses the stored document again the way its parse did (``hints_for``),
 reads it with the detector (``application.detector``: the type its opening names, how sure that
-is, and whether it is a regulatory document at all) and records the classification
+is, and whether it is a regulatory document at all, by the title the registration gives it: the
+listed one, else the parse's) and records the classification
 (``domain.classification``) in one transaction with the document's status, its
 ``document.classified`` and, for a conflict, its ``triage`` task:
 
@@ -157,7 +158,12 @@ class ClassifyDocument(ActivityBase[ClassifyRequest, Classified]):
         if record is None:
             raise DocumentNotFoundError(f"no stored document has the id {document_id}")
         parsed = parse_request(self._parser, request, self._raw, hints)
-        detection = detect(parsed, own_ref=request.external_ref, given_type=record.doc_type)
+        detection = detect(
+            parsed,
+            own_ref=request.external_ref,
+            given_type=record.doc_type,
+            listed_title=request.title,
+        )
         now = self._clock()
         classification = Classification(
             document_id=document_id,

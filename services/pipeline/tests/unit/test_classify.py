@@ -1,10 +1,12 @@
 """The classify step: a parsed document's classification, recorded once with its status, its
 document.classified and, for a conflict, its triage task.
 
-The documents are synthetic HTML pages stored at the built-in sources (the chain parses them
-with html@1), so the opening each is classified by is the one written here."""
+The documents are synthetic HTML pages (and one synthetic PDF) stored at the built-in sources
+(the chain parses them with html@1 and pdf@1), so the opening each is classified by is the one
+written here."""
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -46,6 +48,44 @@ CIRCULAR = page(
 MANUAL = page("Reset Password User Manual", "Step 1: open the portal.")
 
 
+def text_pdf(*pages: str) -> bytes:
+    """A PDF with a text layer: one line of Helvetica on each page."""
+    kids = " ".join(f"{4 + 2 * index} 0 R" for index in range(len(pages)))
+    bodies = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        f"<< /Type /Pages /Kids [{kids}] /Count {len(pages)} >>".encode(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    for index, line in enumerate(pages):
+        stream = f"BT /F1 12 Tf 72 770 Td ({line}) Tj ET".encode()
+        bodies.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+            f"/Resources << /Font << /F1 3 0 R >> >> /Contents {5 + 2 * index} 0 R >>".encode()
+        )
+        bodies.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream))
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets: list[int] = []
+    for number, body in enumerate(bodies, 1):
+        offsets.append(len(pdf))
+        pdf += b"%d 0 obj\n%s\nendobj\n" % (number, body)
+    xref = len(pdf)
+    pdf += b"xref\n0 %d\n0000000000 65535 f \n" % (len(bodies) + 1)
+    pdf += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    pdf += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(bodies) + 1,
+        xref,
+    )
+    return bytes(pdf)
+
+
+PORTAL_MANUAL = text_pdf(
+    "User Manual",
+    "Login to the portal and open the returns dashboard to file FORM GSTR-1.",
+)
+"""A portal manual whose cover line, 11 characters, is too short to be the PDF's title: the
+parse titles it by the next line, which does not read as a manual."""
+
+
 class Pipeline:
     """A memory store with the built-in sources, the raw store and the chain."""
 
@@ -61,11 +101,18 @@ class Pipeline:
         )
 
     def stored(
-        self, content: bytes, *, key: str = "cbic_notifications", **record: object
+        self,
+        content: bytes,
+        *,
+        key: str = "cbic_notifications",
+        media_type: str = "text/html",
+        title: str = "",
+        **record: object,
     ) -> ParseRequest:
-        """What an upload stores, parsed: the bytes, the record set parsed, the request."""
+        """What an upload stores, parsed: the bytes, the record set parsed, the request, with the
+        title the document is listed under."""
         ref = DocumentRef(source_id_for(key), "upload://example", "")
-        raw = RawDocument.from_bytes(ref, content, "text/html", NOW)
+        raw = RawDocument.from_bytes(ref, content, media_type, NOW)
         storage_key = self.raw.put(raw)
         document_id = document_id_for(raw.sha256)
         values: dict[str, object] = {
@@ -77,6 +124,7 @@ class Pipeline:
             "size": len(content),
             "sha256": raw.sha256,
             "storage_key": storage_key,
+            "title": title,
             "status": DocumentStatus.PARSED,
             "parser_version": "html@1",
         }
@@ -85,6 +133,7 @@ class Pipeline:
             unit.documents.add(RawDocumentRecord(**values))  # type: ignore[arg-type]
         return ParseRequest(
             document_id=document_id.value,
+            title=title,
             stored=Stored(
                 document_id=document_id.value,
                 source_id=source_id_for(key).value,
@@ -211,7 +260,7 @@ async def test_a_conflict_opens_a_triage_task_with_its_classification_and_event(
 async def test_where_each_document_goes(
     content: bytes,
     key: str,
-    record: dict[str, object],
+    record: dict[str, Any],
     route: Route,
     status: DocumentStatus,
 ) -> None:
@@ -219,6 +268,27 @@ async def test_where_each_document_goes(
     assert await pipeline.classify(pipeline.stored(content, key=key, **record)) == (route, status)
     (event,) = pipeline.events()
     assert event.source_key == key
+
+
+async def test_a_user_manual_is_irrelevant_by_the_title_it_is_listed_under() -> None:
+    listed = "User Manual for filing FORM GSTR-1 on the portal"
+    pipeline = Pipeline()
+    request = pipeline.stored(
+        PORTAL_MANUAL, media_type="application/pdf", title=listed, parser_version="pdf@1"
+    )
+    assert await pipeline.classify(request) == (Route.IRRELEVANT, DocumentStatus.IRRELEVANT)
+    (event,) = pipeline.events()
+    assert event.reasons[1] == (
+        "its title reads as a user manual or a how-to guide for the portal, not a regulator's "
+        "document"
+    )
+    unlisted = Pipeline()
+    by_its_parse = unlisted.stored(
+        PORTAL_MANUAL, media_type="application/pdf", parser_version="pdf@1"
+    )
+    assert await unlisted.classify(by_its_parse) == (Route.EXTRACT, DocumentStatus.CLASSIFIED), (
+        "the parse's own title, the line after the cover, reads as no manual"
+    )
 
 
 async def test_a_document_classified_before_keeps_its_classification() -> None:

@@ -247,6 +247,24 @@ def test_a_type_a_person_gave_or_a_statute_source_is_certain_whatever_the_text_n
     )
 
 
+def test_the_listed_title_decides_the_relevance_but_never_the_type() -> None:
+    manual = detect(
+        doc("Login to the portal and open the returns dashboard", "Example text."),
+        listed_title="User Manual for filing FORM GSTR-1 on the portal",
+    )
+    assert (manual.relevance, manual.is_user_manual) == (Relevance.IRRELEVANT, True)
+    circular = detect(
+        doc("Circular No. 5/2026-GST", "Subject: Example clarification for the tests."),
+        default_type=DocumentType.CIRCULAR,
+        listed_title="Clarification on the applicability of notification No. 12/2017-Central Tax",
+    )
+    assert (circular.doc_type, circular.confidence, circular.relevance) == (
+        DocumentType.CIRCULAR,
+        TypeConfidence.CERTAIN,
+        Relevance.RELEVANT,
+    ), "the type is what the circular's own opening names, not the notification its listing names"
+
+
 @pytest.mark.parametrize(
     ("title", "relevance"),
     [

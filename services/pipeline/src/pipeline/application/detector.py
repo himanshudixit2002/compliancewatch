@@ -15,6 +15,12 @@ The type is the one the opening names first: a notification that later quotes "t
 recommendations of the Council" is a notification. A type a person gave (an uploader's, a
 triage's) is taken as it is, and so is a statute source's: no marker overrules a person, and an
 Act or the Rules quote notifications throughout.
+
+The title a document is listed under (a crawl's listing, an uploader's) is the one the rulebook
+registers it with, so the relevance is read from it when there is one: a portal's user manual is
+listed as one even when its cover line is too short to be the PDF's title. The type is read from
+the document's own opening, never from the listing, which names the notifications a circular
+clarifies or a notification amends.
 """
 
 import re
@@ -102,20 +108,24 @@ def detect(
     default_type: DocumentType | None = None,
     own_ref: str = "",
     given_type: DocumentType | None = None,
+    listed_title: str = "",
 ) -> Detection:
     """Read ``doc`` and classify it.
 
     ``default_type`` is what the source usually publishes (``doc.doc_type`` when not given);
     ``given_type`` is a type a person gave (an uploader's, a triage's), which is taken as it is;
     ``own_ref`` is the document's own number as the source listed it ("01/2026-Central Tax"),
-    so a gazette text that repeats its own number does not cite itself.
+    so a gazette text that repeats its own number does not cite itself; ``listed_title`` is the
+    title it is listed and registered under, which the relevance and the title's flags are read
+    from in place of ``doc.title`` when it is given.
     """
     head = " ".join([doc.title, *(clause.text for clause in doc.clauses[:CLAUSES_TO_READ])])
+    title = listed_title.strip() or doc.title
     expected = given_type or default_type or doc.doc_type
     doc_type, confidence, type_reason = _doc_type(
         opening_of(doc), expected, given=given_type is not None
     )
-    relevance, relevance_reason = _relevance(doc.title, expected, given=given_type is not None)
+    relevance, relevance_reason = _relevance(title, expected, given=given_type is not None)
     change = _change_kind(head)
     references = tuple(_references(head, exclude=doc.title, own_ref=own_ref))
     return Detection(
@@ -123,8 +133,8 @@ def detect(
         change_kind=change,
         references=references,
         announced_not_in_force=doc_type is DocumentType.PRESS_RELEASE,
-        is_advisory=bool(_ADVISORY.search(doc.title)),
-        is_user_manual=bool(_USER_MANUAL.search(doc.title)),
+        is_advisory=bool(_ADVISORY.search(title)),
+        is_user_manual=bool(_USER_MANUAL.search(title)),
         confidence=confidence,
         relevance=relevance,
         reasons=reasons_of((type_reason, relevance_reason)),
