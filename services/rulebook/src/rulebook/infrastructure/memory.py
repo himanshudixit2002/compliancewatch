@@ -114,6 +114,8 @@ FROZEN_STATUSES = frozenset(
     {RuleVersionStatus.PUBLISHED, RuleVersionStatus.SUPERSEDED, RuleVersionStatus.WITHDRAWN}
 )
 """Statuses whose content the rule_version guard freezes."""
+TASK_VERSION_KEY = "fk_review_task_rule_version_id_candidate_id_rule_version"
+"""Migration 0011's key from a candidate task's version and candidate to the version."""
 TEST_EFFECTIVE_FROM = date(2026, 4, 1)
 """Where a test version starts when the test does not say: a date, not a regulatory fact."""
 _TOKEN = re.compile(r"[\w\u0900-\u097f]+")
@@ -866,7 +868,7 @@ class MemoryRuleVersionRepository:
 
 class MemoryRuleCandidateRepository:
     """The rule candidates under the table's rules: one row per candidate id, first write
-    wins."""
+    wins, and the version a candidate names was drafted from it (the composite key)."""
 
     def __init__(self, tables: _Tables) -> None:
         self._tables = tables
@@ -876,6 +878,12 @@ class MemoryRuleCandidateRepository:
             return False
         if candidate.document_id not in self._tables.documents:
             raise InvariantViolationError(f"document {candidate.document_id} is not stored")
+        _require_drafted_from(
+            self._tables,
+            candidate.rule_version_id,
+            candidate.candidate_id,
+            "fk_rule_candidate_rule_version_id_id_rule_version",
+        )
         self._tables.rule_candidates[candidate.candidate_id] = candidate
         return True
 
@@ -891,10 +899,12 @@ class MemoryRuleCandidateRepository:
             raise RuleCandidateNotFoundError(
                 f"rule candidate {candidate.candidate_id} is not stored"
             )
-        if candidate.rule_version_id is not None and (
-            candidate.rule_version_id not in self._tables.versions
-        ):
-            raise UnknownRuleVersionError(str(candidate.rule_version_id))
+        _require_drafted_from(
+            self._tables,
+            candidate.rule_version_id,
+            candidate.candidate_id,
+            "fk_rule_candidate_rule_version_id_id_rule_version",
+        )
         self._tables.rule_candidates[candidate.candidate_id] = candidate
 
 
@@ -1045,6 +1055,24 @@ def _version_record(
     )
 
 
+def _require_drafted_from(
+    tables: _Tables, rule_version_id: RuleVersionId | None, candidate_id: UUID, key: str
+) -> None:
+    """A candidate, or its task, names only the version drafted from that candidate: what
+    migration 0011's composite keys (``key``) refuse in Postgres is refused here."""
+    if rule_version_id is None:
+        return
+    version = tables.versions.get(rule_version_id)
+    if version is None:
+        raise UnknownRuleVersionError(str(rule_version_id))
+    if version.candidate_id != candidate_id:
+        drafted_from = "no candidate" if version.candidate_id is None else version.candidate_id
+        raise InvariantViolationError(
+            f"rule version {rule_version_id} was drafted from {drafted_from}, not rule candidate "
+            f"{candidate_id} ({key})"
+        )
+
+
 def _closed(tables: _Tables, rule_version_id: RuleVersionId, version: _Version) -> bool:
     """``intake.version_closed``: drafted from a rule candidate that was rejected, never
     published."""
@@ -1143,7 +1171,8 @@ class MemoryCitationRepository:
 class MemoryReviewTaskRepository:
     """The review tasks under the table's rules: at most one task per version that is not
     decided, and one per candidate (the partial unique indexes), a decided task never changes
-    and a task takes its version once (the trigger)."""
+    and a task takes its version once (the trigger), and a candidate task's version was drafted
+    from its candidate (the composite key)."""
 
     def __init__(self, tables: _Tables) -> None:
         self._tables = tables
@@ -1153,6 +1182,10 @@ class MemoryReviewTaskRepository:
             raise UnknownRuleVersionError(str(task.rule_version_id))
         if task.candidate_id is not None and task.candidate_id not in self._tables.rule_candidates:
             raise RuleCandidateNotFoundError(f"rule candidate {task.candidate_id} is not stored")
+        if task.candidate_id is not None:
+            _require_drafted_from(
+                self._tables, task.rule_version_id, task.candidate_id, TASK_VERSION_KEY
+            )
         if task.task_id in self._tables.review_tasks:
             return False
         if task.undecided and any(
@@ -1194,6 +1227,10 @@ class MemoryReviewTaskRepository:
             )
         if task.rule_version_id is not None and task.rule_version_id not in self._tables.versions:
             raise UnknownRuleVersionError(str(task.rule_version_id))
+        if task.candidate_id is not None:
+            _require_drafted_from(
+                self._tables, task.rule_version_id, task.candidate_id, TASK_VERSION_KEY
+            )
         self._tables.review_tasks[task.task_id] = task
 
     def page(self, query: TaskQuery) -> Sequence[QueuedTask]:

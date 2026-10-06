@@ -340,7 +340,7 @@ def test_migration_0009_goes_down_only_while_no_edit_is_recorded(
     try:
         with pytest.raises(IntegrityError, match="ck_rule_version_decision_action"):
             command.downgrade(alembic_config, "0008")
-        assert scalar(engine, "SELECT version_num FROM alembic_version") == "0010"
+        assert scalar(engine, "SELECT version_num FROM alembic_version") == "0011"
         assert scalar(engine, "SELECT count(*) > 0 FROM review_task") is True, "nothing dropped"
     finally:
         engine.dispose()

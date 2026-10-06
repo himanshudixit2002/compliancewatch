@@ -827,6 +827,34 @@ def test_the_detail_carries_the_candidate_and_the_draft_it_proposes(review: Revi
     assert not candidate.suggested_rule_known
 
 
+def test_a_candidate_and_its_task_name_only_the_version_drafted_from_it(review: Review) -> None:
+    drafted = review.received()
+    review.claim.run(drafted, by=ANALYST)
+    detail = review.draft_new_rule(drafted)
+    assert detail.version is not None
+    other = review.received()
+    with review.store() as uow:
+        task = uow.review_tasks.get(other)
+        assert task is not None
+        assert task.candidate_id is not None
+        candidate = uow.rule_candidates.get(task.candidate_id)
+        assert candidate is not None
+    for version in (detail.version.rule_version_id, review.monthly):
+        with (
+            pytest.raises(
+                InvariantViolationError, match="fk_review_task_rule_version_id_candidate"
+            ),
+            review.store() as uow,
+        ):
+            uow.review_tasks.save(task.drafted(version))
+        with (
+            pytest.raises(InvariantViolationError, match="fk_rule_candidate_rule_version_id_id"),
+            review.store() as uow,
+        ):
+            uow.rule_candidates.save(candidate.drafted(version))
+    assert review.read.run(other).version is None, "nothing was stored"
+
+
 # ---------------------------------------------------------------- closed drafts
 
 

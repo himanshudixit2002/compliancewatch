@@ -11,8 +11,10 @@ the integration test compares the two. Triggers are not modelled: migration 0004
 ``clause_embedding`` refuse updates, migration 0007 makes ``rule_version_decision``
 append-only and guards ``rule_version`` (inserted as drafts, status moves, frozen content,
 publish preconditions), migration 0009 keeps a decided ``review_task`` as it is, and migration
-0010 lets a candidate task take its version once. The ``outbox_event`` table of 0007 and the
-``processed_event`` table of 0010 belong to py-common's metadata, not this one.
+0010 lets a candidate task take its version once. The composite foreign keys of migration 0011,
+which tie a candidate task's version and a candidate's version to the version drafted from that
+candidate, are modelled. The ``outbox_event`` table of 0007 and the ``processed_event`` table of
+0010 belong to py-common's metadata, not this one.
 
 The vocabulary in the CHECK constraints is the kernel's (``domain_kernel.knowledge``), and so are
 the rules on ``rule_relation``: the relations in ``RULE_VERSION_ONLY`` target a rule version,
@@ -517,6 +519,7 @@ class RuleVersionRow(Base):
             use_alter=True,
         ),
         UniqueConstraint("candidate_id", name="uq_rule_version_candidate_id"),
+        UniqueConstraint("id", "candidate_id", name="uq_rule_version_id_candidate_id"),
         Index("ix_rule_version_status_effective", "status", "effective_from"),
         {
             "comment": (
@@ -654,6 +657,12 @@ class ReviewTaskRow(Base):
             name="fk_review_task_candidate_id_rule_candidate",
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["rule_version_id", "candidate_id"],
+            ["rule_version.id", "rule_version.candidate_id"],
+            name="fk_review_task_rule_version_id_candidate_id_rule_version",
+            ondelete="RESTRICT",
+        ),
         CheckConstraint(sql_in_list("kind", REVIEW_TASK_KINDS), name="ck_review_task_kind"),
         CheckConstraint(
             "(kind = 'seed' AND rule_version_id IS NOT NULL AND candidate_id IS NULL)"
@@ -738,6 +747,12 @@ class RuleCandidateRow(Base):
             ["rule_version_id"],
             ["rule_version.id"],
             name="fk_rule_candidate_rule_version_id_rule_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["rule_version_id", "id"],
+            ["rule_version.id", "rule_version.candidate_id"],
+            name="fk_rule_candidate_rule_version_id_id_rule_version",
             ondelete="RESTRICT",
         ),
         UniqueConstraint("rule_version_id", name="uq_rule_candidate_rule_version_id"),

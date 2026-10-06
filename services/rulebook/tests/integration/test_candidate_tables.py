@@ -1,9 +1,12 @@
-"""Rule candidates on Postgres: migration 0010 over seed tasks stored before it (up, down and up),
-the checks of rule_candidate and of candidate review tasks, the guard that lets a candidate task
-take its version once, the intake, drafting and decisions on the Postgres unit of work (with
-rule.rejected in the outbox), the seed command and seed tasks leaving a candidate's draft alone,
-and the worker's consumer, whose candidate, task and inbox row commit together or not at all.
-Needs Docker."""
+"""Rule candidates on Postgres: migration 0010 over seed tasks stored before it (up, down and up,
+and no way down once a candidate is stored), the checks of rule_candidate and of candidate review
+tasks, the guard that lets a candidate task take its version once, migration 0011's keys tying a
+candidate's draft to its candidate and its task, the intake, drafting and decisions on the
+Postgres unit of work (with rule.rejected in the outbox, and a rejection after drafting that
+reopens the draft's relations and closes it), the seed command (which updates its own draft
+beside a candidate's, skips a closed one, and waits for a draft holding the rule) and seed tasks
+leaving a candidate's draft alone, and the worker's consumer, whose candidate, task and inbox row
+commit together or not at all. Needs Docker."""
 
 import hashlib
 import json
@@ -286,7 +289,7 @@ def test_migration_0010_keeps_the_seed_tasks_and_goes_down_and_up(
     assert scalar(engine, "SELECT to_regclass('processed_event')") is None
     assert before_0010() == stored
     command.upgrade(alembic_config, "head")
-    assert scalar(engine, "SELECT version_num FROM alembic_version") == "0010"
+    assert scalar(engine, "SELECT version_num FROM alembic_version") == "0011"
     assert scalar(engine, nullable, schema=SCHEMA) == "YES"
     assert before_0010() == stored
 
@@ -353,15 +356,17 @@ def test_a_candidate_task_takes_its_version_once(
         id=rule,
         key=f"example_guard_{rule.hex[:8]}",
     )
+    drafted_from = {first: intake.candidate.candidate_id, second: None}
     for number, version in enumerate((first, second), start=1):
         execute(
             engine,
             "INSERT INTO rule_version (id, rule_id, version, status, title, specification,"
-            " obligation_template, effective_from) VALUES (:id, :rule, :number, 'draft',"
-            " 'Example draft', '{}', '{}', DATE '2000-02-01')",
+            " obligation_template, effective_from, candidate_id) VALUES (:id, :rule, :number,"
+            " 'draft', 'Example draft', '{}', '{}', DATE '2000-02-01', :candidate)",
             id=version,
             rule=rule,
             number=number,
+            candidate=drafted_from[version],
         )
     move = "UPDATE review_task SET rule_version_id = :version WHERE id = :id"
     execute(engine, move, version=first, id=task_id)
@@ -452,6 +457,90 @@ def test_a_candidate_is_drafted_approved_and_another_rejected_on_postgres(
     counts = ReadReviewStats(factory).run().candidates
     assert (counts.approved, counts.approved_without_edits, counts.rejected) == (1, 1, 1)
     assert counts.acceptance_rate == 0.5
+
+
+KEYS_0011 = (
+    "fk_review_task_rule_version_id_candidate_id_rule_version",
+    "fk_rule_candidate_rule_version_id_id_rule_version",
+    "uq_rule_version_id_candidate_id",
+)
+
+
+def _keys_0011(engine: Engine) -> list[str]:
+    names = ", ".join(f"'{name}'" for name in KEYS_0011)
+    return [
+        row[0]
+        for row in _rows(
+            engine,
+            f"SELECT conname FROM pg_constraint WHERE conname IN ({names}) ORDER BY conname",
+        )
+    ]
+
+
+def test_migration_0011_goes_down_and_up_over_drafted_candidates(
+    notification: PostgresKnowledgeUnitOfWorkFactory, alembic_config: Config, engine: Engine
+) -> None:
+    """After the drafting above, so the keys are added over candidates and tasks that name
+    their drafts."""
+    drafted = "SELECT count(*) FROM rule_candidate WHERE rule_version_id IS NOT NULL"
+    assert scalar(engine, drafted) > 0
+    assert _keys_0011(engine) == list(KEYS_0011)
+    command.downgrade(alembic_config, "0010")
+    assert scalar(engine, "SELECT version_num FROM alembic_version") == "0010"
+    assert _keys_0011(engine) == []
+    command.upgrade(alembic_config, "head")
+    assert scalar(engine, "SELECT version_num FROM alembic_version") == "0011"
+    assert _keys_0011(engine) == list(KEYS_0011)
+
+
+def test_a_candidate_and_its_task_name_only_the_draft_made_from_it(
+    notification: PostgresKnowledgeUnitOfWorkFactory, engine: Engine
+) -> None:
+    factory, clock = notification, Clock(START + timedelta(days=5))
+    drafted = IngestRuleCandidate(factory, clock).run(payload(), uuid4())
+    assert drafted.task is not None
+    ClaimReviewTask(factory, clock).run(drafted.task.task_id, by=ANALYST)
+    detail = DraftFromCandidate(factory, ontology_package.load, clock).run(
+        drafted.task.task_id,
+        by=ANALYST,
+        rule_key="example_keys_drafted",
+        new_rule=NewRule("cbic", AttributeLevel.REGISTRATION),
+    )
+    assert detail.version is not None
+    other = IngestRuleCandidate(factory, clock).run(payload(), uuid4())
+    assert other.task is not None
+    task_key, candidate_key = KEYS_0011[0], KEYS_0011[1]
+    for version in (detail.version.rule_version_id, _monthly(engine)):
+        with pytest.raises(IntegrityError, match=task_key):
+            execute(
+                engine,
+                "UPDATE review_task SET rule_version_id = :version WHERE id = :id",
+                version=version.value,
+                id=other.task.task_id,
+            )
+        with pytest.raises(IntegrityError, match=candidate_key):
+            execute(
+                engine,
+                "UPDATE rule_candidate SET status = 'drafted', rule_version_id = :version"
+                " WHERE id = :id",
+                version=version.value,
+                id=other.candidate.candidate_id,
+            )
+    with pytest.raises(IntegrityError, match=f"{task_key}|{candidate_key}"):
+        execute(
+            engine,
+            "UPDATE rule_version SET candidate_id = :other WHERE id = :id",
+            other=other.candidate.candidate_id,
+            id=detail.version.rule_version_id.value,
+        )
+    assert (
+        scalar(
+            engine,
+            "SELECT rule_version_id FROM review_task WHERE id = :id",
+            id=other.task.task_id,
+        )
+        is None
+    )
 
 
 def _monthly(engine: Engine) -> RuleVersionId:

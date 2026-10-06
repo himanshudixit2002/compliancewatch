@@ -229,7 +229,7 @@ def test_migration_0007_goes_down_and_up(
     update(engine, before, "status = 'published'")
 
     command.upgrade(alembic_config, "head")
-    assert scalar(engine, "SELECT version_num FROM alembic_version") == "0010"
+    assert scalar(engine, "SELECT version_num FROM alembic_version") == "0011"
     assert (
         scalar(engine, "SELECT high_impact FROM rule_version WHERE id = :id", id=before.value)
         is False
