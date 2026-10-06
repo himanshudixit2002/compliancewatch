@@ -261,8 +261,9 @@ is open (no entity has the name, several share it as an alias, the mention names
 or rule lacks its statute) and a link marking it in its document. A GET form chooses one type; the
 pages continue after the last group shown (`after_type` and `after_name`, an empty name included),
 so a page has its own address. The queue is read fresh on every visit, as the admin home reads it
-(D-036): the pipeline fills it and decisions empty it outside this server (D-055). An empty queue
-says why.
+(D-036): the pipeline fills it and decisions empty it outside this server (D-055). An empty page
+says why in its own words: nothing waits at all, nothing of the chosen type (with the way to every
+type), or nothing after the previous page, where the first page is always offered.
 
 ## Entity group: `/admin/rulebook/entities/group?type=&name=`
 
@@ -306,7 +307,9 @@ document by its id. A row shows the relation (a link to the candidate's page, wh
 status it was listed in), the period and new due date of a deadline, the target with whether it is
 aligned to an entity and the rule key it names, the evidence quote with a link marking its clause
 in the document, the quote match and the confidence as percentages, whether the pipeline flagged it
-and the issues it raised, and the status. Read fresh on every visit.
+and the issues it raised, and the status. Read fresh on every visit. An empty page says which case
+it is: nothing in the status, nothing in the status for the document named, or nothing after the
+previous page, where the first page is always offered.
 
 ## Relation candidate: `/admin/rulebook/relations/[candidateId]`
 

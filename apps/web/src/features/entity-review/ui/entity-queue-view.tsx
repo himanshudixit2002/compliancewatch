@@ -23,6 +23,7 @@ import {
   QUEUE_PARAMS,
   entityTypeLabel,
   typeOptions,
+  type QueueFilter,
   type QueueRead,
   type QueueView,
 } from "../model/queue";
@@ -36,6 +37,30 @@ export interface EntityQueueViewProps {
   /** The page the filter found; null when the filter was refused or the read failed. */
   view: QueueView | null;
   error?: ServiceErrorLike;
+}
+
+/**
+ * Why a page holds no group: a later page past the queue's end (the first page is offered below),
+ * the type the form names, or the queue itself.
+ */
+function emptyText(filter: QueueFilter): { title: string; body: string } {
+  const type = filter.entityType === null ? null : entityTypeLabel(filter.entityType);
+  if (filter.after !== null) {
+    return {
+      title:
+        type === null
+          ? t("entityReview.empty.laterTitle")
+          : t("entityReview.empty.laterTypeTitle", { type }),
+      body: t("entityReview.empty.laterBody"),
+    };
+  }
+  if (type !== null) {
+    return {
+      title: t("entityReview.empty.typeTitle", { type }),
+      body: t("entityReview.empty.typeBody", { type }),
+    };
+  }
+  return { title: t("entityReview.empty.title"), body: t("entityReview.empty.body") };
 }
 
 /**
@@ -53,7 +78,6 @@ export function EntityQueueView({
   error,
 }: EntityQueueViewProps) {
   const typeValue = read.kind === "invalid" ? read.value : (read.filter.entityType ?? "");
-  const filterType = read.filter.entityType;
   return (
     <div data-slot="entity-queue" className="flex max-w-6xl flex-col gap-6">
       <PageHeader
@@ -83,14 +107,16 @@ export function EntityQueueView({
       </form>
       {error !== undefined ? <ServiceError error={error} /> : null}
       {view === null ? null : view.rows.length === 0 ? (
-        <EmptyState
-          title={
-            filterType === null
-              ? t("entityReview.empty.title")
-              : t("entityReview.empty.typeTitle", { type: entityTypeLabel(filterType) })
-          }
-          body={t("entityReview.empty.body")}
-        />
+        <>
+          <EmptyState {...emptyText(view.filter)} />
+          <KeysetPager
+            nextHref={null}
+            firstHref={view.firstHref}
+            label={t("entityReview.pager")}
+            nextLabel={t("entityReview.nextPage")}
+            firstLabel={t("entityReview.firstPage")}
+          />
+        </>
       ) : (
         <>
           <Table scrollLabel={t("entityReview.tableRegion")}>

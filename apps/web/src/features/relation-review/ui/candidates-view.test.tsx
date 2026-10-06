@@ -61,10 +61,51 @@ describe("CandidatesView", () => {
         )}
       />,
     );
-    expect(screen.getByRole("heading", { name: "No candidate is approved yet" })).toBeDefined();
+    expect(
+      screen.getByRole("heading", { name: "No approved candidate for this document" }),
+    ).toBeDefined();
+    expect(screen.getByText(/^This document has no candidate in this status/)).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "No candidate is approved yet" })).toBeNull();
     expect(screen.getByRole("link", { name: "Every document" }).getAttribute("href")).toBe(
       `${PATH}?status=approved`,
     );
+    expect(screen.queryByRole("navigation", { name: "Pages of relation candidates" })).toBeNull();
+  });
+
+  it("says a status is empty everywhere only without a document or a page", () => {
+    render(
+      <CandidatesView
+        title="Relation candidates"
+        crumbs={crumbs}
+        pageHref={PATH}
+        read={readCandidateQueue({ status: "rejected" })}
+        view={candidateQueueView(PATH, { status: "rejected", documentId: null, after: null }, [])}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "No candidate is rejected yet" })).toBeDefined();
+  });
+
+  it("says a later page holds nothing more and always offers the first page", async () => {
+    const read = readCandidateQueue({ document: EXAMPLE_DOCUMENT_ID, after: EXAMPLE_CANDIDATE_ID });
+    const { container } = render(
+      <CandidatesView
+        title="Relation candidates"
+        crumbs={crumbs}
+        pageHref={PATH}
+        read={read}
+        view={candidateQueueView(PATH, read.filter, [])}
+      />,
+    );
+    expect(
+      screen.getByRole("heading", { name: "No more open candidates after the previous page" }),
+    ).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "No candidate waits for a decision" })).toBeNull();
+    const pager = screen.getByRole("navigation", { name: "Pages of relation candidates" });
+    expect(pager.querySelector("a")?.textContent).toBe("First page");
+    expect(pager.querySelector("a")?.getAttribute("href")).toBe(
+      `${PATH}?document=${EXAMPLE_DOCUMENT_ID}`,
+    );
+    expect(await runAxe(container)).toHaveNoViolations();
   });
 
   it("marks a malformed document id on its field and shows a failed read", async () => {

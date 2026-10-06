@@ -27,6 +27,7 @@ import {
   candidateQueueHref,
   candidateStatusLabel,
   statusChips,
+  type CandidateFilter,
   type CandidateQueueRead,
   type CandidateQueueView,
 } from "../model/queue";
@@ -42,17 +43,51 @@ export interface CandidatesViewProps {
   error?: ServiceErrorLike;
 }
 
-const EMPTY: Readonly<Record<CandidateStatus, { title: MessageKey; body: MessageKey }>> = {
-  open: { title: "relationReview.empty.openTitle", body: "relationReview.empty.openBody" },
+interface EmptyWords {
+  /** Nothing in the status anywhere. */
+  title: MessageKey;
+  body: MessageKey;
+  /** Nothing in the status for the document the form names. */
+  documentTitle: MessageKey;
+  /** Nothing after the previous page's last candidate. */
+  laterTitle: MessageKey;
+}
+
+const EMPTY: Readonly<Record<CandidateStatus, EmptyWords>> = {
+  open: {
+    title: "relationReview.empty.openTitle",
+    body: "relationReview.empty.openBody",
+    documentTitle: "relationReview.empty.openDocumentTitle",
+    laterTitle: "relationReview.empty.openLaterTitle",
+  },
   approved: {
     title: "relationReview.empty.approvedTitle",
     body: "relationReview.empty.approvedBody",
+    documentTitle: "relationReview.empty.approvedDocumentTitle",
+    laterTitle: "relationReview.empty.approvedLaterTitle",
   },
   rejected: {
     title: "relationReview.empty.rejectedTitle",
     body: "relationReview.empty.rejectedBody",
+    documentTitle: "relationReview.empty.rejectedDocumentTitle",
+    laterTitle: "relationReview.empty.rejectedLaterTitle",
   },
 };
+
+/**
+ * Why a page holds no candidate: a later page past the list's end (the first page is offered
+ * below), the document the form names, or the status itself.
+ */
+function emptyText(filter: CandidateFilter): { title: string; body: string } {
+  const words = EMPTY[filter.status];
+  if (filter.after !== null) {
+    return { title: t(words.laterTitle), body: t("relationReview.empty.laterBody") };
+  }
+  if (filter.documentId !== null) {
+    return { title: t(words.documentTitle), body: t("relationReview.empty.documentBody") };
+  }
+  return { title: t(words.title), body: t(words.body) };
+}
 
 const TONES = { open: "warning", approved: "success", rejected: "neutral" } as const;
 
@@ -72,7 +107,7 @@ export function CandidatesView({
   error,
 }: CandidatesViewProps) {
   const filter = read.filter;
-  const empty = EMPTY[filter.status];
+  const empty = emptyText(filter);
   return (
     <div data-slot="relation-candidates" className="flex max-w-6xl flex-col gap-6">
       <PageHeader
@@ -122,7 +157,16 @@ export function CandidatesView({
       </form>
       {error !== undefined ? <ServiceError error={error} /> : null}
       {view === null ? null : view.rows.length === 0 ? (
-        <EmptyState title={t(empty.title)} body={t(empty.body)} />
+        <>
+          <EmptyState title={empty.title} body={empty.body} />
+          <KeysetPager
+            nextHref={null}
+            firstHref={view.firstHref}
+            label={t("relationReview.pager")}
+            nextLabel={t("relationReview.nextPage")}
+            firstLabel={t("relationReview.firstPage")}
+          />
+        </>
       ) : (
         <>
           <Table scrollLabel={t("relationReview.tableRegion")}>
