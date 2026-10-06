@@ -9,12 +9,14 @@ Approval needs the rule version the relation starts from, still a draft, and for
 that must target a rule version the version it targets. It locks that version before checking
 its status, as citing and submitting do, so a relation cannot slip in beside a submission. It
 writes one ``rule_relation`` row pointing back at the candidate; a supersession that would close
-a cycle is refused.
+a cycle is refused. ``approve_relation`` is that approval inside a unit of work the caller
+opened, with no transaction of its own: drafting a version from a rule candidate approves the
+relations the analyst picks onto the new draft in the drafting's own transaction.
 """
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 
 from domain_kernel.ids import CanonicalEntityId, DocumentId, RuleVersionId
@@ -184,6 +186,81 @@ class ListRelationCandidates:
             return uow.candidates.page(status, document_id, min(max(limit, 1), MAX_PAGE), after)
 
 
+def approve_relation(
+    uow: KnowledgeUnitOfWork,
+    candidate_id: UUID,
+    from_rule_version_id: RuleVersionId,
+    target_rule_version_id: RuleVersionId | None,
+    *,
+    decided_by: str,
+    now: datetime,
+    note: str = "",
+) -> Approval:
+    """``ApproveRelationCandidate`` inside the caller's transaction: the candidate locked and
+    still open, the version it starts from locked and still a draft, the target known, no
+    supersession cycle; one ``rule_relation`` row and the candidate approved."""
+    candidate = uow.candidates.lock(candidate_id)
+    if candidate is None:
+        raise CandidateNotFoundError(f"relation candidate {candidate_id} does not exist")
+    if candidate.status is not CandidateStatus.OPEN:
+        raise CandidateClosedError(f"candidate {candidate_id} is {candidate.status.value}")
+    version = uow.rule_versions.lock(from_rule_version_id)
+    if version is None:
+        raise UnknownRuleVersionError(str(from_rule_version_id))
+    if version.status not in EDITABLE_FROM_STATUSES:
+        raise RuleVersionNotEditableError(
+            f"rule version {from_rule_version_id} is {version.status.value}"
+        )
+    if (
+        target_rule_version_id is not None
+        and uow.rules.version_status(target_rule_version_id) is None
+    ):
+        raise UnknownRuleVersionError(str(target_rule_version_id))
+    target_entity = None
+    if target_rule_version_id is None:
+        target_entity = _target_entity(uow, candidate)
+    relation = to_rule_relation(
+        candidate, from_rule_version_id, target_rule_version_id, target_entity
+    )
+    if relation.relation is RelationKind.SUPERSEDES and target_rule_version_id:
+        uow.relations.lock_supersession()
+        cycle = find_supersedes_cycle(
+            uow.relations.supersedes_edges(), from_rule_version_id, target_rule_version_id
+        )
+        if cycle is not None:
+            raise SupersessionCycleError(
+                " -> ".join(str(version) for version in cycle) + f" -> {target_rule_version_id}"
+            )
+    relation_id = rule_relation_id_for(
+        from_rule_version_id.value,
+        relation.relation,
+        relation.to_kind,
+        relation.to_ref,
+        candidate.evidence_clause_id,
+    )
+    uow.relations.add(relation, relation_id=relation_id, candidate_id=candidate_id)
+    uow.candidates.save(candidate.approve(decided_by=decided_by, at=now, note=note))
+    return Approval(candidate_id=candidate_id, rule_relation_id=relation_id)
+
+
+def _target_entity(
+    uow: KnowledgeUnitOfWork, candidate: RelationCandidate
+) -> tuple[CanonicalEntityId, str] | None:
+    """The entity the candidate's target is now aligned to, with its canonical name: the one
+    staging found, else the one recorded for the target mention since, else the one its name
+    resolves to now. ``None`` while the target is not aligned."""
+    entity_id = candidate.target_entity_id or uow.mentions.entity_at(
+        candidate.target_clause_id, candidate.target_span_start, candidate.target_type
+    )
+    if entity_id is None:
+        outcome = resolve(candidate.target_type, candidate.target_name, uow.entities)
+        entity_id = outcome.entity_id if isinstance(outcome, Resolved) else None
+    if entity_id is None:
+        return None
+    found = uow.entities.get(entity_id)
+    return None if found is None else (entity_id, found[1])
+
+
 class ApproveRelationCandidate:
     def __init__(self, unit_of_work: KnowledgeUnitOfWorkFactory, clock: Clock = default_clock):
         self._unit_of_work = unit_of_work
@@ -200,67 +277,15 @@ class ApproveRelationCandidate:
     ) -> Approval:
         now = self._clock()
         with self._unit_of_work() as uow:
-            candidate = uow.candidates.lock(candidate_id)
-            if candidate is None:
-                raise CandidateNotFoundError(f"relation candidate {candidate_id} does not exist")
-            if candidate.status is not CandidateStatus.OPEN:
-                raise CandidateClosedError(f"candidate {candidate_id} is {candidate.status.value}")
-            version = uow.rule_versions.lock(from_rule_version_id)
-            if version is None:
-                raise UnknownRuleVersionError(str(from_rule_version_id))
-            if version.status not in EDITABLE_FROM_STATUSES:
-                raise RuleVersionNotEditableError(
-                    f"rule version {from_rule_version_id} is {version.status.value}"
-                )
-            if (
-                target_rule_version_id is not None
-                and uow.rules.version_status(target_rule_version_id) is None
-            ):
-                raise UnknownRuleVersionError(str(target_rule_version_id))
-            target_entity = None
-            if target_rule_version_id is None:
-                target_entity = self._target_entity(uow, candidate)
-            relation = to_rule_relation(
-                candidate, from_rule_version_id, target_rule_version_id, target_entity
+            return approve_relation(
+                uow,
+                candidate_id,
+                from_rule_version_id,
+                target_rule_version_id,
+                decided_by=decided_by,
+                now=now,
+                note=note,
             )
-            if relation.relation is RelationKind.SUPERSEDES and target_rule_version_id:
-                uow.relations.lock_supersession()
-                cycle = find_supersedes_cycle(
-                    uow.relations.supersedes_edges(), from_rule_version_id, target_rule_version_id
-                )
-                if cycle is not None:
-                    raise SupersessionCycleError(
-                        " -> ".join(str(version) for version in cycle)
-                        + f" -> {target_rule_version_id}"
-                    )
-            relation_id = rule_relation_id_for(
-                from_rule_version_id.value,
-                relation.relation,
-                relation.to_kind,
-                relation.to_ref,
-                candidate.evidence_clause_id,
-            )
-            uow.relations.add(relation, relation_id=relation_id, candidate_id=candidate_id)
-            uow.candidates.save(candidate.approve(decided_by=decided_by, at=now, note=note))
-        return Approval(candidate_id=candidate_id, rule_relation_id=relation_id)
-
-    @staticmethod
-    def _target_entity(
-        uow: KnowledgeUnitOfWork, candidate: RelationCandidate
-    ) -> tuple[CanonicalEntityId, str] | None:
-        """The entity the candidate's target is now aligned to, with its canonical name: the
-        one staging found, else the one recorded for the target mention since, else the one its
-        name resolves to now. ``None`` while the target is not aligned."""
-        entity_id = candidate.target_entity_id or uow.mentions.entity_at(
-            candidate.target_clause_id, candidate.target_span_start, candidate.target_type
-        )
-        if entity_id is None:
-            outcome = resolve(candidate.target_type, candidate.target_name, uow.entities)
-            entity_id = outcome.entity_id if isinstance(outcome, Resolved) else None
-        if entity_id is None:
-            return None
-        found = uow.entities.get(entity_id)
-        return None if found is None else (entity_id, found[1])
 
 
 class RejectRelationCandidate:

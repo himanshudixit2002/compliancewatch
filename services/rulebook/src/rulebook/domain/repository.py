@@ -14,7 +14,7 @@ from domain_kernel.vectors import ClauseFilter, Vector
 from rulebook.domain.alignment import EntityLookup
 from rulebook.domain.changes import ChangeEntry, ChangeQuery
 from rulebook.domain.documents import StoredClause, StoredDocument
-from rulebook.domain.events import RuleEvent
+from rulebook.domain.events import RulebookEvent
 from rulebook.domain.graph import (
     ClauseDetail,
     EntityRecord,
@@ -22,6 +22,7 @@ from rulebook.domain.graph import (
     RelationQuery,
     RelationRecord,
 )
+from rulebook.domain.intake import RuleCandidate
 from rulebook.domain.publication import PendingReplacement, RuleVersionDecision
 from rulebook.domain.relations import CandidateStatus, RelationCandidate
 from rulebook.domain.review import EntityReviewItem, MentionGroup, ReviewQueueStats
@@ -261,6 +262,18 @@ class RuleVersionRepository(Protocol):
         ``regulator`` issues, after ``after``, at most ``limit``."""
         ...
 
+    def latest_version(self, rule_key: str) -> RuleVersionRecord | None:
+        """The latest version of the rule with this key, in any status, with the rule locked
+        for the rest of the transaction so two drafts never take one version number; None when
+        no rule has the key."""
+        ...
+
+    def add_rule_and_version(self, record: RuleVersionRecord, *, new_rule: bool) -> None:
+        """Insert ``record`` as a new draft version, its rule first when ``new_rule`` (with the
+        record's rule id, key, regulator and level). A new rule whose key another rule has is
+        ``RuleKeyTakenError``; the version number must follow the rule's latest."""
+        ...
+
 
 class CitationRepository(Protocol):
     def for_version(self, rule_version_id: RuleVersionId) -> tuple[CitationRecord, ...]:
@@ -272,10 +285,26 @@ class CitationRepository(Protocol):
         ...
 
 
+class RuleCandidateRepository(Protocol):
+    def add(self, candidate: RuleCandidate) -> bool:
+        """Insert unless a candidate with the id exists; whether this call inserted it."""
+        ...
+
+    def get(self, candidate_id: UUID) -> RuleCandidate | None: ...
+
+    def lock(self, candidate_id: UUID) -> RuleCandidate | None:
+        """The candidate, locked for the rest of the transaction."""
+        ...
+
+    def save(self, candidate: RuleCandidate) -> None:
+        """Write the candidate's status, version, reject reason and decision."""
+        ...
+
+
 class ReviewTaskRepository(Protocol):
     def add(self, task: ReviewTask) -> bool:
-        """Insert unless the version has a task that is not decided; whether this call
-        inserted it."""
+        """Insert unless the version, or the candidate, has a task that is not decided; whether
+        this call inserted it."""
         ...
 
     def get(self, task_id: UUID) -> ReviewTask | None: ...
@@ -285,8 +314,9 @@ class ReviewTaskRepository(Protocol):
         ...
 
     def save(self, task: ReviewTask) -> None:
-        """Write the task's status, claim and decision. A decided task never changes
-        (``ReviewTaskClosedError``; the table's trigger refuses it too)."""
+        """Write the task's status, claim and decision, and the version a candidate task gets
+        when it is drafted. A decided task never changes (``ReviewTaskClosedError``; the
+        table's trigger refuses it too), nor does a task's version once it has one."""
         ...
 
     def page(self, query: TaskQuery) -> Sequence[QueuedTask]:
@@ -298,21 +328,28 @@ class ReviewTaskRepository(Protocol):
         """Every task of the version, oldest first."""
         ...
 
+    def of_candidate(self, candidate_id: UUID) -> tuple[ReviewTask, ...]:
+        """Every task of the candidate, oldest first."""
+        ...
+
     def drafts_without_task(self) -> Sequence[RuleVersionRecord]:
-        """The drafts that need review (seed status needs_review) and have no task that is not
-        decided, by rule key and version."""
+        """The seed drafts that need review (seed status needs_review, no candidate) and have
+        no task that is not decided, by rule key and version. A draft made from a candidate is
+        reviewed through its candidate's task, never a seed task."""
         ...
 
     def stats(self) -> ReviewTaskStats:
-        """Tasks per regulator and status, the decisions made, the median time to decide and
-        when the oldest task not decided yet was opened."""
+        """Tasks per regulator and status, the decisions made, the median time to decide, when
+        the oldest task not decided yet was opened, and the decided candidates: approved (and
+        how many of those with no edit recorded on their version) and rejected."""
         ...
 
 
 class EventSink(Protocol):
-    """Where rule events go inside the transaction: the outbox, keyed by rule."""
+    """Where the rulebook's events go inside the transaction: the outbox, each keyed by its
+    partition key (a rule event by its rule)."""
 
-    def publish(self, event: RuleEvent) -> None: ...
+    def publish(self, event: RulebookEvent) -> None: ...
 
 
 class RuleCatalog(Protocol):
@@ -396,6 +433,9 @@ class KnowledgeUnitOfWork(Protocol):
 
     @property
     def review_tasks(self) -> ReviewTaskRepository: ...
+
+    @property
+    def rule_candidates(self) -> RuleCandidateRepository: ...
 
     @property
     def index(self) -> ClauseIndex: ...

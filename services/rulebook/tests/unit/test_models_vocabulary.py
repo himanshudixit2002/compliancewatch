@@ -16,6 +16,7 @@ from domain_kernel.documents import PARSER_VERSION_PATTERN, DocumentType
 from domain_kernel.knowledge import RULE_VERSION_KIND, RULE_VERSION_ONLY, EntityType, RelationKind
 from domain_kernel.status import RULE_VERSION_TRANSITIONS, RuleVersionStatus
 from rulebook.domain.documents import CLAUSE_REF_PATTERN
+from rulebook.domain.intake import CandidateOutcome, RuleCandidateStatus, RuleRejectReason
 from rulebook.domain.publication import DecisionAction
 from rulebook.domain.review_tasks import (
     UNDECIDED,
@@ -24,6 +25,7 @@ from rulebook.domain.review_tasks import (
     ReviewTaskStatus,
 )
 from rulebook.infrastructure.models import (
+    CANDIDATE_OUTCOMES,
     DECISION_ACTIONS,
     DOCUMENT_TYPES,
     ENTITY_TYPES,
@@ -32,6 +34,8 @@ from rulebook.infrastructure.models import (
     REVIEW_DECISIONS,
     REVIEW_TASK_KINDS,
     REVIEW_TASK_STATUSES,
+    RULE_CANDIDATE_STATUSES,
+    RULE_REJECT_REASONS,
     RULE_VERSION_ONLY_RELATIONS,
     RULE_VERSION_STATUSES,
     RULE_VERSION_TARGET,
@@ -45,6 +49,7 @@ PAIR = re.compile(r"\('([a-z_]+)', '([a-z_]+)'\)")
 VERSIONS = Path(__file__).resolve().parents[2] / "migrations" / "versions"
 PUBLISH_FLOW = VERSIONS / "20260929_0007_publish_flow.py"
 REVIEW_TASKS = VERSIONS / "20261006_0009_review_tasks.py"
+RULE_CANDIDATES = VERSIONS / "20261006_0010_rule_candidates.py"
 
 
 def _migration(path: Path) -> ModuleType:
@@ -188,7 +193,10 @@ def test_decision_actions_and_statuses_follow_the_domain() -> None:
 
 def test_review_task_checks_follow_the_domain() -> None:
     migration = _migration(REVIEW_TASKS)
-    assert tuple(kind.value for kind in ReviewTaskKind) == REVIEW_TASK_KINDS == migration.KINDS
+    candidates = _migration(RULE_CANDIDATES)
+    assert migration.KINDS == candidates.KINDS_BEFORE == ("seed",)
+    assert tuple(kind.value for kind in ReviewTaskKind) == REVIEW_TASK_KINDS
+    assert candidates.KINDS_AFTER == REVIEW_TASK_KINDS
     assert (
         tuple(status.value for status in ReviewTaskStatus)
         == REVIEW_TASK_STATUSES
@@ -207,9 +215,12 @@ def test_review_task_checks_follow_the_domain() -> None:
         REVIEW_DECISIONS
     )
     assert set(QUOTED.findall(UNDECIDED_TASK)) == {status.value for status in UNDECIDED}
-    assert migration.UNDECIDED == UNDECIDED_TASK
+    assert migration.UNDECIDED == candidates.UNDECIDED == UNDECIDED_TASK
     state = _check("review_task", "ck_review_task_state")
     assert set(QUOTED.findall(state)) == set(REVIEW_TASK_STATUSES)
+    subject = _check("review_task", "ck_review_task_subject")
+    assert set(QUOTED.findall(subject)) == set(REVIEW_TASK_KINDS)
+    assert "kind = 'seed' AND rule_version_id IS NOT NULL AND candidate_id IS NULL" in subject
 
 
 def test_the_review_task_guard_keeps_decided_tasks_and_identities() -> None:
@@ -217,3 +228,33 @@ def test_the_review_task_guard_keeps_decided_tasks_and_identities() -> None:
     assert "OLD.status = 'decided'" in guard
     assert "TG_OP = 'DELETE'" in guard
     assert "NEW.rule_version_id, NEW.kind, NEW.regulator, NEW.opened_at" in guard
+    candidates = _migration(RULE_CANDIDATES)
+    assert candidates.GUARD_BEFORE.strip() == guard.strip().replace(
+        "CREATE FUNCTION", "CREATE OR REPLACE FUNCTION"
+    ), "the downgrade restores 0009's guard as it was"
+    after: str = candidates.GUARD_AFTER
+    assert "NEW.id, NEW.kind, NEW.candidate_id, NEW.regulator, NEW.opened_at" in after
+    assert "OLD.rule_version_id IS NOT NULL" in after, "a version is taken once, never changed"
+    assert "OLD.status = 'decided'" in after
+    assert "TG_OP = 'DELETE'" in after
+
+
+def test_rule_candidate_checks_follow_the_domain() -> None:
+    migration = _migration(RULE_CANDIDATES)
+    assert tuple(outcome.value for outcome in CandidateOutcome) == CANDIDATE_OUTCOMES
+    assert migration.OUTCOMES == CANDIDATE_OUTCOMES
+    assert tuple(status.value for status in RuleCandidateStatus) == RULE_CANDIDATE_STATUSES
+    assert migration.STATUSES == RULE_CANDIDATE_STATUSES
+    assert tuple(reason.value for reason in RuleRejectReason) == RULE_REJECT_REASONS
+    assert migration.REJECT_REASONS == RULE_REJECT_REASONS
+    assert QUOTED.findall(_check("rule_candidate", "ck_rule_candidate_outcome")) == list(
+        CANDIDATE_OUTCOMES
+    )
+    assert QUOTED.findall(_check("rule_candidate", "ck_rule_candidate_status")) == list(
+        RULE_CANDIDATE_STATUSES
+    )
+    assert QUOTED.findall(_check("rule_candidate", "ck_rule_candidate_reject_reason")) == list(
+        RULE_REJECT_REASONS
+    )
+    state = _check("rule_candidate", "ck_rule_candidate_state")
+    assert set(QUOTED.findall(state)) == set(RULE_CANDIDATE_STATUSES)

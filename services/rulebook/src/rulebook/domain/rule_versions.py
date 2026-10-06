@@ -44,7 +44,9 @@ a rule, whether or not that rule is in force."""
 class RuleVersionRecord:
     """One rule version with its rule's key, regulator and level. Specification, template and
     recurrence are the kernel's mapping forms, as stored. ``high_impact`` asks for two
-    different approvers (ADR-006); ``submitted_at`` starts the current review round."""
+    different approvers (ADR-006); ``submitted_at`` starts the current review round;
+    ``candidate_id`` names the rule candidate an analyst drafted the version from, None for the
+    seed calendar's versions."""
 
     rule_version_id: RuleVersionId
     rule_id: RuleId
@@ -66,6 +68,7 @@ class RuleVersionRecord:
     published_at: datetime | None = None
     high_impact: bool = False
     submitted_at: datetime | None = None
+    candidate_id: UUID | None = None
 
     @property
     def effective(self) -> EffectivePeriod:

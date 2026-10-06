@@ -20,3 +20,8 @@ reason in one sentence (without a `|`), and the ADR as `ADR-NNN`.
 
 | Spec | Operation | Reason | ADR |
 | ---- | --------- | ------ | --- |
+| rulebook.v1.json | GET /v1/rulebook/review/tasks | A candidate task has no rule version until an analyst drafts one, so its rule_version_id, rule_key, version and version_status are null until then; no client read the queue yet | ADR-018 |
+| rulebook.v1.json | GET /v1/rulebook/review/tasks/{task_id} | A candidate task not drafted yet has no rule version, so the task's rule_version_id and the detail's rule_version are null | ADR-018 |
+| rulebook.v1.json | POST /v1/rulebook/review/tasks/{task_id}/claim | A candidate task not drafted yet has no rule version, so the claimed task's rule_version_id is null | ADR-018 |
+| rulebook.v1.json | PATCH /v1/rulebook/review/tasks/{task_id}/draft | The response is the task detail, whose task rule_version_id and rule_version are null for a candidate task not drafted yet | ADR-018 |
+| rulebook.v1.json | POST /v1/rulebook/review/tasks/{task_id}/decide | A candidate rejected before it was drafted has no version, so the decision's version and the task's rule_version_id are null | ADR-018 |

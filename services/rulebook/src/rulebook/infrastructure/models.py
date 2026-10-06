@@ -10,8 +10,9 @@ the integration test compares the two. Triggers are not modelled: migration 0004
 ``document`` and ``clause`` append-only and fixes a citation's identity, migration 0006 makes
 ``clause_embedding`` refuse updates, migration 0007 makes ``rule_version_decision``
 append-only and guards ``rule_version`` (inserted as drafts, status moves, frozen content,
-publish preconditions), and migration 0009 keeps a decided ``review_task`` as it is.
-The ``outbox_event`` table of 0007 belongs to py-common's metadata, not this one.
+publish preconditions), migration 0009 keeps a decided ``review_task`` as it is, and migration
+0010 lets a candidate task take its version once. The ``outbox_event`` table of 0007 and the
+``processed_event`` table of 0010 belong to py-common's metadata, not this one.
 
 The vocabulary in the CHECK constraints is the kernel's (``domain_kernel.knowledge``), and so are
 the rules on ``rule_relation``: the relations in ``RULE_VERSION_ONLY`` target a rule version,
@@ -60,6 +61,7 @@ from domain_kernel.status import RuleVersionStatus
 from domain_kernel.vectors import EMBEDDING_DIMS
 from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.documents import CLAUSE_REF_PATTERN
+from rulebook.domain.intake import CandidateOutcome, RuleCandidateStatus, RuleRejectReason
 from rulebook.domain.publication import DecisionAction
 from rulebook.domain.relations import CandidateRejectReason, CandidateStatus
 from rulebook.domain.review import EntityRejectReason, Resolution, ReviewStatus
@@ -507,6 +509,14 @@ class RuleVersionRow(Base):
             "effective_to IS NULL OR effective_to > effective_from",
             name="ck_rule_version_effective",
         ),
+        ForeignKeyConstraint(
+            ["candidate_id"],
+            ["rule_candidate.id"],
+            name="fk_rule_version_candidate_id_rule_candidate",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
+        UniqueConstraint("candidate_id", name="uq_rule_version_candidate_id"),
         Index("ix_rule_version_status_effective", "status", "effective_from"),
         {
             "comment": (
@@ -552,6 +562,11 @@ class RuleVersionRow(Base):
         DateTime(timezone=True),
         nullable=True,
         comment="Start of the current review round; approvals before it do not count",
+    )
+    candidate_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        nullable=True,
+        comment="The rule candidate it was drafted from; null for a seed version",
     )
 
 
@@ -614,11 +629,15 @@ REVIEW_TASK_KINDS: Final[tuple[str, ...]] = tuple(kind.value for kind in ReviewT
 REVIEW_TASK_STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in ReviewTaskStatus)
 REVIEW_DECISIONS: Final[tuple[str, ...]] = tuple(decision.value for decision in ReviewDecision)
 UNDECIDED_TASK = "status IN ('open', 'claimed')"
-"""The tasks still in the queue; a version has at most one of them."""
+"""The tasks still in the queue; a version has at most one of them, and so has a candidate."""
+CANDIDATE_OUTCOMES: Final[tuple[str, ...]] = tuple(outcome.value for outcome in CandidateOutcome)
+RULE_CANDIDATE_STATUSES: Final[tuple[str, ...]] = tuple(s.value for s in RuleCandidateStatus)
+RULE_REJECT_REASONS: Final[tuple[str, ...]] = tuple(reason.value for reason in RuleRejectReason)
 
 
 class ReviewTaskRow(Base):
-    """A rule version waiting for an analyst's decision: opened, claimed, then decided once."""
+    """A rule version, or a candidate to draft one from, waiting for an analyst's decision:
+    opened, claimed, then decided once."""
 
     __tablename__ = "review_task"
     __table_args__ = (
@@ -629,7 +648,18 @@ class ReviewTaskRow(Base):
             name="fk_review_task_rule_version_id_rule_version",
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["candidate_id"],
+            ["rule_candidate.id"],
+            name="fk_review_task_candidate_id_rule_candidate",
+            ondelete="RESTRICT",
+        ),
         CheckConstraint(sql_in_list("kind", REVIEW_TASK_KINDS), name="ck_review_task_kind"),
+        CheckConstraint(
+            "(kind = 'seed' AND rule_version_id IS NOT NULL AND candidate_id IS NULL)"
+            " OR (kind = 'candidate' AND candidate_id IS NOT NULL)",
+            name="ck_review_task_subject",
+        ),
         CheckConstraint(sql_in_list("status", REVIEW_TASK_STATUSES), name="ck_review_task_status"),
         CheckConstraint(
             f"decision IS NULL OR {sql_in_list('decision', REVIEW_DECISIONS)}",
@@ -652,20 +682,29 @@ class ReviewTaskRow(Base):
             unique=True,
             postgresql_where=text(UNDECIDED_TASK),
         ),
+        Index(
+            "uq_review_task_undecided_candidate",
+            "candidate_id",
+            unique=True,
+            postgresql_where=text(UNDECIDED_TASK),
+        ),
         Index("ix_review_task_rule_version", "rule_version_id", "opened_at"),
+        Index("ix_review_task_candidate", "candidate_id", "opened_at"),
         Index("ix_review_task_queue", "status", "regulator", "priority", "opened_at"),
         {
             "comment": (
                 "Review tasks: one decision (approve, return, reject) asked about one rule "
-                "version, queued by regulator and priority. A version has at most one task "
-                "that is not decided; a decided task never changes (trigger). Global "
-                "regulatory work: no tenant, no row-level security."
+                "version (kind seed) or about one rule candidate and the version drafted from it "
+                "(kind candidate), queued by regulator and priority. A version, and a candidate, "
+                "has at most one task that is not decided; a decided task never changes and a "
+                "task takes its version at most once (trigger). Global regulatory work: no "
+                "tenant, no row-level security."
             )
         },
     )
 
     id: Mapped[UUID] = mapped_column(Uuid)
-    rule_version_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    rule_version_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     priority: Mapped[int] = mapped_column(Integer, nullable=False)
     regulator: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -679,6 +718,96 @@ class ReviewTaskRow(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decision: Mapped[str | None] = mapped_column(String(16), nullable=True)
     note: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    candidate_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+
+
+class RuleCandidateRow(Base):
+    """A rule candidate the pipeline extracted from a document (rule.candidate.created), kept
+    once per candidate id with where its review got to."""
+
+    __tablename__ = "rule_candidate"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_rule_candidate"),
+        ForeignKeyConstraint(
+            ["document_id"],
+            ["document.id"],
+            name="fk_rule_candidate_document_id_document",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["rule_version_id"],
+            ["rule_version.id"],
+            name="fk_rule_candidate_rule_version_id_rule_version",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("rule_version_id", name="uq_rule_candidate_rule_version_id"),
+        CheckConstraint(
+            "regulator = lower(regulator) AND length(btrim(regulator)) > 0",
+            name="ck_rule_candidate_regulator",
+        ),
+        CheckConstraint("confidence BETWEEN 0 AND 1", name="ck_rule_candidate_confidence"),
+        CheckConstraint("citation_count >= 0", name="ck_rule_candidate_citation_count"),
+        CheckConstraint(
+            sql_in_list("outcome", CANDIDATE_OUTCOMES), name="ck_rule_candidate_outcome"
+        ),
+        CheckConstraint(
+            sql_in_list("status", RULE_CANDIDATE_STATUSES), name="ck_rule_candidate_status"
+        ),
+        CheckConstraint(
+            f"reject_reason IS NULL OR {sql_in_list('reject_reason', RULE_REJECT_REASONS)}",
+            name="ck_rule_candidate_reject_reason",
+        ),
+        CheckConstraint(
+            "(status = 'open' AND rule_version_id IS NULL AND reject_reason IS NULL"
+            " AND decided_by IS NULL AND decided_at IS NULL)"
+            " OR (status = 'drafted' AND rule_version_id IS NOT NULL AND reject_reason IS NULL"
+            " AND decided_by IS NULL AND decided_at IS NULL)"
+            " OR (status = 'approved' AND rule_version_id IS NOT NULL AND reject_reason IS NULL"
+            " AND decided_by IS NOT NULL AND decided_at IS NOT NULL)"
+            " OR (status = 'rejected' AND reject_reason IS NOT NULL"
+            " AND decided_by IS NOT NULL AND decided_at IS NOT NULL)",
+            name="ck_rule_candidate_state",
+        ),
+        Index("ix_rule_candidate_document", "document_id"),
+        Index("ix_rule_candidate_status", "status", "created_at"),
+        {
+            "comment": (
+                "Rule candidates the pipeline extracted (rule.candidate.created), one row per "
+                "candidate id; payload keeps the candidate, its issues, the cited clauses and its "
+                "source. status moves open, drafted (a version was drafted from it), then "
+                "approved or rejected with a reason. Global regulatory data: no tenant, no "
+                "row-level security."
+            )
+        },
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid)
+    document_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    regulator: Mapped[str] = mapped_column(String(40), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(60), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False)
+    citation_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    needs_review: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="open")
+    reject_reason: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    rule_version_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    suggested_rule_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    high_impact_suggested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=false()
+    )
+    event_id: Mapped[UUID] = mapped_column(
+        Uuid, nullable=False, comment="The rule.candidate.created event it came with"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    decided_by: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class CitationRow(Base):

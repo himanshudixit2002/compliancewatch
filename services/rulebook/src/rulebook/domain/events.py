@@ -4,18 +4,24 @@ Rule events are regulatory: they carry no tenant, and the outbox keys them by ru
 consumer sees one rule's events in order. The events of one publication share a correlation id,
 and the ones that follow from it (a replaced version moving, a deadline change) name the
 ``rule.published`` event as their cause.
+
+``rule.rejected`` is about a rule candidate an analyst rejected, which may never have become a
+rule: it is keyed by the candidate's document, and names the rule.candidate.created event it
+answers as its cause.
 """
 
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
 from typing import ClassVar
+from uuid import UUID
 
 from domain_kernel._validation import require_date, require_instance, require_int, require_text
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.events import DomainEvent
-from domain_kernel.ids import ClauseId, RuleId, RuleVersionId, UserId
+from domain_kernel.ids import ClauseId, DocumentId, RuleId, RuleVersionId, UserId
 from domain_kernel.ontology import ATTRIBUTE_KEY_PATTERN
+from rulebook.domain.intake import RuleRejectReason
 
 
 class DeadlineChangeReason(StrEnum):
@@ -149,3 +155,40 @@ class RuleDeadlineChanged(RuleEvent):
         require_date(self.new_due_on, "new_due_on")
         require_instance(self.reason, DeadlineChangeReason, "reason")
         require_instance(self.evidence_clause_id, ClauseId, "evidence_clause_id")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RuleRejected(DomainEvent):
+    """An analyst rejected a rule candidate, before drafting it (``rule_version_id`` None) or
+    after drafting it into the version their review refused."""
+
+    topic: ClassVar[str] = "rule.rejected"
+    schema_version: ClassVar[str] = "1.0.0"
+
+    candidate_id: UUID
+    document_id: DocumentId
+    regulator: str
+    reason: RuleRejectReason
+    prompt_version: str
+    model: str
+    rule_version_id: RuleVersionId | None
+
+    def __post_init__(self) -> None:
+        DomainEvent.__post_init__(self)
+        if self.tenant_id is not None:
+            raise InvariantViolationError("rule.rejected is regulatory: no tenant")
+        require_instance(self.candidate_id, UUID, "candidate_id")
+        require_instance(self.document_id, DocumentId, "document_id")
+        for name in ("regulator", "prompt_version", "model"):
+            require_text(getattr(self, name), name)
+        require_instance(self.reason, RuleRejectReason, "reason")
+        if self.rule_version_id is not None:
+            require_instance(self.rule_version_id, RuleVersionId, "rule_version_id")
+
+    @property
+    def partition_key(self) -> str:
+        return str(self.document_id)
+
+
+type RulebookEvent = RuleEvent | RuleRejected
+"""Everything the rulebook writes to its outbox."""

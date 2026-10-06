@@ -1,82 +1,72 @@
-"""Review tasks: a rule version waiting for an analyst's decision, queued by regulator and
-priority.
+"""Review tasks: a rule version, or a rule candidate to draft one from, waiting for an analyst's
+decision, queued by regulator and priority.
 
-A task asks for one decision about one rule version: approve it, return it for rework, or reject
-it. It is opened (``open``), claimed by the analyst who works on it (``claimed``) and decided
+A task asks for one decision: approve the version, return it for rework, or reject it. It is
+opened (``open``), claimed by the analyst who works on it (``claimed``) and decided
 (``decided``); a decided task never changes again, which the table's trigger enforces for every
-writer. A version has at most one task that is not decided yet.
+writer. A version has at most one task that is not decided yet, and so has a candidate.
 
 - ``claim``: an analyst takes an open task. The claimant claiming again changes nothing; a task
   someone else holds is refused (``ReviewTaskClaimedError``), and so is a decided one
   (``ReviewTaskClosedError``). Only the claimant edits the draft (``require_claimant``).
+- ``drafted``: the claimant drafted a version from the task's candidate; the task keeps that
+  version from then on.
 - ``release``: the first of the two approvals a high-impact version needs leaves the task open
   again, unclaimed, for a second and different reviewer.
 - ``decide``: approve, return or reject, once.
 
-Every draft the seed calendar wrote that still needs review gets a task of kind ``seed``; tasks
-for the candidates the pipeline extracts come later with their own kind. Seed tasks share one
-priority, so the queue keeps them in the order they were opened within a regulator.
+Two kinds of task share the queue:
 
-The draft an analyst edits through a task is checked as the seed loader checks the calendar
-(``edited_record``): structured predicates must fit the ontology, a free-text predicate may name
-an attribute the ontology lacks only while the version carries an open question (``todo``), and
-a duty that does not recur needs the template's ``due_in_days``.
+- ``seed``: a draft the seed calendar wrote that still needs review. Seed tasks share one
+  priority, so the queue keeps them in the order they were opened within a regulator.
+- ``candidate``: a rule candidate the pipeline extracted (``rulebook.domain.intake``), at the
+  candidate's priority and under its regulator. It has no version until the claimant drafts one
+  from the candidate; until then it can be claimed and rejected, nothing else.
+
+The content of a draft an analyst edits is checked in ``rulebook.domain.drafting``.
 """
 
 import statistics
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime
+from datetime import datetime
 from enum import StrEnum
-from typing import Any, Final
+from typing import Final
 from uuid import UUID, uuid4
 
-from domain_kernel._validation import (
-    require_aware,
-    require_date,
-    require_instance,
-    require_int,
-    require_text,
-)
+from domain_kernel._validation import require_aware, require_instance, require_int, require_text
 from domain_kernel.errors import DomainError, InvariantViolationError
 from domain_kernel.ids import RuleVersionId, UserId
-from domain_kernel.ontology import Ontology
 from domain_kernel.predicates import (
     AllOf,
     AnyOf,
     Not,
     Predicate,
-    PredicateKind,
     Specification,
     specification_from_mapping,
-    specification_to_mapping,
 )
-from domain_kernel.recurrence import Recurrence
-from domain_kernel.rules import ObligationTemplate
 from domain_kernel.status import RuleVersionStatus
 from rulebook.domain.errors import (
     ReviewTaskClaimedError,
     ReviewTaskClosedError,
     ReviewTaskNotClaimedError,
 )
+from rulebook.domain.intake import CandidateSummary
 from rulebook.domain.rule_versions import RuleVersionRecord
 
 SEED_PRIORITY: Final = 50
 """The priority of every seed task: the queue keeps them in the order they were opened."""
 MAX_PRIORITY: Final = 1_000
 MAX_NOTE: Final = 2_000
-MAX_TITLE: Final = 300
-MAX_SUMMARY: Final = 4_000
-MAX_TODO: Final = 20
-MAX_QUESTION: Final = 500
 MAX_PAGE: Final = 200
 
 
 class ReviewTaskKind(StrEnum):
-    """What a task reviews. ``seed``: a draft the seed calendar wrote. The pipeline's candidates
-    get a kind of their own when their intake is built."""
+    """What a task reviews. ``seed``: a draft the seed calendar wrote. ``candidate``: a rule
+    candidate the pipeline extracted, and the version an analyst drafts from it."""
 
     SEED = "seed"
+    CANDIDATE = "candidate"
 
 
 class ReviewTaskStatus(StrEnum):
@@ -101,11 +91,13 @@ class ReviewDecision(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ReviewTask:
-    """One decision asked about one rule version. ``regulator`` is the rule's, kept on the task
-    for the queue's order and filter."""
+    """One decision asked about one rule version, or about one candidate and the version drafted
+    from it. ``regulator`` is the rule's or the candidate's, kept on the task for the queue's
+    order and filter. A seed task has its version from the start; a candidate task names its
+    candidate, and its version once one is drafted."""
 
     task_id: UUID
-    rule_version_id: RuleVersionId
+    rule_version_id: RuleVersionId | None
     kind: ReviewTaskKind
     priority: int
     regulator: str
@@ -117,11 +109,19 @@ class ReviewTask:
     decided_at: datetime | None = None
     decision: ReviewDecision | None = None
     note: str = ""
+    candidate_id: UUID | None = None
 
     def __post_init__(self) -> None:
         require_instance(self.task_id, UUID, "task_id")
-        require_instance(self.rule_version_id, RuleVersionId, "rule_version_id")
+        if self.rule_version_id is not None:
+            require_instance(self.rule_version_id, RuleVersionId, "rule_version_id")
         require_instance(self.kind, ReviewTaskKind, "kind")
+        if self.kind is ReviewTaskKind.SEED and (
+            self.rule_version_id is None or self.candidate_id is not None
+        ):
+            raise InvariantViolationError("a seed task reviews a version and names no candidate")
+        if self.kind is ReviewTaskKind.CANDIDATE:
+            require_instance(self.candidate_id, UUID, "candidate_id")
         priority = require_int(self.priority, "priority", minimum=0)
         if priority > MAX_PRIORITY:
             raise InvariantViolationError(f"priority must be at most {MAX_PRIORITY}")
@@ -160,12 +160,40 @@ class ReviewTask:
             opened_at=at,
         )
 
+    @classmethod
+    def for_candidate(
+        cls,
+        candidate_id: UUID,
+        *,
+        regulator: str,
+        priority: int,
+        at: datetime,
+        task_id: UUID | None = None,
+    ) -> "ReviewTask":
+        """The task that asks an analyst to draft a version from a candidate and decide it, at
+        the candidate's priority and under its regulator; it has no version yet."""
+        return cls(
+            task_id=task_id or uuid4(),
+            rule_version_id=None,
+            kind=ReviewTaskKind.CANDIDATE,
+            priority=priority,
+            regulator=regulator,
+            opened_at=at,
+            candidate_id=candidate_id,
+        )
+
     @property
     def undecided(self) -> bool:
         return self.status in UNDECIDED
 
+    @property
+    def drafts_pending(self) -> bool:
+        """Whether this is a candidate task with no version drafted yet."""
+        return self.kind is ReviewTaskKind.CANDIDATE and self.rule_version_id is None
+
     def next_round(self, *, at: datetime, task_id: UUID | None = None) -> "ReviewTask":
-        """A new open task for the same version, as a return opens for the rework."""
+        """A new open task for the same version (and candidate), as a return opens for the
+        rework."""
         return ReviewTask(
             task_id=task_id or uuid4(),
             rule_version_id=self.rule_version_id,
@@ -173,7 +201,18 @@ class ReviewTask:
             priority=self.priority,
             regulator=self.regulator,
             opened_at=at,
+            candidate_id=self.candidate_id,
         )
+
+    def drafted(self, rule_version_id: RuleVersionId) -> "ReviewTask":
+        """The candidate task once its claimant drafted a version: the task keeps the version
+        from then on."""
+        self._require_undecided()
+        if not self.drafts_pending:
+            raise InvariantViolationError(
+                f"review task {self.task_id} has a version already or names no candidate"
+            )
+        return replace(self, rule_version_id=rule_version_id)
 
     def claim(self, by: UserId, at: datetime) -> "ReviewTask":
         """The task claimed by ``by``; the same claimant again gets it unchanged."""
@@ -247,23 +286,28 @@ class TaskKey:
 
 @dataclass(frozen=True, slots=True)
 class TaskQuery:
-    """Which tasks a page of the queue holds: of ``status`` and ``regulator`` when given, after
-    ``after`` in queue order, at most ``limit``."""
+    """Which tasks a page of the queue holds: of ``status``, ``regulator`` and ``kind`` when
+    given, after ``after`` in queue order, at most ``limit``. The regulator is compared in
+    lower case, as the queue keeps it."""
 
     status: ReviewTaskStatus | None = None
     regulator: str | None = None
     after: TaskKey | None = None
     limit: int = 50
+    kind: ReviewTaskKind | None = None
 
     def __post_init__(self) -> None:
         limit = require_int(self.limit, "limit", minimum=1)
         if limit > MAX_PAGE + 1:
             raise InvariantViolationError(f"a page reads at most {MAX_PAGE + 1} tasks")
+        if self.regulator is not None:
+            object.__setattr__(self, "regulator", self.regulator.strip().lower())
 
     def admits(self, task: ReviewTask) -> bool:
         return (
             self.status in (None, task.status)
-            and self.regulator in (None, task.regulator)
+            and self.regulator in (None, task.regulator.lower())
+            and self.kind in (None, task.kind)
             and (self.after is None or queue_position(task) > self.after.position)
         )
 
@@ -272,15 +316,18 @@ class TaskQuery:
 class QueuedTask:
     """A task in the queue with what a reviewer scans it by: the version's rule, number,
     title and status, whether it is high impact, and how many people approved its current
-    round."""
+    round. A candidate task not drafted yet has no version: its title is the candidate's, its
+    rule key the one suggested for it, and ``high_impact`` what the candidate suggests;
+    ``candidate`` summarises the candidate of every candidate task."""
 
     task: ReviewTask
-    rule_key: str
-    version: int
+    rule_key: str | None
+    version: int | None
     title: str
-    version_status: RuleVersionStatus
+    version_status: RuleVersionStatus | None
     high_impact: bool
     approvals: int
+    candidate: CandidateSummary | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,15 +343,41 @@ class RegulatorCounts:
 
 
 @dataclass(frozen=True, slots=True)
+class CandidateCounts:
+    """The candidates analysts decided: approved (``approved_without_edits`` of them drafted as
+    the candidate proposed, with no edit recorded on their version) or rejected. The acceptance
+    rate is the share approved without edits, ADR-006's measure of the extraction."""
+
+    approved: int = 0
+    approved_without_edits: int = 0
+    rejected: int = 0
+
+    @property
+    def decided(self) -> int:
+        return self.approved + self.rejected
+
+    @property
+    def acceptance_rate(self) -> float | None:
+        """Approved without edits over decided; None while none is decided."""
+        if not self.decided:
+            return None
+        return self.approved_without_edits / self.decided
+
+
+NO_CANDIDATES: Final = CandidateCounts()
+
+
+@dataclass(frozen=True, slots=True)
 class ReviewTaskStats:
     """The queue in numbers: tasks per regulator and status, the decisions made, the median
-    time from a task's opening to its decision, and when the oldest task not decided yet was
-    opened."""
+    time from a task's opening to its decision, when the oldest task not decided yet was
+    opened, and how the candidates analysts decided went."""
 
     by_regulator: tuple[RegulatorCounts, ...] = ()
     decisions: Mapping[ReviewDecision, int] = field(default_factory=dict)
     median_seconds_to_decide: float | None = None
     oldest_open_at: datetime | None = None
+    candidates: CandidateCounts = NO_CANDIDATES
 
     def counts(self) -> dict[ReviewTaskStatus, int]:
         return {
@@ -327,8 +400,11 @@ class ReviewTaskStats:
         return max((now - self.oldest_open_at).total_seconds(), 0.0)
 
 
-def task_stats(tasks: Sequence[ReviewTask]) -> ReviewTaskStats:
-    """The stats of ``tasks``, as the Postgres store computes them in SQL."""
+def task_stats(
+    tasks: Sequence[ReviewTask], candidates: CandidateCounts = NO_CANDIDATES
+) -> ReviewTaskStats:
+    """The stats of ``tasks``, as the Postgres store computes them in SQL, with the counts of
+    the decided candidates."""
     rows: dict[str, dict[ReviewTaskStatus, int]] = {}
     decisions: dict[ReviewDecision, int] = {}
     waits: list[float] = []
@@ -354,6 +430,7 @@ def task_stats(tasks: Sequence[ReviewTask]) -> ReviewTaskStats:
         decisions=decisions,
         median_seconds_to_decide=statistics.median(waits) if waits else None,
         oldest_open_at=oldest,
+        candidates=candidates,
     )
 
 
@@ -386,143 +463,3 @@ def describe_specification(specification: Mapping[str, object]) -> tuple[str, ..
 
     walk(tree, 0)
     return tuple(lines)
-
-
-EDITABLE_FIELDS: Final = (
-    "title",
-    "summary",
-    "specification",
-    "obligation_template",
-    "recurrence",
-    "effective_from",
-    "effective_to",
-    "todo",
-)
-"""The content of a draft an analyst edits through its task. The rule's key, regulator and
-level, the seed source and the lifecycle columns are not edited here."""
-NULLABLE_FIELDS: Final = frozenset({"recurrence", "effective_to"})
-
-
-@dataclass(frozen=True, slots=True)
-class DraftEdit:
-    """What an analyst changes in a draft: the fields named in ``changes``, each with its new
-    value as sent (the mapping forms for the specification, the template and the recurrence;
-    None clears the recurrence or the end date)."""
-
-    changes: Mapping[str, object]
-
-    def __post_init__(self) -> None:
-        unknown = sorted(set(self.changes) - set(EDITABLE_FIELDS))
-        if unknown:
-            raise InvariantViolationError(f"a draft edit cannot change {', '.join(unknown)}")
-        refused = sorted(
-            name
-            for name, value in self.changes.items()
-            if value is None and name not in NULLABLE_FIELDS
-        )
-        if refused:
-            raise InvariantViolationError(f"{', '.join(refused)} cannot be null")
-
-
-def edited_record(
-    record: RuleVersionRecord, edit: DraftEdit, ontology: Ontology
-) -> tuple[RuleVersionRecord, tuple[str, ...]]:
-    """The draft after ``edit`` and the fields whose value changed. Each value is checked and
-    stored in the kernel's canonical form; every problem found is reported at once."""
-    problems: list[str] = []
-    values: dict[str, Any] = {}
-    for name, raw in edit.changes.items():
-        try:
-            values[name] = _CHECKS[name](raw)
-        except (DomainError, TypeError, ValueError) as exc:
-            problems.append(f"{name}: {exc}")
-    if problems:
-        raise InvariantViolationError("; ".join(problems))
-    after = replace(record, **values)
-    problems = _content_problems(after, ontology)
-    if problems:
-        raise InvariantViolationError("; ".join(problems))
-    changed = tuple(
-        name for name in EDITABLE_FIELDS if getattr(after, name) != getattr(record, name)
-    )
-    return after, changed
-
-
-def _title(raw: object) -> str:
-    title = require_text(raw, "title")
-    if len(title) > MAX_TITLE:
-        raise InvariantViolationError(f"at most {MAX_TITLE} characters")
-    return title
-
-
-def _summary(raw: object) -> str:
-    summary = require_instance(raw, str, "summary").strip()
-    if len(summary) > MAX_SUMMARY:
-        raise InvariantViolationError(f"at most {MAX_SUMMARY} characters")
-    return summary
-
-
-def _specification(raw: object) -> Mapping[str, object]:
-    return specification_to_mapping(specification_from_mapping(raw))
-
-
-def _template(raw: object) -> Mapping[str, object]:
-    return ObligationTemplate.from_mapping(raw).to_mapping()
-
-
-def _recurrence(raw: object) -> Mapping[str, object] | None:
-    return None if raw is None else Recurrence.from_mapping(raw).to_mapping()
-
-
-def _effective_to(raw: object) -> date | None:
-    return None if raw is None else require_date(raw, "effective_to")
-
-
-def _todo(raw: object) -> tuple[str, ...]:
-    if isinstance(raw, str) or not isinstance(raw, Sequence):
-        raise InvariantViolationError("todo must be a list of questions")
-    if len(raw) > MAX_TODO:
-        raise InvariantViolationError(f"at most {MAX_TODO} questions")
-    questions = tuple(require_text(item, "todo[]") for item in raw)
-    if any(len(question) > MAX_QUESTION for question in questions):
-        raise InvariantViolationError(f"a question has at most {MAX_QUESTION} characters")
-    return questions
-
-
-_CHECKS: Mapping[str, Callable[[object], object]] = {
-    "title": _title,
-    "summary": _summary,
-    "specification": _specification,
-    "obligation_template": _template,
-    "recurrence": _recurrence,
-    "effective_from": lambda raw: require_date(raw, "effective_from"),
-    "effective_to": _effective_to,
-    "todo": _todo,
-}
-
-
-def _content_problems(record: RuleVersionRecord, ontology: Ontology) -> list[str]:
-    """What the seed loader would refuse in the edited draft."""
-    problems: list[str] = []
-    if record.effective_to is not None and record.effective_to <= record.effective_from:
-        problems.append("effective_to must be after effective_from")
-    try:
-        template = ObligationTemplate.from_mapping(record.obligation_template)
-        specification = specification_from_mapping(record.specification)
-    except DomainError as exc:
-        return [*problems, f"the stored content does not parse: {exc}"]
-    if record.recurrence is None and template.due_in_days is None:
-        problems.append("a duty that does not recur needs obligation_template.due_in_days")
-    for predicate in specification.predicates():
-        if predicate.kind is PredicateKind.FREE_TEXT:
-            if predicate.attribute not in ontology and not record.todo:
-                problems.append(
-                    f"free-text predicate on unknown attribute {predicate.attribute!r} needs an "
-                    "open question in todo"
-                )
-            continue
-        try:
-            ontology.check_predicate(predicate)
-        except DomainError as exc:
-            problems.append(f"{predicate.describe()}: {exc}")
-    return problems

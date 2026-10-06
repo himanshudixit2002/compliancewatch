@@ -1,12 +1,13 @@
-"""Review tasks: the queue of rule versions waiting for an analyst's decision, and the decisions.
+"""Review tasks: the queue of rule versions, and of rule candidates to draft versions from,
+waiting for an analyst's decision, and the decisions.
 
 Reads need a regulatory role a token names (``ReviewRead``; open without a token in header and
-dual mode, as the other review queues). An analyst claims a task and edits its draft
-(``AnalystWork``); an analyst, a reviewer or an admin decides it and opens the seed tasks
-(``AnalystWrite``). Without a bearer, in header and dual mode, the review token opens the writes
-and the body names the actor; a signed-in user is the actor whatever the body says, so the two
-approvals of a high-impact version come from two people. ``POST .../draft``, which drafts a
-version from a candidate, comes with the pipeline's candidates and is not served yet.
+dual mode, as the other review queues). An analyst claims a task, drafts a version from a
+candidate task's candidate and edits the draft (``AnalystWork``); an analyst, a reviewer or an
+admin decides it and opens the seed tasks (``AnalystWrite``). Without a bearer, in header and
+dual mode, the review token opens the writes and the body names the actor; a signed-in user is
+the actor whatever the body says, so the two approvals of a high-impact version come from two
+people.
 """
 
 import hashlib
@@ -30,6 +31,7 @@ from rulebook.api.review_task_schemas import (
     ClaimIn,
     DecideIn,
     DraftEditIn,
+    DraftFromCandidateIn,
     QueuedTaskOut,
     ReviewStatsOut,
     ReviewTaskDetailOut,
@@ -38,7 +40,7 @@ from rulebook.api.review_task_schemas import (
     TaskCursor,
     TaskDecisionOut,
 )
-from rulebook.domain.review_tasks import ReviewTaskStatus
+from rulebook.domain.review_tasks import ReviewTaskKind, ReviewTaskStatus
 
 router = APIRouter(tags=["review"])
 
@@ -58,19 +60,27 @@ def list_review_tasks(
         ReviewTaskStatus | None, Query(description="Only tasks of this status")
     ] = None,
     regulator: Annotated[
-        str | None, Query(min_length=1, max_length=40, description="Only this regulator's")
+        str | None,
+        Query(min_length=1, max_length=40, description="Only this regulator's, in any case"),
     ] = None,
+    kind: Annotated[ReviewTaskKind | None, Query(description="Only tasks of this kind")] = None,
 ) -> Page[QueuedTaskOut]:
     """Each task with its version's rule, number, title and status, whether it is high impact
     and how many people approved its current round. A task open again after the first of two
-    approvals waits for a second, different reviewer."""
+    approvals waits for a second, different reviewer. A candidate task not drafted yet shows its
+    candidate's title, suggested rule key and suggested impact; ``candidate`` summarises the
+    candidate of every candidate task."""
+    regulator = None if regulator is None else regulator.strip().lower()
     scope = f"{TASKS_SCOPE}.{status or 'any'}.{_regulator_scope(regulator)}"
+    if kind is not None:
+        scope = f"{scope}.{kind.value}"
     after = page.after(scope, TaskCursor)
     found = wired.list_review_tasks.run(
         status=status,
         regulator=regulator,
         after=None if after is None else after.key(),
         limit=page.limit + 1,
+        kind=kind,
     )
     kept, cursor = page_of(found, page.limit, scope, TaskCursor.of)
     return Page[QueuedTaskOut](
@@ -108,7 +118,11 @@ def open_seed_tasks(wired: Wired) -> SeedTasksOut:
 def read_review_task(task_id: UUID, wired: Wired) -> ReviewTaskDetailOut:
     """The version's content with its specification described, every citation with its
     verification, the documents they cite, the approvers of its current round, its decision
-    audit and every task it has had."""
+    audit and every task it has had. A candidate task also carries its candidate: the
+    extraction as stored, its document (the stored file is at the pipeline's ``GET
+    /v1/pipeline/documents/{document_id}/raw``), the draft it proposes and what does not map,
+    why it looks high impact, and whether a rule has its suggested key; until it is drafted the
+    task has no version."""
     return ReviewTaskDetailOut.from_detail(wired.read_review_task.run(task_id))
 
 
@@ -126,6 +140,39 @@ def claim_review_task(
     return ReviewTaskOut.from_task(task)
 
 
+@router.post(
+    "/review/tasks/{task_id}/draft",
+    summary="Draft a version from a candidate task's candidate, cited and with its relations",
+    responses=problem_responses(401, 403, 404, 409, 422, 503),
+)
+def draft_from_candidate(
+    task_id: UUID, body: DraftFromCandidateIn, analyst: AnalystWork, wired: Wired
+) -> ReviewTaskDetailOut:
+    """Only the analyst who claimed the task (409 rulebook-review-task-not-claimed), once per
+    candidate (409 rulebook-candidate-already-drafted). The version is the next of the rule
+    ``rule_key`` names, or the first of a new rule when ``new_rule`` gives its regulator and
+    level (404 rulebook-rule-key-unknown without it; 409 rulebook-rule-key-taken with it for a
+    key a rule has). It is a draft that names the candidate and starts high impact when the
+    candidate suggests it. Its content is the candidate's with ``edits`` applied, checked as the
+    seed calendar is: what is missing, does not map or fails the checks is 422
+    rulebook-draft-incomplete, every problem in the detail, and nothing is stored. The citations
+    (the candidate's quotes, or ``citations``) are verified against their clauses (422
+    rulebook-citation-not-verified), and each relation candidate listed, of the candidate's
+    document, is approved onto the draft. What the analyst changed from the candidate is an
+    edited row of the decision audit."""
+    detail = wired.draft_from_candidate.run(
+        task_id,
+        by=actor_of(analyst, body.actor_id),
+        rule_key=body.rule_key,
+        new_rule=None if body.new_rule is None else body.new_rule.to_new_rule(),
+        edit=None if body.edits is None else body.edits.to_edit(),
+        citations=body.to_citations(),
+        relations=[choice.to_choice() for choice in body.relation_candidates],
+        note=body.note,
+    )
+    return ReviewTaskDetailOut.from_detail(detail)
+
+
 @router.patch(
     "/review/tasks/{task_id}/draft",
     summary="Edit the draft of a claimed task: its content and citations, every quote verified",
@@ -135,7 +182,8 @@ def edit_review_draft(
     task_id: UUID, body: DraftEditIn, analyst: AnalystWork, wired: Wired
 ) -> ReviewTaskDetailOut:
     """Only the analyst who claimed the task (409 rulebook-review-task-not-claimed), only while
-    the version is a draft (409 rulebook-rule-version-not-editable). Content is checked against
+    the version is a draft (409 rulebook-rule-version-not-editable), and for a candidate task
+    once a version is drafted (409 rulebook-candidate-not-drafted). Content is checked against
     the ontology as the seed calendar is, and citations go through the citation step: a quote
     not in its clause is 422 rulebook-citation-not-verified and nothing is stored. The edit is
     recorded in the version's decision audit as edited."""
@@ -162,13 +210,17 @@ def decide_review_task(
     an earlier one leaves the task open for another reviewer, and the same person twice is 409
     rulebook-duplicate-approver. Approving never publishes; POST .../rule-versions/{id}/publish
     does. return sends the version back to draft and opens the next task for it; reject closes
-    the task and leaves the version a draft. Both need a note."""
+    the task and leaves the version a draft. Both need a note. A candidate task's approval of
+    the round approves its candidate; its rejection names a reason, rejects the candidate before
+    or after drafting and writes rule.rejected; before drafting it can only be rejected (409
+    rulebook-candidate-not-drafted)."""
     decision = wired.decide_review_task.run(
         task_id,
         body.decision,
         by=actor_of(reviewer, body.actor_id),
         note=body.note,
         high_impact=body.high_impact,
+        reason=body.reason,
     )
     return TaskDecisionOut.from_decision(decision)
 

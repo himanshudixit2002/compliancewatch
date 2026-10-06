@@ -8,8 +8,9 @@ comparison: review sets it to reviewed while the file still says needs_review, a
 not a change to the rule.
 
 A rule whose latest version an analyst edited through its review task (an ``edited`` row in its
-decision audit) is the analyst's: the seed neither overwrites that draft nor adds a version after
-it, and reports the rule in ``kept_edited``.
+decision audit), or drafted from a rule candidate (its ``candidate_id``), is the analyst's: the
+seed neither overwrites that draft nor adds a version after it, and reports the rule in
+``kept_edited``.
 """
 
 import uuid
@@ -74,7 +75,7 @@ class SqlAlchemySeedRepository:
                 if latest is None:
                     session.add(_version(row, rule, 1, content, now))
                     created_versions.append(f"{rule.rule_key}@1")
-                elif _edited(session, latest):
+                elif latest.candidate_id is not None or _edited(session, latest):
                     kept.append(rule.rule_key)
                 elif latest.status == RuleVersionStatus.DRAFT.value:
                     if _content_of(latest) == content:

@@ -1,5 +1,7 @@
 """Errors of the rulebook service, with stable problem type slugs."""
 
+from collections.abc import Sequence
+
 from domain_kernel.errors import DomainError
 
 
@@ -286,3 +288,74 @@ class ReviewTaskNotClaimedError(DomainError, ValueError):
 
     type_slug = "rulebook-review-task-not-claimed"
     title = "Review task not claimed by this analyst"
+
+
+class RuleCandidateNotFoundError(DomainError, LookupError):
+    type_slug = "rulebook-rule-candidate-not-found"
+    title = "Rule candidate not found"
+
+
+class CandidateAlreadyDraftedError(DomainError, ValueError):
+    """A rule candidate is drafted into one version, once: its review task works on that draft
+    from then on, through ``PATCH .../draft`` and the decision."""
+
+    type_slug = "rulebook-candidate-already-drafted"
+    title = "Rule candidate already drafted"
+
+
+class CandidateNotDraftedError(DomainError, ValueError):
+    """A candidate task has no version until an analyst drafts one from its candidate (``POST
+    .../review/tasks/{id}/draft``): until then it can be rejected, not edited, approved or
+    returned."""
+
+    type_slug = "rulebook-candidate-not-drafted"
+    title = "Rule candidate not drafted yet"
+
+
+class DraftIncompleteError(DomainError, ValueError):
+    """The draft a candidate and the analyst's edits make cannot be stored: a value is missing
+    or does not read, or the content fails the checks the seed calendar passes. ``problems``
+    lists each one; the analyst's edits fix them."""
+
+    type_slug = "rulebook-draft-incomplete"
+    title = "Draft is incomplete"
+
+    def __init__(self, problems: Sequence[str]) -> None:
+        self.problems = tuple(problems)
+        super().__init__("; ".join(self.problems))
+
+
+class RuleKeyUnknownError(DomainError, LookupError):
+    """No rule has the key a draft names; a new rule needs its regulator and level."""
+
+    type_slug = "rulebook-rule-key-unknown"
+    title = "Rule key is not known"
+
+    def __init__(self, rule_key: str) -> None:
+        super().__init__(
+            f"no rule has the key {rule_key!r}: draft into an existing rule, or send new_rule "
+            "with its regulator and level"
+        )
+        self.rule_key = rule_key
+
+
+class RuleKeyTakenError(DomainError, ValueError):
+    """A new rule needs a key no rule has."""
+
+    type_slug = "rulebook-rule-key-taken"
+    title = "Rule key already taken"
+
+    def __init__(self, rule_key: str) -> None:
+        super().__init__(
+            f"a rule has the key {rule_key!r} already: draft into it without new_rule, or "
+            "choose another key"
+        )
+        self.rule_key = rule_key
+
+
+class CandidatePayloadInvalidError(DomainError, ValueError):
+    """A rule.candidate.created payload the contract refuses: the consumer retries it and then
+    dead-letters it, and nothing is stored."""
+
+    type_slug = "rulebook-candidate-payload-invalid"
+    title = "Rule candidate event is invalid"

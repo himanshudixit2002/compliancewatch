@@ -17,7 +17,7 @@ from domain_kernel.ids import ClauseId, RuleVersionId, SourceId, UserId
 from domain_kernel.ontology import Ontology
 from domain_kernel.status import RuleVersionStatus
 from rulebook.application.documents import RegisterDocument
-from rulebook.application.publication import CitationInput, PublishVersion
+from rulebook.application.publication import CitationInput, PublishVersion, VersionState
 from rulebook.application.review_tasks import (
     ClaimReviewTask,
     DecideReviewTask,
@@ -26,9 +26,12 @@ from rulebook.application.review_tasks import (
     OpenSeedReviewTasks,
     ReadReviewStats,
     ReadReviewTask,
+    TaskDecision,
+    TaskDetail,
 )
 from rulebook.application.seed_loader import load_calendar
 from rulebook.domain.documents import StoredDocument
+from rulebook.domain.drafting import DraftEdit, edited_record
 from rulebook.domain.errors import (
     CitationNotVerifiedError,
     DuplicateApproverError,
@@ -41,7 +44,6 @@ from rulebook.domain.errors import (
 from rulebook.domain.publication import DecisionAction
 from rulebook.domain.review_tasks import (
     SEED_PRIORITY,
-    DraftEdit,
     ReviewDecision,
     ReviewTask,
     ReviewTaskKind,
@@ -49,10 +51,10 @@ from rulebook.domain.review_tasks import (
     TaskKey,
     TaskQuery,
     describe_specification,
-    edited_record,
     queue_position,
     task_stats,
 )
+from rulebook.domain.rule_versions import RuleVersionRecord
 from rulebook.domain.seed import SeedStatus
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 
@@ -157,6 +159,7 @@ def statute(store: MemoryKnowledgeStore) -> ClauseId:
 
 
 def version_of(store: MemoryKnowledgeStore, task: ReviewTask) -> Any:
+    assert task.rule_version_id is not None
     with store() as uow:
         return uow.rule_versions.get(task.rule_version_id)
 
@@ -362,11 +365,14 @@ def test_one_waiting_task_per_version_and_a_decided_task_never_changes(
             uow.review_tasks.save(decided)
         with pytest.raises(ReviewTaskClosedError):
             uow.review_tasks.save(first.claim(ANALYST, START))
+    assert first.rule_version_id is not None
     with store() as uow:
         waiting = [t for t in uow.review_tasks.of_version(first.rule_version_id) if t.undecided]
         (following,) = waiting
-        with pytest.raises(InvariantViolationError, match="keeps its version"):
+        with pytest.raises(InvariantViolationError, match="keeps its kind, candidate, regulator"):
             uow.review_tasks.save(replace(following, regulator="other"))
+        with pytest.raises(InvariantViolationError, match="keeps its version"):
+            uow.review_tasks.save(replace(following, rule_version_id=RuleVersionId.new()))
 
 
 # ---------------------------------------------------------------- seed tasks
@@ -394,7 +400,7 @@ def test_the_queue_pages_by_regulator_priority_and_age(review: Review) -> None:
     assert [queued.task for queued in every] == sorted(
         (queued.task for queued in every), key=queue_position
     )
-    keys = [queued.rule_key for queued in every]
+    keys = [queued.rule_key or "" for queued in every]
     assert keys == sorted(keys), "one request's seed tasks queue by rule key"
     first = review.list.run(limit=5)
     rest = review.list.run(after=TaskKey.of(first[-1].task), limit=201)
@@ -447,8 +453,8 @@ def test_the_claimant_edits_the_draft_and_cites_a_statute(
         citations=[CitationInput(clause, QUOTE)],
         note="the analyst read the example statute",
     )
-    assert detail.version.title == "File the example statement every month"
-    assert detail.version.status is RuleVersionStatus.DRAFT
+    assert record_of(detail).title == "File the example statement every month"
+    assert record_of(detail).status is RuleVersionStatus.DRAFT
     (citation,) = detail.citations
     assert (citation.verified, citation.match_score, citation.quote) == (True, 1.0, QUOTE)
     assert [d.title for d in detail.documents] == ["Example Act (synthetic)"]
@@ -501,9 +507,9 @@ def test_one_approval_approves_a_version_and_decides_its_task(
     decided = review.decide.run(task_id, ReviewDecision.APPROVE, by=REVIEWER, note="checked")
     assert decided.task.status is ReviewTaskStatus.DECIDED
     assert (decided.task.decision, decided.task.decided_by) == (ReviewDecision.APPROVE, REVIEWER)
-    record = decided.version.record
+    record = state_of(decided).record
     assert (record.status, record.seed_status) == (RuleVersionStatus.APPROVED, SeedStatus.REVIEWED)
-    assert decided.version.approvers == (REVIEWER,)
+    assert state_of(decided).approvers == (REVIEWER,)
     actions = [d.action for d in store.decisions(record.rule_version_id)]
     assert actions == [DecisionAction.EDITED, DecisionAction.SUBMITTED, DecisionAction.APPROVED]
     assert store.events() == [], "approving never publishes"
@@ -517,8 +523,8 @@ def test_a_high_impact_version_needs_two_distinct_approvers(
 ) -> None:
     task_id = cited(store, review)
     first = review.decide.run(task_id, ReviewDecision.APPROVE, by=REVIEWER, high_impact=True)
-    assert first.version.record.status is RuleVersionStatus.IN_REVIEW
-    assert first.version.record.high_impact
+    assert state_of(first).record.status is RuleVersionStatus.IN_REVIEW
+    assert state_of(first).record.high_impact
     assert (first.task.status, first.task.claimed_by) == (ReviewTaskStatus.OPEN, None), (
         "open again for a second reviewer"
     )
@@ -527,16 +533,16 @@ def test_a_high_impact_version_needs_two_distinct_approvers(
 
     with pytest.raises(DuplicateApproverError):
         review.decide.run(task_id, ReviewDecision.APPROVE, by=REVIEWER)
-    assert len(store.decisions(first.version.record.rule_version_id)) == 3, (
+    assert len(store.decisions(state_of(first).record.rule_version_id)) == 3, (
         "the refused approval wrote nothing"
     )
     assert review.read.run(task_id).task == first.task
     second = review.decide.run(task_id, ReviewDecision.APPROVE, by=OTHER_REVIEWER)
     assert second.task.status is ReviewTaskStatus.DECIDED
-    assert second.version.record.status is RuleVersionStatus.APPROVED
-    assert set(second.version.approvers) == {REVIEWER, OTHER_REVIEWER}
+    assert state_of(second).record.status is RuleVersionStatus.APPROVED
+    assert set(state_of(second).approvers) == {REVIEWER, OTHER_REVIEWER}
 
-    published = review.publish.run(second.version.record.rule_version_id, actor_id=REVIEWER)
+    published = review.publish.run(state_of(second).record.rule_version_id, actor_id=REVIEWER)
     assert published.plan.published.status is RuleVersionStatus.PUBLISHED
     assert set(published.plan.approved_by) == {REVIEWER, OTHER_REVIEWER}
 
@@ -555,7 +561,7 @@ def test_a_return_sends_the_version_back_and_opens_the_next_task(
     returned = review.decide.run(
         task_id, ReviewDecision.RETURN, by=OTHER_REVIEWER, note="the quote is too short"
     )
-    record = returned.version.record
+    record = state_of(returned).record
     assert (record.status, record.submitted_at, record.seed_status) == (
         RuleVersionStatus.DRAFT,
         None,
@@ -571,7 +577,7 @@ def test_a_return_sends_the_version_back_and_opens_the_next_task(
     again = review.decide.run(
         returned.next_task.task_id, ReviewDecision.RETURN, by=REVIEWER, note="still a draft"
     )
-    assert again.version.record.status is RuleVersionStatus.DRAFT, "a draft stays a draft"
+    assert state_of(again).record.status is RuleVersionStatus.DRAFT, "a draft stays a draft"
     assert again.next_task is not None
 
 
@@ -582,8 +588,8 @@ def test_a_rejection_closes_the_task_and_leaves_the_draft(
     task_id = review.task_of(MONTHLY).task_id
     rejected = review.decide.run(task_id, ReviewDecision.REJECT, by=REVIEWER, note="not yet")
     assert (rejected.task.decision, rejected.next_task) == (ReviewDecision.REJECT, None)
-    assert rejected.version.record.status is RuleVersionStatus.DRAFT
-    assert store.decisions(rejected.version.record.rule_version_id) == []
+    assert state_of(rejected).record.status is RuleVersionStatus.DRAFT
+    assert store.decisions(state_of(rejected).record.rule_version_id) == []
     (reopened,) = review.seed.run().opened
     assert reopened.rule_version_id == rejected.task.rule_version_id, (
         "the next seed request opens a new task for the rejected draft"
@@ -607,7 +613,7 @@ def test_a_task_whose_version_moved_on_is_closed_by_a_rejection(
     assert review.read.run(task_id).task == claimed, "a refused decision leaves the task"
     assert version_of(store, claimed).status is RuleVersionStatus.APPROVED
     rejected = review.decide.run(task_id, ReviewDecision.REJECT, by=REVIEWER, note="moved on")
-    assert rejected.version.record.status is RuleVersionStatus.DRAFT
+    assert state_of(rejected).record.status is RuleVersionStatus.DRAFT
     assert rejected.task.status is ReviewTaskStatus.DECIDED
 
 
@@ -645,3 +651,15 @@ def test_the_stats_follow_the_queue(store: MemoryKnowledgeStore, review: Review)
     assert stats.median_seconds_to_decide > 0
     assert stats.oldest_open_at is not None
     assert stats.open_by_regulator() == {"cbic": 12}
+
+
+def state_of(decision: TaskDecision) -> VersionState:
+    """The version a decision left, which every decision on a seed task has."""
+    assert decision.version is not None
+    return decision.version
+
+
+def record_of(detail: TaskDetail) -> RuleVersionRecord:
+    """The version a task reviews, which every seed task has."""
+    assert detail.version is not None
+    return detail.version

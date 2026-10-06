@@ -94,8 +94,11 @@ def test_the_source_manager_is_the_regulatory_teams() -> None:
 def test_the_rule_review_tasks_are_the_regulatory_teams() -> None:
     rulebook = EXPOSURE["rulebook"]
     tasks = {key: exposure for key, exposure in rulebook.items() if "/review/tasks" in key}
-    assert len(tasks) == 6, "the queue, the seed tasks, one task, claim, draft edit, decide"
+    assert len(tasks) == 7, (
+        "the queue, the seed tasks, one task, claim, draft from a candidate, draft edit, decide"
+    )
     assert set(tasks.values()) == {ADMIN}
+    assert rulebook["POST /v1/rulebook/review/tasks/{task_id}/draft"] is ADMIN
     assert rulebook["GET /v1/rulebook/review/stats"] is ADMIN
     assert served_publicly(rulebook["POST /v1/rulebook/review/tasks/{task_id}/decide"], "token")
     assert not served_publicly(rulebook["GET /v1/rulebook/review/tasks"], "header")

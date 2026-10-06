@@ -234,3 +234,13 @@ One review of one rule version: its queue position (regulator, priority), who cl
 decided what. Regulatory work on the rulebook every tenant reads, so there is no tenant_id; it
 holds analyst ids and notes, nothing of a tenant (migration 0009 of rulebook).
 """
+
+[[exemptions]]
+table = "rulebook.rule_candidate"
+kind = "exempt"
+reason = """
+One rule candidate the pipeline extracted from a regulator document (rule.candidate.created), with
+its scores, the candidate itself and where its review got to. Global regulatory data, the same for
+every tenant, so there is no tenant_id; it holds analyst ids, nothing of a tenant (migration 0010 of
+rulebook).
+"""

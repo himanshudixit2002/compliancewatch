@@ -119,11 +119,13 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "POST /v1/rulebook/rule-versions/{rule_version_id}/withdraw": ADMIN,
         "POST /v1/rulebook/maintenance/transitions": ADMIN,
         # The review tasks: the queue a regulatory user reads, the seed tasks an analyst,
-        # reviewer or admin opens, the claim and the draft edit of an analyst, and the decisions.
+        # reviewer or admin opens, the claim, the draft from a candidate and the draft edit of
+        # an analyst, and the decisions.
         "GET /v1/rulebook/review/tasks": ADMIN,
         "POST /v1/rulebook/review/tasks/seed": ADMIN,
         "GET /v1/rulebook/review/tasks/{task_id}": ADMIN,
         "POST /v1/rulebook/review/tasks/{task_id}/claim": ADMIN,
+        "POST /v1/rulebook/review/tasks/{task_id}/draft": ADMIN,
         "PATCH /v1/rulebook/review/tasks/{task_id}/draft": ADMIN,
         "POST /v1/rulebook/review/tasks/{task_id}/decide": ADMIN,
         "GET /v1/rulebook/review/stats": ADMIN,
