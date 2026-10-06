@@ -1,8 +1,11 @@
 """In-memory store and unit of work: the fakes for tests, demos and the app before Postgres.
 
-A unit of work works on copies of the sources, documents, crawl runs, tasks, classifications and
-extractions and replaces the stored ones when the block exits cleanly; its events and audit entries
-wait until then too, so they are published exactly when the rows they describe are. Units run one at
+A unit of work works on copies of the sources, documents, crawl runs, tasks, classifications,
+extractions and retries and replaces the stored ones when the block exits cleanly; its events,
+its requeues and its audit entries wait until then too, so they are published exactly when the
+rows they describe are. Each published event is also a row of the store's outbox
+(``MemoryStore.outbox``, py-common's ``MemoryOutboxStore``), which a relay can drive and whose
+dead rows the operations routes list and requeue. Units run one at
 a time (a store-level lock held from open to commit or rollback), so two overlapping units cannot
 both start from the same copy, and a unit that reads a source "for update" holds nothing more. The
 store keeps the same rules the tables do: a document's source must be stored, a document never
@@ -16,18 +19,35 @@ from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import replace
 from datetime import datetime
+from uuid import UUID
 
 from domain_kernel.audit import AuditEntry
+from domain_kernel.events import utc_now
 from domain_kernel.ids import DocumentId
 from pipeline.domain.classification import Classification
 from pipeline.domain.crawl import CrawlRun, CrawlRunId, CrawlStatus
 from pipeline.domain.events import DocumentEvent
-from pipeline.domain.extraction import RuleExtraction
+from pipeline.domain.extraction import ExtractionOutcome, RuleExtraction
+from pipeline.domain.outbox import DeadEventKey, OutboxEvent
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
-from pipeline.domain.repository import DocumentKey, TaskKey, UnitOfWork
+from pipeline.domain.repository import (
+    DocumentKey,
+    DocumentQuery,
+    DocumentTally,
+    FetchKey,
+    RunKey,
+    RunQuery,
+    TaskKey,
+    UnitOfWork,
+)
+from pipeline.domain.retry import DocumentRetry
 from pipeline.domain.sources import Source
 from pipeline.domain.tasks import PipelineTask, TaskId, TaskKind, TaskStatus
+from pipeline.infrastructure.repository import outbox_event_of
 from py_common.audit import MemoryAuditSink
+from py_common.events import to_message
+from py_common.outbox.admin import DeadKey
+from py_common.outbox.testing import MemoryOutboxStore
 
 
 class MemorySourceRepository:
@@ -54,12 +74,21 @@ class MemorySourceRepository:
 
 class MemoryRawDocumentRepository:
     def __init__(
-        self, documents: dict[DocumentId, RawDocumentRecord], sources: dict[str, Source]
+        self,
+        documents: dict[DocumentId, RawDocumentRecord],
+        sources: dict[str, Source],
+        classifications: dict[DocumentId, Classification] | None = None,
+        extractions: dict[tuple[DocumentId, str], RuleExtraction] | None = None,
     ) -> None:
         self._documents = documents
         self._sources = sources
+        self._classifications = {} if classifications is None else classifications
+        self._extractions = {} if extractions is None else extractions
 
     def get(self, document_id: DocumentId) -> RawDocumentRecord | None:
+        return self._documents.get(document_id)
+
+    def lock(self, document_id: DocumentId) -> RawDocumentRecord | None:
         return self._documents.get(document_id)
 
     def add(self, record: RawDocumentRecord) -> bool:
@@ -136,6 +165,69 @@ class MemoryRawDocumentRepository:
         found = [d for d in self._documents.values() if d.fetched_at >= moment]
         return sorted(found, key=lambda d: (d.fetched_at, d.document_id.value.int))
 
+    def search(self, query: DocumentQuery) -> Sequence[RawDocumentRecord]:
+        found = sorted(
+            (d for d in self._documents.values() if self._admits(query, d)),
+            key=lambda d: _fetch_order(FetchKey.of(d)),
+            reverse=True,
+        )
+        if query.after is not None:
+            start = _fetch_order(query.after)
+            found = [d for d in found if _fetch_order(FetchKey.of(d)) < start]
+        return found[: query.limit]
+
+    def _admits(self, query: DocumentQuery, record: RawDocumentRecord) -> bool:
+        published = record.published_on
+        if query.status not in (None, record.status):
+            return False
+        if query.source_key not in (None, record.source_key):
+            return False
+        if query.published_from is not None and (
+            published is None or published < query.published_from
+        ):
+            return False
+        if query.published_to is not None and (published is None or published > query.published_to):
+            return False
+        if query.doc_type is None:
+            return True
+        classification = self._classifications.get(record.document_id)
+        read_as = classification.doc_type if classification is not None else record.doc_type
+        if read_as is not None:
+            return read_as is query.doc_type
+        return record.source_key in query.of_source_type
+
+    def tally(self) -> Mapping[str, DocumentTally]:
+        counted: dict[str, tuple[int, int, dict[DocumentStatus, int]]] = {}
+        for record in self._documents.values():
+            stored, parsed, statuses = counted.get(record.source_key, (0, 0, {}))
+            statuses[record.status] = statuses.get(record.status, 0) + 1
+            counted[record.source_key] = (
+                stored + 1,
+                parsed + bool(record.parser_version),
+                statuses,
+            )
+        return {
+            key: DocumentTally(stored, parsed, statuses)
+            for key, (stored, parsed, statuses) in counted.items()
+        }
+
+    def awaiting_extraction(
+        self, prompt_version: str, *, source_key: str | None = None, limit: int = 500
+    ) -> Sequence[RawDocumentRecord]:
+        found = [
+            d
+            for d in self._documents.values()
+            if d.status is DocumentStatus.CLASSIFIED
+            and source_key in (None, d.source_key)
+            and (d.document_id, prompt_version) not in self._extractions
+        ]
+        return sorted(found, key=lambda d: (d.fetched_at, d.document_id.value.int))[:limit]
+
+
+def _fetch_order(key: FetchKey) -> tuple[float, int]:
+    """``FetchKey``'s order, read backwards: uuids compare as their 128-bit integers."""
+    return (key.fetched_at.timestamp(), key.document_id.value.int)
+
 
 def _recent_order(record: RawDocumentRecord) -> tuple[bool, int, float, int]:
     """The Postgres order: the newest publication first with undated ones last, then the latest
@@ -210,9 +302,30 @@ class MemoryCrawlRunRepository:
             (run for run in self._runs.values() if run.started_at >= moment), key=_started
         )
 
+    def page(self, query: RunQuery) -> Sequence[CrawlRun]:
+        found = sorted(
+            (
+                run
+                for run in self._runs.values()
+                if query.source_key in (None, run.source_key)
+                and query.status in (None, run.status)
+                and query.trigger in (None, run.trigger)
+            ),
+            key=_started,
+            reverse=True,
+        )
+        if query.after is not None:
+            start = _started_key(query.after)
+            found = [run for run in found if _started(run) < start]
+        return found[: query.limit]
+
 
 def _started(run: CrawlRun) -> tuple[datetime, int]:
     return (run.started_at, run.id.value.int)
+
+
+def _started_key(key: RunKey) -> tuple[datetime, int]:
+    return (key.started_at, key.run_id.value.int)
 
 
 class MemoryTaskRepository:
@@ -261,6 +374,12 @@ class MemoryTaskRepository:
                 if task.document_id == document_id and task.kind is kind and task.is_open
             ),
             None,
+        )
+
+    def of_document(self, document_id: DocumentId) -> Sequence[PipelineTask]:
+        return sorted(
+            (task for task in self._tasks.values() if task.document_id == document_id),
+            key=_task_order,
         )
 
     def page(
@@ -330,6 +449,15 @@ class MemoryClassificationRepository:
             raise KeyError(f"no classification of {classification.document_id} to save")
         self._classifications[classification.document_id] = classification
 
+    def of_documents(
+        self, document_ids: Collection[DocumentId]
+    ) -> Mapping[DocumentId, Classification]:
+        return {
+            document_id: self._classifications[document_id]
+            for document_id in document_ids
+            if document_id in self._classifications
+        }
+
     def _check(self, classification: Classification) -> None:
         if classification.document_id not in self._documents:
             raise KeyError(f"classification of {classification.document_id}: no such document")
@@ -362,10 +490,97 @@ class MemoryExtractionRepository:
         self._extractions[key] = extraction
         return True
 
+    def of_documents(
+        self, document_ids: Collection[DocumentId], prompt_version: str
+    ) -> Mapping[DocumentId, RuleExtraction]:
+        return {
+            document_id: self._extractions[document_id, prompt_version]
+            for document_id in document_ids
+            if (document_id, prompt_version) in self._extractions
+        }
+
+    def tally(self, prompt_version: str) -> Mapping[str, Mapping[ExtractionOutcome, int]]:
+        counted: dict[str, dict[ExtractionOutcome, int]] = {}
+        for (_, prompt), extraction in self._extractions.items():
+            if prompt == prompt_version:
+                outcomes = counted.setdefault(extraction.source_key, {})
+                outcomes[extraction.outcome] = outcomes.get(extraction.outcome, 0) + 1
+        return counted
+
+
+class MemoryRetryRepository:
+    def __init__(
+        self,
+        retries: dict[tuple[DocumentId, int], DocumentRetry],
+        documents: dict[DocumentId, RawDocumentRecord],
+    ) -> None:
+        self._retries = retries
+        self._documents = documents
+
+    def add(self, retry: DocumentRetry) -> bool:
+        if retry.document_id not in self._documents:
+            raise KeyError(f"retry of {retry.document_id}: no such document")
+        taken = any(
+            stored.id == retry.id
+            or (
+                stored.document_id == retry.document_id
+                and stored.idempotency_key == retry.idempotency_key
+            )
+            for stored in self._retries.values()
+        )
+        if taken or (retry.document_id, retry.attempt) in self._retries:
+            return False
+        self._retries[retry.document_id, retry.attempt] = retry
+        return True
+
+    def of_document(self, document_id: DocumentId) -> Sequence[DocumentRetry]:
+        return sorted(
+            (retry for retry in self._retries.values() if retry.document_id == document_id),
+            key=lambda retry: retry.attempt,
+        )
+
+
+class MemoryOutboxRepository:
+    """The store's outbox: reads at once, requeues when the unit commits."""
+
+    def __init__(self, outbox: MemoryOutboxStore) -> None:
+        self._outbox = outbox
+        self.requeued: dict[UUID, datetime] = {}
+
+    def dead(
+        self, *, topic: str | None = None, after: DeadEventKey | None = None, limit: int = 50
+    ) -> Sequence[OutboxEvent]:
+        key = None if after is None else DeadKey(after.dead_at, after.event_id)
+        rows = self._outbox.dead(topic=topic, after=key, limit=limit + len(self.requeued))
+        return [outbox_event_of(row) for row in rows if row.event_id not in self.requeued][:limit]
+
+    def get(self, event_id: UUID) -> OutboxEvent | None:
+        row = self._outbox.get(event_id)
+        if row is None:
+            return None
+        if event_id in self.requeued:
+            row = replace(row, status="pending", attempts=0, available_at=self.requeued[event_id])
+        return outbox_event_of(row)
+
+    def requeue(self, event_id: UUID, *, at: datetime) -> bool:
+        row = self._outbox.get(event_id)
+        if row is None or not row.is_dead or event_id in self.requeued:
+            return False
+        self.requeued[event_id] = at
+        return True
+
+    def commit(self) -> None:
+        for event_id, at in self.requeued.items():
+            self._outbox.requeue(event_id, at=at)
+        self.requeued.clear()
+
 
 class MemoryEventSink:
-    def __init__(self, published: list[DocumentEvent]) -> None:
+    def __init__(
+        self, published: list[DocumentEvent], outbox: MemoryOutboxStore | None = None
+    ) -> None:
         self._published = published
+        self._outbox = outbox
         self.pending: list[DocumentEvent] = []
 
     def publish(self, event: DocumentEvent) -> None:
@@ -373,6 +588,12 @@ class MemoryEventSink:
 
     def commit(self) -> None:
         self._published.extend(self.pending)
+        if self._outbox is not None:
+            now = utc_now()
+            for event in self.pending:
+                self._outbox.add(
+                    to_message(event), partition_key=event.partition_key, available_at=now
+                )
         self.pending.clear()
 
 
@@ -385,15 +606,20 @@ class MemoryUnitOfWork:
         self._tasks: dict[TaskId, PipelineTask] = {}
         self._classifications: dict[DocumentId, Classification] = {}
         self._extractions: dict[tuple[DocumentId, str], RuleExtraction] = {}
+        self._retries: dict[tuple[DocumentId, int], DocumentRetry] = {}
         self.sources = MemorySourceRepository(self._sources)
-        self.documents = MemoryRawDocumentRepository(self._documents, self._sources)
+        self.documents = MemoryRawDocumentRepository(
+            self._documents, self._sources, self._classifications, self._extractions
+        )
         self.crawl_runs = MemoryCrawlRunRepository(self._runs, self._sources)
         self.tasks = MemoryTaskRepository(self._tasks, self._documents, self._sources)
         self.classifications = MemoryClassificationRepository(
             self._classifications, self._documents, self._tasks
         )
         self.extractions = MemoryExtractionRepository(self._extractions, self._documents)
-        self.events = MemoryEventSink(store.events)
+        self.retries = MemoryRetryRepository(self._retries, self._documents)
+        self.outbox = MemoryOutboxRepository(store.outbox)
+        self.events = MemoryEventSink(store.events, store.outbox)
         self.audit = MemoryAuditSink(store.audit)
 
     def __enter__(self) -> "MemoryUnitOfWork":
@@ -403,6 +629,7 @@ class MemoryUnitOfWork:
         self._tasks.update(self._store.tasks)
         self._classifications.update(self._store.classifications)
         self._extractions.update(self._store.extractions)
+        self._retries.update(self._store.retries)
         return self
 
     def __exit__(self, exc_type: object, *exc_info: object) -> None:
@@ -419,15 +646,18 @@ class MemoryUnitOfWork:
             self._store.classifications.update(self._classifications)
             self._store.extractions.clear()
             self._store.extractions.update(self._extractions)
+            self._store.retries.clear()
+            self._store.retries.update(self._retries)
             self.events.commit()
+            self.outbox.commit()
             self.audit.commit()
         else:
             self.audit.rollback()
 
 
 class MemoryStore:
-    """Holds the sources, documents, crawl runs, tasks, classifications, extractions, published
-    events and audit entries; makes units of work."""
+    """Holds the sources, documents, crawl runs, tasks, classifications, extractions, retries,
+    published events with their outbox rows, and audit entries; makes units of work."""
 
     def __init__(self) -> None:
         self.sources: dict[str, Source] = {}
@@ -436,7 +666,9 @@ class MemoryStore:
         self.tasks: dict[TaskId, PipelineTask] = {}
         self.classifications: dict[DocumentId, Classification] = {}
         self.extractions: dict[tuple[DocumentId, str], RuleExtraction] = {}
+        self.retries: dict[tuple[DocumentId, int], DocumentRetry] = {}
         self.events: list[DocumentEvent] = []
+        self.outbox = MemoryOutboxStore()
         self.audit: list[AuditEntry] = []
         self._lock = threading.Lock()
 

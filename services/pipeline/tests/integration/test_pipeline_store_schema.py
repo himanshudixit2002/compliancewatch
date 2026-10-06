@@ -1,7 +1,9 @@
-"""Migrations 0001 to 0004 on Postgres: the tables, the unit of work with the outbox and the
+"""Migrations 0001 to 0005 on Postgres: the tables, the unit of work with the outbox and the
 audit log, the rules the tables keep, the crawl's queries, the parse of a document and the tasks
-on it, its classification and its rule extraction with the candidate's event, the catalog lint,
-and a downgrade back to nothing. Needs Docker.
+on it, its classification and its rule extraction with the candidate's event, the operations'
+queries (every source's runs and documents, the extraction backlog, a person's retries, the
+outbox's dead rows and their requeue), the catalog lint, and a downgrade back to nothing. Needs
+Docker.
 
 The repositories run as a plain database role with the grants infra/dev/postgres/50-app-role.sql
 gives the product's cw_app: it owns nothing and is not a superuser. ``audit.event`` is made as
@@ -27,16 +29,25 @@ from testcontainers.community.postgres import PostgresContainer
 
 from domain_kernel.audit import AuditActor, AuditEntryId
 from domain_kernel.documents import DocumentType, document_id_for
-from domain_kernel.ids import SourceId, UserId
+from domain_kernel.ids import DocumentId, SourceId, UserId
 from pipeline.application.sources import AddSource, AdminAction, NewSource
 from pipeline.domain.candidate import candidate_from_mapping
 from pipeline.domain.classification import Classification, Relevance, TypeConfidence
-from pipeline.domain.crawl import CrawlCounts, CrawlRun, CrawlStatus
+from pipeline.domain.crawl import CrawlCounts, CrawlRun, CrawlRunId, CrawlStatus, CrawlTrigger
 from pipeline.domain.events import DocumentClassified, DocumentDiscovered
 from pipeline.domain.extraction import ExtractionOutcome, RuleExtraction, candidate_id_for
 from pipeline.domain.issues import Issue
+from pipeline.domain.outbox import DeadEventKey, OutboxStatus
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
-from pipeline.domain.repository import DocumentKey, TaskKey
+from pipeline.domain.repository import (
+    DocumentKey,
+    DocumentQuery,
+    FetchKey,
+    RunKey,
+    RunQuery,
+    TaskKey,
+)
+from pipeline.domain.retry import DocumentRetry, RetryId, RetryStage, retry_workflow_id
 from pipeline.domain.sources import Source, SourceDefinition
 from pipeline.domain.tasks import PipelineTask, TaskKind, TaskStatus
 from pipeline.infrastructure.adapters import RegistryAdapterTypes
@@ -54,6 +65,7 @@ STORE_TABLES = {
     "pipeline_task",
     "document_classification",
     "rule_extraction",
+    "document_retry",
 }
 TABLES = {*STORE_TABLES, "outbox_event", "alembic_version"}
 APP_ROLE = "pipeline_app"
@@ -169,7 +181,7 @@ def test_migration_creates_the_tables_without_tenant_columns(engine: Engine) -> 
         assert "tenant_id" not in columns, "the pipeline's data is regulatory"
     with engine.connect() as connection:
         version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    assert version == "0004"
+    assert version == "0005"
     names = {column["name"] for column in inspector.get_columns("source", schema=SCHEMA)}
     assert "name" in names
     indexes = {index["name"] for index in inspector.get_indexes("raw_document", schema=SCHEMA)}
@@ -767,7 +779,294 @@ def test_an_extraction_and_its_candidate_event_commit_together_and_stay(
             connection.execute(text(statement), {"id": stored.document_id.value})
 
 
+def test_runs_keep_their_trigger_and_page_the_latest_first(
+    units: PostgresUnitOfWorkFactory,
+) -> None:
+    runs = [
+        CrawlRun(
+            id=CrawlRunId.new(),
+            source_key=DEFINITION.key,
+            started_at=NOW + timedelta(days=30, minutes=minutes),
+            trigger=trigger,
+            workflow_id="" if trigger is None else f"pipeline-crawl-x-{minutes}",
+        )
+        for minutes, trigger in ((1, None), (2, CrawlTrigger.MANUAL), (3, CrawlTrigger.BACKFILL))
+    ]
+    with units() as unit:
+        unit.sources.add(Source.of(DEFINITION, NOW))
+        for found in runs:
+            unit.crawl_runs.add(found)
+    with units() as unit:
+        latest = unit.crawl_runs.page(RunQuery(source_key=DEFINITION.key, limit=2))
+        assert [run.trigger for run in latest] == [CrawlTrigger.BACKFILL, CrawlTrigger.MANUAL]
+        assert latest[0].workflow_id == "pipeline-crawl-x-3"
+        rest = unit.crawl_runs.page(
+            RunQuery(source_key=DEFINITION.key, after=RunKey.of(latest[-1]), limit=10)
+        )
+        assert runs[0].id in [run.id for run in rest]
+        assert unit.crawl_runs.get(runs[0].id) == runs[0], "a run with no trigger round-trips"
+        backfills = unit.crawl_runs.page(RunQuery(trigger=CrawlTrigger.BACKFILL, limit=10))
+        assert [run.id for run in backfills] == [runs[2].id]
+        running = unit.crawl_runs.page(RunQuery(status=CrawlStatus.RUNNING, limit=50))
+        assert {run.id for run in runs} <= {run.id for run in running}
+
+
+def test_documents_are_searched_tallied_and_found_waiting_for_extraction(
+    units: PostgresUnitOfWorkFactory,
+) -> None:
+    statute_source = SourceDefinition(
+        key="cgst_act",
+        adapter_type="upload",
+        parameters={"document_type": "statute"},
+        cadence=timedelta(days=31),
+        regulator="CBIC",
+        doc_type=DocumentType.STATUTE,
+    )
+    later = NOW + timedelta(days=60)
+    waiting = record(b"%PDF-1.7 ops waiting", fetched_at=later, published_on=date(2000, 1, 2))
+    extracted = record(
+        b"%PDF-1.7 ops extracted", fetched_at=later + timedelta(minutes=1), published_on=None
+    )
+    uploaded = record(
+        b"%PDF-1.7 ops uploaded circular",
+        fetched_at=later + timedelta(minutes=2),
+        doc_type=DocumentType.CIRCULAR,
+        published_on=date(2000, 1, 5),
+    )
+    statute = record(
+        b"%PDF-1.7 ops statute",
+        source_key=statute_source.key,
+        fetched_at=later + timedelta(minutes=3),
+        published_on=date(2000, 1, 9),
+    )
+    with units() as unit:
+        unit.sources.add(Source.of(DEFINITION, NOW))
+        unit.sources.add(Source.of(statute_source, NOW))
+        for document in (waiting, extracted, uploaded, statute):
+            unit.documents.add(document)
+        for document in (waiting, extracted):
+            unit.documents.record_parse(document.document_id, "pdf@1")
+            unit.classifications.add(classified(document))
+            unit.documents.set_status(document.document_id, DocumentStatus.CLASSIFIED)
+        unit.extractions.add(extraction(extracted))
+    mine = {d.document_id for d in (waiting, extracted, uploaded, statute)}
+    with units() as unit:
+        newest = [
+            d.document_id
+            for d in unit.documents.search(DocumentQuery(limit=500))
+            if d.document_id in mine
+        ]
+        assert newest == [d.document_id for d in (statute, uploaded, extracted, waiting)]
+        page = unit.documents.search(DocumentQuery(after=FetchKey.of(uploaded), limit=500))
+        assert [d.document_id for d in page if d.document_id in mine] == [
+            extracted.document_id,
+            waiting.document_id,
+        ]
+
+        def found(**query: object) -> set[DocumentId]:
+            hits = unit.documents.search(DocumentQuery(limit=500, **query))  # type: ignore[arg-type]
+            return {d.document_id for d in hits} & mine
+
+        assert found(doc_type=DocumentType.CIRCULAR) == {uploaded.document_id}, "its uploader's"
+        assert found(
+            doc_type=DocumentType.STATUTE, of_source_type=frozenset({statute_source.key})
+        ) == {statute.document_id}, "its source's"
+        assert found(doc_type=DocumentType.NOTIFICATION) == {
+            waiting.document_id,
+            extracted.document_id,
+        }, "its classification's"
+        assert found(status=DocumentStatus.CLASSIFIED, source_key=DEFINITION.key) == {
+            waiting.document_id,
+            extracted.document_id,
+        }
+        assert found(published_from=date(2000, 1, 3), published_to=date(2000, 1, 8)) == {
+            uploaded.document_id
+        }
+        backlog = unit.documents.awaiting_extraction(
+            "extraction.rule_candidate@1", source_key=DEFINITION.key
+        )
+        assert waiting.document_id in {d.document_id for d in backlog}
+        assert extracted.document_id not in {d.document_id for d in backlog}
+        tally = unit.documents.tally()
+        assert tally[statute_source.key].stored == 1
+        assert tally[DEFINITION.key].at(DocumentStatus.CLASSIFIED) >= 2
+        assert tally[DEFINITION.key].parsed >= 2
+        outcomes = unit.extractions.tally("extraction.rule_candidate@1")
+        assert outcomes[DEFINITION.key][ExtractionOutcome.EXTRACTED] >= 1
+        assert set(unit.extractions.of_documents(list(mine), "extraction.rule_candidate@1")) == {
+            extracted.document_id
+        }
+        assert set(unit.classifications.of_documents(list(mine))) == {
+            waiting.document_id,
+            extracted.document_id,
+        }
+        assert unit.documents.lock(waiting.document_id) == unit.documents.get(waiting.document_id)
+
+
+def extraction(document: RawDocumentRecord) -> RuleExtraction:
+    prompt = "extraction.rule_candidate@1"
+    return RuleExtraction(
+        document_id=document.document_id,
+        prompt_version=prompt,
+        candidate_id=candidate_id_for(document.document_id, prompt),
+        outcome=ExtractionOutcome.EXTRACTED,
+        model="scripted/golden",
+        attempts=1,
+        source_key=document.source_key,
+        doc_type=DocumentType.NOTIFICATION,
+        regulator="CBIC",
+        issues=(),
+        citation_count=1,
+        confidence=0.9,
+        needs_review=False,
+        answer="{}",
+        ontology_version="0.2.0",
+        extracted_at=NOW,
+        fields=candidate_from_mapping(ANSWER).to_mapping(),
+    )
+
+
+def retry(document: RawDocumentRecord, attempt: int, key: str) -> DocumentRetry:
+    return DocumentRetry(
+        id=RetryId.new(),
+        document_id=document.document_id,
+        attempt=attempt,
+        stage=RetryStage.CLASSIFY,
+        reason="Example: the detector changed",
+        requested_at=NOW,
+        idempotency_key=key,
+        fingerprint="ab" * 32,
+        workflow_id=retry_workflow_id(document.document_id, attempt),
+        doc_type=DocumentType.NOTIFICATION,
+        requested_by=UserId.new().value,
+    )
+
+
+def test_a_retry_is_recorded_once_per_attempt_and_key_and_kept_as_written(
+    units: PostgresUnitOfWorkFactory,
+) -> None:
+    document = record(b"%PDF-1.7 retried")
+    with units() as unit:
+        unit.sources.add(Source.of(DEFINITION, NOW))
+        unit.documents.add(document)
+    # Rolled back at the end: a stored retry would stop the downgrade (it drops none).
+    with units.engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            on = PostgresUnitOfWorkFactory.on_connection(connection)
+            first = retry(document, 1, "example-key-a")
+            with on() as unit:
+                assert unit.retries.add(first)
+                assert not unit.retries.add(retry(document, 1, "example-key-b")), "its attempt"
+                assert not unit.retries.add(retry(document, 2, "example-key-a")), "its key"
+                assert unit.retries.add(retry(document, 2, "example-key-b"))
+                given = Classification.given(
+                    document.document_id,
+                    doc_type=DocumentType.CIRCULAR,
+                    by=UserId.new().value,
+                    at=NOW,
+                    reason="Example: an analyst read it as a circular",
+                )
+                assert unit.classifications.add(given)
+            with on() as unit:
+                assert [r.attempt for r in unit.retries.of_document(document.document_id)] == [1, 2]
+                assert unit.retries.of_document(document.document_id)[0] == first
+                stored = unit.classifications.get(document.document_id)
+                assert stored is not None
+                assert stored.classifier == "retry"
+            for statement in (
+                "UPDATE document_retry SET reason = 'rewritten' WHERE document_id = :id",
+                "DELETE FROM document_retry WHERE document_id = :id",
+            ):
+                saved = connection.begin_nested()
+                with pytest.raises(DBAPIError, match="kept as written"):
+                    connection.execute(text(statement), {"id": document.document_id.value})
+                saved.rollback()
+        finally:
+            transaction.rollback()
+
+
+def test_dead_outbox_rows_are_listed_and_requeued(
+    units: PostgresUnitOfWorkFactory, engine: Engine
+) -> None:
+    dead = record(b"%PDF-1.7 its event went dead")
+    with units() as unit:
+        unit.sources.add(Source.of(DEFINITION, NOW))
+        unit.documents.add(dead)
+        unit.events.publish(discovered(dead))
+    with engine.begin() as connection:
+        event_id = connection.execute(
+            text(
+                "UPDATE outbox_event SET status = 'dead', attempts = 8,"
+                " available_at = :at, last_error = 'Example: broker away'"
+                " WHERE message->'payload'->>'document_id' = :document RETURNING id"
+            ),
+            {"at": NOW + timedelta(days=90), "document": str(dead.document_id)},
+        ).scalar_one()
+    with units() as unit:
+        newest = unit.outbox.dead(limit=1)
+        assert [event.event_id for event in newest] == [event_id]
+        (event,) = newest
+        assert (event.status, event.attempts, event.dead_at) == (
+            OutboxStatus.DEAD,
+            8,
+            NOW + timedelta(days=90),
+        )
+        assert event.summary["document_id"] == str(dead.document_id)
+        assert unit.outbox.dead(after=DeadEventKey.of(event), limit=5) == []
+        assert unit.outbox.dead(topic="document.parsed") == []
+    with units() as unit:
+        assert unit.outbox.requeue(event_id, at=NOW + timedelta(days=91))
+        assert not unit.outbox.requeue(event_id, at=NOW), "requeued once"
+    with units() as unit:
+        requeued = unit.outbox.get(event_id)
+    assert requeued is not None
+    assert (requeued.status, requeued.attempts, requeued.dead_at) == (OutboxStatus.PENDING, 0, None)
+
+
 def test_downgrade_removes_everything(engine: Engine, migrated: Config) -> None:
+    given = record(b"%PDF-1.7 a person's type before the downgrade")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO raw_document (id, source_key, source_url, fetched_at, content_type,"
+                " size, sha256, storage_key) VALUES (:id, :key, :url, now(), 'application/pdf',"
+                " 1, :sha256, 'raw/given')"
+            ),
+            {
+                "id": given.document_id.value,
+                "key": DEFINITION.key,
+                "url": "upload://example/given",
+                "sha256": given.sha256,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO document_classification (document_id, doc_type, relevance,"
+                " confidence, reasons, classifier, decided_by, classified_at) VALUES (:id,"
+                " 'circular', 'relevant', 'certain', '[\"Example\"]', 'retry', gen_random_uuid(),"
+                " now())"
+            ),
+            {"id": given.document_id.value},
+        )
+    with pytest.raises(RuntimeError, match="never drops a person's decision"):
+        command.downgrade(migrated, "0004")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE document_classification SET classifier = 'triage' WHERE document_id = :id"
+            ),
+            {"id": given.document_id.value},
+        )
+    command.downgrade(migrated, "0004")
+    try:
+        assert "document_retry" not in inspect(engine).get_table_names(schema=SCHEMA)
+        runs = {
+            column["name"] for column in inspect(engine).get_columns("crawl_run", schema=SCHEMA)
+        }
+        assert not {"trigger", "workflow_id"} & runs
+    finally:
+        command.upgrade(migrated, "head")
     command.downgrade(migrated, "0003")
     try:
         tables = set(inspect(engine).get_table_names(schema=SCHEMA))

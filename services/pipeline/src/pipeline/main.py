@@ -18,11 +18,20 @@ from starlette.concurrency import run_in_threadpool
 from domain_kernel.errors import DomainError
 from domain_kernel.events import utc_now
 from pipeline import __version__
+from pipeline.api.operations import router as operations_router
 from pipeline.api.router import router
 from pipeline.api.sources import router as sources_router
 from pipeline.api.tasks import router as tasks_router
 from pipeline.api.uploads import router as uploads_router
 from pipeline.application.crawl import StartCrawl
+from pipeline.application.operations import (
+    ListDeadEvents,
+    ListDocuments,
+    ListRuns,
+    ReadDocumentView,
+    RequeueEvent,
+    RetryDocument,
+)
 from pipeline.application.sources import (
     AddSource,
     EditSource,
@@ -39,9 +48,13 @@ from pipeline.domain.errors import (
     CrawlRunningError,
     CrawlUnavailableError,
     DocumentNotFoundError,
+    IngestRunningError,
     IngestUnavailableError,
+    OutboxEventNotFoundError,
     RawDocumentUnreadableError,
     RawStoreUnavailableError,
+    RetryInvalidError,
+    RetryRefusedError,
     SourceExistsError,
     SourceInvalidError,
     SourceNotFoundError,
@@ -95,6 +108,10 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     TranscriptInvalidError: 422,
     WriteTokenInvalidError: 401,
     WritesDisabledError: 503,
+    IngestRunningError: 409,
+    RetryRefusedError: 409,
+    RetryInvalidError: 422,
+    OutboxEventNotFoundError: 404,
 }
 
 
@@ -148,6 +165,12 @@ def build_wiring(
         list_tasks=ListTasks(store),
         resolve_task=ResolveTask(store, raw, ingest, types, knowledge=knowledge),
         dismiss_task=DismissTask(store),
+        list_runs=ListRuns(store),
+        list_every_document=ListDocuments(store, types),
+        read_document_view=ReadDocumentView(store, types),
+        retry_document=RetryDocument(store, raw, ingest, types, knowledge=knowledge),
+        list_dead_events=ListDeadEvents(store),
+        requeue_event=RequeueEvent(store),
     )
 
 
@@ -234,7 +257,7 @@ def build_app(
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router, sources_router, uploads_router, tasks_router],
+        routers=[router, sources_router, uploads_router, tasks_router, operations_router],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         lifespan=lifespan,

@@ -69,6 +69,78 @@
         "title": "Body_upload_document_v1_pipeline_sources__key__uploads_post",
         "type": "object"
       },
+      "ClassificationOut": {
+        "properties": {
+          "classified_at": {
+            "format": "date-time",
+            "title": "Classified At",
+            "type": "string"
+          },
+          "classifier": {
+            "description": "detector@1 for the rule-based detector, triage for a person's triage, retry for the type a person gave on a retry",
+            "title": "Classifier",
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/TypeConfidence"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The person whose decision it is, if one's",
+            "title": "Decided By"
+          },
+          "doc_type": {
+            "$ref": "#/components/schemas/DocumentType"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "relevance": {
+            "$ref": "#/components/schemas/Relevance"
+          },
+          "route": {
+            "$ref": "#/components/schemas/Route",
+            "description": "Where it goes: extract (on to the rule extraction), reference (registered, nothing extracted), irrelevant (set aside), triage (held for a person)"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "doc_type",
+          "relevance",
+          "confidence",
+          "route",
+          "reasons",
+          "classifier",
+          "decided_by",
+          "task_id",
+          "classified_at"
+        ],
+        "title": "ClassificationOut",
+        "type": "object"
+      },
       "CrawlRunOut": {
         "properties": {
           "duplicates": {
@@ -115,6 +187,29 @@
           "stored": {
             "title": "Stored",
             "type": "integer"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CrawlTrigger"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it ran: the schedule's tick, an admin's fetch, or a backfill; null on a run recorded before the pipeline kept it"
+          },
+          "workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The crawl's workflow on Temporal; null on a run recorded before it was kept",
+            "title": "Workflow Id"
           }
         },
         "required": [
@@ -126,7 +221,9 @@
           "stored",
           "duplicates",
           "failed",
-          "error"
+          "error",
+          "trigger",
+          "workflow_id"
         ],
         "title": "CrawlRunOut",
         "type": "object"
@@ -141,10 +238,11 @@
         "type": "string"
       },
       "CrawlTrigger": {
-        "description": "Why a crawl ran: the schedule's tick, or an admin's fetch.",
+        "description": "Why a crawl ran: the schedule's tick, an admin's fetch, or a backfill of history.",
         "enum": [
           "schedule",
-          "manual"
+          "manual",
+          "backfill"
         ],
         "title": "CrawlTrigger",
         "type": "string"
@@ -172,6 +270,154 @@
           "reason"
         ],
         "title": "DismissIn",
+        "type": "object"
+      },
+      "DocumentDetailOut": {
+        "description": "One stored document with how the pipeline reads it and the retries people asked for.",
+        "properties": {
+          "classification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClassificationOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null before its classify step"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "doc_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The type its uploader gave; null when it is its source's"
+          },
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "external_ref": {
+            "title": "External Ref",
+            "type": "string"
+          },
+          "extraction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExtractionOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its rule extraction by the current prompt; null before one is stored"
+          },
+          "fetched_at": {
+            "description": "When the bytes were first fetched",
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "parser_version": {
+            "description": "The parser of the document's last parse (pdf@1, pdf-tables@1, html@1, html-tables@1, manual@1 for an analyst's transcript); empty before one",
+            "title": "Parser Version",
+            "type": "string"
+          },
+          "published_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published On"
+          },
+          "raw_path": {
+            "description": "Where the stored bytes are served",
+            "title": "Raw Path",
+            "type": "string"
+          },
+          "read_as": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The type the pipeline reads it as: its classification's, else its uploader's, else its source's; null for a source the code cannot read"
+          },
+          "retries": {
+            "description": "Its retries by attempt; empty before one",
+            "items": {
+              "$ref": "#/components/schemas/RetryOut"
+            },
+            "title": "Retries",
+            "type": "array"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "source_key": {
+            "title": "Source Key",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentStatus"
+          },
+          "storage_key": {
+            "title": "Storage Key",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "source_key",
+          "source_url",
+          "external_ref",
+          "title",
+          "published_on",
+          "fetched_at",
+          "content_type",
+          "size",
+          "sha256",
+          "storage_key",
+          "status",
+          "parser_version",
+          "doc_type",
+          "raw_path",
+          "read_as",
+          "classification",
+          "extraction",
+          "retries"
+        ],
+        "title": "DocumentDetailOut",
         "type": "object"
       },
       "DocumentOut": {
@@ -301,6 +547,61 @@
           "statute"
         ],
         "title": "DocumentType",
+        "type": "string"
+      },
+      "ExtractionOut": {
+        "description": "The document's rule extraction by the current prompt.",
+        "properties": {
+          "candidate_id": {
+            "description": "The candidate its rule.candidate.created names",
+            "format": "uuid",
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "extracted_at": {
+            "format": "date-time",
+            "title": "Extracted At",
+            "type": "string"
+          },
+          "issue_count": {
+            "title": "Issue Count",
+            "type": "integer"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "needs_review": {
+            "title": "Needs Review",
+            "type": "boolean"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/ExtractionOutcome",
+            "description": "extracted (a candidate), or unparseable (the model gave none, twice)"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt_version",
+          "outcome",
+          "candidate_id",
+          "needs_review",
+          "issue_count",
+          "model",
+          "extracted_at"
+        ],
+        "title": "ExtractionOut",
+        "type": "object"
+      },
+      "ExtractionOutcome": {
+        "enum": [
+          "extracted",
+          "unparseable"
+        ],
+        "title": "ExtractionOutcome",
         "type": "string"
       },
       "FetchIn": {
@@ -469,6 +770,112 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "OutboxEventOut": {
+        "description": "An outbox row without its body.",
+        "properties": {
+          "attempts": {
+            "description": "Failed sends since it was written or last requeued",
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dead_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the relay marked it dead",
+            "title": "Dead At"
+          },
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "key": {
+            "description": "The Kafka message key (the event's source)",
+            "title": "Key",
+            "type": "string"
+          },
+          "last_error": {
+            "title": "Last Error",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "payload_bytes": {
+            "title": "Payload Bytes",
+            "type": "integer"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OutboxStatus"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "description": "What the event is about, from its payload: the document, source, candidate, type or outcome it names; never the body",
+            "title": "Summary",
+            "type": "object"
+          },
+          "topic": {
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "topic",
+          "schema_version",
+          "key",
+          "status",
+          "attempts",
+          "last_error",
+          "occurred_at",
+          "created_at",
+          "published_at",
+          "dead_at",
+          "summary",
+          "payload_bytes"
+        ],
+        "title": "OutboxEventOut",
+        "type": "object"
+      },
+      "OutboxStatus": {
+        "enum": [
+          "pending",
+          "published",
+          "dead"
+        ],
+        "title": "OutboxStatus",
+        "type": "string"
+      },
       "Page_DocumentOut_": {
         "properties": {
           "items": {
@@ -496,6 +903,93 @@
           "next_cursor"
         ],
         "title": "Page[DocumentOut]",
+        "type": "object"
+      },
+      "Page_OutboxEventOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OutboxEventOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Send as cursor to read the next page; null on the last page",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[OutboxEventOut]",
+        "type": "object"
+      },
+      "Page_PipelineDocumentOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineDocumentOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Send as cursor to read the next page; null on the last page",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[PipelineDocumentOut]",
+        "type": "object"
+      },
+      "Page_RunOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Send as cursor to read the next page; null on the last page",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[RunOut]",
         "type": "object"
       },
       "Page_TaskOut_": {
@@ -567,6 +1061,145 @@
           "text"
         ],
         "title": "ParagraphIn",
+        "type": "object"
+      },
+      "PipelineDocumentOut": {
+        "description": "A stored document with how the pipeline reads it.",
+        "properties": {
+          "classification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClassificationOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null before its classify step"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "doc_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The type its uploader gave; null when it is its source's"
+          },
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "external_ref": {
+            "title": "External Ref",
+            "type": "string"
+          },
+          "extraction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExtractionOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its rule extraction by the current prompt; null before one is stored"
+          },
+          "fetched_at": {
+            "description": "When the bytes were first fetched",
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "parser_version": {
+            "description": "The parser of the document's last parse (pdf@1, pdf-tables@1, html@1, html-tables@1, manual@1 for an analyst's transcript); empty before one",
+            "title": "Parser Version",
+            "type": "string"
+          },
+          "published_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published On"
+          },
+          "raw_path": {
+            "description": "Where the stored bytes are served",
+            "title": "Raw Path",
+            "type": "string"
+          },
+          "read_as": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The type the pipeline reads it as: its classification's, else its uploader's, else its source's; null for a source the code cannot read"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "source_key": {
+            "title": "Source Key",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentStatus"
+          },
+          "storage_key": {
+            "title": "Storage Key",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "source_key",
+          "source_url",
+          "external_ref",
+          "title",
+          "published_on",
+          "fetched_at",
+          "content_type",
+          "size",
+          "sha256",
+          "storage_key",
+          "status",
+          "parser_version",
+          "doc_type",
+          "raw_path",
+          "read_as",
+          "classification",
+          "extraction"
+        ],
+        "title": "PipelineDocumentOut",
         "type": "object"
       },
       "Problem": {
@@ -673,6 +1306,49 @@
         "title": "Relevance",
         "type": "string"
       },
+      "RequeueIn": {
+        "additionalProperties": false,
+        "description": "A dead outbox row put back to pending, so the relay sends it again.",
+        "properties": {
+          "actor_id": {
+            "description": "The admin taking the step; a signed-in user's token overrides it, and the audit entry names whoever acted",
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why: kept verbatim in the audit entry",
+            "maxLength": 2000,
+            "minLength": 10,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id",
+          "reason"
+        ],
+        "title": "RequeueIn",
+        "type": "object"
+      },
+      "RequeueOut": {
+        "description": "The row as it stands now: ``requeued`` is false for a row that was not dead (pending, or\npublished), which nothing changed.",
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/OutboxEventOut"
+          },
+          "requeued": {
+            "title": "Requeued",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "event",
+          "requeued"
+        ],
+        "title": "RequeueOut",
+        "type": "object"
+      },
       "ResolutionOut": {
         "description": "The resolved task and the ingest it starts (a manual parse's parses the transcript, a\nrelevant triage's continues the document as its type): ``started`` is false when it was\nstarted before (it runs, or it is done). An irrelevant triage starts none, and\n``workflow_id`` is empty.",
         "properties": {
@@ -740,6 +1416,255 @@
           "reason"
         ],
         "title": "ResolveIn",
+        "type": "object"
+      },
+      "RetryAcceptedOut": {
+        "description": "The retry and its ingest: ``started`` is false when the ingest was started before (a\nrequest sent again under its Idempotency-Key, whose answer is replayed).",
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/DocumentDetailOut"
+          },
+          "reclassified": {
+            "description": "Whether the person's type reclassified the document",
+            "title": "Reclassified",
+            "type": "boolean"
+          },
+          "retry": {
+            "$ref": "#/components/schemas/RetryOut"
+          },
+          "started": {
+            "title": "Started",
+            "type": "boolean"
+          },
+          "workflow_id": {
+            "title": "Workflow Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document",
+          "retry",
+          "workflow_id",
+          "started",
+          "reclassified"
+        ],
+        "title": "RetryAcceptedOut",
+        "type": "object"
+      },
+      "RetryIn": {
+        "additionalProperties": false,
+        "description": "A retry of a stored document: the stage its ingest starts again from, and, to reclassify\nit, the type a person gives it.",
+        "properties": {
+          "actor_id": {
+            "description": "The admin taking the step; a signed-in user's token overrides it, and the audit entry names whoever acted",
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "doc_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The document's type, as a person reads it: it reclassifies the document (relevant, certain, by retry), beats the detector, and brings back a document set aside as irrelevant or whose triage was dismissed"
+          },
+          "reason": {
+            "description": "Why: kept verbatim in the audit entry",
+            "maxLength": 2000,
+            "minLength": 10,
+            "title": "Reason",
+            "type": "string"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/RetryStage",
+            "description": "parse: the stored document's whole ingest again (parse, classify, register, extract); classify: the same with the detector's classification read again; extract: the rule extraction of a document classified on its way to it"
+          }
+        },
+        "required": [
+          "actor_id",
+          "reason",
+          "stage"
+        ],
+        "title": "RetryIn",
+        "type": "object"
+      },
+      "RetryOut": {
+        "description": "One retry of a document: its attempt, stage, the type a person gave, why, by whom and\nwhen, and its ingest's workflow.",
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "doc_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The type the person gave the document; null when its classification stood"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who asked, when a person's token or id named one",
+            "title": "Requested By"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/RetryStage"
+          },
+          "workflow_id": {
+            "description": "pipeline-retry-<document>-<attempt>",
+            "title": "Workflow Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt",
+          "stage",
+          "doc_type",
+          "reason",
+          "requested_by",
+          "requested_at",
+          "workflow_id"
+        ],
+        "title": "RetryOut",
+        "type": "object"
+      },
+      "RetryStage": {
+        "description": "Where a retry starts the stored document's ingest again: its parse, its classification\n(read again by the detector), or its rule extraction.",
+        "enum": [
+          "parse",
+          "classify",
+          "extract"
+        ],
+        "title": "RetryStage",
+        "type": "string"
+      },
+      "Route": {
+        "description": "Where a classified document goes: on to the rule extraction, kept for reference, set\naside as irrelevant, or held for a person's triage.",
+        "enum": [
+          "extract",
+          "reference",
+          "irrelevant",
+          "triage"
+        ],
+        "title": "Route",
+        "type": "string"
+      },
+      "RunOut": {
+        "description": "A crawl run with its source.",
+        "properties": {
+          "duplicates": {
+            "title": "Duplicates",
+            "type": "integer"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "listed": {
+            "title": "Listed",
+            "type": "integer"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "source_key": {
+            "title": "Source Key",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CrawlStatus"
+          },
+          "stored": {
+            "title": "Stored",
+            "type": "integer"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CrawlTrigger"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it ran: the schedule's tick, an admin's fetch, or a backfill; null on a run recorded before the pipeline kept it"
+          },
+          "workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The crawl's workflow on Temporal; null on a run recorded before it was kept",
+            "title": "Workflow Id"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "started_at",
+          "finished_at",
+          "listed",
+          "stored",
+          "duplicates",
+          "failed",
+          "error",
+          "trigger",
+          "workflow_id",
+          "source_key"
+        ],
+        "title": "RunOut",
         "type": "object"
       },
       "SourceEditIn": {
@@ -1349,6 +2274,16 @@
         "title": "TriageIn",
         "type": "object"
       },
+      "TypeConfidence": {
+        "description": "How sure the classifier is of the type: the text names it (``certain``), nothing in the\ntext names one and the source's is taken (``default``), or the text names another type than\nits source publishes (``conflict``).",
+        "enum": [
+          "certain",
+          "default",
+          "conflict"
+        ],
+        "title": "TypeConfidence",
+        "type": "string"
+      },
       "UploadOut": {
         "description": "The uploaded document as stored, and the ingest that parses it. For bytes stored before,\n``duplicate`` is true and ``document`` is the record stored first (it may be another\nsource's).",
         "properties": {
@@ -1474,9 +2409,195 @@
         ]
       }
     },
+    "/v1/pipeline/documents": {
+      "get": {
+        "description": "Every source's stored documents, a page at a time, the latest first fetch first (then by\nid), each with the type the pipeline reads it as, its classification and its extraction by\nthe current prompt. A date filter leaves undated documents out.",
+        "operationId": "list_every_document_v1_pipeline_documents_get",
+        "parameters": [
+          {
+            "description": "Only documents of this status: discovered, parsed, failed (no parser reads it), irrelevant (set aside), classified (waiting for its extraction), triage, reference, extracted",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DocumentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only documents of this status: discovered, parsed, failed (no parser reads it), irrelevant (set aside), classified (waiting for its extraction), triage, reference, extracted",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Only this source's",
+            "in": "query",
+            "name": "source_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[a-z][a-z0-9_]{0,62}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this source's",
+              "title": "Source Key"
+            }
+          },
+          {
+            "description": "Only documents the pipeline reads as this type: its classification's, else its uploader's, else its source's",
+            "in": "query",
+            "name": "doc_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DocumentType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only documents the pipeline reads as this type: its classification's, else its uploader's, else its source's",
+              "title": "Doc Type"
+            }
+          },
+          {
+            "description": "Only documents published on or after this day",
+            "in": "query",
+            "name": "published_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only documents published on or after this day",
+              "title": "Published From"
+            }
+          },
+          {
+            "description": "Only documents published on or before this day",
+            "in": "query",
+            "name": "published_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only documents published on or before this day",
+              "title": "Published To"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 200",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Items per page, 1 to 200",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page; absent for the first page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_cursor of the previous page; absent for the first page",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_PipelineDocumentOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List every source's documents, the latest fetch first",
+        "tags": [
+          "pipeline"
+        ]
+      }
+    },
     "/v1/pipeline/documents/{document_id}": {
       "get": {
-        "description": "A stored document as its record holds it: where it was listed, what the listing said,\nwhen it was first fetched, its digest, storage key and status.",
+        "description": "A stored document as its record holds it: where it was listed, what the listing said,\nwhen it was first fetched, its digest, storage key and status; with the type the pipeline\nreads it as, its classification, its extraction by the current prompt, and the retries\npeople asked for.",
         "operationId": "read_document_v1_pipeline_documents__document_id__get",
         "parameters": [
           {
@@ -1495,7 +2616,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DocumentOut"
+                  "$ref": "#/components/schemas/DocumentDetailOut"
                 }
               }
             },
@@ -1664,6 +2785,406 @@
         ]
       }
     },
+    "/v1/pipeline/documents/{document_id}/retry": {
+      "post": {
+        "description": "Start the stored document's ingest again from ``stage``, without a new fetch, under the\nworkflow ``pipeline-retry-<document>-<attempt>``, and answer 202 with the attempt.\n\n- ``parse``: the whole ingest of the stored bytes (parse, classify, register while knowledge\n  is on, extract a notification, circular or act amendment while the extraction is on); a\n  document no parser read is parsed again;\n- ``classify``: the same, the detector reading the document again (a person's decision\n  stands);\n- ``extract``: the rule extraction of a document classified on its way to it whose extraction\n  failed or never started.\n\nA ``doc_type`` reclassifies the document first: relevant, of that type, certain, by retry,\nwith its status and a document.classified. It beats the detector and is the way back for a\ndocument set aside as irrelevant or whose triage was dismissed. Audited as\npipeline.document.retry. The same request with its Idempotency-Key again answers its attempt\n(``Idempotent-Replayed: true``) and starts its ingest only if it did not start; the key with\nanother body is a 422. 409 while an ingest of the document runs (an earlier retry's, its\ncrawl's, a task resolution's, its rule extraction's), while a triage task holds it, or when\nthere is nothing to extract; 422 for an extraction of a type no rule is extracted from; 503\nwhen Temporal does not answer (the attempt stays recorded: send the same request again).",
+        "operationId": "retry_document_v1_pipeline_documents__document_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role",
+            "in": "header",
+            "name": "x-cw-write-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role",
+              "title": "X-Cw-Write-Token"
+            }
+          },
+          {
+            "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetryAcceptedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run a stored document again from a stage",
+        "tags": [
+          "pipeline"
+        ]
+      }
+    },
+    "/v1/pipeline/outbox/dead": {
+      "get": {
+        "description": "The pipeline's outbox rows the relay marked dead after its eight sends failed (their\nmessage is on <topic>.dlq), a page at a time, the newest dead first: the topic, key,\nattempts, last error, when each went dead, and a summary of the payload without its body.",
+        "operationId": "list_dead_events_v1_pipeline_outbox_dead_get",
+        "parameters": [
+          {
+            "description": "Only rows of this topic, such as document.parsed",
+            "in": "query",
+            "name": "topic",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[a-z][a-z0-9_.-]{0,119}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only rows of this topic, such as document.parsed",
+              "title": "Topic"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 200",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Items per page, 1 to 200",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page; absent for the first page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_cursor of the previous page; absent for the first page",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_OutboxEventOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the outbox's dead rows, the newest dead first",
+        "tags": [
+          "pipeline"
+        ]
+      }
+    },
+    "/v1/pipeline/outbox/{event_id}/requeue": {
+      "post": {
+        "description": "Put the dead row back to pending with its attempts reset, due at once, so the relay sends\nit again on its next pass; its last error stays until a send succeeds. Audited as\npipeline.outbox.requeue. A row that is not dead (pending, published) is answered as it\nstands, with requeued false and nothing written, so the request is safe to send again. 404\nfor an id the outbox does not hold.",
+        "operationId": "requeue_event_v1_pipeline_outbox__event_id__requeue_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role",
+            "in": "header",
+            "name": "x-cw-write-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role",
+              "title": "X-Cw-Write-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequeueIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequeueOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put a dead outbox row back to pending",
+        "tags": [
+          "pipeline"
+        ]
+      }
+    },
     "/v1/pipeline/ping": {
       "get": {
         "operationId": "ping_v1_pipeline_ping_get",
@@ -1684,6 +3205,154 @@
           }
         },
         "summary": "Ping",
+        "tags": [
+          "pipeline"
+        ]
+      }
+    },
+    "/v1/pipeline/runs": {
+      "get": {
+        "description": "Every source's crawl runs, a page at a time, the latest started first (then by id):\nwhen each ran, why (its trigger and workflow; null on runs recorded before they were\nkept), what its listing found (listed; stored, duplicates and failed of the new documents)\nand how it ended.",
+        "operationId": "list_runs_v1_pipeline_runs_get",
+        "parameters": [
+          {
+            "description": "Only this source's",
+            "in": "query",
+            "name": "source_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[a-z][a-z0-9_]{0,62}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this source's",
+              "title": "Source Key"
+            }
+          },
+          {
+            "description": "Only runs that are running, completed or failed",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CrawlStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only runs that are running, completed or failed",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Only runs the schedule's tick, an admin's fetch or a backfill started",
+            "in": "query",
+            "name": "trigger",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CrawlTrigger"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only runs the schedule's tick, an admin's fetch or a backfill started",
+              "title": "Trigger"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 200",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Items per page, 1 to 200",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page; absent for the first page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_cursor of the previous page; absent for the first page",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_RunOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the crawl runs, the latest first",
         "tags": [
           "pipeline"
         ]

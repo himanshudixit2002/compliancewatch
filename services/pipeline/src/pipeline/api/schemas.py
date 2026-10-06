@@ -17,11 +17,11 @@ from pipeline.application.sources import (
 from pipeline.application.tasks import Resolution, TaskView
 from pipeline.application.uploads import UploadOutcome
 from pipeline.domain.classification import Relevance, TriageDecision
-from pipeline.domain.crawl import CrawlRun, CrawlStatus
+from pipeline.domain.crawl import CrawlRun, CrawlStatus, CrawlTrigger
 from pipeline.domain.ports import CrawlStart
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.repository import DocumentKey, TaskKey
-from pipeline.domain.schedule import CrawlTrigger, Freshness, FreshnessState, SourceStatus
+from pipeline.domain.schedule import Freshness, FreshnessState, SourceStatus
 from pipeline.domain.sources import (
     ADAPTER_TYPE_PATTERN,
     MAX_CADENCE,
@@ -140,6 +140,15 @@ class CrawlRunOut(BaseModel):
     duplicates: int
     failed: int
     error: str
+    trigger: CrawlTrigger | None = Field(
+        description=(
+            "Why it ran: the schedule's tick, an admin's fetch, or a backfill; null on a run "
+            "recorded before the pipeline kept it"
+        )
+    )
+    workflow_id: str | None = Field(
+        description="The crawl's workflow on Temporal; null on a run recorded before it was kept"
+    )
 
     @classmethod
     def of(cls, run: CrawlRun) -> Self:
@@ -153,6 +162,8 @@ class CrawlRunOut(BaseModel):
             duplicates=run.counts.duplicates,
             failed=run.counts.failed,
             error=run.error,
+            trigger=run.trigger,
+            workflow_id=run.workflow_id or None,
         )
 
 

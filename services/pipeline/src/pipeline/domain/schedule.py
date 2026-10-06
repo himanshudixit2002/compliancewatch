@@ -7,9 +7,9 @@ running, and its cadence has passed since its last crawl started (since its last
 its first run). A crawl's workflow id names the source and the
 cadence slot the tick saw it due in (``scheduled_workflow_id``), so two ticks of the same slot
 ask Temporal for the same workflow, and the second is refused. A crawl an admin starts by hand
-has an id of its own (``manual_workflow_id``). Either way the crawl run's id is derived from the
-workflow id (``run_id_for``), so the run a start records and the workflow it starts name each
-other.
+has an id of its own (``manual_workflow_id``), and so does each round of a backfill
+(``backfill_workflow_id``). Either way the crawl run's id is derived from the workflow id
+(``run_id_for``), so the run a start records and the workflow it starts name each other.
 
 A run still ``running`` ``ABANDONED_AFTER`` its start has lost its workflow, which Temporal ends
 at ``CRAWL_TIMEOUT``: the next start closes it as failed (``CrawlRun.abandon``).
@@ -31,6 +31,7 @@ from uuid import UUID
 from domain_kernel._validation import require_aware, require_instance
 from domain_kernel.ids import derive_id
 from pipeline.domain.crawl import CrawlRun, CrawlRunId, CrawlStatus
+from pipeline.domain.crawl import CrawlTrigger as CrawlTrigger
 from pipeline.domain.sources import Source, require_source_key
 
 INDIA: Final = timezone(timedelta(hours=5, minutes=30), "IST")
@@ -50,13 +51,6 @@ LATE_AFTER: Final = 1.0
 STALE_AFTER: Final = 2.0
 """Freshness in cadences: beyond one a source is late, beyond two stale."""
 _EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
-
-
-class CrawlTrigger(StrEnum):
-    """Why a crawl ran: the schedule's tick, or an admin's fetch."""
-
-    SCHEDULE = "schedule"
-    MANUAL = "manual"
 
 
 def run_id_for(workflow_id: str) -> CrawlRunId:
@@ -84,6 +78,12 @@ def manual_workflow_id(source_key: str, request: UUID) -> str:
     """``pipeline-crawl-<key>-manual-<request>``: one per fetch an admin asks for."""
     require_instance(request, UUID, "request")
     return f"{WORKFLOW_PREFIX}-{require_source_key(source_key)}-manual-{request.hex}"
+
+
+def backfill_workflow_id(source_key: str, request: UUID) -> str:
+    """``pipeline-crawl-<key>-backfill-<request>``: one per round of a backfill's plan row."""
+    require_instance(request, UUID, "request")
+    return f"{WORKFLOW_PREFIX}-{require_source_key(source_key)}-backfill-{request.hex}"
 
 
 def ingest_workflow_id(source_key: str, url: str) -> str:

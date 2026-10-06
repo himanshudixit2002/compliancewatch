@@ -5,8 +5,8 @@ Every route a hosted service serves has one class:
 - ``public``: user-facing routes, served on both listeners;
 - ``admin``: the regulatory team's and operators' routes (rulebook review, its review tasks
   and publishing, the engine's review queue and fan-out controls, the gateway's prompts, models
-  and usage, notification resends, the stored eval runs, the pipeline's source manager, uploads
-  and task queue). The public listener serves them only when
+  and usage, notification resends, the stored eval runs, the pipeline's source manager, uploads,
+  task queue and operations). The public listener serves them only when
   ``CW_AUTH_MODE=token``, where each route itself requires an analyst, reviewer or admin a
   verified token names; in ``header`` and ``dual`` mode a request without a token could reach
   them, so they stay internal;
@@ -244,6 +244,14 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "GET /v1/pipeline/tasks": ADMIN,
         "POST /v1/pipeline/tasks/{task_id}/resolve": ADMIN,
         "POST /v1/pipeline/tasks/{task_id}/dismiss": ADMIN,
+        # Operations: the regulatory team reads every source's crawl runs and documents and the
+        # outbox's dead rows; an admin retries a stored document from a stage (with the type
+        # they give it) and requeues a dead row, each audited with a reason.
+        "GET /v1/pipeline/runs": ADMIN,
+        "GET /v1/pipeline/documents": ADMIN,
+        "POST /v1/pipeline/documents/{document_id}/retry": ADMIN,
+        "GET /v1/pipeline/outbox/dead": ADMIN,
+        "POST /v1/pipeline/outbox/{event_id}/requeue": ADMIN,
     },
 }
 

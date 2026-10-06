@@ -86,9 +86,19 @@ def test_the_source_manager_is_the_regulatory_teams() -> None:
     pipeline = EXPOSURE["pipeline"]
     assert pipeline["GET /v1/pipeline/ping"] is INTERNAL
     managed = {key: exposure for key, exposure in pipeline.items() if "ping" not in key}
-    assert len(managed) == 11, "the sources, their documents, uploads and the task queue"
+    assert len(managed) == 16, (
+        "the sources, their documents, uploads, the task queue and the operations"
+    )
     assert set(managed.values()) == {ADMIN}
     assert pipeline["POST /v1/pipeline/sources/{key}/uploads"] is ADMIN
+    for operation in (
+        "GET /v1/pipeline/runs",
+        "GET /v1/pipeline/documents",
+        "POST /v1/pipeline/documents/{document_id}/retry",
+        "GET /v1/pipeline/outbox/dead",
+        "POST /v1/pipeline/outbox/{event_id}/requeue",
+    ):
+        assert pipeline[operation] is ADMIN, operation
 
 
 def test_the_rule_review_tasks_are_the_regulatory_teams() -> None:

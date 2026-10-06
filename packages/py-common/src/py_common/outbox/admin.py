@@ -32,6 +32,8 @@ SUMMARY_FIELDS: Final = (
     "document_id",
     "source_id",
     "source_key",
+    "regulator",
+    "external_ref",
     "candidate_id",
     "rule_version_id",
     "rule_key",

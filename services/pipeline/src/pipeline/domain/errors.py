@@ -231,3 +231,35 @@ class WritesDisabledError(DomainError, PermissionError):
             "pipeline writes are refused: CW_RULEBOOK_WRITE_TOKEN is not set, so no shared write "
             "token opens them"
         )
+
+
+class IngestRunningError(DomainError):
+    """An ingest of the document runs (an earlier retry's, its crawl's, a resolution's, its rule
+    extraction): a retry waits for it to end."""
+
+    type_slug = "pipeline-ingest-running"
+    title = "An ingest of this document runs"
+
+
+class RetryRefusedError(DomainError):
+    """The document cannot be retried from this stage as it stands: an open triage task holds it
+    (resolve the task), or there is nothing to extract (it is not classified on its way to the
+    extraction, or its extraction for the current prompt is stored)."""
+
+    type_slug = "pipeline-retry-refused"
+    title = "The document cannot be retried so"
+
+
+class RetryInvalidError(DomainError, ValueError):
+    """The retry asks for something that cannot be: an extraction of a type no rule is
+    extracted from."""
+
+    type_slug = "pipeline-retry-invalid"
+    title = "The retry is not valid"
+
+
+class OutboxEventNotFoundError(DomainError, LookupError):
+    """The pipeline's outbox holds no event with this id."""
+
+    type_slug = "pipeline-outbox-event-not-found"
+    title = "Outbox event not found"

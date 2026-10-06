@@ -25,7 +25,17 @@ from pipeline.application.crawl import (
     launch,
 )
 from pipeline.application.sources import FETCH_ACTION, SyncSources
-from pipeline.domain.crawl import CrawlCounts, CrawlRun, CrawlRunId, CrawlStatus, Outcome
+from pipeline.domain.crawl import (
+    MAX_REFS,
+    CrawlCounts,
+    CrawlRun,
+    CrawlRunId,
+    CrawlStatus,
+    ListingWindow,
+    Outcome,
+    ref_key,
+    settled_watermark,
+)
 from pipeline.domain.errors import (
     CrawlDisabledError,
     CrawlRunningError,
@@ -38,6 +48,7 @@ from pipeline.domain.raw_documents import RawDocumentRecord
 from pipeline.domain.schedule import (
     ABANDONED_AFTER,
     CrawlTrigger,
+    backfill_workflow_id,
     run_id_for,
     scheduled_workflow_id,
 )
@@ -494,3 +505,111 @@ async def test_the_activity_runs_the_bookkeeping_on_a_thread() -> None:
 def test_a_listed_document_crosses_the_wire_as_discovered() -> None:
     document = Discovered(source_id=UUID(int=1), url="https://example.invalid/x")
     assert document.published_at is None
+
+
+# ---------------------------------------------------------------- a backfill's window
+
+
+async def test_a_backfill_lists_its_own_window_below_the_watermark() -> None:
+    store = with_recorded(synced(), watermark=date(2026, 4, 21))
+    plain = await lister(store, NOW).run(ListRequest(source_key=RECORDED, run_id=UUID(int=1)))
+    assert plain.since == date(2026, 4, 14)
+    assert [d.external_ref for d in plain.new] == ["01/2026-Central Tax"]
+    window = ListRequest(
+        source_key=RECORDED, run_id=UUID(int=1), since=date(2025, 1, 1), until=date(2025, 12, 31)
+    )
+    listing = await lister(store, NOW).run(window)
+    assert listing.since == date(2025, 1, 1)
+    assert [d.external_ref for d in listing.new] == ["17/2025-Central Tax", "15/2025-Central Tax"]
+    named = ListRequest(
+        source_key=RECORDED,
+        run_id=UUID(int=1),
+        since=date(2025, 1, 1),
+        refs=["15/2025 - central tax"],
+    )
+    found = await lister(store, NOW).run(named)
+    assert [d.external_ref for d in found.new] == ["15/2025-Central Tax"]
+    assert found.listed == 1, "only the references named are listed"
+
+
+def test_a_backfill_never_moves_the_watermark_back() -> None:
+    store = with_recorded(synced(), watermark=date(2026, 4, 21))
+    run = started(store)
+    result = FinishCrawl(store, clock=Clock()).finish(
+        FinishRequest(
+            source_key=RECORDED,
+            run_id=run.id.value,
+            listed=3,
+            trigger=CrawlTrigger.BACKFILL,
+            deferred=1,
+            deferred_oldest=date(2025, 1, 2),
+            outcomes=[child("https://example.invalid/old", Outcome.STORED, date(2025, 9, 17))],
+        )
+    )
+    assert (result.watermark, result.deferred, result.stored) == (date(2026, 4, 21), 1, 1)
+    assert store.sources[RECORDED].watermark_date == date(2026, 4, 21)
+    scheduled = started(store)
+    moved = FinishCrawl(store, clock=Clock()).finish(
+        FinishRequest(
+            source_key=RECORDED,
+            run_id=scheduled.id.value,
+            listed=1,
+            deferred_oldest=date(2025, 1, 2),
+        )
+    )
+    assert moved.watermark == date(2025, 1, 2), "the schedule's crawl goes back for the deferred"
+
+
+def test_a_backfill_run_finished_outside_the_schedule_is_recorded_as_a_backfill() -> None:
+    store = with_recorded(synced())
+    run_id = UUID(int=77)
+    FinishCrawl(store, clock=Clock()).finish(
+        FinishRequest(source_key=RECORDED, run_id=run_id, trigger=CrawlTrigger.BACKFILL)
+    )
+    assert store.crawl_runs[CrawlRunId(run_id)].trigger is CrawlTrigger.BACKFILL
+
+
+def test_a_window_reads_references_without_spaces_or_case() -> None:
+    window = ListingWindow(date(2020, 1, 1), date(2020, 12, 31), ("82/2020-Central Tax",))
+    assert window.narrows
+    assert window.admits(date(2020, 11, 10), "82/2020 - central TAX")
+    assert not window.admits(date(2020, 11, 10), "83/2020-Central Tax")
+    assert not window.admits(date(2021, 1, 1), "82/2020-Central Tax"), "after until"
+    assert not window.admits(None, "82/2020-Central Tax"), "undated, with an until"
+    assert ListingWindow(refs=()).admits(None, "anything"), "no window admits everything"
+    assert not ListingWindow().narrows
+    assert ref_key(" 82/2020 -Central  Tax ") == "82/2020-centraltax"
+    with pytest.raises(InvariantViolationError, match="until must not be before since"):
+        ListingWindow(date(2021, 1, 1), date(2020, 1, 1))
+    with pytest.raises(InvariantViolationError, match="at most"):
+        ListingWindow(refs=tuple(str(n) for n in range(MAX_REFS + 1)))
+
+
+def test_settled_watermark_keeps_a_backfill_from_moving_it_back() -> None:
+    ahead, behind = date(2026, 4, 21), date(2025, 1, 2)
+    assert settled_watermark(ahead, behind, trigger=CrawlTrigger.SCHEDULE) == behind
+    assert settled_watermark(ahead, behind, trigger=CrawlTrigger.BACKFILL) == ahead
+    assert settled_watermark(behind, ahead, trigger=CrawlTrigger.BACKFILL) == ahead
+    assert settled_watermark(None, behind, trigger=CrawlTrigger.BACKFILL) == behind
+    assert settled_watermark(ahead, None, trigger=CrawlTrigger.BACKFILL) == ahead
+    assert settled_watermark(ahead, None, trigger=None) is None
+
+
+def test_a_run_keeps_its_trigger_and_workflow_when_it_ends() -> None:
+    run = CrawlRun(
+        id=CrawlRunId.new(),
+        source_key=RECORDED,
+        started_at=NOW,
+        trigger=CrawlTrigger.BACKFILL,
+        workflow_id="pipeline-crawl-recorded_cbic-backfill-1",
+    )
+    finished = run.finish(NOW, CrawlCounts(listed=1))
+    assert (finished.trigger, finished.workflow_id) == (run.trigger, run.workflow_id)
+    with pytest.raises(InvariantViolationError, match="workflow_id"):
+        CrawlRun(id=CrawlRunId.new(), source_key=RECORDED, started_at=NOW, workflow_id="x" * 201)
+
+
+def test_a_backfill_workflow_id_names_its_source_and_request() -> None:
+    assert backfill_workflow_id("cbic_notifications", UUID(int=5)) == (
+        f"pipeline-crawl-cbic_notifications-backfill-{UUID(int=5).hex}"
+    )

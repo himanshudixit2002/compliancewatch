@@ -1,9 +1,9 @@
 """SQLAlchemy rows of the pipeline service; mirrored by the migrations.
 
 Sources, fetched documents, crawl runs, the tasks people work on the documents, their
-classifications and their rule extractions are regulatory data shared by every tenant (the
-``pipeline`` schema is in the global group of infra/scripts/migration_lint.toml), so the tables
-carry no tenant_id and no row-level security.
+classifications, their rule extractions and the retries people ask for are regulatory data
+shared by every tenant (the ``pipeline`` schema is in the global group of
+infra/scripts/migration_lint.toml), so the tables carry no tenant_id and no row-level security.
 """
 
 import uuid
@@ -35,11 +35,12 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from domain_kernel.documents import PARSER_VERSION_PATTERN, DocumentType
 from pipeline.domain.classification import (
     MAX_REASONS,
+    PERSON_CLASSIFIERS,
     RULE_KINDS,
     Relevance,
     TypeConfidence,
 )
-from pipeline.domain.crawl import COUNTS, CrawlStatus
+from pipeline.domain.crawl import COUNTS, MAX_WORKFLOW_ID_CHARS, CrawlStatus, CrawlTrigger
 from pipeline.domain.extraction import (
     MAX_ANSWER_CHARS,
     PROMPT_VERSION_PATTERN,
@@ -50,6 +51,7 @@ from pipeline.domain.raw_documents import (
     MAX_STORAGE_KEY_CHARS,
     DocumentStatus,
 )
+from pipeline.domain.retry import MAX_KEY_CHARS, MAX_RETRY_REASON_CHARS, RetryStage
 from pipeline.domain.sources import (
     ADAPTER_TYPE_PATTERN,
     MAX_ERROR_CHARS,
@@ -61,6 +63,9 @@ from pipeline.domain.tasks import MAX_NOTE_CHARS, MAX_REASON_CHARS, TaskKind, Ta
 DOCUMENT_STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in DocumentStatus)
 DOCUMENT_TYPES: Final[tuple[str, ...]] = tuple(kind.value for kind in DocumentType)
 CRAWL_STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in CrawlStatus)
+CRAWL_TRIGGERS: Final[tuple[str, ...]] = tuple(trigger.value for trigger in CrawlTrigger)
+RETRY_STAGES: Final[tuple[str, ...]] = tuple(stage.value for stage in RetryStage)
+DECIDING_CLASSIFIERS: Final[tuple[str, ...]] = tuple(sorted(PERSON_CLASSIFIERS))
 TASK_KINDS: Final[tuple[str, ...]] = tuple(kind.value for kind in TaskKind)
 TASK_STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in TaskStatus)
 RELEVANCES: Final[tuple[str, ...]] = tuple(relevance.value for relevance in Relevance)
@@ -94,6 +99,11 @@ EXTRACTION_COMMENT: Final = (
 CRAWL_RUN_COMMENT: Final = (
     "One crawl of one source: when it ran, what it found and how it ended. Regulatory data, "
     "no tenant."
+)
+RETRY_COMMENT: Final = (
+    "A person's retry of a stored document: its attempt, the stage its ingest starts again from, "
+    "the type the person gave it, why and by whom, the request's Idempotency-Key and the ingest's "
+    "workflow id. Kept as written (pipeline_document_retry_guard). Regulatory data, no tenant."
 )
 
 
@@ -174,6 +184,7 @@ class RawDocumentRow(Base):
         Index("ix_raw_document_source_published", "source_key", "published_on"),
         Index("ix_raw_document_status_fetched", "status", "fetched_at"),
         Index("ix_raw_document_source_url", "source_key", "source_url"),
+        Index("ix_raw_document_fetched", "fetched_at", "id"),
         {"comment": RAW_DOCUMENT_COMMENT},
     )
 
@@ -216,7 +227,12 @@ class CrawlRunRow(Base):
         ),
         CheckConstraint("(status = 'failed') = (length(error) > 0)", name="ck_crawl_run_error"),
         CheckConstraint(f"length(error) <= {MAX_ERROR_CHARS}", name="ck_crawl_run_error_length"),
+        CheckConstraint(
+            f"trigger IS NULL OR {sql_in_list('trigger', CRAWL_TRIGGERS)}",
+            name="ck_crawl_run_trigger",
+        ),
         Index("ix_crawl_run_source_started", "source_key", "started_at"),
+        Index("ix_crawl_run_started", "started_at", "id"),
         {"comment": CRAWL_RUN_COMMENT},
     )
 
@@ -230,6 +246,8 @@ class CrawlRunRow(Base):
     duplicates: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     failed: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     error: Mapped[str] = mapped_column(Text, server_default="")
+    trigger: Mapped[str | None] = mapped_column(String(16))
+    workflow_id: Mapped[str | None] = mapped_column(String(MAX_WORKFLOW_ID_CHARS))
 
 
 class PipelineTaskRow(Base):
@@ -325,7 +343,7 @@ class DocumentClassificationRow(Base):
         ),
         CheckConstraint("length(classifier) > 0", name="ck_document_classification_classifier"),
         CheckConstraint(
-            "decided_by IS NULL OR classifier = 'triage'",
+            f"decided_by IS NULL OR {sql_in_list('classifier', DECIDING_CLASSIFIERS)}",
             name="ck_document_classification_decided_by",
         ),
         Index("ix_document_classification_task", "task_id"),
@@ -403,3 +421,47 @@ class RuleExtractionRow(Base):
     answer: Mapped[str] = mapped_column(Text, server_default="")
     ontology_version: Mapped[str] = mapped_column(String(40))
     extracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DocumentRetryRow(Base):
+    __tablename__ = "document_retry"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_document_retry"),
+        ForeignKeyConstraint(
+            ["document_id"],
+            ["raw_document.id"],
+            name="fk_document_retry_document_id_raw_document",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("document_id", "attempt", name="uq_document_retry_attempt"),
+        UniqueConstraint("document_id", "idempotency_key", name="uq_document_retry_key"),
+        CheckConstraint("attempt >= 1", name="ck_document_retry_attempt"),
+        CheckConstraint(sql_in_list("stage", RETRY_STAGES), name="ck_document_retry_stage"),
+        CheckConstraint(
+            f"doc_type IS NULL OR {sql_in_list('doc_type', DOCUMENT_TYPES)}",
+            name="ck_document_retry_doc_type",
+        ),
+        CheckConstraint(
+            f"length(reason) BETWEEN 1 AND {MAX_RETRY_REASON_CHARS}",
+            name="ck_document_retry_reason",
+        ),
+        CheckConstraint(
+            f"length(idempotency_key) BETWEEN 8 AND {MAX_KEY_CHARS}",
+            name="ck_document_retry_key",
+        ),
+        CheckConstraint("fingerprint ~ '^[0-9a-f]{64}$'", name="ck_document_retry_fingerprint"),
+        CheckConstraint("length(workflow_id) > 0", name="ck_document_retry_workflow_id"),
+        {"comment": RETRY_COMMENT},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    document_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    attempt: Mapped[int] = mapped_column(Integer)
+    stage: Mapped[str] = mapped_column(String(16))
+    doc_type: Mapped[str | None] = mapped_column(String(16))
+    reason: Mapped[str] = mapped_column(Text)
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    idempotency_key: Mapped[str] = mapped_column(String(MAX_KEY_CHARS))
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    workflow_id: Mapped[str] = mapped_column(String(MAX_WORKFLOW_ID_CHARS))

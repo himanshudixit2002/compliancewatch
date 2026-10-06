@@ -27,7 +27,7 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -660,10 +660,16 @@ class MemoryCrawls:
 class MemoryIngests:
     """An ``IngestStarter`` that keeps what it starts and refuses an id it has seen, as
     Temporal's ALLOW_DUPLICATE_FAILED_ONLY does for a running or completed workflow; ``fail``
-    makes the next start raise it."""
+    makes the next start raise it. A workflow it started runs until ``finish`` ends it (every
+    one: ``finish()``); ``running_ids`` names more that run (a crawl's ingest, an extraction),
+    and ``running_fails`` makes the next ``running`` raise it."""
 
     started: list[IngestStart] = field(default_factory=list)
     fail: Exception | None = None
+    finished: set[str] = field(default_factory=set)
+    running_ids: set[str] = field(default_factory=set)
+    running_fails: Exception | None = None
+    asked: list[frozenset[str]] = field(default_factory=list)
 
     def start(self, start: IngestStart) -> bool:
         if self.fail is not None:
@@ -673,6 +679,19 @@ class MemoryIngests:
             return False
         self.started.append(start)
         return True
+
+    def running(self, workflow_ids: Collection[str]) -> frozenset[str]:
+        if self.running_fails is not None:
+            error, self.running_fails = self.running_fails, None
+            raise error
+        asked = frozenset(workflow_ids)
+        self.asked.append(asked)
+        mine = {start.workflow_id for start in self.started} - self.finished
+        return asked & (mine | self.running_ids)
+
+    def finish(self, *workflow_ids: str) -> None:
+        """The workflows of these ids ended; with none, every one started so far."""
+        self.finished |= set(workflow_ids or (start.workflow_id for start in self.started))
 
 
 class LockRace:
