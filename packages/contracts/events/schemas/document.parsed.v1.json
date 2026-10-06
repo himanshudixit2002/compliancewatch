@@ -2,10 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:compliancewatch:event:document.parsed:v1",
   "title": "document.parsed",
-  "description": "The parser split a classified document into clauses with stable references; clause text is read from the store, not carried here. Producer: pipeline (document parser). Consumers: pipeline (rule extractor), rulebook.",
+  "description": "The pipeline parsed a stored document into clauses with stable references, the first time or with another parser. Clause text is not carried here: read it from the rulebook once the document is registered (GET /v1/rulebook/documents/{document_id}). Producer: pipeline (the ingest's parse). Consumers: none yet; the rulebook once registration moves to events (ADR-018).",
   "type": "object",
-  "x-version": "1.0.0",
-  "x-producer": "pipeline (document parser)",
+  "x-version": "1.1.0",
+  "x-producer": "pipeline (the ingest's parse)",
   "x-tenant-scoped": false,
   "properties": {
     "document_id": {
@@ -20,8 +20,8 @@
     },
     "doc_type": {
       "type": "string",
-      "enum": ["notification", "circular", "press_release", "act_amendment"],
-      "description": "Document type decided by the detector."
+      "enum": ["notification", "circular", "press_release", "act_amendment", "statute"],
+      "description": "Document type: the source's, or the one the uploader gave. A statute (an Act or the Rules under it) is registered and embedded but nothing is extracted from it."
     },
     "title": {
       "type": "string",
@@ -56,7 +56,7 @@
     "parser_version": {
       "type": "string",
       "minLength": 1,
-      "description": "Version of the parser that produced the clauses."
+      "description": "The parser that produced the clauses, as name@version: pdf@1, pdf-tables@1, html@1, html-tables@1, or manual@1 for an analyst's transcript."
     }
   },
   "required": [

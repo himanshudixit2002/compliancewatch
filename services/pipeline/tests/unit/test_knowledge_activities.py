@@ -197,6 +197,8 @@ def test_the_activity_declares_what_a_retry_cannot_fix() -> None:
         "RulebookRejectedError",
         "KnowledgeContractError",
         "UnsupportedDocumentError",
+        "UnparsedDocumentError",
+        "TranscriptInvalidError",
         "RawObjectMissingError",
         "RawObjectCorruptError",
     }

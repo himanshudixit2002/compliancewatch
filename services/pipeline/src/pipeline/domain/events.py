@@ -15,12 +15,13 @@ from domain_kernel._validation import (
     require_instance,
     require_text,
 )
-from domain_kernel.documents import document_id_for
+from domain_kernel.documents import PARSER_VERSION_PATTERN, DocumentType, document_id_for
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import DocumentId, SourceId
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_PARSER_VERSION = re.compile(PARSER_VERSION_PATTERN)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -75,3 +76,36 @@ class DocumentDiscovered(DocumentEvent):
         require_text(self.media_type, "media_type")
         require_aware(self.fetched_at, "fetched_at")
         require_text(self.raw_uri, "raw_uri")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DocumentParsed(DocumentEvent):
+    """The pipeline parsed a stored document into clauses, the first time or with another
+    parser. The clause text is not in the event: it is read from the rulebook once the document
+    is registered (``GET /v1/rulebook/documents/{document_id}``)."""
+
+    topic: ClassVar[str] = "document.parsed"
+    schema_version: ClassVar[str] = "1.1.0"
+
+    doc_type: DocumentType
+    title: str
+    language: str
+    published_at: date | None
+    clause_count: int
+    clause_refs: tuple[str, ...]
+    parser_version: str
+
+    def __post_init__(self) -> None:
+        DocumentEvent.__post_init__(self)
+        require_instance(self.doc_type, DocumentType, "doc_type")
+        require_text(self.title, "title")
+        require_text(self.language, "language")
+        if self.published_at is not None:
+            require_date(self.published_at, "published_at")
+        refs = require_instance(self.clause_refs, tuple, "clause_refs")
+        if not refs or len(set(refs)) != len(refs):
+            raise InvariantViolationError("clause_refs must be unique and at least one")
+        if self.clause_count != len(refs):
+            raise InvariantViolationError("clause_count must count clause_refs")
+        if not _PARSER_VERSION.fullmatch(require_instance(self.parser_version, str, "parser")):
+            raise InvariantViolationError("parser_version must look like 'pdf@1'")

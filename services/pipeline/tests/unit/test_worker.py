@@ -36,8 +36,9 @@ def test_with_knowledge_off_no_prompt_is_read(tmp_path: Path) -> None:
     names = [a.name for a in activities(settings(pipeline_prompts_dir=tmp_path / "missing"))]
     assert "pipeline.propose_relations" in names
     assert "pipeline.embed_clauses" in names
-    assert len(names) == len(set(names)) == 11
+    assert len(names) == len(set(names)) == 12
     assert "pipeline.fetch_and_store" in names
+    assert "pipeline.open_manual_parse" in names
     assert names[-2:] == ["pipeline.list_new_documents", "pipeline.finish_crawl"]
 
 
@@ -46,7 +47,7 @@ def test_with_knowledge_on_the_prompt_must_be_there(tmp_path: Path) -> None:
         activities(
             settings(pipeline_knowledge_enabled=True, pipeline_prompts_dir=tmp_path / "missing")
         )
-    assert len(activities(settings(pipeline_knowledge_enabled=True))) == 11
+    assert len(activities(settings(pipeline_knowledge_enabled=True))) == 12
 
 
 def test_an_enabled_relation_activity_needs_its_stage() -> None:

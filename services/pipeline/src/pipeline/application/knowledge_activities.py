@@ -23,7 +23,13 @@ from temporalio.common import RetryPolicy
 from domain_kernel.documents import clause_id_for
 from domain_kernel.ids import DocumentId, SourceId
 from domain_kernel.knowledge import EntityType, RelationKind
-from pipeline.application.activities import Frozen, ParseRequest, on_thread, parse_request
+from pipeline.application.activities import (
+    Frozen,
+    ParseRequest,
+    hints_for,
+    on_thread,
+    parse_request,
+)
 from pipeline.application.detector import detect
 from pipeline.application.embedding import EmbeddingStage
 from pipeline.application.mentions import MentionInput, MentionStage
@@ -38,6 +44,7 @@ from pipeline.domain.knowledge import (
     StagedRelation,
 )
 from pipeline.domain.ports import DocumentParsers, KnowledgeSink, RawStore, RulebookReader
+from pipeline.domain.repository import UnitOfWorkFactory
 from py_common.logging import get_logger
 from py_common.temporal import ActivityBase
 
@@ -62,7 +69,9 @@ class Registered(Frozen):
 
 
 class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
-    """Store the parsed document in the rulebook; idempotent, so a retry is harmless."""
+    """Store the parsed document in the rulebook; idempotent, so a retry is harmless. It parses
+    the bytes again the way the parse did (``hints_for`` over the record the parse just wrote),
+    so it sends the same clauses and the parser that gave them."""
 
     name: ClassVar[str] = "pipeline.register_document"
     input_type: ClassVar[type[RegisterRequest]] = RegisterRequest
@@ -78,6 +87,8 @@ class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
             "RulebookRejectedError",
             "KnowledgeContractError",
             "UnsupportedDocumentError",
+            "UnparsedDocumentError",
+            "TranscriptInvalidError",
             "RawObjectMissingError",
             "RawObjectCorruptError",
         ],
@@ -90,11 +101,13 @@ class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
         *,
         enabled: bool,
         raw_store: RawStore | None = None,
+        units: UnitOfWorkFactory | None = None,
     ) -> None:
         self._parser = parser
         self._sink = sink
         self._enabled = enabled
         self._raw = raw_store
+        self._units = units
 
     async def run(self, input: RegisterRequest) -> Registered:
         if not self._enabled:
@@ -103,7 +116,8 @@ class RegisterDocument(ActivityBase[RegisterRequest, Registered]):
 
     def _register(self, input: RegisterRequest) -> Registered:
         request = input.parse
-        parsed = parse_request(self._parser, request, self._raw)
+        _, hints = hints_for(request, self._units, self._raw)
+        parsed = parse_request(self._parser, request, self._raw, hints)
         parsed = dataclasses.replace(
             parsed,
             title=request.title or parsed.title,

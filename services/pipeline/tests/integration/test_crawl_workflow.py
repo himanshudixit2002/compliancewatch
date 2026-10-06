@@ -168,9 +168,11 @@ async def test_a_crawl_stores_what_is_new_skips_what_is_known_and_moves_the_wate
     assert result.watermark == date(2026, 4, 21)
     stored = [d for d in pipeline.documents() if d.source_url != known]
     assert [d.external_ref for d in stored] == ["01/2026-Central Tax", "17/2025-Central Tax"]
-    assert all(d.status is DocumentStatus.DISCOVERED for d in stored)
+    assert all(d.status is DocumentStatus.PARSED for d in stored)
+    assert {d.parser_version for d in stored} == {"pdf@1"}, "prose stays with the text layer"
     assert all(pipeline.raw.files[d.storage_key].startswith(b"%PDF") for d in stored)
-    assert len(pipeline.store.events) == 2, "one document.discovered per new document"
+    topics = sorted(event.topic for event in pipeline.store.events)
+    assert topics == ["document.discovered"] * 2 + ["document.parsed"] * 2, "one each per new"
     (run,) = [r for r in pipeline.store.crawl_runs.values() if r.source_key == KEY]
     assert (run.status, run.counts.listed, run.counts.stored) == (CrawlStatus.COMPLETED, 3, 2)
     source = pipeline.store.sources[KEY]

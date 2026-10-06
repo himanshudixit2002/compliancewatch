@@ -23,11 +23,20 @@ import pytest
 from temporalio import workflow
 from temporalio.client import WorkflowHistory
 from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.exceptions import ActivityError
 from temporalio.worker import Replayer
 
-from pipeline.application.activities import DiscoverDocument, DiscoverRequest, FetchAndStore
+from pipeline.application.activities import (
+    DiscoverDocument,
+    DiscoverRequest,
+    FetchAndStore,
+    OpenManualParse,
+    ParseDocument,
+    ParseFailure,
+    ParseRequest,
+)
 from pipeline.workflows import ExtractKnowledgeWorkflow, IngestDocumentWorkflow, IngestRequest
-from pipeline.workflows.ingest_document import IngestResult
+from pipeline.workflows.ingest_document import GIVEN_PATCH, STORE_PATCH, IngestResult
 
 HISTORIES = Path(__file__).resolve().parents[1] / "fixtures" / "histories"
 BEFORE_THE_STORE = [
@@ -133,5 +142,38 @@ class IngestWithoutTheGuard:
 async def test_without_the_guard_the_old_histories_would_not_replay() -> None:
     replayed = await replayer(IngestWithoutTheGuard).replay_workflow(
         history(BEFORE_THE_STORE[0]), raise_on_replay_failure=False
+    )
+    assert isinstance(replayed.replay_failure, workflow.NondeterminismError)
+
+
+@workflow.defn(name="pipeline.ingest_document", sandboxed=False)
+class IngestWithoutTheParseGuard:
+    """The ingest as it would be had a parse failure opened a manual-parse task without
+    ``PARSE_PATCH``."""
+
+    @workflow.run
+    async def run(self, request: IngestRequest) -> IngestResult:
+        assert request.discovered is not None
+        workflow.patched(GIVEN_PATCH)
+        workflow.patched(STORE_PATCH)
+        stored = await FetchAndStore.schedule(request.discovered)
+        try:
+            await ParseDocument.schedule(
+                ParseRequest(document_id=stored.document_id, stored=stored)
+            )
+        except ActivityError:
+            await OpenManualParse.schedule(ParseFailure(document_id=stored.document_id))
+        return IngestResult(
+            document_id=stored.document_id,
+            sha256=stored.sha256,
+            url=stored.url,
+            clause_count=0,
+            clause_refs=[],
+        )
+
+
+async def test_without_the_parse_guard_a_failed_parse_would_not_replay() -> None:
+    replayed = await replayer(IngestWithoutTheParseGuard).replay_workflow(
+        history(UNPARSED), raise_on_replay_failure=False
     )
     assert isinstance(replayed.replay_failure, workflow.NondeterminismError)

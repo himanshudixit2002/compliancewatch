@@ -7,10 +7,11 @@ import pytest
 
 from cw_contracts.events import TOPICS, EventEnvelopeV1
 from cw_contracts.events.document_discovered_v1 import DocumentDiscoveredV1
-from domain_kernel.documents import document_id_for
+from cw_contracts.events.document_parsed_v1 import DocumentParsedV1
+from domain_kernel.documents import DocumentType, document_id_for
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import DocumentId, SourceId, TenantId
-from pipeline.domain.events import DocumentDiscovered
+from pipeline.domain.events import DocumentDiscovered, DocumentParsed
 from py_common.events import decode, encode, to_message
 
 SHA256 = hashlib.sha256(b"%PDF-1.7 notification 17/2025").hexdigest()
@@ -59,3 +60,53 @@ def test_a_document_event_is_keyed_by_its_source_and_has_no_tenant() -> None:
         event(tenant_id=TenantId.new())
     with pytest.raises(InvariantViolationError, match="first half of sha256"):
         event(document_id=DocumentId.new())
+
+
+def parsed(**overrides: object) -> DocumentParsed:
+    values: dict[str, object] = {
+        "source_id": SOURCE,
+        "document_id": document_id_for(SHA256),
+        "doc_type": DocumentType.NOTIFICATION,
+        "title": "Seeks to extend the due date for FORM GSTR-3B",
+        "language": "en",
+        "published_at": date(2025, 9, 18),
+        "clause_count": 3,
+        "clause_refs": ("en.p1", "en.p2", "en.p3"),
+        "parser_version": "pdf-tables@1",
+    }
+    values.update(overrides)
+    return DocumentParsed(**values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {},
+        {
+            "doc_type": DocumentType.STATUTE,
+            "published_at": None,
+            "clause_count": 1,
+            "clause_refs": ("hi.p1",),
+            "parser_version": "manual@1",
+        },
+    ],
+    ids=["notification", "transcribed-statute"],
+)
+def test_document_parsed_matches_its_schema(overrides: dict[str, object]) -> None:
+    message = decode(encode(to_message(parsed(**overrides))))
+    EventEnvelopeV1.model_validate(message.model_dump(mode="json"))
+    spec = TOPICS[message.topic]
+    assert (message.topic, message.schema_version) == ("document.parsed", spec.version)
+    assert spec.version == "1.1.0"
+    assert message.tenant_id is None
+    payload = DocumentParsedV1.model_validate(message.payload)
+    assert payload.clause_count == len(payload.clause_refs)
+
+
+def test_a_parsed_event_counts_its_unique_clauses() -> None:
+    with pytest.raises(InvariantViolationError, match="count"):
+        parsed(clause_count=2)
+    with pytest.raises(InvariantViolationError, match="unique"):
+        parsed(clause_count=2, clause_refs=("en.p1", "en.p1"))
+    with pytest.raises(InvariantViolationError, match="parser_version"):
+        parsed(parser_version="pdf")

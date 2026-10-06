@@ -35,6 +35,7 @@ from pipeline.application.activities import (
     DiscoverDocument,
     FetchAndStore,
     FetchDocument,
+    OpenManualParse,
     ParseDocument,
 )
 from pipeline.application.crawl import FinishCrawl, ListNewDocuments, ScheduleCrawls
@@ -146,8 +147,9 @@ def activities(
         DiscoverDocument(catalog),
         FetchDocument(catalog),
         FetchAndStore(store),
-        ParseDocument(parsers, raw),
-        RegisterDocument(parsers, rulebook, enabled=enabled, raw_store=raw),
+        ParseDocument(parsers, raw, units=records),
+        OpenManualParse(records),
+        RegisterDocument(parsers, rulebook, enabled=enabled, raw_store=raw, units=records),
         EmbedClauses(embedding, enabled=enabled),
         ExtractMentions(rulebook, rulebook, enabled=enabled),
         ProposeRelations(rulebook, relations, enabled=enabled),

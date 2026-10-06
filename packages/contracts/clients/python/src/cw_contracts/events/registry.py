@@ -58,7 +58,7 @@ TOPICS: Mapping[str, TopicSpec] = MappingProxyType(
         ),
         "document.parsed": TopicSpec(
             topic="document.parsed",
-            version="1.0.0",
+            version="1.1.0",
             model=DocumentParsedV1,
             tenant_scoped=False,
             schema_file="document.parsed.v1.json",
