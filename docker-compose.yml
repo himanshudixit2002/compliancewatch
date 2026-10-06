@@ -13,11 +13,43 @@
 #   grafana      --profile observability http://localhost:3030 (anonymous admin in dev; dashboard "ComplianceWatch services")
 #   fake-llm     --profile llm           http://localhost:8090 (make dev-llm): llm-gateway image, fake provider
 #   unleash      --profile flags         http://localhost:4242 (make dev-flags): feature flags for CW_FLAGS_PROVIDER=unleash
+#   mvp-*        --profile mvp           the one deployable from its image (make product-image): the
+#                                        release step, the app on 8000 and 8080, the worker's health on 8081
 #
 # Host ports and credentials come from .env (copy .env.example). Every ${VAR:-default} has a
 # default so `docker compose config` validates without a .env file.
 
 name: compliancewatch
+
+# The product's settings (docs/onboarding/product.md), as make product passes them to the local
+# processes, here for the image's containers on this compose network: header auth, the services
+# connecting as cw_app (make product-role) so row-level security applies, the worker's Kafka and
+# Temporal switches, the reminder sweep, recompute, fan-out, the rule events and the bulk change
+# card on, rule publishing with the placeholder tokens (not secrets; values in .env win), the
+# static GSTIN lookup, and the notification sink recording into var/product/sink.jsonl, the file
+# make product-check reads. The repo's .env is not passed: its URLs name localhost.
+x-mvp-env: &mvp-env
+  CW_ENV: local
+  CW_AUTH_MODE: header
+  CW_DATABASE_URL: postgresql+psycopg://${PRODUCT_DB_USER:-cw_app}:${PRODUCT_DB_PASSWORD:-cw_app}@postgres:5432/${POSTGRES_DB:-compliancewatch}
+  CW_KAFKA_BOOTSTRAP: redpanda:9092
+  CW_TEMPORAL_ADDRESS: temporal:7233
+  CW_WORKER_KAFKA_ENABLED: "true"
+  CW_WORKER_TEMPORAL_ENABLED: "true"
+  CW_OBLIGATION_SWEEP_ENABLED: "true"
+  CW_APPLICABILITY_RECOMPUTE_ENABLED: "true"
+  CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS: "5"
+  CW_APPLICABILITY_FANOUT_ENABLED: "true"
+  CW_OBLIGATION_RULE_EVENTS_ENABLED: "true"
+  CW_NOTIFICATION_BULK_ENABLED: "true"
+  CW_RULEBOOK_PUBLISH_ENABLED: "true"
+  CW_RULEBOOK_WRITE_TOKEN: ${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}
+  CW_RULEBOOK_REVIEW_TOKEN: ${CW_RULEBOOK_REVIEW_TOKEN:-local-review-token}
+  CW_PROFILE_GSTIN_LOOKUP: static
+  CW_NOTIFICATION_CHANNELS: sink
+  CW_NOTIFICATION_SINK_PATH: var/product/sink.jsonl
+  CW_NOTIFICATION_BATCH_WINDOW_SECONDS: "5"
+  CW_WEB_BASE_URL: http://localhost:${WEB_PORT:-3000}
 
 services:
   postgres:
@@ -289,6 +321,96 @@ services:
       - "${UNLEASH_PORT:-4242}:4242"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4242/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+
+  # The one deployable (ADR-013) from its image, composition/mvp/Dockerfile: make product-image
+  # builds it, creates cw_app, starts these and loads the seed calendar; make product-image-down
+  # removes them and leaves the rest of the stack running. The containers run as CW_MVP_USER
+  # (make passes your uid and gid), so the sink file they write in var/product is yours.
+  mvp-release:
+    # The release step a deploy runs once per version: every service's migrations as the
+    # database owner, then the topics of composition/mvp/topics.toml. Idempotent.
+    image: ${CW_MVP_IMAGE:-compliancewatch-mvp:local}
+    build:
+      context: .
+      dockerfile: composition/mvp/Dockerfile
+    profiles: ["mvp"]
+    user: ${CW_MVP_USER:-10001:10001}
+    command: ["cw-mvp", "release"]
+    environment:
+      <<: *mvp-env
+      CW_MIGRATION_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-cw}:${POSTGRES_PASSWORD:-cw}@postgres:5432/${POSTGRES_DB:-compliancewatch}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+
+  mvp-app:
+    # cw-mvp serve: the public listener on 8000 and the internal one on 8080, on this machine only.
+    image: ${CW_MVP_IMAGE:-compliancewatch-mvp:local}
+    profiles: ["mvp"]
+    user: ${CW_MVP_USER:-10001:10001}
+    command: ["cw-mvp", "serve"]
+    environment: *mvp-env
+    volumes:
+      - ./var/product:/app/var/product
+    ports:
+      - "127.0.0.1:${CW_MVP_PUBLIC_PORT:-8000}:8000"
+      - "127.0.0.1:${CW_MVP_INTERNAL_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      mvp-release:
+        condition: service_completed_successfully
+    healthcheck:
+      # The image has no curl; python is already there. /ready reads every service's checks.
+      test:
+        - CMD
+        - python
+        - "-c"
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=4)
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+
+  mvp-worker:
+    # cw-mvp worker: consumers, relays, periodic jobs and Temporal workers, calling the app's
+    # internal listener; its /health and /loops on 8081.
+    image: ${CW_MVP_IMAGE:-compliancewatch-mvp:local}
+    profiles: ["mvp"]
+    user: ${CW_MVP_USER:-10001:10001}
+    command: ["cw-mvp", "worker", "--internal-url", "http://mvp-app:8080"]
+    environment: *mvp-env
+    volumes:
+      - ./var/product:/app/var/product
+    ports:
+      - "127.0.0.1:${PRODUCT_WORKER_PORT:-8081}:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      mvp-release:
+        condition: service_completed_successfully
+      mvp-app:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - "-c"
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=4)
       interval: 5s
       timeout: 5s
       retries: 24
