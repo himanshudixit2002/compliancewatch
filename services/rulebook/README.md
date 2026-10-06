@@ -235,9 +235,9 @@ a new round. Every step is one transaction that locks the version, checks the mo
 kernel's transition table and appends a row to `rule_version_decision`; the kernel's
 `InvalidTransitionError` is a 409. A version drafted from a rule candidate that was rejected is
 closed: no step cites it, relates from it, submits, approves or publishes it (409
-`rulebook-rule-version-closed`), and it stays a draft. Citing and approving a relation lock the version the same way
-before checking that it is a draft, so neither slips in beside a submission. Days are days in
-India: "today" is the date in Asia/Kolkata when the step runs.
+`rulebook-rule-version-closed`), and it stays a draft. Citing and approving a relation lock the
+version the same way before checking that it is a draft, so neither slips in beside a
+submission. Days are days in India: "today" is the date in Asia/Kolkata when the step runs.
 
 Publishing checks, in order (`rulebook.domain.publication.plan_publication`):
 
@@ -369,9 +369,9 @@ Who acts is the user a verified token names, or in header and dual mode the body
 with the review token, as on the publish routes. The publish routes still work on a version that
 has a task: a version they approve or publish outside the task leaves the task waiting, and a
 rejection closes it. The seed command leaves alone a candidate's draft and a version an analyst
-edited through its task, and updates its own draft beside a candidate's (see Seed calendar). `GET .../review/stats` counts
-the decided candidates and the acceptance rate, approved without an edit over decided, ADR-006's
-measure of the extraction.
+edited through its task, and updates its own draft beside a candidate's (see Seed calendar).
+`GET .../review/stats` counts the decided candidates and the acceptance rate, approved without an
+edit over decided, ADR-006's measure of the extraction.
 
 ## Candidate intake
 
@@ -390,8 +390,9 @@ candidate review task (`IngestRuleCandidate`, `rulebook.application.intake`):
 - the regulator is kept in lower case (the pipeline sends the source registry's `CBIC`);
 - the suggested rule key is the payload's when a rule has that key, else the one rule key the
   document's relation candidates name when they name exactly one (an analyst's rejected ones left
-  out), else the payload's as a key for a new rule. The pipeline's key is a `<form>_<cadence>` heuristic, never a lookup, and
-  `GET .../review/tasks/{id}` says whether a rule has it (`suggested_rule_known`).
+  out), else the payload's as a key for a new rule. The pipeline's key is a `<form>_<cadence>`
+  heuristic, never a lookup, and `GET .../review/tasks/{id}` says whether a rule has it
+  (`suggested_rule_known`).
 
 Nothing is drafted by the intake: an analyst drafts, as above. Off, no group reads the topic,
 which keeps the candidates a month; turned on, the group reads them from the start. `make product`
