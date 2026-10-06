@@ -121,6 +121,8 @@ describe("StatusPanel", () => {
   });
 
   it("lets a redirect from the server through to the framework", async () => {
+    // React reports the error the boundary caught; the boundary is the test's, so is the report.
+    const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const redirect = Object.assign(new Error("NEXT_REDIRECT"), {
       digest: "NEXT_REDIRECT;push;/sign-in",
     });
@@ -155,5 +157,6 @@ describe("StatusPanel", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Start work" }));
     expect(await screen.findByText("Example boundary")).toBeDefined();
     expect(caught).toEqual([redirect]);
+    reported.mockRestore();
   });
 });
