@@ -12,8 +12,9 @@ import pytest
 
 import ontology as ontology_package
 from domain_kernel.errors import InvariantViolationError
-from domain_kernel.ids import DocumentId, RuleVersionId, UserId
-from domain_kernel.ontology import Ontology
+from domain_kernel.ids import DocumentId, RuleId, RuleVersionId, UserId
+from domain_kernel.ontology import AttributeLevel, Ontology
+from domain_kernel.status import RuleVersionStatus
 from rulebook.domain.drafting import DraftEdit, changed_paths, described_paths
 from rulebook.domain.errors import (
     CandidateAlreadyDraftedError,
@@ -37,7 +38,10 @@ from rulebook.domain.intake import (
     draft_content,
     drafted_content,
     suggest_high_impact,
+    version_closed,
 )
+from rulebook.domain.rule_versions import RuleVersionRecord
+from rulebook.domain.seed import SeedStatus
 
 EXAMPLES = (
     Path(__file__).resolve().parents[4]
@@ -500,6 +504,47 @@ def test_a_candidate_is_drafted_once_then_approved_or_rejected() -> None:
 def test_a_candidate_keeps_its_state_consistent(overrides: dict[str, Any]) -> None:
     with pytest.raises(InvariantViolationError):
         candidate(**overrides)
+
+
+def draft_of(
+    candidate_id: UUID | None, *, published_at: datetime | None = None
+) -> RuleVersionRecord:
+    """A version of an example rule, drafted from ``candidate_id`` (a seed draft when None)."""
+    return RuleVersionRecord(
+        rule_version_id=RuleVersionId.new(),
+        rule_id=RuleId.new(),
+        rule_key="example_monthly",
+        regulator="cbic",
+        level=AttributeLevel.REGISTRATION,
+        version=2,
+        status=RuleVersionStatus.DRAFT if published_at is None else RuleVersionStatus.PUBLISHED,
+        title="Example draft",
+        summary="",
+        specification={"all_of": []},
+        obligation_template={},
+        recurrence=None,
+        effective_from=date(2000, 2, 1),
+        effective_to=None,
+        source={},
+        seed_status=SeedStatus.NEEDS_REVIEW,
+        todo=(),
+        published_at=published_at,
+        candidate_id=candidate_id,
+    )
+
+
+def test_only_the_unpublished_draft_of_a_rejected_candidate_is_closed() -> None:
+    drafted = candidate().drafted(RuleVersionId.new())
+    rejected = drafted.rejected(RuleRejectReason.WRONG_EXTRACTION, by=ANALYST, at=NOW)
+    draft = draft_of(drafted.candidate_id)
+    assert version_closed(draft, rejected)
+    assert not version_closed(draft, drafted), "a drafted candidate's draft moves on"
+    assert not version_closed(draft, drafted.approved(by=ANALYST, at=NOW))
+    assert not version_closed(draft, None)
+    assert not version_closed(draft_of(None), rejected), "a seed draft names no candidate"
+    assert not version_closed(draft_of(UUID(int=99)), rejected), "another candidate's draft"
+    published = draft_of(drafted.candidate_id, published_at=NOW)
+    assert not version_closed(published, rejected), "a version published before it stands"
 
 
 def test_the_queue_summarises_a_candidate() -> None:
