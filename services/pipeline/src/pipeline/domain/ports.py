@@ -254,8 +254,10 @@ class IngestStart:
     """An ingest of a stored document to start (``pipeline.ingest_document`` with
     ``IngestRequest.stored``): the workflow's id; the document as its record holds it, under the
     source it is stored for (its id and regulator) and where the raw store keeps it; whether
-    those bytes were stored before; the analyst's transcript to parse it from, if any; and
-    whether the knowledge steps run."""
+    those bytes were stored before; the analyst's transcript to parse it from, if any; whether
+    the knowledge steps run; whether the detector reads the document again (``reclassify``); and
+    whether its id is used once, ever (``once``: a retry's attempt, whose failure a new attempt
+    retries, so a request sent again never starts a second run of it)."""
 
     workflow_id: str
     record: RawDocumentRecord
@@ -266,6 +268,7 @@ class IngestStart:
     transcript_key: str = ""
     knowledge: bool = False
     reclassify: bool = False
+    once: bool = False
 
 
 class IngestStarter(Protocol):
@@ -273,8 +276,9 @@ class IngestStarter(Protocol):
     retry's), and says which ingests run."""
 
     def start(self, start: IngestStart) -> bool:
-        """Start the workflow; False when a workflow with its id runs or has completed (one
-        that failed may run again). ``IngestUnavailableError`` when Temporal does not answer."""
+        """Start the workflow; False when a workflow with its id runs or has completed, and,
+        for a start that uses its id ``once``, whatever became of it (otherwise one that failed
+        may run again). ``IngestUnavailableError`` when Temporal does not answer."""
         ...
 
     def running(self, workflow_ids: Collection[str]) -> frozenset[str]:

@@ -2,6 +2,7 @@
 checks them, and the Temporal starter of the crawl."""
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -251,6 +252,10 @@ def test_an_ingest_of_a_stored_document_starts_with_its_request() -> None:
     )
     assert options["id_reuse_policy"] is WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY
     assert options["execution_timeout"] == INGEST_TIMEOUT
+    assert ingests.start(replace(start, workflow_id="pipeline-retry-1-1", once=True)) is True
+    assert client.calls[-1][2]["id_reuse_policy"] is WorkflowIDReusePolicy.REJECT_DUPLICATE, (
+        "a retry's attempt never runs twice"
+    )
     taken = WorkflowAlreadyStartedError(start.workflow_id, INGEST_WORKFLOW)
     refused = TemporalIngests(
         Settings(_env_file=None, service_name="pipeline"),

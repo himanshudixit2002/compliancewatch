@@ -430,6 +430,36 @@ def test_a_retry_temporal_does_not_start_is_started_by_the_same_request(ops: Ops
     assert again.headers["Idempotent-Replayed"] == "true"
 
 
+def test_a_replayed_retry_never_runs_an_ingest_that_failed_again(ops: Ops) -> None:
+    """The fake starter keeps Temporal's policies: an upload's failed ingest may run again under
+    its id, but a retry's attempt is used once, so the same request sent after its ingest failed
+    replays the attempt and starts nothing; a new request is a new attempt."""
+    document_id = ops.upload(NOTIFICATION)["document_id"]
+    ops.classify(document_id)
+    (upload,) = ops.ingests.started
+    assert not ops.ingests.start(upload), "the upload's ingest runs"
+    ops.ingests.fail_runs(upload.workflow_id)
+    assert ops.ingests.start(upload), "a failed ingest of an upload may run again"
+    ops.ingests.finish(upload.workflow_id)
+    assert not ops.ingests.start(upload), "a completed one may not"
+
+    first = ops.retry(document_id, "example-key-13")
+    assert first.status_code == 202, first.text
+    workflow_id = first.json()["workflow_id"]
+    assert first.json()["started"] is True
+    assert ops.ingests.started[-1].once, "a retry's attempt uses its id once"
+    ops.ingests.fail_runs(workflow_id)
+    again = ops.retry(document_id, "example-key-13")
+    assert again.status_code == 202, again.text
+    assert again.headers["Idempotent-Replayed"] == "true"
+    assert (again.json()["retry"]["attempt"], again.json()["started"]) == (1, False)
+    assert [s.workflow_id for s in ops.ingests.started].count(workflow_id) == 1
+    assert len(ops.audit("pipeline.document.retry")) == 1
+    second = ops.retry(document_id, "example-key-14")
+    assert second.status_code == 202, second.text
+    assert (second.json()["retry"]["attempt"], second.json()["started"]) == (2, True)
+
+
 def test_a_held_document_and_nothing_to_extract_are_refused(ops: Ops) -> None:
     circular = ops.upload(CIRCULAR, title="Circular No. 3/2000-GST")["document_id"]
     assert ops.classify(circular) == "triage"

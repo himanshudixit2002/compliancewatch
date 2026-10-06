@@ -13,9 +13,11 @@ documents, a person's retry of a stored document, and the outbox's dead rows wit
   In one transaction, with the document's row locked, it records the attempt, and with a
   person's type the document's classification (``retry``), status and document.classified, and
   writes its ``pipeline.document.retry`` audit row; then, with the transaction closed, it starts
-  the ingest ``pipeline-retry-<document>-<attempt>``. The same request again under its
-  Idempotency-Key replays its attempt, and starts its ingest if it did not start; the same key
-  with another body is refused.
+  the ingest ``pipeline-retry-<document>-<attempt>``, whose id is used once (``IngestStart.once``:
+  Temporal's ``REJECT_DUPLICATE``). The same request again under its Idempotency-Key replays its
+  attempt, and starts its ingest only if it never started: an ingest of the attempt that failed
+  or timed out is not run again under the same attempt and audit row (a new request, with a new
+  key, is a new attempt). The same key with another body is refused.
 - ``ListDeadEvents`` and ``RequeueEvent``: the outbox's dead rows, the newest dead first, and a
   dead row put back to pending (attempts reset, due at once) with its ``pipeline.outbox.requeue``
   audit row, in one transaction. A row that is not dead is answered as it stands, unchanged.
@@ -419,8 +421,8 @@ class RetryDocument:
         return unit.documents.get(record.document_id) or record
 
     def _replay(self, retry: DocumentRetry) -> RetryOutcome:
-        """A retry recorded before under this key: its ingest, started now only if it did not
-        start."""
+        """A retry recorded before under this key: its ingest, started now only if it never
+        started (the attempt's id is used once, whatever became of its run)."""
         with self._units() as unit:
             record = unit.documents.get(retry.document_id)
         if record is None:
@@ -449,6 +451,7 @@ class RetryDocument:
                 duplicate=True,
                 knowledge=self._knowledge and bool(regulator),
                 reclassify=reclassify,
+                once=True,
             )
         )
 

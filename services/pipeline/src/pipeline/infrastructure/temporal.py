@@ -7,9 +7,11 @@ start, running or finished, is refused and answers False) and the crawl's execut
 (``schedule.CRAWL_TIMEOUT``). ``TemporalIngests.start`` starts ``pipeline.ingest_document`` of a
 stored document (an upload's, a manual parse's resolution's) the same way, with the policy
 ``ALLOW_DUPLICATE_FAILED_ONLY`` (a failed ingest may run again under its id) and the ingest's
-timeout (``schedule.INGEST_TIMEOUT``). The workflows are named, not imported, and their inputs are
-built here in the shape of ``CrawlRequest`` and ``IngestRequest``, since infrastructure imports no
-application code; tests check the shapes against those models.
+timeout (``schedule.INGEST_TIMEOUT``); a start that uses its id once (``IngestStart.once``: a
+retry's attempt) with ``REJECT_DUPLICATE``, so a retry sent again never runs its attempt twice.
+The workflows are named, not imported, and their inputs are built here in the shape of
+``CrawlRequest`` and ``IngestRequest``, since infrastructure imports no application code; tests
+check the shapes against those models.
 
 ``TemporalIngests.running`` describes each workflow id it is given and names those whose
 workflow runs, so a retry refuses to start while an ingest of its document runs; an id Temporal
@@ -89,6 +91,14 @@ def crawl_outcome(workflow_id: str, result: Mapping[str, Any]) -> CrawlOutcome:
         deferred=count("deferred"),
         error=str(result.get("error", "") or ""),
     )
+
+
+def ingest_policy(start: IngestStart) -> WorkflowIDReusePolicy:
+    """``REJECT_DUPLICATE`` for an id used once (a retry's attempt), else
+    ``ALLOW_DUPLICATE_FAILED_ONLY``: a failed ingest may run again under its id."""
+    if start.once:
+        return WorkflowIDReusePolicy.REJECT_DUPLICATE
+    return WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY
 
 
 def ingest_payload(start: IngestStart) -> dict[str, object]:
@@ -252,7 +262,7 @@ class TemporalIngests(_TemporalStarter):
             INGEST_WORKFLOW,
             ingest_payload(start),
             start.workflow_id,
-            policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+            policy=ingest_policy(start),
             timeout=INGEST_TIMEOUT,
             unavailable=IngestUnavailableError,
             what="the ingest",

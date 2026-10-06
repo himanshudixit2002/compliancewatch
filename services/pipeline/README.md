@@ -503,8 +503,10 @@ document set aside as irrelevant or whose triage was dismissed: a typed re-uploa
 bytes is a duplicate and changes nothing. The attempt, the classification and the audit row are
 written in one transaction with the document's row locked; the ingest starts once it closed. The
 same request again under its `Idempotency-Key` answers its attempt (`Idempotent-Replayed: true`)
-and starts its ingest only if it did not start (503 when Temporal did not answer: send it again);
-the key with another body is a 422, a request without one a 428. A retry is refused with 409
+and starts its ingest only if it never started (503 when Temporal did not answer: send it again).
+The attempt's workflow id is used once (`REJECT_DUPLICATE`), so an ingest of it that failed or
+timed out is not run again under the same attempt and audit row: a new request, with a new key,
+is a new attempt. The key with another body is a 422, a request without one a 428. A retry is refused with 409
 `pipeline-ingest-running` while an ingest of the document runs (its earlier retries', its
 crawl's, its tasks' resolutions' and its rule extraction's, the ids that follow from the
 document; an upload's ingest has an id of its own that the check does not see), and with 409
