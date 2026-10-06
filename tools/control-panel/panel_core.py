@@ -1,6 +1,7 @@
-"""The control panel's logic, kept apart from the window so it runs and is tested without a display.
+"""The control app's logic, kept apart from its window so it runs and is tested without one.
 
-``control_panel.py`` draws the window; everything it shows or runs comes from here:
+``panel_server.py`` serves ComplianceWatch Control's window and API; everything it shows or runs
+comes from here:
 
 - the checkout it controls (``CW_CONTROL_PANEL_REPO``, else the repo this file sits in) and the
   environment every program gets (a Finder-launched app has a bare PATH);
@@ -13,9 +14,7 @@
   every plan;
 - the runner that streams a plan's output, stops a step that overruns its time and cancels its
   process group;
-- what keeps the window responsive: when a wrapped label re-wraps, one probe of each kind at a
-  time, hard timeouts on every program it reads from, and the watch that logs a stalled event
-  loop.
+- one probe of each kind at a time, and hard timeouts on every program it reads from.
 
 Every program runs as an argument list, never through a shell.
 """
@@ -32,11 +31,8 @@ import select
 import shlex
 import signal
 import subprocess
-import sys
-import tempfile
 import threading
 import time
-import traceback
 import urllib.parse
 import urllib.request
 from collections import defaultdict
@@ -45,7 +41,6 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import FrameType
 from typing import Any, Final, Literal, Protocol
 
 # ---- the checkout and the environment ---------------------------------------------------------
@@ -849,9 +844,14 @@ _DENIED_PREFIXES: Final = ("Code Helper", "Cursor Helper", "Electron", "Visual S
 # Claude Code keeps its worktrees and state in the checkout: what runs there is not the checkout's
 _EXCLUDED_DIRS: Final = ("/.claude/",)
 _PNPM_SCRIPTS: Final = frozenset({"pnpm", "pnpm.cjs", "pnpm.mjs", "pnpm.js"})
-PANEL_MARKER: Final = "control-panel/control_panel.py"
-"""A control panel window's command line holds this, run from a checkout (tools/control-panel)
-or from ComplianceWatch.app's own copy (Contents/Resources/control-panel)."""
+PANEL_MARKERS: Final = ("control-panel/control_panel.py", "control-panel/panel_server.py")
+"""A control window's command line holds one of these: ComplianceWatch Control's helper, or the
+retired tkinter panel, which an app installed before it was retired still runs; from a checkout
+(tools/control-panel) or from ComplianceWatch.app's own copy (Contents/Resources/control-panel)."""
+
+
+def is_control_panel(command: str) -> bool:
+    return any(marker in command for marker in PANEL_MARKERS)
 
 
 def _under(path: str, repo: str) -> bool:
@@ -881,12 +881,29 @@ def _node_script_in(parts: Sequence[str], cwd: str, repo: str) -> bool:
     return _under(path, repo) or (Path(script).name in _PNPM_SCRIPTS and _under(cwd, repo))
 
 
+_TOOL_SERVERS: Final = re.compile(
+    r"(?:^|[\s/])(?:ruff\s+server|ruff-lsp|pylsp|pyls|pyright(?:-langserver)?|"
+    r"basedpyright(?:-langserver)?|jedi-language-server|dmypy|mypy\.dmypy|tsserver(?:\.js)?|"
+    r"typescript-language-server|vtsls|vscode-eslint-language-server|eslintServer(?:\.js)?|"
+    r"eslint_d|tailwindcss-language-server|vscode-json-language-server|"
+    r"yaml-language-server)(?:\s|$)"
+)
+"""Language servers and editor helpers: an editor starts them for the folder it has open, and
+they are never the checkout's to stop."""
+
+
+def is_tool_server(command: str) -> bool:
+    return _TOOL_SERVERS.search(command) is not None
+
+
 def is_project_root(name: str, command: str, cwd: str, repo: str) -> bool:
     """A process of the checkout in its own right, not only as the child of one: make, uv run,
     pnpm, the repo's Python or a Node script of the checkout, running in the checkout or naming a
-    path in it. Shells, agents and the tools they fetch (uvx, uv tool), editors and Colima never
-    are, nor is anything in a worktree under .claude/."""
+    path in it. Shells, agents and the tools they fetch (uvx, uv tool), editors, their language
+    servers and Colima never are, nor is anything in a worktree under .claude/."""
     if name in DENIED_NAMES or name.startswith(_DENIED_PREFIXES):
+        return False
+    if is_tool_server(command):
         return False
     parts = command.split()
     first = Path(parts[0]).name if parts else ""
@@ -928,7 +945,8 @@ def project_pids(
             if child in found or child not in names:
                 continue
             name, cwd = names[child]
-            if name in DENIED_NAMES or not _under(cwd, where):
+            command = procs[child].command if child in procs else ""
+            if name in DENIED_NAMES or is_tool_server(command) or not _under(cwd, where):
                 continue
             found.add(child)
             queue.append(child)
@@ -942,6 +960,39 @@ def ancestors(pid: int, procs: Mapping[int, Proc]) -> list[int]:
         chain.append(current.ppid)
         current = procs.get(current.ppid)
     return chain
+
+
+_EDITORS: Final = re.compile(
+    r"Visual Studio Code|Code Helper|/Code\.app/|Cursor Helper|/Cursor\.app/|Electron|"
+    r"/Zed\.app/|JetBrains|PyCharm|IntelliJ|WebStorm|Sublime Text|(?:^|/)(?:n?vim|emacs)(?:\s|$)"
+)
+_AGENTS: Final = re.compile(
+    r"(^|/)claude(\s|$)|Claude\.app|claude-code|/\.claude/|(^|/)(codex|aider)(\s|$)", re.I
+)
+
+
+def guard_reason(pid: int, procs: Mapping[int, Proc], self_pid: int) -> str:
+    """Who runs a process of the checkout when it is not the person's own: ``Claude Code`` (or
+    another agent, its shells included, such as ``bash -c "cd <repo> && make check"``) or ``an
+    editor`` among its ancestors; ``""`` otherwise, and for what this window started."""
+    for parent in ancestors(pid, procs):
+        if parent == self_pid:
+            return ""
+        command = procs[parent].command if parent in procs else ""
+        if _AGENTS.search(command):
+            return "Claude Code"
+        if _EDITORS.search(command):
+            return "an editor"
+    return ""
+
+
+def split_guarded(
+    found: Collection[int], procs: Mapping[int, Proc], self_pid: int
+) -> tuple[set[int], dict[int, str]]:
+    """The checkout's processes this app may stop, and those an editor or an agent runs, with
+    who runs each (:func:`guard_reason`)."""
+    guarded = {pid: who for pid in found if (who := guard_reason(pid, procs, self_pid))}
+    return set(found) - guarded.keys(), guarded
 
 
 def descendants(pid: int, procs: Mapping[int, Proc]) -> list[int]:
@@ -960,7 +1011,7 @@ def descendants(pid: int, procs: Mapping[int, Proc]) -> list[int]:
 
 def control_panels(procs: Mapping[int, Proc]) -> set[int]:
     """Every control panel window, this one and any other."""
-    return {pid for pid, proc in procs.items() if PANEL_MARKER in proc.command}
+    return {pid for pid, proc in procs.items() if is_control_panel(proc.command)}
 
 
 def short_command(command: str, repo: Path, limit: int = 90) -> str:
@@ -988,16 +1039,23 @@ class ProcessSnapshot:
     self_pid: int
     taken_at: float
     error: str = ""
+    guarded: frozenset[int] = frozenset()
+    """Processes in the checkout that an editor, Claude Code or another agent runs: never
+    stopped from here, only named, as another session's (:func:`guard_reason`)."""
 
     def listener_on(self, port: int) -> Listener | None:
         return next((item for item in self.listeners if item.port == port), None)
 
     def foreign(self) -> list[int]:
-        """Project processes this panel did not start, and no pid file of make accounts for."""
+        """Project processes this panel did not start and no pid file of make accounts for, and
+        what editors and agents run in the checkout."""
         return sorted(
-            pid
-            for pid in self.project
-            if self.origins.get(pid, "").startswith(("other", "control panel"))
+            {
+                pid
+                for pid in self.project
+                if self.origins.get(pid, "").startswith(("other", "control panel"))
+            }
+            | set(self.guarded)
         )
 
     def foreign_groups(self) -> list[list[Proc]]:
@@ -1019,7 +1077,7 @@ def describe_group(members: Sequence[Proc], repo: Path) -> str:
     pids = {proc.pid for proc in members}
     top = next((p for p in members if p.ppid not in pids), members[0])
     maker = next((p for p in members if Path(p.command.split(" ", 1)[0]).name == "make"), top)
-    if PANEL_MARKER in top.command:
+    if is_control_panel(top.command):
         text = f"another control panel window (pid {top.pid}, {format_seconds(top.elapsed)})"
     else:
         head = short_command(maker.command, repo, 48)
@@ -1075,6 +1133,20 @@ class StackUsers:
     product: tuple[str, ...]
 
 
+def group_uses(members: Sequence[Proc]) -> tuple[str, ...]:
+    """What a process group would lose in a stop: ``docker`` (its databases and queues) and
+    ``product``. Another control panel window uses neither: it only reads."""
+    commands = " ".join(proc.command for proc in members)
+    if is_control_panel(commands):
+        return ()
+    uses: list[str] = []
+    if _uses_docker(members):
+        uses.append("docker")
+    if _USES_THE_PRODUCT.search(commands):
+        uses.append("product")
+    return tuple(uses)
+
+
 def stack_users(snapshot: ProcessSnapshot, repo: Path) -> StackUsers:
     """The foreign process groups that use Docker's databases and queues (tests, make targets,
     services, migrations, the web app) and those that use the product (make product and its
@@ -1082,15 +1154,45 @@ def stack_users(snapshot: ProcessSnapshot, repo: Path) -> StackUsers:
     docker: list[str] = []
     product: list[str] = []
     for members in snapshot.foreign_groups():
-        commands = " ".join(proc.command for proc in members)
-        if PANEL_MARKER in commands:
-            continue
+        uses = group_uses(members)
         text = describe_group(members, repo)
-        if _USES_THE_PRODUCT.search(commands):
+        if "product" in uses:
             product.append(text)
-        if _uses_docker(members):
+        if "docker" in uses:
             docker.append(text)
     return StackUsers(tuple(docker), tuple(product))
+
+
+_AGENT = re.compile(r"(^|/)claude(\s|$)|Claude\.app|claude-code|/\.claude/", re.IGNORECASE)
+_TERMINALS: Final = (
+    "Terminal.app",
+    "iTerm",
+    "Ghostty",
+    "WezTerm",
+    "Alacritty",
+    "kitty",
+    "Warp.app",
+    "tmux",
+    "login -",
+)
+
+
+def session_kind(members: Sequence[Proc], procs: Mapping[int, Proc]) -> str:
+    """Who runs a foreign process group: ``panel`` (another control window), ``agent`` (under
+    Claude Code), ``terminal`` (under a terminal app), or ``other``."""
+    if any(is_control_panel(proc.command) for proc in members):
+        return "panel"
+    pids = {proc.pid for proc in members}
+    top = next((p for p in members if p.ppid not in pids), members[0])
+    for pid in ancestors(top.pid, procs):
+        command = procs[pid].command if pid in procs else ""
+        if is_control_panel(command):
+            return "panel"  # a run another control window started
+        if _AGENT.search(command):
+            return "agent"
+        if any(name in command for name in _TERMINALS):
+            return "terminal"
+    return "other"
 
 
 def breaks_note(users: StackUsers, *, docker: bool = False, product: bool = False) -> str:
@@ -1143,7 +1245,7 @@ def process_origins(
 ) -> dict[int, str]:
     """Who started each project process: this panel, a make target's pid file, another control
     panel window, or someone else (``other``)."""
-    panels = {pid for pid in project if PANEL_MARKER in procs[pid].command and pid != self_pid}
+    panels = {pid for pid in project if is_control_panel(procs[pid].command) and pid != self_pid}
     origins: dict[int, str] = {}
     for pid in project:
         proc = procs[pid]
@@ -1183,6 +1285,9 @@ def _refusal(pid: int, snapshot: ProcessSnapshot) -> str:
     panels = control_panels(procs)
     if pid in panels:
         return "that is a control panel window; close it from the window itself"
+    if pid in snapshot.guarded:
+        who = snapshot.origins.get(pid, "").removeprefix("run by ") or "an editor or an agent"
+        return f"{who} runs it; stop it there"
     if pid not in snapshot.project:
         return f"pid {pid} is not one of this checkout's processes"
     if any(child in panels for child in descendants(pid, procs)):
@@ -1235,6 +1340,8 @@ def stop_target(pid: int, snapshot: ProcessSnapshot) -> StopTarget:
 
 
 def describe_stop(target: StopTarget, snapshot: ProcessSnapshot, repo: Path) -> str:
+    if target.refused or not target.pids:
+        return target.refused or "There is nothing of this checkout's to stop here."
     lines = []
     for pid in target.pids:
         proc = snapshot.procs.get(pid)
@@ -1242,19 +1349,133 @@ def describe_stop(target: StopTarget, snapshot: ProcessSnapshot, repo: Path) -> 
             origin = snapshot.origins.get(pid, "other")
             lines.append(f"  {pid}  {short_command(proc.command, repo, 70)}  [{origin}]")
     if target.mode == "group":
-        head = f"Send SIGTERM to process group {target.pgid} ({len(target.pids)} processes):"
+        head = (
+            f"Send SIGTERM to each process of group {target.pgid} named here ({len(target.pids)}):"
+        )
     else:
         head = f"Send SIGTERM to pid {target.pids[0]} and its children ({len(target.pids)}):"
     return "\n".join([head, *lines])
 
 
-def signal_target(target: StopTarget, sig: int = signal.SIGTERM) -> None:
-    if target.mode == "group":
-        os.killpg(target.pgid, sig)
-    elif target.mode == "tree":
-        for pid in reversed(target.pids):
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(pid, sig)
+STOP_GRACE_SECONDS: Final = 5.0
+"""How long a stopped process gets to exit after SIGTERM before SIGKILL."""
+WEB_STOP_GRACE_SECONDS: Final = 10.0
+"""The web app's (next dev) grace: it writes its cache on the way out."""
+
+
+@dataclass(frozen=True)
+class StopResult:
+    """What a stop did: the processes it signalled, and those it left alone because they started
+    after the question (``new``) or run another program now (``changed``)."""
+
+    signalled: tuple[int, ...]
+    new: tuple[int, ...] = ()
+    changed: tuple[int, ...] = ()
+
+    @property
+    def changed_since(self) -> bool:
+        return bool(self.new or self.changed)
+
+
+def stop_named(
+    reach: Sequence[int],
+    named: Mapping[int, str],
+    snapshot: ProcessSnapshot,
+    repo: Path,
+    log: LogFn,
+    wait: Callable[[float], bool],
+    commands_now: Callable[[], Mapping[int, str]],
+    *,
+    kill: Callable[[int, int], None] | None = None,
+    alive: Callable[[int], bool] | None = None,
+    grace: float = STOP_GRACE_SECONDS,
+) -> StopResult | None:
+    """Stops what a question named and nothing else: each process in ``reach`` (what the stop
+    would reach now, from a fresh scan) that ``named`` lists (pid and the program it ran when
+    the question was asked) and that still runs that program. One ``os.kill`` per pid, never a
+    process group: a process that joined the group since the question is not signalled. SIGKILL
+    after ``grace`` to those still alive and still running the same program. What it leaves alone
+    is logged by name. None when ``wait`` says the step was cancelled."""
+    is_alive = alive or pid_alive
+    send = kill or os.kill
+    chosen: list[int] = []
+    new: list[int] = []
+    changed: list[int] = []
+    for pid in reach:
+        proc = snapshot.procs.get(pid)
+        if pid not in named:
+            new.append(pid)
+        elif proc is None or proc.command != named[pid]:
+            changed.append(pid)
+        else:
+            chosen.append(pid)
+    for pid in new:
+        command = (
+            short_command(snapshot.procs[pid].command, repo, 70) if pid in snapshot.procs else ""
+        )
+        log(f"left alone, started after the question: pid {pid} {command}".rstrip(), None)
+    for pid in changed:
+        command = (
+            short_command(snapshot.procs[pid].command, repo, 70) if pid in snapshot.procs else ""
+        )
+        log(f"left alone, runs another program now: pid {pid} {command}".rstrip(), None)
+    if chosen:
+        count = f"{len(chosen)} process{'es' if len(chosen) != 1 else ''}"
+        log(f"SIGTERM to {count} the question named:", None)
+        for pid in chosen:
+            log(f"  {pid}  {short_command(named[pid], repo, 70)}", None)
+    for pid in reversed(chosen):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            send(pid, signal.SIGTERM)
+    for _ in range(max(int(grace / 0.25), 1)):
+        if not any(is_alive(pid) for pid in chosen):
+            break
+        if not wait(0.25):
+            return None
+    if left := [pid for pid in chosen if is_alive(pid)]:
+        now = commands_now()
+        killed = [pid for pid in left if now.get(pid) == named[pid]]
+        for pid in killed:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                send(pid, signal.SIGKILL)
+        if killed:
+            log(
+                f"still running after {format_seconds(grace)}, sent SIGKILL: "
+                + ", ".join(map(str, killed)),
+                "err",
+            )
+    return StopResult(tuple(chosen), tuple(new), tuple(changed))
+
+
+def changed_line(result: StopResult) -> str:
+    """The error line of a stop that met processes its question did not name."""
+    parts = []
+    if result.new:
+        count = len(result.new)
+        parts.append(f"{count} process{'es' if count != 1 else ''} started after it")
+    if result.changed:
+        count = len(result.changed)
+        parts.append(f"{count} now run{'s' if count == 1 else ''} another program")
+    return (
+        "error: changed since the question: "
+        + " and ".join(parts)
+        + "; they were left alone. Ask again to see what runs now."
+    )
+
+
+def stop_reach(pid: int, mode: Literal["group", "tree"], snapshot: ProcessSnapshot) -> StopTarget:
+    """What a stop of ``pid`` in ``mode`` would reach now, or why it may not (no fallback from
+    one mode to the other)."""
+    options = stop_options(pid, snapshot)
+    if options[0].refused:
+        return options[0]
+    if mode == "tree":
+        return tree_target(pid, snapshot)
+    found = next((option for option in options if option.mode == "group"), None)
+    if found is None:
+        proc = snapshot.procs[pid]
+        return StopTarget("none", proc.pgid, (), "its process group may not be signalled whole now")
+    return found
 
 
 WEB_APP_MARKERS: Final = ("--filter web dev", "next dev", "next-server", "next start")
@@ -1417,6 +1638,9 @@ process it left behind may hold the pipe open, and must not hold the panel."""
 def kill_group(proc: subprocess.Popen[Any]) -> None:
     """SIGKILL to the process group a program the panel started leads (it starts a session of its
     own), so whatever it started goes with it."""
+    # A group of our own: the program was started with start_new_session, so its group is a new
+    # session that no process outside it can join (setpgid only moves a process within its own
+    # session). It holds only what this program started.
     with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(proc.pid, signal.SIGKILL)
     with contextlib.suppress(OSError):
@@ -1847,6 +2071,9 @@ class BackgroundManager:
             spec.pid_file.unlink(missing_ok=True)
             log(f"{spec.label} is not running", None)
             return True
+        # The group only when the process leads one of its own: a panel starts each background
+        # program with start_new_session, a new session no outside process can join, so the group
+        # holds what that program started and nothing else (its marker was checked above).
         group = pgid == pid and pgid != os.getpgrp()
         with contextlib.suppress(ProcessLookupError):
             if group:
@@ -1893,6 +2120,9 @@ class Status:
     background: Mapping[str, int | None]
     product_pids: Mapping[str, int | None]
     taken_at: float
+    llm_provider: str | None = None
+    """The model provider of the running product's gateway (``fake``, ``vercel``), from its
+    log; None while the product is not running or its log does not say."""
 
     @property
     def infra_up(self) -> int:
@@ -1917,6 +2147,32 @@ def _answered(future: Any, seconds: float) -> bool:
         return bool(future.result(timeout=seconds))
     except FutureTimeoutError:
         return False
+
+
+_PROVIDER = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+
+
+def gateway_provider(log: Path, limit: int = 256 * 1024) -> str | None:
+    """The provider the product's gateway said it wired, from the last ``gateway_wired`` line of
+    its log (read from at most its last ``limit`` bytes); None when the log does not say."""
+    try:
+        with log.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(size - limit, 0))
+            text = handle.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    for line in reversed(text.splitlines()):
+        if '"gateway_wired"' not in line:
+            continue
+        with contextlib.suppress(ValueError):
+            entry = json.loads(line)
+            provider = entry.get("provider") if isinstance(entry, dict) else None
+            if isinstance(provider, str) and _PROVIDER.fullmatch(provider):
+                return provider
+        return None
+    return None
 
 
 def probe_status(project: Project, manager: BackgroundManager) -> Status:
@@ -1947,7 +2203,10 @@ def probe_status(project: Project, manager: BackgroundManager) -> Status:
         )
         for proc in ("app", "worker", "web")
     }
-    return Status(docker, containers, up, background, product, time.time())
+    provider = (
+        gateway_provider(project.product_dir / "app.log") if up.get("product.internal") else None
+    )
+    return Status(docker, containers, up, background, product, time.time(), provider)
 
 
 def probe_git(repo: Path, env: Mapping[str, str]) -> GitState:
@@ -2004,18 +2263,21 @@ def probe_processes(
     names = parse_lsof_cwd(out)
     _, out, _ = capture(lsof_listen_argv(), cwd=root, env=env, timeout=15)
     listeners = tuple(parse_lsof_listen(out))
-    project = project_pids(procs, names, repo)
+    self_pid = os.getpid()
+    project, guarded = split_guarded(project_pids(procs, names, repo), procs, self_pid)
     registry.prune({proc.pgid for proc in procs.values()})
-    origins = process_origins(procs, project, registry.groups(), pid_file_owners(repo), os.getpid())
+    origins = process_origins(procs, project, registry.groups(), pid_file_owners(repo), self_pid)
+    origins.update({pid: f"run by {who}" for pid, who in guarded.items()})
     return ProcessSnapshot(
         procs,
         names,
         frozenset(project),
         origins,
         listeners,
-        os.getpid(),
+        self_pid,
         time.time(),
         "; ".join(errors),
+        frozenset(guarded),
     )
 
 
@@ -2078,6 +2340,13 @@ class RateLimit:
                 return self.seconds - (now - self._last)
             self._last = now
             return 0.0
+
+    def remaining(self) -> float:
+        """The seconds until it may start again (0 when it may now), without counting a start."""
+        with self._lock:
+            if self._last is None:
+                return 0.0
+            return max(self.seconds - (self.clock() - self._last), 0.0)
 
 
 def load_flags(repo: Path) -> tuple[list[FlagRow], str]:
@@ -2635,10 +2904,11 @@ class Plans:
         web = self.project.web()
         return Call("start web app", self._start_web, (web.argv, PS_ARGV), web.env)
 
-    def stop_web_call(self, expected: Collection[int] | None = None) -> Call:
-        """Stop web app: SIGTERM to the trees :func:`web_stop_targets` finds, then SIGKILL to what
-        of them still runs the same program ten seconds later. With ``expected`` (the pids the
-        confirm named), a pid it did not name is left alone."""
+    def stop_web_call(self, expected: Mapping[int, str] | None = None) -> Call:
+        """Stop web app: the trees :func:`web_stop_targets` finds in a fresh scan, signalled pid by
+        pid (:func:`stop_named`), SIGKILL ten seconds later to what still runs the same program.
+        With ``expected`` (the pids and programs the question named), only those: the step fails,
+        naming them, when the web app now runs a process the question did not name."""
 
         def stop(ctx: StepContext) -> bool:
             repo = self.project.repo
@@ -2646,36 +2916,32 @@ class Plans:
             targets, notes = web_stop_targets(self.project, snapshot)
             for text in notes:
                 ctx.log(text)
-            pids: list[int] = []
-            for target in targets:
-                kept = tuple(p for p in target.pids if expected is None or p in expected)
-                if len(kept) < len(target.pids):
-                    left = sorted(set(target.pids) - set(kept))
-                    ctx.log(f"left alone, not named in the confirm: {', '.join(map(str, left))}")
-                if kept:
-                    ctx.log(describe_stop(StopTarget("tree", target.pgid, kept), snapshot, repo))
-                    pids += kept
-            if not pids:
+            reach = [pid for target in targets for pid in target.pids]
+            if not reach:
                 ctx.log("the web app is not running")
-            commands = {pid: snapshot.procs[pid].command for pid in pids}
-            for pid in reversed(pids):
-                with contextlib.suppress(ProcessLookupError, PermissionError):
-                    os.kill(pid, signal.SIGTERM)
-            for _ in range(40):
-                if not any(pid_alive(pid) for pid in pids):
-                    break
-                if not ctx.wait(0.25):
-                    return False
-            if left := [pid for pid in pids if pid_alive(pid)]:
-                now = process_commands(self.project.env, ctx.capture)
-                for pid in left:
-                    if now.get(pid) == commands[pid]:
-                        with contextlib.suppress(ProcessLookupError, PermissionError):
-                            os.kill(pid, signal.SIGKILL)
-                ctx.log(f"still running after 10 s, sent SIGKILL: {', '.join(map(str, left))}")
+            named = (
+                dict(expected)
+                if expected is not None
+                else {pid: snapshot.procs[pid].command for pid in reach}
+            )
+            result = stop_named(
+                reach,
+                named,
+                snapshot,
+                repo,
+                ctx.log,
+                ctx.wait,
+                lambda: process_commands(self.project.env, ctx.capture),
+                grace=WEB_STOP_GRACE_SECONDS,
+            )
+            if result is None:
+                return False
             recorded = read_pid(self.project.web().pid_file)
             if recorded is not None and not pid_alive(recorded):
                 self.project.web().pid_file.unlink(missing_ok=True)
+            if result.changed_since:
+                ctx.log(changed_line(result), "err")
+                return False
             return True
 
         return Call("stop web app", stop, scan_commands(), timeout=WEB_STOP_SECONDS)
@@ -2721,7 +2987,7 @@ class Plans:
             ),
         )
 
-    def stop_everything(self, expected_web: Collection[int] | None = None) -> Plan:
+    def stop_everything(self, expected_web: Mapping[int, str] | None = None) -> Plan:
         return Plan(
             "stop everything",
             (
@@ -2809,7 +3075,7 @@ class Plans:
     def web_start(self) -> Plan:
         return Plan("start the web app", (self.start_web_call(),))
 
-    def web_stop(self, expected: Collection[int] | None = None) -> Plan:
+    def web_stop(self, expected: Mapping[int, str] | None = None) -> Plan:
         return Plan("stop the web app", (self.stop_web_call(expected),))
 
     # stack
@@ -3013,48 +3279,57 @@ class Plans:
 
     # processes
     def stop_process(
-        self, pid: int, command: str, mode: Literal["group", "tree"] = "group"
+        self,
+        pid: int,
+        command: str,
+        mode: Literal["group", "tree"] = "group",
+        named: Mapping[int, str] | None = None,
     ) -> Plan:
+        """Stop one process (``tree``: it and its children; ``group``: its process group), as
+        its question named it: ``named``, the pids and programs the question listed. A fresh
+        scan decides what still runs; only pids both named and found are signalled, one by one
+        (:func:`stop_named`), and the step fails, naming them, when something new appeared."""
+        listed = dict(named) if named is not None else {pid: command}
+
         def stop(ctx: StepContext) -> bool:
-            snapshot = probe_processes(
-                self.project.repo, self.project.env, self.manager.registry, ctx.capture
-            )
+            repo = self.project.repo
+            snapshot = probe_processes(repo, self.project.env, self.manager.registry, ctx.capture)
             proc = snapshot.procs.get(pid)
             if proc is None:
                 ctx.log(f"pid {pid} is not running any more")
                 return True
             if proc.command != command:
-                ctx.log(f"error: pid {pid} now runs another program; left alone", "err")
+                ctx.log(
+                    f"error: changed since the question: pid {pid} now runs another program; "
+                    "left alone. Ask again to see what runs now.",
+                    "err",
+                )
                 return False
-            options = stop_options(pid, snapshot)
-            target = next((option for option in options if option.mode == mode), None)
-            if target is None:
-                # Only one choice is left: the group when it holds nothing but the process's own
-                # tree (the same stop), else a group that may not be signalled whole any more
-                first = options[0]
-                if first.refused or mode == "tree":
-                    target = first
-                else:
-                    refused = "its process group may not be signalled whole now"
-                    target = StopTarget("none", first.pgid, (), refused)
+            target = stop_reach(pid, mode, snapshot)
             if target.refused:
                 ctx.log(f"error: {target.refused}", "err")
                 return False
-            ctx.log(describe_stop(target, snapshot, self.project.repo))
-            try:
-                signal_target(target)
-            except (ProcessLookupError, PermissionError) as exc:
-                ctx.log(f"error: {exc}", "err")
+            result = stop_named(
+                target.pids,
+                listed,
+                snapshot,
+                repo,
+                ctx.log,
+                ctx.wait,
+                lambda: process_commands(self.project.env, ctx.capture),
+            )
+            if result is None:
                 return False
-            for _ in range(20):
-                if not any(pid_alive(p) for p in target.pids):
-                    ctx.log("stopped", "ok")
-                    return True
-                if not ctx.wait(0.25):
-                    return False
-            left = [p for p in target.pids if pid_alive(p)]
-            ctx.log(f"still running after 5 s: {', '.join(map(str, left))}", "err")
-            return False
+            if result.changed_since:
+                ctx.log(changed_line(result), "err")
+                return False
+            if not ctx.wait(0.5):
+                return False
+            if left := [p for p in result.signalled if pid_alive(p)]:
+                ctx.log(f"error: still running: {', '.join(map(str, left))}", "err")
+                return False
+            ctx.log("stopped", "ok")
+            return True
 
         return Plan(f"stop pid {pid}", (Call(f"SIGTERM to pid {pid}", stop, scan_commands()),))
 
@@ -3063,7 +3338,9 @@ class Plans:
         return [
             self.start_everything(),
             self.stop_everything(),
-            self.stop_everything(expected_web=(4242,)),
+            self.stop_everything(
+                expected_web={4242: "node /opt/homebrew/bin/pnpm --filter web dev"}
+            ),
             self.docker_start(),
             self.docker_stop(),
             self.colima_force_stop(),
@@ -3339,6 +3616,9 @@ class Runner:
     def _terminate(self, proc: subprocess.Popen[bytes]) -> None:
         """SIGTERM to the step's process group, and SIGKILL after the grace period to whatever of
         the group is left, its first process gone or not."""
+        # The step's own group: each step starts with start_new_session, a new session that no
+        # process outside it can join, so the group holds only what the step started. Cancel and
+        # the time limits may signal it whole; a stop of another session's process never does.
         pgid = proc.pid
         if proc.poll() is not None and not group_alive(pgid):
             return
@@ -3553,78 +3833,7 @@ class Runner:
             )
 
 
-# ---- keeping the window responsive -------------------------------------------------------------
-
-WRAP_STEP: Final = 8
-"""A wrapped label re-wraps only when its width moves by this many pixels or more."""
-WRAP_MARGIN: Final = 8
-"""The wrap length sits this far inside the label's width, so a narrowing smaller than
-:data:`WRAP_STEP` never clips the text."""
-WRAP_MINIMUM: Final = 160
-WRAP_FLIP_SECONDS: Final = 2.0
-
-
-def rewrap_width(current: int | None, width: int, *, minimum: int = WRAP_MINIMUM) -> int | None:
-    """The wrap length a label ``width`` pixels wide should take, or None to keep ``current``: a
-    label not placed yet (one pixel wide) keeps it, and so does one whose width moved by less
-    than :data:`WRAP_STEP`."""
-    if width <= 1:
-        return None
-    target = max(width - WRAP_MARGIN, minimum)
-    if current is not None and abs(target - current) < WRAP_STEP:
-        return None
-    return target
-
-
-class WrapState:
-    """The wrap length of one label, following its width (:func:`rewrap_width`).
-
-    A label whose width depends on its own wrap (its parent sized from what the label asks for)
-    can flip between two wrap lengths for ever: each length makes the label as wide as the
-    other one wants. A re-wrap back to the length it had two re-wraps ago, within
-    :data:`WRAP_FLIP_SECONDS`, is such a flip: the state then keeps the narrower of the two
-    lengths (it never clips) and refuses the wider one until the width settles somewhere new.
-    """
-
-    def __init__(
-        self, minimum: int = WRAP_MINIMUM, clock: Callable[[], float] = time.monotonic
-    ) -> None:
-        self.minimum = minimum
-        self.current: int | None = None
-        self._clock = clock
-        self._previous: tuple[int, float] | None = None
-        self._refused: int | None = None
-
-    def wants(self, width: int) -> bool:
-        """Whether a label of this width would re-wrap (cheap; changes nothing)."""
-        target = rewrap_width(self.current, width, minimum=self.minimum)
-        return target is not None and not self._is_refused(target)
-
-    def _is_refused(self, target: int) -> bool:
-        return self._refused is not None and abs(target - self._refused) < WRAP_STEP
-
-    def decide(self, width: int) -> int | None:
-        """The wrap length to apply now, or None to leave the label as it is."""
-        target = rewrap_width(self.current, width, minimum=self.minimum)
-        if target is None or self._is_refused(target):
-            return None
-        now = self._clock()
-        previous = self._previous
-        flipping = (
-            previous is not None
-            and abs(target - previous[0]) < WRAP_STEP
-            and now - previous[1] < WRAP_FLIP_SECONDS
-        )
-        if flipping and self.current is not None:
-            self._refused = max(target, self.current)
-            if target > self.current:
-                return None
-        else:
-            self._refused = None
-        if self.current is not None:
-            self._previous = (self.current, now)
-        self.current = target
-        return target
+# ---- one probe of each kind at a time ------------------------------------------------------------
 
 
 class SingleFlight:
@@ -3649,148 +3858,3 @@ class SingleFlight:
     def running(self) -> frozenset[str]:
         with self._lock:
             return frozenset(self._running)
-
-
-HANG_SECONDS: Final = 5.0
-HANG_CPU_SHARE: Final = 0.5
-"""A late beat counts as a hang when the main thread is inside a callback, or when the process
-used at least this share of a CPU since the beat: a loop that only waits (macOS's App Nap delays
-the timers of a hidden window) is not hung."""
-
-
-def describe_stack(frame: FrameType | None) -> str:
-    return "".join(traceback.format_stack(frame)) if frame is not None else "  (no frame)\n"
-
-
-class HangWatch:
-    """Notices when the window's event loop stops running, from a thread that never touches Tk.
-
-    The window calls :meth:`beat` from a Tk timer a few times a second, with what ``after info``
-    lists then (the timers and idle callbacks waiting to run). When a beat is more than
-    ``threshold`` seconds late and the main thread is busy (:meth:`busy`), :meth:`check` (on the
-    watch thread) writes the main thread's Python stack, the other threads' stacks and that list
-    to ``hang-<time>.log`` in ``directory`` (a temporary folder when it cannot be written), once
-    per stall. When the loop runs again, :meth:`recovered` says once where the log is and how
-    long the loop stood still, so the window can show it.
-    """
-
-    def __init__(
-        self,
-        directory: Path,
-        main_ident: int,
-        *,
-        threshold: float = HANG_SECONDS,
-        clock: Callable[[], float] = time.monotonic,
-        wall: Callable[[], float] = time.time,
-        frames: Callable[[], Mapping[int, FrameType]] = sys._current_frames,
-        cpu: Callable[[], float] = time.process_time,
-        context: Callable[[], str] = lambda: "",
-    ) -> None:
-        self.directory = directory
-        self.main_ident = main_ident
-        self.threshold = threshold
-        self._clock = clock
-        self._wall = wall
-        self._frames = frames
-        self._cpu = cpu
-        self._context = context
-        self._lock = threading.Lock()
-        self._last = clock()
-        self._cpu_at_last = cpu()
-        self._pending = ""
-        self._written_for: float | None = None
-        self._stalled: tuple[Path, float] | None = None
-        self._report: tuple[Path, float] | None = None
-
-    def beat(self, pending: str = "") -> None:
-        """The event loop ran: note when, and what it had waiting."""
-        now = self._clock()
-        with self._lock:
-            if self._stalled is not None:
-                path, since = self._stalled
-                self._report = (path, now - since)
-                self._stalled = None
-            self._last = now
-            self._cpu_at_last = self._cpu()
-            self._pending = pending
-
-    def busy(self, late: float, cpu_at_last: float) -> bool:
-        """Whether the main thread is working rather than waiting for events: inside a callback
-        (its innermost Python frame is not tkinter's mainloop), or with the process using at
-        least :data:`HANG_CPU_SHARE` of a CPU since the last beat (Tcl spinning on its own)."""
-        frame = self._frames().get(self.main_ident)
-        if frame is not None and frame.f_code.co_name != "mainloop":
-            return True
-        return (self._cpu() - cpu_at_last) / max(late, 1e-6) >= HANG_CPU_SHARE
-
-    def check(self) -> Path | None:
-        """On the watch thread: write the log of a stall over the threshold, once per stall."""
-        with self._lock:
-            last, pending, cpu_at_last = self._last, self._pending, self._cpu_at_last
-            late = self._clock() - last
-            if self._written_for == last or late <= self.threshold:
-                return None
-        if not self.busy(late, cpu_at_last):
-            return None
-        with self._lock:
-            if self._written_for == last or self._last != last:
-                return None
-            self._written_for = last
-        path = self._write(late, pending)
-        with self._lock:
-            if self._last == last:
-                self._stalled = (path, last)
-            else:
-                self._report = (path, self._last - last)
-        return path
-
-    def recovered(self) -> tuple[Path, float] | None:
-        """Once after a logged stall, when the loop runs again: the log and the seconds lost."""
-        with self._lock:
-            report, self._report = self._report, None
-        return report
-
-    def start(self, interval: float = 0.5) -> threading.Thread:
-        def watch() -> None:
-            while True:
-                time.sleep(interval)
-                with contextlib.suppress(Exception):  # the watch must outlive any one failure
-                    self.check()
-
-        thread = threading.Thread(target=watch, daemon=True, name="hang-watch")
-        thread.start()
-        return thread
-
-    def report_text(self, late: float, pending: str) -> str:
-        frames = self._frames()
-        names = {thread.ident: thread.name for thread in threading.enumerate()}
-        when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self._wall()))
-        lines = [
-            f"The control panel's event loop had not run for {late:.1f} s at {when}.",
-            "",
-            "The main thread's Python stack (most recent call last):",
-            describe_stack(frames.get(self.main_ident)),
-            "Timers and idle callbacks waiting at the last beat (after info):",
-            pending or "  (none)",
-        ]
-        for ident, frame in frames.items():
-            if ident in (self.main_ident, threading.get_ident()):
-                continue
-            lines += ["", f"Thread {names.get(ident, ident)}:", describe_stack(frame)]
-        if context := self._context():
-            lines += ["", context]
-        return "\n".join(lines) + "\n"
-
-    def _write(self, late: float, pending: str) -> Path:
-        stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(self._wall()))
-        text = self.report_text(late, pending)
-        fallback = Path(tempfile.gettempdir()) / "compliancewatch-control-panel"
-        for directory in (self.directory, fallback):
-            path = directory / f"hang-{stamp}.log"
-            try:
-                directory.mkdir(parents=True, exist_ok=True)
-                path.write_text(text, encoding="utf-8")
-            except OSError:
-                continue
-            return path
-        return self.directory / f"hang-{stamp}.log"

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="color-scheme" content="light dark" />
+    <title>ComplianceWatch Control</title>
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="modulepreload" href="app.js" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to the content</a>
+    <div id="app" class="app">
+      <aside class="sidebar" aria-label="ComplianceWatch Control">
+        <div class="brand">
+          <span class="brand-slot" aria-hidden="true"></span>
+          <span class="brand-text">
+            <span class="brand-name">ComplianceWatch</span>
+            <span class="brand-sub"
+              >Control<span
+                id="demo-chip"
+                class="demo-chip"
+                role="note"
+                title="Demo mode: the data here is made up, and nothing really runs on this Mac."
+                hidden
+                ><span class="sr-only"
+                  >Demo mode: the data here is made up, and nothing really runs on this Mac.</span
+                ><span aria-hidden="true">Demo</span></span
+              ></span
+            >
+          </span>
+        </div>
+        <nav class="nav" aria-label="Sections">
+          <ul role="list">
+            <li>
+              <a class="nav-link" href="#/home" data-view="home"
+                ><span class="nav-icon" data-icon="home"></span><span>Home</span></a
+              >
+            </li>
+            <li class="nav-label" aria-hidden="true">Do</li>
+            <li>
+              <a class="nav-link" href="#/run" data-view="run"
+                ><span class="nav-icon" data-icon="play"></span><span>Run</span></a
+              >
+            </li>
+            <li>
+              <a class="nav-link" href="#/data" data-view="data"
+                ><span class="nav-icon" data-icon="database"></span><span>Data</span></a
+              >
+            </li>
+            <li>
+              <a class="nav-link" href="#/checks" data-view="checks"
+                ><span class="nav-icon" data-icon="checks"></span><span>Checks</span></a
+              >
+            </li>
+            <li class="nav-label" aria-hidden="true">See</li>
+            <li>
+              <a class="nav-link" href="#/features" data-view="features"
+                ><span class="nav-icon" data-icon="features"></span><span>Features</span></a
+              >
+            </li>
+            <li>
+              <a class="nav-link" href="#/pipeline" data-view="pipeline"
+                ><span class="nav-icon" data-icon="pipeline"></span
+                ><span>Pipeline &amp; events</span></a
+              >
+            </li>
+            <li>
+              <a class="nav-link" href="#/flags" data-view="flags"
+                ><span class="nav-icon" data-icon="flag"></span><span>Flags</span></a
+              >
+            </li>
+            <li>
+              <a class="nav-link" href="#/processes" data-view="processes"
+                ><span class="nav-icon" data-icon="cpu"></span><span>Processes</span></a
+              >
+            </li>
+            <li>
+              <a class="nav-link" href="#/logs" data-view="logs"
+                ><span class="nav-icon" data-icon="logs"></span><span>Logs</span></a
+              >
+            </li>
+            <li class="nav-label" aria-hidden="true">Find</li>
+            <li>
+              <a class="nav-link" href="#/commands" data-view="commands"
+                ><span class="nav-icon" data-icon="terminal"></span><span>Commands</span></a
+              >
+            </li>
+            <li>
+              <a class="nav-link" href="#/guide" data-view="guide" data-tour="guide"
+                ><span class="nav-icon" data-icon="book"></span><span>Guide</span></a
+              >
+            </li>
+          </ul>
+        </nav>
+        <p class="sidebar-foot">Runs this project on this Mac. Nothing here reaches customers.</p>
+      </aside>
+      <div class="main-col">
+        <header class="topbar">
+          <ul class="pills" role="list" aria-label="What is running" data-tour="pills">
+            <li>
+              <a class="pill" href="#/run/docker" data-part="docker" data-state="unknown"
+                ><span class="dot" aria-hidden="true"></span><span class="pill-name">Docker</span
+                ><span class="pill-state">Checking</span></a
+              >
+            </li>
+            <li>
+              <a class="pill" href="#/run/infra" data-part="infra" data-state="unknown"
+                ><span class="dot" aria-hidden="true"></span><span class="pill-name">Databases</span
+                ><span class="pill-state">Checking</span></a
+              >
+            </li>
+            <li>
+              <a class="pill" href="#/run/services" data-part="services" data-state="unknown"
+                ><span class="dot" aria-hidden="true"></span><span class="pill-name">Services</span
+                ><span class="pill-state">Checking</span></a
+              >
+            </li>
+            <li>
+              <a class="pill" href="#/run/product" data-part="product" data-state="unknown"
+                ><span class="dot" aria-hidden="true"></span><span class="pill-name">Product</span
+                ><span class="pill-state">Checking</span></a
+              >
+            </li>
+            <li>
+              <a class="pill" href="#/run/web" data-part="web" data-state="unknown"
+                ><span class="dot" aria-hidden="true"></span><span class="pill-name">Web</span
+                ><span class="pill-state">Checking</span></a
+              >
+            </li>
+          </ul>
+          <div class="topbar-tools">
+            <button id="activity-btn" class="activity-btn" type="button">
+              <span class="nav-icon" data-icon="activity" data-size="16"></span>
+              <span class="activity-label">Activity</span>
+              <span class="activity-bar" aria-hidden="true"></span>
+            </button>
+            <button id="branch-chip" class="branch-chip" type="button" data-tone="neutral" hidden>
+              <span class="nav-icon" data-icon="branch" data-size="16"></span>
+              <span class="branch-name">main</span>
+              <span class="branch-note" hidden></span>
+              <span class="branch-count" aria-hidden="true" hidden
+                ><span class="nav-icon" data-icon="users" data-size="14"></span
+                ><span class="branch-count-num"></span
+              ></span>
+            </button>
+            <button
+              id="palette-btn"
+              class="palette-btn"
+              type="button"
+              data-tour="palette"
+              aria-label="Search actions"
+              aria-keyshortcuts="Meta+K"
+            >
+              <span class="nav-icon" data-icon="search" data-size="16"></span>
+              <span class="palette-btn-label">Search actions</span>
+              <kbd aria-hidden="true">⌘K</kbd>
+            </button>
+          </div>
+        </header>
+        <div id="connection" class="connection" hidden></div>
+        <main id="main" class="main" tabindex="-1">
+          <div class="view view-loading" aria-hidden="true">
+            <div class="card hero skel-hero">
+              <span class="skel skel-title"></span>
+              <span class="skel skel-line"></span>
+              <span class="skel skel-line short"></span>
+              <span class="skel skel-button"></span>
+            </div>
+            <div class="card skel-block"></div>
+            <div class="home-grid">
+              <div class="card skel-block short"></div>
+              <div class="card skel-block short"></div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+    <div id="toasts" class="toasts" role="region" aria-label="Notifications"></div>
+    <div id="announcer" class="sr-only" aria-live="polite"></div>
+    <div id="term-tip" class="term-tip" role="tooltip" hidden></div>
+    <script type="module" src="app.js"></script>
+    <script src="boot.js"></script>
+  </body>
+</html>

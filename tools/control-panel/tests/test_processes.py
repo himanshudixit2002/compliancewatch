@@ -510,3 +510,31 @@ def test_a_make_target_that_needs_no_docker_is_not_named() -> None:
     users = core.stack_users(state, REPO)
     assert users.docker == ("make check (pid 6100, 40 s)",)
     assert users.product == ()
+
+
+def test_the_control_app_s_helper_is_a_control_window_too() -> None:
+    helper = (
+        "/Users/dev/Desktop/ComplianceWatch.app/Contents/Resources/control-panel/panel_server.py"
+    )
+    lines = (
+        f"97000     1 97000    01:00 /Users/dev/cw/.venv/bin/python -B {helper}\n"
+        "97100 97000 97100    00:30 /usr/bin/make dev\n"
+        "97101 97100 97100    00:30 docker compose up -d --wait\n"
+    )
+    procs = core.parse_ps(PS + lines)
+    assert {97000} <= core.control_panels(procs)
+    names = core.parse_lsof_cwd(
+        CWD + "".join(f"p{pid}\ncpython3.12\nfcwd\nn{REPO}\n" for pid in (97000, 97100, 97101))
+    )
+    project = core.project_pids(procs, names, REPO)
+    origins = core.process_origins(procs, project, set(), PID_FILES, SELF)
+    state = core.ProcessSnapshot(procs, names, frozenset(project), origins, (), SELF, 0.0)
+    assert core.stop_target(97000, state).refused == (
+        "that is a control panel window; close it from the window itself"
+    )
+    # what that window started runs in a session of its own, and it is that window's
+    run = [procs[97100], procs[97101]]
+    assert core.session_kind(run, procs) == "panel"
+    assert core.group_uses(run) == ("docker",)
+    assert core.session_kind([procs[97000]], procs) == "panel"
+    assert core.group_uses([procs[97000]]) == ()
