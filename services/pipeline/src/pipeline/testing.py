@@ -19,14 +19,16 @@ client it is given, the fixture transport of ``recorded_sources``; ``recorded_ty
 registry's types with it. ``MemoryCrawls`` and ``MemoryIngests`` are a crawl and an ingest starter
 that record what they would start and refuse an id they have seen, as Temporal does.
 ``pipeline_settings`` are the app's settings for tests: memory stores and the shared write token
-``WRITE_TOKEN``.
+``WRITE_TOKEN``. ``LockRace`` lets another request in just before a unit of work opens, as a
+request that holds a row lock commits while this one waits for it.
 """
 
 import hashlib
 import json
 import math
 import re
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -65,7 +67,7 @@ from pipeline.domain.knowledge import (
     StagingReport,
 )
 from pipeline.domain.ports import CrawlStart, IngestStart
-from pipeline.domain.repository import UnitOfWorkFactory
+from pipeline.domain.repository import UnitOfWork, UnitOfWorkFactory
 from pipeline.infrastructure.adapters._shared import on_or_after, parse_iso_date
 from pipeline.infrastructure.adapters.cbic import CbicAdapter
 from pipeline.infrastructure.adapters.registry import ADAPTER_TYPES, AdapterType, Parameters
@@ -656,18 +658,77 @@ class MemoryCrawls:
 
 @dataclass
 class MemoryIngests:
-    """An ``IngestStarter`` that keeps what it starts and refuses an id it has seen, as
-    Temporal's ALLOW_DUPLICATE_FAILED_ONLY does for a running or completed workflow; ``fail``
-    makes the next start raise it."""
+    """An ``IngestStarter`` that keeps what it starts and applies Temporal's id reuse policies:
+    a start of an id it has seen is refused while that workflow runs or once it completed
+    (ALLOW_DUPLICATE_FAILED_ONLY), and, for a start that uses its id ``once``
+    (REJECT_DUPLICATE), whatever became of it; only a workflow that failed may run again.
+    ``fail`` makes the next start raise it. A workflow it started runs until ``finish`` ends it
+    completed or ``fail_runs`` ends it failed (every one, without ids); ``running_ids`` names
+    more that run (a crawl's ingest, an extraction), and ``running_fails`` makes the next
+    ``running`` raise it."""
 
     started: list[IngestStart] = field(default_factory=list)
     fail: Exception | None = None
+    finished: set[str] = field(default_factory=set)
+    failed: set[str] = field(default_factory=set)
+    running_ids: set[str] = field(default_factory=set)
+    running_fails: Exception | None = None
+    asked: list[frozenset[str]] = field(default_factory=list)
 
     def start(self, start: IngestStart) -> bool:
         if self.fail is not None:
             error, self.fail = self.fail, None
             raise error
-        if any(seen.workflow_id == start.workflow_id for seen in self.started):
+        workflow_id = start.workflow_id
+        seen = any(found.workflow_id == workflow_id for found in self.started)
+        if seen and (start.once or workflow_id not in self.failed):
             return False
+        self.finished.discard(workflow_id)
+        self.failed.discard(workflow_id)
         self.started.append(start)
         return True
+
+    def running(self, workflow_ids: Collection[str]) -> frozenset[str]:
+        if self.running_fails is not None:
+            error, self.running_fails = self.running_fails, None
+            raise error
+        asked = frozenset(workflow_ids)
+        self.asked.append(asked)
+        mine = {start.workflow_id for start in self.started} - self.finished
+        return asked & (mine | self.running_ids)
+
+    def finish(self, *workflow_ids: str) -> None:
+        """The workflows of these ids completed; with none, every one started so far."""
+        ended = set(workflow_ids or (start.workflow_id for start in self.started))
+        self.finished |= ended
+        self.failed -= ended
+
+    def fail_runs(self, *workflow_ids: str) -> None:
+        """The workflows of these ids failed (or timed out, or were terminated); with none,
+        every one started so far."""
+        ended = set(workflow_ids or (start.workflow_id for start in self.started))
+        self.finished |= ended
+        self.failed |= ended
+
+
+class LockRace:
+    """The memory store's units of work, letting another request in once: what ``let_in``
+    names runs, and commits, just before the ``before``-th unit opened from then on, as a request
+    that took a row lock first commits while this one waits for the lock. A resolution opens its
+    second unit to lock the task."""
+
+    def __init__(self, store: MemoryStore) -> None:
+        self.store = store
+        self._meanwhile: Callable[[], object] | None = None
+        self._left = 0
+
+    def let_in(self, meanwhile: Callable[[], object], *, before: int) -> None:
+        self._meanwhile, self._left = meanwhile, before
+
+    def __call__(self) -> AbstractContextManager[UnitOfWork]:
+        if self._meanwhile is not None:
+            self._left -= 1
+            if self._left == 0:
+                meanwhile, self._meanwhile = self._meanwhile, None
+                meanwhile()
+        return self.store()

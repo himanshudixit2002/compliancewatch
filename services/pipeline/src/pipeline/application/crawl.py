@@ -7,15 +7,20 @@ the crawl workflow (``workflows.crawl_source``).
   ``pipeline.source.fetch`` audit entry; then, with the transaction closed, it starts the
   workflow.
 - ``ScheduleCrawls``: the tick. For each source ``schedule.is_due`` names (never an upload-only
-  one), it locks the source, checks again, records the run under the id derived from the
-  source's cadence slot and starts the workflow of that slot. A second tick in the same slot
-  finds the run recorded (or Temporal refuses the id), so it starts nothing.
+  one, none while a crawl of it runs, a backfill's included; the cadence counted from its last
+  crawl that was not a backfill), it locks the source, checks again, records the run under the
+  id derived from the source's cadence slot and starts the workflow of that slot. A second tick
+  in the same slot finds the run recorded (or Temporal refuses the id), so it starts nothing.
 - ``ListNewDocuments`` (``pipeline.list_new_documents``): the source's listing since a week
   before its watermark, through its adapter, with no transaction open; the URLs the store holds
-  are skipped, and at most the crawl's limit of the rest come back, newest first.
+  are skipped, and at most the crawl's limit of the rest come back, newest first. A backfill
+  names its own window instead (``ListingWindow``): from a date below the watermark, up to
+  another, only the references its plan names.
 - ``FinishCrawl`` (``pipeline.finish_crawl``): the run's counts and end, and the source's last
   listing, watermark and error, in one transaction. A document whose ingest failed or was busy
-  elsewhere is looked up by its URL first, since its bytes may be stored all the same.
+  elsewhere is looked up by its URL first, since its bytes may be stored all the same. A
+  backfill's end records its run only: the source keeps its watermark, last listing and error
+  as the schedule's crawls left them (``domain.crawl``).
 
 Neither the tick nor a start ever fetches inside a transaction: the workflow does the fetching,
 in its child ingests (``FetchAndStore``).
@@ -42,10 +47,13 @@ from pipeline.application.sources import (
 )
 from pipeline.domain.crawl import (
     MAX_NEW_PER_CRAWL,
+    MAX_REFS,
     CrawlRun,
     CrawlRunId,
     CrawlStatus,
+    CrawlTrigger,
     DocumentOutcome,
+    ListingWindow,
     Outcome,
     failure_summary,
     listing_since,
@@ -64,7 +72,6 @@ from pipeline.domain.repository import UnitOfWork, UnitOfWorkFactory
 from pipeline.domain.schedule import (
     ABANDONED_AFTER,
     INDIA,
-    CrawlTrigger,
     is_abandoned,
     is_due,
     manual_workflow_id,
@@ -196,7 +203,15 @@ class StartCrawl:
                     f"crawl run {running[0].id} of {key} runs since "
                     f"{running[0].started_at.isoformat()}"
                 )
-            unit.crawl_runs.add(CrawlRun(id=start.run_id, source_key=key, started_at=now))
+            unit.crawl_runs.add(
+                CrawlRun(
+                    id=start.run_id,
+                    source_key=key,
+                    started_at=now,
+                    trigger=start.trigger,
+                    workflow_id=start.workflow_id,
+                )
+            )
             unit.audit.write(
                 AuditEntry(
                     action=FETCH_ACTION,
@@ -245,11 +260,19 @@ class ScheduleCrawls:
         with self._units() as unit:
             sources = unit.sources.list()
             latest = unit.crawl_runs.latest_by_source()
+            crawled = unit.crawl_runs.latest_by_source(backfills=False)
         started: list[str] = []
         failed: list[str] = []
         for source in sources:
             listable = self._types.listable(source.adapter_type)
-            if not is_due(source, latest.get(source.key), now, listable=listable):
+            due = is_due(
+                source,
+                latest.get(source.key),
+                now,
+                listable=listable,
+                last_crawl=crawled.get(source.key),
+            )
+            if not due:
                 continue
             try:
                 start = self._start(source.key, now)
@@ -273,12 +296,25 @@ class ScheduleCrawls:
             if source is None:
                 return None
             close_abandoned(unit, key, now)
-            listable = self._types.listable(source.adapter_type)
-            if not is_due(source, unit.crawl_runs.latest(key), now, listable=listable):
+            due = is_due(
+                source,
+                unit.crawl_runs.latest(key),
+                now,
+                listable=self._types.listable(source.adapter_type),
+                last_crawl=unit.crawl_runs.latest(key, backfills=False),
+            )
+            if not due:
                 return None
             workflow_id = scheduled_workflow_id(key, now, source.cadence)
             start = CrawlStart(workflow_id, run_id_for(workflow_id), key, CrawlTrigger.SCHEDULE)
-            if not unit.crawl_runs.start(CrawlRun(id=start.run_id, source_key=key, started_at=now)):
+            recorded = CrawlRun(
+                id=start.run_id,
+                source_key=key,
+                started_at=now,
+                trigger=start.trigger,
+                workflow_id=start.workflow_id,
+            )
+            if not unit.crawl_runs.start(recorded):
                 return None
         return start if launch(self._units, self._starter, start, self._clock) else None
 
@@ -288,18 +324,33 @@ class ScheduleCrawls:
 
 class CrawlRequest(Frozen):
     """The input of ``pipeline.crawl_source``: the source, the run its start recorded, why it
-    runs, and the most documents it ingests."""
+    runs, and the most documents it ingests. A backfill also names its listing window:
+    ``since`` (below the watermark), ``until`` and the references ``refs`` it takes."""
 
     source_key: str = Field(pattern=SOURCE_KEY_PATTERN)
     run_id: UUID
     trigger: CrawlTrigger = CrawlTrigger.SCHEDULE
     limit: int = Field(default=MAX_NEW_PER_CRAWL, ge=1, le=MAX_LIMIT)
+    since: date | None = None
+    until: date | None = None
+    refs: list[str] = Field(default_factory=list, max_length=MAX_REFS)
+
+    @property
+    def window(self) -> ListingWindow:
+        return ListingWindow(self.since, self.until, tuple(self.refs))
 
 
 class ListRequest(Frozen):
     source_key: str = Field(pattern=SOURCE_KEY_PATTERN)
     run_id: UUID
     limit: int = Field(default=MAX_NEW_PER_CRAWL, ge=1, le=MAX_LIMIT)
+    since: date | None = None
+    until: date | None = None
+    refs: list[str] = Field(default_factory=list, max_length=MAX_REFS)
+
+    @property
+    def window(self) -> ListingWindow:
+        return ListingWindow(self.since, self.until, tuple(self.refs))
 
 
 class Listing(Frozen):
@@ -331,7 +382,8 @@ class ChildOutcome(Frozen):
 
 class FinishRequest(Frozen):
     """The crawl's end: ``error`` when the listing failed, otherwise what it listed and what
-    became of each new document."""
+    became of each new document, and how many new ones it left for a later crawl. A backfill's
+    (``trigger``) leaves its source as it found it."""
 
     source_key: str = Field(pattern=SOURCE_KEY_PATTERN)
     run_id: UUID
@@ -340,9 +392,13 @@ class FinishRequest(Frozen):
     known_newest: date | None = None
     deferred_oldest: date | None = None
     outcomes: list[ChildOutcome] = Field(default_factory=list)
+    trigger: CrawlTrigger = CrawlTrigger.SCHEDULE
+    deferred: int = Field(default=0, ge=0)
 
 
 class CrawlResult(Frozen):
+    """How the crawl went; ``deferred`` counts the new documents left for a later crawl."""
+
     run_id: UUID
     source_key: str
     status: CrawlStatus
@@ -353,6 +409,7 @@ class CrawlResult(Frozen):
     error: str = ""
     source_error: str = ""
     watermark: date | None = None
+    deferred: int = 0
 
 
 def india_midnight(day: date) -> datetime:
@@ -407,13 +464,17 @@ class ListNewDocuments(ActivityBase[ListRequest, Listing]):
     async def run(self, input: ListRequest) -> Listing:
         source = await on_thread(self, lambda: self._source(input.source_key))
         resolved = await on_thread(self, lambda: self._sources.resolve(source_id_of(source.key)))
-        since = listing_since(source.watermark_date, self._clock().astimezone(INDIA).date())
+        window = input.window
+        since = window.since or listing_since(
+            source.watermark_date, self._clock().astimezone(INDIA).date()
+        )
         listed = await on_thread(
             self, lambda: list(resolved.adapter.list_documents(india_midnight(since)))
         )
         unique: dict[str, DiscoveredDocument] = {}
         for document in listed:
-            unique.setdefault(document.ref.url, document)
+            if window.admits(document.published_at, document.ref.external_ref):
+                unique.setdefault(document.ref.url, document)
         known = await on_thread(self, lambda: self._known(source.key, list(unique)))
         new = sorted(
             (document for url, document in unique.items() if url not in known),
@@ -506,29 +567,21 @@ class FinishCrawl(ActivityBase[FinishRequest, CrawlResult]):
             if source is None:
                 raise SourceNotFoundError(f"no source has the key {key!r}")
             if run is None:
-                run = CrawlRun(id=run_id, source_key=key, started_at=self._clock())
+                run = CrawlRun(
+                    id=run_id, source_key=key, started_at=self._clock(), trigger=input.trigger
+                )
                 unit.crawl_runs.add(run)
             if run.status is not CrawlStatus.RUNNING:
                 # Closed as abandoned meanwhile: a later crawl may have moved the source on.
                 log.warning("pipeline.crawl_finished_late", source=key, run_id=str(run_id))
-                return _result(run, source, None)
+                return _result(run, source, None, input.deferred)
             now = max(self._clock(), run.started_at)
-            if input.error:
-                finished = run.finish(now, counts, error=input.error)
-                updated = source.crawled(now, listed=False, watermark=None, error=input.error)
-            else:
-                finished = run.finish(now, counts)
-                watermark = next_watermark(
-                    source.watermark_date,
-                    outcomes,
-                    known_newest=input.known_newest,
-                    deferred_oldest=input.deferred_oldest,
-                )
-                updated = source.crawled(
-                    now, listed=True, watermark=watermark, error=failure_summary(outcomes)
-                )
+            finished = run.finish(now, counts, error=input.error)
             unit.crawl_runs.save(finished)
-            unit.sources.save(updated)
+            updated = source
+            if input.trigger is not CrawlTrigger.BACKFILL:
+                updated = _crawled(source, input, outcomes, now)
+                unit.sources.save(updated)
         log.info(
             "pipeline.crawl_finished",
             source=key,
@@ -539,7 +592,7 @@ class FinishCrawl(ActivityBase[FinishRequest, CrawlResult]):
             duplicates=counts.duplicates,
             failed=counts.failed,
         )
-        return _result(finished, updated, updated.watermark_date)
+        return _result(finished, updated, updated.watermark_date, input.deferred)
 
     def _settled(self, key: str, outcomes: Sequence[ChildOutcome]) -> list[DocumentOutcome]:
         """The outcomes, with a failed or deferred document whose URL is stored counted as
@@ -563,7 +616,24 @@ class FinishCrawl(ActivityBase[FinishRequest, CrawlResult]):
         return settled
 
 
-def _result(run: CrawlRun, source: Source, watermark: date | None) -> CrawlResult:
+def _crawled(
+    source: Source, input: FinishRequest, outcomes: Sequence[DocumentOutcome], now: datetime
+) -> Source:
+    """The source after the schedule's crawl or an admin's fetch: reached or not, its watermark
+    (``next_watermark``) and its error. A backfill's never comes here: it lists history, so the
+    source's watermark (None included), last listing and error stay the schedule's."""
+    if input.error:
+        return source.crawled(now, listed=False, watermark=None, error=input.error)
+    watermark = next_watermark(
+        source.watermark_date,
+        outcomes,
+        known_newest=input.known_newest,
+        deferred_oldest=input.deferred_oldest,
+    )
+    return source.crawled(now, listed=True, watermark=watermark, error=failure_summary(outcomes))
+
+
+def _result(run: CrawlRun, source: Source, watermark: date | None, deferred: int) -> CrawlResult:
     return CrawlResult(
         run_id=run.id.value,
         source_key=run.source_key,
@@ -575,4 +645,5 @@ def _result(run: CrawlRun, source: Source, watermark: date | None) -> CrawlResul
         error=run.error,
         source_error=source.last_error,
         watermark=watermark,
+        deferred=deferred,
     )

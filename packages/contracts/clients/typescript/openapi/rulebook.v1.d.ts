@@ -744,7 +744,9 @@ export type paths = {
     /**
      * Every version of a rule in any status, by version number
      * @description The drafts the seed command writes as well as the versions past them: where a workbench
-     *     finds the version to cite, submit and publish. 404 when no rule has the key.
+     *     finds the version to cite, submit and publish. A closed draft (its rule candidate was
+     *     rejected) is listed with ``closed`` true: it never moves on, so a reader after the rule's
+     *     latest version skips it. 404 when no rule has the key.
      */
     get: operations["list_versions_of_rule_v1_rulebook_rules__rule_key__versions_get"];
     put?: never;
@@ -2686,6 +2688,12 @@ export type components = {
       /** Citations */
       citations: components["schemas"]["CitationOut"][];
       /**
+       * Closed
+       * @description A draft whose rule candidate was rejected: it stays a draft and never moves on (citing, submitting, approving and publishing it are refused), so a reader that takes a rule's latest version skips it
+       * @default false
+       */
+      closed?: boolean;
+      /**
        * Effective From
        * Format: date
        */
@@ -2749,6 +2757,12 @@ export type components = {
     };
     /** RuleVersionOut */
     RuleVersionOut: {
+      /**
+       * Closed
+       * @description A draft whose rule candidate was rejected: it stays a draft and never moves on (citing, submitting, approving and publishing it are refused), so a reader that takes a rule's latest version skips it
+       * @default false
+       */
+      closed?: boolean;
       /**
        * Effective From
        * Format: date

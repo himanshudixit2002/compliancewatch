@@ -7,7 +7,7 @@ document through an ingest of the stored document; irrelevant sets it aside. The
 document's own type is never changed."""
 
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -21,13 +21,14 @@ from domain_kernel.documents import DocumentType
 from domain_kernel.ids import DocumentId, UserId
 from pipeline.application.activities import ParseRequest, Stored
 from pipeline.application.classify import ClassifyDocument
+from pipeline.application.extraction import RULE_PROMPT_REF
 from pipeline.application.sources import AdminAction
 from pipeline.application.tasks import ResolveTask, triage_workflow_id
 from pipeline.domain.classification import TRIAGE, Relevance, TriageDecision, TypeConfidence
 from pipeline.domain.errors import TaskClosedError
 from pipeline.domain.events import DocumentClassified
+from pipeline.domain.extraction import ExtractionOutcome, RuleExtraction, candidate_id_for
 from pipeline.domain.raw_documents import DocumentStatus
-from pipeline.domain.repository import UnitOfWork
 from pipeline.domain.tasks import PipelineTask, TaskKind, TaskStatus
 from pipeline.infrastructure.adapters import RegistryAdapterTypes, RegistryCatalog
 from pipeline.infrastructure.http import PoliteClient
@@ -36,7 +37,13 @@ from pipeline.infrastructure.parsers import ParserChain
 from pipeline.infrastructure.raw_store import MemoryRawStore
 from pipeline.infrastructure.temporal import ingest_payload
 from pipeline.main import build_app
-from pipeline.testing import WRITE_TOKEN, MemoryCrawls, MemoryIngests, pipeline_settings
+from pipeline.testing import (
+    WRITE_TOKEN,
+    LockRace,
+    MemoryCrawls,
+    MemoryIngests,
+    pipeline_settings,
+)
 from pipeline.workflows import IngestRequest
 
 BASE = "/v1/pipeline"
@@ -108,29 +115,6 @@ class Triage:
         """Another analyst's request resolving ``task`` with ``decision``."""
         admin = AdminAction(actor=AuditActor.user(UserId(OTHER_ANALYST)), reason=REASON)
         return lambda: self.resolver().run(task.id, None, admin, triage=decision)
-
-
-class LockRace:
-    """The memory store's units of work, letting another request in once: what ``let_in``
-    names runs, and commits, just before the ``before``-th unit opened from then on, as a request
-    that took a task's row lock first commits while this one waits for the lock. A triage's
-    resolution opens its second unit to lock the task."""
-
-    def __init__(self, store: MemoryStore) -> None:
-        self.store = store
-        self._meanwhile: Callable[[], object] | None = None
-        self._left = 0
-
-    def let_in(self, meanwhile: Callable[[], object], *, before: int) -> None:
-        self._meanwhile, self._left = meanwhile, before
-
-    def __call__(self) -> AbstractContextManager[UnitOfWork]:
-        if self._meanwhile is not None:
-            self._left -= 1
-            if self._left == 0:
-                meanwhile, self._meanwhile = self._meanwhile, None
-                meanwhile()
-        return self.store()
 
 
 @contextmanager
@@ -216,6 +200,39 @@ def test_a_relevant_triage_classifies_the_document_and_continues_it(triage: Tria
     assert len(triage.classified()) == 2
     other = triage.resolve(task, {"relevance": "relevant", "doc_type": "notification"})
     assert (other.status_code, problem(other)) == (409, "pipeline-task-closed")
+
+
+def test_a_triage_on_to_the_extraction_keeps_an_extracted_document_extracted(
+    triage: Triage,
+) -> None:
+    """A document extracted before a fresh reading held it for triage: its extraction's id is
+    used, so a decision that sends it on to the extraction leaves it extracted."""
+    task = triage.conflict()
+    document_id = DocumentId(task.document_id.value)
+    with triage.store() as unit:
+        unit.extractions.add(
+            RuleExtraction(
+                document_id=document_id,
+                prompt_version=RULE_PROMPT_REF,
+                candidate_id=candidate_id_for(document_id, RULE_PROMPT_REF),
+                outcome=ExtractionOutcome.UNPARSEABLE,
+                model="fake/echo",
+                attempts=2,
+                source_key="cbic_notifications",
+                doc_type=DocumentType.NOTIFICATION,
+                regulator="CBIC",
+                issues=(),
+                citation_count=0,
+                confidence=0.0,
+                needs_review=True,
+                answer="",
+                ontology_version="1",
+                extracted_at=NOW,
+            )
+        )
+    response = triage.resolve(task, {"relevance": "relevant", "doc_type": "circular"})
+    assert response.status_code == 200, response.text
+    assert response.json()["task"]["document"]["status"] == "extracted"
 
 
 def test_an_irrelevant_triage_sets_the_document_aside(triage: Triage) -> None:

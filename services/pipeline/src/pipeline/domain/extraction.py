@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import Final
+from uuid import UUID
 
 from domain_kernel._validation import (
     freeze_mapping,
@@ -57,6 +58,13 @@ _RULE_KEY = re.compile(RULE_KEY_PATTERN)
 class ExtractionOutcome(StrEnum):
     EXTRACTED = "extracted"
     UNPARSEABLE = "unparseable"
+
+
+def extraction_workflow_id(document_id: UUID | DocumentId, prompt_ref: str) -> str:
+    """``pipeline-extract-<document>-<prompt>``: one extraction workflow per document and prompt
+    version (``extraction.rule_candidate@1`` gives ``extraction.rule_candidate-v1``)."""
+    value = document_id.value if isinstance(document_id, DocumentId) else document_id
+    return f"pipeline-extract-{value.hex}-{prompt_ref.replace('@', '-v')}"
 
 
 def candidate_id_for(document_id: DocumentId, prompt_version: str) -> CandidateId:

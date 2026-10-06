@@ -31,16 +31,11 @@ with workflow.unsafe.imports_passed_through():
         StoreExtraction,
     )
     from pipeline.application.extractor import FEATURE
+    from pipeline.domain.extraction import extraction_workflow_id as extraction_workflow_id
 
 EXTRACT_RULES_WORKFLOW: Final = "pipeline.extract_rules"
 EXTRACTION_TIMEOUT: Final = timedelta(days=45)
 """Long enough for the budget waits (some 40 days at most) and the asks between them."""
-
-
-def extraction_workflow_id(document_id: UUID, prompt_ref: str) -> str:
-    """``pipeline-extract-<document>-<prompt>``: one extraction per document and prompt
-    version."""
-    return f"pipeline-extract-{document_id.hex}-{prompt_ref.replace('@', '-v')}"
 
 
 def budget_wait(error: ActivityError) -> float | None:

@@ -102,9 +102,9 @@ writes in an order that holds at every statement, so the keys are not deferred.
 | `POST /v1/rulebook/review/relations/{id}/approve` | Approve into a `rule_relation` from a draft rule version (and to the target version for supersedes, extends_deadline, corrects, withdraws); 409 `rulebook-rule-version-not-editable` when the version is not a draft, 409 `rulebook-rule-version-closed` when it is a closed draft (its rule candidate was rejected); refuses supersession cycles. Needs the review token |
 | `POST /v1/rulebook/review/relations/{id}/reject` | Reject with a reason. Needs the review token |
 | `GET /v1/rulebook/rules` | Rule keys with their latest title, the list the relation prompt may choose a rule from. A closed draft (drafted from a rule candidate that was rejected) is never a rule's latest version, so its title is never listed, and a rule only closed drafts hold is left out |
-| `GET /v1/rulebook/rules/{rule_key}/versions` | Every version of the rule in any status, by version number: the drafts the seed command writes as well as the versions past them, where a workbench finds the version to cite and submit; 404 `rulebook-rule-not-found` for an unknown key |
+| `GET /v1/rulebook/rules/{rule_key}/versions` | Every version of the rule in any status, by version number: the drafts the seed command writes as well as the versions past them, where a workbench finds the version to cite and submit. Each says whether it is `closed`, a draft whose rule candidate was rejected: it never moves on, so a reader after the rule's latest version (`cw-product publish`) skips it. 404 `rulebook-rule-not-found` for an unknown key |
 | `GET /v1/rulebook/rule-versions?as_of=&rule_key=&regulator=&status=&limit=&after=&after_version=` | Versions in force on `as_of`: published or superseded, with `effective_from <= as_of < effective_to`. With `ended_on_or_after` instead of `as_of`, the versions whose `effective_to` is on or after that day, published or superseded, never withdrawn (withdrawing closes a version's obligations, so it governs nothing) and never open-ended: the applicability engine asks for the ones superseded since a day (`status=superseded`), whose returns may still be due. `status` keeps published or superseded ones. Ordered by rule key, then version; paged with `after` (a rule key) and `after_version` (a version of that rule key). Naming both days, or neither, is a 422 |
-| `GET /v1/rulebook/rule-versions/{id}` | One version in any status, with its citations, `published_at` and `approved_by`: the distinct approvers of the review round it was published from (the decision audit's approvals since its `submitted_at`), empty until it is published, so a reader showing who reviewed a duty does not depend on having seen rule.published |
+| `GET /v1/rulebook/rule-versions/{id}` | One version in any status, with its citations, `closed` (as in the listing above), `published_at` and `approved_by`: the distinct approvers of the review round it was published from (the decision audit's approvals since its `submitted_at`), empty until it is published, so a reader showing who reviewed a duty does not depend on having seen rule.published |
 | `GET /v1/rulebook/rule-versions/{id}/citations` | The clauses a version cites, with the quote and its verification |
 | `GET /v1/rulebook/entities/resolve?type=&name=` | Normalise the name and resolve it the way alignment does. Always 200 with `status`: `resolved` (with the entity), `ambiguous` (with the candidates sharing the alias), `not_found`, `unqualified` (a section or rule without its statute) or `empty` |
 | `GET /v1/rulebook/entities/{id}` | An entity with its aliases |
@@ -503,12 +503,38 @@ migrations and the seed calendar, or on a deployed database through the reposito
 violation (exit code 1) also labels it `data-quality`. What to do about a violation:
 `docs/runbooks/rulebook-data-quality.md`.
 
+## Golden export
+
+`rulebook-golden-export` (`make golden-export ARGS="--since 2026-10-01 --out var/golden-export"`)
+reads the rule candidates analysts decided on or after a day and writes them as draft cases of
+the extraction golden set (`application/golden_export.py`), for an analyst to review and copy into
+`evals/golden/extraction/cases` by hand:
+
+- An approved candidate is one case, `<out>/cases/<case id>.yaml`, in the shape
+  `pipeline-label prepare` writes and the eval harness loads: `label_status: draft`,
+  `labelled_by` the analyst who decided it, `reviewed_by` empty, the document's clauses as stored,
+  and `expected` the approved version's content mapped back to the candidate shape (what the
+  analyst corrected is in `export.edited`). The case id is the notification number's slug and the
+  candidate id's last eight hex digits.
+- A rejected candidate is listed in `<out>/summary.yaml` with its reason: the golden shape has no
+  negative case.
+- A candidate whose approved conditions the shape cannot hold (anything but an `all_of` of
+  attribute, operator and value) is skipped, with why, in the summary.
+
+It refuses an `--out` inside `evals/golden` (exit 2): only a person moves a case there, after
+a review, and no exported case is ever marked reviewed. `ARGS` takes `--json` for the summary as
+JSON; exit 1 when the database cannot be read. `make golden-export` reads the local stack's
+`rulebook` schema. `packages/contracts/golden/extraction-case.example.yaml` is one exported case
+from synthetic data: `tests/contract/test_golden_case_shape.py` checks the export against it and
+the eval harness's `tests/unit/test_exported_case.py` loads it, so the two sides agree on the
+shape without importing each other.
+
 ## Layout
 
 ```
 src/rulebook/
   api/             # routers (documents, review, review_tasks, rule_versions, publication, graph, search; changes, the public GET /v1/changes), request/response schemas, the write-token and review-token dependencies
-  application/     # use cases: documents.py, alignment.py, review.py, review_tasks.py (and drafting from a candidate), intake.py (the candidate intake), relations.py, rule_versions.py, publication.py, graph.py, search.py, changes.py; seed_loader.py
+  application/     # use cases: documents.py, alignment.py, review.py, review_tasks.py (and drafting from a candidate), intake.py (the candidate intake), relations.py, rule_versions.py, publication.py, graph.py, search.py, changes.py, golden_export.py (decided candidates as draft golden cases); seed_loader.py
   domain/          # documents.py, alignment.py, review.py, review_tasks.py, intake.py (rule candidates and the draft they propose), drafting.py (the checks of a draft's content), relations.py, rule_versions.py, publication.py (the planner), events.py, graph.py, search.py, changes.py (the feed), runs.py, ids.py, errors.py, repository.py, seed.py
   infrastructure/  # models.py (with the Vector column type), knowledge_repository.py (Postgres unit of work and outbox sink), memory.py, seed_repository.py, review_metrics.py (the gauges of both review queues)
   settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN, CW_RULEBOOK_REVIEW_TOKEN, CW_RULEBOOK_PUBLISH_ENABLED, CW_RULEBOOK_CANDIDATE_INTAKE_ENABLED, CW_RULEBOOK_SEED_ON_START (local and test, memory store)
@@ -518,6 +544,7 @@ src/rulebook/
   seed.py          # rulebook-seed command
   quality.py       # rulebook-quality command: domain/quality.py checks, application/quality.py, infrastructure/quality_reader.py
   transitions.py   # rulebook-transitions command (the daily sweep)
+  golden.py        # rulebook-golden-export command
   main.py          # composition root: build_app(settings), store selection, the seed calendar loaded at start when asked, problem statuses, the review queue gauges when telemetry is on
 seed/gst_calendar.yaml   # the seed calendar
 migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and targets models.Base.metadata
@@ -535,7 +562,7 @@ migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and 
 tests/
   unit/            # domain, use cases and API on the memory store; test_models_vocabulary.py: model CHECKs against the kernel enums
   integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work and its reads; the search index; the publish guard, the outbox and the sweep; the changes feed read by a plain role; review tasks with their checks, index and guard; rule candidates, their tasks and the consumer's transaction
-  contract/        # test_openapi.py: the served schema equals the committed spec; test_events.py: the rule events and rule.rejected match their schemas
+  contract/        # test_openapi.py: the served schema equals the committed spec; test_events.py: the rule events and rule.rejected match their schemas; test_golden_case_shape.py: an exported case equals packages/contracts/golden/extraction-case.example.yaml
 alembic.ini, pyproject.toml, Dockerfile
 ```
 

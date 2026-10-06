@@ -1,7 +1,9 @@
-"""One crawl of one source (the ``crawl_run`` table): when it ran, what it found, how it ended,
-and how far it moves the source's watermark.
+"""One crawl of one source (the ``crawl_run`` table): when it ran, why, what it found, how it
+ended, and how far it moves the source's watermark.
 
-A run starts ``running`` and finishes ``completed``, or ``failed`` with the error. Its counts
+A run starts ``running`` and finishes ``completed``, or ``failed`` with the error. It names why it
+ran (``trigger``: the schedule's tick, an admin's fetch, or a backfill) and its workflow
+(``workflow_id``); both are empty on a run recorded before migration 0005. Its counts
 are what the listing returned (``listed``), the documents stored for the first time
 (``stored``), the ones fetched again with bytes already stored (``duplicates``) and the ones that
 could not be fetched or stored (``failed``). A document whose URL is stored already is listed and
@@ -13,10 +15,18 @@ for a source without one), skips the URLs it has stored, and ingests at most
 publication date stored, never past a document that was listed and not stored (one that failed,
 one beyond the cap, one another crawl is ingesting), so the next crawl lists it again
 (``next_watermark``). Undated documents are listed by every crawl and never hold it back.
+
+A backfill (``CrawlTrigger.BACKFILL``) lists history on purpose, from a date its plan names, up to
+another, and only the references the plan names, so it is none of the source's crawls: its end
+leaves the source's watermark as it found it (None included), and its last listing and error
+too. A watermark it moved forward would skip the documents between the old one and the newest it
+stored, and a first one it set would have the schedule's first crawl list years of the live site;
+the schedule's crawls go on from where they were.
 """
 
+import re
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from enum import StrEnum
 from typing import Final, Self
@@ -36,6 +46,11 @@ MAX_NEW_PER_CRAWL: Final = 50
 """The most documents one crawl ingests; the rest wait for the next crawl."""
 MAX_SUMMARY_FAILURES: Final = 3
 """How many failed documents the source's ``last_error`` names."""
+MAX_WORKFLOW_ID_CHARS: Final = 200
+MAX_REFS: Final = 200
+"""The most references one backfill crawl takes."""
+_SPACES = re.compile(r"\s+")
+_LEADING_ZEROS = re.compile(r"^0+(?=\d)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +62,14 @@ class CrawlStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class CrawlTrigger(StrEnum):
+    """Why a crawl ran: the schedule's tick, an admin's fetch, or a backfill of history."""
+
+    SCHEDULE = "schedule"
+    MANUAL = "manual"
+    BACKFILL = "backfill"
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +98,8 @@ class CrawlRun:
     finished_at: datetime | None = None
     counts: CrawlCounts = field(default_factory=CrawlCounts)
     error: str = ""
+    trigger: CrawlTrigger | None = None
+    workflow_id: str = ""
 
     def __post_init__(self) -> None:
         require_instance(self.id, CrawlRunId, "id")
@@ -93,6 +118,13 @@ class CrawlRun:
             raise InvariantViolationError(f"error must be at most {MAX_ERROR_CHARS} chars")
         if (self.status is CrawlStatus.FAILED) != bool(error.strip()):
             raise InvariantViolationError("a run has an error exactly when it failed")
+        if self.trigger is not None:
+            require_instance(self.trigger, CrawlTrigger, "trigger")
+        workflow = require_instance(self.workflow_id, str, "workflow_id")
+        if len(workflow) > MAX_WORKFLOW_ID_CHARS:
+            raise InvariantViolationError(
+                f"workflow_id must be at most {MAX_WORKFLOW_ID_CHARS} chars"
+            )
 
     @classmethod
     def start(cls, source_key: str, now: datetime) -> Self:
@@ -103,10 +135,8 @@ class CrawlRun:
         if self.status is not CrawlStatus.RUNNING:
             raise InvariantViolationError(f"crawl run {self.id} has already {self.status.value}")
         cut = error.strip()[:MAX_ERROR_CHARS]
-        return type(self)(
-            id=self.id,
-            source_key=self.source_key,
-            started_at=self.started_at,
+        return replace(
+            self,
             status=CrawlStatus.FAILED if cut else CrawlStatus.COMPLETED,
             finished_at=now,
             counts=counts,
@@ -157,6 +187,41 @@ class DocumentOutcome:
     def kept(self) -> bool:
         """Its bytes are in the store."""
         return self.outcome in (Outcome.STORED, Outcome.DUPLICATE)
+
+
+def ref_key(ref: str) -> str:
+    """A listing's reference as a backfill compares it: no spaces, case folded, no leading
+    zeros, so ``82/2020-Central Tax`` and ``82/2020 - central tax`` are one notification, and so
+    are ``01/2026-Central Tax`` and ``1/2026-Central Tax``."""
+    return _LEADING_ZEROS.sub("", _SPACES.sub("", ref)).casefold()
+
+
+@dataclass(frozen=True, slots=True)
+class ListingWindow:
+    """What a backfill crawl lists instead of the watermark's window: from ``since`` (below the
+    watermark), up to ``until`` (both included; an undated document is then left out), only the
+    references ``refs`` names (none: every one)."""
+
+    since: date | None = None
+    until: date | None = None
+    refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.since is not None and self.until is not None and self.until < self.since:
+            raise InvariantViolationError("until must not be before since")
+        if len(self.refs) > MAX_REFS:
+            raise InvariantViolationError(f"a backfill crawl takes at most {MAX_REFS} references")
+
+    @property
+    def narrows(self) -> bool:
+        """Whether it changes the listing at all."""
+        return self.since is not None or self.until is not None or bool(self.refs)
+
+    def admits(self, published: date | None, ref: str) -> bool:
+        """Whether a listed document is in the window."""
+        if self.until is not None and (published is None or published > self.until):
+            return False
+        return not self.refs or ref_key(ref) in {ref_key(wanted) for wanted in self.refs}
 
 
 def listing_since(watermark: date | None, today: date) -> date:

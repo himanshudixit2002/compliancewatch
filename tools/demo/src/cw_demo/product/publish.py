@@ -155,7 +155,9 @@ def register_notifications(
 
 
 def rule_versions(product: Product, rule_key: str) -> list[dict[str, Any]]:
-    """Every version of the rule, by number; refuses a rule the seed command has not loaded."""
+    """Every version of the rule that can still move, by number, so the last is the one to
+    publish: a closed draft (``closed``: its rule candidate was rejected) never moves on and is
+    left out. Refuses a rule the seed command has not loaded."""
     answer = product.internal.get(f"{RULEBOOK}/rules/{rule_key}/versions")
     if answer.status_code == 404:
         raise ProductError(
@@ -163,7 +165,7 @@ def rule_versions(product: Product, rule_key: str) -> list[dict[str, Any]]:
             "(make seed SERVICE=rulebook)"
         )
     versions: list[dict[str, Any]] = ok(answer)
-    return versions
+    return [version for version in versions if not version.get("closed", False)]
 
 
 def publish_rule(product: Product, rule: RuleSpec, clause_ids: ClauseIds) -> PublishedRule:

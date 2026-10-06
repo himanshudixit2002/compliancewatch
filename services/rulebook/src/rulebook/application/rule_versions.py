@@ -7,7 +7,9 @@ so a draft, a version under review or a withdrawn one never reaches an answer.
 ``ListEndedVersions`` is how the applicability engine finds the superseded versions whose returns
 are still due: a version keeps the periods whose last day it was in force on. Neither lists a
 withdrawn version. ``ListRuleVersions`` is the editorial view: the drafts the seed command writes
-and the versions past them, which is how a workbench finds a version to cite and submit.
+and the versions past them, which is how a workbench finds a version to cite and submit; each
+says whether it is closed (a draft whose rule candidate was rejected, which never moves on), and
+so does ``ReadRuleVersion``.
 """
 
 from collections.abc import Sequence
@@ -16,9 +18,11 @@ from datetime import date
 from domain_kernel.ids import RuleId, RuleVersionId
 from domain_kernel.status import RuleVersionStatus
 from rulebook.domain.errors import UnknownRuleError, UnknownRuleVersionError
-from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
+from rulebook.domain.intake import version_closed
+from rulebook.domain.repository import KnowledgeUnitOfWork, KnowledgeUnitOfWorkFactory
 from rulebook.domain.rule_versions import (
     CitationRecord,
+    ListedVersion,
     RuleVersionDetail,
     RuleVersionRecord,
     VersionPage,
@@ -107,18 +111,30 @@ class ListEndedVersions:
             return uow.rule_versions.ended(since, page)
 
 
+def is_closed(uow: KnowledgeUnitOfWork, record: RuleVersionRecord) -> bool:
+    """Whether the version is a closed draft: drafted from a rule candidate that was rejected,
+    and never published."""
+    if record.candidate_id is None:
+        return False
+    return version_closed(record, uow.rule_candidates.get(record.candidate_id))
+
+
 class ListRuleVersions:
-    """Every version of the rule with ``rule_key``, by version number, in any status."""
+    """Every version of the rule with ``rule_key``, by version number, in any status, each with
+    whether it is closed."""
 
     def __init__(self, unit_of_work: KnowledgeUnitOfWorkFactory) -> None:
         self._unit_of_work = unit_of_work
 
-    def run(self, rule_key: str) -> Sequence[RuleVersionRecord]:
+    def run(self, rule_key: str) -> list[ListedVersion]:
         with self._unit_of_work() as uow:
             rule_id = uow.rules.rule_id(rule_key)
             if rule_id is None:
                 raise UnknownRuleError(rule_key)
-            return uow.rule_versions.of_rule(RuleId(rule_id))
+            return [
+                ListedVersion(record, is_closed(uow, record))
+                for record in uow.rule_versions.of_rule(RuleId(rule_id))
+            ]
 
 
 class ReadRuleVersion:
@@ -144,6 +160,7 @@ class ReadRuleVersion:
                 record,
                 uow.citations.for_version(rule_version_id),
                 tuple(sorted(approvers, key=str)),
+                closed=is_closed(uow, record),
             )
 
 

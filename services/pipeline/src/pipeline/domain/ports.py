@@ -2,14 +2,15 @@
 files it fetches, from the adapter registry and from Temporal, as protocols. The adapters live in
 ``infrastructure`` (HTTP, S3, disk, Temporal) and ``testing`` (memory)."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Protocol
 
 from domain_kernel.documents import DocumentType, ParsedDocument, RawDocument
 from domain_kernel.ids import ClauseId, DocumentId, SourceId
 from domain_kernel.protocols import SourceAdapter
-from pipeline.domain.crawl import CrawlRunId
+from pipeline.domain.crawl import CrawlRunId, CrawlTrigger
 from pipeline.domain.embedding import ClauseToEmbed, ClauseVector, EmbeddingBatch, EmbeddingsStored
 from pipeline.domain.knowledge import (
     AlignmentReport,
@@ -21,7 +22,6 @@ from pipeline.domain.knowledge import (
     StagingReport,
 )
 from pipeline.domain.raw_documents import RawDocumentRecord
-from pipeline.domain.schedule import CrawlTrigger
 from pipeline.domain.sources import SourceDefinition
 from pipeline.domain.transcripts import Transcript
 
@@ -80,6 +80,13 @@ class RulebookReader(Protocol):
     def known_rules(self) -> tuple[RuleKey, ...]:
         """The rules a relation may name as the one it affects."""
         ...
+
+
+class CandidateStats(Protocol):
+    """How analysts decided the rule candidates: the ``candidates`` block of the rulebook's
+    review stats (decided, approved, approved without edits, rejected, acceptance rate)."""
+
+    def candidate_stats(self) -> Mapping[str, object]: ...
 
 
 class Embedder(Protocol):
@@ -192,12 +199,34 @@ class AdapterTypes(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class CrawlStart:
-    """A crawl to start: the workflow's id, the run it records, the source, and why."""
+    """A crawl to start: the workflow's id, the run it records, the source, and why. A backfill
+    also names where its listing starts (``since``, below the watermark), where it ends
+    (``until``), the references it takes (``refs``; empty: every one) and the most documents
+    it ingests (``limit``); None leaves the crawl's own."""
 
     workflow_id: str
     run_id: CrawlRunId
     source_key: str
     trigger: CrawlTrigger
+    since: date | None = None
+    until: date | None = None
+    refs: tuple[str, ...] = ()
+    limit: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlOutcome:
+    """How a crawl workflow ended, as its result says: the run's status and counts, the new
+    documents left for a later crawl (``deferred``), and the run's or the listing's error."""
+
+    workflow_id: str
+    status: str
+    listed: int = 0
+    stored: int = 0
+    duplicates: int = 0
+    failed: int = 0
+    deferred: int = 0
+    error: str = ""
 
 
 class CrawlStarter(Protocol):
@@ -210,13 +239,25 @@ class CrawlStarter(Protocol):
         ...
 
 
+class CrawlWatcher(Protocol):
+    """Waits for a crawl workflow on Temporal to end (a backfill's rounds run one after the
+    other)."""
+
+    def wait(self, workflow_id: str) -> CrawlOutcome:
+        """The crawl's outcome once it ended; ``CrawlUnavailableError`` when Temporal does not
+        answer, or the crawl does not end in time."""
+        ...
+
+
 @dataclass(frozen=True, slots=True)
 class IngestStart:
     """An ingest of a stored document to start (``pipeline.ingest_document`` with
     ``IngestRequest.stored``): the workflow's id; the document as its record holds it, under the
     source it is stored for (its id and regulator) and where the raw store keeps it; whether
-    those bytes were stored before; the analyst's transcript to parse it from, if any; and
-    whether the knowledge steps run."""
+    those bytes were stored before; the analyst's transcript to parse it from, if any; whether
+    the knowledge steps run; whether the detector reads the document again (``reclassify``); and
+    whether its id is used once, ever (``once``: a retry's attempt, whose failure a new attempt
+    retries, so a request sent again never starts a second run of it)."""
 
     workflow_id: str
     record: RawDocumentRecord
@@ -226,12 +267,21 @@ class IngestStart:
     duplicate: bool = False
     transcript_key: str = ""
     knowledge: bool = False
+    reclassify: bool = False
+    once: bool = False
 
 
 class IngestStarter(Protocol):
-    """Starts the ingest of a stored document on Temporal (an upload's, a resolution's)."""
+    """Starts the ingest of a stored document on Temporal (an upload's, a resolution's, a
+    retry's), and says which ingests run."""
 
     def start(self, start: IngestStart) -> bool:
-        """Start the workflow; False when a workflow with its id runs or has completed (one
-        that failed may run again). ``IngestUnavailableError`` when Temporal does not answer."""
+        """Start the workflow; False when a workflow with its id runs or has completed, and,
+        for a start that uses its id ``once``, whatever became of it (otherwise one that failed
+        may run again). ``IngestUnavailableError`` when Temporal does not answer."""
+        ...
+
+    def running(self, workflow_ids: Collection[str]) -> frozenset[str]:
+        """Those of ``workflow_ids`` whose workflow runs now; an id Temporal does not know is
+        not running. ``IngestUnavailableError`` when Temporal does not answer."""
         ...

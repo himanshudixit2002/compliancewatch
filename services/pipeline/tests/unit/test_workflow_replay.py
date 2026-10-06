@@ -1,5 +1,6 @@
-"""Histories recorded before the store, before the crawl, before manual parse and before the
-classify step replay on today's ingest workflow.
+"""Histories recorded before the store, before the crawl, before manual parse, before the
+classify step, and with the classify step, a retry's fresh reading and a backfill's crawl, replay
+on today's ingest and crawl workflows.
 
 ``tests/fixtures/histories`` holds runs of ``pipeline.ingest_document``, each pair one with
 knowledge off and one with registration, embedding and the extraction child:
@@ -19,8 +20,17 @@ knowledge off and one with registration, embedding and the extraction child:
   an upload's stored document (``STORED_PATCH``), an analyst's transcript of a statute (stored,
   registered and embedded, never extracted), and a scan no parser reads, which opened its
   manual-parse task (``PARSE_PATCH``).
+- ``ingest-with-classify*`` as it ran with the classify step (``CLASSIFY_PATCH``) and the rule
+  extraction, handed its document by a crawl: with knowledge off it ends after its
+  classification; with knowledge on it is registered and embedded, runs its knowledge child and
+  starts its rule extraction child (``EXTRACTION_PATCH``).
+- ``ingest-with-reclassify``, a retry from the classify stage of a stored document, which the
+  detector read again (``RECLASSIFY_PATCH``) and placed on its way to the extraction.
+- ``crawl-with-backfill``, a run of ``pipeline.crawl_source``: a backfill's crawl that listed its
+  own window (``BACKFILL_PATCH``) and ingested the document in a child.
 """
 
+import base64
 import json
 from pathlib import Path
 
@@ -41,9 +51,19 @@ from pipeline.application.activities import (
     ParseRequest,
 )
 from pipeline.application.classify import ClassifyDocument, ClassifyRequest
-from pipeline.workflows import ExtractKnowledgeWorkflow, IngestDocumentWorkflow, IngestRequest
+from pipeline.workflows import (
+    CrawlSourceWorkflow,
+    ExtractKnowledgeWorkflow,
+    ExtractRulesWorkflow,
+    IngestDocumentWorkflow,
+    IngestRequest,
+)
+from pipeline.workflows.crawl_source import BACKFILL_PATCH
 from pipeline.workflows.ingest_document import (
+    CLASSIFY_PATCH,
+    EXTRACTION_PATCH,
     GIVEN_PATCH,
+    RECLASSIFY_PATCH,
     STORE_PATCH,
     STORED_PATCH,
     IngestResult,
@@ -70,12 +90,21 @@ BEFORE_THE_CLASSIFY_STEP = [
     HISTORIES / "ingest-with-parse-statute.json",
     HISTORIES / "ingest-with-parse-unparsed.json",
 ]
+WITH_THE_CLASSIFY_STEP = [
+    HISTORIES / "ingest-with-classify.json",
+    HISTORIES / "ingest-with-classify-knowledge.json",
+]
+RECLASSIFIED = HISTORIES / "ingest-with-reclassify.json"
+BACKFILLED = HISTORIES / "crawl-with-backfill.json"
 RECORDED = [
     *BEFORE_THE_STORE,
     *BEFORE_THE_CRAWL,
     *WITH_THE_CRAWL,
     UNPARSED,
     *BEFORE_THE_CLASSIFY_STEP,
+    *WITH_THE_CLASSIFY_STEP,
+    RECLASSIFIED,
+    BACKFILLED,
 ]
 
 
@@ -102,6 +131,28 @@ def scheduled_activities(path: Path) -> list[str]:
 def event_types(path: Path) -> list[str]:
     events = json.loads(path.read_text(encoding="utf-8"))["events"]
     return [str(event["eventType"]).removeprefix("EVENT_TYPE_") for event in events]
+
+
+def patches(path: Path) -> list[str]:
+    """The patch ids the history's markers recorded."""
+    found: list[str] = []
+    for event in json.loads(path.read_text(encoding="utf-8"))["events"]:
+        details = event.get("markerRecordedEventAttributes", {}).get("details", {})
+        for payloads in details.values():
+            for payload in payloads.get("payloads", []):
+                item = json.loads(base64.b64decode(payload["data"]))
+                if isinstance(item, dict) and "id" in item:
+                    found.append(str(item["id"]))
+    return found
+
+
+def children(path: Path) -> list[str]:
+    events = json.loads(path.read_text(encoding="utf-8"))["events"]
+    return [
+        event["startChildWorkflowExecutionInitiatedEventAttributes"]["workflowType"]["name"]
+        for event in events
+        if event["eventType"] == "EVENT_TYPE_START_CHILD_WORKFLOW_EXECUTION_INITIATED"
+    ]
 
 
 def test_the_recorded_histories_fetched_before_the_store() -> None:
@@ -160,11 +211,43 @@ def test_the_histories_before_the_classify_step_took_each_path() -> None:
     assert event_types(unparsed)[-1] == "WORKFLOW_EXECUTION_COMPLETED"
 
 
+def test_the_histories_with_the_classify_step_took_its_paths() -> None:
+    off, on = WITH_THE_CLASSIFY_STEP
+    assert scheduled_activities(off) == [
+        "pipeline.fetch_and_store",
+        "pipeline.parse_document",
+        "pipeline.classify_document",
+    ]
+    assert CLASSIFY_PATCH in patches(off)
+    assert children(off) == []
+    assert scheduled_activities(on) == [
+        *scheduled_activities(off),
+        "pipeline.register_document",
+        "pipeline.embed_clauses",
+    ]
+    assert {CLASSIFY_PATCH, EXTRACTION_PATCH} <= set(patches(on))
+    assert children(on) == ["pipeline.extract_knowledge", "pipeline.extract_rules"]
+    assert scheduled_activities(RECLASSIFIED) == [
+        "pipeline.parse_document",
+        "pipeline.classify_document",
+    ]
+    assert {STORED_PATCH, CLASSIFY_PATCH, RECLASSIFY_PATCH} <= set(patches(RECLASSIFIED))
+
+
+def test_the_backfill_history_listed_its_own_window() -> None:
+    assert scheduled_activities(BACKFILLED) == [
+        "pipeline.list_new_documents",
+        "pipeline.finish_crawl",
+    ]
+    assert patches(BACKFILLED) == [BACKFILL_PATCH]
+    assert children(BACKFILLED) == ["pipeline.ingest_document"]
+
+
 @pytest.mark.parametrize("path", RECORDED, ids=lambda path: path.stem)
 async def test_a_recorded_history_replays_on_todays_workflow(path: Path) -> None:
-    replayed = await replayer(IngestDocumentWorkflow, ExtractKnowledgeWorkflow).replay_workflow(
-        history(path)
-    )
+    replayed = await replayer(
+        IngestDocumentWorkflow, ExtractKnowledgeWorkflow, ExtractRulesWorkflow, CrawlSourceWorkflow
+    ).replay_workflow(history(path))
     assert replayed.replay_failure is None
 
 

@@ -1,11 +1,11 @@
 """The pipeline worker: ``python -m pipeline.worker`` (locally ``make worker SERVICE=pipeline``).
 
-Registers the crawl, ingest and extraction workflows and their activities on the ``pipeline``
-task queue against ``CW_TEMPORAL_ADDRESS``. The activities read the sources the store holds
-(``StoreCatalog``: each adapter built from its row's adapter type and parameters) over one polite
-client, parse each document through the parser chain as its source's document type
-(``ParserChain``: text-layer PDF, table-aware PDF, HTML, table-aware HTML), keep the fetched
-files in the raw store ``CW_PIPELINE_RAW_STORE`` names and record them, with their
+Registers the crawl, ingest, extraction and backlog workflows and their activities on the
+``pipeline`` task queue against ``CW_TEMPORAL_ADDRESS``. The activities read the sources the
+store holds (``StoreCatalog``: each adapter built from its row's adapter type and parameters)
+over one polite client, parse each document through the parser chain as its source's document
+type (``ParserChain``: text-layer PDF, table-aware PDF, HTML, table-aware HTML), keep the
+fetched files in the raw store ``CW_PIPELINE_RAW_STORE`` names and record them, with their
 document.discovered, in the store ``CW_PIPELINE_STORE`` names, which must be postgres:
 ``pipeline.stores``. The outbox relay that publishes the events runs on its own
 (``make relay SERVICE=pipeline``), or in the combined worker.
@@ -47,6 +47,7 @@ from pipeline.application.crawl import FinishCrawl, ListNewDocuments, ScheduleCr
 from pipeline.application.embedding import EmbeddingStage
 from pipeline.application.extraction import (
     RULE_PROMPT,
+    CheckExtraction,
     ExtractRules,
     RuleExtractionStage,
     StoreExtraction,
@@ -85,6 +86,7 @@ from pipeline.stores import raw_store_of, unit_of_work_of
 from pipeline.workflows import (
     TASK_QUEUE,
     CrawlSourceWorkflow,
+    ExtractBacklogWorkflow,
     ExtractKnowledgeWorkflow,
     ExtractRulesWorkflow,
     IngestDocumentWorkflow,
@@ -105,6 +107,7 @@ WORKFLOWS: Final[tuple[type[Any], ...]] = (
     ExtractKnowledgeWorkflow,
     ExtractRulesWorkflow,
     CrawlSourceWorkflow,
+    ExtractBacklogWorkflow,
 )
 TICK_JOB: Final = "pipeline-crawl-tick"
 TICK_SECONDS: Final = 60.0
@@ -182,6 +185,7 @@ def activities(
         SubmitRelations(rulebook, enabled=enabled),
         ExtractRules(rulebook, rules, records, enabled=extracting),
         StoreExtraction(records),
+        CheckExtraction(enabled=extracting),
         ListNewDocuments(records, catalog, knowledge=enabled),
         FinishCrawl(records),
     ]

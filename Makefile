@@ -199,7 +199,7 @@ ts-dev: check-pnpm ## next dev (:3000) and whatsapp-bot (:8080) with reload
 	$(PNPM) turbo run dev
 
 # ---- Composition (guide sections 13, 17, 19) -------------------------------------------------
-.PHONY: install lint format typecheck test check eval eval-check label demo runbooks-check migrate run worker relay seed openapi contracts contracts-check hooks ci-lint crawl-report
+.PHONY: install lint format typecheck test check eval eval-check label demo runbooks-check migrate run worker relay replay seed openapi contracts contracts-check hooks ci-lint crawl-report extract-backlog golden-export
 # The gates `make check` runs. A package adds its own with `CHECKS += <target>` in its section.
 # The prerequisites of check expand a second time when make runs them (.SECONDEXPANSION below),
 # so a `CHECKS +=` line counts wherever it sits in this file.
@@ -267,9 +267,27 @@ seed: check-uv ## Load the rulebook seed calendar as draft rule versions: make s
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \
 	  $(UV) run --package compliancewatch-$(SERVICE) $(SERVICE)-seed $(ARGS)
 
-backfill: check-uv ## Backfill one regulator source into var/raw: make backfill SERVICE=pipeline ARGS="--source cbic_notifications --since 2026-01-01"
-	@[ "$(SERVICE)" = "pipeline" ] || { echo "usage: make backfill SERVICE=pipeline ARGS=\"--source <key> [--since YYYY-MM-DD] [--limit N] [--list-only]\""; exit 1; }
-	@$(UV) run --package compliancewatch-pipeline pipeline-backfill $(ARGS)
+# The backfill through the crawl workflow (pipeline.backfill, services/pipeline/README.md): a plan
+# with --dry-run (lists each row on the live regulator site, fetches and writes nothing),
+# --workflow (crawls each row through the running worker; needs CW_PIPELINE_CRAWL_ENABLED and a
+# --reason) or --report (where the documents got to, and the rulebook's acceptance). --legacy
+# keeps the old fetch into var/raw. It reads the database make migrate uses.
+backfill: check-uv ## Backfill from a plan through the crawl workflow: make backfill ARGS="--plan services/pipeline/backfill-plan.yaml --dry-run" | ARGS="... --workflow --reason '<why>'" | ARGS="... --report"
+	@[ -n "$(ARGS)" ] || { echo 'usage: make backfill ARGS="--plan services/pipeline/backfill-plan.yaml --dry-run|--report|--workflow --reason <why>" (or ARGS="--legacy --source <key> [--since YYYY-MM-DD] [--limit N] [--list-only]")'; exit 1; }
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3Dpipeline%2Cpublic"; \
+	CW_DATABASE_URL="$$url" CW_DB_SCHEMA=pipeline CW_PIPELINE_STORE=postgres CW_LOG_LEVEL=WARNING \
+	  $(UV) run --package compliancewatch-pipeline pipeline-backfill $(ARGS)
+
+# The rule candidates analysts decided since a day, as draft golden extraction cases
+# (rulebook.golden): cases/<id>.yaml and summary.yaml under --out, never inside evals/golden. It
+# reads the database make migrate uses.
+golden-export: check-uv ## Decided rule candidates as draft golden cases: make golden-export ARGS="--since 2026-10-01 --out var/golden-export"
+	@[ -n "$(ARGS)" ] || { echo 'usage: make golden-export ARGS="--since YYYY-MM-DD --out <dir> [--json]"'; exit 1; }
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3Drulebook%2Cpublic"; \
+	CW_DATABASE_URL="$$url" CW_DB_SCHEMA=rulebook CW_LOG_LEVEL=WARNING \
+	  $(UV) run --package compliancewatch-rulebook rulebook-golden-export $(ARGS)
 
 # The crawl's report over the pipeline store and the F1 check (every new CBIC notification detected
 # within 6 hours over the window): exit 0 when F1 is met, 1 when it is not, 2 when the store cannot
@@ -280,6 +298,16 @@ crawl-report: check-uv ## Crawl runs, failures, gaps and detection delays per so
 	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3Dpipeline%2Cpublic"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA=pipeline CW_PIPELINE_STORE=postgres CW_LOG_LEVEL=WARNING \
 	  $(UV) run --package compliancewatch-pipeline pipeline-crawl-report $(ARGS)
+
+# The documents that wait as classified with no extraction for the current prompt (the ones the
+# ingest classified while CW_PIPELINE_EXTRACTION_ENABLED was off), per source, and a sweep that
+# extracts them on the running worker's Temporal: --dry-run only counts; without it the command
+# refuses while the extraction flag is off.
+extract-backlog: check-uv ## The classified backlog per source, and a sweep that extracts it: make extract-backlog [ARGS="--dry-run --source cbic_notifications --limit 200 --json"]
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3Dpipeline%2Cpublic"; \
+	CW_DATABASE_URL="$$url" CW_DB_SCHEMA=pipeline CW_PIPELINE_STORE=postgres CW_LOG_LEVEL=WARNING \
+	  $(UV) run --package compliancewatch-pipeline pipeline-extract-backlog $(ARGS)
 
 worker: check-uv ## Run a service's worker process, python -m <pkg>.worker (consumers, relay, periodic jobs, Temporal): make worker SERVICE=pipeline
 	@[ -n "$(SERVICE)" ] || { echo "usage: make worker SERVICE=<pipeline|notification|...>"; exit 1; }
@@ -294,6 +322,16 @@ relay: check-uv ## Run the outbox relay for one service's schema: make relay SER
 	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$(SCHEMA)%2Cpublic"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \
 	  $(UV) run --package compliancewatch-$(SERVICE) python -m py_common.outbox
+
+# The dead letters on Kafka (py_common.outbox.replay): list reads a dead-letter topic from its first
+# offset with no consumer group, so it commits nothing; send puts one message, by its event id,
+# back on its origin topic without the dead-letter headers. CW_KAFKA_BOOTSTRAP (.env) names the
+# cluster. Exit 0 done, 1 an unknown event id or topic, 2 the broker did not answer or the topic
+# was not read to its end in time, 64 wrong arguments.
+replay: check-uv ## List a dead-letter topic, or send one message back to its origin: make replay ARGS="list --topic <topic>.<group>.dlq" | ARGS="send --topic <dlq> --event-id <id> [--dry-run]"
+	@[ -n "$(ARGS)" ] || { echo 'usage: make replay ARGS="list --topic <dead-letter topic> [--json]" | ARGS="send --topic <dead-letter topic> --event-id <uuid> [--to <topic>] [--dry-run]"'; exit 1; }
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	CW_LOG_LEVEL=WARNING $(UV) run --package py-common python -m py_common.outbox.replay $(ARGS)
 
 openapi: check-uv ## Export a service's OpenAPI spec: make openapi SERVICE=llm-gateway -> packages/contracts/openapi/<svc>.v1.json
 	@[ -n "$(SERVICE)" ] || { echo "usage: make openapi SERVICE=<identity|profile|...>"; exit 1; }

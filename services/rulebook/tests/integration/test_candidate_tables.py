@@ -43,6 +43,7 @@ from py_common.outbox import (
 from py_common.outbox.testing import FakeProducer
 from rulebook import worker
 from rulebook.application.documents import RegisterDocument
+from rulebook.application.golden_export import ExportDecidedCandidates
 from rulebook.application.intake import IngestRuleCandidate
 from rulebook.application.publication import SubmitForReview
 from rulebook.application.review_tasks import (
@@ -54,6 +55,7 @@ from rulebook.application.review_tasks import (
     ReadReviewStats,
     RelationChoice,
 )
+from rulebook.application.rule_versions import ListRuleVersions
 from rulebook.application.seed_loader import load_calendar
 from rulebook.domain.documents import StoredDocument
 from rulebook.domain.errors import RuleVersionClosedError
@@ -457,6 +459,13 @@ def test_a_candidate_is_drafted_approved_and_another_rejected_on_postgres(
     counts = ReadReviewStats(factory).run().candidates
     assert (counts.approved, counts.approved_without_edits, counts.rejected) == (1, 1, 1)
     assert counts.acceptance_rate == 0.5
+    export = ExportDecidedCandidates(factory).run(START)
+    case = {case.candidate_id: case for case in export.cases}[intake.candidate.candidate_id]
+    assert (case.content["label_status"], case.content["reviewed_by"]) == ("draft", "")
+    assert case.content["labelled_by"] == str(approved.candidate.decided_by)
+    assert case.rule_version_id == detail.version.rule_version_id
+    assert [c["clause_ref"] for c in case.content["expected"]["citations"]] == ["en.p2", "en.p3"]
+    assert other.candidate.candidate_id in {r.candidate_id for r in export.rejections}
 
 
 KEYS_0011 = (
@@ -726,6 +735,8 @@ def test_a_rejected_candidates_draft_is_closed_on_postgres(
     )
     assert head is not None
     assert head.last_version == 2
+    listed_versions = ListRuleVersions(factory).run(seeded)
+    assert [(v.record.version, v.closed) for v in listed_versions] == [(1, False), (2, True)]
     outcome = SqlAlchemySeedRepository(engine).apply(calendar)
     assert seeded in outcome.unchanged
     assert seeded not in outcome.kept_edited

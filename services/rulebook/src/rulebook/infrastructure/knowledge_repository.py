@@ -1113,6 +1113,14 @@ class SqlAlchemyRuleCandidateRepository:
                 f"rule candidate {candidate.candidate_id} is not stored"
             )
 
+    def decided_since(self, since: datetime) -> Sequence[RuleCandidate]:
+        rows = self._session.scalars(
+            select(RuleCandidateRow)
+            .where(RuleCandidateRow.decided_at >= since)
+            .order_by(RuleCandidateRow.decided_at, RuleCandidateRow.id)
+        ).all()
+        return [_to_rule_candidate(row) for row in rows]
+
 
 class SqlAlchemyReviewTaskRepository:
     """Review tasks read and written as plain rows (never ORM objects), so a task written in a

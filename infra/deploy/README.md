@@ -167,6 +167,21 @@ so the classifications, the triage decisions among them, and every extraction re
 (a resolved triage task keeps only its resolution), and those documents go back to `parsed`;
 only the backup brings them back.
 
+Pipeline migration 0005 only adds (the crawl runs' trigger and workflow, the retries' table), and
+an image built before it starts on that schema, but it cannot run beside the image that came
+with it. That image's workflow and activity inputs carry fields the older models refuse (they
+forbid extra fields: a backfill's trigger and window, `deferred`, `reclassify`, `fresh`), so an
+older pipeline worker fails every task of a workflow the newer one started. Old and new pipeline
+workers must never poll the `pipeline` task queue at the same time: a rolling deploy, which
+overlaps them, is not safe across 0005. Deploy by stopping the old workers (scale them to zero)
+before the new ones start. Roll back the same way in reverse: stop new crawls and retries, let
+every crawl, ingest, retry and backlog sweep the newer image started end on its workers (or
+terminate them), stop those workers, then start the older image's. The schema stays at 0005:
+the older image ignores what it added, and `alembic downgrade 0004` refuses while any retry is
+stored. Once a person has given a document a type on a retry (a `document_classification` row by
+`retry` with `decided_by` set), the older image fails on that document, since its
+`Classification` takes a person's decision from a triage only: roll forward then, not back.
+
 ## What the MVP profile does not give
 
 Canary rollouts with automatic rollback on SLO breach, network policies and mTLS, node pools for

@@ -20,7 +20,9 @@ After its parse, a stored document is classified, behind ``workflow.patched(CLAS
 whether it is a regulatory document, recorded with its status and its ``document.classified``.
 An irrelevant document is set aside and a conflict (its text names another type than its source
 publishes) waits for a person's ``triage`` task; the ingest ends there for both, so nothing of
-them is registered. Everything else is registered as the type it was classified as.
+them is registered. Everything else is registered as the type it was classified as. A retry from
+the classify stage (``IngestRequest.reclassify``) has the detector read the document again,
+behind ``workflow.patched(RECLASSIFY_PATCH)``; a person's decision stands.
 
 Statutes are registered and their clauses embedded like any document, so rules can cite them,
 but nothing is extracted from them (``domain.candidate.is_extracted``): the extraction child is
@@ -105,6 +107,7 @@ STORED_PATCH = "pipeline-stored-v1"
 PARSE_PATCH = "pipeline-parse-v1"
 CLASSIFY_PATCH = "pipeline-classify-v1"
 EXTRACTION_PATCH = "pipeline-extraction-v1"
+RECLASSIFY_PATCH = "pipeline-reclassify-v1"
 REGISTER_PATCH = "kag-register-v1"
 EMBED_PATCH = "kag-embed-v1"
 EXTRACT_PATCH = "kag-extract-v1"
@@ -134,9 +137,10 @@ def unparsed(error: ActivityError) -> bool:
 
 class IngestRequest(Frozen):
     """The document to ingest: ``discovered``, as a crawl listed it; ``stored``, stored already
-    (an upload, a manual parse's resolution), with ``transcript_key`` naming the analyst's
-    transcript to parse it from; or neither, and the ingest discovers the first document the
-    source lists since ``since``."""
+    (an upload, a manual parse's resolution, a retry), with ``transcript_key`` naming the
+    analyst's transcript to parse it from; or neither, and the ingest discovers the first document
+    the source lists since ``since``. ``reclassify`` (a retry from the classify stage) has the
+    detector read a stored document again."""
 
     source_id: UUID
     since: datetime | None = None
@@ -145,6 +149,7 @@ class IngestRequest(Frozen):
     transcript_key: str = Field(default="", max_length=1_024)
     knowledge: bool = False
     regulator: str = ""
+    reclassify: bool = False
 
     @model_validator(mode="after")
     def _regulator_with_knowledge(self) -> Self:
@@ -252,7 +257,10 @@ class IngestDocumentWorkflow:
             )
         classified: Classified | None = None
         if parse_request.stored is not None and workflow.patched(CLASSIFY_PATCH):
-            classified = await ClassifyDocument.schedule(ClassifyRequest(parse=parse_request))
+            fresh = request.reclassify and workflow.patched(RECLASSIFY_PATCH)
+            classified = await ClassifyDocument.schedule(
+                ClassifyRequest(parse=parse_request, fresh=fresh)
+            )
             if classified.stops:
                 workflow.logger.info(
                     "the document stops at its classification: %s", classified.route

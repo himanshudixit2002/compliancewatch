@@ -26,9 +26,10 @@ Other sources are re-recorded by hand (the URLs are in each adapter module).
 
 ## Workflow histories
 
-`histories/` holds runs of `pipeline.ingest_document`, recorded on 2026-10-06 on a local
-Temporal dev server on the sample notification of `pipeline.infrastructure.fakes`, each pair one
-run with knowledge off and one with registration, embedding and the extraction child:
+`histories/` holds runs of `pipeline.ingest_document` (and one of `pipeline.crawl_source`),
+recorded on 2026-10-06 on a local Temporal dev server on the sample notification of
+`pipeline.infrastructure.fakes`, each pair one run with knowledge off and one with registration,
+embedding and the extraction child:
 
 - `ingest-before-store.json` and `ingest-before-store-knowledge.json`, with the code before
   `FetchAndStore`: both fetched with `pipeline.fetch_document`, whose result carries the bytes;
@@ -48,6 +49,17 @@ run with knowledge off and one with registration, embedding and the extraction c
   extracted; and `-unparsed.json`, handed a synthetic PDF with no text layer
   (`https://example.invalid/notifications/18-2026-scanned`) and the real parsers, whose parse
   failure opened its manual-parse task (`PARSE_PATCH`). Stack traces emptied the same way.
+- `ingest-with-classify.json` and `-knowledge.json`, recorded on 2026-10-06 with the classify step
+  and the rule extraction (`CLASSIFY_PATCH`, `EXTRACTION_PATCH`), handed the sample notification
+  as a crawl hands it, the extraction on: with knowledge off it ends after its classification;
+  with knowledge on it is registered and embedded, runs its knowledge child, and starts its rule
+  extraction child (a scripted model, whose answer is no candidate).
+- `ingest-with-reclassify.json`, a retry from the classify stage as `RetryDocument` starts it
+  (`ingest_payload` with `reclassify`): the stored sample notification, which an older
+  detector's classification had set aside, read again by the detector (`RECLASSIFY_PATCH`).
+- `crawl-with-backfill.json`, a backfill's crawl of the sample source with its window (since
+  2026-01-01, the reference `17/2026`; `BACKFILL_PATCH`), which listed the sample notification
+  and ingested it in a child.
 
 The worker's identity in them reads `1@pipeline-history`. `tests/unit/test_workflow_replay.py`
 replays them on today's workflow; record a new pair (`WorkflowHandle.fetch_history()`,

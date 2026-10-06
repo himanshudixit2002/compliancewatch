@@ -10,6 +10,7 @@ import pytest
 
 from pipeline import worker
 from pipeline.application.crawl import ScheduleCrawls, ScheduleReport
+from pipeline.application.extraction import CheckExtraction, ExtractionCheck
 from pipeline.application.knowledge_activities import (
     EmbedClauses,
     EmbedRequest,
@@ -23,6 +24,7 @@ from pipeline.worker import SYNC_HOOK, TICK_JOB, TICK_SECONDS, WORKFLOWS, activi
 from pipeline.workflows import (
     TASK_QUEUE,
     CrawlSourceWorkflow,
+    ExtractBacklogWorkflow,
     ExtractKnowledgeWorkflow,
     ExtractRulesWorkflow,
     IngestDocumentWorkflow,
@@ -37,11 +39,15 @@ def test_with_knowledge_off_no_prompt_is_read(tmp_path: Path) -> None:
     names = [a.name for a in activities(settings(pipeline_prompts_dir=tmp_path / "missing"))]
     assert "pipeline.propose_relations" in names
     assert "pipeline.embed_clauses" in names
-    assert len(names) == len(set(names)) == 15
+    assert len(names) == len(set(names)) == 16
     assert "pipeline.fetch_and_store" in names
     assert "pipeline.open_manual_parse" in names
     assert "pipeline.classify_document" in names
-    assert {"pipeline.extract_rules", "pipeline.store_extraction"} <= set(names)
+    assert {
+        "pipeline.extract_rules",
+        "pipeline.store_extraction",
+        "pipeline.extraction_enabled",
+    } <= set(names)
     assert names[-2:] == ["pipeline.list_new_documents", "pipeline.finish_crawl"]
 
 
@@ -50,7 +56,7 @@ def test_with_knowledge_on_the_prompt_must_be_there(tmp_path: Path) -> None:
         activities(
             settings(pipeline_knowledge_enabled=True, pipeline_prompts_dir=tmp_path / "missing")
         )
-    assert len(activities(settings(pipeline_knowledge_enabled=True))) == 15
+    assert len(activities(settings(pipeline_knowledge_enabled=True))) == 16
 
 
 def test_with_the_extraction_on_its_prompt_must_be_there(tmp_path: Path) -> None:
@@ -60,6 +66,13 @@ def test_with_the_extraction_on_its_prompt_must_be_there(tmp_path: Path) -> None
         )
     names = [a.name for a in activities(settings(pipeline_extraction_enabled=True))]
     assert "pipeline.extract_rules" in names
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_the_extraction_check_answers_the_workers_own_flag(enabled: bool) -> None:
+    wired = activities(settings(pipeline_extraction_enabled=enabled))
+    (check,) = [a for a in wired if isinstance(a, CheckExtraction)]
+    assert (await check.run(ExtractionCheck())).enabled is enabled
 
 
 def test_an_enabled_relation_activity_needs_its_stage() -> None:
@@ -91,6 +104,7 @@ def test_the_worker_serves_every_workflow_and_activity_on_the_pipeline_queue() -
         ExtractKnowledgeWorkflow,
         ExtractRulesWorkflow,
         CrawlSourceWorkflow,
+        ExtractBacklogWorkflow,
     ) == WORKFLOWS
     assert [a.name for a in temporal.activities] == [a.name for a in activities(settings())]
     assert not components(settings()).loops(), "crawling is off: no tick"

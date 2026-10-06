@@ -11,7 +11,9 @@ slot against the dev server through ``TemporalCrawls``, starts each source's cra
 """
 
 import asyncio
+import base64
 import hashlib
+import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -20,14 +22,15 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from temporalio.client import Client, WorkflowExecutionStatus
+from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHistory
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Worker
+from temporalio.worker import Replayer, Worker
 
 from domain_kernel.audit import AuditActor
 from domain_kernel.documents import document_id_for
 from domain_kernel.ids import UserId
+from pipeline.application.backfill import BackfillRequest, StartBackfill
 from pipeline.application.crawl import (
     CrawlRequest,
     CrawlResult,
@@ -37,13 +40,14 @@ from pipeline.application.crawl import (
     StartCrawl,
 )
 from pipeline.application.sources import SyncSources
-from pipeline.domain.crawl import CrawlStatus
+from pipeline.domain.backfill import BackfillRow
+from pipeline.domain.crawl import CrawlStatus, CrawlTrigger
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.sources import Source, watermark_of
 from pipeline.infrastructure.adapters import SOURCES, RegistryAdapterTypes, StoreCatalog
 from pipeline.infrastructure.memory import MemoryStore
 from pipeline.infrastructure.raw_store import MemoryRawStore, storage_key_for
-from pipeline.infrastructure.temporal import TemporalCrawls
+from pipeline.infrastructure.temporal import TemporalCrawls, crawl_payload
 from pipeline.settings import PipelineSettings
 from pipeline.testing import MemoryCrawls, recorded_client, recorded_types
 from pipeline.worker import activities
@@ -52,6 +56,7 @@ from pipeline.workflows import (
     ExtractKnowledgeWorkflow,
     IngestDocumentWorkflow,
 )
+from pipeline.workflows.crawl_source import BACKFILL_PATCH
 from py_common.temporal import ActivityBase
 from py_common.temporal.client import default_interceptors
 
@@ -231,3 +236,70 @@ async def test_a_double_tick_starts_each_crawl_once(environment: WorkflowEnviron
         await environment.client.get_workflow_handle(workflow_id).terminate("test over")
     again = await asyncio.to_thread(ticks[0].run)
     assert again.started == (), "the runs are recorded: nothing is due"
+
+
+def patches(history: WorkflowHistory) -> list[str]:
+    """The patch ids the history's markers recorded."""
+    found: list[str] = []
+    for event in json.loads(history.to_json())["events"]:
+        details = event.get("markerRecordedEventAttributes", {}).get("details", {})
+        for payloads in details.values():
+            for payload in payloads.get("payloads", []):
+                item = json.loads(base64.b64decode(payload["data"]))
+                if isinstance(item, dict) and "id" in item:
+                    found.append(str(item["id"]))
+    return found
+
+
+async def test_a_backfill_crawls_its_window_below_the_watermark_and_keeps_it(
+    environment: WorkflowEnvironment,
+) -> None:
+    """A backfill row of 2025 naming 17/2025: its crawl takes that one only, records its run as a
+    backfill and leaves the source as the schedule's crawls left it: its watermark, last listing
+    and error."""
+    pipeline = Pipeline(watermark=date(2026, 4, 21))
+    starter = MemoryCrawls()
+    request = BackfillRequest(actor=ACTOR, reason="Backfill the recorded history for the test")
+    start = StartBackfill(pipeline.store, starter, types=TYPES, enabled=True).run(
+        BackfillRow(
+            source_key=KEY,
+            since=date(2025, 1, 1),
+            until=date(2025, 12, 31),
+            refs=("17/2025-Central Tax",),
+            limit=5,
+        ),
+        5,
+        request,
+    )
+    crawl_request = CrawlRequest.model_validate(crawl_payload(start))
+    async with pipeline.worker(environment.client) as task_queue:
+        handle = await environment.client.start_workflow(
+            CrawlSourceWorkflow.run,
+            crawl_request,
+            id=start.workflow_id,
+            task_queue=task_queue,
+        )
+        result = await handle.result()
+        history = await handle.fetch_history()
+    assert (result.status, result.listed, result.stored, result.deferred) == (
+        CrawlStatus.COMPLETED,
+        1,
+        1,
+        0,
+    )
+    assert [d.external_ref for d in pipeline.documents()] == ["17/2025-Central Tax"]
+    source = pipeline.store.sources[KEY]
+    assert source.watermark_date == date(2026, 4, 21), "a backfill moves no watermark"
+    assert (source.last_fetch_at, source.last_error) == (None, ""), "nor the source's listing"
+    run = pipeline.store.crawl_runs[start.run_id]
+    assert (run.trigger, run.workflow_id, run.status) == (
+        CrawlTrigger.BACKFILL,
+        start.workflow_id,
+        CrawlStatus.COMPLETED,
+    )
+    assert BACKFILL_PATCH in patches(history)
+    replayer = Replayer(
+        workflows=[CrawlSourceWorkflow, IngestDocumentWorkflow, ExtractKnowledgeWorkflow],
+        data_converter=pydantic_data_converter,
+    )
+    assert (await replayer.replay_workflow(history)).replay_failure is None

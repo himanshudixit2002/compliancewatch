@@ -235,12 +235,14 @@ def test_every_version_of_a_rule_reads_in_any_status(store: MemoryKnowledgeStore
     _, first = store.add_rule("gstr3b_monthly", status=RuleVersionStatus.PUBLISHED)
     second = store.add_version("gstr3b_monthly", effective_from=JULY)
     store.add_rule("gstr1_monthly")
-    versions = ListRuleVersions(store).run("gstr3b_monthly")
+    listed = ListRuleVersions(store).run("gstr3b_monthly")
+    versions = [v.record for v in listed]
     assert [(v.rule_version_id, v.version, v.status) for v in versions] == [
         (first, 1, RuleVersionStatus.PUBLISHED),
         (second, 2, RuleVersionStatus.DRAFT),
     ]
     assert {v.seed_status for v in versions} == {SeedStatus.NEEDS_REVIEW}
+    assert not any(v.closed for v in listed), "no rule candidate behind them"
     with pytest.raises(UnknownRuleError, match="no_such_rule"):
         ListRuleVersions(store).run("no_such_rule")
 

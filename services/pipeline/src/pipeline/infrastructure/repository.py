@@ -1,8 +1,9 @@
 """The Postgres unit of work: one transaction with the source, document, crawl-run, task,
-classification and extraction repositories on it, the outbox writer as the event sink and the audit
-writer as the audit sink, so a stored document and the outbox row of its document.discovered commit
-or roll back together, and so do a stored extraction and its rule.candidate.created, and an admin's
-change and its ``audit.event`` row. There is no tenant setting: the pipeline's data is regulatory,
+classification, extraction and retry repositories on it, the outbox (its writer as the event sink,
+``OutboxAdmin`` for its dead rows) and the audit writer as the audit sink, so a stored document and
+the outbox row of its document.discovered commit or roll back together, and so do a stored
+extraction and its rule.candidate.created, and an admin's change (a retry, a requeue) and its
+``audit.event`` row. There is no tenant setting: the pipeline's data is regulatory,
 the same for every tenant, and its audit entries have no tenant.
 
 ``PostgresUnitOfWorkFactory.on_connection(connection)`` makes units inside a transaction someone
@@ -10,10 +11,12 @@ else owns, such as a consumer's inbox transaction (``py_common.outbox.sync``), s
 writes, their outbox rows and the ``processed_event`` row commit together.
 """
 
+import json
 from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
 from typing import Final, Self
+from uuid import UUID
 
 from sqlalchemy import (
     ColumnElement,
@@ -22,6 +25,7 @@ from sqlalchemy import (
     and_,
     case,
     create_engine,
+    exists,
     func,
     or_,
     select,
@@ -36,17 +40,28 @@ from sqlalchemy.pool import NullPool
 from domain_kernel.documents import DocumentType
 from domain_kernel.ids import CandidateId, DocumentId
 from pipeline.domain.classification import Classification, Relevance, TypeConfidence
-from pipeline.domain.crawl import CrawlCounts, CrawlRun, CrawlRunId, CrawlStatus
+from pipeline.domain.crawl import CrawlCounts, CrawlRun, CrawlRunId, CrawlStatus, CrawlTrigger
 from pipeline.domain.events import DocumentEvent
 from pipeline.domain.extraction import ExtractionOutcome, RuleExtraction
 from pipeline.domain.issues import Issue
+from pipeline.domain.outbox import DeadEventKey, OutboxEvent, OutboxStatus
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
-from pipeline.domain.repository import DocumentKey, TaskKey, UnitOfWork, UnitOfWorkFactory
+from pipeline.domain.repository import (
+    DocumentKey,
+    DocumentQuery,
+    DocumentTally,
+    RunQuery,
+    TaskKey,
+    UnitOfWork,
+    UnitOfWorkFactory,
+)
+from pipeline.domain.retry import DocumentRetry, RetryId, RetryStage
 from pipeline.domain.sources import Source
 from pipeline.domain.tasks import PipelineTask, TaskId, TaskKind, TaskStatus
 from pipeline.infrastructure.models import (
     CrawlRunRow,
     DocumentClassificationRow,
+    DocumentRetryRow,
     PipelineTaskRow,
     RawDocumentRow,
     RuleExtractionRow,
@@ -54,9 +69,11 @@ from pipeline.infrastructure.models import (
 )
 from py_common.audit.writer import PostgresAuditSink
 from py_common.outbox import OutboxWriter
+from py_common.outbox.admin import DeadKey, OutboxAdmin, OutboxRow, payload_summary
 
 URL_CHUNK: Final = 500
-"""How many URLs one ``known_urls`` query asks about."""
+"""How many URLs one ``known_urls`` query asks about, and how many ids one ``of_documents``
+query."""
 
 
 class SqlAlchemySourceRepository:
@@ -135,6 +152,16 @@ class SqlAlchemyRawDocumentRepository:
 
     def get(self, document_id: DocumentId) -> RawDocumentRecord | None:
         row = self._session.get(RawDocumentRow, document_id.value, populate_existing=True)
+        return None if row is None else _to_record(row)
+
+    def lock(self, document_id: DocumentId) -> RawDocumentRecord | None:
+        statement = (
+            select(RawDocumentRow)
+            .where(RawDocumentRow.id == document_id.value)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        row = self._session.scalars(statement).first()
         return None if row is None else _to_record(row)
 
     def add(self, record: RawDocumentRecord) -> bool:
@@ -261,6 +288,91 @@ class SqlAlchemyRawDocumentRepository:
         )
         return [_to_record(row) for row in self._session.scalars(statement).all()]
 
+    def search(self, query: DocumentQuery) -> Sequence[RawDocumentRecord]:
+        statement = select(RawDocumentRow)
+        if query.status is not None:
+            statement = statement.where(RawDocumentRow.status == query.status.value)
+        if query.source_key is not None:
+            statement = statement.where(RawDocumentRow.source_key == query.source_key)
+        if query.doc_type is not None:
+            statement = statement.outerjoin(
+                DocumentClassificationRow,
+                DocumentClassificationRow.document_id == RawDocumentRow.id,
+            ).where(_read_as(query))
+        if query.published_from is not None:
+            statement = statement.where(RawDocumentRow.published_on >= query.published_from)
+        if query.published_to is not None:
+            statement = statement.where(RawDocumentRow.published_on <= query.published_to)
+        if query.after is not None:
+            statement = statement.where(
+                tuple_(RawDocumentRow.fetched_at, RawDocumentRow.id)
+                < tuple_(query.after.fetched_at, query.after.document_id.value)
+            )
+        statement = statement.order_by(
+            RawDocumentRow.fetched_at.desc(), RawDocumentRow.id.desc()
+        ).limit(query.limit)
+        return [_to_record(row) for row in self._session.scalars(statement).all()]
+
+    def tally(self) -> Mapping[str, DocumentTally]:
+        statement = select(
+            RawDocumentRow.source_key,
+            RawDocumentRow.status,
+            func.count(),
+            func.count().filter(RawDocumentRow.parser_version != ""),
+        ).group_by(RawDocumentRow.source_key, RawDocumentRow.status)
+        counted: dict[str, tuple[int, int, dict[DocumentStatus, int]]] = {}
+        for key, status, count, parsed in self._session.execute(statement).all():
+            stored, parsed_before, statuses = counted.get(key, (0, 0, {}))
+            statuses[DocumentStatus(status)] = int(count)
+            counted[key] = (stored + int(count), parsed_before + int(parsed), statuses)
+        return {
+            key: DocumentTally(stored, parsed, statuses)
+            for key, (stored, parsed, statuses) in counted.items()
+        }
+
+    def awaiting_extraction(
+        self, prompt_version: str, *, source_key: str | None = None, limit: int = 500
+    ) -> Sequence[RawDocumentRecord]:
+        statement = select(RawDocumentRow).where(
+            RawDocumentRow.status == DocumentStatus.CLASSIFIED.value, ~_extracted_by(prompt_version)
+        )
+        if source_key is not None:
+            statement = statement.where(RawDocumentRow.source_key == source_key)
+        statement = statement.order_by(RawDocumentRow.fetched_at, RawDocumentRow.id).limit(limit)
+        return [_to_record(row) for row in self._session.scalars(statement).all()]
+
+    def awaiting_counts(self, prompt_version: str) -> Mapping[str, int]:
+        statement = (
+            select(RawDocumentRow.source_key, func.count())
+            .where(
+                RawDocumentRow.status == DocumentStatus.CLASSIFIED.value,
+                ~_extracted_by(prompt_version),
+            )
+            .group_by(RawDocumentRow.source_key)
+        )
+        return {key: int(count) for key, count in self._session.execute(statement).all()}
+
+
+def _extracted_by(prompt_version: str) -> ColumnElement[bool]:
+    """The documents with an extraction stored for ``prompt_version``."""
+    return exists().where(
+        RuleExtractionRow.document_id == RawDocumentRow.id,
+        RuleExtractionRow.prompt_version == prompt_version,
+    )
+
+
+def _read_as(query: DocumentQuery) -> ColumnElement[bool]:
+    """The documents read as ``query.doc_type``: their classification's type, else their
+    uploader's, else their source's (one of ``query.of_source_type``)."""
+    wanted = None if query.doc_type is None else query.doc_type.value
+    read_as = func.coalesce(DocumentClassificationRow.doc_type, RawDocumentRow.doc_type)
+    if not query.of_source_type:
+        return read_as == wanted
+    return or_(
+        read_as == wanted,
+        and_(read_as.is_(None), RawDocumentRow.source_key.in_(sorted(query.of_source_type))),
+    )
+
 
 def _after(key: DocumentKey) -> ColumnElement[bool]:
     """The rows after ``key`` in the page order: newest publication first with the undated
@@ -322,21 +434,22 @@ class SqlAlchemyCrawlRunRepository:
         self._session.merge(_to_run_row(run))
         self._session.flush()
 
-    def latest(self, source_key: str) -> CrawlRun | None:
-        statement = (
-            select(CrawlRunRow)
-            .where(CrawlRunRow.source_key == source_key)
-            .order_by(CrawlRunRow.started_at.desc(), CrawlRunRow.id.desc())
-            .limit(1)
+    def latest(self, source_key: str, *, backfills: bool = True) -> CrawlRun | None:
+        statement = select(CrawlRunRow).where(CrawlRunRow.source_key == source_key)
+        if not backfills:
+            statement = statement.where(_NOT_BACKFILL)
+        statement = statement.order_by(CrawlRunRow.started_at.desc(), CrawlRunRow.id.desc()).limit(
+            1
         )
         row = self._session.scalars(statement).first()
         return None if row is None else _to_run(row)
 
-    def latest_by_source(self) -> Mapping[str, CrawlRun]:
-        statement = (
-            select(CrawlRunRow)
-            .ext(distinct_on(CrawlRunRow.source_key))
-            .order_by(CrawlRunRow.source_key, CrawlRunRow.started_at.desc(), CrawlRunRow.id.desc())
+    def latest_by_source(self, *, backfills: bool = True) -> Mapping[str, CrawlRun]:
+        statement = select(CrawlRunRow).ext(distinct_on(CrawlRunRow.source_key))
+        if not backfills:
+            statement = statement.where(_NOT_BACKFILL)
+        statement = statement.order_by(
+            CrawlRunRow.source_key, CrawlRunRow.started_at.desc(), CrawlRunRow.id.desc()
         )
         return {row.source_key: _to_run(row) for row in self._session.scalars(statement).all()}
 
@@ -359,6 +472,28 @@ class SqlAlchemyCrawlRunRepository:
         )
         return [_to_run(row) for row in self._session.scalars(statement).all()]
 
+    def page(self, query: RunQuery) -> Sequence[CrawlRun]:
+        statement = select(CrawlRunRow)
+        if query.source_key is not None:
+            statement = statement.where(CrawlRunRow.source_key == query.source_key)
+        if query.status is not None:
+            statement = statement.where(CrawlRunRow.status == query.status.value)
+        if query.trigger is not None:
+            statement = statement.where(CrawlRunRow.trigger == query.trigger.value)
+        if query.after is not None:
+            statement = statement.where(
+                tuple_(CrawlRunRow.started_at, CrawlRunRow.id)
+                < tuple_(query.after.started_at, query.after.run_id.value)
+            )
+        statement = statement.order_by(CrawlRunRow.started_at.desc(), CrawlRunRow.id.desc()).limit(
+            query.limit
+        )
+        return [_to_run(row) for row in self._session.scalars(statement).all()]
+
+
+_NOT_BACKFILL: Final = CrawlRunRow.trigger.is_distinct_from(CrawlTrigger.BACKFILL.value)
+"""A run that was not a backfill's: a run recorded before triggers were has none."""
+
 
 def _run_values(run: CrawlRun) -> dict[str, object]:
     return {
@@ -372,6 +507,8 @@ def _run_values(run: CrawlRun) -> dict[str, object]:
         "duplicates": run.counts.duplicates,
         "failed": run.counts.failed,
         "error": run.error,
+        "trigger": None if run.trigger is None else run.trigger.value,
+        "workflow_id": run.workflow_id or None,
     }
 
 
@@ -390,6 +527,8 @@ def _to_run(row: CrawlRunRow) -> CrawlRun:
             listed=row.listed, stored=row.stored, duplicates=row.duplicates, failed=row.failed
         ),
         error=row.error,
+        trigger=None if row.trigger is None else CrawlTrigger(row.trigger),
+        workflow_id=row.workflow_id or "",
     )
 
 
@@ -443,6 +582,14 @@ class SqlAlchemyTaskRepository:
         )
         row = self._session.scalars(statement).first()
         return None if row is None else _to_task(row)
+
+    def of_document(self, document_id: DocumentId) -> Sequence[PipelineTask]:
+        statement = (
+            select(PipelineTaskRow)
+            .where(PipelineTaskRow.document_id == document_id.value)
+            .order_by(PipelineTaskRow.opened_at, PipelineTaskRow.id)
+        )
+        return [_to_task(row) for row in self._session.scalars(statement).all()]
 
     def page(
         self,
@@ -547,6 +694,24 @@ class SqlAlchemyClassificationRepository:
             .values(values)
         )
 
+    def of_documents(
+        self, document_ids: Collection[DocumentId]
+    ) -> Mapping[DocumentId, Classification]:
+        found: dict[DocumentId, Classification] = {}
+        for chunk in _chunks(document_ids):
+            statement = select(DocumentClassificationRow).where(
+                DocumentClassificationRow.document_id.in_(chunk)
+            )
+            for row in self._session.scalars(statement).all():
+                found[DocumentId(row.document_id)] = _to_classification(row)
+        return found
+
+
+def _chunks(document_ids: Collection[DocumentId]) -> Iterator[list[UUID]]:
+    wanted = sorted({document_id.value for document_id in document_ids})
+    for start in range(0, len(wanted), URL_CHUNK):
+        yield wanted[start : start + URL_CHUNK]
+
 
 def _classification_values(classification: Classification) -> dict[str, object]:
     return {
@@ -594,6 +759,30 @@ class SqlAlchemyExtractionRepository:
             .returning(RuleExtractionRow.document_id)
         )
         return self._session.execute(statement).first() is not None
+
+    def of_documents(
+        self, document_ids: Collection[DocumentId], prompt_version: str
+    ) -> Mapping[DocumentId, RuleExtraction]:
+        found: dict[DocumentId, RuleExtraction] = {}
+        for chunk in _chunks(document_ids):
+            statement = select(RuleExtractionRow).where(
+                RuleExtractionRow.document_id.in_(chunk),
+                RuleExtractionRow.prompt_version == prompt_version,
+            )
+            for row in self._session.scalars(statement).all():
+                found[DocumentId(row.document_id)] = _to_extraction(row)
+        return found
+
+    def tally(self, prompt_version: str) -> Mapping[str, Mapping[ExtractionOutcome, int]]:
+        statement = (
+            select(RuleExtractionRow.source_key, RuleExtractionRow.outcome, func.count())
+            .where(RuleExtractionRow.prompt_version == prompt_version)
+            .group_by(RuleExtractionRow.source_key, RuleExtractionRow.outcome)
+        )
+        counted: dict[str, dict[ExtractionOutcome, int]] = {}
+        for key, outcome, count in self._session.execute(statement).all():
+            counted.setdefault(key, {})[ExtractionOutcome(outcome)] = int(count)
+        return counted
 
 
 def _extraction_values(extraction: RuleExtraction) -> dict[str, object]:
@@ -659,6 +848,99 @@ def _optional_text(value: object) -> str | None:
     return None if value is None else str(value)
 
 
+class SqlAlchemyRetryRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, retry: DocumentRetry) -> bool:
+        # No conflict target: the id, (document, attempt) and (document, key) are each unique.
+        statement = (
+            insert(DocumentRetryRow)
+            .values(
+                id=retry.id.value,
+                document_id=retry.document_id.value,
+                attempt=retry.attempt,
+                stage=retry.stage.value,
+                doc_type=None if retry.doc_type is None else retry.doc_type.value,
+                reason=retry.reason,
+                requested_by=retry.requested_by,
+                requested_at=retry.requested_at,
+                idempotency_key=retry.idempotency_key,
+                fingerprint=retry.fingerprint,
+                workflow_id=retry.workflow_id,
+            )
+            .on_conflict_do_nothing()
+            .returning(DocumentRetryRow.id)
+        )
+        return self._session.execute(statement).first() is not None
+
+    def of_document(self, document_id: DocumentId) -> Sequence[DocumentRetry]:
+        statement = (
+            select(DocumentRetryRow)
+            .where(DocumentRetryRow.document_id == document_id.value)
+            .order_by(DocumentRetryRow.attempt)
+        )
+        return [_to_retry(row) for row in self._session.scalars(statement).all()]
+
+
+def _to_retry(row: DocumentRetryRow) -> DocumentRetry:
+    return DocumentRetry(
+        id=RetryId(row.id),
+        document_id=DocumentId(row.document_id),
+        attempt=row.attempt,
+        stage=RetryStage(row.stage),
+        reason=row.reason,
+        requested_at=row.requested_at.astimezone(UTC),
+        idempotency_key=row.idempotency_key,
+        fingerprint=row.fingerprint,
+        workflow_id=row.workflow_id,
+        doc_type=None if row.doc_type is None else DocumentType(row.doc_type),
+        requested_by=row.requested_by,
+    )
+
+
+class SqlAlchemyOutboxRepository:
+    """The pipeline's ``outbox_event`` rows on the unit's connection (``OutboxAdmin``)."""
+
+    def __init__(self, connection: Connection) -> None:
+        self._admin = OutboxAdmin(connection)
+
+    def dead(
+        self, *, topic: str | None = None, after: DeadEventKey | None = None, limit: int = 50
+    ) -> Sequence[OutboxEvent]:
+        key = None if after is None else DeadKey(after.dead_at, after.event_id)
+        return [
+            outbox_event_of(row) for row in self._admin.dead(topic=topic, after=key, limit=limit)
+        ]
+
+    def get(self, event_id: UUID, *, for_update: bool = False) -> OutboxEvent | None:
+        row = self._admin.get(event_id, for_update=for_update)
+        return None if row is None else outbox_event_of(row)
+
+    def requeue(self, event_id: UUID, *, at: datetime) -> bool:
+        return self._admin.requeue(event_id, at=at)
+
+
+def outbox_event_of(row: OutboxRow) -> OutboxEvent:
+    """An outbox row as the domain reads it: the payload's summary and size, never its body."""
+    payload = row.payload
+    return OutboxEvent(
+        event_id=row.event_id,
+        topic=row.topic,
+        schema_version=row.schema_version,
+        partition_key=row.partition_key,
+        status=OutboxStatus(row.status),
+        attempts=row.attempts,
+        last_error=row.last_error,
+        occurred_at=row.occurred_at,
+        created_at=row.created_at,
+        published_at=row.published_at,
+        dead_at=row.dead_at,
+        summary=payload_summary(payload),
+        payload_bytes=len(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()),
+    )
+
+
 class OutboxSink:
     """Writes each event into ``outbox_event`` on the unit of work's connection, keyed by its
     source, so the event commits or rolls back with the change it describes."""
@@ -679,6 +961,8 @@ class SqlAlchemyUnitOfWork:
         self.tasks = SqlAlchemyTaskRepository(session)
         self.classifications = SqlAlchemyClassificationRepository(session)
         self.extractions = SqlAlchemyExtractionRepository(session)
+        self.retries = SqlAlchemyRetryRepository(session)
+        self.outbox = SqlAlchemyOutboxRepository(session.connection())
         self.events = OutboxSink(session.connection(), writer)
         self.audit = PostgresAuditSink(session.connection())
 

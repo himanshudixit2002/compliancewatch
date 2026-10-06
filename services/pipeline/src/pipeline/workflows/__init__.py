@@ -2,6 +2,12 @@
 activities in ``pipeline.application`` and combines their results."""
 
 from pipeline.workflows.crawl_source import CRAWL_WORKFLOW, CrawlSourceWorkflow
+from pipeline.workflows.extract_backlog import (
+    EXTRACT_BACKLOG_WORKFLOW,
+    BacklogRequest,
+    BacklogResult,
+    ExtractBacklogWorkflow,
+)
 from pipeline.workflows.extract_knowledge import (
     ExtractKnowledgeWorkflow,
     KnowledgeRequest,
@@ -21,9 +27,13 @@ from pipeline.workflows.ingest_document import (
 
 __all__ = [
     "CRAWL_WORKFLOW",
+    "EXTRACT_BACKLOG_WORKFLOW",
     "EXTRACT_RULES_WORKFLOW",
     "TASK_QUEUE",
+    "BacklogRequest",
+    "BacklogResult",
     "CrawlSourceWorkflow",
+    "ExtractBacklogWorkflow",
     "ExtractKnowledgeWorkflow",
     "ExtractRulesWorkflow",
     "ExtractionResult",

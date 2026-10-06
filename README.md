@@ -155,7 +155,7 @@ compliancewatch/
       src/pipeline/workflows/  # ingest_document: discover, fetch and store, parse; worker.py runs the worker
       src/pipeline/infrastructure/adapters/  # one SourceAdapter per regulator site; registry.py
       src/pipeline/infrastructure/parsers/   # PDF and HTML parsers, language detection
-      src/pipeline/backfill.py  # pipeline-backfill: make backfill SERVICE=pipeline ARGS=...
+      src/pipeline/backfill.py  # pipeline-backfill: a plan through the crawl workflow (make backfill ARGS=...)
       src/pipeline/label.py     # pipeline-label: golden extraction cases (make label ARGS=...)
       src/pipeline/application/{extractor,validators}.py  # the extractor behind the gateway and its checks
       prompts/               # extraction.rule_candidate.v1.md; digest recorded in the gateway registry
@@ -331,7 +331,7 @@ Both switches are off by default; enable them with `CW_WORKER_KAFKA_ENABLED=1` (
 - For notifications: Meta's approval of the templates (all drafts, so WhatsApp reaches only numbers that wrote in the last 24 hours and anyone else falls back to email), the analyst review of their Hindi copy, the in-region SES sending domain with its SNS feedback subscription (email stays off until then), and the web pages the messages link to (`/obligations`)
 - Alert rules for source freshness, decision-flip rate and LLM budget (their metrics do not exist yet; the API SLO, outbox, worker, entity review queue and notification delivery alerts do, with runbooks)
 - The EKS path of the guide (Terraform, Helm, Argo CD canaries); the MVP profile in `infra/deploy` targets Fly.io and Vercel and has not been applied
-- The ingest workflow wired to the real adapters and the outbox (the adapters, parsers and detector exist and run from `make backfill`; the workflow still runs on the in-memory fakes); OCR for scanned PDFs
+- The live backfill, which a person runs (`docs/runbooks/pipeline-backfill.md`: the dry run, then the crawls of `services/pipeline/backfill-plan.yaml` through the workflow); OCR for scanned PDFs, which waits on the share of documents no parser reads that its report counts
 - The 50-document sample rulebook (the seed calendar of standing obligations exists, pending analyst review)
 - Prompt texts for judgement and classification (extraction, relations and question answering exist); the applicability golden set and its harness suite
 - Analyst labels: 45 of the 50 listed CBIC notifications have no case yet, and the five case files (01/2026 with a draft label; 17/2025, 15/2025, 10/2025 and 13/2024 with clauses and detector output only) are unreviewed; so are the 56 draft question-answering cases, their world and the relation drafts they rely on

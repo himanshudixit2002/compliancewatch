@@ -12,7 +12,7 @@ from domain_kernel.documents import document_id_for
 from pipeline import crawl_report
 from pipeline.application.report import CrawlReport, detection_delay, longest_gap
 from pipeline.application.sources import SyncSources
-from pipeline.domain.crawl import CrawlCounts, CrawlRun
+from pipeline.domain.crawl import CrawlCounts, CrawlRun, CrawlTrigger
 from pipeline.domain.raw_documents import RawDocumentRecord
 from pipeline.infrastructure.adapters import SOURCES
 from pipeline.infrastructure.memory import MemoryStore
@@ -116,6 +116,42 @@ def test_a_source_listed_every_two_hours_meets_f1_and_a_late_one_does_not() -> N
     assert result.source("nowhere") is None
     with pytest.raises(ValueError, match="at least one day"):
         CrawlReport(store).run(days=0)
+
+
+def backfilled(store: MemoryStore, key: str, at: datetime, **counts: int) -> CrawlRun:
+    run = replace(CrawlRun.start(key, at), trigger=CrawlTrigger.BACKFILL).finish(
+        at + timedelta(hours=1), CrawlCounts(**counts)
+    )
+    with store() as unit:
+        unit.crawl_runs.add(run)
+    return run
+
+
+def test_a_backfill_is_none_of_the_crawls_the_report_counts() -> None:
+    """A backfill's runs close no gap and count in no total, and neither the documents it
+    fetched nor the ones published before the window count in the detection delay."""
+    store = synced()
+    for at in every(2):
+        crawled(store, "cbic_notifications", at, listed=3, stored=1)
+    run = backfilled(store, "cbic_notifications", NOW - timedelta(hours=5), listed=60, stored=40)
+    backfilled(store, "gstn_advisories", NOW - timedelta(hours=30), listed=9, stored=9)
+    during = run.started_at + timedelta(minutes=20)
+    kept(store, "cbic_notifications", date(2026, 10, 5), during)
+    kept(store, "cbic_notifications", date(2020, 11, 10), NOW - timedelta(hours=3))
+    # Published the day before the window opened in India: it was not new in the window.
+    kept(store, "cbic_notifications", date(2026, 10, 3), NOW - timedelta(hours=3))
+    kept(store, "cbic_notifications", date(2026, 10, 5), datetime(2026, 10, 5, 3, 0, tzinfo=UTC))
+    result = CrawlReport(store, clock=lambda: NOW).run(days=2)
+    cbic = result.source("cbic_notifications")
+    assert cbic is not None
+    assert (cbic.runs, cbic.completed, cbic.stored) == (24, 24, 24), "no backfill counted"
+    assert cbic.detection is not None
+    assert (cbic.detection.documents, cbic.detection.longest) == (1, timedelta(hours=8, minutes=30))
+    gstn = result.source("gstn_advisories")
+    assert gstn is not None
+    assert (gstn.runs, gstn.completed, gstn.last_listing) == (0, 0, None)
+    assert gstn.longest_gap == timedelta(days=2), "a backfill closes no gap"
+    assert not gstn.meets(result.target)
 
 
 def test_the_command_prints_the_table_and_exits_by_f1(

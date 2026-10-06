@@ -16,7 +16,11 @@ The route follows (``Route``): an irrelevant document is set aside, a conflict w
 person's triage (a ``triage`` task), a press release or a statute is kept for reference
 (registered and embedded, nothing extracted), and a notification, circular or act amendment
 goes on to the rule extraction. A person's triage replaces a conflict with their decision,
-``certain``, by the ``triage`` classifier.
+``certain``, by the ``triage`` classifier. A person's type on a retry
+(``POST /v1/pipeline/documents/{id}/retry`` with ``doc_type``) replaces any classification the
+same way, relevant and ``certain``, by the ``retry`` classifier: it is how a document the detector
+set aside, or whose triage was dismissed, comes back. The detector never replaces a person's
+decision (``Classification.by_person``).
 
 A document's status names its route, not what became of it. The classify step sets it before
 anything is registered, in the transaction of the classification:
@@ -30,7 +34,10 @@ anything is registered, in the transaction of the classification:
   extraction is off, when it failed, and when knowledge is off;
 - ``extracted``, set by the stored extraction: an extraction is stored, whatever its outcome,
   so an ``unparseable`` one, with no candidate for an analyst to review, is ``extracted`` too
-  (``domain.extraction``).
+  (``domain.extraction``). A document classified again (a retry, a triage, the detector's fresh
+  reading) stays ``extracted`` while its route still leads to the extraction and its extraction
+  by the current prompt is stored (``status_after``): that extraction's id is used, so no
+  extraction would run again to set it.
 """
 
 from collections.abc import Sequence
@@ -51,6 +58,10 @@ DETECTOR: Final = "detector@1"
 """The rule-based classifier (``application.detector``); bump it when its reading changes."""
 TRIAGE: Final = "triage"
 """The classifier of a person's triage decision."""
+RETRY: Final = "retry"
+"""The classifier of a type a person gave a document on a retry."""
+PERSON_CLASSIFIERS: Final = frozenset({TRIAGE, RETRY})
+"""The classifiers that are a person's decision, which the detector never replaces."""
 MAX_REASONS: Final = 8
 MAX_REASON_CHARS: Final = 500
 
@@ -111,6 +122,15 @@ _STATUS: Final = {
 }
 
 
+def status_after(route: Route, *, extracted: bool) -> DocumentStatus:
+    """The status a document gets when it is classified (again): its route's, except that one
+    whose extraction by the current prompt is stored (``extracted``) stays ``extracted`` while
+    the route still leads to the extraction."""
+    if extracted and route is Route.EXTRACT:
+        return DocumentStatus.EXTRACTED
+    return route.status
+
+
 def route_of(doc_type: DocumentType, relevance: Relevance, confidence: TypeConfidence) -> Route:
     """An irrelevant document is set aside whatever its type; a conflict waits for triage; a
     rule kind goes on to the extraction; anything else is kept for reference."""
@@ -123,9 +143,10 @@ def route_of(doc_type: DocumentType, relevance: Relevance, confidence: TypeConfi
 
 @dataclass(frozen=True, slots=True)
 class Classification:
-    """One document's classification: by the detector, or by a person's triage
-    (``classifier`` ``triage``, ``decided_by`` the person, ``task_id`` the task they resolved).
-    A conflict names the triage task it opened in ``task_id``."""
+    """One document's classification: by the detector, by a person's triage (``classifier``
+    ``triage``, ``decided_by`` the person, ``task_id`` the task they resolved), or by the type a
+    person gave it on a retry (``classifier`` ``retry``, no task). A conflict names the triage
+    task it opened in ``task_id``."""
 
     document_id: DocumentId
     doc_type: DocumentType
@@ -152,14 +173,56 @@ class Classification:
         require_text(self.classifier, "classifier")
         if self.decided_by is not None:
             require_instance(self.decided_by, UUID, "decided_by")
-            if self.classifier != TRIAGE:
-                raise InvariantViolationError("only a triage is decided by a person")
+            if self.classifier not in PERSON_CLASSIFIERS:
+                raise InvariantViolationError("only a triage or a retry is decided by a person")
         if self.task_id is not None:
             require_instance(self.task_id, TaskId, "task_id")
 
     @property
     def route(self) -> Route:
         return route_of(self.doc_type, self.relevance, self.confidence)
+
+    @property
+    def by_person(self) -> bool:
+        """Whether a person decided it (a triage, a type given on a retry): the detector never
+        replaces it."""
+        return self.classifier in PERSON_CLASSIFIERS
+
+    def same_reading(self, other: "Classification") -> bool:
+        """Whether ``other`` reads the document the same way: type, relevance and confidence."""
+        return (self.doc_type, self.relevance, self.confidence) == (
+            other.doc_type,
+            other.relevance,
+            other.confidence,
+        )
+
+    @classmethod
+    def given(
+        cls,
+        document_id: DocumentId,
+        *,
+        doc_type: DocumentType,
+        by: UUID | None,
+        at: datetime,
+        reason: str,
+    ) -> "Classification":
+        """The type a person gave the document on a retry: relevant, ``certain``, with their
+        reason; it beats the detector."""
+        return cls(
+            document_id=document_id,
+            doc_type=doc_type,
+            relevance=Relevance.RELEVANT,
+            confidence=TypeConfidence.CERTAIN,
+            reasons=reasons_of(
+                (
+                    f"an analyst gave it the type {doc_type.value.replace('_', ' ')} on a retry",
+                    reason,
+                )
+            ),
+            classified_at=at,
+            classifier=RETRY,
+            decided_by=by,
+        )
 
     @classmethod
     def triaged(

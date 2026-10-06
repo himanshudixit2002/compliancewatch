@@ -16,6 +16,7 @@ from fastapi import APIRouter, Path, Response, status
 from domain_kernel.access import Principal
 from domain_kernel.ids import DocumentId
 from pipeline.api.deps import SourceRead, SourceWrite, Wired, admin_actor
+from pipeline.api.operations_schemas import DocumentDetailOut
 from pipeline.api.schemas import (
     AdminWriteIn,
     DocumentCursor,
@@ -162,10 +163,12 @@ def list_documents(page: Pagination, wired: Wired, key: str = SourceKey) -> Page
     dependencies=[SourceRead],
     responses=problem_responses(401, 403, 404),
 )
-def read_document(document_id: UUID, wired: Wired) -> DocumentOut:
+def read_document(document_id: UUID, wired: Wired) -> DocumentDetailOut:
     """A stored document as its record holds it: where it was listed, what the listing said,
-    when it was first fetched, its digest, storage key and status."""
-    return DocumentOut.of(wired.read_document.run(DocumentId(document_id)))
+    when it was first fetched, its digest, storage key and status; with the type the pipeline
+    reads it as, its classification, its extraction by the current prompt, and the retries
+    people asked for."""
+    return DocumentDetailOut.of_detail(wired.read_document_view.run(DocumentId(document_id)))
 
 
 @router.get(

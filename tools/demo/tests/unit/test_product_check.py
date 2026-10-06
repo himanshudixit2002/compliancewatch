@@ -315,6 +315,7 @@ def test_steps_are_chosen_by_name_in_the_check_order() -> None:
         "sources",
         "review",
         "extraction",
+        "operations",
     ]
     assert [step.name for step in select(["isolation", "health"])] == ["health", "isolation"]
     assert select(None) == check.STEPS
@@ -1117,3 +1118,173 @@ def test_the_extraction_step_fails_on_a_triage_taken_a_prompt_refused_or_a_real_
     without = Extraction(route={"feature": "qa", "primary": "fake/echo", "fallback": None})
     with pytest.raises(StepFailedError, match="has no extraction route"):
         check.extraction(context_of(with_fake_gateway(without, sink)))
+
+
+class Operations(Scripted):
+    """The pipeline's operations routes: runs, every document (``status`` filtered when asked)
+    and the dead outbox rows; the public listener answers them 404 unless ``public_status``
+    says otherwise. Every request is recorded with its method."""
+
+    def __init__(
+        self,
+        *,
+        runs: Sequence[dict[str, Any]] = (),
+        documents: Sequence[dict[str, Any]] = (),
+        dead: Sequence[dict[str, Any]] = (),
+        public_status: int = 404,
+        filter_ignored: bool = False,
+    ) -> None:
+        super().__init__()
+        self.runs = list(runs)
+        self.documents = list(documents)
+        self.dead = list(dead)
+        self.public_status = public_status
+        self.filter_ignored = filter_ignored
+        self.requests: list[tuple[str, str]] = []
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        path, params = request.url.path, request.url.params
+        self.requests.append((request.method, f"{request.url.host}{path}"))
+        if request.url.host == "public" and path.startswith("/v1/pipeline"):
+            slug = "route-not-found" if self.public_status == 404 else "example"
+            return httpx2.Response(
+                self.public_status, json={"type": f"urn:compliancewatch:problem:{slug}"}
+            )
+        if path == check.RUNS:
+            return httpx2.Response(200, json={"items": self.runs, "next_cursor": None})
+        if path == check.EVERY_DOCUMENT:
+            status = params.get("status")
+            items = [
+                item
+                for item in self.documents
+                if status is None or self.filter_ignored or item["status"] == status
+            ]
+            return httpx2.Response(200, json={"items": items, "next_cursor": None})
+        if path == check.DEAD_OUTBOX:
+            return httpx2.Response(200, json={"items": self.dead, "next_cursor": None})
+        return super().__call__(request)
+
+
+def document(status: str, fetched_at: str) -> dict[str, Any]:
+    return {
+        "document_id": str(uuid4()),
+        "status": status,
+        "fetched_at": fetched_at,
+        "read_as": "notification",
+    }
+
+
+def dead_row(topic: str, dead_at: str) -> dict[str, Any]:
+    return {
+        "event_id": str(uuid4()),
+        "topic": topic,
+        "status": "dead",
+        "dead_at": dead_at,
+        "summary": {"document_id": str(uuid4())},
+        "payload_bytes": 200,
+    }
+
+
+RUN: Final = {
+    "run_id": str(uuid4()),
+    "source_key": "cbic_notifications",
+    "status": "completed",
+    "started_at": "2000-01-03T06:00:00+00:00",
+    "trigger": "schedule",
+}
+
+
+def test_the_operations_step_reads_runs_documents_and_dead_rows_and_writes_nothing(
+    sink: Path,
+) -> None:
+    script = Operations(
+        runs=[RUN, {**RUN, "run_id": str(uuid4()), "started_at": "2000-01-02T06:00:00+00:00"}],
+        documents=[
+            document("extracted", "2000-01-03T06:00:00+00:00"),
+            document("irrelevant", "2000-01-02T06:00:00+00:00"),
+            document("extracted", "2000-01-01T06:00:00+00:00"),
+        ],
+        dead=[
+            dead_row("document.parsed", "2000-01-03T07:00:00+00:00"),
+            dead_row("rule.candidate.created", "2000-01-03T06:30:00+00:00"),
+        ],
+    )
+    lines = check.operations(context_of(scripted_product(script, sink)))
+    assert lines[0] == (
+        "GET /v1/pipeline/runs: 2 on the first page, the latest started first; the latest: "
+        "cbic_notifications completed (schedule)"
+    )
+    assert lines[1] == (
+        "GET /v1/pipeline/documents: 3 on the first page, the latest fetched first "
+        "(2 extracted, 1 irrelevant)"
+    )
+    assert lines[2] == "GET /v1/pipeline/documents?status=extracted: extracted only"
+    assert lines[3].startswith(
+        "GET /v1/pipeline/outbox/dead: 2 dead row(s) on the first page (1 document.parsed, "
+        "1 rule.candidate.created), the newest dead first, without their bodies"
+    )
+    assert "which the check never does" in lines[3]
+    assert lines[4] == "the public listener: 404 route-not-found for all three"
+    assert {method for method, _ in script.requests} == {"GET"}, "it only reads"
+
+
+def test_the_operations_step_reports_an_empty_pipeline(sink: Path) -> None:
+    lines = check.operations(context_of(scripted_product(Operations(), sink)))
+    assert lines[:4] == [
+        "GET /v1/pipeline/runs: 0 on the first page, the latest started first",
+        "GET /v1/pipeline/documents: 0 on the first page, the latest fetched first (none)",
+        "GET /v1/pipeline/documents?status=: not tried, no document is stored",
+        "GET /v1/pipeline/outbox/dead: no dead row",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("script", "reason"),
+    [
+        (Operations(public_status=200), "the public listener answered /v1/pipeline/runs 200"),
+        (
+            Operations(
+                documents=[
+                    document("extracted", "2000-01-01T06:00:00+00:00"),
+                    document("irrelevant", "2000-01-02T06:00:00+00:00"),
+                ]
+            ),
+            "does not list the latest fetched_at first",
+        ),
+        (
+            Operations(
+                documents=[
+                    document("extracted", "2000-01-03T06:00:00+00:00"),
+                    document("irrelevant", "2000-01-02T06:00:00+00:00"),
+                ],
+                filter_ignored=True,
+            ),
+            r"\?status=extracted listed another status",
+        ),
+        (
+            Operations(documents=[document("example", "2000-01-03T06:00:00+00:00")]),
+            "without a known status",
+        ),
+        (
+            Operations(
+                dead=[{**dead_row("document.parsed", "2000-01-03T07:00:00+00:00"), "payload": {}}]
+            ),
+            "listed a body",
+        ),
+        (
+            Operations(
+                runs=[
+                    {**RUN, "started_at": "2000-01-01T06:00:00+00:00"},
+                    {**RUN, "started_at": "2000-01-02T06:00:00+00:00"},
+                ]
+            ),
+            "does not list the latest started_at first",
+        ),
+    ],
+    ids=["public", "order", "filter", "status", "body", "runs"],
+)
+def test_the_operations_step_fails_on_what_it_reads_wrongly(
+    script: Operations, reason: str, sink: Path
+) -> None:
+    with pytest.raises(StepFailedError, match=reason):
+        check.operations(context_of(scripted_product(script, sink)))

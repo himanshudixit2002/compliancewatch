@@ -1,6 +1,7 @@
 """The crawl's rules in the domain: where a listing starts, how the watermark moves, how a run
 ends, when a source is due and under which ids, and how a source stands."""
 
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
@@ -14,6 +15,7 @@ from pipeline.domain.crawl import (
     CrawlCounts,
     CrawlRun,
     CrawlStatus,
+    CrawlTrigger,
     DocumentOutcome,
     Outcome,
     failure_summary,
@@ -183,30 +185,65 @@ def test_the_source_id_is_the_registrys() -> None:
     assert source_id_of("cbic_notifications") == source_id_for("cbic_notifications")
 
 
+def due(
+    found: Source,
+    latest: CrawlRun | None,
+    now: datetime,
+    *,
+    listable: bool = True,
+    last_crawl: CrawlRun | None = None,
+) -> bool:
+    """``is_due`` with the latest run as the last crawl too, unless the test names another."""
+    crawl = latest if last_crawl is None and latest is not None else last_crawl
+    return is_due(found, latest, now, listable=listable, last_crawl=crawl)
+
+
 def test_a_source_is_due_once_its_cadence_has_passed_since_its_last_crawl() -> None:
     fresh = source()
-    assert is_due(fresh, None, NOW, listable=True), "never crawled"
+    assert due(fresh, None, NOW), "never crawled"
     ran = CrawlRun.start(fresh.key, NOW - timedelta(minutes=30)).finish(
         NOW - timedelta(minutes=29), CrawlCounts()
     )
-    assert not is_due(fresh, ran, NOW, listable=True)
-    assert is_due(fresh, ran, NOW + timedelta(minutes=90), listable=True)
+    assert not due(fresh, ran, NOW)
+    assert due(fresh, ran, NOW + timedelta(minutes=90))
     listed = source(last_fetch_at=NOW - timedelta(hours=1))
-    assert not is_due(listed, None, NOW, listable=True)
-    assert is_due(listed, None, NOW + timedelta(hours=1), listable=True)
+    assert not due(listed, None, NOW)
+    assert due(listed, None, NOW + timedelta(hours=1))
+
+
+def test_a_backfill_holds_the_tick_back_while_it_runs_and_counts_as_no_crawl() -> None:
+    """The cadence counts from the schedule's crawl an hour and a half ago, not from the
+    backfill that ended a minute ago; a backfill that runs holds the tick back all the same."""
+    crawled = source(last_fetch_at=NOW - timedelta(minutes=85))
+    scheduled = CrawlRun.start(crawled.key, NOW - timedelta(minutes=90)).finish(
+        NOW - timedelta(minutes=85), CrawlCounts()
+    )
+    backfill = replace(
+        CrawlRun.start(crawled.key, NOW - timedelta(minutes=20)), trigger=CrawlTrigger.BACKFILL
+    )
+    assert not is_due(crawled, backfill, NOW, listable=True, last_crawl=scheduled), "it runs"
+    ended = backfill.finish(NOW - timedelta(minutes=1), CrawlCounts(listed=40, stored=40))
+    assert not is_due(crawled, ended, NOW, listable=True, last_crawl=scheduled)
+    later = NOW + timedelta(minutes=30)
+    assert is_due(crawled, ended, later, listable=True, last_crawl=scheduled), (
+        "two hours since the schedule's crawl, though the backfill ended 31 minutes ago"
+    )
+    assert is_due(source(), ended, NOW, listable=True, last_crawl=None), (
+        "a source only a backfill crawled was never crawled by the schedule"
+    )
 
 
 def test_a_paused_or_disabled_source_or_one_being_crawled_is_not_due() -> None:
-    assert not is_due(source(paused=True), None, NOW, listable=True)
-    assert not is_due(source(enabled=False), None, NOW, listable=True)
+    assert not due(source(paused=True), None, NOW)
+    assert not due(source(enabled=False), None, NOW)
     running = CrawlRun.start("cbic_notifications", NOW - timedelta(hours=2, minutes=30))
-    assert not is_due(source(), running, NOW, listable=True)
-    assert is_due(source(), running, running.started_at + ABANDONED_AFTER, listable=True)
+    assert not due(source(), running, NOW)
+    assert due(source(), running, running.started_at + ABANDONED_AFTER)
 
 
 def test_an_upload_only_source_is_never_due() -> None:
-    assert not is_due(source(), None, NOW, listable=False), "never crawled, and never will be"
-    assert not is_due(source(), None, NOW + timedelta(days=400), listable=False)
+    assert not due(source(), None, NOW, listable=False), "never crawled, and never will be"
+    assert not due(source(), None, NOW + timedelta(days=400), listable=False)
 
 
 def test_how_a_source_stands() -> None:

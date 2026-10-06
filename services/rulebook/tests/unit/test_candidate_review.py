@@ -47,6 +47,7 @@ from rulebook.application.review_tasks import (
     ReadReviewTask,
     RelationChoice,
 )
+from rulebook.application.rule_versions import ListRuleVersions, ReadRuleVersion
 from rulebook.application.seed_loader import load_calendar
 from rulebook.domain.documents import StoredDocument
 from rulebook.domain.drafting import DraftEdit
@@ -911,6 +912,9 @@ def test_a_closed_draft_is_never_its_rules_latest_version(review: Review) -> Non
     assert listed[MONTHLY] == "Example monthly return", "not the rejected candidate's title"
     assert head is not None
     assert head.last_version == 2, "the closed draft keeps its number"
+    listed_versions = ListRuleVersions(review.store).run(MONTHLY)
+    assert [(v.record.version, v.closed) for v in listed_versions] == [(1, False), (2, True)]
+    assert ReadRuleVersion(review.store).run(closed.rule_version_id).closed
     task_id = review.received()
     review.claim.run(task_id, by=ANALYST)
     again = review.draft.run(task_id, by=ANALYST, rule_key=MONTHLY)
@@ -919,6 +923,7 @@ def test_a_closed_draft_is_never_its_rules_latest_version(review: Review) -> Non
     with review.store() as uow:
         listed = {rule.rule_key: rule.title for rule in uow.rules.list_rules()}
     assert listed[MONTHLY] == FIELDS["title"], "an open draft is the latest version"
+    assert [v.closed for v in ListRuleVersions(review.store).run(MONTHLY)] == [False, True, False]
 
 
 def test_a_rule_that_only_closed_drafts_hold_is_not_listed(review: Review) -> None:

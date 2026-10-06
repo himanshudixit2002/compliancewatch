@@ -111,11 +111,21 @@ class CitationRecord:
 class RuleVersionDetail:
     """One version with its citations and, once it has been published, the distinct approvers
     of the review round it was published from, by user id. Empty for a version that was never
-    published: its current round may still change."""
+    published: its current round may still change. ``closed`` says it is a draft whose rule
+    candidate was rejected (``intake.version_closed``): it stays a draft and never moves on."""
 
     record: RuleVersionRecord
     citations: tuple[CitationRecord, ...]
     approved_by: tuple[UserId, ...] = ()
+    closed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ListedVersion:
+    """A version of a rule as its listing shows it, and whether it is closed."""
+
+    record: RuleVersionRecord
+    closed: bool = False
 
 
 @dataclass(frozen=True, slots=True)

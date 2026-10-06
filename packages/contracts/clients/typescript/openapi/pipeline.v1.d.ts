@@ -35,6 +35,28 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/pipeline/documents": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List every source's documents, the latest fetch first
+     * @description Every source's stored documents, a page at a time, the latest first fetch first (then by
+     *     id), each with the type the pipeline reads it as, its classification and its extraction by
+     *     the current prompt. A date filter leaves undated documents out.
+     */
+    get: operations["list_every_document_v1_pipeline_documents_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/pipeline/documents/{document_id}": {
     parameters: {
       query?: never;
@@ -45,7 +67,9 @@ export type paths = {
     /**
      * Read one stored document
      * @description A stored document as its record holds it: where it was listed, what the listing said,
-     *     when it was first fetched, its digest, storage key and status.
+     *     when it was first fetched, its digest, storage key and status; with the type the pipeline
+     *     reads it as, its classification, its extraction by the current prompt, and the retries
+     *     people asked for.
      */
     get: operations["read_document_v1_pipeline_documents__document_id__get"];
     put?: never;
@@ -79,6 +103,91 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/pipeline/documents/{document_id}/retry": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Run a stored document again from a stage
+     * @description Start the stored document's ingest again from ``stage``, without a new fetch, under the
+     *     workflow ``pipeline-retry-<document>-<attempt>``, and answer 202 with the attempt.
+     *
+     *     - ``parse``: the whole ingest of the stored bytes (parse, classify, register while knowledge
+     *       is on, extract a notification, circular or act amendment while the extraction is on); a
+     *       document no parser read is parsed again;
+     *     - ``classify``: the same, the detector reading the document again (a person's decision
+     *       stands);
+     *     - ``extract``: the rule extraction of a document classified on its way to it whose extraction
+     *       failed or never started.
+     *
+     *     A ``doc_type`` reclassifies the document first: relevant, of that type, certain, by retry,
+     *     with its status and a document.classified. It beats the detector and is the way back for a
+     *     document set aside as irrelevant or whose triage was dismissed. Audited as
+     *     pipeline.document.retry. The same request with its Idempotency-Key again answers its attempt
+     *     (``Idempotent-Replayed: true``) and starts its ingest only if it did not start; the key with
+     *     another body is a 422. 409 while an ingest of the document runs (an earlier retry's, its
+     *     crawl's, a task resolution's, its rule extraction's), while a triage task holds it, or when
+     *     there is nothing to extract; 422 for an extraction of a type no rule is extracted from; 503
+     *     when Temporal does not answer (the attempt stays recorded: send the same request again).
+     */
+    post: operations["retry_document_v1_pipeline_documents__document_id__retry_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/pipeline/outbox/{event_id}/requeue": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Put a dead outbox row back to pending
+     * @description Put the dead row back to pending with its attempts reset, due at once, so the relay sends
+     *     it again on its next pass; its last error stays until a send succeeds. Audited as
+     *     pipeline.outbox.requeue. A row that is not dead (pending, published) is answered as it
+     *     stands, with requeued false and nothing written, so the request is safe to send again. 404
+     *     for an id the outbox does not hold.
+     */
+    post: operations["requeue_event_v1_pipeline_outbox__event_id__requeue_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/pipeline/outbox/dead": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the outbox's dead rows, the newest dead first
+     * @description The pipeline's outbox rows the relay marked dead after its eight sends failed (their
+     *     message is on <topic>.dlq), a page at a time, the newest dead first: the topic, key,
+     *     attempts, last error, when each went dead, and a summary of the payload without its body.
+     */
+    get: operations["list_dead_events_v1_pipeline_outbox_dead_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/pipeline/ping": {
     parameters: {
       query?: never;
@@ -88,6 +197,29 @@ export type paths = {
     };
     /** Ping */
     get: operations["ping_v1_pipeline_ping_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/pipeline/runs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the crawl runs, the latest first
+     * @description Every source's crawl runs, a page at a time, the latest started first (then by id):
+     *     when each ran, why (its trigger and workflow; null on runs recorded before they were
+     *     kept), what its listing found (listed; stored, duplicates and failed of the new documents)
+     *     and how it ended.
+     */
+    get: operations["list_runs_v1_pipeline_runs_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -353,6 +485,33 @@ export type components = {
        */
       title?: string;
     };
+    /** ClassificationOut */
+    ClassificationOut: {
+      /**
+       * Classified At
+       * Format: date-time
+       */
+      classified_at: string;
+      /**
+       * Classifier
+       * @description detector@1 for the rule-based detector, triage for a person's triage, retry for the type a person gave on a retry
+       */
+      classifier: string;
+      confidence: components["schemas"]["TypeConfidence"];
+      /**
+       * Decided By
+       * @description The person whose decision it is, if one's
+       */
+      decided_by: string | null;
+      doc_type: components["schemas"]["DocumentType"];
+      /** Reasons */
+      reasons: string[];
+      relevance: components["schemas"]["Relevance"];
+      /** @description Where it goes: extract (on to the rule extraction), reference (registered, nothing extracted), irrelevant (set aside), triage (held for a person) */
+      route: components["schemas"]["Route"];
+      /** Task Id */
+      task_id: string | null;
+    };
     /** CrawlRunOut */
     CrawlRunOut: {
       /** Duplicates */
@@ -378,6 +537,13 @@ export type components = {
       status: components["schemas"]["CrawlStatus"];
       /** Stored */
       stored: number;
+      /** @description Why it ran: the schedule's tick, an admin's fetch, or a backfill; null on a run recorded before the pipeline kept it */
+      trigger: components["schemas"]["CrawlTrigger"] | null;
+      /**
+       * Workflow Id
+       * @description The crawl's workflow on Temporal; null on a run recorded before it was kept
+       */
+      workflow_id: string | null;
     };
     /**
      * CrawlStatus
@@ -386,10 +552,10 @@ export type components = {
     CrawlStatus: "running" | "completed" | "failed";
     /**
      * CrawlTrigger
-     * @description Why a crawl ran: the schedule's tick, or an admin's fetch.
+     * @description Why a crawl ran: the schedule's tick, an admin's fetch, or a backfill of history.
      * @enum {string}
      */
-    CrawlTrigger: "schedule" | "manual";
+    CrawlTrigger: "schedule" | "manual" | "backfill";
     /**
      * DismissIn
      * @description A task dismissed; the reason is why it needs no work.
@@ -406,6 +572,65 @@ export type components = {
        * @description Why: kept verbatim in the audit entry
        */
       reason: string;
+    };
+    /**
+     * DocumentDetailOut
+     * @description One stored document with how the pipeline reads it and the retries people asked for.
+     */
+    DocumentDetailOut: {
+      /** @description Null before its classify step */
+      classification: components["schemas"]["ClassificationOut"] | null;
+      /** Content Type */
+      content_type: string;
+      /** @description The type its uploader gave; null when it is its source's */
+      doc_type: components["schemas"]["DocumentType"] | null;
+      /**
+       * Document Id
+       * Format: uuid
+       */
+      document_id: string;
+      /** External Ref */
+      external_ref: string;
+      /** @description Its rule extraction by the current prompt; null before one is stored */
+      extraction: components["schemas"]["ExtractionOut"] | null;
+      /**
+       * Fetched At
+       * Format: date-time
+       * @description When the bytes were first fetched
+       */
+      fetched_at: string;
+      /**
+       * Parser Version
+       * @description The parser of the document's last parse (pdf@1, pdf-tables@1, html@1, html-tables@1, manual@1 for an analyst's transcript); empty before one
+       */
+      parser_version: string;
+      /** Published On */
+      published_on: string | null;
+      /**
+       * Raw Path
+       * @description Where the stored bytes are served
+       */
+      raw_path: string;
+      /** @description The type the pipeline reads it as: its classification's, else its uploader's, else its source's; null for a source the code cannot read */
+      read_as: components["schemas"]["DocumentType"] | null;
+      /**
+       * Retries
+       * @description Its retries by attempt; empty before one
+       */
+      retries: components["schemas"]["RetryOut"][];
+      /** Sha256 */
+      sha256: string;
+      /** Size */
+      size: number;
+      /** Source Key */
+      source_key: string;
+      /** Source Url */
+      source_url: string;
+      status: components["schemas"]["DocumentStatus"];
+      /** Storage Key */
+      storage_key: string;
+      /** Title */
+      title: string;
     };
     /** DocumentOut */
     DocumentOut: {
@@ -480,6 +705,38 @@ export type components = {
      * @enum {string}
      */
     DocumentType: "notification" | "circular" | "press_release" | "act_amendment" | "statute";
+    /**
+     * ExtractionOut
+     * @description The document's rule extraction by the current prompt.
+     */
+    ExtractionOut: {
+      /**
+       * Candidate Id
+       * Format: uuid
+       * @description The candidate its rule.candidate.created names
+       */
+      candidate_id: string;
+      /**
+       * Extracted At
+       * Format: date-time
+       */
+      extracted_at: string;
+      /** Issue Count */
+      issue_count: number;
+      /** Model */
+      model: string;
+      /** Needs Review */
+      needs_review: boolean;
+      /** @description extracted (a candidate), or unparseable (the model gave none, twice) */
+      outcome: components["schemas"]["ExtractionOutcome"];
+      /** Prompt Version */
+      prompt_version: string;
+    };
+    /**
+     * ExtractionOutcome
+     * @enum {string}
+     */
+    ExtractionOutcome: "extracted" | "unparseable";
     /**
      * FetchIn
      * @description An admin's fetch of the source now.
@@ -559,10 +816,99 @@ export type components = {
       /** Version */
       version: string;
     };
+    /**
+     * OutboxEventOut
+     * @description An outbox row without its body.
+     */
+    OutboxEventOut: {
+      /**
+       * Attempts
+       * @description Failed sends since it was written or last requeued
+       */
+      attempts: number;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Dead At
+       * @description When the relay marked it dead
+       */
+      dead_at: string | null;
+      /**
+       * Event Id
+       * Format: uuid
+       */
+      event_id: string;
+      /**
+       * Key
+       * @description The Kafka message key (the event's source)
+       */
+      key: string;
+      /** Last Error */
+      last_error: string;
+      /**
+       * Occurred At
+       * Format: date-time
+       */
+      occurred_at: string;
+      /** Payload Bytes */
+      payload_bytes: number;
+      /** Published At */
+      published_at: string | null;
+      /** Schema Version */
+      schema_version: string;
+      status: components["schemas"]["OutboxStatus"];
+      /**
+       * Summary
+       * @description What the event is about, from its payload: the document, source, candidate, type or outcome it names; never the body
+       */
+      summary: {
+        [key: string]: unknown;
+      };
+      /** Topic */
+      topic: string;
+    };
+    /**
+     * OutboxStatus
+     * @enum {string}
+     */
+    OutboxStatus: "pending" | "published" | "dead";
     /** Page[DocumentOut] */
     Page_DocumentOut_: {
       /** Items */
       items: components["schemas"]["DocumentOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
+    /** Page[OutboxEventOut] */
+    Page_OutboxEventOut_: {
+      /** Items */
+      items: components["schemas"]["OutboxEventOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
+    /** Page[PipelineDocumentOut] */
+    Page_PipelineDocumentOut_: {
+      /** Items */
+      items: components["schemas"]["PipelineDocumentOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
+    /** Page[RunOut] */
+    Page_RunOut_: {
+      /** Items */
+      items: components["schemas"]["RunOut"][];
       /**
        * Next Cursor
        * @description Send as cursor to read the next page; null on the last page
@@ -599,6 +945,60 @@ export type components = {
        * @enum {string}
        */
       type: "paragraph";
+    };
+    /**
+     * PipelineDocumentOut
+     * @description A stored document with how the pipeline reads it.
+     */
+    PipelineDocumentOut: {
+      /** @description Null before its classify step */
+      classification: components["schemas"]["ClassificationOut"] | null;
+      /** Content Type */
+      content_type: string;
+      /** @description The type its uploader gave; null when it is its source's */
+      doc_type: components["schemas"]["DocumentType"] | null;
+      /**
+       * Document Id
+       * Format: uuid
+       */
+      document_id: string;
+      /** External Ref */
+      external_ref: string;
+      /** @description Its rule extraction by the current prompt; null before one is stored */
+      extraction: components["schemas"]["ExtractionOut"] | null;
+      /**
+       * Fetched At
+       * Format: date-time
+       * @description When the bytes were first fetched
+       */
+      fetched_at: string;
+      /**
+       * Parser Version
+       * @description The parser of the document's last parse (pdf@1, pdf-tables@1, html@1, html-tables@1, manual@1 for an analyst's transcript); empty before one
+       */
+      parser_version: string;
+      /** Published On */
+      published_on: string | null;
+      /**
+       * Raw Path
+       * @description Where the stored bytes are served
+       */
+      raw_path: string;
+      /** @description The type the pipeline reads it as: its classification's, else its uploader's, else its source's; null for a source the code cannot read */
+      read_as: components["schemas"]["DocumentType"] | null;
+      /** Sha256 */
+      sha256: string;
+      /** Size */
+      size: number;
+      /** Source Key */
+      source_key: string;
+      /** Source Url */
+      source_url: string;
+      status: components["schemas"]["DocumentStatus"];
+      /** Storage Key */
+      storage_key: string;
+      /** Title */
+      title: string;
     };
     /**
      * Problem
@@ -647,6 +1047,33 @@ export type components = {
      */
     Relevance: "relevant" | "irrelevant";
     /**
+     * RequeueIn
+     * @description A dead outbox row put back to pending, so the relay sends it again.
+     */
+    RequeueIn: {
+      /**
+       * Actor Id
+       * Format: uuid
+       * @description The admin taking the step; a signed-in user's token overrides it, and the audit entry names whoever acted
+       */
+      actor_id: string;
+      /**
+       * Reason
+       * @description Why: kept verbatim in the audit entry
+       */
+      reason: string;
+    };
+    /**
+     * RequeueOut
+     * @description The row as it stands now: ``requeued`` is false for a row that was not dead (pending, or
+     *     published), which nothing changed.
+     */
+    RequeueOut: {
+      event: components["schemas"]["OutboxEventOut"];
+      /** Requeued */
+      requeued: boolean;
+    };
+    /**
      * ResolutionOut
      * @description The resolved task and the ingest it starts (a manual parse's parses the transcript, a
      *     relevant triage's continues the document as its type): ``started`` is false when it was
@@ -682,6 +1109,127 @@ export type components = {
       reason: string;
       transcript?: components["schemas"]["TranscriptIn"] | null;
       triage?: components["schemas"]["TriageIn"] | null;
+    };
+    /**
+     * RetryAcceptedOut
+     * @description The retry and its ingest: ``started`` is false when the ingest was started before (a
+     *     request sent again under its Idempotency-Key, whose answer is replayed).
+     */
+    RetryAcceptedOut: {
+      document: components["schemas"]["DocumentDetailOut"];
+      /**
+       * Reclassified
+       * @description Whether the person's type reclassified the document
+       */
+      reclassified: boolean;
+      retry: components["schemas"]["RetryOut"];
+      /** Started */
+      started: boolean;
+      /** Workflow Id */
+      workflow_id: string;
+    };
+    /**
+     * RetryIn
+     * @description A retry of a stored document: the stage its ingest starts again from, and, to reclassify
+     *     it, the type a person gives it.
+     */
+    RetryIn: {
+      /**
+       * Actor Id
+       * Format: uuid
+       * @description The admin taking the step; a signed-in user's token overrides it, and the audit entry names whoever acted
+       */
+      actor_id: string;
+      /** @description The document's type, as a person reads it: it reclassifies the document (relevant, certain, by retry), beats the detector, and brings back a document set aside as irrelevant or whose triage was dismissed */
+      doc_type?: components["schemas"]["DocumentType"] | null;
+      /**
+       * Reason
+       * @description Why: kept verbatim in the audit entry
+       */
+      reason: string;
+      /** @description parse: the stored document's whole ingest again (parse, classify, register, extract); classify: the same with the detector's classification read again; extract: the rule extraction of a document classified on its way to it */
+      stage: components["schemas"]["RetryStage"];
+    };
+    /**
+     * RetryOut
+     * @description One retry of a document: its attempt, stage, the type a person gave, why, by whom and
+     *     when, and its ingest's workflow.
+     */
+    RetryOut: {
+      /** Attempt */
+      attempt: number;
+      /** @description The type the person gave the document; null when its classification stood */
+      doc_type: components["schemas"]["DocumentType"] | null;
+      /** Reason */
+      reason: string;
+      /**
+       * Requested At
+       * Format: date-time
+       */
+      requested_at: string;
+      /**
+       * Requested By
+       * @description Who asked, when a person's token or id named one
+       */
+      requested_by: string | null;
+      stage: components["schemas"]["RetryStage"];
+      /**
+       * Workflow Id
+       * @description pipeline-retry-<document>-<attempt>
+       */
+      workflow_id: string;
+    };
+    /**
+     * RetryStage
+     * @description Where a retry starts the stored document's ingest again: its parse, its classification
+     *     (read again by the detector), or its rule extraction.
+     * @enum {string}
+     */
+    RetryStage: "parse" | "classify" | "extract";
+    /**
+     * Route
+     * @description Where a classified document goes: on to the rule extraction, kept for reference, set
+     *     aside as irrelevant, or held for a person's triage.
+     * @enum {string}
+     */
+    Route: "extract" | "reference" | "irrelevant" | "triage";
+    /**
+     * RunOut
+     * @description A crawl run with its source.
+     */
+    RunOut: {
+      /** Duplicates */
+      duplicates: number;
+      /** Error */
+      error: string;
+      /** Failed */
+      failed: number;
+      /** Finished At */
+      finished_at: string | null;
+      /** Listed */
+      listed: number;
+      /**
+       * Run Id
+       * Format: uuid
+       */
+      run_id: string;
+      /** Source Key */
+      source_key: string;
+      /**
+       * Started At
+       * Format: date-time
+       */
+      started_at: string;
+      status: components["schemas"]["CrawlStatus"];
+      /** Stored */
+      stored: number;
+      /** @description Why it ran: the schedule's tick, an admin's fetch, or a backfill; null on a run recorded before the pipeline kept it */
+      trigger: components["schemas"]["CrawlTrigger"] | null;
+      /**
+       * Workflow Id
+       * @description The crawl's workflow on Temporal; null on a run recorded before it was kept
+       */
+      workflow_id: string | null;
     };
     /**
      * SourceEditIn
@@ -955,6 +1503,14 @@ export type components = {
       relevance: components["schemas"]["Relevance"];
     };
     /**
+     * TypeConfidence
+     * @description How sure the classifier is of the type: the text names it (``certain``), nothing in the
+     *     text names one and the source's is taken (``default``), or the text names another type than
+     *     its source publishes (``conflict``).
+     * @enum {string}
+     */
+    TypeConfidence: "certain" | "default" | "conflict";
+    /**
      * UploadOut
      * @description The uploaded document as stored, and the ingest that parses it. For bytes stored before,
      *     ``duplicate`` is true and ``document`` is the record stored first (it may be another
@@ -1040,6 +1596,68 @@ export interface operations {
       };
     };
   };
+  list_every_document_v1_pipeline_documents_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Only documents the pipeline reads as this type: its classification's, else its uploader's, else its source's */
+        doc_type?: components["schemas"]["DocumentType"] | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Only documents published on or after this day */
+        published_from?: string | null;
+        /** @description Only documents published on or before this day */
+        published_to?: string | null;
+        /** @description Only this source's */
+        source_key?: string | null;
+        /** @description Only documents of this status: discovered, parsed, failed (no parser reads it), irrelevant (set aside), classified (waiting for its extraction), triage, reference, extracted */
+        status?: components["schemas"]["DocumentStatus"] | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_PipelineDocumentOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   read_document_v1_pipeline_documents__document_id__get: {
     parameters: {
       query?: never;
@@ -1057,7 +1675,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["DocumentOut"];
+          "application/json": components["schemas"]["DocumentDetailOut"];
         };
       };
       /** @description Unauthorized */
@@ -1176,6 +1794,246 @@ export interface operations {
       };
     };
   };
+  retry_document_v1_pipeline_documents__document_id__retry_post: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours */
+        "Idempotency-Key": string;
+        /** @description The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role */
+        "x-cw-write-token"?: string | null;
+      };
+      path: {
+        document_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RetryIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RetryAcceptedOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  requeue_event_v1_pipeline_outbox__event_id__requeue_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The shared write token (CW_RULEBOOK_WRITE_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token; a bearer needs the admin role */
+        "x-cw-write-token"?: string | null;
+      };
+      path: {
+        event_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RequeueIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RequeueOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  list_dead_events_v1_pipeline_outbox_dead_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Only rows of this topic, such as document.parsed */
+        topic?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_OutboxEventOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   ping_v1_pipeline_ping_get: {
     parameters: {
       query?: never;
@@ -1194,6 +2052,64 @@ export interface operations {
           "application/json": {
             [key: string]: string;
           };
+        };
+      };
+    };
+  };
+  list_runs_v1_pipeline_runs_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Only this source's */
+        source_key?: string | null;
+        /** @description Only runs that are running, completed or failed */
+        status?: components["schemas"]["CrawlStatus"] | null;
+        /** @description Only runs the schedule's tick, an admin's fetch or a backfill started */
+        trigger?: components["schemas"]["CrawlTrigger"] | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_RunOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
     };

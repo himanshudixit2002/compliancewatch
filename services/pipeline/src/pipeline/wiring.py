@@ -5,6 +5,14 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from pipeline.application.crawl import StartCrawl
+from pipeline.application.operations import (
+    ListDeadEvents,
+    ListDocuments,
+    ListRuns,
+    ReadDocumentView,
+    RequeueEvent,
+    RetryDocument,
+)
 from pipeline.application.sources import (
     AddSource,
     EditSource,
@@ -39,3 +47,9 @@ class Wiring:
     list_tasks: ListTasks
     resolve_task: ResolveTask
     dismiss_task: DismissTask
+    list_runs: ListRuns
+    list_every_document: ListDocuments
+    read_document_view: ReadDocumentView
+    retry_document: RetryDocument
+    list_dead_events: ListDeadEvents
+    requeue_event: RequeueEvent

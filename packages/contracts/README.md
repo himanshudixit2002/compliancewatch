@@ -25,6 +25,10 @@ openapi/                 # OpenAPI 3.1 specs, public /v1 and internal service AP
   clients.json             # the specs that get generated Python REST models (today: public)
   BREAKING.md              # deliberate breaking changes, one row per break of an operation, each with an ADR
 consumers/               # consumer contracts: <consumer>/<provider>.json, recorded HTTP calls both sides replay (consumers/README.md)
+golden/
+  extraction-case.example.yaml  # the draft golden case the rulebook's export writes (rulebook-golden-export), as the
+                                # eval harness loads it: the rulebook's contract test keeps it equal to its export,
+                                # the harness's test loads it with its case loader and validators
 events/
   schemas/               # JSON Schema 2020-12: envelope.v1.json and one <topic>.v1.json per event
   examples/<topic>/      # golden messages (envelope + payload) every check replays

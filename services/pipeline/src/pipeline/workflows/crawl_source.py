@@ -15,9 +15,15 @@ by the worker's tick or an admin's fetch with the run their start recorded
 3. ``pipeline.finish_crawl`` records the run's counts and end and the source's last listing,
    watermark and error.
 
+A backfill's crawl (trigger ``backfill``) lists its own window instead of the watermark's: from a
+date below the watermark, up to another, only the references its plan names, behind
+``workflow.patched(BACKFILL_PATCH)``; its end records the run only, and the source keeps its
+watermark, last listing and error. A crawl that names no window records no marker, so the
+histories of every other crawl stay as they were.
+
 A failure is recorded, not raised: a listing that fails ends the run as failed with the error on
-the run and the source, and a child that fails counts as failed. The workflow does no I/O
-itself.
+the run and (unless the crawl is a backfill) the source, and a child that fails counts as failed.
+The workflow does no I/O itself.
 """
 
 import asyncio
@@ -53,23 +59,37 @@ with workflow.unsafe.imports_passed_through():
 
 CRAWL_WORKFLOW = "pipeline.crawl_source"
 MAX_ERROR_CHARS = 1_000
+BACKFILL_PATCH = "pipeline-backfill-v1"
 
 
 @workflow.defn(name=CRAWL_WORKFLOW)
 class CrawlSourceWorkflow:
     @workflow.run
     async def run(self, request: CrawlRequest) -> CrawlResult:
-        try:
-            listing = await ListNewDocuments.schedule(
-                ListRequest(
-                    source_key=request.source_key, run_id=request.run_id, limit=request.limit
-                )
+        listing_request = ListRequest(
+            source_key=request.source_key, run_id=request.run_id, limit=request.limit
+        )
+        if request.window.narrows and workflow.patched(BACKFILL_PATCH):
+            listing_request = ListRequest(
+                source_key=request.source_key,
+                run_id=request.run_id,
+                limit=request.limit,
+                since=request.since,
+                until=request.until,
+                refs=request.refs,
             )
+        try:
+            listing = await ListNewDocuments.schedule(listing_request)
         except ActivityError as error:
             reason = failure_text(error)[:MAX_ERROR_CHARS] or "the listing failed"
             workflow.logger.warning("crawl listing failed: %s", reason)
             return await FinishCrawl.schedule(
-                FinishRequest(source_key=request.source_key, run_id=request.run_id, error=reason)
+                FinishRequest(
+                    source_key=request.source_key,
+                    run_id=request.run_id,
+                    error=reason,
+                    trigger=request.trigger,
+                )
             )
         gate = asyncio.Semaphore(CHILD_CONCURRENCY)
         outcomes = await asyncio.gather(
@@ -83,6 +103,8 @@ class CrawlSourceWorkflow:
                 known_newest=listing.known_newest,
                 deferred_oldest=listing.deferred_oldest,
                 outcomes=list(outcomes),
+                trigger=request.trigger,
+                deferred=listing.deferred,
             )
         )
 

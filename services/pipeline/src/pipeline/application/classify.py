@@ -16,7 +16,13 @@ listed one, else the parse's) and records the classification
   extraction, while ``CW_PIPELINE_EXTRACTION_ENABLED`` is on (``Classified.extracts``).
 
 A document classified before (a retry, a second ingest of the same bytes, a person's triage) keeps
-its classification: nothing is read again or written, and the result says ``created=False``.
+its classification: nothing is read again or written, and the result says ``created=False``. A
+retry from the classify stage asks for it ``fresh``: the detector reads the document again and,
+when it reads it another way, its classification replaces the detector's earlier one, with the
+status (``extracted`` kept while the route still leads to the extraction and its extraction by
+the current prompt is stored), a document.classified and, for a conflict, a triage task. A
+person's decision (a triage, a type given on a retry) is never read again: the detector does not
+replace a person.
 """
 
 import dataclasses
@@ -37,7 +43,8 @@ from pipeline.application.activities import (
     parse_request,
 )
 from pipeline.application.detector import detect
-from pipeline.domain.classification import Classification, Route
+from pipeline.application.extraction import RULE_PROMPT_REF
+from pipeline.domain.classification import Classification, Route, status_after
 from pipeline.domain.errors import ClassifiedMeanwhileError, DocumentNotFoundError
 from pipeline.domain.events import DocumentClassified
 from pipeline.domain.ports import DocumentParsers, RawStore
@@ -68,9 +75,12 @@ database, or finds the classification another ingest of the same bytes recorded 
 
 
 class ClassifyRequest(Frozen):
-    """The parsed document to classify: the parse's own request."""
+    """The parsed document to classify: the parse's own request. ``fresh`` reads it again with
+    the detector even when it was classified before by the detector (a retry from the classify
+    stage)."""
 
     parse: ParseRequest
+    fresh: bool = False
 
 
 class Classified(Frozen):
@@ -146,13 +156,13 @@ class ClassifyDocument(ActivityBase[ClassifyRequest, Classified]):
         self._clock = clock
 
     async def run(self, input: ClassifyRequest) -> Classified:
-        return await on_thread(self, lambda: self.classify(input.parse))
+        return await on_thread(self, lambda: self.classify(input.parse, fresh=input.fresh))
 
-    def classify(self, request: ParseRequest) -> Classified:
+    def classify(self, request: ParseRequest, *, fresh: bool = False) -> Classified:
         document_id = DocumentId(request.document_id)
         with self._units() as unit:
             stored = unit.classifications.get(document_id)
-        if stored is not None:
+        if stored is not None and (not fresh or stored.by_person):
             return classified(stored, created=False, extraction_enabled=self._extraction)
         record, hints = hints_for(request, self._units, self._raw)
         if record is None:
@@ -173,6 +183,8 @@ class ClassifyDocument(ActivityBase[ClassifyRequest, Classified]):
             reasons=detection.reasons,
             classified_at=now,
         )
+        if stored is not None:
+            return self._read_again(stored, classification, record.source_key, request)
         with self._units() as unit:
             found = unit.classifications.get(document_id)
             if found is not None:
@@ -210,3 +222,52 @@ class ClassifyDocument(ActivityBase[ClassifyRequest, Classified]):
             task_id=None if classification.task_id is None else str(classification.task_id),
         )
         return classified(classification, created=True, extraction_enabled=self._extraction)
+
+    def _read_again(
+        self,
+        stored: Classification,
+        fresh: Classification,
+        source_key: str,
+        request: ParseRequest,
+    ) -> Classified:
+        """The detector's new reading of a document it classified before: kept as it was when
+        it reads the same, else written over the earlier one with the status, a
+        document.classified and, for a conflict, the triage task (an open one is kept). A
+        person's decision written meanwhile stands."""
+        document_id = stored.document_id
+        if fresh.same_reading(stored):
+            return classified(stored, created=False, extraction_enabled=self._extraction)
+        with self._units() as unit:
+            current = unit.classifications.get(document_id)
+            if current is None or current.by_person or current.same_reading(fresh):
+                kept = current or stored
+                return classified(kept, created=False, extraction_enabled=self._extraction)
+            if fresh.route is Route.TRIAGE:
+                task = unit.tasks.open(
+                    PipelineTask.opened(
+                        TaskKind.TRIAGE,
+                        document_id,
+                        source_key,
+                        at=fresh.classified_at,
+                        reason=fresh.reasons[0][:MAX_REASON_CHARS],
+                    )
+                )
+                fresh = dataclasses.replace(fresh, task_id=task.id)
+            unit.classifications.save(fresh)
+            extracted = unit.extractions.get(document_id, RULE_PROMPT_REF) is not None
+            unit.documents.set_status(document_id, status_after(fresh.route, extracted=extracted))
+            unit.events.publish(
+                DocumentClassified.of(
+                    fresh, source_id=SourceId(request.source_id), source_key=source_key
+                )
+            )
+        log.info(
+            "pipeline.document_classified_again",
+            document_id=str(document_id),
+            was=stored.route.value,
+            doc_type=fresh.doc_type.value,
+            relevance=fresh.relevance.value,
+            confidence=fresh.confidence.value,
+            route=fresh.route.value,
+        )
+        return classified(fresh, created=True, extraction_enabled=self._extraction)

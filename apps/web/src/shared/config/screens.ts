@@ -156,6 +156,12 @@ const SOURCE_FETCH = uses("pipeline", "POST", "/v1/pipeline/sources/{key}/fetch"
 const SOURCE_DOCUMENTS = uses("pipeline", "GET", "/v1/pipeline/sources/{key}/documents");
 const STORED_DOCUMENT = uses("pipeline", "GET", "/v1/pipeline/documents/{document_id}");
 const STORED_BYTES = uses("pipeline", "GET", "/v1/pipeline/documents/{document_id}/raw");
+/** The pipeline's operations (M2-7): runs, every source's documents, a retry, the dead outbox. */
+const RUNS = uses("pipeline", "GET", "/v1/pipeline/runs");
+const EVERY_DOCUMENT = uses("pipeline", "GET", "/v1/pipeline/documents");
+const DOCUMENT_RETRY = uses("pipeline", "POST", "/v1/pipeline/documents/{document_id}/retry");
+const DEAD_OUTBOX = uses("pipeline", "GET", "/v1/pipeline/outbox/dead");
+const OUTBOX_REQUEUE = uses("pipeline", "POST", "/v1/pipeline/outbox/{event_id}/requeue");
 const SESSION_EXCHANGE = servicesTrack("WP14", "identity", "POST", "/v1/identity/sessions");
 const DEV_PROVIDER_TOKENS = servicesTrack(
   "WP14",
@@ -1665,7 +1671,7 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [RUNS, EVERY_DOCUMENT, DOCUMENT_RETRY, DEAD_OUTBOX, OUTBOX_REQUEUE],
     awaits: [
       servicesTrack("WP19", "pipeline", "GET", "/v1/pipeline/runs"),
       servicesTrack("WP19", "pipeline", "GET", "/v1/pipeline/documents"),
@@ -1673,7 +1679,7 @@ const SCREEN_LIST = [
       servicesTrack("WP19", "pipeline", "GET", "/v1/pipeline/outbox/dead"),
       servicesTrack("WP19", "pipeline", "POST", "/v1/pipeline/outbox/{event_id}/requeue"),
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15; 5",
     nav: { group: "operations", order: 2 },
@@ -2177,7 +2183,8 @@ const SCREEN_LIST = [
     guideRef: "15; G53",
     nav: { group: "operations", order: 10 },
     parent: "admin.home",
-    notes: "make backfill SERVICE=pipeline is the current path.",
+    notes:
+      'The command line is the current path: make backfill ARGS="--plan services/pipeline/backfill-plan.yaml --dry-run | --workflow | --report" runs the crawl workflow per plan row, make replay lists and replays dead letters, and the pipeline screen requeues dead outbox rows.',
   },
 ] as const satisfies readonly Screen[];
 

@@ -40,6 +40,7 @@ DOCUMENTS_PATH = "/v1/rulebook/documents/{document_id}"
 MENTIONS_PATH = DOCUMENTS_PATH + "/mentions"
 RELATIONS_PATH = DOCUMENTS_PATH + "/relation-candidates"
 RULES_PATH = "/v1/rulebook/rules"
+REVIEW_STATS_PATH = "/v1/rulebook/review/stats"
 UNEMBEDDED_PATH = "/v1/rulebook/clauses/unembedded"
 EMBEDDINGS_PATH = "/v1/rulebook/clauses/embeddings"
 WRITE_TOKEN_HEADER = "x-cw-write-token"
@@ -65,6 +66,17 @@ class HttpRulebook:
         self._client = client or httpx2.Client(base_url=base_url, timeout=timeout_seconds)
         self._token = token
         self._auth = auth
+
+    def candidate_stats(self) -> Mapping[str, object]:
+        """The ``candidates`` block of ``GET /v1/rulebook/review/stats``: how analysts decided
+        the rule candidates. ``RulebookRejectedError`` when the rulebook refuses the read (a
+        token mode that wants an analyst's token), ``RulebookUnavailableError`` when it does not
+        answer."""
+        found = self._send("get", REVIEW_STATS_PATH)
+        block = found.get("candidates") if isinstance(found, Mapping) else None
+        if not isinstance(block, Mapping):
+            raise RulebookRejectedError(f"{REVIEW_STATS_PATH} answered without its candidates")
+        return dict(block)
 
     def register_document(self, record: DocumentRecord) -> RegisteredDocument:
         document = record.document

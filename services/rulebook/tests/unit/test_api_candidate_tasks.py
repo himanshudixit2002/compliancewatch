@@ -421,7 +421,14 @@ def test_a_rejected_candidates_draft_is_closed_over_http(client: TestClient) -> 
     assert [(r.status_code, problem(r)) for r in refused] == [
         (409, "rulebook-rule-version-closed")
     ] * 4
-    assert client.get(path).json()["status"] == "draft"
+    read = client.get(path).json()
+    assert (read["status"], read["closed"]) == ("draft", True)
+    listed = client.get(f"{BASE}/rules/{MONTHLY}/versions").json()
+    assert [(v["version"], v["closed"]) for v in listed] == [(1, False), (2, True)], (
+        "listed with the flag, so a reader after the latest version skips it"
+    )
+    detail = client.get(f"{TASKS}/{task_id}", headers=REVIEW).json()
+    assert detail["rule_version"]["closed"] is True
 
 
 def test_token_mode_lets_an_analyst_draft_and_not_a_reviewer() -> None:

@@ -302,3 +302,49 @@ Consequences:
   specification and template fan out when it is published. Whether such a version should apply
   to nobody (a specification such as `any_of: []`) and only move the deadline is for Regulatory
   Intelligence to decide; the journey's draft does so only to show the plumbing.
+
+## Addendum 2026-10-06: a person's type on a retry, the backlog sweep and the backfill
+
+The pipeline gets its operations: every source's crawl runs and documents, a person's retry of a
+stored document, the outbox's dead rows and their requeue (`/v1/pipeline/runs`,
+`/v1/pipeline/documents`, `/v1/pipeline/documents/{id}/retry`, `/v1/pipeline/outbox/dead`,
+`/v1/pipeline/outbox/{event_id}/requeue`), reads for a regulatory role and writes for an admin
+with a reason, audited. Two of them change how a document is classified.
+
+**A type given on a retry is a person's classification.** An admin may give a `doc_type` on a
+retry, from any stage. It becomes the document's classification as a triage's decision does:
+relevant, of that type, `certain`, classifier `retry`, the admin in `decided_by`, recorded with
+the document's status and a `document.classified`, and audited as `pipeline.document.retry`, in
+the retry's transaction with the document's row locked; the stored raw document's own type (the
+uploader's) never changes. It beats the detector, as the triage's decision does, and it is the
+way back for a document the detector set aside as irrelevant, or whose triage was dismissed,
+which before had none: a typed re-upload of the same bytes is a duplicate and changes nothing,
+and an irrelevant document has no task to resolve. While a triage task holds the document the
+retry is refused, so a decision is taken in one place at a time. Migration 0005 lets a
+classification decided by a person be a `retry`'s as well as a `triage`'s.
+
+**A retry from the classify stage reads the document again.** Behind the workflow patch
+`pipeline-reclassify-v1`, the ingest of a retry from `classify` given no type asks the classify
+step for a fresh reading: today's detector reads the document again, and a reading that differs
+replaces the detector's earlier one, with its status, a `document.classified` and, for a
+conflict, a triage task. A person's decision (a triage's, a retry's type) is never read again.
+Every other ingest keeps a classification it finds, as before.
+
+**The backlog and the backfill.** The consequence above that a sweep of the documents waiting as
+`classified` is not built yet no longer holds: `pipeline-extract-backlog` starts
+`pipeline.extract_backlog`, which runs each waiting document's extraction as a child under the id
+the ingest's own extraction would have, so a document is extracted once whichever starts it, and
+the command refuses while `pipeline.extraction` is off. The backfill now goes through the crawl
+workflow from a plan (`pipeline-backfill --plan ... --workflow`, a crawl run with the trigger
+`backfill` behind the patch `pipeline-backfill-v1`), so its documents are classified and, with
+the flag on, extracted like any crawl's; the command that fetched into a local raw store and
+extracted nothing stays behind `--legacy` for recording fixtures.
+
+Consequences:
+
+- A person can now bring back a document the detector set aside, which before nothing could: a
+  re-upload of the same bytes is a duplicate, and the crawl never fetches a stored URL again.
+  Their type is audited with the reason and stands against every later ingest; to change it,
+  another retry with another type.
+- The patches keep the histories recorded before them replaying: an ingest without the reclassify
+  marker keeps the classification it finds, and a crawl that names no window records no marker.

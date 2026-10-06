@@ -363,11 +363,13 @@ def test_a_synthetic_round_publishes_a_version_that_stays_needs_review(
     PublishVersion(factory, enabled=True, clock=clock).run(version_id, actor_id=REVIEWER)
     key = scalar(factory.engine, "SELECT rule_key FROM rule WHERE id = :id", id=rule_id.value)
     draft = version(factory.engine, rule_id, 2, effective_from=date(2026, 7, 1))
-    versions = ListRuleVersions(factory).run(str(key))
+    listed = ListRuleVersions(factory).run(str(key))
+    versions = [v.record for v in listed]
     assert [(v.rule_version_id, v.status.value, v.seed_status.value) for v in versions] == [
         (version_id, "published", "needs_review"),
         (draft, "draft", "needs_review"),
     ]
+    assert [v.closed for v in listed] == [False, False]
 
 
 def test_decisions_are_append_only_and_name_an_actor_or_a_cause(

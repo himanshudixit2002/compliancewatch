@@ -907,6 +907,14 @@ class MemoryRuleCandidateRepository:
         )
         self._tables.rule_candidates[candidate.candidate_id] = candidate
 
+    def decided_since(self, since: datetime) -> Sequence[RuleCandidate]:
+        found = [
+            candidate
+            for candidate in self._tables.rule_candidates.values()
+            if candidate.decided_at is not None and candidate.decided_at >= since
+        ]
+        return sorted(found, key=lambda candidate: (candidate.decided_at, candidate.candidate_id))
+
 
 class MemoryClauseIndex:
     """Token overlap for the lexical leg, cosine similarity for the vector leg."""

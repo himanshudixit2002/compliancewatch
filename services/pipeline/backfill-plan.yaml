@@ -1,0 +1,42 @@
+# The backfill plan (pipeline-backfill --plan services/pipeline/backfill-plan.yaml): rows run in
+# order, each a crawl of one source through CrawlSourceWorkflow (trigger backfill), again while
+# new documents are left. A row's window is since, until (both included) and the references it
+# takes as the CBIC listing writes them; the year of a window is the year the notification's
+# number names. Nothing here is a regulatory fact beyond the numbers the seed calendar cites.
+#
+# First the notifications the seed rules cite (services/rulebook/seed/gst_calendar.yaml,
+# source.instrument and source.reference), so their citations can be checked against stored
+# clauses; tests/unit/test_backfill_plan.py keeps this list equal to the calendar's. The CGST
+# Rules the calendar also cites are upload-only (cgst_rules): upload them, nothing crawls them.
+# Then about 200 recent notifications, newest first, for the extraction and the OCR question
+# (more than 5% unparsed asks for OCR).
+rows:
+  - source: cbic_notifications
+    note: cited by gstr3b_quarterly_group_a and _b (82/2020), gstr1_monthly and gstr1_quarterly (83/2020), e_invoicing (13/2020)
+    since: 2020-01-01
+    until: 2020-12-31
+    refs: [13/2020-Central Tax, 82/2020-Central Tax, 83/2020-Central Tax]
+    limit: 10
+  - source: cbic_notifications
+    note: cited by gstr9c_annual (30/2021), itc04_half_yearly and itc04_annual (35/2021)
+    since: 2021-01-01
+    until: 2021-12-31
+    refs: [30/2021-Central Tax, 35/2021-Central Tax]
+    limit: 10
+  - source: cbic_notifications
+    note: cited by e_invoicing (10/2023)
+    since: 2023-01-01
+    until: 2023-12-31
+    refs: [10/2023-Central Tax]
+    limit: 10
+  - source: cbic_notifications
+    note: cited by gstr4_annual (12/2024)
+    since: 2024-01-01
+    until: 2024-12-31
+    refs: [12/2024-Central Tax]
+    limit: 10
+  - source: cbic_notifications
+    note: about 200 recent notifications, newest first, after the cited ones
+    since: 2017-01-01
+    limit: 100
+    max_documents: 200

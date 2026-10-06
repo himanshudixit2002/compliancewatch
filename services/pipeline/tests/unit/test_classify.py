@@ -14,9 +14,11 @@ from domain_kernel.documents import DocumentRef, DocumentType, RawDocument, docu
 from domain_kernel.ids import DocumentId
 from pipeline.application.activities import ParseRequest, Stored
 from pipeline.application.classify import ClassifyDocument, ClassifyRequest
-from pipeline.domain.classification import Classification, Relevance, Route
+from pipeline.application.extraction import RULE_PROMPT_REF
+from pipeline.domain.classification import Classification, Relevance, Route, TypeConfidence
 from pipeline.domain.errors import ClassifiedMeanwhileError, DocumentNotFoundError
 from pipeline.domain.events import DocumentClassified
+from pipeline.domain.extraction import ExtractionOutcome, RuleExtraction, candidate_id_for
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.sources import Source
 from pipeline.domain.tasks import TaskKind, TaskStatus
@@ -347,3 +349,153 @@ async def test_a_classification_another_ingest_recorded_meanwhile_rolls_this_one
     assert pipeline.store.documents[DocumentId(request.document_id)].status is (
         DocumentStatus.PARSED
     )
+
+
+# ---------------------------------------------------------------- a retry's fresh reading
+
+
+def earlier(request: ParseRequest, **values: Any) -> Classification:
+    """A classification stored before, as an older detector read the document."""
+    defaults: dict[str, Any] = {
+        "document_id": DocumentId(request.document_id),
+        "doc_type": DocumentType.NOTIFICATION,
+        "relevance": Relevance.IRRELEVANT,
+        "confidence": TypeConfidence.CERTAIN,
+        "reasons": ("an older detector read its title as a user manual",),
+        "classified_at": NOW,
+    }
+    defaults.update(values)
+    return Classification(**defaults)
+
+
+def store_earlier(
+    pipeline: Pipeline, classification: Classification, status: DocumentStatus
+) -> None:
+    with pipeline.store() as unit:
+        unit.classifications.add(classification)
+        unit.documents.set_status(classification.document_id, status)
+
+
+async def test_a_fresh_reading_replaces_the_detectors_earlier_one() -> None:
+    pipeline = Pipeline()
+    request = pipeline.stored(NOTIFICATION, title="Notification No. 99/2026 - Central Tax")
+    store_earlier(pipeline, earlier(request), DocumentStatus.IRRELEVANT)
+    kept = await pipeline.activity.run(ClassifyRequest(parse=request))
+    assert (kept.route, kept.created) == ("irrelevant", False), "kept unless read fresh"
+    found = await pipeline.activity.run(ClassifyRequest(parse=request, fresh=True))
+    assert (found.route, found.relevance, found.created) == ("extract", "relevant", True)
+    document_id = DocumentId(request.document_id)
+    assert pipeline.store.documents[document_id].status is DocumentStatus.CLASSIFIED
+    assert pipeline.store.classifications[document_id].relevance is Relevance.RELEVANT
+    assert [e.relevance for e in pipeline.events()] == [Relevance.RELEVANT]
+    again = await pipeline.activity.run(ClassifyRequest(parse=request, fresh=True))
+    assert (again.route, again.created) == ("extract", False), "the same reading writes nothing"
+    assert len(pipeline.events()) == 1
+
+
+def extracted(pipeline: Pipeline, request: ParseRequest) -> None:
+    """The document's extraction by the current prompt, stored as an unparseable answer."""
+    document_id = DocumentId(request.document_id)
+    with pipeline.store() as unit:
+        unit.extractions.add(
+            RuleExtraction(
+                document_id=document_id,
+                prompt_version=RULE_PROMPT_REF,
+                candidate_id=candidate_id_for(document_id, RULE_PROMPT_REF),
+                outcome=ExtractionOutcome.UNPARSEABLE,
+                model="fake/echo",
+                attempts=2,
+                source_key="cbic_notifications",
+                doc_type=DocumentType.CIRCULAR,
+                regulator="CBIC",
+                issues=(),
+                citation_count=0,
+                confidence=0.0,
+                needs_review=True,
+                answer="",
+                ontology_version="1",
+                extracted_at=NOW,
+            )
+        )
+
+
+async def test_a_fresh_reading_of_an_extracted_document_keeps_it_extracted() -> None:
+    """The detector once read it as a circular, which was extracted; read again it is a
+    notification, still on its way to the extraction, whose id is used: it stays extracted.
+    Read again as nothing regulatory, it is set aside."""
+    pipeline = Pipeline()
+    request = pipeline.stored(NOTIFICATION, title="Notification No. 99/2026 - Central Tax")
+    circular = earlier(request, doc_type=DocumentType.CIRCULAR, relevance=Relevance.RELEVANT)
+    store_earlier(pipeline, circular, DocumentStatus.EXTRACTED)
+    extracted(pipeline, request)
+    found = await pipeline.activity.run(ClassifyRequest(parse=request, fresh=True))
+    assert (found.route, found.doc_type, found.created) == ("extract", "notification", True)
+    document_id = DocumentId(request.document_id)
+    assert pipeline.store.documents[document_id].status is DocumentStatus.EXTRACTED
+
+    manual = pipeline.stored(MANUAL, title="Reset Password User Manual")
+    store_earlier(
+        pipeline,
+        earlier(manual, doc_type=DocumentType.CIRCULAR, relevance=Relevance.RELEVANT),
+        DocumentStatus.EXTRACTED,
+    )
+    extracted(pipeline, manual)
+    aside = await pipeline.activity.run(ClassifyRequest(parse=manual, fresh=True))
+    assert aside.route == "irrelevant"
+    status = pipeline.store.documents[DocumentId(manual.document_id)].status
+    assert status is DocumentStatus.IRRELEVANT
+
+
+async def test_a_fresh_reading_never_replaces_a_persons_decision() -> None:
+    pipeline = Pipeline()
+    request = pipeline.stored(MANUAL, title="Reset Password User Manual")
+    given = Classification.given(
+        DocumentId(request.document_id),
+        doc_type=DocumentType.CIRCULAR,
+        by=None,
+        at=NOW,
+        reason="Example: an analyst read it as a circular",
+    )
+    store_earlier(pipeline, given, DocumentStatus.CLASSIFIED)
+    found = await pipeline.activity.run(ClassifyRequest(parse=request, fresh=True))
+    assert (found.route, found.doc_type, found.classifier, found.created) == (
+        "extract",
+        "circular",
+        "retry",
+        False,
+    )
+    assert pipeline.events() == []
+
+
+async def test_a_fresh_conflict_opens_its_triage_task() -> None:
+    pipeline = Pipeline()
+    request = pipeline.stored(CIRCULAR, title="Circular No. 5/2026-GST")
+    store_earlier(pipeline, earlier(request), DocumentStatus.IRRELEVANT)
+    found = await pipeline.activity.run(ClassifyRequest(parse=request, fresh=True))
+    assert (found.route, found.created) == ("triage", True)
+    (task,) = pipeline.store.tasks.values()
+    assert (task.kind, task.status, found.task_id) == (
+        TaskKind.TRIAGE,
+        TaskStatus.OPEN,
+        task.id.value,
+    )
+    assert pipeline.store.documents[DocumentId(request.document_id)].status is DocumentStatus.TRIAGE
+
+
+async def test_a_person_deciding_while_the_detector_reads_again_stands() -> None:
+    pipeline = Pipeline()
+    request = pipeline.stored(NOTIFICATION, title="Notification No. 99/2026 - Central Tax")
+    stored = earlier(request)
+    store_earlier(pipeline, stored, DocumentStatus.IRRELEVANT)
+    given = Classification.given(
+        stored.document_id,
+        doc_type=DocumentType.CIRCULAR,
+        by=None,
+        at=NOW,
+        reason="Example: an analyst decided meanwhile",
+    )
+    fresh = earlier(request, relevance=Relevance.RELEVANT)
+    with pipeline.store() as unit:
+        unit.classifications.save(given)
+    found = pipeline.activity._read_again(stored, fresh, "cbic_notifications", request)
+    assert (found.classifier, found.created) == ("retry", False)

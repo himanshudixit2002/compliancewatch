@@ -111,8 +111,13 @@ def list_versions_of_rule(
     rule_key: Annotated[str, Path(max_length=80, pattern=RULE_KEY)],
 ) -> list[RuleVersionOut]:
     """The drafts the seed command writes as well as the versions past them: where a workbench
-    finds the version to cite, submit and publish. 404 when no rule has the key."""
-    return [RuleVersionOut.from_record(record) for record in wired.list_rule_versions.run(rule_key)]
+    finds the version to cite, submit and publish. A closed draft (its rule candidate was
+    rejected) is listed with ``closed`` true: it never moves on, so a reader after the rule's
+    latest version skips it. 404 when no rule has the key."""
+    return [
+        RuleVersionOut.from_record(listed.record, closed=listed.closed)
+        for listed in wired.list_rule_versions.run(rule_key)
+    ]
 
 
 @router.get(

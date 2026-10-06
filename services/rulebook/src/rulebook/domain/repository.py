@@ -309,6 +309,11 @@ class RuleCandidateRepository(Protocol):
         """Write the candidate's status, version, reject reason and decision."""
         ...
 
+    def decided_since(self, since: datetime) -> Sequence[RuleCandidate]:
+        """The candidates approved or rejected at or after ``since``, by when each was decided,
+        then by id."""
+        ...
+
 
 class ReviewTaskRepository(Protocol):
     def add(self, task: ReviewTask) -> bool:

@@ -8,17 +8,21 @@ tenant, in ``audit.event``) commit or roll back together.
 
 from collections.abc import Collection, Mapping, Sequence
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Protocol
+from uuid import UUID
 
 from domain_kernel.audit import AuditSink
+from domain_kernel.documents import DocumentType
 from domain_kernel.ids import DocumentId
 from pipeline.domain.classification import Classification
-from pipeline.domain.crawl import CrawlRun, CrawlRunId
+from pipeline.domain.crawl import CrawlRun, CrawlRunId, CrawlStatus, CrawlTrigger
 from pipeline.domain.events import DocumentEvent
-from pipeline.domain.extraction import RuleExtraction
+from pipeline.domain.extraction import ExtractionOutcome, RuleExtraction
+from pipeline.domain.outbox import DeadEventKey, OutboxEvent
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
+from pipeline.domain.retry import DocumentRetry
 from pipeline.domain.sources import Source
 from pipeline.domain.tasks import PipelineTask, TaskId, TaskKind, TaskStatus
 
@@ -36,6 +40,76 @@ class DocumentKey:
     @classmethod
     def of(cls, record: RawDocumentRecord) -> "DocumentKey":
         return cls(record.published_on, record.fetched_at, record.document_id)
+
+
+@dataclass(frozen=True, slots=True)
+class FetchKey:
+    """Where a page of every source's documents starts: after the document first fetched at
+    ``fetched_at`` with ``document_id``. The order is the latest first fetch first, then the id
+    from the highest."""
+
+    fetched_at: datetime
+    document_id: DocumentId
+
+    @classmethod
+    def of(cls, record: RawDocumentRecord) -> "FetchKey":
+        return cls(record.fetched_at, record.document_id)
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentQuery:
+    """Which of every source's documents a page holds: of ``status`` and ``source_key``, read as
+    ``doc_type`` (its classification's type, else its uploader's, else its source's:
+    ``of_source_type`` names the sources that publish that type), published from
+    ``published_from`` to ``published_to`` (both included; an undated document matches no date),
+    after ``after``, at most ``limit``. None leaves a filter out."""
+
+    status: DocumentStatus | None = None
+    source_key: str | None = None
+    doc_type: DocumentType | None = None
+    of_source_type: frozenset[str] = frozenset()
+    published_from: date | None = None
+    published_to: date | None = None
+    after: FetchKey | None = None
+    limit: int = 50
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentTally:
+    """One source's documents: how many are stored, how many have a parse recorded, and how many
+    stand at each status (a status with none is absent)."""
+
+    stored: int = 0
+    parsed: int = 0
+    statuses: Mapping[DocumentStatus, int] = field(default_factory=dict)
+
+    def at(self, status: DocumentStatus) -> int:
+        return self.statuses.get(status, 0)
+
+
+@dataclass(frozen=True, slots=True)
+class RunKey:
+    """Where a page of crawl runs starts: after the run started at ``started_at`` with
+    ``run_id``. Runs come the latest started first, then by id from the highest."""
+
+    started_at: datetime
+    run_id: CrawlRunId
+
+    @classmethod
+    def of(cls, run: CrawlRun) -> "RunKey":
+        return cls(run.started_at, run.id)
+
+
+@dataclass(frozen=True, slots=True)
+class RunQuery:
+    """Which crawl runs a page holds: of ``source_key``, ``status`` and ``trigger`` (None leaves a
+    filter out), after ``after``, at most ``limit``."""
+
+    source_key: str | None = None
+    status: CrawlStatus | None = None
+    trigger: CrawlTrigger | None = None
+    after: RunKey | None = None
+    limit: int = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +147,11 @@ class SourceRepository(Protocol):
 
 class RawDocumentRepository(Protocol):
     def get(self, document_id: DocumentId) -> RawDocumentRecord | None: ...
+
+    def lock(self, document_id: DocumentId) -> RawDocumentRecord | None:
+        """The document, its row held until the unit ends, so two retries of it run one after
+        the other."""
+        ...
 
     def add(self, record: RawDocumentRecord) -> bool:
         """Insert the record unless one with its id (its bytes) exists, which is left as it is;
@@ -120,6 +199,29 @@ class RawDocumentRepository(Protocol):
         """Every document first fetched at or after ``moment``, oldest fetch first."""
         ...
 
+    def search(self, query: DocumentQuery) -> Sequence[RawDocumentRecord]:
+        """Every source's documents the query admits, the latest first fetch first, then by id
+        from the highest (``FetchKey``)."""
+        ...
+
+    def tally(self) -> Mapping[str, DocumentTally]:
+        """Each source's documents counted: stored, parsed, and by status; a source without any
+        is absent."""
+        ...
+
+    def awaiting_extraction(
+        self, prompt_version: str, *, source_key: str | None = None, limit: int = 500
+    ) -> Sequence[RawDocumentRecord]:
+        """The documents that wait as ``classified`` with no extraction stored for
+        ``prompt_version``, of one source or every one, the first fetched first, at most
+        ``limit``."""
+        ...
+
+    def awaiting_counts(self, prompt_version: str) -> Mapping[str, int]:
+        """How many documents of each source ``awaiting_extraction`` would give; a source with
+        none is absent."""
+        ...
+
 
 class CrawlRunRepository(Protocol):
     def add(self, run: CrawlRun) -> None: ...
@@ -134,12 +236,14 @@ class CrawlRunRepository(Protocol):
         """Write the status, end, counts and error of an existing run."""
         ...
 
-    def latest(self, source_key: str) -> CrawlRun | None:
-        """The source's most recently started run."""
+    def latest(self, source_key: str, *, backfills: bool = True) -> CrawlRun | None:
+        """The source's most recently started run; with ``backfills`` False, the most recent
+        that was not a backfill's (a run recorded before triggers were is not)."""
         ...
 
-    def latest_by_source(self) -> Mapping[str, CrawlRun]:
-        """Each source's most recently started run."""
+    def latest_by_source(self, *, backfills: bool = True) -> Mapping[str, CrawlRun]:
+        """Each source's most recently started run; with ``backfills`` False, the most recent
+        that was not a backfill's."""
         ...
 
     def running(self, source_key: str) -> Sequence[CrawlRun]:
@@ -148,6 +252,10 @@ class CrawlRunRepository(Protocol):
 
     def started_since(self, moment: datetime) -> Sequence[CrawlRun]:
         """Every run started at or after ``moment``, oldest first."""
+        ...
+
+    def page(self, query: RunQuery) -> Sequence[CrawlRun]:
+        """The runs the query admits in ``RunKey`` order: the latest started first."""
         ...
 
 
@@ -167,6 +275,10 @@ class TaskRepository(Protocol):
 
     def open_for(self, document_id: DocumentId, kind: TaskKind) -> PipelineTask | None:
         """The document's open task of ``kind``, if any."""
+        ...
+
+    def of_document(self, document_id: DocumentId) -> Sequence[PipelineTask]:
+        """Every task of the document, open or closed, oldest first."""
         ...
 
     def page(
@@ -199,7 +311,14 @@ class ClassificationRepository(Protocol):
         ...
 
     def save(self, classification: Classification) -> None:
-        """Replace the stored classification of the document (a person's triage)."""
+        """Replace the stored classification of the document (a person's triage or type, the
+        detector reading it again)."""
+        ...
+
+    def of_documents(
+        self, document_ids: Collection[DocumentId]
+    ) -> Mapping[DocumentId, Classification]:
+        """The classifications of those of ``document_ids`` that have one."""
         ...
 
 
@@ -209,6 +328,47 @@ class ExtractionRepository(Protocol):
     def add(self, extraction: RuleExtraction) -> bool:
         """Insert the extraction unless one of its document and prompt version is stored,
         which is kept as written; True when it was inserted."""
+        ...
+
+    def of_documents(
+        self, document_ids: Collection[DocumentId], prompt_version: str
+    ) -> Mapping[DocumentId, RuleExtraction]:
+        """The extractions by ``prompt_version`` of those of ``document_ids`` that have one."""
+        ...
+
+    def tally(self, prompt_version: str) -> Mapping[str, Mapping[ExtractionOutcome, int]]:
+        """The extractions by ``prompt_version`` of each source's documents, by outcome; a
+        source without any is absent."""
+        ...
+
+
+class RetryRepository(Protocol):
+    def add(self, retry: DocumentRetry) -> bool:
+        """Insert the retry unless its document has a retry of its attempt or of its
+        Idempotency-Key; True when it was inserted. A retry is kept as written."""
+        ...
+
+    def of_document(self, document_id: DocumentId) -> Sequence[DocumentRetry]:
+        """The document's retries by attempt."""
+        ...
+
+
+class OutboxRepository(Protocol):
+    """The pipeline's ``outbox_event`` rows, on the unit's connection."""
+
+    def dead(
+        self, *, topic: str | None = None, after: DeadEventKey | None = None, limit: int = 50
+    ) -> Sequence[OutboxEvent]:
+        """The dead rows (of ``topic``), the newest dead first (``DeadEventKey``)."""
+        ...
+
+    def get(self, event_id: UUID, *, for_update: bool = False) -> OutboxEvent | None:
+        """One row, whatever its status; ``for_update`` holds it until the unit ends."""
+        ...
+
+    def requeue(self, event_id: UUID, *, at: datetime) -> bool:
+        """A dead row back to pending with its attempts reset and due at ``at``; False, with
+        nothing changed, for a row that is not dead."""
         ...
 
 
@@ -236,6 +396,12 @@ class UnitOfWork(Protocol):
 
     @property
     def extractions(self) -> ExtractionRepository: ...
+
+    @property
+    def retries(self) -> RetryRepository: ...
+
+    @property
+    def outbox(self) -> OutboxRepository: ...
 
     @property
     def events(self) -> EventSink: ...
