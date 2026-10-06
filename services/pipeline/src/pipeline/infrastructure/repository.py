@@ -1,19 +1,32 @@
 """The Postgres unit of work: one transaction with the source, document and crawl-run
-repositories on it and the outbox writer as the event sink, so a stored document and the outbox
-row of its document.discovered commit or roll back together. There is no tenant setting: the
-pipeline's data is regulatory, the same for every tenant.
+repositories on it, the outbox writer as the event sink and the audit writer as the audit sink,
+so a stored document and the outbox row of its document.discovered commit or roll back together,
+and so does an admin's change and its ``audit.event`` row. There is no tenant setting: the
+pipeline's data is regulatory, the same for every tenant, and its audit entries have no tenant.
 
 ``PostgresUnitOfWorkFactory.on_connection(connection)`` makes units inside a transaction someone
 else owns, such as a consumer's inbox transaction (``py_common.outbox.sync``), so a handler's
 writes, their outbox rows and the ``processed_event`` row commit together.
 """
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
-from typing import Self
+from typing import Final, Self
 
-from sqlalchemy import Connection, Engine, create_engine, select, text, update
+from sqlalchemy import (
+    ColumnElement,
+    Connection,
+    Engine,
+    and_,
+    create_engine,
+    func,
+    or_,
+    select,
+    text,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
@@ -22,17 +35,30 @@ from domain_kernel.ids import DocumentId
 from pipeline.domain.crawl import CrawlCounts, CrawlRun, CrawlRunId, CrawlStatus
 from pipeline.domain.events import DocumentEvent
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
-from pipeline.domain.repository import UnitOfWork, UnitOfWorkFactory
+from pipeline.domain.repository import DocumentKey, UnitOfWork, UnitOfWorkFactory
 from pipeline.domain.sources import Source
 from pipeline.infrastructure.models import CrawlRunRow, RawDocumentRow, SourceRow
+from py_common.audit.writer import PostgresAuditSink
 from py_common.outbox import OutboxWriter
+
+URL_CHUNK: Final = 500
+"""How many URLs one ``known_urls`` query asks about."""
 
 
 class SqlAlchemySourceRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def get(self, key: str) -> Source | None:
+    def get(self, key: str, *, for_update: bool = False) -> Source | None:
+        if for_update:
+            statement = (
+                select(SourceRow)
+                .where(SourceRow.key == key)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            locked = self._session.scalars(statement).first()
+            return None if locked is None else _to_source(locked)
         row = self._session.get(SourceRow, key, populate_existing=True)
         return None if row is None else _to_source(row)
 
@@ -68,6 +94,7 @@ def _source_values(source: Source) -> dict[str, object]:
         "last_error": source.last_error,
         "created_at": source.created_at,
         "updated_at": source.updated_at,
+        "name": source.name,
     }
 
 
@@ -84,6 +111,7 @@ def _to_source(row: SourceRow) -> Source:
         last_fetch_at=_utc(row.last_fetch_at),
         watermark=row.watermark,
         last_error=row.last_error,
+        name=row.name,
     )
 
 
@@ -141,6 +169,74 @@ class SqlAlchemyRawDocumentRepository:
         )
         return [_to_record(row) for row in self._session.scalars(statement).all()]
 
+    def page(
+        self, source_key: str, *, after: DocumentKey | None, limit: int
+    ) -> Sequence[RawDocumentRecord]:
+        statement = select(RawDocumentRow).where(RawDocumentRow.source_key == source_key)
+        if after is not None:
+            statement = statement.where(_after(after))
+        statement = statement.order_by(
+            RawDocumentRow.published_on.desc().nulls_last(),
+            RawDocumentRow.fetched_at.desc(),
+            RawDocumentRow.id.desc(),
+        ).limit(limit)
+        return [_to_record(row) for row in self._session.scalars(statement).all()]
+
+    def find_by_url(self, source_key: str, url: str) -> RawDocumentRecord | None:
+        statement = (
+            select(RawDocumentRow)
+            .where(RawDocumentRow.source_key == source_key, RawDocumentRow.source_url == url)
+            .order_by(RawDocumentRow.fetched_at.desc(), RawDocumentRow.id.desc())
+            .limit(1)
+        )
+        row = self._session.scalars(statement).first()
+        return None if row is None else _to_record(row)
+
+    def known_urls(self, source_key: str, urls: Collection[str]) -> frozenset[str]:
+        wanted = sorted(set(urls))
+        found: set[str] = set()
+        for start in range(0, len(wanted), URL_CHUNK):
+            chunk = wanted[start : start + URL_CHUNK]
+            statement = (
+                select(RawDocumentRow.source_url)
+                .where(
+                    RawDocumentRow.source_key == source_key,
+                    RawDocumentRow.source_url.in_(chunk),
+                )
+                .distinct()
+            )
+            found.update(self._session.scalars(statement).all())
+        return frozenset(found)
+
+    def counts(self) -> Mapping[str, int]:
+        statement = select(RawDocumentRow.source_key, func.count()).group_by(
+            RawDocumentRow.source_key
+        )
+        return {key: int(count) for key, count in self._session.execute(statement).all()}
+
+    def fetched_since(self, moment: datetime) -> Sequence[RawDocumentRecord]:
+        statement = (
+            select(RawDocumentRow)
+            .where(RawDocumentRow.fetched_at >= moment)
+            .order_by(RawDocumentRow.fetched_at, RawDocumentRow.id)
+        )
+        return [_to_record(row) for row in self._session.scalars(statement).all()]
+
+
+def _after(key: DocumentKey) -> ColumnElement[bool]:
+    """The rows after ``key`` in the page order: newest publication first with the undated
+    last, then the latest fetch, then the highest id."""
+    later_fetch = tuple_(RawDocumentRow.fetched_at, RawDocumentRow.id) < tuple_(
+        key.fetched_at, key.document_id.value
+    )
+    if key.published_on is None:
+        return and_(RawDocumentRow.published_on.is_(None), later_fetch)
+    return or_(
+        RawDocumentRow.published_on < key.published_on,
+        and_(RawDocumentRow.published_on == key.published_on, later_fetch),
+        RawDocumentRow.published_on.is_(None),
+    )
+
 
 def _to_record(row: RawDocumentRow) -> RawDocumentRecord:
     return RawDocumentRecord(
@@ -167,6 +263,15 @@ class SqlAlchemyCrawlRunRepository:
         self._session.add(_to_run_row(run))
         self._session.flush()
 
+    def start(self, run: CrawlRun) -> bool:
+        statement = (
+            insert(CrawlRunRow)
+            .values(**_run_values(run))
+            .on_conflict_do_nothing(index_elements=["id"])
+            .returning(CrawlRunRow.id)
+        )
+        return self._session.execute(statement).first() is not None
+
     def get(self, run_id: CrawlRunId) -> CrawlRun | None:
         row = self._session.get(CrawlRunRow, run_id.value, populate_existing=True)
         return None if row is None else _to_run(row)
@@ -185,20 +290,51 @@ class SqlAlchemyCrawlRunRepository:
         row = self._session.scalars(statement).first()
         return None if row is None else _to_run(row)
 
+    def latest_by_source(self) -> Mapping[str, CrawlRun]:
+        statement = (
+            select(CrawlRunRow)
+            .distinct(CrawlRunRow.source_key)
+            .order_by(CrawlRunRow.source_key, CrawlRunRow.started_at.desc(), CrawlRunRow.id.desc())
+        )
+        return {row.source_key: _to_run(row) for row in self._session.scalars(statement).all()}
+
+    def running(self, source_key: str) -> Sequence[CrawlRun]:
+        statement = (
+            select(CrawlRunRow)
+            .where(
+                CrawlRunRow.source_key == source_key,
+                CrawlRunRow.status == CrawlStatus.RUNNING.value,
+            )
+            .order_by(CrawlRunRow.started_at, CrawlRunRow.id)
+        )
+        return [_to_run(row) for row in self._session.scalars(statement).all()]
+
+    def started_since(self, moment: datetime) -> Sequence[CrawlRun]:
+        statement = (
+            select(CrawlRunRow)
+            .where(CrawlRunRow.started_at >= moment)
+            .order_by(CrawlRunRow.started_at, CrawlRunRow.id)
+        )
+        return [_to_run(row) for row in self._session.scalars(statement).all()]
+
+
+def _run_values(run: CrawlRun) -> dict[str, object]:
+    return {
+        "id": run.id.value,
+        "source_key": run.source_key,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "status": run.status.value,
+        "listed": run.counts.listed,
+        "stored": run.counts.stored,
+        "duplicates": run.counts.duplicates,
+        "failed": run.counts.failed,
+        "error": run.error,
+    }
+
 
 def _to_run_row(run: CrawlRun) -> CrawlRunRow:
-    return CrawlRunRow(
-        id=run.id.value,
-        source_key=run.source_key,
-        started_at=run.started_at,
-        finished_at=run.finished_at,
-        status=run.status.value,
-        listed=run.counts.listed,
-        stored=run.counts.stored,
-        duplicates=run.counts.duplicates,
-        failed=run.counts.failed,
-        error=run.error,
-    )
+    return CrawlRunRow(**_run_values(run))
 
 
 def _to_run(row: CrawlRunRow) -> CrawlRun:
@@ -237,6 +373,7 @@ class SqlAlchemyUnitOfWork:
         self.documents = SqlAlchemyRawDocumentRepository(session)
         self.crawl_runs = SqlAlchemyCrawlRunRepository(session)
         self.events = OutboxSink(session.connection(), writer)
+        self.audit = PostgresAuditSink(session.connection())
 
 
 class ConnectionUnitOfWorkFactory:

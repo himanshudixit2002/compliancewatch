@@ -35,7 +35,12 @@ from pipeline.domain.raw_documents import (
     MAX_STORAGE_KEY_CHARS,
     DocumentStatus,
 )
-from pipeline.domain.sources import ADAPTER_TYPE_PATTERN, MAX_ERROR_CHARS, SOURCE_KEY_PATTERN
+from pipeline.domain.sources import (
+    ADAPTER_TYPE_PATTERN,
+    MAX_ERROR_CHARS,
+    MAX_NAME_CHARS,
+    SOURCE_KEY_PATTERN,
+)
 
 DOCUMENT_STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in DocumentStatus)
 CRAWL_STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in CrawlStatus)
@@ -78,6 +83,7 @@ class SourceRow(Base):
             f"length(last_error) <= {MAX_ERROR_CHARS}", name="ck_source_last_error_length"
         ),
         CheckConstraint("updated_at >= created_at", name="ck_source_updated"),
+        CheckConstraint(f"length(name) <= {MAX_NAME_CHARS}", name="ck_source_name_length"),
         {"comment": SOURCE_COMMENT},
     )
 
@@ -92,6 +98,7 @@ class SourceRow(Base):
     last_error: Mapped[str] = mapped_column(Text, server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    name: Mapped[str] = mapped_column(Text, server_default="")
 
 
 class RawDocumentRow(Base):
@@ -116,6 +123,7 @@ class RawDocumentRow(Base):
         CheckConstraint(sql_in_list("status", DOCUMENT_STATUSES), name="ck_raw_document_status"),
         Index("ix_raw_document_source_published", "source_key", "published_on"),
         Index("ix_raw_document_status_fetched", "status", "fetched_at"),
+        Index("ix_raw_document_source_url", "source_key", "source_url"),
         {"comment": RAW_DOCUMENT_COMMENT},
     )
 

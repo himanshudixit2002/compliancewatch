@@ -7,10 +7,12 @@ it is read; its regulator and document type follow from the type and the paramet
 type reads both portal listings, with the listing and the category as parameters; a category
 needs its recorded listing (``cbic.RECORDED_CATEGORIES``).
 
-A source id is derived from its key with UUID v5, so the same source has the same id in every
-environment and a fixture recorded for ``cbic_notifications`` matches the adapter that replays
-it. ``RegistryCatalog`` serves the built-in sources to the activities by id
-(``pipeline.domain.ports.SourceCatalog``).
+A source id is derived from its key with UUID v5 (``pipeline.domain.sources.source_id_of``), so
+the same source has the same id in every environment and a fixture recorded for
+``cbic_notifications`` matches the adapter that replays it. ``RegistryCatalog`` serves the
+built-in sources by id (``pipeline.domain.ports.SourceCatalog``) where no store is at hand (the
+backfill, the labelling tool); the worker serves the sources the store holds
+(``adapters.catalog.StoreCatalog``), which the built-in ones are added to when it starts.
 """
 
 import threading
@@ -18,7 +20,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Final, Literal, Self
-from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -27,18 +28,17 @@ from domain_kernel.ids import SourceId
 from domain_kernel.protocols import SourceAdapter
 from pipeline.domain.errors import UnknownSourceError
 from pipeline.domain.ports import ResolvedSource
-from pipeline.domain.sources import SourceDefinition
+from pipeline.domain.sources import SourceDefinition, source_id_of
 from pipeline.infrastructure.adapters.cbic import RECORDED_CATEGORIES, CbicAdapter
 from pipeline.infrastructure.adapters.gstcouncil import GstCouncilAdapter
 from pipeline.infrastructure.adapters.gstn import GstnAdapter
 from pipeline.infrastructure.adapters.mahagst import MahagstAdapter
 from pipeline.infrastructure.http import PoliteClient
 
-SOURCE_NAMESPACE = "https://compliancewatch.invalid/sources/"
-
 
 def source_id_for(key: str) -> SourceId:
-    return SourceId(uuid5(NAMESPACE_URL, SOURCE_NAMESPACE + key))
+    """The source's id, UUID v5 of its key (``source_id_of``)."""
+    return source_id_of(key)
 
 
 class Parameters(BaseModel):
@@ -127,13 +127,14 @@ ADAPTER_TYPES: Final[Mapping[str, AdapterType]] = {
 
 @dataclass(frozen=True, slots=True)
 class SourceSpec:
-    """A built-in source: its key, its adapter type with the type's parameters, and its
-    cadence."""
+    """A built-in source: its key, its adapter type with the type's parameters, its cadence and
+    its name."""
 
     key: str
     adapter_type: str
     parameters: Mapping[str, object]
     cadence: timedelta
+    name: str = ""
 
     def __post_init__(self) -> None:
         if self.adapter_type not in ADAPTER_TYPES:
@@ -171,6 +172,7 @@ class SourceSpec:
             cadence=self.cadence,
             regulator=self.regulator,
             doc_type=self.doc_type,
+            name=self.name,
         )
 
     def build(self, client: PoliteClient) -> SourceAdapter:
@@ -185,16 +187,26 @@ SOURCES: Final[Mapping[str, SourceSpec]] = {
             "cbic",
             {"listing": "notifications", "category": "Central Tax"},
             timedelta(hours=2),
+            "CBIC Central Tax notifications",
         ),
         SourceSpec(
             "cbic_circulars",
             "cbic",
             {"listing": "circulars", "category": "Circulars CGST"},
             timedelta(hours=6),
+            "CBIC CGST circulars",
         ),
-        SourceSpec("gstcouncil_press", "gstcouncil", {}, timedelta(hours=6)),
-        SourceSpec("gstn_advisories", "gstn", {}, timedelta(hours=3)),
-        SourceSpec("mahagst_notifications", "mahagst", {}, timedelta(hours=12)),
+        SourceSpec(
+            "gstcouncil_press", "gstcouncil", {}, timedelta(hours=6), "GST Council press releases"
+        ),
+        SourceSpec("gstn_advisories", "gstn", {}, timedelta(hours=3), "GSTN advisories"),
+        SourceSpec(
+            "mahagst_notifications",
+            "mahagst",
+            {},
+            timedelta(hours=12),
+            "Maharashtra GST notifications",
+        ),
     )
 }
 
