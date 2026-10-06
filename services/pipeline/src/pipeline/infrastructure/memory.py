@@ -1,12 +1,13 @@
 """In-memory store and unit of work: the fakes for tests, demos and the app before Postgres.
 
-A unit of work works on copies of the sources, documents and crawl runs and replaces the stored
-ones when the block exits cleanly; its events and audit entries wait until then too, so they are
-published exactly when the rows they describe are. Units run one at a time (a store-level lock
-held from open to commit or rollback), so two overlapping units cannot both start from the same
-copy, and a unit that reads a source "for update" holds nothing more. The store keeps the same
-rules the tables do: a document's source must be stored, and a document never changes but for
-its status.
+A unit of work works on copies of the sources, documents, crawl runs and tasks and replaces the
+stored ones when the block exits cleanly; its events and audit entries wait until then too, so
+they are published exactly when the rows they describe are. Units run one at a time (a
+store-level lock held from open to commit or rollback), so two overlapping units cannot both
+start from the same copy, and a unit that reads a source "for update" holds nothing more. The
+store keeps the same rules the tables do: a document's source must be stored, a document never
+changes but for its status and its parse, a task's document must be stored, and a document has
+at most one open task of a kind.
 """
 
 import threading
@@ -20,8 +21,9 @@ from domain_kernel.ids import DocumentId
 from pipeline.domain.crawl import CrawlRun, CrawlRunId, CrawlStatus
 from pipeline.domain.events import DocumentEvent
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
-from pipeline.domain.repository import DocumentKey, UnitOfWork
+from pipeline.domain.repository import DocumentKey, TaskKey, UnitOfWork
 from pipeline.domain.sources import Source
+from pipeline.domain.tasks import PipelineTask, TaskId, TaskKind, TaskStatus
 from py_common.audit import MemoryAuditSink
 
 
@@ -70,6 +72,23 @@ class MemoryRawDocumentRepository:
         if stored is None:
             return False
         self._documents[document_id] = replace(stored, status=status)
+        return True
+
+    def record_parse(
+        self, document_id: DocumentId, parser_version: str, *, transcript_key: str = ""
+    ) -> bool:
+        stored = self._documents.get(document_id)
+        if stored is None:
+            return False
+        parsed = replace(
+            stored,
+            status=DocumentStatus.PARSED,
+            parser_version=parser_version,
+            transcript_key=stored.transcript_key or transcript_key,
+        )
+        if parsed == stored:
+            return False
+        self._documents[document_id] = parsed
         return True
 
     def recent(self, source_key: str, *, limit: int) -> Sequence[RawDocumentRecord]:
@@ -193,6 +212,87 @@ def _started(run: CrawlRun) -> tuple[datetime, int]:
     return (run.started_at, run.id.value.int)
 
 
+class MemoryTaskRepository:
+    def __init__(
+        self,
+        tasks: dict[TaskId, PipelineTask],
+        documents: dict[DocumentId, RawDocumentRecord],
+        sources: dict[str, Source],
+    ) -> None:
+        self._tasks = tasks
+        self._documents = documents
+        self._sources = sources
+
+    def open(self, task: PipelineTask) -> PipelineTask:
+        if task.document_id not in self._documents or task.source_key not in self._sources:
+            raise KeyError(f"task {task.id} names no stored document or source")
+        found = self.open_for(task.document_id, task.kind)
+        if found is not None:
+            return found
+        if task.id in self._tasks or not task.is_open:
+            raise ValueError(f"task {task.id} is stored already or not open")
+        self._tasks[task.id] = task
+        return task
+
+    def get(self, task_id: TaskId, *, for_update: bool = False) -> PipelineTask | None:
+        return self._tasks.get(task_id)
+
+    def save(self, task: PipelineTask) -> None:
+        stored = self._tasks.get(task.id)
+        if stored is None:
+            raise KeyError(f"no task {task.id} to save")
+        self._tasks[task.id] = replace(
+            task,
+            kind=stored.kind,
+            document_id=stored.document_id,
+            source_key=stored.source_key,
+            opened_at=stored.opened_at,
+            reason=stored.reason,
+        )
+
+    def open_for(self, document_id: DocumentId, kind: TaskKind) -> PipelineTask | None:
+        return next(
+            (
+                task
+                for task in self._tasks.values()
+                if task.document_id == document_id and task.kind is kind and task.is_open
+            ),
+            None,
+        )
+
+    def page(
+        self,
+        *,
+        status: TaskStatus | None,
+        kind: TaskKind | None,
+        after: TaskKey | None,
+        limit: int,
+    ) -> Sequence[PipelineTask]:
+        found = sorted(
+            (
+                task
+                for task in self._tasks.values()
+                if (status is None or task.status is status) and (kind is None or task.kind is kind)
+            ),
+            key=_task_order,
+        )
+        if after is not None:
+            start = (after.opened_at, after.task_id.value.int)
+            found = [task for task in found if _task_order(task) > start]
+        return found[:limit]
+
+    def open_counts(self) -> Mapping[TaskKind, int]:
+        counts: dict[TaskKind, int] = {}
+        for task in self._tasks.values():
+            if task.is_open:
+                counts[task.kind] = counts.get(task.kind, 0) + 1
+        return counts
+
+
+def _task_order(task: PipelineTask) -> tuple[datetime, int]:
+    return (task.opened_at, task.id.value.int)
+
+
 class MemoryEventSink:
     def __init__(self, published: list[DocumentEvent]) -> None:
         self._published = published
@@ -212,9 +312,11 @@ class MemoryUnitOfWork:
         self._sources: dict[str, Source] = {}
         self._documents: dict[DocumentId, RawDocumentRecord] = {}
         self._runs: dict[CrawlRunId, CrawlRun] = {}
+        self._tasks: dict[TaskId, PipelineTask] = {}
         self.sources = MemorySourceRepository(self._sources)
         self.documents = MemoryRawDocumentRepository(self._documents, self._sources)
         self.crawl_runs = MemoryCrawlRunRepository(self._runs, self._sources)
+        self.tasks = MemoryTaskRepository(self._tasks, self._documents, self._sources)
         self.events = MemoryEventSink(store.events)
         self.audit = MemoryAuditSink(store.audit)
 
@@ -222,6 +324,7 @@ class MemoryUnitOfWork:
         self._sources.update(self._store.sources)
         self._documents.update(self._store.documents)
         self._runs.update(self._store.crawl_runs)
+        self._tasks.update(self._store.tasks)
         return self
 
     def __exit__(self, exc_type: object, *exc_info: object) -> None:
@@ -232,6 +335,8 @@ class MemoryUnitOfWork:
             self._store.documents.update(self._documents)
             self._store.crawl_runs.clear()
             self._store.crawl_runs.update(self._runs)
+            self._store.tasks.clear()
+            self._store.tasks.update(self._tasks)
             self.events.commit()
             self.audit.commit()
         else:
@@ -239,13 +344,14 @@ class MemoryUnitOfWork:
 
 
 class MemoryStore:
-    """Holds the sources, documents, crawl runs, published events and audit entries; makes
-    units of work."""
+    """Holds the sources, documents, crawl runs, tasks, published events and audit entries;
+    makes units of work."""
 
     def __init__(self) -> None:
         self.sources: dict[str, Source] = {}
         self.documents: dict[DocumentId, RawDocumentRecord] = {}
         self.crawl_runs: dict[CrawlRunId, CrawlRun] = {}
+        self.tasks: dict[TaskId, PipelineTask] = {}
         self.events: list[DocumentEvent] = []
         self.audit: list[AuditEntry] = []
         self._lock = threading.Lock()

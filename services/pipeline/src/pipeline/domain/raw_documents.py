@@ -1,9 +1,11 @@
 """Fetched regulator files as the pipeline records them (the ``raw_document`` table).
 
 A record is keyed by its content: its id is the kernel's ``document_id_for`` of the SHA-256 of the
-bytes, so the same bytes are one record however often, and from wherever, they are fetched. The
-bytes themselves are in the raw store under ``storage_key``. Only ``status`` ever changes: the
-parse, or a person, moves a discovered document on.
+bytes, so the same bytes are one record however often, and from wherever, they are fetched (or
+uploaded). The bytes themselves are in the raw store under ``storage_key``. What the source listed
+and the bytes never change; only how the document stands does: its ``status``, moved on by the
+parse or a person, and the parse itself (``parser_version``, and ``transcript_key`` once an analyst
+transcribed it). ``doc_type`` is the type an uploader gave, set once; None means its source's.
 """
 
 import re
@@ -19,7 +21,7 @@ from domain_kernel._validation import (
     require_int,
     require_text,
 )
-from domain_kernel.documents import document_id_for
+from domain_kernel.documents import PARSER_VERSION_PATTERN, DocumentType, document_id_for
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import DocumentId
 from pipeline.domain.sources import require_source_key
@@ -29,6 +31,7 @@ MAX_STORAGE_KEY_CHARS: Final = 1_024
 MAX_CONTENT_TYPE_CHARS: Final = 255
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_PARSER_VERSION = re.compile(PARSER_VERSION_PATTERN)
 
 
 class DocumentStatus(StrEnum):
@@ -44,7 +47,10 @@ class DocumentStatus(StrEnum):
 @dataclass(frozen=True, slots=True)
 class RawDocumentRecord:
     """One fetched file. ``source_url``, ``external_ref``, ``title`` and ``published_on`` are
-    what the source listed when the file was first stored; ``fetched_at`` is that first fetch."""
+    what the source listed when the file was first stored (or what its uploader gave);
+    ``fetched_at`` is that first fetch. ``parser_version`` names the parser of its last parse,
+    empty before one; ``transcript_key`` is where the raw store keeps the analyst's transcript it
+    is parsed from (``manual@1``), empty for a document no one transcribed."""
 
     document_id: DocumentId
     source_key: str
@@ -58,6 +64,9 @@ class RawDocumentRecord:
     title: str = ""
     published_on: date | None = None
     status: DocumentStatus = DocumentStatus.DISCOVERED
+    parser_version: str = ""
+    doc_type: DocumentType | None = None
+    transcript_key: str = ""
 
     def __post_init__(self) -> None:
         require_instance(self.document_id, DocumentId, "document_id")
@@ -83,3 +92,11 @@ class RawDocumentRecord:
         if self.published_on is not None:
             require_date(self.published_on, "published_on")
         require_instance(self.status, DocumentStatus, "status")
+        version = require_instance(self.parser_version, str, "parser_version")
+        if version and not _PARSER_VERSION.fullmatch(version):
+            raise InvariantViolationError(f"parser_version must look like 'pdf@1', got {version!r}")
+        if self.doc_type is not None:
+            require_instance(self.doc_type, DocumentType, "doc_type")
+        transcript = require_instance(self.transcript_key, str, "transcript_key")
+        if len(transcript) > MAX_STORAGE_KEY_CHARS:
+            raise InvariantViolationError("transcript_key is too long")
