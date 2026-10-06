@@ -217,6 +217,7 @@ def test_short_commands_drop_the_checkout_and_the_interpreter() -> None:
     assert core.short_command(procs[75978].command, REPO) == "control_panel.py"
     assert core.short_command(procs[8750].command, REPO) == "make product-check"
     assert core.short_command("x" * 200, REPO, 20) == "x" * 19 + "…"
+    assert core.short_command(f"{REPO}/.venv/bin/python -m pytest -q", REPO) == "pytest -q"
 
 
 def test_ancestors_and_descendants_follow_the_parent_links() -> None:
@@ -454,3 +455,58 @@ def test_stop_web_app_reads_the_panel_s_pid_file_and_names_what_it_leaves(
             "port 3000 is held by pid 596, which is not this checkout's",
         ],
     )
+
+
+def test_a_stop_s_confirm_names_the_other_sessions_it_breaks() -> None:
+    state = snapshot()
+    users = core.stack_users(state, REPO)
+    check = "make product-check (pid 8750, 28 s) with 3 more"
+    assert users.product == (check,)
+    assert users.docker == (check,)
+    note = core.breaks_note(users, docker=True, product=True)
+    assert f"Stopping Docker will break them:\n  {check}" in note
+    assert f"Stopping the product will break them:\n  {check}" in note
+    # another control panel window only reads: it breaks nothing and is not named
+    assert "control panel" not in note
+    assert core.breaks_note(users) == ""
+    assert core.breaks_note(core.StackUsers((), ()), docker=True, product=True) == ""
+
+
+def test_another_session_s_tests_are_named_before_docker_stops() -> None:
+    pytest_run = core.Proc(5000, 4990, 5000, 171, f"{REPO}/.venv/bin/python -m pytest -q tests")
+    editor = core.Proc(5100, 4990, 5100, 900, f"{REPO}/.venv/bin/ruff server")
+    state = core.ProcessSnapshot(
+        {5000: pytest_run, 5100: editor},
+        {},
+        frozenset({5000, 5100}),
+        {5000: "other", 5100: "other"},
+        (),
+        SELF,
+        0.0,
+    )
+    users = core.stack_users(state, REPO)
+    assert len(users.docker) == 1
+    assert users.docker == ("pytest -q tests (pid 5000, 2m 51s)",)
+    assert users.product == ()
+    note = core.breaks_note(users, docker=True, product=True)
+    assert note.startswith("Other sessions are using Docker's databases and queues")
+    assert "Stopping Docker will break them" in note
+    assert "ruff" not in note
+
+
+def test_a_make_target_that_needs_no_docker_is_not_named() -> None:
+    lint = core.Proc(6000, 5990, 6000, 30, "/usr/bin/make lint")
+    eslint = core.Proc(6001, 6000, 6000, 29, "node /Users/dev/cw/node_modules/.bin/pnpm lint")
+    check = core.Proc(6100, 5990, 6100, 40, "/usr/bin/make check")
+    state = core.ProcessSnapshot(
+        {proc.pid: proc for proc in (lint, eslint, check)},
+        {},
+        frozenset({6000, 6001, 6100}),
+        {6000: "other", 6001: "other", 6100: "other"},
+        (),
+        SELF,
+        0.0,
+    )
+    users = core.stack_users(state, REPO)
+    assert users.docker == ("make check (pid 6100, 40 s)",)
+    assert users.product == ()

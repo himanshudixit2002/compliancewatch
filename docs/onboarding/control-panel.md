@@ -59,20 +59,41 @@ want; it replaces the bundle. From a copy of the panel outside a checkout, name 
   whether or not the step's first process has exited. Cancelling `make product` or
   `make web-stack` therefore also stops what they had started. A read stops by itself after
   three minutes.
+- **Time limits.** Each step of a stop has one: the web app 1 minute, `make web-stack-down`
+  and `make product-down` 2, the panel's workers and relays 1, `make dev-down` 3 and
+  `colima stop` 2. A step that overruns is stopped the way Cancel stops it and shows as timed
+  out. When `colima stop` times out, the panel offers `colima stop --force` as a question of its
+  own; Stop everything never forces. While a step runs, the line above the output says which
+  step of how many it is and for how long it has run. A step's output stops being read two
+  seconds after its program exits, so a process it left behind holding the pipe cannot hold
+  the step.
 - **Confirms.** Stop everything, reset, restore, stopping Docker and Cancel ask first and say
   what they remove or stop. So does stopping a process this panel did not start: the UI-only
   stack or the product when another window or a terminal started them, the web app (its confirm
-  names each pid its stop reaches), and anything on the Processes tab. When other sessions run
-  in the checkout, the confirm names them.
+  names each pid its stop reaches), and anything on the Processes tab. Before Docker or the
+  product stops (Stop everything, Docker or Databases Stop, Product Stop, a restore or a reset),
+  the confirm names other sessions' processes in the checkout that use them, such as another
+  terminal's `pytest` or `make product-check`, and says the stop will break them. A question
+  opens in a small window of the panel's own, not a macOS sheet: the panel keeps drawing,
+  polling and streaming while it is open.
 - **What it writes.** Nothing until you start something. Then: `var/control-panel/registry.json`
   (the process group of every step and background process it started, so it can tell them
   from another session's), the pid and log file of each worker and relay it starts in
   `var/control-panel/`, the web app's in `var/web-stack/web.pid` and `web.log` as before, and
-  `var/control-panel/psql.command` for the psql button. `var/` is git-ignored.
+  `var/control-panel/psql.command` for the psql button. A `hang-<time>.log` appears there only
+  when the window stopped responding. `var/` is git-ignored.
 - **Probes.** The status (Docker, the containers, every `/health` and `/ready`) refreshes every
-  four seconds on a background thread with short timeouts. git, `ps` and `lsof` run every 30
-  seconds and when a tab needs them. rpk runs on demand, at most once every 30 seconds however
-  it is asked: the button, a visit to the Pipeline tab or its 30-second box.
+  four seconds on a background thread. git, `ps` and `lsof` run every 30 seconds and when a tab
+  needs them. rpk runs on demand, at most once every 30 seconds however it is asked: the
+  button, a visit to the Pipeline tab or its 30-second box. Only one probe of each kind runs at
+  a time, and each program a probe runs has a hard limit (6 seconds for `docker info`, 8 for
+  `docker compose ps`, which hang while Colima stops): past it, SIGKILL goes to the program's
+  whole process group. No probe thread touches the window; each hands its result to the window's
+  own loop.
+- **When the window stops responding.** A watch thread notices when the window's event loop has
+  not run for five seconds and writes `var/control-panel/hang-<time>.log`: the main thread's
+  Python stack, the other threads' stacks and the timers and idle callbacks that were waiting.
+  When the window answers again, a banner under the title names the log.
 
 Closing the window leaves the stack, the services and the panel's workers running; Stop
 everything shuts them down. Closing it while a step runs cancels that step, after a confirm.
@@ -243,8 +264,9 @@ current branch and its comparison with `main` on GitHub (from `git remote get-ur
 - Run `make product-seed` with arguments, or while the product does not answer.
 - Signal itself, another control panel window, a process outside the checkout, or a process
   group that holds a control panel window.
-- Write anything in the checkout before you start something, fetch, or run a git command that
-  writes.
+- Write anything in the checkout before you start something (but a hang log, when the window
+  stopped responding), fetch, or run a git command that writes.
+- Force-stop Colima without asking: `colima stop --force` runs only after its own question.
 - Edit a flag, `.env` or a tracked file itself. The make targets it runs write what they always
   write: `make dev` creates `.env` from `.env.example` when it is missing; `make contracts-check`
   regenerates the generated clients, which are tracked files, before it compares them;
@@ -262,3 +284,9 @@ current branch and its comparison with `main` on GitHub (from `git remote get-ur
   (`make doctor`): the app's PATH is Homebrew's and the system's.
 - **Another session's processes.** The Overview names them and the Processes tab lists them;
   a reset, a restore or Stop everything affects them too, and their confirms say so.
+- **The window stopped responding.** The banner names the log in `var/control-panel/`; attach
+  it to the report. Before this build, a tab never opened could re-lay itself out for ever once
+  its text changed (after Stop everything, the Product tab), and the next tab click froze the
+  window at full CPU; the tabs now keep a width of their own.
+- **colima stop timed out.** Answer the force-stop question, or leave Colima as it is and run
+  `colima stop` in a terminal to watch it.

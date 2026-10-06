@@ -13,6 +13,7 @@ CW_CONTROL_PANEL_REPO points it at another checkout.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import queue
 import threading
@@ -21,7 +22,7 @@ import tkinter as tk
 from collections.abc import Callable, Sequence
 from functools import partial
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import ttk
 from typing import ClassVar, Final
 
 import panel_core as core
@@ -35,8 +36,10 @@ STATUS_MS: Final = 4000
 SLOW_MS: Final = 30000
 KAFKA_MS: Final = 31000  # a little over rpk's 30 s limit, so a tick never meets it
 LINE_QUEUE_MAX: Final = 20000
+BEAT_MS: Final = 250  # the hang watch's heartbeat; the busy line's clock ticks every fourth beat
 
 type Action = Callable[[], object]
+type Answer = Callable[[str | None], object]
 
 
 # ---- small widgets -----------------------------------------------------------------------------
@@ -57,9 +60,31 @@ def heading(parent: tk.Misc, text: str, pady: tuple[int, int] = (0, 6)) -> ttk.L
     return label
 
 
-def wrapping(label: ttk.Label, minimum: int = 160) -> ttk.Label:
-    """Wrap a label at the width its parent gives it, so its text follows the window's width."""
-    label.bind("<Configure>", lambda e: label.configure(wraplength=max(e.width - 4, minimum)))
+def wrapping(label: ttk.Label, minimum: int = core.WRAP_MINIMUM) -> ttk.Label:
+    """Wrap a label at the width its parent gives it, so its text follows the window's width.
+
+    A <Configure> handler that reconfigures the widget it listens to can feed itself: if the
+    label's width depends on what it asks for, each wrap asks for a width that wants the other
+    wrap, and the layout never settles (the freeze of "Stop everything": a tab never opened,
+    whose frame took its width from its content). So the re-wrap waits for an idle moment and
+    runs once however many events came, only when the width moved by eight pixels or more, and
+    holds still once it starts flipping between two wraps (core.WrapState)."""
+    state = core.WrapState(minimum)
+    pending = [False]
+
+    def apply() -> None:
+        pending[0] = False
+        with contextlib.suppress(tk.TclError):  # the label may be gone by now
+            wrap = state.decide(label.winfo_width())
+            if wrap is not None:
+                label.configure(wraplength=wrap)
+
+    def changed(event: tk.Event[ttk.Label]) -> None:
+        if not pending[0] and state.wants(event.width):
+            pending[0] = True
+            label.after_idle(apply)
+
+    label.bind("<Configure>", changed)
     return label
 
 
@@ -154,7 +179,15 @@ def select_tab(book: ttk.Notebook, index: int) -> None:
 
 
 class ScrollFrame(ttk.Frame):
-    """A tab's body that scrolls when the window is shorter than its content."""
+    """A tab's body that scrolls when the window is shorter than its content.
+
+    The body's width is always the one set here, never left to follow what the body asks for: a
+    canvas window item of width 0 takes its window's requested width, and wrapped text inside
+    then decides its own width, which can flip for ever on a tab not yet shown (its canvas never
+    gets a <Configure> to set the width from). So the item starts at the canvas's requested
+    width and follows the canvas once it is placed. Both handlers wait for an idle moment, run
+    once for any number of events, and change nothing when nothing changed.
+    """
 
     def __init__(self, parent: tk.Misc) -> None:
         super().__init__(parent)
@@ -162,51 +195,51 @@ class ScrollFrame(ttk.Frame):
         self.canvas.configure(yscrollincrement=1)
         bar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         self.inner = ttk.Frame(self.canvas, padding=(0, 12, 8, 4))
-        self._window = self.canvas.create_window(0, 0, window=self.inner, anchor="nw")
+        self.view_width = max(self.canvas.winfo_reqwidth(), 1)
+        self._window = self.canvas.create_window(
+            0, 0, window=self.inner, anchor="nw", width=self.view_width
+        )
+        self._region: tuple[int, int, int, int] | None = None
+        self._pending: set[str] = set()
         self.canvas.configure(yscrollcommand=bar.set)
-        self.inner.bind("<Configure>", self._on_inner)
+        self.inner.bind("<Configure>", lambda _e: self._soon("region", self._fit_region))
         self.canvas.bind("<Configure>", self._on_canvas)
         bar.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
 
-    def _on_inner(self, _event: tk.Event[ttk.Frame]) -> None:
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+    def _soon(self, key: str, work: Callable[[], None]) -> None:
+        """Run ``work`` at the next idle moment, once however often this is called before."""
+        if key in self._pending:
+            return
+        self._pending.add(key)
+
+        def run() -> None:
+            self._pending.discard(key)
+            with contextlib.suppress(tk.TclError):  # the tab may be gone by now
+                work()
+
+        self.after_idle(run)
 
     def _on_canvas(self, event: tk.Event[tk.Canvas]) -> None:
-        self.canvas.itemconfigure(self._window, width=event.width)
+        if event.width > 1 and event.width != self.view_width:
+            self._soon("width", self._fit_width)
+
+    def _fit_width(self) -> None:
+        width = self.canvas.winfo_width()
+        if width > 1 and width != self.view_width:
+            self.view_width = width
+            self.canvas.itemconfigure(self._window, width=width)
+
+    def _fit_region(self) -> None:
+        box = self.canvas.bbox(self._window)
+        region = (box[0], box[1], box[2], box[3]) if box else None
+        if region is not None and region != self._region:
+            self._region = region
+            self.canvas.configure(scrollregion=region)
 
     def scroll(self, pixels: int) -> None:
         if self.inner.winfo_height() > self.canvas.winfo_height():
             self.canvas.yview_scroll(pixels, "units")
-
-
-def choose(root: tk.Tk, title: str, message: str, options: Sequence[str]) -> str | None:
-    """A question with named answers; None when the window is closed."""
-    dialog = tk.Toplevel(root, bg=PANEL)
-    dialog.title(title)
-    dialog.transient(root)
-    dialog.resizable(width=False, height=False)
-    ttk.Label(
-        dialog, text=message, style="Panel.TLabel", wraplength=520, justify="left", padding=18
-    ).pack(fill="x")
-    answer: list[str | None] = [None]
-    row = ttk.Frame(dialog, style="Panel.TFrame", padding=(18, 0, 18, 18))
-    row.pack(fill="x")
-
-    def pick(option: str) -> None:
-        answer[0] = option
-        dialog.destroy()
-
-    for index, option in enumerate(options):
-        style = (
-            "TButton" if option == "Cancel" else ("Danger.TButton" if index else "Accent.TButton")
-        )
-        ttk.Button(row, text=option, style=style, command=partial(pick, option)).pack(
-            side="left", padx=(0, 8)
-        )
-    dialog.grab_set()
-    dialog.wait_window()
-    return answer[0]
 
 
 # ---- the output pane ---------------------------------------------------------------------------
@@ -285,29 +318,38 @@ class Output:
         current = self.panel.runners[self.KEYS[tab_index(self.book)]]
         for runner in (current, *self.panel.runners.values()):
             plan = runner.plan
-            if plan is not None:
-                if runner.name == "steps" and not messagebox.askokcancel(
-                    "Cancel",
-                    f"Cancel {plan.title}? Its process group gets SIGTERM (SIGKILL five seconds "
-                    "later if it is still running); a make target stops where it is.",
-                    icon="warning",
-                    parent=self.panel.root,
-                ):
-                    return
-                runner.cancel()
-                self.panel.write(
-                    runner.name, "cancelling: SIGTERM to the step's process group", "err"
-                )
+            if plan is None:
+                continue
+            if runner.name != "steps":
+                self._cancel(runner)
                 return
+            self.panel.ask(
+                "Cancel",
+                f"Cancel {plan.title}? Its process group gets SIGTERM (SIGKILL five seconds later "
+                "if it is still running); a make target stops where it is.",
+                ["Cancel the step", "Keep it running"],
+                partial(self._cancel_if, "Cancel the step", runner),
+            )
+            return
+
+    def _cancel_if(self, wanted: str, runner: core.Runner, answer: str | None) -> None:
+        if answer == wanted:
+            self._cancel(runner)
+
+    def _cancel(self, runner: core.Runner) -> None:
+        if runner.cancel():
+            self.panel.write(runner.name, "cancelling: SIGTERM to the step's process group", "err")
 
     def refresh(self) -> None:
         parts = []
         steps, reads = self.panel.runners["steps"].plan, self.panel.runners["reads"].plan
         if steps is not None:
-            parts.append(f"working: {steps.title}…")
+            parts.append(f"working: {steps.title}{self.panel.progress_text()}")
         if reads is not None:
             parts.append(f"reading: {reads.title}…")
-        self.busy.configure(text="   ".join(parts))
+        text = "   ".join(parts)
+        if str(self.busy.cget("text")) != text:
+            self.busy.configure(text=text)
         self.cancel_button.state(["!disabled"] if parts else ["disabled"])
 
 
@@ -439,10 +481,10 @@ class OverviewTab(Tab):
         plans = panel.plans
         line = self.row(acts, "Docker", 9)
         self.act(line, "Start", lambda: panel.run(plans.docker_start()))
-        self.act(line, "Stop", lambda: panel.run(plans.docker_stop(), shared=True))
+        self.act(line, "Stop", lambda: panel.run(plans.docker_stop(), breaks="docker"))
         ttk.Label(line, text="Databases", style="Panel.TLabel").pack(side="left", padx=(14, 8))
         self.act(line, "Start", lambda: panel.run(plans.databases_start()))
-        self.act(line, "Stop", lambda: panel.run(plans.databases_stop(), shared=True))
+        self.act(line, "Stop", lambda: panel.run(plans.databases_stop(), breaks="docker"))
         line = self.row(acts, "UI only", 9)
         self.act(line, "Start", lambda: panel.run(plans.ui_start()))
         self.act(line, "Stop", lambda: panel.run(plans.ui_stop(), mine="web-stack"))
@@ -452,7 +494,9 @@ class OverviewTab(Tab):
         self.act(line, "Stop", panel.stop_web_app)
         line = self.row(acts, "Product", 9)
         self.act(line, "Start", lambda: panel.run(plans.product_start()))
-        self.act(line, "Stop", lambda: panel.run(plans.product_stop(), mine="product"))
+        self.act(
+            line, "Stop", lambda: panel.run(plans.product_stop(), mine="product", breaks="product")
+        )
         self.act(line, "Open ↗", lambda: panel.open_url(project.product_web_url), guarded=False)
         for text in project.notes:
             note(acts, text)
@@ -516,7 +560,9 @@ class StackTab(Tab):
         line = self.row(top, "Core stack")
         self.act(line, "Start (make dev)", lambda: panel.run(plans.databases_start()))
         self.act(
-            line, "Stop (make dev-down)", lambda: panel.run(plans.databases_stop(), shared=True)
+            line,
+            "Stop (make dev-down)",
+            lambda: panel.run(plans.databases_stop(), breaks="docker"),
         )
         self.act(line, "make dev-ps", lambda: panel.run(plans.dev_ps(), read=True), guarded=False)
         line = self.row(top, "Profiles")
@@ -761,7 +807,9 @@ class ProductTab(Tab):
         heading(right, "ACTIONS")
         line = self.row(right, "Run", 10)
         self.act(line, "Start", lambda: panel.run(plans.product_start()))
-        self.act(line, "Stop", lambda: panel.run(plans.product_stop(), mine="product"))
+        self.act(
+            line, "Stop", lambda: panel.run(plans.product_stop(), mine="product", breaks="product")
+        )
         self.act(line, "Wait", lambda: panel.run(plans.product_wait()))
         self.act(line, "Role", lambda: panel.run(plans.product_role()))
         line = self.row(right, "Prove it", 10)
@@ -952,23 +1000,31 @@ class DataTab(Tab):
             panel.write("steps", f"error: not restored: {text}", "err")
             return
         plan = panel.plans.restore(dump.path)
-        message = f"{plan.confirm}\n\n{dump.describe(time.time())}\n{text}.{panel.shared_note()}"
-        if messagebox.askokcancel("Restore", message, icon="warning", parent=panel.root):
-            panel.run(plan, confirmed=True)
+        message = f"{plan.confirm}\n\n{dump.describe(time.time())}\n{text}."
+        message += panel.users_note(docker=True)
+
+        def answered(answer: str | None) -> None:
+            if answer == "Restore":
+                panel.run(plan, confirmed=True)
+
+        panel.ask("Restore", message, ["Restore", "Cancel"], answered)
 
     def reset(self) -> None:
         plans = self.panel.plans
         message = plans.reset(backup_first=False).confirm or ""
-        message += self.panel.shared_note()
-        choice = choose(
-            self.panel.root,
+        message += self.panel.users_note(docker=True)
+
+        def answered(answer: str | None) -> None:
+            if answer in ("Back up, then reset", "Reset without a backup"):
+                plan = plans.reset(backup_first=answer == "Back up, then reset")
+                self.panel.run(plan, confirmed=True)
+
+        self.panel.ask(
             "Reset database",
             message + "\n\nTake a backup into var/backups first?",
             ["Back up, then reset", "Reset without a backup", "Cancel"],
+            answered,
         )
-        if choice in ("Back up, then reset", "Reset without a backup"):
-            plan = plans.reset(backup_first=choice == "Back up, then reset")
-            self.panel.run(plan, confirmed=True)
 
     def psql(self) -> None:
         try:
@@ -985,6 +1041,7 @@ class GatesTab(Tab):
         "running": ("running…", "warn"),
         "ok": ("passed", "up"),
         "failed": ("failed", "down"),
+        "timeout": ("timed out", "down"),
         "cancelled": ("cancelled", "muted"),
         "skipped": ("not run", "muted"),
         "queued": ("queued", "muted"),
@@ -1414,26 +1471,23 @@ class ProcessesTab(Tab):
                 "using them (for example a make check in a terminal)."
             )
         proc = snapshot.procs[self.chosen]
+        modes = {"Stop the process group": "group", "Stop the process and its children": "tree"}
         if len(options) == 1:
-            if not messagebox.askokcancel(
-                "Stop a process", texts[0] + warning, icon="warning", parent=self.panel.root
-            ):
-                return
-            mode = options[0].mode
+            single = "Stop the process group" if options[0].mode == "group" else "Stop the process"
+            modes = {single: options[0].mode}
+            text = texts[0] + warning
         else:
-            choice = choose(
-                self.panel.root,
-                "Stop a process",
-                f"{texts[0]}\n\nor only the process and its children:\n{texts[1]}{warning}",
-                ["Stop the process group", "Stop the process and its children", "Cancel"],
-            )
-            if choice not in ("Stop the process group", "Stop the process and its children"):
-                return
-            mode = "group" if choice == "Stop the process group" else "tree"
-        plan = self.panel.plans.stop_process(
-            proc.pid, proc.command, "tree" if mode == "tree" else "group"
-        )
-        self.panel.run(plan, confirmed=True)
+            text = f"{texts[0]}\n\nor only the process and its children:\n{texts[1]}{warning}"
+
+        def answered(answer: str | None) -> None:
+            mode = modes.get(answer or "")
+            if mode is not None:
+                plan = self.panel.plans.stop_process(
+                    proc.pid, proc.command, "tree" if mode == "tree" else "group"
+                )
+                self.panel.run(plan, confirmed=True)
+
+        self.panel.ask("Stop a process", text, [*modes, "Cancel"], answered)
 
 
 class DocsTab(Tab):
@@ -1492,9 +1546,13 @@ class DocsTab(Tab):
         self.github = ttk.Frame(box, style="Panel.TFrame")
         self.github.pack(fill="x")
         self.github_note = note(box, "reading the origin remote…")
+        self.links_for: tuple[str | None, str] | None = None
 
     def on_git(self, state: core.GitState) -> None:
         base = self.panel.github
+        if self.links_for == (base, state.branch):
+            return
+        self.links_for = (base, state.branch)
         for child in self.github.winfo_children():
             child.destroy()
         if base is None:
@@ -1546,7 +1604,15 @@ class Panel:
         self.snapshot: core.ProcessSnapshot | None = None
         self.git: core.GitState | None = None
         self.github: str | None = None
-        self._inflight: set[str] = set()
+        self.flights = core.SingleFlight()
+        self.progress: tuple[int, int, str, float] | None = None
+        self._dialog: tk.Toplevel | None = None
+        self._questions: list[tuple[str, str, Sequence[str], Answer]] = []
+        self._beats = 0
+        self.build = core.describe_build(core.read_build(Path(__file__).resolve().parent))
+        self.hang = core.HangWatch(
+            self.project.panel_dir, threading.get_ident(), context=self._hang_context
+        )
 
         root.title("ComplianceWatch")
         root.configure(bg=BG)
@@ -1561,6 +1627,8 @@ class Panel:
         self._poll_status()
         self._poll_slow()
         root.after(80, self._drain)
+        self._beat()
+        self.hang.start()
 
     # styles
     def _styles(self) -> None:
@@ -1579,6 +1647,11 @@ class Panel:
         s.configure("Title.TLabel", font=("Helvetica", 22, "bold"))
         s.configure("Sub.TLabel", foreground=MUTED, font=("Helvetica", 12))
         s.configure("Branch.TLabel", foreground=MUTED, font=("Helvetica", 12))
+        s.configure("Banner.TFrame", background="#3a2f12")
+        s.configure("Banner.TLabel", background="#3a2f12", foreground=TEXT, font=("Helvetica", 12))
+        s.configure(
+            "BannerLink.TLabel", background="#3a2f12", foreground=AMBER, font=("Helvetica", 12)
+        )
         s.configure("BranchWarn.TLabel", foreground=AMBER, font=("Helvetica", 12, "bold"))
         s.configure(
             "Head.TLabel", background=PANEL, foreground=MUTED, font=("Helvetica", 11, "bold")
@@ -1694,6 +1767,16 @@ class Panel:
         self.summary.pack(side="left", padx=16, pady=(6, 0))
         self.branch = ttk.Label(top, text="", style="Branch.TLabel")
         self.branch.pack(side="right", pady=(6, 0))
+        self.banner = ttk.Frame(self.root, style="Banner.TFrame", padding=(14, 8))
+        self.banner_text = ttk.Label(
+            self.banner, text="", style="Banner.TLabel", wraplength=700, justify="left"
+        )
+        self.banner_text.pack(side="left")
+        link(self.banner, "Dismiss", self.banner.pack_forget, "BannerLink.TLabel").pack(
+            side="right"
+        )
+        self.banner_open = link(self.banner, "Open the log", lambda: None, "BannerLink.TLabel")
+        self.banner_open.pack(side="right", padx=(0, 14))
 
         paned = ttk.Panedwindow(self.root, orient="vertical")
         paned.pack(fill="both", expand=True, padx=20)
@@ -1708,8 +1791,7 @@ class Panel:
 
         foot = ttk.Frame(self.root, padding=(20, 6))
         foot.pack(fill="x")
-        build = core.describe_build(core.read_build(Path(__file__).resolve().parent))
-        ttk.Label(foot, text=build, style="Sub.TLabel").pack(side="left")
+        ttk.Label(foot, text=self.build, style="Sub.TLabel").pack(side="left")
         ttk.Label(
             foot,
             text="Closing the window leaves everything running.",
@@ -1802,13 +1884,21 @@ class Panel:
             notice = f"… {count} lines not shown: they came faster than the window draws\n"
             self.output.append(runner, [(notice, "muted")])
         deadline = time.monotonic() + 0.05
-        while time.monotonic() < deadline:
-            try:
-                call = self.calls.get_nowait()
-            except queue.Empty:
-                break
-            call()
-        self.root.after(80, self._drain)
+        try:
+            while time.monotonic() < deadline:
+                try:
+                    call = self.calls.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    call()
+                except Exception as exc:  # one broken callback must not stop the window's loop
+                    self.write(
+                        "reads", f"error: the window could not show a result: {exc!r}", "err"
+                    )
+        finally:
+            with contextlib.suppress(tk.TclError):  # the window may be closing
+                self.root.after(80, self._drain)
 
     def _on_runner(self, event: core.RunnerEvent) -> None:
         gates = next(tab for tab in self.tabs if isinstance(tab, GatesTab))
@@ -1820,10 +1910,13 @@ class Panel:
             if event.plan.gates and event.plan.keep_going:
                 gates.begin(event.plan)
         elif isinstance(event, core.StepUpdate):
+            if event.runner == "steps" and event.state == "running":
+                self.progress = (event.index, len(event.plan.steps), event.label, time.monotonic())
             if event.plan.gates:
                 gates.update(event)
         elif isinstance(event, core.End):
             if event.runner == "steps":
+                self.progress = None
                 for widget in self.guarded:
                     widget.state(["!disabled"])
                 self.root.after(300, self._poll_status_once)
@@ -1831,7 +1924,37 @@ class Panel:
                 for tab in self.tabs:
                     if isinstance(tab, DataTab):
                         tab.refresh_backups()
+                if any(
+                    r.label == core.COLIMA_STOP_LABEL and r.state == "timeout"
+                    for r in event.results
+                ):
+                    self.offer_force_stop()
         self.output.refresh()
+
+    def progress_text(self) -> str:
+        """Where the running plan is: its step, out of how many, and for how long so far."""
+        if self.progress is None:
+            return "…"
+        index, total, label, started = self.progress
+        seconds = core.format_seconds(time.monotonic() - started)
+        return f" — step {index + 1} of {total}: {label}, {seconds}"
+
+    def offer_force_stop(self) -> None:
+        """colima stop overran its time: offer colima stop --force, as a choice of its own."""
+        plan = self.plans.colima_force_stop()
+
+        def answered(answer: str | None) -> None:
+            if answer == "Force-stop Docker":
+                self.run(plan, confirmed=True)
+            else:
+                self.write("steps", "Docker left as it is; colima stop did not finish", "err")
+
+        self.ask(
+            "colima stop did not finish",
+            (plan.confirm or "") + self.users_note(docker=True),
+            ["Force-stop Docker", "Leave it"],
+            answered,
+        )
 
     # running plans
     def run(
@@ -1840,14 +1963,16 @@ class Panel:
         *,
         read: bool = False,
         confirmed: bool = False,
-        shared: bool = False,
+        breaks: str = "",
         mine: str = "",
     ) -> None:
-        """Start a plan after its checks and, where it asks for one, a confirm.
+        """Start a plan after its checks and, where it asks for one, a confirm in the window
+        (:meth:`ask`: nothing waits for the answer).
 
-        ``shared``: the plan affects every session using the stack, so the confirm names the
-        other sessions running in the checkout. ``mine``: the plan stops processes of that kind
-        (web-stack, product, web); the confirm names those this panel did not start.
+        ``breaks`` ("docker", "product" or both, joined by "+"): the plan takes that away from
+        every session using it, so the confirm names other sessions' processes that use it and
+        says the stop breaks them. ``mine``: the plan stops processes of that kind (web-stack,
+        product, web); the confirm names those this panel did not start.
         """
         key = "reads" if read else "steps"
         problems = core.plan_problems(plan, self.project.known_targets)
@@ -1856,34 +1981,45 @@ class Panel:
                 self.write(key, f"error: {problem}", "err")
             self.output.show(key)
             return
+        text = ""
         if not confirmed:
             text = plan.confirm or ""
-            if shared:
-                text += self.shared_note()
+            text += self.users_note(docker="docker" in breaks, product="product" in breaks)
             if mine and (others := self.not_mine(mine)):
                 text += (
                     ("\n\n" if text else "")
                     + f"{sentence(plan.title)} stops these, which this panel did not start:\n  "
                     + "\n  ".join(others)
                 )
-            if text and not messagebox.askokcancel(
-                sentence(plan.title), text.strip(), icon="warning", parent=self.root
-            ):
-                return
+        if not text:
+            self._start(key, plan)
+            return
+        title = sentence(plan.title)
+        self.ask(title, text.strip(), [title, "Cancel"], partial(self._start_if, title, key, plan))
+
+    def _start_if(self, wanted: str, key: str, plan: core.Plan, answer: str | None) -> None:
+        if answer == wanted:
+            self._start(key, plan)
+
+    def _start(self, key: str, plan: core.Plan) -> None:
         if not self.runners[key].start(plan):
             self.output.show(key)
 
-    def shared_note(self) -> str:
-        if self.snapshot is None:
+    def users_note(
+        self,
+        *,
+        docker: bool = False,
+        product: bool = False,
+        snapshot: core.ProcessSnapshot | None = None,
+    ) -> str:
+        """The confirm's note on other sessions: their processes in this checkout that use
+        Docker's databases and queues or the product, named, and that the stop breaks them."""
+        snapshot = snapshot or self.snapshot
+        if snapshot is None or not (docker or product):
             return ""
-        others = self.snapshot.foreign_summary(self.project.repo)
-        if not others:
-            return ""
-        return (
-            "\n\nOther sessions are using this checkout right now:\n  "
-            + "\n  ".join(others[:6])
-            + "\nThis affects them too."
-        )
+        users = core.stack_users(snapshot, self.project.repo)
+        note = core.breaks_note(users, docker=docker, product=product)
+        return f"\n\n{note}" if note else ""
 
     def not_mine(self, kind: str) -> list[str]:
         """Running processes of a kind (web-stack, product) this panel did not start: what make
@@ -1926,29 +2062,35 @@ class Panel:
             self.output.show("reads")
 
     # probes on threads
-    def background(self, key: str, work: Callable[[], Callable[[], None]]) -> None:
-        """Run work() on a thread unless one of this kind is in flight; its result is a callback
-        the window runs."""
-        if key in self._inflight:
-            return
-        self._inflight.add(key)
+    def background(self, key: str, work: Callable[[], Callable[[], None]]) -> bool:
+        """Run work() on a thread unless one of this kind is in flight (False then); its result
+        is a callback the window runs. The thread never touches Tk: it only puts the callback on
+        the queue the window drains."""
+        if not self.flights.begin(key):
+            return False
 
         def run() -> None:
             callback: Callable[[], None]
             try:
-                callback = work()
-            except Exception as exc:  # a probe's defect must not stop the window's polling
-                callback = partial(
-                    self.write, "reads", f"error: the {key} probe failed: {exc!r}", "err"
-                )
-            self.calls.put(callback)
-            self.calls.put(lambda: self._inflight.discard(key))
+                try:
+                    callback = work()
+                except Exception as exc:  # a probe's defect must not stop the window's polling
+                    callback = partial(
+                        self.write, "reads", f"error: the {key} probe failed: {exc!r}", "err"
+                    )
+                self.calls.put(callback)  # first, so the next probe's result lands after it
+            finally:
+                self.flights.end(key)
 
         threading.Thread(target=run, daemon=True, name=f"probe-{key}").start()
+        return True
 
     def _poll_status(self) -> None:
-        self._poll_status_once()
-        self.root.after(STATUS_MS, self._poll_status)
+        try:
+            self._poll_status_once()
+        finally:
+            with contextlib.suppress(tk.TclError):
+                self.root.after(STATUS_MS, self._poll_status)
 
     def _poll_status_once(self) -> None:
         def work() -> Callable[[], None]:
@@ -1958,16 +2100,20 @@ class Panel:
         self.background("status", work)
 
     def _poll_slow(self) -> None:
-        self.refresh_git()
-        self.refresh_processes()
-        self.root.after(SLOW_MS, self._poll_slow)
+        try:
+            self.refresh_git()
+            self.refresh_processes()
+        finally:
+            with contextlib.suppress(tk.TclError):
+                self.root.after(SLOW_MS, self._poll_slow)
 
     def refresh_git(self) -> None:
+        known = self.github
+
         def work() -> Callable[[], None]:
             state = core.probe_git(self.project.repo, self.project.env)
-            if self.github is None:
-                self.github = core.probe_remote(self.project.repo, self.project.env)
-            return lambda: self._show_git(state)
+            remote = known or core.probe_remote(self.project.repo, self.project.env)
+            return lambda: self._show_git(state, remote)
 
         self.background("git", work)
 
@@ -1997,8 +2143,9 @@ class Panel:
             text += " · product up"
         self.summary.configure(text=text, foreground=GREEN if all_up else MUTED)
 
-    def _show_git(self, state: core.GitState) -> None:
+    def _show_git(self, state: core.GitState, remote: str | None = None) -> None:
         self.git = state
+        self.github = remote or self.github
         if state.error:
             self.branch.configure(text="git: " + state.error[:60], style="BranchWarn.TLabel")
         elif state.on_main:
@@ -2027,7 +2174,8 @@ class Panel:
 
     def _web_stop_preview(self, everything: bool) -> None:
         """Scan the processes first, so the confirm names exactly the pids the web app's stop
-        reaches; the stop then leaves alone any pid the confirm did not name."""
+        reaches, and the other sessions the stop breaks; the stop then leaves alone any pid the
+        confirm did not name."""
         if (running := self.runners["steps"].plan) is not None:
             self.write(
                 "steps", f"{running.title} is still running; wait for it or cancel it", "err"
@@ -2040,9 +2188,9 @@ class Panel:
             targets, notes = core.web_stop_targets(self.project, snapshot)
             return lambda: self._confirm_web_stop(snapshot, targets, notes, everything)
 
-        self.write("steps", "reading the processes before the stop…", "muted")
+        if self.background("stop-preview", work):
+            self.write("steps", "reading the processes before the stop…", "muted")
         self.output.show("steps")
-        self.background("stop-preview", work)
 
     def _confirm_web_stop(
         self,
@@ -2061,39 +2209,178 @@ class Panel:
             text = plan.confirm or ""
             text += f"\n\nThe web app's stop reaches:\n{reach}" if reach else ""
             text += f"\n\n{left}" if left else ""
-            text += self.shared_note()
-            if not messagebox.askokcancel(
-                "Stop everything", text, icon="warning", parent=self.root
-            ):
-                return
+            text += self.users_note(docker=True, product=True, snapshot=snapshot)
+            title = "Stop everything"
         else:
             plan = self.plans.web_stop(expected=pids)
-            if any(not snapshot.origins.get(p, "").startswith("this panel") for p in pids):
-                text = (
-                    f"Stop the web app:\n{reach}\n\nThis panel did not start every one of "
-                    "these. Nothing else in their process groups is signalled."
-                )
-                text += f"\n\n{left}" if left else ""
-                if not messagebox.askokcancel(
-                    "Stop the web app", text, icon="warning", parent=self.root
-                ):
-                    return
-        self.run(plan, confirmed=True)
+            if all(snapshot.origins.get(p, "").startswith("this panel") for p in pids):
+                self.run(plan, confirmed=True)
+                return
+            text = (
+                f"Stop the web app:\n{reach}\n\nThis panel did not start every one of these. "
+                "Nothing else in their process groups is signalled."
+            )
+            text += f"\n\n{left}" if left else ""
+            title = "Stop the web app"
+
+        def answered(answer: str | None) -> None:
+            if answer == title:
+                self.run(plan, confirmed=True)
+
+        self.ask(title, text, [title, "Cancel"], answered)
 
     def _close(self) -> None:
         running = self.runners["steps"].plan
-        if running is not None:
-            if not messagebox.askokcancel(
-                "Close the panel",
-                f"{sentence(running.title)} is still running. Closing the window cancels it "
-                "(SIGTERM to its process group). Close anyway?",
-                icon="warning",
-                parent=self.root,
-            ):
-                return
-            self.runners["steps"].cancel()
+        if running is None:
+            self._quit()
+            return
+
+        def answered(answer: str | None) -> None:
+            if answer == "Close and cancel it":
+                self.runners["steps"].cancel()
+                self._quit()
+
+        self.ask(
+            "Close the panel",
+            f"{sentence(running.title)} is still running. Closing the window cancels it "
+            "(SIGTERM to its process group).",
+            ["Close and cancel it", "Keep the window open"],
+            answered,
+        )
+
+    def _quit(self) -> None:
         self.runners["reads"].cancel()
         self.root.destroy()
+
+    # questions, in a window of the panel's own: nothing waits for the answer
+    def ask(
+        self,
+        title: str,
+        text: str,
+        options: Sequence[str],
+        on_answer: Answer,
+    ) -> None:
+        """Ask in a dialog and return at once; ``on_answer`` gets the option picked, or None when
+        the dialog is closed (Escape or its close button). The last option is the way out and
+        has the focus. The dialog takes the mouse and keyboard from the panel (a grab) but the
+        event loop runs on: the panel keeps drawing, polling and streaming while it is open,
+        where a native message box would stop it. One question at a time; a second one waits
+        for the first to be answered."""
+        if self._dialog is not None:
+            self._questions.append((title, text, options, on_answer))
+            with contextlib.suppress(tk.TclError):
+                self._dialog.lift()
+            return
+        dialog = tk.Toplevel(self.root, bg=PANEL)
+        self._dialog = dialog
+        dialog.title(title)
+        dialog.transient(self.root)
+        dialog.resizable(width=False, height=False)
+        ttk.Label(
+            dialog, text=text, style="Panel.TLabel", wraplength=560, justify="left", padding=18
+        ).pack(fill="x")
+        row = ttk.Frame(dialog, style="Panel.TFrame", padding=(18, 0, 18, 18))
+        row.pack(fill="x")
+        answered = [False]
+
+        def finish(answer: str | None) -> None:
+            if answered[0]:
+                return
+            answered[0] = True
+            with contextlib.suppress(tk.TclError):
+                dialog.grab_release()
+                dialog.destroy()
+            self._dialog = None
+            try:
+                on_answer(answer)
+            finally:
+                if self._questions:
+                    question = self._questions.pop(0)
+                    self.root.after_idle(lambda: self.ask(*question))
+
+        buttons = []
+        for index, option in enumerate(options):
+            last = index == len(options) - 1
+            button = ttk.Button(
+                row,
+                text=option,
+                style="TButton" if last else "Danger.TButton",
+                command=partial(finish, option),
+            )
+            button.pack(side="left", padx=(0, 8))
+            buttons.append(button)
+        dialog.protocol("WM_DELETE_WINDOW", partial(finish, None))
+        dialog.bind("<Escape>", lambda _e: finish(None))
+
+        def press(_event: object) -> None:
+            focused = dialog.focus_get()
+            if isinstance(focused, ttk.Button):
+                focused.invoke()
+
+        dialog.bind("<Return>", press)
+        dialog.geometry(f"+{self.root.winfo_rootx() + 120}+{self.root.winfo_rooty() + 90}")
+        buttons[-1].focus_set()
+
+        def grab(tries: int = 20) -> None:
+            if not dialog.winfo_exists() or answered[0]:
+                return
+            try:
+                dialog.grab_set()
+            except tk.TclError:  # not viewable yet
+                if tries:
+                    dialog.after(50, lambda: grab(tries - 1))
+
+        dialog.after_idle(grab)
+
+    # the hang watch's heartbeat, and what it found
+    def _beat(self) -> None:
+        try:
+            self.hang.beat(self._pending_callbacks())
+            report = self.hang.recovered()
+            if report is not None:
+                self.show_hang(*report)
+            self._beats += 1
+            if self.progress is not None and self._beats % 4 == 0:
+                self.output.refresh()
+        finally:
+            with contextlib.suppress(tk.TclError):
+                self.root.after(BEAT_MS, self._beat)
+
+    def _pending_callbacks(self) -> str:
+        """What ``after info`` lists: the timers and idle callbacks waiting to run."""
+        described = []
+        for after_id in self.root.tk.splitlist(self.root.tk.call("after", "info")):
+            with contextlib.suppress(tk.TclError):
+                script, kind = self.root.tk.splitlist(self.root.tk.call("after", "info", after_id))
+                described.append(f"  {after_id}: {kind} {str(script)[:80]}")
+        return "\n".join(described)
+
+    def _hang_context(self) -> str:
+        """For the hang log, from the watch thread: plain Python state only, never Tk."""
+        running = [
+            f"{runner.name}: {plan.title}"
+            for runner in self.runners.values()
+            if (plan := runner.plan) is not None
+        ]
+        return (
+            f"Panel build: {self.build}\n"
+            f"Running: {', '.join(running) or 'nothing'}\n"
+            f"Probes in flight: {', '.join(sorted(self.flights.running())) or 'none'}\n"
+            f"Threads: {threading.active_count()}"
+        )
+
+    def show_hang(self, path: Path, seconds: float) -> None:
+        """The loop is back after a stall the watch logged: say so, and where the log is."""
+        shown = (
+            path.relative_to(self.project.repo) if path.is_relative_to(self.project.repo) else path
+        )
+        self.banner_text.configure(
+            text=f"The window stopped responding for {core.format_seconds(seconds)}. What it "
+            f"was doing is in {shown}."
+        )
+        self.banner_open.bind("<Button-1>", lambda _e: self.open_file(path, text_editor=True))
+        self.banner.pack(fill="x", padx=20, pady=(0, 6), before=self.paned)
+        self.write("reads", f"the window stopped responding for {seconds:.1f} s; see {path}", "err")
 
 
 def main() -> None:

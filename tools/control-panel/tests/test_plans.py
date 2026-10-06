@@ -139,9 +139,13 @@ def test_the_complete_environment_must_keep_the_crawl_off() -> None:
 
 
 def test_call_steps_declare_every_program_they_run(plans: core.Plans) -> None:
-    down = next(s for s in plans.stop_everything().steps if s.label == "stop databases and Docker")
+    steps = {step.label: step for step in plans.stop_everything().steps}
+    down = steps["stop the dev stack's containers (make dev-down)"]
     assert isinstance(down, core.Call)
-    assert down.commands == (("docker", "info"), ("make", "dev-down"), ("colima", "stop"))
+    assert down.commands == (("docker", "info"), ("make", "dev-down"))
+    colima = steps[core.COLIMA_STOP_LABEL]
+    assert isinstance(colima, core.Call)
+    assert colima.commands == (("docker", "info"), ("colima", "stop"))
     up = plans.docker_up()
     assert up.commands == (("docker", "info"), core.COLIMA_START)
     web = plans.stop_web_call()
@@ -379,3 +383,44 @@ def test_the_project_reads_the_checkout_and_writes_nothing(tmp_path: Path) -> No
     assert missing.known_targets is None
     assert missing.notes == [f"no Makefile in {tmp_path / 'nowhere'}: every make step will fail"]
     assert [name for _, name in missing.volumes] == list(core.VOLUMES_FALLBACK)
+
+
+def test_stop_everything_gives_every_step_a_time_limit(plans: core.Plans) -> None:
+    plan = plans.stop_everything()
+    limits = {step.label: step.timeout for step in plan.steps}
+    assert all(limit for limit in limits.values()), limits
+    assert limits[core.COLIMA_STOP_LABEL] == core.COLIMA_STOP_SECONDS
+    # Docker stops last, after the containers make dev-down stops
+    assert [step.label for step in plan.steps][-2:] == [
+        "stop the dev stack's containers (make dev-down)",
+        core.COLIMA_STOP_LABEL,
+    ]
+    assert plan.confirm is not None
+    assert "the panel offers a force stop" in plan.confirm
+    docker = plans.docker_stop().steps[0]
+    assert (docker.label, docker.timeout) == (core.COLIMA_STOP_LABEL, core.COLIMA_STOP_SECONDS)
+
+
+def test_colima_stop_force_runs_only_after_a_confirm_of_its_own(plans: core.Plans) -> None:
+    assert core.command_problems(core.COLIMA_FORCE_STOP, {}) == ["colima --force without a confirm"]
+    assert core.command_problems(("colima", "stop", "-f"), {}) == [
+        "colima --force without a confirm"
+    ]
+    assert core.command_problems(core.COLIMA_FORCE_STOP, {}, confirmed=True) == []
+    force = plans.colima_force_stop()
+    assert core.plan_problems(force) == []
+    assert core.step_commands(force.steps[0]) == (core.COLIMA_FORCE_STOP,)
+    assert force.confirm is not None
+    assert "colima stop --force" in force.confirm
+    assert "no graceful shutdown" in force.confirm
+    assert "Every session using Docker loses it" in force.confirm
+    assert core.plan_problems(core.Plan("x", force.steps)) == [
+        "force-stop Docker (colima stop --force): colima --force without a confirm"
+    ]
+    # stop everything never forces: the force stop is a choice of its own
+    forcing = [
+        plan.title
+        for plan in plans.all_plans()
+        if any(core.COLIMA_FORCE_STOP in core.step_commands(step) for step in plan.steps)
+    ]
+    assert forcing == ["force-stop Docker"]
