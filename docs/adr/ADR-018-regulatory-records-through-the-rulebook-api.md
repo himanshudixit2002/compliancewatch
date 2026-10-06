@@ -214,3 +214,61 @@ Consequences:
   re-ingest of a document (an upload of the same file, say) finds its classification and
   extracts it, and a sweep of the documents waiting as `classified` is not built yet. The
   backfill command never extracts.
+
+## Addendum 2026-10-06: the rulebook's candidate intake, drafting and rejection
+
+The rulebook now consumes `rule.candidate.created` and puts each candidate in front of an
+analyst. The intake runs in the rulebook worker, in consumer group `rulebook.rule-candidates`,
+behind the flag `rulebook.candidate_intake` (`CW_RULEBOOK_CANDIDATE_INTAKE_ENABLED`, default off,
+owner regulatory-intelligence); off, no group reads the topic, which keeps the candidates a month,
+and the group reads them from the start once it is on.
+
+**One candidate, one task, in one transaction with the inbox.** Each event is checked against
+its contract and stored once per `candidate_id` in `rule_candidate` (the scores in columns, the
+candidate, its issues, the cited clause ids and the source in `payload`), with one review task of
+kind `candidate`, in the transaction that records the event in `processed_event`. A candidate
+whose document the rulebook does not store fails and is dead-lettered after its retries; the
+pipeline registers a document before it extracts from it, so a replay takes it in. The
+regulator is kept in lower case, as the rulebook's rules name it. The task's priority is the
+policy of the queue: 100 when the candidate looks high impact (it extends a deadline or withdraws
+something, its `applies_to` is empty, or it names amounts), 80 when there is no candidate to draft
+from, 50 when the extraction asked for review or a validator found an issue, 10 otherwise. The
+pipeline's suggested rule key is kept as a suggestion: a key no rule has gives way to the one rule
+key the document's relation candidates name, and the task says whether a rule has the key.
+
+**Drafting is an analyst's step, never the intake's.** No transition discards a draft, so a wrong
+draft made automatically would linger. The analyst who claimed the task drafts a version from the
+candidate (`POST /v1/rulebook/review/tasks/{task_id}/draft`): into an existing rule as its next
+version, or as the first version of a new rule with an unused key, its level and the candidate's
+regulator. The version names its candidate (`rule_version.candidate_id`) and starts high impact
+when the candidate suggests it; a reviewer may raise it, never lower it. Its content is the
+candidate's, mapped into the kernel's forms, with the analyst's edits, checked as the seed calendar
+is checked; a condition the kernel refuses leaves the specification out rather than widen the
+rule. The citations are verified against the clauses the rulebook stores. The relation candidates
+the analyst picks from the document are approved onto the draft in the same transaction, so an
+`extends_deadline` the knowledge child staged reaches the publication, whose rule.deadline_changed
+the obligation worker turns into rescheduled obligations. What the analyst changed from the
+candidate is recorded as an `edited` decision; a candidate taken as it was records none, and the
+review stats count it as approved without edits, the acceptance this ADR's extraction is measured
+by. The seed command leaves a candidate's draft alone, and no seed task is opened for it.
+
+**Rejection is a decision with a reason and an event.** A candidate task's rejection names why
+(`not_a_rule`, `wrong_extraction`, `duplicate`, `out_of_scope`, `unparseable`), closes the
+candidate before or after drafting, and writes `rule.rejected` 1.0.0 through the rulebook's outbox
+in the decision's transaction. A draft made from a rejected candidate stays a draft.
+
+**The review task routes change shape.** A candidate task has no rule version until it is
+drafted, so `rule_version_id` and the version fields of the queue, and the version of a task's
+detail and of a decision, are null until then. No client reads these routes yet (the review
+workbench is not built), so the shape changes in place, recorded in
+`packages/contracts/openapi/BREAKING.md`, and the workbench is built on it.
+
+Consequences:
+
+- `make product` leaves the intake off, so the product never writes candidates into the database
+  it shares; the intake is proved by the rulebook's tests on Postgres and by
+  `tools/demo/tests/unit/test_candidate_flow.py` on the one deployable's memory stores.
+- A version drafted from an extension notification is a rule version like any other: its own
+  specification and template fan out when it is published. Whether such a version should apply
+  to nobody (a specification such as `any_of: []`) and only move the deadline is for Regulatory
+  Intelligence to decide; the journey's draft does so only to show the plumbing.

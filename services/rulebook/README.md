@@ -8,23 +8,27 @@ clause search index (full text and pgvector) whose hits say when their rule is o
 the citation, review and publish flow (analyst actions behind their own review token, separate
 from the pipeline's write token) with its rule events written through the transactional outbox
 (behind `CW_RULEBOOK_PUBLISH_ENABLED`), review tasks (the queue analysts work the seed drafts
-through, with the two-person rule), the public API's changes feed (`GET /v1/changes`) read
-back from the decision log, and data-quality checks over versions, citations and relations.
+and the pipeline's rule candidates through, with the two-person rule), the candidate intake
+(the worker's consumer of rule.candidate.created, behind `CW_RULEBOOK_CANDIDATE_INTAKE_ENABLED`),
+the public API's changes feed (`GET /v1/changes`) read back from the decision log, and
+data-quality checks over versions, citations and relations.
 Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architecture Reference 3.2, 5.2 and 6.2; ADR-017 and ADR-018.
 
 - **Owns:** Rules, RuleVersions, Documents, Clauses, Citations, embeddings; versioning, supersession graph, hybrid search index, as-of queries;
   the knowledge tables `canonical_entity`, `clause_entity` and `rule_relation` (aligned entities,
   clause mentions, typed relations between rule versions and entities)
 - **Owning team:** Regulatory Intelligence
-- **Consumes:** parsed documents from the pipeline over `PUT /v1/rulebook/documents/{id}` (ADR-018); rule.published; rulebook read API (served to the engine, Q&A and review service)
+- **Consumes:** parsed documents from the pipeline over `PUT /v1/rulebook/documents/{id}` (ADR-018); rule.candidate.created (the worker's group `rulebook.rule-candidates`, see Candidate intake); rulebook read API (served to the engine, Q&A and review service)
 - **Emits / publishes:** rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed
   through `outbox_event` (ADR-005); the applicability engine fans a publication out and cancels it
-  on a withdrawal, and the obligation service acts on all four
+  on a withdrawal, and the obligation service acts on all four. rule.rejected when an analyst
+  rejects a rule candidate; nothing consumes it yet
 
 ## What is in the database today
 
 Migrations `0001` to `0007` create fourteen tables in schema `rulebook`, `0008` lets a document be a
-statute, and `0009` adds `review_task` and the `edited` decision:
+statute, `0009` adds `review_task` and the `edited` decision, and `0010` adds `rule_candidate`,
+candidate review tasks, `rule_version.candidate_id` and the consumer inbox `processed_event`:
 
 | Table | Purpose | Keys |
 | --- | --- | --- |
@@ -37,8 +41,10 @@ statute, and `0009` adds `review_task` and the `edited` decision:
 | `rule_relation` | A typed relation (`supersedes`, `amends`, `refers_to`, `exempts`, `extends_deadline`, `corrects`, `withdraws`) from a rule version to a rule version (`to_rule_version_id`) or an entity (`to_entity_id`), with the evidence clause | pk `id`; unique (`from_rule_version_id`, `relation`, `to_kind`, `to_ref`, `clause_id`); fks to `rule_version`, `clause` and `canonical_entity` (restrict); CHECKs `ck_rule_relation_pairing`, `ck_rule_relation_target_entity`, `ck_rule_relation_target_version`, `ck_rule_relation_not_self` |
 | `rule`, `rule_version` | Rules and their versions: status, effective period, predicates, obligation template, recurrence, seed provenance, `high_impact` and `submitted_at` (the start of the review round) | see migration 0003; the guard trigger of 0007 |
 | `rule_version_decision` | The review and publication audit: submitted, returned, approved, published, withdrawn or superseded, by an analyst (`actor_id`) or caused by another version, and `edited` (migration 0009): an analyst's change to a draft through its review task, with what changed in the note | pk `id`; fks to `rule_version` (both `rule_version_id` and `caused_by_rule_version_id`); CHECK that one of the two is set; append-only (trigger) |
-| `review_task` | One decision (approve, return, reject) asked about one rule version: `kind` (`seed`), `priority`, the rule's `regulator`, `status` (open, claimed, decided), who claimed it and when, who decided what and when, and the decision's note | pk `id`; fk `rule_version_id`; CHECKs that the state, claim and decision columns agree; partial unique index: one task per version that is not decided; never deleted, and a decided task never changes (trigger) |
-| `outbox_event` | py-common's transactional outbox: the rule events, written in the transaction of the change they describe and relayed to Kafka | see `py_common.outbox.schema` |
+| `review_task` | One decision (approve, return, reject) asked about one rule version or one rule candidate: `kind` (`seed`, or `candidate` from migration 0010), `priority`, the `regulator`, `status` (open, claimed, decided), who claimed it and when, who decided what and when, and the decision's note; a candidate task names its `candidate_id` and has no `rule_version_id` until the version is drafted | pk `id`; fks `rule_version_id` and `candidate_id`; CHECKs that the state, claim and decision columns agree and that a seed task has its version and a candidate task its candidate; partial unique indexes: one task per version, and one per candidate, that is not decided; never deleted, a decided task never changes, and a task takes its version once (trigger) |
+| `rule_candidate` | A rule candidate the pipeline extracted (rule.candidate.created), keyed by the event's `candidate_id`: its document, regulator (lower case), model, prompt version, confidence, citation count, whether it asked for review, the outcome (`extracted`, `unparseable`), the rest of the event in `payload` (the candidate itself, its issues, the cited clause ids, the type, the source, the ontology version), the suggested rule key, whether it looks high impact, the event it came with, and its review: `status` (open, drafted, approved, rejected), the version drafted from it, the reject reason, who decided and when | pk `id`; fks `document_id` and `rule_version_id` (unique); CHECKs that the regulator is lower case, the scores in range and the status, version, reason and decision agree |
+| `outbox_event` | py-common's transactional outbox: the rule events and rule.rejected, written in the transaction of the change they describe and relayed to Kafka | see `py_common.outbox.schema` |
+| `processed_event` | py-common's consumer inbox: the rule.candidate.created events the worker's group `rulebook.rule-candidates` took in, so a redelivered one is skipped | see `py_common.outbox.schema` |
 | `extraction_run` | One run of an extraction stage over a document: counts and run-level issues, including model output that could not become a candidate | pk `id` (derived from document, stage, extractor); fk `document_id` |
 | `entity_review` | A mention alignment could not resolve, with the reason (`no_match`, `ambiguous_alias`, `empty_name`, `unqualified`) and the analyst's decision | pk `id` (derived from clause, type, start); unique (`clause_id`, `entity_type`, `span_start`); CHECK that a decision is complete; partial index on open groups |
 | `relation_candidate` | A relation the model proposed before any rule version exists: target as named (and aligned entity), evidence clause and quote, confidence, issues, period and new due date for extensions, status | pk `id` (derived from document, relation, target, evidence clause); fks to `document`, `clause`, `canonical_entity`, `rule`; CHECKs on scores, quote length, decision |
@@ -68,7 +74,11 @@ literal pairs to the kernel.
 Migration 0009 puts `rulebook_review_task_guard` (BEFORE UPDATE OR DELETE) on `review_task`: a
 decided task never changes, a task keeps its version, kind, regulator and opening time, and no
 task is deleted. Its downgrade fails while an `edited` decision is recorded, since the audit is
-append-only, rather than dropping it.
+append-only, rather than dropping it. Migration 0010 relaxes the guard for candidate tasks: a
+task keeps its kind, candidate, regulator and opening time, and its version once it has one, so
+a candidate task's `rule_version_id` goes from null to the drafted version once and never
+changes after. The seed tasks stored before 0010 keep their versions and pass its checks; its
+downgrade fails while a candidate task or a version drafted from a candidate is stored.
 
 ## API
 
@@ -104,13 +114,14 @@ append-only, rather than dropping it.
 | `POST /v1/rulebook/rule-versions/{id}/publish` | Approved to published, applying the version's relations and writing the rule events; see below. `{actor_id, note?}`. Needs the review token and the flag |
 | `POST /v1/rulebook/rule-versions/{id}/withdraw` | Published to withdrawn with `rule.withdrawn` (no withdrawing version, effective today); 409 `rulebook-replacements-pending` while a version it replaces has not moved yet. Needs the review token and the flag |
 | `POST /v1/rulebook/maintenance/transitions` | The daily sweep, `{as_of?}` (today in India when empty, never later); returns the versions it moved and the events. Needs the review token and the flag |
-| `GET /v1/rulebook/review/tasks?status=&regulator=&limit=&cursor=` | The review queue: by regulator, higher priority first, then oldest first, a page of `limit` (1 to 200, 50) with a keyset cursor; each task with its version's rule key, number, title and status, whether it is high impact and the approvals of its current round. See Review tasks below |
+| `GET /v1/rulebook/review/tasks?status=&regulator=&kind=&limit=&cursor=` | The review queue: by regulator, higher priority first, then oldest first, a page of `limit` (1 to 200, 50) with a keyset cursor; each task with its version's rule key, number, title and status, whether it is high impact and the approvals of its current round. `kind` keeps `seed` or `candidate` tasks; `regulator` is compared in lower case. A candidate task not drafted yet shows its candidate's title and suggested rule key, null version fields and the suggested impact; `candidate` summarises the candidate of every candidate task. See Review tasks below |
 | `POST /v1/rulebook/review/tasks/seed` | Opens a task of kind `seed` for every draft that needs review and has no task open or claimed; a second request opens none. Needs the review token |
-| `GET /v1/rulebook/review/tasks/{task_id}` | The task with its version (content, the specification described line by line, the citations with their verification, the documents they cite, the approvers of its current round), the seed source's link when the calendar gives one, and the history: the version's decision audit and every task it has had |
+| `GET /v1/rulebook/review/tasks/{task_id}` | The task with its version (content, the specification described line by line, the citations with their verification, the documents they cite, the approvers of its current round), the source's link when there is one, and the history: the version's decision audit and every task it has had. A candidate task also carries `candidate`: the extraction as stored, its document (`document_id` for the pipeline's `GET /v1/pipeline/documents/{document_id}/raw`), the draft it proposes and what does not map, why it looks high impact and whether a rule has its suggested key; until it is drafted its `rule_version` is null |
+| `POST /v1/rulebook/review/tasks/{task_id}/draft` | `{actor_id, rule_key, new_rule?: {regulator, level}, edits?, citations?, relation_candidates?: [{candidate_id, target_rule_version_id?}], note?}`: the claimant of a candidate task drafts a version from its candidate, once (409 `rulebook-candidate-already-drafted`): the next version of `rule_key`'s rule, or the first of a new rule with `new_rule` (404 `rulebook-rule-key-unknown` without it, 409 `rulebook-rule-key-taken` with it for a key a rule has), always of the candidate's regulator. Content from the candidate with `edits` applied, checked as the seed calendar is (422 `rulebook-draft-incomplete` with every problem, nothing stored); the candidate's quotes, or `citations`, verified (422 `rulebook-citation-not-verified`); the relation candidates listed, of the candidate's document, approved onto the draft. Returns the task as `GET` does. Needs the review token, or an analyst's access token |
 | `POST /v1/rulebook/review/tasks/{task_id}/claim` | `{actor_id}`: the analyst takes the task; the claimant claiming again changes nothing; 409 `rulebook-review-task-claimed` when someone else holds it, `rulebook-review-task-closed` when it was decided. Needs the review token |
-| `PATCH /v1/rulebook/review/tasks/{task_id}/draft` | `{actor_id, note?, title?, summary?, specification?, obligation_template?, recurrence?, effective_from?, effective_to?, todo?, citations?}`: the claimant edits the draft's content and cites clauses in one transaction; 409 `rulebook-review-task-not-claimed` for anyone else and `rulebook-rule-version-not-editable` past draft; every quote is verified as `PUT .../citations` verifies it (422 `rulebook-citation-not-verified`, nothing stored). Recorded as an `edited` decision. Returns the task as `GET` does. Needs the review token |
-| `POST /v1/rulebook/review/tasks/{task_id}/decide` | `{actor_id, decision, note?, high_impact?}`: `approve`, `return` or `reject`, with the version's transition in the same transaction; a return or a rejection needs a note. Returns the task, the version's lifecycle and the task a return opened. Needs the review token |
-| `GET /v1/rulebook/review/stats` | Tasks by status and by regulator, the decisions made, the median time from opening to decision, and when the oldest task not decided yet was opened and its age |
+| `PATCH /v1/rulebook/review/tasks/{task_id}/draft` | `{actor_id, note?, title?, summary?, specification?, obligation_template?, recurrence?, effective_from?, effective_to?, todo?, citations?}`: the claimant edits the draft's content and cites clauses in one transaction; 409 `rulebook-review-task-not-claimed` for anyone else, `rulebook-rule-version-not-editable` past draft and `rulebook-candidate-not-drafted` for a candidate task with no draft yet; every quote is verified as `PUT .../citations` verifies it (422 `rulebook-citation-not-verified`, nothing stored). Recorded as an `edited` decision. Returns the task as `GET` does. Needs the review token |
+| `POST /v1/rulebook/review/tasks/{task_id}/decide` | `{actor_id, decision, note?, high_impact?, reason?}`: `approve`, `return` or `reject`, with the version's transition in the same transaction; a return or a rejection needs a note, and a candidate task's rejection a `reason` (`not_a_rule`, `wrong_extraction`, `duplicate`, `out_of_scope`, `unparseable`). A candidate task not drafted yet can only be rejected (409 `rulebook-candidate-not-drafted`). Returns the task, the version's lifecycle (null for a candidate rejected before drafting), the task a return opened, the candidate's status and the events written (rule.rejected). Needs the review token |
+| `GET /v1/rulebook/review/stats` | Tasks by status and by regulator, the decisions made, the median time from opening to decision, when the oldest task not decided yet was opened and its age, and `candidates`: the candidates decided, approved (and how many of those without an edit), rejected, and the acceptance rate, approved without edits over decided |
 | `GET /v1/changes?since=&regulator=&limit=&cursor=` | The public API's changes feed: one item per published change, newest first, `limit` 1 to 100 (50) with a keyset cursor; see Changes feed below |
 
 Nothing is aligned by fuzzy matching and nothing is created without an analyst (ADR-017). With
@@ -133,7 +144,7 @@ mentions, relation candidates, clause embeddings) need `CW_RULEBOOK_WRITE_TOKEN`
 `x-cw-write-token`: without it configured they are a 503 `rulebook-writes-disabled`, and a missing
 or wrong token is a 401 `rulebook-write-token-invalid`. An analyst's actions (entity review
 decisions, relation approvals and rejections, citations, submit, return, approve, publish,
-withdraw, the sweep, and the review tasks' seed, claim, draft edit and decision) need
+withdraw, the sweep, and the review tasks' seed, claim, draft, draft edit and decision) need
 `CW_RULEBOOK_REVIEW_TOKEN` in `x-cw-review-token` instead: 503
 `rulebook-reviews-disabled` without it, 401 `rulebook-review-token-invalid` for a missing or wrong
 one. The write token does not open the analyst's routes, so a leaked pipeline secret cannot
@@ -267,26 +278,50 @@ command; only this flow publishes.
 
 A review task asks for one decision about one rule version: approve it, return it for rework, or
 reject it (`rulebook.domain.review_tasks`, `rulebook.application.review_tasks`). A version has at
-most one task that is not decided; a decided task never changes. Today every task is of kind
-`seed`: `POST /v1/rulebook/review/tasks/seed` opens one for every draft that needs review (the
-seed calendar's thirteen, as `make seed SERVICE=rulebook` writes them) and has no task open or
-claimed. Seed tasks share priority 50 and the queue keeps them by regulator, then oldest first.
-Candidates the pipeline extracts get their own kind, and `POST .../review/tasks/{id}/draft`
-(a version drafted from a candidate), later; that route is not served yet.
+most one task that is not decided, and so has a rule candidate; a decided task never changes.
+Two kinds share the queue:
+
+- `seed`: `POST /v1/rulebook/review/tasks/seed` opens one for every seed draft that needs review
+  (the seed calendar's thirteen, as `make seed SERVICE=rulebook` writes them) and has no task
+  open or claimed. Seed tasks share priority 50 and the queue keeps them by regulator, then
+  oldest first. A version drafted from a candidate never gets a seed task.
+- `candidate`: the candidate intake opens one for every rule candidate the pipeline extracts
+  (see Candidate intake), under the candidate's regulator in lower case and at its priority:
+  100 when it looks high impact, 80 when there is no candidate to draft from (an analyst drafts
+  it by hand), 50 when the extraction asked for review or a validator found an issue, 10
+  otherwise. Until a version is drafted from it the task has no version: it can be claimed,
+  drafted and rejected, nothing else (409 `rulebook-candidate-not-drafted`).
 
 1. **Claim.** An analyst claims an open task; it stays theirs until a decision. Only the claimant
-   edits the draft, so two people never edit one draft at once.
-2. **Edit.** `PATCH .../draft` changes the content (title, summary, specification, obligation
+   drafts and edits, so two people never edit one draft at once.
+2. **Draft (candidate tasks).** `POST .../draft` makes the version, once per candidate, in one
+   transaction: the rule when the key is new (with its regulator, the candidate's, and its
+   level; an unused key), then the next version of the rule as a draft that names the candidate
+   (`rule_version.candidate_id`) and starts high impact when the candidate suggests it. Its
+   content is what the candidate proposes (`intake.draft_content`: each `applies_to` condition a
+   predicate of an `all_of`, the obligation a template, the recurrence and dates read as the
+   kernel reads them; a condition the kernel refuses leaves the specification out rather than
+   widen the rule) with the analyst's `edits` on top, checked as an edit is; whatever is missing,
+   does not map or fails the checks comes back as 422 `rulebook-draft-incomplete` with every
+   problem, and nothing is stored. The citations are the candidate's quotes (or the `citations`
+   sent), verified against their clauses by the step `PUT .../citations` runs. The relation
+   candidates the analyst lists, of the candidate's document, are approved onto the draft in the
+   same transaction (`relations.approve_relation`, the core of `POST .../relations/{id}/approve`),
+   so an `extends_deadline` reaches the publication. What the analyst changed from the candidate
+   is one `edited` row of the decision audit, naming the dotted paths
+   (`obligation_template.due_in_days`, `citations`); a candidate taken as it was records none.
+   The candidate becomes `drafted` and the task keeps the version from then on.
+3. **Edit.** `PATCH .../draft` changes the content (title, summary, specification, obligation
    template, recurrence, effective period, open questions) and cites clauses, in one
-   transaction. The content is checked as the seed loader checks the calendar: structured
-   predicates must fit the ontology, a free-text predicate may name an attribute the ontology
-   lacks only while an open question stays in `todo`, and a duty that does not recur needs the
-   template's `due_in_days`. Citations go through the step `PUT .../citations` runs (verified
-   against the stored clause, all or nothing): an analyst uploads the statute a seed rule cites
-   (`cgst_act`, `cgst_rules`, `igst_act` are upload-only pipeline sources), and once it is
-   registered its clauses can be cited. Each edit is a row `edited` in the decision audit, by the
-   analyst, naming what changed.
-3. **Decide.** An analyst, a reviewer or an admin decides, and the version's transition commits
+   transaction. The content is checked as the seed loader checks the calendar
+   (`rulebook.domain.drafting`): structured predicates must fit the ontology, a free-text
+   predicate may name an attribute the ontology lacks only while an open question stays in
+   `todo`, and a duty that does not recur needs the template's `due_in_days`. Citations go through
+   the step `PUT .../citations` runs (verified against the stored clause, all or nothing): an
+   analyst uploads the statute a seed rule cites (`cgst_act`, `cgst_rules`, `igst_act` are
+   upload-only pipeline sources), and once it is registered its clauses can be cited. Each edit
+   is a row `edited` in the decision audit, by the analyst, naming what changed.
+4. **Decide.** An analyst, a reviewer or an admin decides, and the version's transition commits
    in the same transaction as the decision (`add_citations`, `submit_for_review`,
    `approve_version` and `return_to_draft` in `application/publication.py` run inside the
    caller's unit of work; the publish routes run them in one of their own):
@@ -295,23 +330,57 @@ Candidates the pipeline extracts get their own kind, and `POST .../review/tasks/
      `rule_version_decision` alone, and the same person twice is 409
      `rulebook-duplicate-approver`. The approval that completes the round (one approver, two
      different ones for a high-impact version) approves the version, marks its seed status
-     reviewed and decides the task; an earlier one leaves the task open, unclaimed, for a second
-     reviewer.
+     reviewed, decides the task and approves a candidate task's candidate; an earlier one leaves
+     the task open, unclaimed, for a second reviewer.
    - `return` sends a version under review or approved back to draft (its round's approvals
      stop counting); a draft stays a draft. The task is decided and a new open task asks for the
-     rework.
+     rework (a candidate task's names the candidate too).
    - `reject` closes the task and leaves the version a draft (a version under review or approved
      goes back to draft; one the publish routes moved on is left as it is). No task opens; the
-     next seed request opens one for the rejected draft. `rule.rejected` comes with candidates.
-4. **Publish.** Approving never publishes. A reviewer publishes the approved version through
+     next seed request opens one for a rejected seed draft. A candidate task's rejection names a
+     `reason` (`not_a_rule`, `wrong_extraction`, `duplicate`, `out_of_scope`, `unparseable`),
+     rejects the candidate before or after drafting, and writes rule.rejected (the candidate,
+     its document, regulator, reason, prompt version and model, and the version drafted from it
+     when there is one) to the outbox in the same transaction. A draft made from a rejected
+     candidate stays a draft: no transition discards one.
+5. **Publish.** Approving never publishes. A reviewer publishes the approved version through
    `POST /v1/rulebook/rule-versions/{id}/publish`, as before, with its checks (verified
-   citations, the round's approvers) and its events; the fan-out and the obligations follow.
+   citations, the round's approvers) and its events; the fan-out and the obligations follow, and
+   an `extends_deadline` approved onto a candidate's draft writes rule.deadline_changed, which
+   the obligation worker turns into rescheduled obligations.
 
 Who acts is the user a verified token names, or in header and dual mode the body's `actor_id`
 with the review token, as on the publish routes. The publish routes still work on a version that
 has a task: a version they approve or publish outside the task leaves the task waiting, and a
 rejection closes it. The seed command leaves alone a rule whose latest version an analyst edited
-through its task (see Seed calendar).
+through its task or drafted from a candidate (see Seed calendar). `GET .../review/stats` counts
+the decided candidates and the acceptance rate, approved without an edit over decided, ADR-006's
+measure of the extraction.
+
+## Candidate intake
+
+The rulebook worker consumes rule.candidate.created in group `rulebook.rule-candidates` while
+`CW_RULEBOOK_CANDIDATE_INTAKE_ENABLED` is on (flag `rulebook.candidate_intake`, default off,
+owner regulatory-intelligence) and `CW_WORKER_KAFKA_ENABLED` runs consumers. Each event becomes,
+in the transaction that also records it in `processed_event`, one `rule_candidate` row and one
+candidate review task (`IngestRuleCandidate`, `rulebook.application.intake`):
+
+- the payload is checked against its contract (the generated `RuleCandidateCreatedV1`, then
+  `CandidateIntake.from_payload`); a missing `outcome` is `extracted`;
+- a candidate id stored before changes nothing, whatever event carried it;
+- the candidate's document must be registered: an unknown one fails and is retried, then goes to
+  `rule.candidate.created.rulebook.rule-candidates.dlq`, and a replay once the document is
+  registered takes it in;
+- the regulator is kept in lower case (the pipeline sends the source registry's `CBIC`);
+- the suggested rule key is the payload's when a rule has that key, else the one rule key the
+  document's relation candidates name when they name exactly one, else the payload's as a key
+  for a new rule. The pipeline's key is a `<form>_<cadence>` heuristic, never a lookup, and
+  `GET .../review/tasks/{id}` says whether a rule has it (`suggested_rule_known`).
+
+Nothing is drafted by the intake: an analyst drafts, as above. Off, no group reads the topic,
+which keeps the candidates a month; turned on, the group reads them from the start. `make product`
+leaves it off, so the product never writes candidates into the database it shares. A failed
+extraction is run again by ingesting the stored document again (the pipeline's business).
 
 ## Changes feed
 
@@ -373,9 +442,10 @@ The command is idempotent: a re-run after editing the file updates the draft ver
 place; a version that has left draft is never modified and a changed rule gets a new draft
 version instead (`rulebook.infrastructure.seed_repository`). The seed status that review sets to
 reviewed is not compared, so re-running the seed after an approval adds nothing. A rule whose
-latest version an analyst edited through its review task (an `edited` decision) is the
-analyst's: the command neither overwrites that draft nor adds a version after it, and reports the
-rule as kept, so a release that runs the seed never reverts an analyst's work. `rulebook.application.seed_loader`
+latest version an analyst edited through its review task (an `edited` decision), or drafted from
+a rule candidate (its `candidate_id`), is the analyst's: the command neither overwrites that
+draft nor adds a version after it, and reports the rule as kept, so a release that runs the seed
+never reverts an analyst's work. `rulebook.application.seed_loader`
 parses and checks the file; `rulebook.domain.seed` is the value object.
 
 A rulebook on the memory store has no database for the command to write into, so
@@ -417,10 +487,11 @@ violation (exit code 1) also labels it `data-quality`. What to do about a violat
 ```
 src/rulebook/
   api/             # routers (documents, review, review_tasks, rule_versions, publication, graph, search; changes, the public GET /v1/changes), request/response schemas, the write-token and review-token dependencies
-  application/     # use cases: documents.py, alignment.py, review.py, review_tasks.py, relations.py, rule_versions.py, publication.py, graph.py, search.py, changes.py; seed_loader.py
-  domain/          # documents.py, alignment.py, review.py, review_tasks.py, relations.py, rule_versions.py, publication.py (the planner), events.py, graph.py, search.py, changes.py (the feed), runs.py, ids.py, errors.py, repository.py, seed.py
+  application/     # use cases: documents.py, alignment.py, review.py, review_tasks.py (and drafting from a candidate), intake.py (the candidate intake), relations.py, rule_versions.py, publication.py, graph.py, search.py, changes.py; seed_loader.py
+  domain/          # documents.py, alignment.py, review.py, review_tasks.py, intake.py (rule candidates and the draft they propose), drafting.py (the checks of a draft's content), relations.py, rule_versions.py, publication.py (the planner), events.py, graph.py, search.py, changes.py (the feed), runs.py, ids.py, errors.py, repository.py, seed.py
   infrastructure/  # models.py (with the Vector column type), knowledge_repository.py (Postgres unit of work and outbox sink), memory.py, seed_repository.py, review_metrics.py (the gauges of both review queues)
-  settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN, CW_RULEBOOK_REVIEW_TOKEN, CW_RULEBOOK_PUBLISH_ENABLED, CW_RULEBOOK_SEED_ON_START (local and test, memory store)
+  settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN, CW_RULEBOOK_REVIEW_TOKEN, CW_RULEBOOK_PUBLISH_ENABLED, CW_RULEBOOK_CANDIDATE_INTAKE_ENABLED, CW_RULEBOOK_SEED_ON_START (local and test, memory store)
+  worker.py        # python -m rulebook.worker: the daily transitions sweep and the consumer of rule.candidate.created
   testing.py       # rulebook_settings() for tests and demos: memory store, known tokens (WRITE_TOKEN, REVIEW_TOKEN)
   wiring.py        # what the api layer gets from the composition root
   seed.py          # rulebook-seed command
@@ -438,10 +509,11 @@ migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and 
   versions/20260929_0007_publish_flow.py   # high_impact, submitted_at, rule_version_decision, the rule_version guard, outbox_event
   versions/20261006_0008_statute_document_type.py  # ck_document_doc_type admits statute
   versions/20261006_0009_review_tasks.py   # review_task with its guard; the edited decision
+  versions/20261006_0010_rule_candidates.py   # rule_candidate, candidate review tasks, rule_version.candidate_id, processed_event
 tests/
   unit/            # domain, use cases and API on the memory store; test_models_vocabulary.py: model CHECKs against the kernel enums
-  integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work and its reads; the search index; the publish guard, the outbox and the sweep; the changes feed read by a plain role; review tasks with their checks, index and guard
-  contract/        # test_openapi.py: the served schema equals the committed spec; test_events.py: the rule events match their schemas
+  integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work and its reads; the search index; the publish guard, the outbox and the sweep; the changes feed read by a plain role; review tasks with their checks, index and guard; rule candidates, their tasks and the consumer's transaction
+  contract/        # test_openapi.py: the served schema equals the committed spec; test_events.py: the rule events and rule.rejected match their schemas
 alembic.ini, pyproject.toml, Dockerfile
 ```
 
@@ -454,6 +526,7 @@ make dev                          # infrastructure (Docker Compose)
 make migrate SERVICE=rulebook     # alembic upgrade head in schema rulebook
 make run SERVICE=rulebook         # http://localhost:8003/health, /ready, /v1/rulebook/ping, /v1/rulebook/documents/{id}
 make relay SERVICE=rulebook       # relays the rule events in outbox_event to Kafka
+make worker SERVICE=rulebook      # the sweep (CW_RULEBOOK_PUBLISH_ENABLED) and the candidate intake (CW_RULEBOOK_CANDIDATE_INTAKE_ENABLED, with Kafka)
 make test                         # unit + contract tests with the coverage gate
 make py-test-integration          # testcontainers tests; needs Docker
 uv run pytest services/rulebook/tests/integration -q -m integration   # this service only
@@ -470,8 +543,8 @@ Check the schema after `make migrate`:
 docker compose exec -T postgres psql -U cw -d compliancewatch -Atc \
   "select table_name from information_schema.tables where table_schema='rulebook' order by 1"
 # alembic_version, canonical_entity, citation, clause, clause_embedding, clause_entity, document,
-# entity_review, extraction_run, outbox_event, relation_candidate, review_task, rule,
-# rule_relation, rule_version, rule_version_decision
+# entity_review, extraction_run, outbox_event, processed_event, relation_candidate, review_task,
+# rule, rule_candidate, rule_relation, rule_version, rule_version_decision
 ```
 
 Roll back with `CW_DATABASE_URL=... CW_DB_SCHEMA=rulebook uv run --package compliancewatch-rulebook alembic -c services/rulebook/alembic.ini downgrade base`
