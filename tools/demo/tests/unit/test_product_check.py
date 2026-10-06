@@ -6,13 +6,13 @@ import json
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, Final
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx2
 import pytest
 
 from cw_demo.product import check
-from cw_demo.product.analysts import REVIEWERS
+from cw_demo.product.analysts import CHECK_ANALYST, REVIEWERS
 from cw_demo.product.check import (
     CheckContext,
     NotYetError,
@@ -38,7 +38,9 @@ from cw_demo.product.client import (
     refusal,
 )
 from cw_demo.product.tenants import BUSINESS_TENANT, DEMO_GSTIN
+from ontology import load as load_ontology
 from py_common.settings import AuthMode, Environment
+from rulebook.application.seed_loader import load_calendar
 
 ENTITY: Final = str(uuid4())
 REGISTRATION: Final = str(uuid4())
@@ -311,6 +313,7 @@ def test_steps_are_chosen_by_name_in_the_check_order() -> None:
         "changes",
         "public",
         "sources",
+        "review",
     ]
     assert [step.name for step in select(["isolation", "health"])] == ["health", "isolation"]
     assert select(None) == check.STEPS
@@ -787,3 +790,172 @@ def test_the_sources_step_waits_for_the_built_in_sources(sink: Path) -> None:
     del script.runs["gstn_advisories"]
     with pytest.raises(StepFailedError, match="lacks gstn_advisories"):
         check.sources(context_of(with_token(script, sink), timeout=0.05))
+
+
+SEED_KEYS: Final = tuple(rule.rule_key for rule in load_calendar(load_ontology()).rules)
+
+
+class Reviews(Scripted):
+    """The rulebook's review tasks: one draft per seed rule, a task per draft once the seed
+    request ran, claims, a task's detail and the stats. ``reopens`` makes every seed request
+    open the tasks again; ``untasked`` leaves that rule's draft out of the queue; ``claimed_by``
+    hands every task to someone else; ``published`` moves that rule's version on."""
+
+    def __init__(
+        self,
+        *,
+        reopens: bool = False,
+        untasked: str = "",
+        claimed_by: str | None = None,
+        published: str = "",
+    ) -> None:
+        super().__init__()
+        self.reopens = reopens
+        self.untasked = untasked
+        self.published = published
+        self.tasks: dict[str, dict[str, Any]] = {}
+        self.claims: list[str] = []
+        self.foreign = claimed_by
+
+    @staticmethod
+    def version_id(key: str) -> str:
+        return str(uuid5(NAMESPACE_URL, key))
+
+    def status_of(self, key: str) -> str:
+        return "published" if key == self.published else "draft"
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        path = request.url.path
+        if request.url.host == "public" and path.startswith("/v1/rulebook/review"):
+            return httpx2.Response(
+                404, json={"type": "urn:compliancewatch:problem:route-not-found"}
+            )
+        if path.startswith("/v1/rulebook/rules/") and path.endswith("/versions"):
+            key = path.split("/")[-2]
+            version = {
+                "rule_version_id": self.version_id(key),
+                "version": 1,
+                "status": self.status_of(key),
+                "seed_status": "needs_review",
+            }
+            return httpx2.Response(200, json=[version])
+        if path == f"{check.REVIEW_TASKS}/seed":
+            assert request.headers["x-cw-review-token"] == "test-review-token"
+            opened = [self.open(key) for key in SEED_KEYS if self.opens(key)]
+            return httpx2.Response(200, json={"opened": len(opened), "task_ids": opened})
+        if path == check.REVIEW_TASKS:
+            return httpx2.Response(
+                200, json={"items": list(self.tasks.values()), "next_cursor": None}
+            )
+        if path.endswith("/claim"):
+            task = self.tasks[path.split("/")[-2]]
+            actor = json.loads(request.content)["actor_id"]
+            if task["claimed_by"] is None:
+                task.update(status="claimed", claimed_by=actor, claimed_at="2000-01-03T10:00:00Z")
+                self.claims.append(task["rule_key"])
+            return httpx2.Response(200, json=task)
+        if path.startswith(f"{check.REVIEW_TASKS}/"):
+            task = self.tasks[path.split("/")[-1]]
+            return httpx2.Response(200, json=self.detail(task))
+        if path == check.REVIEW_STATS:
+            waiting = [t for t in self.tasks.values() if t["status"] != "decided"]
+            claimed = sum(t["status"] == "claimed" for t in waiting)
+            by_status = {"open": len(waiting) - claimed, "claimed": claimed, "decided": 0}
+            return httpx2.Response(
+                200, json={"by_status": by_status, "oldest_open_age_seconds": 7200.0}
+            )
+        return super().__call__(request)
+
+    def opens(self, key: str) -> bool:
+        return key != self.untasked and (self.reopens or self.version_id(key) not in self.tasked())
+
+    def tasked(self) -> set[str]:
+        return {task["rule_version_id"] for task in self.tasks.values()}
+
+    def open(self, key: str) -> str:
+        task_id = str(uuid4())
+        self.tasks[task_id] = {
+            "task_id": task_id,
+            "rule_version_id": self.version_id(key),
+            "rule_key": key,
+            "version": 1,
+            "version_status": self.status_of(key),
+            "status": "open" if self.foreign is None else "claimed",
+            "claimed_by": self.foreign,
+            "claimed_at": None if self.foreign is None else "2000-01-03T09:00:00Z",
+        }
+        return task_id
+
+    def detail(self, task: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "task": task,
+            "rule_version": {
+                "rule_version_id": task["rule_version_id"],
+                "rule_key": task["rule_key"],
+                "version": 1,
+                "status": task["version_status"],
+                "seed_status": "needs_review",
+            },
+            "specification_described": ["all of:", "  registration_type = regular"],
+            "citations": [{"verified": True}],
+            "decisions": [],
+            "tasks": [task],
+        }
+
+
+def with_review_token(script: Reviews, sink: Path) -> Product:
+    return scripted_product(script, sink, rulebook_review_token="test-review-token")
+
+
+def test_the_review_step_opens_claims_reads_and_counts_the_seed_tasks(sink: Path) -> None:
+    script = Reviews()
+    product = with_review_token(script, sink)
+    lines = check.review(context_of(product))
+    first_key = SEED_KEYS[0]
+    assert lines == [
+        f"seed tasks: {len(SEED_KEYS)} opened now, a second request opened none",
+        f"waiting: {len(SEED_KEYS)} tasks (of {len(SEED_KEYS)}), every one of the "
+        f"{len(SEED_KEYS)} seed drafts that need review among them",
+        f"claim: {first_key} v1 (claimed now) by {CHECK_ANALYST.name}; claiming again changed "
+        "nothing",
+        f"read: {first_key} v1 (draft, needs_review), 2 lines of specification, 1 citations "
+        "(1 verified), 0 decisions and 1 tasks in its history",
+        f"stats: {len(SEED_KEYS) - 1} open, 1 claimed, 0 decided; the oldest has waited 2.0 h",
+        "GET /v1/rulebook/review/tasks on the public listener: 404 route-not-found",
+    ]
+    again = check.review(context_of(product))
+    assert again[0] == "seed tasks: 0 opened now, a second request opened none"
+    assert again[2].startswith(f"claim: {first_key} v1 (held from an earlier run)")
+    assert script.claims == [first_key], "one claim, held across runs"
+
+
+def test_the_review_step_fails_when_seeding_twice_opens_tasks_again(sink: Path) -> None:
+    with pytest.raises(StepFailedError, match="a second seed request opened 13 more tasks"):
+        check.review(context_of(with_review_token(Reviews(reopens=True), sink)))
+
+
+def test_the_review_step_fails_when_a_seed_draft_has_no_task(sink: Path) -> None:
+    with pytest.raises(StepFailedError, match="seed drafts with no task waiting: gstr9_annual v1"):
+        check.review(context_of(with_review_token(Reviews(untasked="gstr9_annual"), sink)))
+
+
+def test_the_review_step_reports_tasks_whose_version_moved_on_and_claims_a_draft(
+    sink: Path,
+) -> None:
+    script = Reviews(published=SEED_KEYS[0])
+    lines = check.review(context_of(with_review_token(script, sink)))
+    assert lines[2] == (
+        "waiting on versions the publish routes moved on (decide them with reject): "
+        f"{SEED_KEYS[0]} v1 (published)"
+    )
+    assert script.claims == [SEED_KEYS[1]], "the first open draft, not the published version"
+
+
+def test_the_review_step_claims_nothing_when_someone_else_holds_every_task(sink: Path) -> None:
+    script = Reviews(claimed_by=str(uuid4()))
+    lines = check.review(context_of(with_review_token(script, sink)))
+    assert lines[2] == (
+        "claim: every waiting draft is claimed by someone else, so none was claimed"
+    )
+    assert script.claims == []
+    assert lines[3].startswith("stats: 0 open, 13 claimed")

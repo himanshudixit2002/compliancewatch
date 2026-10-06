@@ -32,5 +32,10 @@ SECOND_REVIEWER: Final = SyntheticAnalyst(
 REVIEWERS: Final = (FIRST_REVIEWER, SECOND_REVIEWER)
 """Two different approvers, as a high-impact version needs (ADR-006)."""
 ANALYSTS: Final = (DRAFTER, *REVIEWERS)
+CHECK_ANALYST: Final = SyntheticAnalyst(
+    UUID("00000000-0000-4000-8000-00000000a004"), "Check analyst (synthetic)"
+)
+"""Who claims a review task in ``cw-product check``'s review step: a claim only, never an edit
+or a decision, so no seed draft changes and none is marked reviewed."""
 NOTE: Final = "synthetic demo publication - not an analyst review"
 """The note of every step of the demo publication."""

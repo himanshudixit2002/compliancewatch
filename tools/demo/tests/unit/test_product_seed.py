@@ -177,6 +177,24 @@ def test_honesty_and_isolation_hold_after_the_seed(product: Product, tmp_path: P
     assert any(CA_FIRM_TENANT.name in line for line in isolation.details)
 
 
+def test_the_review_step_opens_claims_and_reads_seed_tasks_and_changes_no_rule(
+    product: Product, tmp_path: Path
+) -> None:
+    seed(product, state_path=tmp_path / "last.json")
+    context = CheckContext(product, timeout=5)
+    (review,) = select(["review"])
+    (honesty,) = select(["honesty"])
+    first, kept, second = run_checks(context, [review, honesty, review])
+    assert (first.name, first.ok, first.error) == ("review", True, "")
+    drafts = 13 - len(DEFAULT_RULES)
+    assert first.details[0] == f"seed tasks: {drafts} opened now, a second request opened none"
+    assert "(claimed now)" in first.details[2]
+    assert (kept.ok, kept.error) == (True, ""), "a claim changes no seed rule"
+    assert (second.ok, second.error) == (True, "")
+    assert second.details[0] == "seed tasks: 0 opened now, a second request opened none"
+    assert "(held from an earlier run)" in second.details[2]
+
+
 def test_isolation_fails_before_anything_is_seeded(product: Product) -> None:
     (result,) = run_checks(CheckContext(product, timeout=0.2, interval=0.05), select(["isolation"]))
     assert not result.ok

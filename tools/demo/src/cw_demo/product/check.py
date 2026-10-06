@@ -115,6 +115,19 @@ the API answers. One failed step does not stop the next.
   file that is no document must be refused 415 with nothing stored: a stored document is never
   deleted, so the check uploads none (``tools/demo/tests/unit/test_manual_parse_flow.py`` runs
   uploads and a manual parse).
+- ``review``: the rulebook's review tasks on the internal listener. ``POST
+  /v1/rulebook/review/tasks/seed`` opens a task for every seed draft that has none waiting, and a
+  second request opens nothing; every seed draft that needs review then has a task waiting
+  (open or claimed); a task waiting on a version the publish routes moved on (``cw-product
+  publish`` publishes seed rules outside the review flow) is reported, not judged. The step claims
+  one task as the synthetic check analyst (``analysts.CHECK_ANALYST``): the one it holds from an
+  earlier run, or the first open one in the queue whose version is a draft; claiming it again
+  changes nothing. It reads that task (its
+  draft, the specification described, the citations with their verification, the history) and
+  the stats, which count the waiting tasks. The public listener answers the queue 404 in header
+  mode. Nothing is edited or decided, so no seed draft changes, none is approved or published
+  and none is marked reviewed: ``tools/demo/tests/unit/test_review_flow.py`` edits, approves
+  and publishes on memory stores.
 """
 
 import io
@@ -131,7 +144,7 @@ from uuid import UUID, uuid4
 
 import httpx2
 
-from cw_demo.product.analysts import FIRST_REVIEWER, NOTE, REVIEWERS
+from cw_demo.product.analysts import CHECK_ANALYST, FIRST_REVIEWER, NOTE, REVIEWERS
 from cw_demo.product.client import (
     GOLDEN,
     Product,
@@ -297,6 +310,13 @@ FETCHED_SOURCE: Final = "cbic_notifications"
 FETCH_ACTOR: Final = UUID("00000000-0000-4000-8000-0000000c0001")
 """The synthetic admin the check's fetches name."""
 FETCH_REASON: Final = "cw-product check: a fetch must be refused while crawling is off"
+REVIEW_TASKS: Final = f"{RULEBOOK}/review/tasks"
+REVIEW_STATS: Final = f"{RULEBOOK}/review/stats"
+WAITING: Final = frozenset({"open", "claimed"})
+"""The statuses of a review task that waits for a decision."""
+IN_REVIEW_FLOW: Final = frozenset({"draft", "in_review"})
+"""The statuses of a version its task can still move: a version the publish routes approved or
+published while its task waited is decided with reject."""
 
 SweepRunner = Callable[[Sequence[str]], tuple[int, dict[str, Any]]]
 """Runs ``obligation-sweep --once --json`` with more arguments: its exit code and its report."""
@@ -2248,6 +2268,147 @@ def _uploads_and_tasks(product: Product, built_in: Sequence[Mapping[str, Any]]) 
     ]
 
 
+# ---------------------------------------------------------------- review
+
+
+def review_queue(product: Product) -> list[dict[str, Any]]:
+    """Every review task, a page at a time, in the queue's order."""
+    items: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while True:
+        params: dict[str, str | int] = {"limit": 200}
+        if cursor is not None:
+            params["cursor"] = cursor
+        page = ok(product.internal.get(REVIEW_TASKS, params=params))
+        items += page["items"]
+        cursor = page["next_cursor"]
+        if cursor is None:
+            return items
+
+
+def seed_drafts(context: CheckContext) -> dict[str, str]:
+    """The seed calendar's versions that are drafts needing review, by version id."""
+    drafts: dict[str, str] = {}
+    for rule in load_calendar(load_ontology()).rules:
+        versions = poll(
+            partial(rule_versions, context.product, rule.rule_key),
+            timeout=context.timeout,
+            interval=context.interval,
+        )
+        for version in versions:
+            if version["status"] == "draft" and version["seed_status"] == NEEDS_REVIEW:
+                drafts[str(version["rule_version_id"])] = f"{rule.rule_key} v{version['version']}"
+    return drafts
+
+
+def review(context: CheckContext) -> list[str]:
+    product = context.product
+    headers = product.review_headers()
+    opened = ok(product.internal.post(f"{REVIEW_TASKS}/seed", headers=headers))
+    again = ok(product.internal.post(f"{REVIEW_TASKS}/seed", headers=headers))
+    if again["opened"]:
+        raise StepFailedError(
+            f"a second seed request opened {again['opened']} more tasks: one per draft, once"
+        )
+    drafts = seed_drafts(context)
+    tasks = review_queue(product)
+    waiting = [task for task in tasks if task["status"] in WAITING]
+    tasked = {str(task["rule_version_id"]) for task in waiting}
+    untasked = sorted(label for version_id, label in drafts.items() if version_id not in tasked)
+    if untasked:
+        raise StepFailedError(f"seed drafts with no task waiting: {', '.join(untasked)}")
+    moved_on = sorted(
+        f"{task['rule_key']} v{task['version']} ({task['version_status']})"
+        for task in waiting
+        if task["version_status"] not in IN_REVIEW_FLOW
+    )
+    claimed, claim_line = claim_one(product, waiting)
+    lines = [
+        f"seed tasks: {opened['opened']} opened now, a second request opened none",
+        f"waiting: {len(waiting)} tasks (of {len(tasks)}), every one of the {len(drafts)} "
+        "seed drafts that need review among them",
+    ]
+    if moved_on:
+        lines.append(
+            "waiting on versions the publish routes moved on (decide them with reject): "
+            + ", ".join(moved_on)
+        )
+    lines.append(claim_line)
+    if claimed is not None:
+        lines.append(read_task(product, claimed))
+    stats = ok(product.internal.get(REVIEW_STATS))
+    counted = stats["by_status"]["open"] + stats["by_status"]["claimed"]
+    if counted < len(waiting) or stats["oldest_open_age_seconds"] < 0:
+        raise StepFailedError(f"the stats count {counted} waiting tasks, the queue {len(waiting)}")
+    lines.append(
+        f"stats: {stats['by_status']['open']} open, {stats['by_status']['claimed']} claimed, "
+        f"{stats['by_status']['decided']} decided; the oldest has waited "
+        f"{stats['oldest_open_age_seconds'] / 3600:.1f} h"
+    )
+    hidden = product.public.get(REVIEW_TASKS)
+    if (hidden.status_code, problem_slug(hidden)) != (404, ROUTE_NOT_FOUND):
+        raise StepFailedError(
+            f"GET {REVIEW_TASKS} on the public listener answered {hidden.status_code}, not 404"
+        )
+    lines.append(f"GET {REVIEW_TASKS} on the public listener: 404 {ROUTE_NOT_FOUND}")
+    return lines
+
+
+def claim_one(
+    product: Product, waiting: Sequence[Mapping[str, Any]]
+) -> tuple[Mapping[str, Any] | None, str]:
+    """The task the check analyst holds, or the first open one, claimed (again) by the check
+    analyst; the claimant claiming again changes nothing."""
+    analyst = str(CHECK_ANALYST.user_id)
+    held = [
+        task
+        for task in waiting
+        if task["claimed_by"] == analyst and task["version_status"] in IN_REVIEW_FLOW
+    ]
+    candidates = held or [
+        task for task in waiting if task["status"] == "open" and task["version_status"] == "draft"
+    ]
+    if not candidates:
+        return None, "claim: every waiting draft is claimed by someone else, so none was claimed"
+    task = candidates[0]
+    path = f"{REVIEW_TASKS}/{task['task_id']}/claim"
+    body = {"actor_id": analyst}
+    claimed = ok(product.internal.post(path, json=body, headers=product.review_headers()))
+    if (claimed["status"], claimed["claimed_by"]) != ("claimed", analyst):
+        raise StepFailedError(f"the claim of task {task['task_id']} answered {claimed}")
+    repeated = ok(product.internal.post(path, json=body, headers=product.review_headers()))
+    if repeated["claimed_at"] != claimed["claimed_at"]:
+        raise StepFailedError("claiming a task the analyst holds changed the claim")
+    how = "held from an earlier run" if held else "claimed now"
+    return claimed, (
+        f"claim: {task['rule_key']} v{task['version']} ({how}) by {CHECK_ANALYST.name}; "
+        "claiming again changed nothing"
+    )
+
+
+def read_task(product: Product, task: Mapping[str, Any]) -> str:
+    detail = ok(product.internal.get(f"{REVIEW_TASKS}/{task['task_id']}"))
+    version = detail["rule_version"]
+    problems: list[str] = []
+    if detail["task"]["task_id"] != task["task_id"]:
+        problems.append("another task came back")
+    if version["rule_version_id"] != task["rule_version_id"]:
+        problems.append("another version came back")
+    if not detail["specification_described"]:
+        problems.append("its specification is not described")
+    if task["task_id"] not in {entry["task_id"] for entry in detail["tasks"]}:
+        problems.append("its history leaves it out")
+    if problems:
+        raise StepFailedError(f"task {task['task_id']}: " + "; ".join(problems))
+    verified = sum(citation["verified"] for citation in detail["citations"])
+    return (
+        f"read: {version['rule_key']} v{version['version']} ({version['status']}, "
+        f"{version['seed_status']}), {len(detail['specification_described'])} lines of "
+        f"specification, {len(detail['citations'])} citations ({verified} verified), "
+        f"{len(detail['decisions'])} decisions and {len(detail['tasks'])} tasks in its history"
+    )
+
+
 # ---------------------------------------------------------------- the command
 
 STEPS: list[Step] = [
@@ -2295,6 +2456,12 @@ STEPS: list[Step] = [
         "the pipeline lists its sources, refuses a fetch while crawling is off and an upload "
         "that is no document",
         sources,
+    ),
+    Step(
+        "review",
+        "every seed draft waits in the review queue; one task is claimed and read, and the "
+        "stats count them",
+        review,
     ),
 ]
 """The steps in the order they run. A later package appends its own."""
