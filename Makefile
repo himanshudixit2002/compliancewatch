@@ -593,18 +593,21 @@ openapi-ts-check: check-pnpm ## The generated OpenAPI types match the committed 
 # default: header auth; both listeners on 127.0.0.1; the worker's health on PRODUCT_WORKER_PORT
 # (8081, since 8001 is identity's under make run and make web-stack); the worker's Kafka and
 # Temporal switches, the reminder sweep and the rolling window on; the engine's recompute on
-# profile.updated on, with the rulebook's in-force listing cached for five seconds, and its
-# fan-out of rule.published on (CW_APPLICABILITY_FANOUT_ENABLED); obligation's consumer of the rule
-# events on (CW_OBLIGATION_RULE_EVENTS_ENABLED); a CA firm's bulk change card on
-# (CW_NOTIFICATION_BULK_ENABLED); rule publishing on with the placeholder
-# tokens local-write-token and local-review-token (not secrets; values in .env win); the profile's
-# static GSTIN lookup, so the demo GSTIN pre-fills; the notification sink in place of the real
-# channels, recording into var/product/sink.jsonl, with a five-second batching window so a change
-# card goes within the check's wait; message links to the product's web app; and the pipeline's
-# crawl off (CW_PIPELINE_CRAWL_ENABLED=false, whatever .env says): a crawl reads the live
-# regulator sites, which the local product and CI never do. The web app gets
-# every CW_WEB_*_URL at the internal listener and builds into .next/product, so it runs beside a
-# make web-dev of the same checkout (Next allows one dev server per build directory). Pids and
+# profile.updated on, with the rulebook's in-force listing cached for five seconds, and its fan-out
+# of rule.published on (CW_APPLICABILITY_FANOUT_ENABLED); obligation's consumer of the rule events
+# on (CW_OBLIGATION_RULE_EVENTS_ENABLED); a CA firm's bulk change card on
+# (CW_NOTIFICATION_BULK_ENABLED); rule publishing on with the placeholder tokens local-write-token
+# and local-review-token (not secrets; values in .env win); the profile's static GSTIN lookup, so
+# the demo GSTIN pre-fills; the notification sink in place of the real channels, recording into
+# var/product/sink.jsonl, with a five-second batching window so a change card goes within the
+# check's wait; message links to the product's web app; the pipeline's crawl off
+# (CW_PIPELINE_CRAWL_ENABLED=false, whatever .env says): a crawl reads the live regulator sites,
+# which the local product and CI never do; and its rule extraction on
+# (CW_PIPELINE_EXTRACTION_ENABLED=true): the gateway's fake model, the default, answers it
+# deterministically and for nothing, and the product ingests nothing by itself, so the worker only
+# builds it at start and the check's extraction step asks the gateway with its prompt. The web app
+# gets every CW_WEB_*_URL at the internal listener and builds into .next/product, so it runs beside
+# a make web-dev of the same checkout (Next allows one dev server per build directory). Pids and
 # logs are under var/product; make product-down stops only the processes whose pids it recorded,
 # with their children.
 PRODUCT_DIR := var/product
@@ -626,7 +629,8 @@ PRODUCT_ENV = CW_AUTH_MODE=header CW_MVP_HOST=127.0.0.1 \
   CW_RULEBOOK_REVIEW_TOKEN="$${CW_RULEBOOK_REVIEW_TOKEN:-local-review-token}" \
   CW_PROFILE_GSTIN_LOOKUP=static CW_NOTIFICATION_CHANNELS=sink \
   CW_NOTIFICATION_SINK_PATH=$(PRODUCT_DIR)/sink.jsonl CW_NOTIFICATION_BATCH_WINDOW_SECONDS=5 \
-  CW_WEB_BASE_URL="http://localhost:$${WEB_PORT:-3000}" CW_PIPELINE_CRAWL_ENABLED=false
+  CW_WEB_BASE_URL="http://localhost:$${WEB_PORT:-3000}" CW_PIPELINE_CRAWL_ENABLED=false \
+  CW_PIPELINE_EXTRACTION_ENABLED=true
 
 product: check-uv ## The local product: make dev, make migrate, the seed calendar, cw-mvp serve and worker (Kafka, Temporal on), next dev on WEB_PORT (3000): make product [WEB=0] [WEB_PORT=3400]
 	@$(MAKE) --no-print-directory dev

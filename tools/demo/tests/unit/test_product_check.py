@@ -314,6 +314,7 @@ def test_steps_are_chosen_by_name_in_the_check_order() -> None:
         "public",
         "sources",
         "review",
+        "extraction",
     ]
     assert [step.name for step in select(["isolation", "health"])] == ["health", "isolation"]
     assert select(None) == check.STEPS
@@ -959,3 +960,126 @@ def test_the_review_step_claims_nothing_when_someone_else_holds_every_task(sink:
     )
     assert script.claims == []
     assert lines[3].startswith("stats: 0 open, 13 claimed")
+
+
+PLACEHOLDER: Final = json.dumps(
+    {
+        "title": "placeholder",
+        "summary": "placeholder",
+        "doc_kind": "notification",
+        "change_kind": "none",
+        "effective_from": None,
+        "effective_to": None,
+        "references": [],
+        "applies_to": [],
+        "obligation": None,
+        "recurrence": None,
+        "amounts": [],
+        "citations": [],
+        "confidence": 0.0,
+    }
+)
+"""What the gateway's fake model answers for the extraction schema: every required field, the
+first value of each enum, no citation."""
+
+
+class Extraction(Scripted):
+    """The triage queue, the resolve route (404 for a typed triage of a task nobody opened, 422
+    for an untyped one, or ``resolve_status``), and the gateway's completions route answering
+    ``answer`` (or ``gateway_status`` with a problem)."""
+
+    def __init__(self, *, resolve_status: int | None = None, gateway_status: int = 200) -> None:
+        super().__init__()
+        self.resolve_status = resolve_status
+        self.gateway_status = gateway_status
+        self.asked: list[dict[str, Any]] = []
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        path = request.url.path
+        if path == check.TASKS:
+            assert request.url.params["kind"] == "triage"
+            return httpx2.Response(200, json={"items": [], "next_cursor": None})
+        if path.endswith("/resolve"):
+            assert request.headers["x-cw-write-token"] == "test-write-token"
+            triage = json.loads(request.content)["triage"]
+            if self.resolve_status is not None:
+                return httpx2.Response(self.resolve_status, json={})
+            if "doc_type" in triage:
+                slug = check.TASK_NOT_FOUND
+                return httpx2.Response(404, json={"type": f"urn:compliancewatch:problem:{slug}"})
+            slug = check.REQUEST_INVALID
+            return httpx2.Response(422, json={"type": f"urn:compliancewatch:problem:{slug}"})
+        if path == "/v1/llm-gateway/completions":
+            self.asked.append(json.loads(request.content))
+            if self.gateway_status != 200:
+                return httpx2.Response(
+                    self.gateway_status,
+                    json={"type": "urn:compliancewatch:problem:llm-prompt-unregistered"},
+                )
+            return httpx2.Response(
+                200,
+                json={
+                    "text": PLACEHOLDER,
+                    "model_served": "fake/echo",
+                    "input_tokens": 1,
+                    "output_tokens": 1,
+                },
+            )
+        return super().__call__(request)
+
+
+def with_fake_gateway(script: Extraction, sink: Path) -> Product:
+    return scripted_product(script, sink, rulebook_write_token="test-write-token")
+
+
+def test_the_extraction_step_proves_triage_and_the_gateways_prompt_ingesting_nothing(
+    sink: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "gateway_provider", lambda product: "fake")
+    script = Extraction()
+    lines = check.extraction(context_of(with_fake_gateway(script, sink)))
+    assert lines[0] == "GET /v1/pipeline/tasks?kind=triage: 0 on the first page"
+    assert lines[1] == (
+        "a triage of a task nobody opened: 404 pipeline-task-not-found; a relevant one without "
+        "a type: 422 request-invalid"
+    )
+    assert lines[2].startswith(
+        "the extraction asked the gateway's fake model 2 time(s) with "
+        "extraction.rule_candidate@1 about a synthetic notification: not a candidate twice "
+        "(citations must cite at least one clause)"
+    )
+    assert [(asked["prompt"], asked["temperature"]) for asked in script.asked] == [
+        ("extraction.rule_candidate@1", 0.0),
+        ("extraction.rule_candidate@1", 0.3),
+    ]
+
+
+def test_the_extraction_step_asks_no_real_model(
+    sink: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "gateway_provider", lambda product: "vercel")
+    script = Extraction()
+    with pytest.raises(check.StepSkippedError, match="answers from vercel"):
+        check.extraction(context_of(with_fake_gateway(script, sink)))
+    assert script.asked == []
+
+
+def test_the_extraction_step_fails_on_a_triage_taken_or_a_prompt_refused(
+    sink: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "gateway_provider", lambda product: "fake")
+    with pytest.raises(StepFailedError, match="a triage of a task nobody opened answered 200"):
+        check.extraction(context_of(with_fake_gateway(Extraction(resolve_status=200), sink)))
+    with pytest.raises(StepFailedError, match="the gateway refused the extraction's ask: 422"):
+        check.extraction(context_of(with_fake_gateway(Extraction(gateway_status=422), sink)))
+
+
+def test_the_extraction_step_reads_the_products_gateway_provider(
+    sink: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    product = with_fake_gateway(Extraction(), sink)
+    monkeypatch.setenv("CW_LLM_PROVIDER", "fake")
+    assert check.gateway_provider(product) == "fake"
+    monkeypatch.setenv("CW_LLM_PROVIDER", "vercel")
+    monkeypatch.setenv("CW_AI_GATEWAY_API_KEY", "not-a-real-key")
+    assert check.gateway_provider(product) == "vercel"
