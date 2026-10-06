@@ -369,6 +369,24 @@ def gstr9_obligations(product: Product, registration: str, version_id: str) -> i
     return len(listed)
 
 
+def admin_change_cards(pump: Pump, registration: str, version_id: str) -> int:
+    """The firm admin's own change cards of the version for the client. The obligation is listed
+    a drain before its events reach the notification consumer, so the public step waits for the
+    card: a contact it registered first would get that card too, and its bulk request would find
+    it a duplicate."""
+    with pump.lock:
+        cards = [
+            n
+            for n in pump.notifications.notifications_of(TenantId(CA_FIRM_TENANT.tenant_id))
+            if n.occasion is OccasionKind.CHANGE_CARD
+            and n.business_id == BusinessId(UUID(registration))
+            and n.params.get("rule_version_id") == version_id
+        ]
+    if not cards:
+        raise NotYetError("the firm's admin has no change card of the GSTR-9 version yet")
+    return len(cards)
+
+
 def monthly_due_next(now: datetime) -> str:
     """The structured layer's answer for a monthly GSTR-3B filer decided on ``now``'s day in
     India: the return due next that day, from the seed calendar, which is the previous month's
@@ -402,6 +420,11 @@ def test_the_public_api_lists_answers_and_bulk_notifies(tmp_path: Path) -> None:
                 lambda: gstr9_obligations(
                     product, seeded["client_karnataka"], gstr9.rule_version_id
                 ),
+                timeout=30.0,
+                interval=0.1,
+            )
+            check.poll(
+                lambda: admin_change_cards(pump, seeded["client_karnataka"], gstr9.rule_version_id),
                 timeout=30.0,
                 interval=0.1,
             )

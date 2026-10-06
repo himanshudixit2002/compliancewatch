@@ -6,6 +6,11 @@ patch. Every line names the topic and its version.
 
 ## 2026-10-06
 
+- document.classified 1.0.0: first version; the pipeline's classify step and a triage's
+  resolution produce it
+- rule.candidate.created 1.1.0: optional source_id, source_key, doc_type, outcome, the candidate
+  in the extraction schema's shape, issues, suggested_rule_key, clause_ids and ontology_version;
+  the pipeline's rule extraction produces it
 - document.parsed 1.1.0: doc_type admits statute; the pipeline's parse produces it, and the
   descriptions say clause text is read from the rulebook
 

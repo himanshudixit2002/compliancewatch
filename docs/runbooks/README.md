@@ -19,6 +19,7 @@ Flat; one markdown file per alert or operational procedure.
 - [notification-delivery.md](notification-delivery.md): notifications that fail for good, are delivered twice or wait past the 15-minute objective, and email bounces and complaints (NotificationDeliveryFailures, NotificationDuplicateSent, NotificationPendingOverdue, NotificationEmailBounces), the delivery metrics and receipts, the SES feedback subscription, and where a failure's cause shows.
 - [outbox-relay.md](outbox-relay.md): events not reaching Kafka, `dead` outbox rows (OutboxDeadLetters, OutboxBacklog), replay by hand, pruning.
 - [parse-failures.md](parse-failures.md): documents no parser reads waiting for a manual parse (ParseFailureQueueHigh), the open-tasks gauge, transcribing a document, dismissing a task, a site whose documents stopped parsing.
+- [pipeline-triage.md](pipeline-triage.md): documents held for an analyst's triage too long (TriageQueueStale), the oldest-task gauge, deciding or dismissing a triage task, a source the detector misreads.
 - [rule-review-queue.md](rule-review-queue.md): rule versions waiting too long for an analyst's decision as review tasks (RuleReviewQueueStale), the queue gauges and stats, claiming, editing and deciding a task, a high-impact version waiting for its second reviewer, a seed backlog.
 - [rulebook-data-quality.md](rulebook-data-quality.md): the nightly data-quality checks over rule versions, citations and relations, what each violation means, and the read-only role for a deployed database.
 - [source-stale.md](source-stale.md): a regulator source no crawl has listed for more than two cadences (SourceStale), the freshness gauges, why a crawl fails or never starts, pausing a source a site blocks.
@@ -39,7 +40,8 @@ with that anchor.
 Wired now: `ApiErrorBurnRate`, `ApiLatencyBurnRate`, `OutboxDeadLetters`, `OutboxBacklog`,
 `TemporalWorkerDown`, `TelemetrySilent`, `EntityReviewQueueStale`, `EntityReviewQueueBacklog`,
 `NotificationDeliveryFailures`, `NotificationDuplicateSent`, `NotificationPendingOverdue`,
-`NotificationEmailBounces`, `SourceStale`, `ParseFailureQueueHigh`, `RuleReviewQueueStale`.
+`NotificationEmailBounces`, `SourceStale`, `ParseFailureQueueHigh`, `TriageQueueStale`,
+`RuleReviewQueueStale`.
 Pending their metrics: decision-flip rate after a deploy (the fan-out already pauses
 itself on flips, [fan-out-control.md](fan-out-control.md)), LLM spend past 80% of the monthly
 budget before the 20th.

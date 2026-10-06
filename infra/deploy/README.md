@@ -92,6 +92,7 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_RULEBOOK_REVIEW_TOKEN` | - | - | secret (analyst actions in `header` and `dual` mode; the workbench holds the same value; in `token` mode the analyst's own access token replaces it) | - | - | - | - | - | - |
 | `CW_RULEBOOK_PUBLISH_ENABLED` | - | - | env (default `false`; owner regulatory-intelligence; removed once the workbench publishes in production and the obligation consumer of the rule events is live) | - | - | - | - | - | - |
 | `CW_PIPELINE_KNOWLEDGE_ENABLED` | - | - | - | - | - | - | env | - | - |
+| `CW_PIPELINE_EXTRACTION_ENABLED` | - | - | - | - | - | - | env (flag `pipeline.extraction`, default `false`; owner regulatory-intelligence. On, the worker extracts a rule candidate from each classified notification, circular or act amendment it registered, through the llm-gateway with the registered prompt `extraction.rule_candidate@1`, and publishes `rule.candidate.created`; it needs `CW_PIPELINE_KNOWLEDGE_ENABLED` (check-config refuses it alone outside local and test). Removed once extracted candidates are reviewed into rules in staging and the extraction is on in production) | - | - |
 | `CW_PIPELINE_CRAWL_ENABLED` | - | - | - | - | - | - | env (flag `pipeline.crawl`, default `false`; owner regulatory-intelligence. **On, the worker crawls the live regulator sites** at each source's cadence and an admin may start a crawl by hand, so it needs `CW_PIPELINE_RAW_STORE=s3` outside local and test (check-config refuses otherwise); never on in a local or CI product. Removed once the 30-day F1 run, `pipeline-crawl-report --days 30`, passes in staging and the crawl is on in production) | - | - |
 | `CW_RULEBOOK_URL`, `CW_LLM_GATEWAY_URL` | - | - | - | - | env (`CW_RULEBOOK_URL` only: the published facts of change cards) | - | env | env (qa) | - |
 | `CW_PROFILE_URL`, `CW_OBLIGATION_URL`, `CW_QA_HTTP_TIMEOUT_SECONDS`, `CW_QA_LLM_TIMEOUT_SECONDS`, `CW_QA_EMBEDDING_TIMEOUT_SECONDS` | - | - | - | env (`CW_PROFILE_URL` only: whether a business with an empty page of the public list is the tenant's) | env (`CW_OBLIGATION_URL` only: the open obligations of a CA firm's clients for a bulk notification) | - | - | env (qa; reads time out after 5 s by default, the model calls after 20 s, longer than the gateway's budget for the call) | - |
@@ -154,6 +155,17 @@ rotates, is in `docs/runbooks/secret-rotation.md`.
 rolls back. The migration release command runs before the new machines start, so a migration
 must be backward compatible with the previous image (add columns, never drop in the same
 release). Vercel keeps every deployment; promote or roll back from its dashboard.
+
+Pipeline migration 0004 is the exception to rolling back with the schema left at head. From it
+on, the pipeline writes the statuses `classified`, `triage`, `reference` and `extracted` into
+`raw_document.status`, and an image built before 0004 fails on every row that has one. Rolling
+back to such an image needs `alembic downgrade 0003` on the pipeline schema first: take a backup
+(or note the PITR point), run `alembic -c alembic.ini downgrade 0003` from the current pipeline
+image (`fly ssh console`) as the role that owns the schema, with `CW_DB_SCHEMA=pipeline`, then
+deploy the previous image. The downgrade drops `document_classification` and `rule_extraction`,
+so the classifications, the triage decisions among them, and every extraction record are lost
+(a resolved triage task keeps only its resolution), and those documents go back to `parsed`;
+only the backup brings them back.
 
 ## What the MVP profile does not give
 

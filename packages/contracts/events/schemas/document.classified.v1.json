@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:document.classified:v1",
+  "title": "document.classified",
+  "description": "The pipeline classified a parsed document: its type, whether it is a regulatory document, how sure the classifier is of the type and why. A conflict (the text names another type than its source publishes) opens a triage task, and the person's decision is classified again, certain. An irrelevant document is set aside and a conflict waits for its triage; a press release or a statute is kept for reference; a notification, circular or act amendment goes on to the rule extraction. Producer: pipeline (the ingest's classify step and a triage's resolution). Consumers: none yet.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "pipeline (the ingest's classify step and a triage's resolution)",
+  "x-tenant-scoped": false,
+  "properties": {
+    "document_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The classified document."
+    },
+    "source_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The source it came from."
+    },
+    "source_key": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The source's key, such as cbic_notifications."
+    },
+    "doc_type": {
+      "type": "string",
+      "enum": ["notification", "circular", "press_release", "act_amendment", "statute"],
+      "description": "Document type: what its opening names, its source's when it names none, or what a person gave (an uploader, a triage). For a conflict, the type the text names."
+    },
+    "relevance": {
+      "type": "string",
+      "enum": ["relevant", "irrelevant"],
+      "description": "Whether it is a regulatory document; irrelevant for one such as a portal user manual listed among notifications, which is set aside."
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["certain", "default", "conflict"],
+      "description": "How sure the type is: certain when the text names the type its source publishes or a person gave it, default when the text names none and the source's is taken, conflict when the text names another type, which a person triages."
+    },
+    "reasons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 500 },
+      "minItems": 1,
+      "maxItems": 8,
+      "description": "Why, in words: the type's reason first, then the relevance's."
+    },
+    "classifier": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What classified it: the rule-based detector with its version (detector@1), or triage for a person's decision."
+    },
+    "task_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "The triage task a conflict opened, or the one whose resolution decided it; null otherwise."
+    },
+    "decided_by": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "The analyst whose triage decided it; null when the detector did, or a service resolved the task."
+    }
+  },
+  "required": [
+    "document_id",
+    "source_id",
+    "source_key",
+    "doc_type",
+    "relevance",
+    "confidence",
+    "reasons",
+    "classifier"
+  ]
+}

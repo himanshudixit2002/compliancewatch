@@ -2,11 +2,196 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:compliancewatch:event:rule.candidate.created:v1",
   "title": "rule.candidate.created",
-  "description": "The extractor produced a rule candidate from a parsed document; the candidate itself is read from the store. Producer: pipeline (rule extractor). Consumers: pipeline (review).",
+  "description": "The extractor produced a rule candidate from a parsed document: the model's answer to the registered extraction prompt, read as a candidate and checked by the validators. The pipeline stores the extraction, keyed by the document and the prompt version, and writes this event in the same transaction. Since 1.1.0 it carries the candidate itself, how the extraction ended, the issues found, a suggested rule key and the cited clauses' ids. Producer: pipeline (rule extractor). Consumers: none yet; the rulebook's candidate intake once it is built.",
   "type": "object",
-  "x-version": "1.0.0",
+  "x-version": "1.1.0",
   "x-producer": "pipeline (rule extractor)",
   "x-tenant-scoped": false,
+  "$defs": {
+    "rule_candidate_fields": {
+      "title": "RuleCandidateFields",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "summary",
+        "doc_kind",
+        "change_kind",
+        "effective_from",
+        "effective_to",
+        "references",
+        "applies_to",
+        "obligation",
+        "recurrence",
+        "amounts",
+        "citations",
+        "confidence"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "doc_kind": {
+          "type": "string",
+          "enum": ["notification", "circular", "press_release", "act_amendment"]
+        },
+        "change_kind": {
+          "type": "string",
+          "enum": ["none", "corrigendum", "withdrawal", "amendment", "extension"]
+        },
+        "effective_from": {
+          "type": ["string", "null"],
+          "format": "date"
+        },
+        "effective_to": {
+          "type": ["string", "null"],
+          "format": "date"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Notifications and circulars the document names, as written."
+        },
+        "applies_to": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["attribute", "operator", "value", "clause_ref"],
+            "properties": {
+              "attribute": {
+                "type": "string"
+              },
+              "operator": {
+                "type": "string",
+                "enum": [
+                  "eq",
+                  "neq",
+                  "in",
+                  "not_in",
+                  "gt",
+                  "gte",
+                  "lt",
+                  "lte",
+                  "contains",
+                  "contains_any"
+                ]
+              },
+              "value": {},
+              "clause_ref": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "obligation": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["title", "steps", "evidence_type", "due_in_days", "clause_ref"],
+          "properties": {
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "evidence_type": {
+              "type": "string"
+            },
+            "due_in_days": {
+              "type": ["integer", "null"],
+              "minimum": 0
+            },
+            "clause_ref": {
+              "type": "string"
+            }
+          }
+        },
+        "recurrence": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["frequency", "due_day", "due_month_offset", "clause_ref"],
+          "properties": {
+            "frequency": {
+              "type": "string",
+              "enum": ["monthly", "quarterly", "half_yearly", "annual"]
+            },
+            "due_day": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 31
+            },
+            "due_month_offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 24
+            },
+            "clause_ref": {
+              "type": "string"
+            }
+          }
+        },
+        "amounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "value_inr", "clause_ref"],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value_inr": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "clause_ref": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "citations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["clause_ref", "quote"],
+            "properties": {
+              "clause_ref": {
+                "type": "string"
+              },
+              "quote": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    }
+  },
   "properties": {
     "candidate_id": {
       "type": "string",
@@ -46,7 +231,80 @@
     },
     "needs_review": {
       "type": "boolean",
-      "description": "True when the confidence is below the review threshold or a check failed."
+      "description": "True when the confidence is below the review threshold, a check failed or the answer was not a candidate."
+    },
+    "source_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The source the document came from. Added in 1.1.0."
+    },
+    "source_key": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The source's key, such as cbic_notifications. Added in 1.1.0."
+    },
+    "doc_type": {
+      "type": "string",
+      "enum": ["notification", "circular", "act_amendment"],
+      "description": "The type the document was classified as and extracted as: rules are extracted from notifications, circulars and act amendments only. Added in 1.1.0."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["extracted", "unparseable"],
+      "description": "How the extraction ended: extracted, the model's answer read as a candidate (which the validators may still send to review); unparseable, the answer was not a candidate twice (a second ask once the first failed), so candidate is null and an analyst drafts the rule by hand. Added in 1.1.0."
+    },
+    "candidate": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/rule_candidate_fields"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The candidate as the model gave it, in the shape the extraction prompt asks for (the extractor's CANDIDATE_SCHEMA, kept equal to it by a contract test); null when the outcome is unparseable. Added in 1.1.0."
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "detail"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The check that failed, such as citation_quote_not_found or output_unparseable."
+          },
+          "detail": {
+            "type": "string",
+            "description": "What it found, in words."
+          },
+          "clause_ref": {
+            "type": ["string", "null"],
+            "description": "The clause it is about, when there is one."
+          }
+        }
+      },
+      "description": "What the validators found wrong with the candidate; any issue sends it to review. Added in 1.1.0."
+    },
+    "suggested_rule_key": {
+      "type": ["string", "null"],
+      "pattern": "^[a-z][a-z0-9_]{0,62}$",
+      "description": "A rule key the candidate may belong to, named as the seed calendar names rules (form and cadence, such as gstr3b_monthly): from the first GST form the candidate names and its recurrence or filing scheme. A suggestion for the analyst to confirm, never a match against the rulebook; null when the candidate names no form or no cadence. Added in 1.1.0."
+    },
+    "clause_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "uniqueItems": true,
+      "description": "The ids of the clauses the candidate cites or leans on, as the kernel derives them from the document id and each clause ref (the rulebook stores the clauses under them), in clause-ref order. Added in 1.1.0."
+    },
+    "ontology_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The ontology the candidate's predicates were checked against. Added in 1.1.0."
     }
   },
   "required": [

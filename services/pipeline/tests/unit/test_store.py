@@ -9,10 +9,14 @@ import pytest
 from domain_kernel.documents import DocumentType, document_id_for
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import DocumentId, SourceId
+from pipeline.domain.classification import Classification, Relevance, TypeConfidence
 from pipeline.domain.crawl import CrawlCounts, CrawlRun, CrawlStatus
 from pipeline.domain.events import DocumentDiscovered
+from pipeline.domain.extraction import ExtractionOutcome, RuleExtraction, candidate_id_for
+from pipeline.domain.issues import Issue
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.sources import Source, SourceDefinition
+from pipeline.domain.tasks import PipelineTask, TaskKind
 from pipeline.infrastructure.memory import MemoryStore
 from py_common.audit.testing import audit_entry
 
@@ -306,3 +310,87 @@ def test_audit_entries_commit_with_the_unit_and_go_with_a_failed_one() -> None:
     with pytest.raises(RuntimeError):
         write_then_fail()
     assert store.audit == [entry]
+
+
+def test_a_classification_is_added_once_saved_by_a_triage_and_needs_its_rows() -> None:
+    store = MemoryStore()
+    stored = record(b"%PDF-1.7 classified")
+    task = PipelineTask.opened(TaskKind.TRIAGE, stored.document_id, DEFINITION.key, at=NOW)
+    first = Classification(
+        document_id=stored.document_id,
+        doc_type=DocumentType.CIRCULAR,
+        relevance=Relevance.RELEVANT,
+        confidence=TypeConfidence.CONFLICT,
+        reasons=("its opening names it a circular",),
+        classified_at=NOW,
+        task_id=task.id,
+    )
+    with store() as unit:
+        unit.sources.add(Source.of(DEFINITION, NOW))
+        unit.documents.add(stored)
+        with pytest.raises(KeyError, match="no such task"):
+            unit.classifications.add(first)
+        unit.tasks.open(task)
+        assert unit.classifications.add(first)
+        assert not unit.classifications.add(first)
+    triaged = Classification.triaged(
+        stored.document_id,
+        relevance=Relevance.IRRELEVANT,
+        doc_type=DocumentType.CIRCULAR,
+        by=None,
+        task_id=task.id,
+        at=NOW,
+        reason="A portal manual",
+    )
+    with store() as unit:
+        unit.classifications.save(triaged)
+        with pytest.raises(KeyError, match="no such document"):
+            unit.classifications.add(
+                Classification.triaged(
+                    record(b"never stored").document_id,
+                    relevance=Relevance.IRRELEVANT,
+                    doc_type=DocumentType.CIRCULAR,
+                    by=None,
+                    task_id=task.id,
+                    at=NOW,
+                    reason="A portal manual",
+                )
+            )
+    assert store.classifications[stored.document_id] == triaged
+
+
+def test_an_extraction_is_kept_as_written_and_a_parse_keeps_a_later_status() -> None:
+    store = MemoryStore()
+    stored = record(b"%PDF-1.7 extracted")
+    prompt = "extraction.rule_candidate@1"
+    extraction = RuleExtraction(
+        document_id=stored.document_id,
+        prompt_version=prompt,
+        candidate_id=candidate_id_for(stored.document_id, prompt),
+        outcome=ExtractionOutcome.UNPARSEABLE,
+        model="fake/echo",
+        attempts=2,
+        source_key=DEFINITION.key,
+        doc_type=DocumentType.NOTIFICATION,
+        regulator="CBIC",
+        issues=(Issue("output_unparseable", "not JSON"),),
+        citation_count=0,
+        confidence=0.0,
+        needs_review=True,
+        answer="not json",
+        ontology_version="0.2.0",
+        extracted_at=NOW,
+    )
+    with store() as unit:
+        unit.sources.add(Source.of(DEFINITION, NOW))
+        unit.documents.add(stored)
+        assert unit.extractions.add(extraction)
+        assert not unit.extractions.add(extraction)
+        assert unit.documents.record_parse(stored.document_id, "pdf@1")
+        assert unit.documents.set_status(stored.document_id, DocumentStatus.EXTRACTED)
+    with store() as unit:
+        assert unit.extractions.get(stored.document_id, prompt) == extraction
+        assert not unit.documents.record_parse(stored.document_id, "pdf@1")
+        again = unit.documents.get(stored.document_id)
+    assert again is not None
+    assert again.status is DocumentStatus.EXTRACTED

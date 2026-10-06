@@ -1,5 +1,5 @@
-"""Histories recorded before the store, before the crawl and before manual parse replay on
-today's ingest workflow.
+"""Histories recorded before the store, before the crawl, before manual parse and before the
+classify step replay on today's ingest workflow.
 
 ``tests/fixtures/histories`` holds runs of ``pipeline.ingest_document``, each pair one with
 knowledge off and one with registration, embedding and the extraction child:
@@ -14,6 +14,11 @@ knowledge off and one with registration, embedding and the extraction child:
   document that does not parse opened a manual-parse task; beside the pair,
   ``ingest-with-crawl-unparsed`` was handed a PDF with no text layer, so its parse failed and the
   ingest failed with it.
+- ``ingest-with-parse*`` as it ran with the parser chain, uploads and manual parse, before the
+  classify step and rule extraction: handed its document by a crawl with knowledge off and on,
+  an upload's stored document (``STORED_PATCH``), an analyst's transcript of a statute (stored,
+  registered and embedded, never extracted), and a scan no parser reads, which opened its
+  manual-parse task (``PARSE_PATCH``).
 """
 
 import json
@@ -35,8 +40,14 @@ from pipeline.application.activities import (
     ParseFailure,
     ParseRequest,
 )
+from pipeline.application.classify import ClassifyDocument, ClassifyRequest
 from pipeline.workflows import ExtractKnowledgeWorkflow, IngestDocumentWorkflow, IngestRequest
-from pipeline.workflows.ingest_document import GIVEN_PATCH, STORE_PATCH, IngestResult
+from pipeline.workflows.ingest_document import (
+    GIVEN_PATCH,
+    STORE_PATCH,
+    STORED_PATCH,
+    IngestResult,
+)
 
 HISTORIES = Path(__file__).resolve().parents[1] / "fixtures" / "histories"
 BEFORE_THE_STORE = [
@@ -52,7 +63,20 @@ WITH_THE_CRAWL = [
     HISTORIES / "ingest-with-crawl-knowledge.json",
 ]
 UNPARSED = HISTORIES / "ingest-with-crawl-unparsed.json"
-RECORDED = [*BEFORE_THE_STORE, *BEFORE_THE_CRAWL, *WITH_THE_CRAWL, UNPARSED]
+BEFORE_THE_CLASSIFY_STEP = [
+    HISTORIES / "ingest-with-parse.json",
+    HISTORIES / "ingest-with-parse-knowledge.json",
+    HISTORIES / "ingest-with-parse-upload.json",
+    HISTORIES / "ingest-with-parse-statute.json",
+    HISTORIES / "ingest-with-parse-unparsed.json",
+]
+RECORDED = [
+    *BEFORE_THE_STORE,
+    *BEFORE_THE_CRAWL,
+    *WITH_THE_CRAWL,
+    UNPARSED,
+    *BEFORE_THE_CLASSIFY_STEP,
+]
 
 
 def history(path: Path) -> WorkflowHistory:
@@ -109,6 +133,31 @@ def test_the_histories_with_the_crawl_were_handed_their_document() -> None:
     types = event_types(UNPARSED)
     assert "ACTIVITY_TASK_FAILED" in types
     assert types[-1] == "WORKFLOW_EXECUTION_FAILED"
+
+
+def test_the_histories_before_the_classify_step_took_each_path() -> None:
+    crawled, knowledge, upload, statute, unparsed = BEFORE_THE_CLASSIFY_STEP
+    assert scheduled_activities(crawled) == ["pipeline.fetch_and_store", "pipeline.parse_document"]
+    assert scheduled_activities(knowledge) == [
+        "pipeline.fetch_and_store",
+        "pipeline.parse_document",
+        "pipeline.register_document",
+        "pipeline.embed_clauses",
+    ]
+    assert "START_CHILD_WORKFLOW_EXECUTION_INITIATED" in event_types(knowledge)
+    assert scheduled_activities(upload) == [
+        "pipeline.parse_document",
+        "pipeline.register_document",
+        "pipeline.embed_clauses",
+    ]
+    assert scheduled_activities(statute) == scheduled_activities(upload)
+    assert "START_CHILD_WORKFLOW_EXECUTION_INITIATED" not in event_types(statute)
+    assert scheduled_activities(unparsed) == [
+        "pipeline.fetch_and_store",
+        "pipeline.parse_document",
+        "pipeline.open_manual_parse",
+    ]
+    assert event_types(unparsed)[-1] == "WORKFLOW_EXECUTION_COMPLETED"
 
 
 @pytest.mark.parametrize("path", RECORDED, ids=lambda path: path.stem)
@@ -175,5 +224,34 @@ class IngestWithoutTheParseGuard:
 async def test_without_the_parse_guard_a_failed_parse_would_not_replay() -> None:
     replayed = await replayer(IngestWithoutTheParseGuard).replay_workflow(
         history(UNPARSED), raise_on_replay_failure=False
+    )
+    assert isinstance(replayed.replay_failure, workflow.NondeterminismError)
+
+
+@workflow.defn(name="pipeline.ingest_document", sandboxed=False)
+class IngestWithoutTheClassifyGuard:
+    """The ingest as it would be had the classify step followed the parse without
+    ``CLASSIFY_PATCH``."""
+
+    @workflow.run
+    async def run(self, request: IngestRequest) -> IngestResult:
+        assert request.stored is not None
+        workflow.patched(STORED_PATCH)
+        parse = ParseRequest(document_id=request.stored.document_id, stored=request.stored)
+        parsed = await ParseDocument.schedule(parse)
+        await ClassifyDocument.schedule(ClassifyRequest(parse=parse))
+        return IngestResult(
+            document_id=parsed.document_id,
+            sha256=request.stored.sha256,
+            url=request.stored.url,
+            clause_count=parsed.clause_count,
+            clause_refs=parsed.clause_refs,
+        )
+
+
+async def test_without_the_classify_guard_an_upload_before_it_would_not_replay() -> None:
+    upload = BEFORE_THE_CLASSIFY_STEP[2]
+    replayed = await replayer(IngestWithoutTheClassifyGuard).replay_workflow(
+        history(upload), raise_on_replay_failure=False
     )
     assert isinstance(replayed.replay_failure, workflow.NondeterminismError)

@@ -4,7 +4,8 @@ import pytest
 
 from domain_kernel.documents import Clause, DocumentType, ParsedDocument
 from domain_kernel.ids import DocumentId
-from pipeline.application.detector import ChangeKind, detect
+from pipeline.application.detector import ChangeKind, detect, opening_of
+from pipeline.domain.classification import Relevance, TypeConfidence
 
 
 def doc(
@@ -133,3 +134,150 @@ def test_own_number_from_the_listing_is_not_a_reference() -> None:
 )
 def test_references_are_canonical_and_unique(text: str, expected: tuple[str, ...]) -> None:
     assert detect(doc("Notification", text)).references == expected
+
+
+def test_the_type_its_opening_names_is_certain() -> None:
+    detection = detect(doc("Notification No. 01/2026 - Central Tax", "the Commissioner extends"))
+    assert (detection.doc_type, detection.confidence) == (
+        DocumentType.NOTIFICATION,
+        TypeConfidence.CERTAIN,
+    )
+    assert detection.reasons[0] == (
+        "its opening names it a notification, the type its source publishes"
+    )
+
+
+def test_an_opening_that_names_no_type_takes_its_sources() -> None:
+    detection = detect(
+        doc("Advisory on use of version 3.3 of emSigner", "This is an advance information"),
+        default_type=DocumentType.PRESS_RELEASE,
+    )
+    assert (detection.doc_type, detection.confidence) == (
+        DocumentType.PRESS_RELEASE,
+        TypeConfidence.DEFAULT,
+    )
+    assert "taken as its source's: press release" in detection.reasons[0]
+
+
+def test_another_type_than_its_source_publishes_is_a_conflict() -> None:
+    detection = detect(
+        doc(
+            "Circular No. 256/02/2026-GST",
+            "Subject: Clarification on Notification No. 12/2024 - Central Tax",
+        ),
+        default_type=DocumentType.NOTIFICATION,
+    )
+    assert (detection.doc_type, detection.confidence) == (
+        DocumentType.CIRCULAR,
+        TypeConfidence.CONFLICT,
+    )
+    assert detection.reasons[0] == (
+        "its opening names it a circular, but its source publishes the type notification"
+    )
+
+
+def test_the_council_a_notification_quotes_does_not_make_it_a_press_release() -> None:
+    detection = detect(
+        doc(
+            "Notification No. 9/2025 - Central Tax (Rate)",
+            "In exercise of the powers conferred by section 9, the Central Government, on the "
+            "recommendations of the Council, hereby notifies",
+        )
+    )
+    assert (detection.doc_type, detection.confidence) == (
+        DocumentType.NOTIFICATION,
+        TypeConfidence.CERTAIN,
+    )
+    press = detect(
+        doc("Press release", "Recommendations of the 56th meeting of the GST Council"),
+        default_type=DocumentType.NOTIFICATION,
+    )
+    assert (press.doc_type, press.confidence) == (
+        DocumentType.PRESS_RELEASE,
+        TypeConfidence.CONFLICT,
+    )
+
+
+def test_the_first_type_the_opening_names_wins() -> None:
+    circular = detect(
+        doc("Circular No. 123/42/2019-GST", "as amended by notification No. 14/2022"),
+        default_type=DocumentType.CIRCULAR,
+    )
+    assert (circular.doc_type, circular.confidence) == (
+        DocumentType.CIRCULAR,
+        TypeConfidence.CERTAIN,
+    )
+
+
+def test_a_title_the_first_clause_starts_with_is_read_once() -> None:
+    heading = "[To be published in the Gazette of India] Government of India " * 3
+    first = f"{heading}Ministry of Finance Notification No. 01/2026 - Central Tax"
+    gazette = ParsedDocument(
+        DocumentId(UUID(int=7)),
+        DocumentType.NOTIFICATION,
+        heading[:150],
+        (Clause("en.p1", first), Clause("en.p2", "In exercise of the powers")),
+    )
+    assert opening_of(gazette).count("Gazette of India") == 3
+    assert detect(gazette).confidence is TypeConfidence.CERTAIN
+
+
+def test_a_type_a_person_gave_or_a_statute_source_is_certain_whatever_the_text_names() -> None:
+    uploaded = detect(
+        doc("Notification No. 3/2017 - Central Tax", "the Central Goods and Services Tax Rules"),
+        given_type=DocumentType.STATUTE,
+    )
+    assert (uploaded.doc_type, uploaded.confidence, uploaded.relevance) == (
+        DocumentType.STATUTE,
+        TypeConfidence.CERTAIN,
+        Relevance.RELEVANT,
+    )
+    assert uploaded.reasons == (
+        "a person gave its type: statute",
+        "a person placed it as a statute",
+    )
+    rules = detect(
+        doc("Rule 61. Form and manner of furnishing of return", "substituted vide notification"),
+        default_type=DocumentType.STATUTE,
+    )
+    assert (rules.doc_type, rules.confidence, rules.relevance) == (
+        DocumentType.STATUTE,
+        TypeConfidence.CERTAIN,
+        Relevance.RELEVANT,
+    )
+
+
+def test_the_listed_title_decides_the_relevance_but_never_the_type() -> None:
+    manual = detect(
+        doc("Login to the portal and open the returns dashboard", "Example text."),
+        listed_title="User Manual for filing FORM GSTR-1 on the portal",
+    )
+    assert (manual.relevance, manual.is_user_manual) == (Relevance.IRRELEVANT, True)
+    circular = detect(
+        doc("Circular No. 5/2026-GST", "Subject: Example clarification for the tests."),
+        default_type=DocumentType.CIRCULAR,
+        listed_title="Clarification on the applicability of notification No. 12/2017-Central Tax",
+    )
+    assert (circular.doc_type, circular.confidence, circular.relevance) == (
+        DocumentType.CIRCULAR,
+        TypeConfidence.CERTAIN,
+        Relevance.RELEVANT,
+    ), "the type is what the circular's own opening names, not the notification its listing names"
+
+
+@pytest.mark.parametrize(
+    ("title", "relevance"),
+    [
+        ("Reset Password User Manual", Relevance.IRRELEVANT),
+        ("How to file an appeal on the portal", Relevance.IRRELEVANT),
+        ("Step-by-step guide to the new invoice management system", Relevance.IRRELEVANT),
+        ("FAQs on the decisions of the 56th GST Council", Relevance.RELEVANT),
+        ("Notification No. 01/2026 - Central Tax", Relevance.RELEVANT),
+    ],
+)
+def test_a_portal_manual_is_irrelevant_and_an_faq_is_not(title: str, relevance: Relevance) -> None:
+    detection = detect(doc(title, "Step 1"))
+    assert detection.relevance is relevance
+    assert len(detection.reasons) == 2
+    if relevance is Relevance.IRRELEVANT:
+        assert "user manual or a how-to guide" in detection.reasons[1]

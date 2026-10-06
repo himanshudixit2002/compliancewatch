@@ -187,6 +187,18 @@
       "services": ["pipeline"]
     },
     {
+      "name": "pipeline.extraction",
+      "type": "bool",
+      "default": false,
+      "owner": "regulatory-intelligence",
+      "description": "The ingest extracts a rule candidate from each classified notification, circular or act amendment it registered: a child workflow asks the llm-gateway with the registered prompt extraction.rule_candidate@1 (once more when the answer is not a candidate, and later again while a budget is used up), stores the extraction and publishes rule.candidate.created in one transaction. It reads the document as the rulebook keeps it, so it needs pipeline.knowledge. Off, classified documents wait as classified and no model is called for them.",
+      "removal": "Once candidates from the extraction are reviewed into rules through the rulebook's candidate intake in staging and the extraction is on in production.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_PIPELINE_EXTRACTION_ENABLED",
+      "services": ["pipeline"]
+    },
+    {
       "name": "pipeline.knowledge",
       "type": "bool",
       "default": false,

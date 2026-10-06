@@ -273,7 +273,11 @@ async def test_an_upload_ingests_from_the_stored_document(
         "pdf-tables@1",
     )
     assert result.storage_key == stored.storage_key
-    assert scheduled(history)[:2] == ["pipeline.parse_document", "pipeline.register_document"]
+    assert scheduled(history)[:3] == [
+        "pipeline.parse_document",
+        "pipeline.classify_document",
+        "pipeline.register_document",
+    ]
     assert "pipeline.fetch_and_store" not in scheduled(history)
     assert STORED_PATCH in patches(history)
     assert STORE_PATCH not in patches(history)
@@ -282,7 +286,9 @@ async def test_an_upload_ingests_from_the_stored_document(
         "pdf-tables@1",
         "Example upload",
     )
-    assert pipeline.store.documents[DocumentId(stored.document_id)].status is DocumentStatus.PARSED
+    assert pipeline.store.documents[DocumentId(stored.document_id)].status is (
+        DocumentStatus.CLASSIFIED
+    )
     await replays(history)
 
 
@@ -315,5 +321,5 @@ async def test_a_resolutions_ingest_registers_the_transcript_of_a_statute(
     assert result.clauses_embedded == 4, "a statute is embedded"
     assert (result.relations_outcome, children(history)) == ("disabled", []), "never extracted"
     stored_record = pipeline.store.documents[DocumentId(stored.document_id)]
-    assert (stored_record.status, stored_record.transcript_key) == (DocumentStatus.PARSED, key)
+    assert (stored_record.status, stored_record.transcript_key) == (DocumentStatus.REFERENCE, key)
     await replays(history)

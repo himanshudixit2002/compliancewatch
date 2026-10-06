@@ -122,10 +122,12 @@ def test_the_memory_store_opens_one_task_of_a_kind_per_document() -> None:
         for n, scan in enumerate(scans[1:], 1):
             unit.tasks.open(task(scan.document_id, n))
         assert unit.tasks.open_counts() == {TaskKind.MANUAL_PARSE: 3, TaskKind.TRIAGE: 1}
+        assert unit.tasks.oldest_open() == {TaskKind.MANUAL_PARSE: NOW, TaskKind.TRIAGE: NOW}
     with store() as unit:
         unit.tasks.save(first.dismiss(ANALYST, NOW + timedelta(hours=1), "A duplicate scan"))
         assert unit.tasks.open_for(scans[0].document_id, TaskKind.MANUAL_PARSE) is None
         assert unit.tasks.open_counts()[TaskKind.MANUAL_PARSE] == 2
+        assert unit.tasks.oldest_open()[TaskKind.MANUAL_PARSE] == NOW + timedelta(minutes=1)
         pages: list[PipelineTask] = []
         after: TaskKey | None = None
         while page := unit.tasks.page(status=TaskStatus.OPEN, kind=None, after=after, limit=2):

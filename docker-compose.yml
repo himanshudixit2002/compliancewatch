@@ -54,6 +54,10 @@ x-mvp-env: &mvp-env
   # A crawl reads the live regulator sites: the product from the image, like make product and CI,
   # never crawls.
   CW_PIPELINE_CRAWL_ENABLED: "false"
+  # No provider key reaches these containers, so the gateway answers every model from its fake
+  # one; its extraction route names that model, as make product's does, so the product check's
+  # extraction step can tell from the routing table that its asks stay in process.
+  CW_LLM_ROUTES__EXTRACTION: fake/echo
   CW_WEB_BASE_URL: http://localhost:${WEB_PORT:-3000}
 
 services:

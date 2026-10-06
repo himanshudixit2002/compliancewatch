@@ -35,13 +35,28 @@ _PARSER_VERSION = re.compile(PARSER_VERSION_PATTERN)
 
 
 class DocumentStatus(StrEnum):
-    """Where a stored document stands: just discovered, parsed into clauses, failed to parse,
-    or set aside as not a regulatory document (a user manual listed among notifications)."""
+    """Where a stored document stands: just discovered; parsed into clauses; failed to parse
+    (a manual parse waits); set aside as not a regulatory document (a user manual listed among
+    notifications); classified and on its way to the rule extraction; held for a person's
+    triage; kept for reference (a press release, a statute: on its way to be registered, nothing
+    extracted); or extracted, its extraction stored, a candidate or an unparseable answer. The
+    statuses a classification sets are its route, not outcomes (``domain.classification``): a
+    ``reference`` or ``classified`` document is registered only while knowledge is on."""
 
     DISCOVERED = "discovered"
     PARSED = "parsed"
     FAILED = "failed"
     IRRELEVANT = "irrelevant"
+    CLASSIFIED = "classified"
+    TRIAGE = "triage"
+    REFERENCE = "reference"
+    EXTRACTED = "extracted"
+
+    @property
+    def unparsed(self) -> bool:
+        """Whether no parse is recorded for the document yet: it was just discovered, or no
+        parser read it."""
+        return self in (DocumentStatus.DISCOVERED, DocumentStatus.FAILED)
 
 
 @dataclass(frozen=True, slots=True)

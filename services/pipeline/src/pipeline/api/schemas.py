@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from typing import Annotated, Any, Final, Literal, Self
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from domain_kernel.documents import DocumentType
 from domain_kernel.ids import DocumentId
@@ -16,6 +16,7 @@ from pipeline.application.sources import (
 )
 from pipeline.application.tasks import Resolution, TaskView
 from pipeline.application.uploads import UploadOutcome
+from pipeline.domain.classification import Relevance, TriageDecision
 from pipeline.domain.crawl import CrawlRun, CrawlStatus
 from pipeline.domain.ports import CrawlStart
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
@@ -361,10 +362,41 @@ class TranscriptIn(BaseModel):
     )
 
 
+class TriageIn(BaseModel):
+    """A triage's decision: the document is relevant and of a type, or irrelevant (its type
+    left as the classifier read it). The reason is the request's own."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    relevance: Relevance = Field(
+        description="relevant: a regulator's document, of doc_type; irrelevant: set it aside"
+    )
+    doc_type: DocumentType | None = Field(
+        default=None,
+        description=(
+            "Its type, for a relevant document: a notification, circular or act amendment goes "
+            "on to the rule extraction; a press release or a statute is kept for reference"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _a_type_for_a_relevant_one(self) -> Self:
+        if (self.relevance is Relevance.RELEVANT) != (self.doc_type is not None):
+            raise ValueError(
+                "a relevant document is triaged with its type, an irrelevant one without"
+            )
+        return self
+
+    def decision(self) -> TriageDecision:
+        return TriageDecision(self.relevance, self.doc_type)
+
+
 class ResolveIn(AdminWriteIn):
-    """The resolution of a task: a manual parse takes the analyst's transcript."""
+    """The resolution of a task: a manual parse takes the analyst's transcript, a triage the
+    analyst's decision."""
 
     transcript: TranscriptIn | None = None
+    triage: TriageIn | None = None
 
 
 class DismissIn(AdminWriteIn):
@@ -373,12 +405,22 @@ class DismissIn(AdminWriteIn):
 
 class TaskOut(BaseModel):
     task_id: UUID
-    kind: TaskKind = Field(description="manual_parse (no parser reads the document) or triage")
+    kind: TaskKind = Field(
+        description=(
+            "manual_parse (no parser reads the document) or triage (the classify step found "
+            "another type in the text than its source publishes)"
+        )
+    )
     status: TaskStatus
     document_id: UUID
     source_key: str
     opened_at: AwareDatetime
-    reason: str = Field(description="Why it opened: each parser's reason, for a manual parse")
+    reason: str = Field(
+        description=(
+            "Why it opened: each parser's reason, for a manual parse; the classifier's, for a "
+            "triage"
+        )
+    )
     claimed_by: UUID | None
     resolved_by: UUID | None = Field(
         description="Who resolved or dismissed it; null for one the pipeline closed itself"
@@ -387,7 +429,8 @@ class TaskOut(BaseModel):
     resolution: dict[str, Any] | None = Field(
         description=(
             "What the resolution did: for a manual parse, the transcript's storage key and "
-            "digest, the parser (manual@1) and the clause count"
+            "digest, the parser (manual@1) and the clause count; for a triage, the relevance, "
+            "the type and the route it gave the document (extract, reference or irrelevant)"
         )
     )
     note: str = Field(description="The resolver's or dismisser's reason")
@@ -414,11 +457,17 @@ class TaskOut(BaseModel):
 
 
 class ResolutionOut(BaseModel):
-    """The resolved task and the ingest that parses its transcript: ``started`` is false when it
-    was started before (it runs, or it is done)."""
+    """The resolved task and the ingest it starts (a manual parse's parses the transcript, a
+    relevant triage's continues the document as its type): ``started`` is false when it was
+    started before (it runs, or it is done). An irrelevant triage starts none, and
+    ``workflow_id`` is empty."""
 
     task: TaskOut
-    workflow_id: str
+    workflow_id: str = Field(
+        description=(
+            "pipeline-manual-parse-<task> or pipeline-triage-<task>; empty for an irrelevant triage"
+        )
+    )
     started: bool
 
     @classmethod

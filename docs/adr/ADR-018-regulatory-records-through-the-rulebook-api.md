@@ -136,3 +136,81 @@ A better parse of a document stored before is therefore not applied by itself; s
 clause set under a new parser version, as a new version of the document, is a decision for when
 an analyst needs one. `document.parsed` 1.1.0 now carries each parse with its parser, but the
 registration stays on HTTP, since the event carries no clause text.
+
+## Addendum 2026-10-06: classification, extraction in the workflow, and the candidate it publishes
+
+The ingest now classifies every parsed document and extracts a rule candidate from the ones a
+rule can come from. Both steps sit behind workflow patches (`pipeline-classify-v1`,
+`pipeline-extraction-v1`), so histories recorded before them replay unchanged; the extraction
+also sits behind the flag `pipeline.extraction` (`CW_PIPELINE_EXTRACTION_ENABLED`, default off,
+owner regulatory-intelligence).
+
+**Classification comes before registration.** A rule-based classifier (the detector, no model)
+reads the opening of each parsed document for the type it names, compares it with the type its
+source publishes, and says how sure it is: `certain`, `default` (the text names no type, the
+source's is taken) or `conflict`. It also says whether the document is a regulatory one at all.
+The classification is recorded in the pipeline's store with the document's status and a
+`document.classified` event, in one transaction. A conflict opens a `triage` task in the same
+transaction and the document is not registered until a person decides; an irrelevant document is
+never registered; a press release or a statute is registered for reference and nothing is
+extracted from it. The rulebook keeps the type of a document's first registration, so registering
+before the type is settled would freeze a wrong one there; the registration now sends the type
+the classification gave. A person's triage is stored on the task's resolution and becomes the
+document's classification; the stored raw document's own `doc_type` (the uploader's) never
+changes, and the triage's resolution starts an ingest of the stored document that registers it as
+the decided type.
+
+**The extraction reads what the rulebook keeps.** Once a notification, circular or act amendment
+is classified and registered, the ingest starts a child workflow, `pipeline.extract_rules`, and
+leaves it running (`ParentClosePolicy.ABANDON`), so neither the ingest nor the crawl above it
+waits for a model or a budget. The child reads the document back from the rulebook, as
+`ExtractMentions` does, so every citation it makes points at a clause the rulebook stores (the
+first parse, per the addendum above). It therefore needs `pipeline.knowledge`, and check-config
+refuses the extraction without it outside local and test.
+
+**Two activities, keyed by document and prompt version.** `pipeline.extract_rules` asks the
+llm-gateway with the registered prompt `extraction.rule_candidate@1` (unchanged, with its eval
+cases) and writes nothing; `pipeline.store_extraction` stores the answer (`rule_extraction`, one
+row per document and prompt version, kept as written by a trigger) with its
+`rule.candidate.created`, through the outbox, in one transaction. The answer crosses the workflow
+as data, so a failed write never asks the model again, and an extraction stored before is
+returned without a model call. The candidate's id is derived from the document and the prompt
+version, so the same extraction always names the same candidate.
+
+**Retries.** An answer that is not a candidate (not JSON, not the schema's shape, or outside the
+schema's limits that the parser does not check) is asked for once more, at a small temperature:
+the gateway caches deterministic calls, so asking the same way would return the same answer. Two
+such answers are stored as `unparseable`, with no candidate and the reason, for an analyst to
+draft by hand. A used-up budget is the gateway's problem type `llm-budget-exceeded` (a 429 with
+`Retry-After` until the budget resets): the activity hands it to the workflow without retrying,
+and the workflow sleeps on a durable timer, between 15 minutes and 6 hours, and asks again, at
+most 160 times (some 40 days). This replaces the gateway's deferral queue, which is dropped from
+the plan. Any other failure fails the child, and the document stays `classified` until a
+re-ingest of it starts the extraction again.
+
+**The candidate is a contract.** `rule.candidate.created` 1.1.0 adds, as optional fields: the
+outcome, the candidate in the extraction schema's shape (the schema file keeps the extractor's
+`CANDIDATE_SCHEMA` under `$defs`, and a contract test keeps the two equal), the validators'
+issues, a suggested rule key (`<form>_<cadence>`, as the seed calendar names rules; a suggestion
+for the analyst, never a lookup in the rulebook), the ids of the cited clauses as the kernel
+derives them, the type it was extracted as and its source. `regulator` and `confidence` were
+already required. This is the first record the pipeline hands the rulebook as an event rather
+than over HTTP; the rulebook's candidate intake, which is not built yet, consumes it, and sets a
+review's priority from `needs_review`, `confidence` and `outcome` and its regulator from
+`regulator`. Registration stays on HTTP.
+
+Consequences:
+
+- A prompt version whose output schema differs changes the event: the candidate block is a
+  closed schema (its objects forbid other fields), so a new field in it is a new event major
+  version, not a minor one.
+- The detector's reading of the opening is now consequential: a false conflict holds a document
+  out of the rulebook until a person triages it. The type a person gave (an upload's, a triage's)
+  is taken as it is, a statute source's documents are statutes whatever they quote, and "the
+  recommendations of the Council", which nearly every notification says, no longer reads as a
+  press release.
+- Classification runs whatever the flag says: with the extraction off, a classified notification
+  waits as `classified`. Turning the flag on later does not extract that backlog by itself: a
+  re-ingest of a document (an upload of the same file, say) finds its classification and
+  extracts it, and a sweep of the documents waiting as `classified` is not built yet. The
+  backfill command never extracts.

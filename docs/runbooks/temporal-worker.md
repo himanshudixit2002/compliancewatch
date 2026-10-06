@@ -89,6 +89,19 @@ workers run; [TemporalWorkerDown](#temporalworkerdown) does. Severity ticket, te
 3. A retryable error that exhausted its attempts is usually an upstream outage; once it is
    over, reset the workflow from the UI ("Reset" to the last workflow task) or start it again.
 
+## A rule extraction waits for the model's budget
+
+A `pipeline-extract-<document>-...` workflow (`pipeline.extract_rules`) that stays Running with
+a timer between failed `pipeline.extract_rules` attempts is waiting out a used-up budget: the
+llm-gateway refused the call with `llm-budget-exceeded`, and the workflow asks again after the
+gateway's `Retry-After`, between 15 minutes and 6 hours, up to 160 times
+(`services/pipeline/README.md`, "Extraction in the workflow"). Nothing is lost and the ingest
+that started it has finished. `GET /v1/llm-gateway/usage?feature=extraction` shows the month's
+spend against `CW_LLM_FEATURE_MONTHLY_BUDGET_INR`; raise the budget, if that is the decision, and
+the next ask goes through, or let it wait for the month to turn. A workflow that ran out of waits
+failed, and its document stays `classified`; start the ingest of the stored document again (an
+upload of the same bytes does) once the budget allows.
+
 ## Local checks
 
 - `make worker SERVICE=pipeline` in one terminal; in another, start `pipeline.ingest_document`

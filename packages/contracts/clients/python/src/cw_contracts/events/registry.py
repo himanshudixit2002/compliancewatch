@@ -7,6 +7,7 @@ from types import MappingProxyType
 from pydantic import BaseModel
 
 from cw_contracts.events.applicability_decided_v1 import ApplicabilityDecidedV1
+from cw_contracts.events.document_classified_v1 import DocumentClassifiedV1
 from cw_contracts.events.document_discovered_v1 import DocumentDiscoveredV1
 from cw_contracts.events.document_parsed_v1 import DocumentParsedV1
 from cw_contracts.events.eval_run_completed_v1 import EvalRunCompletedV1
@@ -48,6 +49,13 @@ TOPICS: Mapping[str, TopicSpec] = MappingProxyType(
             model=ApplicabilityDecidedV1,
             tenant_scoped=True,
             schema_file="applicability.decided.v1.json",
+        ),
+        "document.classified": TopicSpec(
+            topic="document.classified",
+            version="1.0.0",
+            model=DocumentClassifiedV1,
+            tenant_scoped=False,
+            schema_file="document.classified.v1.json",
         ),
         "document.discovered": TopicSpec(
             topic="document.discovered",
@@ -121,7 +129,7 @@ TOPICS: Mapping[str, TopicSpec] = MappingProxyType(
         ),
         "rule.candidate.created": TopicSpec(
             topic="rule.candidate.created",
-            version="1.0.0",
+            version="1.1.0",
             model=RuleCandidateCreatedV1,
             tenant_scoped=False,
             schema_file="rule.candidate.created.v1.json",

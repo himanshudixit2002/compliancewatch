@@ -314,6 +314,7 @@ def test_steps_are_chosen_by_name_in_the_check_order() -> None:
         "public",
         "sources",
         "review",
+        "extraction",
     ]
     assert [step.name for step in select(["isolation", "health"])] == ["health", "isolation"]
     assert select(None) == check.STEPS
@@ -959,3 +960,160 @@ def test_the_review_step_claims_nothing_when_someone_else_holds_every_task(sink:
     )
     assert script.claims == []
     assert lines[3].startswith("stats: 0 open, 13 claimed")
+
+
+PLACEHOLDER: Final = json.dumps(
+    {
+        "title": "placeholder",
+        "summary": "placeholder",
+        "doc_kind": "notification",
+        "change_kind": "none",
+        "effective_from": None,
+        "effective_to": None,
+        "references": [],
+        "applies_to": [],
+        "obligation": None,
+        "recurrence": None,
+        "amounts": [],
+        "citations": [],
+        "confidence": 0.0,
+    }
+)
+"""What the gateway's fake model answers for the extraction schema: every required field, the
+first value of each enum, no citation."""
+
+
+FAKE_ROUTE: Final = {"feature": "extraction", "primary": "fake/echo", "fallback": None}
+"""The extraction route make product sets while CW_LLM_PROVIDER is fake."""
+DEFAULT_ROUTE: Final = {
+    "feature": "extraction",
+    "primary": "deepseek/deepseek-v4-pro-0813",
+    "fallback": "zai/glm-5.3",
+}
+"""The gateway's own extraction route: real model ids, whichever provider answers them."""
+
+
+class Extraction(Scripted):
+    """The gateway's routing table (``route`` for the extraction, beside another feature's), the
+    triage queue, the resolve route (404 for a typed triage of a task nobody opened, 422 for an
+    untyped one, or ``resolve_status``), and the gateway's completions route answering as
+    ``served`` (or ``gateway_status`` with a problem)."""
+
+    def __init__(
+        self,
+        *,
+        route: dict[str, Any] | None = None,
+        resolve_status: int | None = None,
+        gateway_status: int = 200,
+        served: str = "fake/echo",
+    ) -> None:
+        super().__init__()
+        self.route = FAKE_ROUTE if route is None else route
+        self.resolve_status = resolve_status
+        self.gateway_status = gateway_status
+        self.served = served
+        self.asked: list[dict[str, Any]] = []
+        self.triaged = 0
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        path = request.url.path
+        if path == check.GATEWAY_MODELS:
+            smoke = {"feature": "smoke", "primary": "fake/echo", "fallback": None}
+            return httpx2.Response(200, json=[smoke, self.route])
+        if path == check.TASKS:
+            assert request.url.params["kind"] == "triage"
+            self.triaged += 1
+            return httpx2.Response(200, json={"items": [], "next_cursor": None})
+        if path.endswith("/resolve"):
+            assert request.headers["x-cw-write-token"] == "test-write-token"
+            triage = json.loads(request.content)["triage"]
+            if self.resolve_status is not None:
+                return httpx2.Response(self.resolve_status, json={})
+            if "doc_type" in triage:
+                slug = check.TASK_NOT_FOUND
+                return httpx2.Response(404, json={"type": f"urn:compliancewatch:problem:{slug}"})
+            slug = check.REQUEST_INVALID
+            return httpx2.Response(422, json={"type": f"urn:compliancewatch:problem:{slug}"})
+        if path == "/v1/llm-gateway/completions":
+            self.asked.append(json.loads(request.content))
+            if self.gateway_status != 200:
+                return httpx2.Response(
+                    self.gateway_status,
+                    json={"type": "urn:compliancewatch:problem:llm-prompt-unregistered"},
+                )
+            return httpx2.Response(
+                200,
+                json={
+                    "text": PLACEHOLDER,
+                    "model_served": self.served,
+                    "input_tokens": 1,
+                    "output_tokens": 1,
+                },
+            )
+        return super().__call__(request)
+
+
+def with_fake_gateway(script: Extraction, sink: Path) -> Product:
+    return scripted_product(script, sink, rulebook_write_token="test-write-token")
+
+
+def test_the_extraction_step_proves_triage_and_the_gateways_prompt_ingesting_nothing(
+    sink: Path,
+) -> None:
+    script = Extraction()
+    lines = check.extraction(context_of(with_fake_gateway(script, sink)))
+    assert lines[0] == (
+        "GET /v1/llm-gateway/models: the extraction is routed to fake/echo, which the gateway "
+        "serves from its fake model whatever its provider"
+    )
+    assert lines[1] == "GET /v1/pipeline/tasks?kind=triage: 0 on the first page"
+    assert lines[2] == (
+        "a triage of a task nobody opened: 404 pipeline-task-not-found; a relevant one without "
+        "a type: 422 request-invalid"
+    )
+    assert lines[3].startswith(
+        "the extraction asked the gateway's fake model 2 time(s) with "
+        "extraction.rule_candidate@1 about a synthetic notification, answered by fake/echo: not "
+        "a candidate twice (citations must cite at least one clause)"
+    )
+    assert [(asked["prompt"], asked["temperature"]) for asked in script.asked] == [
+        ("extraction.rule_candidate@1", 0.0),
+        ("extraction.rule_candidate@1", 0.3),
+    ]
+    assert all("model" not in asked for asked in script.asked), "as the worker asks: the route"
+
+
+@pytest.mark.parametrize(
+    "route",
+    [DEFAULT_ROUTE, {**FAKE_ROUTE, "fallback": "zai/glm-5.3"}],
+    ids=["real-models", "a-real-fallback"],
+)
+def test_the_extraction_step_asks_no_model_the_gateway_may_serve_for_real(
+    sink: Path, monkeypatch: pytest.MonkeyPatch, route: dict[str, Any]
+) -> None:
+    monkeypatch.setenv("CW_LLM_PROVIDER", "fake")
+    script = Extraction(route=route)
+    with pytest.raises(check.StepSkippedError, match="no route of it says whether its provider"):
+        check.extraction(context_of(with_fake_gateway(script, sink)))
+    assert (script.asked, script.triaged) == ([], 0), (
+        "decided by the running gateway's routes, not the check's own CW_LLM_PROVIDER"
+    )
+
+
+def test_the_extraction_step_fails_on_a_triage_taken_a_prompt_refused_or_a_real_answer(
+    sink: Path,
+) -> None:
+    with pytest.raises(StepFailedError, match="a triage of a task nobody opened answered 200"):
+        check.extraction(context_of(with_fake_gateway(Extraction(resolve_status=200), sink)))
+    with pytest.raises(StepFailedError, match="the gateway refused the extraction's ask: 422"):
+        check.extraction(context_of(with_fake_gateway(Extraction(gateway_status=422), sink)))
+    real = Extraction(served="deepseek/deepseek-v4-pro-0813")
+    with pytest.raises(
+        StepFailedError,
+        match="answered the extraction from deepseek/deepseek-v4-pro-0813, not from its fake",
+    ):
+        check.extraction(context_of(with_fake_gateway(real, sink)))
+    assert len(real.asked) == 2, "the stage asked twice before the answer was read"
+    without = Extraction(route={"feature": "qa", "primary": "fake/echo", "fallback": None})
+    with pytest.raises(StepFailedError, match="has no extraction route"):
+        check.extraction(context_of(with_fake_gateway(without, sink)))

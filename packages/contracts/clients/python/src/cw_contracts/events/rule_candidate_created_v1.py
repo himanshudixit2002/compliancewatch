@@ -2,15 +2,168 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from datetime import date
+from enum import StrEnum
+from typing import Annotated, Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, RootModel
+
+
+class DocType(StrEnum):
+    """
+    The type the document was classified as and extracted as: rules are extracted from notifications, circulars and act amendments only. Added in 1.1.0.
+    """
+
+    notification = "notification"
+    circular = "circular"
+    act_amendment = "act_amendment"
+
+
+class Outcome(StrEnum):
+    """
+    How the extraction ended: extracted, the model's answer read as a candidate (which the validators may still send to review); unparseable, the answer was not a candidate twice (a second ask once the first failed), so candidate is null and an analyst drafts the rule by hand. Added in 1.1.0.
+    """
+
+    extracted = "extracted"
+    unparseable = "unparseable"
+
+
+class Issue(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    code: Annotated[
+        str,
+        Field(
+            description="The check that failed, such as citation_quote_not_found or output_unparseable.",
+            min_length=1,
+        ),
+    ]
+    detail: Annotated[str, Field(description="What it found, in words.")]
+    clause_ref: Annotated[
+        str | None, Field(description="The clause it is about, when there is one.")
+    ] = None
+
+
+class DocKind(StrEnum):
+    notification = "notification"
+    circular = "circular"
+    press_release = "press_release"
+    act_amendment = "act_amendment"
+
+
+class ChangeKind(StrEnum):
+    none = "none"
+    corrigendum = "corrigendum"
+    withdrawal = "withdrawal"
+    amendment = "amendment"
+    extension = "extension"
+
+
+class Reference(RootModel[str]):
+    root: Annotated[str, Field(min_length=1)]
+
+
+class Operator(StrEnum):
+    eq = "eq"
+    neq = "neq"
+    in_ = "in"
+    not_in = "not_in"
+    gt = "gt"
+    gte = "gte"
+    lt = "lt"
+    lte = "lte"
+    contains = "contains"
+    contains_any = "contains_any"
+
+
+class AppliesToItem(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    attribute: str
+    operator: Operator
+    value: Any
+    clause_ref: str
+
+
+class Obligation(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    title: Annotated[str, Field(min_length=1)]
+    steps: list[str]
+    evidence_type: str
+    due_in_days: Annotated[int | None, Field(ge=0)]
+    clause_ref: str
+
+
+class Frequency(StrEnum):
+    monthly = "monthly"
+    quarterly = "quarterly"
+    half_yearly = "half_yearly"
+    annual = "annual"
+
+
+class Recurrence(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    frequency: Frequency
+    due_day: Annotated[int, Field(ge=1, le=31)]
+    due_month_offset: Annotated[int, Field(ge=0, le=24)]
+    clause_ref: str
+
+
+class Amount(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    label: Annotated[str, Field(min_length=1)]
+    value_inr: Annotated[int, Field(ge=0)]
+    clause_ref: str
+
+
+class Citation(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    clause_ref: str
+    quote: Annotated[str, Field(min_length=1)]
+
+
+class RuleCandidateFields(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    title: Annotated[str, Field(max_length=200, min_length=1)]
+    summary: Annotated[str, Field(max_length=1000, min_length=1)]
+    doc_kind: DocKind
+    change_kind: ChangeKind
+    effective_from: date | None
+    effective_to: date | None
+    references: Annotated[
+        list[Reference],
+        Field(description="Notifications and circulars the document names, as written."),
+    ]
+    applies_to: list[AppliesToItem]
+    obligation: Obligation | None
+    recurrence: Recurrence | None
+    amounts: list[Amount]
+    citations: Annotated[list[Citation], Field(min_length=1)]
+    confidence: Annotated[float, Field(ge=0.0, le=1.0)]
 
 
 class RuleCandidateCreatedV1(BaseModel):
     """
-    The extractor produced a rule candidate from a parsed document; the candidate itself is read from the store. Producer: pipeline (rule extractor). Consumers: pipeline (review).
+    The extractor produced a rule candidate from a parsed document: the model's answer to the registered extraction prompt, read as a candidate and checked by the validators. The pipeline stores the extraction, keyed by the document and the prompt version, and writes this event in the same transaction. Since 1.1.0 it carries the candidate itself, how the extraction ended, the issues found, a suggested rule key and the cited clauses' ids. Producer: pipeline (rule extractor). Consumers: none yet; the rulebook's candidate intake once it is built.
     """
 
     model_config = ConfigDict(
@@ -32,6 +185,61 @@ class RuleCandidateCreatedV1(BaseModel):
     needs_review: Annotated[
         bool,
         Field(
-            description="True when the confidence is below the review threshold or a check failed."
+            description="True when the confidence is below the review threshold, a check failed or the answer was not a candidate."
         ),
     ]
+    source_id: Annotated[
+        UUID | None,
+        Field(description="The source the document came from. Added in 1.1.0."),
+    ] = None
+    source_key: Annotated[
+        str | None,
+        Field(
+            description="The source's key, such as cbic_notifications. Added in 1.1.0.",
+            min_length=1,
+        ),
+    ] = None
+    doc_type: Annotated[
+        DocType | None,
+        Field(
+            description="The type the document was classified as and extracted as: rules are extracted from notifications, circulars and act amendments only. Added in 1.1.0."
+        ),
+    ] = None
+    outcome: Annotated[
+        Outcome | None,
+        Field(
+            description="How the extraction ended: extracted, the model's answer read as a candidate (which the validators may still send to review); unparseable, the answer was not a candidate twice (a second ask once the first failed), so candidate is null and an analyst drafts the rule by hand. Added in 1.1.0."
+        ),
+    ] = None
+    candidate: Annotated[
+        RuleCandidateFields | None,
+        Field(
+            description="The candidate as the model gave it, in the shape the extraction prompt asks for (the extractor's CANDIDATE_SCHEMA, kept equal to it by a contract test); null when the outcome is unparseable. Added in 1.1.0."
+        ),
+    ] = None
+    issues: Annotated[
+        list[Issue] | None,
+        Field(
+            description="What the validators found wrong with the candidate; any issue sends it to review. Added in 1.1.0."
+        ),
+    ] = None
+    suggested_rule_key: Annotated[
+        str | None,
+        Field(
+            description="A rule key the candidate may belong to, named as the seed calendar names rules (form and cadence, such as gstr3b_monthly): from the first GST form the candidate names and its recurrence or filing scheme. A suggestion for the analyst to confirm, never a match against the rulebook; null when the candidate names no form or no cadence. Added in 1.1.0.",
+            pattern="^[a-z][a-z0-9_]{0,62}$",
+        ),
+    ] = None
+    clause_ids: Annotated[
+        list[UUID] | None,
+        Field(
+            description="The ids of the clauses the candidate cites or leans on, as the kernel derives them from the document id and each clause ref (the rulebook stores the clauses under them), in clause-ref order. Added in 1.1.0."
+        ),
+    ] = None
+    ontology_version: Annotated[
+        str | None,
+        Field(
+            description="The ontology the candidate's predicates were checked against. Added in 1.1.0.",
+            min_length=1,
+        ),
+    ] = None

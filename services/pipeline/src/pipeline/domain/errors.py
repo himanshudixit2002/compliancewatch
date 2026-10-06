@@ -64,6 +64,22 @@ class UnsupportedDocumentError(Exception):
     """No parser of the chain takes the document's media type; retrying cannot help."""
 
 
+class ClassifiedMeanwhileError(Exception):
+    """Another ingest of the same bytes classified the document while this one read it; the
+    transaction rolls back, and the retry finds that classification."""
+
+
+class ModelBudgetExhaustedError(Exception):
+    """The llm-gateway refused a model call because a monthly budget is used up (its problem
+    type ``llm-budget-exceeded``, a 429). ``retry_after_seconds`` is the gateway's
+    ``Retry-After``: how long until the budget resets, when it knows. The rule extraction waits
+    and asks again rather than failing."""
+
+    def __init__(self, message: str, *, retry_after_seconds: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
 class TranscriptInvalidError(DomainError, ValueError):
     """An analyst's transcript is not in the shape of the parsers' blocks, or gives clauses the
     rulebook would refuse; the message names each problem by its place."""

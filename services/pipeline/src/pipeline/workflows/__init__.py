@@ -7,6 +7,11 @@ from pipeline.workflows.extract_knowledge import (
     KnowledgeRequest,
     KnowledgeResult,
 )
+from pipeline.workflows.extract_rules import (
+    EXTRACT_RULES_WORKFLOW,
+    ExtractionResult,
+    ExtractRulesWorkflow,
+)
 from pipeline.workflows.ingest_document import (
     TASK_QUEUE,
     IngestDocumentWorkflow,
@@ -16,9 +21,12 @@ from pipeline.workflows.ingest_document import (
 
 __all__ = [
     "CRAWL_WORKFLOW",
+    "EXTRACT_RULES_WORKFLOW",
     "TASK_QUEUE",
     "CrawlSourceWorkflow",
     "ExtractKnowledgeWorkflow",
+    "ExtractRulesWorkflow",
+    "ExtractionResult",
     "IngestDocumentWorkflow",
     "IngestRequest",
     "IngestResult",

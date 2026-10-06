@@ -286,6 +286,28 @@ def candidate_from_mapping(data: object) -> CandidateFields:
     )
 
 
+def conformance_problems(fields: CandidateFields) -> tuple[str, ...]:
+    """What in ``fields`` the schema refuses although ``parse_candidate`` reads it: a title or a
+    summary longer than the schema allows, no citation, a due month offset past the schema's
+    maximum. The rule extraction asks again for an answer with any of these, and keeps none as
+    a candidate, so every candidate it publishes fits ``CANDIDATE_SCHEMA``; the eval harness
+    scores the parse alone."""
+    properties = CANDIDATE_SCHEMA["properties"]
+    problems: list[str] = []
+    for name in ("title", "summary"):
+        limit = int(properties[name]["maxLength"])
+        if len(getattr(fields, name)) > limit:
+            problems.append(f"{name} is longer than {limit} characters")
+    if len(fields.citations) < int(properties["citations"]["minItems"]):
+        problems.append("citations must cite at least one clause")
+    offsets = properties["recurrence"]["properties"]["due_month_offset"]
+    if fields.recurrence is not None and fields.recurrence.due_month_offset > int(
+        offsets["maximum"]
+    ):
+        problems.append(f"recurrence.due_month_offset is more than {offsets['maximum']}")
+    return tuple(problems)
+
+
 def _text(data: Mapping[str, object], key: str) -> str:
     value = data.get(key)
     if not isinstance(value, str) or not value.strip():

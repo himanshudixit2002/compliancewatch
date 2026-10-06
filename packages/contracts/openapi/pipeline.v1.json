@@ -277,12 +277,16 @@
         "type": "object"
       },
       "DocumentStatus": {
-        "description": "Where a stored document stands: just discovered, parsed into clauses, failed to parse,\nor set aside as not a regulatory document (a user manual listed among notifications).",
+        "description": "Where a stored document stands: just discovered; parsed into clauses; failed to parse\n(a manual parse waits); set aside as not a regulatory document (a user manual listed among\nnotifications); classified and on its way to the rule extraction; held for a person's\ntriage; kept for reference (a press release, a statute: on its way to be registered, nothing\nextracted); or extracted, its extraction stored, a candidate or an unparseable answer. The\nstatuses a classification sets are its route, not outcomes (``domain.classification``): a\n``reference`` or ``classified`` document is registered only while knowledge is on.",
         "enum": [
           "discovered",
           "parsed",
           "failed",
-          "irrelevant"
+          "irrelevant",
+          "classified",
+          "triage",
+          "reference",
+          "extracted"
         ],
         "title": "DocumentStatus",
         "type": "string"
@@ -661,8 +665,16 @@
         "title": "ReadyResponse",
         "type": "object"
       },
+      "Relevance": {
+        "enum": [
+          "relevant",
+          "irrelevant"
+        ],
+        "title": "Relevance",
+        "type": "string"
+      },
       "ResolutionOut": {
-        "description": "The resolved task and the ingest that parses its transcript: ``started`` is false when it\nwas started before (it runs, or it is done).",
+        "description": "The resolved task and the ingest it starts (a manual parse's parses the transcript, a\nrelevant triage's continues the document as its type): ``started`` is false when it was\nstarted before (it runs, or it is done). An irrelevant triage starts none, and\n``workflow_id`` is empty.",
         "properties": {
           "started": {
             "title": "Started",
@@ -672,6 +684,7 @@
             "$ref": "#/components/schemas/TaskOut"
           },
           "workflow_id": {
+            "description": "pipeline-manual-parse-<task> or pipeline-triage-<task>; empty for an irrelevant triage",
             "title": "Workflow Id",
             "type": "string"
           }
@@ -686,7 +699,7 @@
       },
       "ResolveIn": {
         "additionalProperties": false,
-        "description": "The resolution of a task: a manual parse takes the analyst's transcript.",
+        "description": "The resolution of a task: a manual parse takes the analyst's transcript, a triage the\nanalyst's decision.",
         "properties": {
           "actor_id": {
             "description": "The admin taking the step; a signed-in user's token overrides it, and the audit entry names whoever acted",
@@ -705,6 +718,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/TranscriptIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "triage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageIn"
               },
               {
                 "type": "null"
@@ -1161,7 +1184,7 @@
           },
           "kind": {
             "$ref": "#/components/schemas/TaskKind",
-            "description": "manual_parse (no parser reads the document) or triage"
+            "description": "manual_parse (no parser reads the document) or triage (the classify step found another type in the text than its source publishes)"
           },
           "note": {
             "description": "The resolver's or dismisser's reason",
@@ -1174,7 +1197,7 @@
             "type": "string"
           },
           "reason": {
-            "description": "Why it opened: each parser's reason, for a manual parse",
+            "description": "Why it opened: each parser's reason, for a manual parse; the classifier's, for a triage",
             "title": "Reason",
             "type": "string"
           },
@@ -1188,7 +1211,7 @@
                 "type": "null"
               }
             ],
-            "description": "What the resolution did: for a manual parse, the transcript's storage key and digest, the parser (manual@1) and the clause count",
+            "description": "What the resolution did: for a manual parse, the transcript's storage key and digest, the parser (manual@1) and the clause count; for a triage, the relevance, the type and the route it gave the document (extract, reference or irrelevant)",
             "title": "Resolution"
           },
           "resolved_at": {
@@ -1298,6 +1321,32 @@
           "blocks"
         ],
         "title": "TranscriptIn",
+        "type": "object"
+      },
+      "TriageIn": {
+        "additionalProperties": false,
+        "description": "A triage's decision: the document is relevant and of a type, or irrelevant (its type\nleft as the classifier read it). The reason is the request's own.",
+        "properties": {
+          "doc_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its type, for a relevant document: a notification, circular or act amendment goes on to the rule extraction; a press release or a statute is kept for reference"
+          },
+          "relevance": {
+            "$ref": "#/components/schemas/Relevance",
+            "description": "relevant: a regulator's document, of doc_type; irrelevant: set it aside"
+          }
+        },
+        "required": [
+          "relevance"
+        ],
+        "title": "TriageIn",
         "type": "object"
       },
       "UploadOut": {
@@ -2187,7 +2236,7 @@
     },
     "/v1/pipeline/sources/{key}/uploads": {
       "post": {
-        "description": "Store the file under the source, record it with its document.discovered and start its\ningest, which parses it and, while knowledge is on, registers it in the rulebook. Answers\n202 at once with the stored document and the ingest's workflow id; a document no parser\nreads opens a manual-parse task (GET /v1/pipeline/tasks). Bytes stored before are a\nduplicate: nothing is recorded again and the ingest runs again. 413 past the upload limit,\n415 for a file that is not a PDF or an HTML page, 404 for an unknown source, 503 when\nTemporal does not answer (the document stays stored: upload it again). Audited as\npipeline.document.upload with the reason.",
+        "description": "Store the file under the source, record it with its document.discovered and start its\ningest, which parses and classifies it. The classification decides whether it is registered\nin the rulebook (while knowledge is on): a document that is no regulatory one is set aside,\nand one whose text names another type than its source publishes waits for a person's\ntriage, neither registered; a document_type given here is taken as it is. Answers 202 at\nonce with the stored document and the ingest's workflow id; a document no parser reads opens\na manual-parse task and a held one a triage task (GET /v1/pipeline/tasks). Bytes stored\nbefore are a duplicate: nothing is recorded again and the ingest runs again. 413 past the\nupload limit, 415 for a file that is not a PDF or an HTML page, 404 for an unknown source,\n503 when Temporal does not answer (the document stays stored: upload it again). Audited as\npipeline.document.upload with the reason.",
         "operationId": "upload_document_v1_pipeline_sources__key__uploads_post",
         "parameters": [
           {
@@ -2465,7 +2514,7 @@
     },
     "/v1/pipeline/tasks/{task_id}/dismiss": {
       "post": {
-        "description": "Close an open task without the work: the reason says why (a duplicate scan, not a\nregulatory document). A dismissed manual parse leaves its document failed and unregistered.\nAudited as pipeline.task.dismiss. 409 for a closed task.",
+        "description": "Close an open task without the work: the reason says why (a duplicate scan, not a\nregulatory document). A dismissed manual parse leaves its document failed and unregistered,\na dismissed triage leaves it held for triage and unregistered. Audited as\npipeline.task.dismiss. 409 for a closed task.",
         "operationId": "dismiss_task_v1_pipeline_tasks__task_id__dismiss_post",
         "parameters": [
           {
@@ -2602,7 +2651,7 @@
     },
     "/v1/pipeline/tasks/{task_id}/resolve": {
       "post": {
-        "description": "Resolve an open manual-parse task with the document typed by hand: headings, numbered\nparagraphs and tables in document order, checked first (422 names each problem). The\ntranscript is kept in the raw store, the task is resolved and audited as\npipeline.task.resolve, and an ingest starts that parses the document from it as manual@1\nand, while knowledge is on, registers it in the rulebook; from then on the document is\nparsed from its transcript. 409 for a closed task (the same transcript again starts the\ningest if it did not start); 422 for a resolution that does not fit the task (a manual parse\nwithout a transcript, a triage task, which its own step resolves); 503 when Temporal does\nnot answer, in which case the task stays resolved and the same request starts the ingest\nagain.",
+        "description": "Resolve an open task.\n\nA manual parse takes the document typed by hand (``transcript``): headings, numbered\nparagraphs and tables in document order, checked first (422 names each problem). The\ntranscript is kept in the raw store, the task is resolved and audited as\npipeline.task.resolve, and an ingest starts that parses the document from it as manual@1,\nclassifies it and, unless the classification sets it aside or holds it for a triage,\nregisters it in the rulebook while knowledge is on; from then on the document is parsed\nfrom its transcript.\n\nA triage takes the analyst's decision (``triage``): relevant with the document's type, or\nirrelevant. It is stored on the task's resolution and becomes the document's classification\n(certain, by triage), with its status and a document.classified, audited as\npipeline.task.resolve; the stored document's own type is never changed. A relevant document\ncontinues through an ingest (pipeline-triage-<task>) that registers it as that type while\nknowledge is on and, for a notification, circular or act amendment, extracts its rule\ncandidate while the extraction is on; an irrelevant one is set aside and nothing starts.\n\n409 for a closed task (the same transcript or decision again starts the ingest if it did not\nstart); 422 for a resolution that does not fit the task (a manual parse without a\ntranscript, a triage without a decision, or either with the other's); 503 when Temporal does\nnot answer, in which case the task stays resolved and the same request starts the ingest\nagain.",
         "operationId": "resolve_task_v1_pipeline_tasks__task_id__resolve_post",
         "parameters": [
           {
@@ -2731,7 +2780,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Resolve a task: a manual parse with the analyst's transcript",
+        "summary": "Resolve a task: a manual parse with a transcript, a triage with a decision",
         "tags": [
           "pipeline"
         ]

@@ -127,6 +127,21 @@ the API answers. One failed step does not stop the next.
   public listener answers the queue 404 in header mode. Nothing is edited or decided, so no seed
   draft changes, none is approved or published and none is marked reviewed:
   ``tools/demo/tests/unit/test_review_flow.py`` edits, approves and publishes on memory stores.
+- ``extraction``: the pipeline's triage and its rule extraction, ingesting nothing. It runs only
+  while the running gateway's routing table (``GET /v1/llm-gateway/models``) routes the
+  extraction to fake models alone, ``fake/...`` ids, which the gateway serves in process
+  whatever its provider (``make product`` routes it to ``fake/echo`` while ``CW_LLM_PROVIDER``
+  is fake), and reports itself skipped otherwise: no route of the gateway names the provider it
+  answers other ids from, and the check never asks a real model. ``GET
+  /v1/pipeline/tasks?kind=triage`` answers with triage tasks only; a triage of a task id nobody
+  opened is refused 404 ``pipeline-task-not-found`` and a relevant one without a type 422, so
+  no task changes. The extraction's stage, as the worker builds it, asks the product's gateway
+  with the registered prompt ``extraction.rule_candidate@1`` about a synthetic notification
+  that is stored nowhere: the gateway accepts the prompt, the answer must name a ``fake/``
+  model, and the fake model's placeholder, which cites no clause, is read as no candidate twice.
+  Nothing is stored or published; the gateway books each ask its cache did not answer at a
+  tiny estimated price in its ledger. ``tools/demo/tests/unit/test_extraction_flow.py``
+  extracts from a recorded notification.
 """
 
 import io
@@ -176,10 +191,18 @@ from cw_demo.product.tenants import (
 )
 from cw_evals.qa.world import load_world
 from cw_mvp.registry import entry_named, service_settings
+from domain_kernel.documents import Clause, DocumentType, ExtractionContext, ParsedDocument
+from domain_kernel.ids import DocumentId
 from domain_kernel.recurrence import Period, Recurrence
 from notification.infrastructure.sink import MESSAGE_ID_PREFIX
 from obligation.sweep import main as sweep_main
+from ontology import VERSION as ONTOLOGY_VERSION
 from ontology import load as load_ontology
+from pipeline.application.extraction import RULE_PROMPT, RULE_PROMPT_REF, RuleExtractionStage
+from pipeline.application.extractor import FEATURE as EXTRACTION_FEATURE
+from pipeline.application.extractor import LlmRuleExtractor
+from pipeline.infrastructure.gateway import GatewayError, GatewayProvider
+from pipeline.infrastructure.prompts import load_prompt
 from rulebook.application.seed_loader import load_calendar
 
 TIMEOUT_SECONDS: Final = 30.0
@@ -309,6 +332,26 @@ FETCHED_SOURCE: Final = "cbic_notifications"
 FETCH_ACTOR: Final = UUID("00000000-0000-4000-8000-0000000c0001")
 """The synthetic admin the check's fetches name."""
 FETCH_REASON: Final = "cw-product check: a fetch must be refused while crawling is off"
+TASK_NOT_FOUND: Final = "pipeline-task-not-found"
+REQUEST_INVALID: Final = "request-invalid"
+TRIAGE_REASON: Final = "cw-product check: a triage of a task nobody opened must be refused"
+GATEWAY_MODELS: Final = "/v1/llm-gateway/models"
+"""The running gateway's routing table: which models serve each feature."""
+FAKE_MODEL: Final = "fake/"
+"""What a fake model's id starts with. The gateway serves such an id from its in-process fake
+provider whatever ``CW_LLM_PROVIDER`` says (``llm_gateway.domain.routing.provider_for``), so a
+route of fake models only never reaches a real one; no route of the gateway names the provider
+it answers other ids from."""
+EXTRACTION_DOCUMENT: Final = ParsedDocument(
+    document_id=DocumentId(UUID("00000000-0000-4000-8000-0000000c0e01")),
+    doc_type=DocumentType.NOTIFICATION,
+    title="Example notification of the product check",
+    clauses=(
+        Clause("en.p1", "Example notification of the product check"),
+        Clause("en.p2", "Example text: it states no rule and is stored nowhere."),
+    ),
+)
+"""What the extraction step asks the product's gateway about: synthetic, never stored."""
 REVIEW_TASKS: Final = f"{RULEBOOK}/review/tasks"
 REVIEW_STATS: Final = f"{RULEBOOK}/review/stats"
 WAITING: Final = frozenset({"open", "claimed"})
@@ -2267,6 +2310,92 @@ def _uploads_and_tasks(product: Product, built_in: Sequence[Mapping[str, Any]]) 
     ]
 
 
+# ---------------------------------------------------------------- extraction
+
+
+def extraction_models(product: Product) -> list[str]:
+    """The models the running gateway routes the extraction to, primary first, as its routing
+    table on the internal listener says (``GET /v1/llm-gateway/models``)."""
+    for route in ok(product.internal.get(GATEWAY_MODELS)):
+        if route.get("feature") == EXTRACTION_FEATURE:
+            return [str(model) for model in (route.get("primary"), route.get("fallback")) if model]
+    raise StepFailedError(f"GET {GATEWAY_MODELS} has no {EXTRACTION_FEATURE} route")
+
+
+def extraction(context: CheckContext) -> list[str]:
+    product = context.product
+    models = extraction_models(product)
+    if not models or not all(model.startswith(FAKE_MODEL) for model in models):
+        raise StepSkippedError(
+            f"the product's gateway routes the extraction to {', '.join(models)}, and no route "
+            "of it says whether its provider is the fake one, so the check asks no model (make "
+            "product routes the extraction to fake/echo while CW_LLM_PROVIDER is fake)"
+        )
+    queue = ok(product.internal.get(TASKS, params={"kind": "triage"}))["items"]
+    if any(item.get("kind") != "triage" for item in queue):
+        raise StepFailedError(f"GET {TASKS}?kind=triage listed a task of another kind")
+    nobody = f"{TASKS}/{uuid4()}/resolve"
+    decision = {
+        "actor_id": str(FETCH_ACTOR),
+        "reason": TRIAGE_REASON,
+        "triage": {"relevance": "relevant", "doc_type": "notification"},
+    }
+    missing = product.internal.post(nobody, json=decision, headers=product.write_headers())
+    if (missing.status_code, problem_slug(missing)) != (404, TASK_NOT_FOUND):
+        raise StepFailedError(
+            f"a triage of a task nobody opened answered {describe(missing)}, not 404 "
+            f"{TASK_NOT_FOUND}"
+        )
+    untyped = product.internal.post(
+        nobody,
+        json={**decision, "triage": {"relevance": "relevant"}},
+        headers=product.write_headers(),
+    )
+    if (untyped.status_code, problem_slug(untyped)) != (422, REQUEST_INVALID):
+        raise StepFailedError(
+            f"a relevant triage without a type answered {describe(untyped)}, not 422 "
+            f"{REQUEST_INVALID}"
+        )
+    stage = RuleExtractionStage(
+        LlmRuleExtractor(
+            GatewayProvider(client=product.internal), load_prompt(*RULE_PROMPT), load_ontology()
+        )
+    )
+    context_of_call = ExtractionContext(
+        regulator="CBIC",
+        prompt_version=RULE_PROMPT_REF,
+        model="llm-gateway",
+        ontology_version=ONTOLOGY_VERSION,
+    )
+    try:
+        got = stage.run(EXTRACTION_DOCUMENT, context_of_call)
+    except GatewayError as exc:
+        raise StepFailedError(f"the gateway refused the extraction's ask: {exc}") from exc
+    if not got.model.startswith(FAKE_MODEL):
+        raise StepFailedError(
+            f"the gateway answered the extraction from {got.model or 'no model'}, not from its "
+            "fake model"
+        )
+    if got.fields is None:
+        read = (
+            f"not a candidate twice ({'; '.join(i.detail for i in got.report.issues)}), so it "
+            "would be stored unparseable for an analyst"
+        )
+    else:
+        read = f"a candidate with {len(got.report.issues)} issue(s) for review"
+    return [
+        f"GET {GATEWAY_MODELS}: the extraction is routed to {', '.join(models)}, which the "
+        "gateway serves from its fake model whatever its provider",
+        f"GET {TASKS}?kind=triage: {len(queue)} on the first page",
+        f"a triage of a task nobody opened: 404 {TASK_NOT_FOUND}; a relevant one without a "
+        f"type: 422 {REQUEST_INVALID}",
+        f"the extraction asked the gateway's fake model {got.attempts} time(s) with "
+        f"{RULE_PROMPT_REF} about a synthetic notification, answered by {got.model}: {read}",
+        "nothing ingested, uploaded or stored: test_extraction_flow.py and the pipeline's "
+        "extraction workflow tests extract from a recorded notification",
+    ]
+
+
 # ---------------------------------------------------------------- review
 
 
@@ -2461,6 +2590,12 @@ STEPS: list[Step] = [
         "every seed draft waits in the review queue; one task is claimed and read, and the "
         "stats count them",
         review,
+    ),
+    Step(
+        "extraction",
+        "the triage routes answer and the rule extraction asks the gateway with the registered "
+        "prompt, ingesting nothing",
+        extraction,
     ),
 ]
 """The steps in the order they run. A later package appends its own."""

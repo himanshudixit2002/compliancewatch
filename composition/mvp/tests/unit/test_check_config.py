@@ -355,6 +355,25 @@ def test_the_crawl_flag_fetches_documents_too(
     assert on_s3.ok, lines(on_s3)
 
 
+@pytest.mark.parametrize("base", [STAGING, PRODUCTION], ids=["staging", "prod"])
+def test_the_extraction_needs_the_knowledge_flag(
+    monkeypatch: pytest.MonkeyPatch, base: dict[str, str]
+) -> None:
+    alone = report(monkeypatch, base, pipeline_extraction_enabled="true")
+    assert only(alone).where == "pipeline"
+    assert only(alone).message.startswith(
+        "CW_PIPELINE_EXTRACTION_ENABLED needs CW_PIPELINE_KNOWLEDGE_ENABLED"
+    )
+    both = report(
+        monkeypatch,
+        base,
+        pipeline_extraction_enabled="true",
+        pipeline_knowledge_enabled="true",
+        rulebook_write_token="a-long-write-token-for-the-check",
+    )
+    assert both.ok, lines(both)
+
+
 def test_local_and_test_may_fetch_into_a_local_raw_store(monkeypatch: pytest.MonkeyPatch) -> None:
     local = {"CW_LLM_PROVIDER": "fake", "CW_WORKER_TEMPORAL_ENABLED": "true"}
     found = report(monkeypatch, local, env="local", pipeline_raw_store="local")

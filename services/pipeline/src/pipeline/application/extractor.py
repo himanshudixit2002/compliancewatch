@@ -52,15 +52,32 @@ class LlmRuleExtractor:
     def extract(self, doc: ParsedDocument, ctx: ExtractionContext) -> RuleCandidate:
         return self.run(doc, ctx).candidate
 
-    def run(self, doc: ParsedDocument, ctx: ExtractionContext) -> ExtractionOutcome:
+    @property
+    def prompt_ref(self) -> str:
+        return self._prompt.ref
+
+    def run(
+        self,
+        doc: ParsedDocument,
+        ctx: ExtractionContext,
+        *,
+        temperature: float = 0.0,
+        attempt: int = 1,
+    ) -> ExtractionOutcome:
+        """One gateway call. ``temperature`` above 0 asks for a fresh sample, which the
+        gateway's cache of deterministic calls does not answer; ``attempt`` tags the trace."""
+        metadata = {"document_id": str(doc.document_id), "regulator": ctx.regulator}
+        if attempt > 1:
+            metadata["attempt"] = str(attempt)
         request = CompletionRequest(
             feature=FEATURE,
             prompt_version=self._prompt.ref,
             system=self._prompt.system,
             user=render_document(doc),
+            temperature=temperature,
             json_schema=CANDIDATE_SCHEMA,
             max_tokens=4096,
-            metadata={"document_id": str(doc.document_id), "regulator": ctx.regulator},
+            metadata=metadata,
         )
         response = self._provider.complete(request)
         return self.assess(doc, ctx, response.text, response.model)

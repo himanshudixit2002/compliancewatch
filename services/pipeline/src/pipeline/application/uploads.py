@@ -5,10 +5,13 @@ statutes the rules cite) or a site blocks.
 what its type says), keeps the bytes in the raw store with no transaction open, and then, in one
 transaction, records the document with its ``document.discovered`` and its ``audit.event`` row
 (``pipeline.document.upload``, of no tenant). With the transaction closed it starts the ingest
-of the stored document (``IngestStarter``), which parses it, and registers it while knowledge is
-on. Bytes stored before are a duplicate: nothing is recorded again, the upload is audited all
-the same, and the ingest runs again (the parse and the registration are idempotent), so an
-upload whose ingest could not start is mended by uploading the file again.
+of the stored document (``IngestStarter``), which parses and classifies it; the classification
+decides whether it is registered (while knowledge is on): a document that is no regulatory one
+is set aside and a conflict waits for a person's triage, neither registered
+(``application.classify``). Bytes stored before are a duplicate: nothing is recorded again, the
+upload is audited all the same, and the ingest runs again (the parse, the classification and the
+registration are idempotent; the first classification stands), so an upload whose ingest could
+not start is mended by uploading the file again.
 
 An uploaded document is listed at ``upload://<source key>/<sha256>``, its title, date and
 reference are what the uploader gave, and its document type is the one the uploader gave

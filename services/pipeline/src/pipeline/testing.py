@@ -1,5 +1,6 @@
-"""Test doubles for adapter tests and demos: recorded sources, a scripted model and embedder,
-a rulebook, an S3 endpoint, a recorded adapter type and a crawl starter.
+"""Test doubles for adapter tests and demos: recorded sources, scripted models (by document, or
+answers in turn) and an embedder, a rulebook, an S3 endpoint, a recorded adapter type and a
+crawl starter.
 
 ``FixtureTransport`` maps a request to a file under ``tests/fixtures`` (or a literal body) and
 answers 404 for anything else, so a test that reaches an unrecorded URL fails loudly instead of
@@ -198,6 +199,27 @@ class ScriptedProvider:
             (document_id, req.prompt_version), self._answers.get(document_id, self._default)
         )
         return CompletionResponse(text=text, model=self.MODEL, input_tokens=0, output_tokens=0)
+
+
+class AnswersInTurn:
+    """An ``LLMProvider`` that gives its answers one after another, raising any exception among
+    them (a used-up budget, an outage): for the rule extraction's retries in tests. Every
+    request is kept in ``requests``."""
+
+    MODEL = "scripted/turns"
+
+    def __init__(self, *answers: str | Exception) -> None:
+        self.answers = list(answers)
+        self.requests: list[CompletionRequest] = []
+
+    def complete(self, req: CompletionRequest) -> CompletionResponse:
+        self.requests.append(req)
+        if not self.answers:
+            raise AssertionError(f"no answer left for request {len(self.requests)}")
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return CompletionResponse(text=answer, model=self.MODEL, input_tokens=0, output_tokens=0)
 
 
 def hash_vector(text: str, dims: int = EMBEDDING_DIMS) -> Vector:

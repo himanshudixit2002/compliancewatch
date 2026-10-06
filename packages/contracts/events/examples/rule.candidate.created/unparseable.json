@@ -1,0 +1,34 @@
+{
+  "event_id": "c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f",
+  "topic": "rule.candidate.created",
+  "schema_version": "1.1.0",
+  "occurred_at": "2026-10-06T07:02:44Z",
+  "tenant_id": null,
+  "correlation_id": "d3e4f5a6-b7c8-4d9e-8f0a-1b2c3d4e5f6a",
+  "causation_id": null,
+  "payload": {
+    "candidate_id": "3d4e5f6a-7b8c-4d9e-8f0a-2b3c4d5e6f7a",
+    "document_id": "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e",
+    "regulator": "CBIC",
+    "model": "fake/echo",
+    "prompt_version": "extraction.rule_candidate@1",
+    "confidence": 0.0,
+    "citation_count": 0,
+    "needs_review": true,
+    "source_id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+    "source_key": "cbic_notifications",
+    "doc_type": "circular",
+    "outcome": "unparseable",
+    "candidate": null,
+    "issues": [
+      {
+        "code": "output_unparseable",
+        "detail": "not JSON: Expecting value at 0",
+        "clause_ref": null
+      }
+    ],
+    "suggested_rule_key": null,
+    "clause_ids": [],
+    "ontology_version": "0.2.0"
+  }
+}

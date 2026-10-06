@@ -49,6 +49,14 @@ class PipelineSettings(Settings):
     regulatory-intelligence; remove the flag once ADR-017 is accepted). Off, the worker makes no
     call to the rulebook or the gateway.
 
+    ``pipeline_extraction_enabled`` turns on the rule extraction
+    (``CW_PIPELINE_EXTRACTION_ENABLED``, flag ``pipeline.extraction``, default off; owner
+    regulatory-intelligence; remove the flag once extracted candidates are reviewed into rules in
+    staging and the extraction is on in production). On, the ingest starts the extraction of each
+    classified notification, circular or act amendment it registered, which reads the document as
+    the rulebook keeps it: it needs ``pipeline_knowledge_enabled``. Off, classified documents wait
+    as ``classified`` and no model is called for them.
+
     ``rulebook_url`` and ``rulebook_write_token`` reach the rulebook's write API; the token is
     the rulebook's ``CW_RULEBOOK_WRITE_TOKEN``. ``llm_gateway_url`` is where the relation stage's
     model calls and the clause embeddings go (``CW_LLM_GATEWAY_URL``). With py-common's
@@ -76,6 +84,7 @@ class PipelineSettings(Settings):
     pipeline_raw_encryption: Encryption = "AES256"
     pipeline_raw_kms_key_id: str | None = None
     pipeline_knowledge_enabled: bool = False
+    pipeline_extraction_enabled: bool = False
     pipeline_crawl_enabled: bool = False
     rulebook_url: str = "http://localhost:8003"
     rulebook_write_token: SecretStr | None = None

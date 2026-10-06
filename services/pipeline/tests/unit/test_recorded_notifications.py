@@ -14,6 +14,7 @@ import pytest
 from domain_kernel.documents import DocumentRef, DocumentType, clause_id_for, document_id_for
 from domain_kernel.protocols import SourceAdapter
 from pipeline.application.detector import ChangeKind, detect
+from pipeline.domain.classification import Relevance, TypeConfidence
 from pipeline.infrastructure.adapters import SOURCES, build_adapter
 from pipeline.infrastructure.http import ClientConfig, PoliteClient
 from pipeline.infrastructure.parsers import PdfParser
@@ -67,3 +68,8 @@ def test_a_recorded_notification_replays_and_parses(
     change_kind, references = DETECTED[number]
     assert detection.change_kind is change_kind
     assert detection.references == references
+    assert (detection.doc_type, detection.confidence, detection.relevance) == (
+        DocumentType.NOTIFICATION,
+        TypeConfidence.CERTAIN,
+        Relevance.RELEVANT,
+    ), "each names itself a notification under its gazette heading"

@@ -43,8 +43,9 @@ missing data, not as an empty queue.
   document order, in the JSON shape the README gives. The route checks it first and names each
   problem by its place. The transcript is kept in the raw store, the task is resolved and
   audited, and an ingest starts (`pipeline-manual-parse-<task>`) that parses the document from
-  it as `manual@1` and, while `CW_PIPELINE_KNOWLEDGE_ENABLED` is on, registers it. From then on
-  the document is always parsed from its transcript. If the ingest could not start (a 503), the
+  it as `manual@1`, classifies it and, while `CW_PIPELINE_KNOWLEDGE_ENABLED` is on, registers it
+  unless the classification sets it aside or holds it for a triage. From then on the document is
+  always parsed from its transcript. If the ingest could not start (a 503), the
   task stays resolved: send the same request again to start it.
 - **Dismiss what needs no work.** `POST /v1/pipeline/tasks/{task_id}/dismiss` with the reason: a
   duplicate scan of a document already parsed, a user manual or a form that is not a regulatory
