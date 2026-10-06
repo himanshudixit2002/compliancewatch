@@ -6,13 +6,19 @@ back as ``Authorization1: homeToken <token>`` together with ``language: en``. Li
 year and page, newest first, and a page past the end is an empty list. A document's PDF is served
 as JSON, ``{"data": <base64>, "fileName": ...}``, and every notification has an English and a
 Hindi PDF; the adapter lists the English one and records the Hindi path as an alternate.
+
+One adapter reads every listing: ``listing`` picks the API path and the fields its items carry
+(``LISTINGS``), and ``category`` the portal's category within it. ``RECORDED_CATEGORIES`` are
+the ones read so far, each with its listing recorded under tests/fixtures/cbic; the registry
+refuses any other, so a new category comes with its fixture.
 """
 
 import base64
 import json
 from collections.abc import Iterable, Iterator, Mapping
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Final
 from urllib.parse import quote
 
 from domain_kernel.documents import DiscoveredDocument, DocumentRef, RawDocument
@@ -25,27 +31,62 @@ GST_TAX_ID = "1000001"
 PAGE_SIZE = 10
 
 
-class CbicAdapter:
-    """Shared listing and fetch logic; the two subclasses differ only in endpoint and fields."""
+@dataclass(frozen=True, slots=True)
+class CbicListing:
+    """One of the portal's listings: its API path and the fields of its items."""
 
-    listing_path: str
-    category: str
+    path: str
     number_field: str
     title_field: str
     date_field: str
 
+
+LISTINGS: Final[Mapping[str, CbicListing]] = {
+    "notifications": CbicListing(
+        "/api/cbic-notification-msts/fetchNotificationByYearAndCategory",
+        "notificationNo",
+        "notificationName",
+        "notificationDt",
+    ),
+    "circulars": CbicListing(
+        "/api/cbic-circular-msts/fetchCircularByYearCategory",
+        "circularNo",
+        "circularName",
+        "circularDt",
+    ),
+}
+RECORDED_CATEGORIES: Final[Mapping[str, tuple[str, ...]]] = {
+    "notifications": ("Central Tax",),
+    "circulars": ("Circulars CGST",),
+}
+"""The categories read in each listing, each with a recorded listing under tests/fixtures/cbic."""
+
+
+class CbicAdapter:
+    """Lists one category of one listing, newest first, and fetches its PDFs."""
+
     def __init__(
-        self, client: PoliteClient, source_id: SourceId, *, base_url: str = BASE_URL
+        self,
+        client: PoliteClient,
+        source_id: SourceId,
+        *,
+        listing: str,
+        category: str,
+        base_url: str = BASE_URL,
     ) -> None:
+        if listing not in LISTINGS:
+            raise ValueError(f"unknown CBIC listing {listing!r}; known: {', '.join(LISTINGS)}")
         self._client = client
         self._source_id = source_id
+        self._listing = LISTINGS[listing]
+        self._category = category
         self._base_url = base_url.rstrip("/")
         self._token: str | None = None
 
     def list_documents(self, since: datetime) -> Iterable[DiscoveredDocument]:
         for year in range(datetime.now(since.tzinfo).year, since.year - 1, -1):
             for item in self._pages(year):
-                published = parse_iso_date(item.get(self.date_field))
+                published = parse_iso_date(item.get(self._listing.date_field))
                 if not on_or_after(published, since):
                     return
                 yield self._discovered(item, published)
@@ -64,8 +105,8 @@ class CbicAdapter:
         page = 0
         while True:
             url = (
-                f"{self._base_url}{self.listing_path}?year={year}&page={page}&size={PAGE_SIZE}"
-                f"&taxId={GST_TAX_ID}&category={quote(self.category)}"
+                f"{self._base_url}{self._listing.path}?year={year}&page={page}&size={PAGE_SIZE}"
+                f"&taxId={GST_TAX_ID}&category={quote(self._category)}"
             )
             response = self._client.get(url, headers=self._headers())
             if response.status_code == 401:
@@ -84,9 +125,9 @@ class CbicAdapter:
             ref=DocumentRef(
                 self._source_id,
                 f"{self._base_url}/content/pdf/{path}",
-                external_ref=str(item.get(self.number_field, "")),
+                external_ref=str(item.get(self._listing.number_field, "")),
             ),
-            title=str(item.get(self.title_field, "")).strip(),
+            title=str(item.get(self._listing.title_field, "")).strip(),
             published_at=published,
         )
 
@@ -96,22 +137,6 @@ class CbicAdapter:
             response.raise_for_status()
             self._token = str(response.json()["id_token"])
         return {"Authorization1": f"homeToken {self._token}", "language": "en"}
-
-
-class CbicNotificationsAdapter(CbicAdapter):
-    listing_path = "/api/cbic-notification-msts/fetchNotificationByYearAndCategory"
-    category = "Central Tax"
-    number_field = "notificationNo"
-    title_field = "notificationName"
-    date_field = "notificationDt"
-
-
-class CbicCircularsAdapter(CbicAdapter):
-    listing_path = "/api/cbic-circular-msts/fetchCircularByYearCategory"
-    category = "Circulars CGST"
-    number_field = "circularNo"
-    title_field = "circularName"
-    date_field = "circularDt"
 
 
 def hindi_alternate(item: Mapping[str, Any], *, base_url: str = BASE_URL) -> str | None:

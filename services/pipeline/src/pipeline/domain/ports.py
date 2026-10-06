@@ -3,10 +3,12 @@ files it fetches, as protocols. The adapters live in ``infrastructure`` (HTTP, S
 ``testing`` (memory)."""
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Protocol
 
 from domain_kernel.documents import ParsedDocument, RawDocument
-from domain_kernel.ids import ClauseId, DocumentId
+from domain_kernel.ids import ClauseId, DocumentId, SourceId
+from domain_kernel.protocols import SourceAdapter
 from pipeline.domain.embedding import ClauseToEmbed, ClauseVector, EmbeddingBatch, EmbeddingsStored
 from pipeline.domain.knowledge import (
     AlignmentReport,
@@ -17,6 +19,7 @@ from pipeline.domain.knowledge import (
     RuleKey,
     StagingReport,
 )
+from pipeline.domain.sources import SourceDefinition
 
 
 class KnowledgeSink(Protocol):
@@ -101,4 +104,22 @@ class RawStore(Protocol):
 
     def uri(self, storage_key: str) -> str:
         """Where the key's bytes are, as a URI: ``s3://bucket/key``, ``file:///...``."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedSource:
+    """A source the pipeline can fetch from: its id, what it is, and the adapter that reads
+    it."""
+
+    source_id: SourceId
+    definition: SourceDefinition
+    adapter: SourceAdapter
+
+
+class SourceCatalog(Protocol):
+    """The sources the pipeline knows, by id."""
+
+    def resolve(self, source_id: SourceId) -> ResolvedSource:
+        """The source with this id; ``UnknownSourceError`` when there is none."""
         ...

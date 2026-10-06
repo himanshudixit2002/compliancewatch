@@ -5,10 +5,11 @@ import pytest
 
 from domain_kernel.documents import DocumentType
 from pipeline import backfill
-from pipeline.backfill import BackfillResult, ingest, main, parsers_for
+from pipeline.backfill import BackfillResult, ingest, main
 from pipeline.infrastructure.adapters import build_adapter
 from pipeline.infrastructure.fakes import FakeSourceAdapter
 from pipeline.infrastructure.http import ClientConfig, PoliteClient
+from pipeline.infrastructure.parsers import parsers_for
 from pipeline.infrastructure.raw_store import LocalRawStore, MemoryRawStore
 from pipeline.testing import recorded_sources
 

@@ -1,3 +1,6 @@
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import httpx2
 import pytest
 
@@ -69,6 +72,26 @@ def test_waits_between_requests_to_the_same_host() -> None:
     client.get("https://a.test/2")
     client.get("https://b.test/1")
     assert clock.sleeps == [2.0]
+
+
+def test_threads_take_their_turns_at_a_host() -> None:
+    lock = threading.Lock()
+    clock = Clock()
+
+    def sleep(seconds: float) -> None:
+        with lock:
+            clock.sleep(seconds)
+
+    client = PoliteClient(
+        ClientConfig(min_delay_seconds=1.0, respect_robots=False),
+        transport=httpx2.MockTransport(lambda request: httpx2.Response(200)),
+        clock=clock,
+        sleep=sleep,
+    )
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        statuses = list(pool.map(lambda n: client.get(f"https://a.test/{n}").status_code, range(4)))
+    assert statuses == [200] * 4
+    assert clock.sleeps == [1.0, 1.0, 1.0], "each request after the first waits a full delay"
 
 
 def test_retries_server_errors_with_backoff_then_succeeds() -> None:

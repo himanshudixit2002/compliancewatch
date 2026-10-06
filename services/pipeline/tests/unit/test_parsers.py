@@ -8,11 +8,15 @@ from pypdf import PdfWriter
 
 from domain_kernel.documents import DocumentRef, DocumentType, RawDocument, document_id_for
 from domain_kernel.ids import SourceId
+from pipeline.domain.errors import UnknownSourceError
+from pipeline.infrastructure.adapters import RegistryCatalog, source_id_for
+from pipeline.infrastructure.http import PoliteClient
 from pipeline.infrastructure.parsers import (
     LANGUAGE_ENGLISH,
     LANGUAGE_HINDI,
     HtmlParser,
     PdfParser,
+    SourceParsers,
     detect_language,
     split_clauses,
 )
@@ -103,3 +107,25 @@ def test_html_parser_keeps_block_text_and_drops_scripts() -> None:
     ]
     assert parsed.title == "T"
     assert "var x" not in html_to_text(html)
+
+
+def test_source_parsers_parse_as_the_document_type_of_the_source() -> None:
+    parsers = SourceParsers(RegistryCatalog(PoliteClient()))
+    pdf = pdf_fixture("gst-ct-01-2026.pdf.json")
+    for key, doc_type in (
+        ("cbic_notifications", DocumentType.NOTIFICATION),
+        ("cbic_circulars", DocumentType.CIRCULAR),
+    ):
+        ref = DocumentRef(source_id_for(key), "https://example.test/doc.pdf")
+        raw = RawDocument.from_bytes(ref, pdf.content, "application/pdf")
+        assert parsers.supports(raw)
+        assert parsers.parse(raw).doc_type is doc_type
+    advisory = DocumentRef(source_id_for("gstn_advisories"), "https://example.test/672")
+    html = RawDocument.from_bytes(advisory, b"<p>Advisory</p>", "text/html")
+    assert parsers.parse(html).doc_type is DocumentType.PRESS_RELEASE
+    text = RawDocument.from_bytes(advisory, b"plain text", "text/plain")
+    assert not parsers.supports(text)
+    with pytest.raises(ValueError, match="no parser for text/plain"):
+        parsers.parse(text)
+    with pytest.raises(UnknownSourceError):
+        parsers.supports(pdf)

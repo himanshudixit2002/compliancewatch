@@ -21,7 +21,7 @@ from pipeline.application.detector import Detection, detect
 from pipeline.domain.ports import RawStore
 from pipeline.infrastructure.adapters import SOURCES, build_adapter
 from pipeline.infrastructure.http import ClientConfig, PoliteClient
-from pipeline.infrastructure.parsers import HtmlParser, PdfParser
+from pipeline.infrastructure.parsers import parsers_for
 from pipeline.infrastructure.parsers.pdf import UnparsedDocumentError
 from pipeline.infrastructure.raw_store import LocalRawStore
 
@@ -42,10 +42,6 @@ class Ingested:
     uri: str
     parsed: ParsedDocument | None
     detection: Detection | None
-
-
-def parsers_for(doc_type: DocumentType) -> list[DocumentParser]:
-    return [PdfParser(doc_type=doc_type), HtmlParser(doc_type=doc_type)]
 
 
 def ingest(

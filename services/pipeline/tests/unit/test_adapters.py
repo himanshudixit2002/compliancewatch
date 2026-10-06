@@ -1,14 +1,24 @@
 """Conformance: every adapter replayed against the recorded responses of its site."""
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 
 from domain_kernel.documents import DocumentType
-from pipeline.infrastructure.adapters import SOURCES, build_adapter, source_id_for
-from pipeline.infrastructure.adapters.cbic import hindi_alternate
+from domain_kernel.ids import SourceId
+from pipeline.domain.errors import UnknownSourceError
+from pipeline.infrastructure.adapters import (
+    ADAPTER_TYPES,
+    SOURCES,
+    RegistryCatalog,
+    SourceSpec,
+    build_adapter,
+    source_id_for,
+)
+from pipeline.infrastructure.adapters.cbic import RECORDED_CATEGORIES, CbicAdapter, hindi_alternate
 from pipeline.infrastructure.http import ClientConfig, PoliteClient
 from pipeline.testing import CBIC, FixtureTransport, recorded_sources
 
@@ -32,6 +42,66 @@ def test_source_ids_are_stable_and_distinct() -> None:
     assert isinstance(SOURCES["cbic_notifications"].source_id.value, UUID)
     with pytest.raises(KeyError, match="unknown source"):
         build_adapter("nope", PoliteClient(CONFIG))
+
+
+def test_the_cbic_listing_and_category_are_parameters_of_one_adapter_type(
+    client: PoliteClient,
+) -> None:
+    notifications, circulars = SOURCES["cbic_notifications"], SOURCES["cbic_circulars"]
+    assert notifications.adapter_type == circulars.adapter_type == "cbic"
+    assert dict(notifications.parameters) == {"listing": "notifications", "category": "Central Tax"}
+    assert dict(circulars.parameters) == {"listing": "circulars", "category": "Circulars CGST"}
+    assert type(notifications.build(client)) is type(circulars.build(client)) is CbicAdapter
+    assert (notifications.doc_type, circulars.doc_type) == (
+        DocumentType.NOTIFICATION,
+        DocumentType.CIRCULAR,
+    )
+    assert {spec.regulator for spec in (notifications, circulars)} == {"CBIC"}
+    assert set(RECORDED_CATEGORIES) == {"notifications", "circulars"}
+
+
+@pytest.mark.parametrize(
+    ("adapter_type", "parameters", "message"),
+    [
+        ("cbic", {"listing": "notifications", "category": "Integrated Tax"}, "no recorded listing"),
+        ("cbic", {"listing": "orders", "category": "Central Tax"}, "listing"),
+        ("cbic", {"listing": "circulars"}, "category"),
+        ("gstn", {"page": 2}, "Extra inputs are not permitted"),
+    ],
+)
+def test_parameters_an_adapter_type_does_not_take_are_refused(
+    adapter_type: str, parameters: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        SourceSpec("new_source", adapter_type, parameters, timedelta(hours=1))
+    with pytest.raises(ValueError, match="unknown adapter type"):
+        SourceSpec("new_source", "fssai", {}, timedelta(hours=1))
+
+
+def test_each_source_is_defined_by_its_type_and_parameters() -> None:
+    assert sorted(ADAPTER_TYPES) == ["cbic", "gstcouncil", "gstn", "mahagst"]
+    definitions = {key: spec.definition() for key, spec in SOURCES.items()}
+    assert {key: (d.adapter_type, d.regulator, d.doc_type) for key, d in definitions.items()} == {
+        "cbic_notifications": ("cbic", "CBIC", DocumentType.NOTIFICATION),
+        "cbic_circulars": ("cbic", "CBIC", DocumentType.CIRCULAR),
+        "gstcouncil_press": ("gstcouncil", "GST Council", DocumentType.PRESS_RELEASE),
+        "gstn_advisories": ("gstn", "GSTN", DocumentType.PRESS_RELEASE),
+        "mahagst_notifications": ("mahagst", "Maharashtra GST", DocumentType.NOTIFICATION),
+    }
+    assert definitions["cbic_notifications"].cadence <= timedelta(hours=6), "F1: within 6 h"
+    assert {spec.site for spec in SOURCES.values()} >= {"taxinformation.cbic.gov.in"}
+
+
+def test_the_catalog_serves_the_built_in_sources_by_id(client: PoliteClient) -> None:
+    catalog = RegistryCatalog(client)
+    resolved = catalog.resolve(source_id_for("gstn_advisories"))
+    assert resolved.source_id == SOURCES["gstn_advisories"].source_id
+    assert resolved.definition == SOURCES["gstn_advisories"].definition()
+    assert catalog.resolve(source_id_for("gstn_advisories")).adapter is resolved.adapter
+    listed = list(resolved.adapter.list_documents(datetime(2026, 8, 1, tzinfo=UTC)))
+    assert [d.ref.source_id for d in listed] == [resolved.source_id] * 3
+    with pytest.raises(UnknownSourceError, match="no source has the id"):
+        catalog.resolve(SourceId(UUID(int=1)))
 
 
 def test_cbic_notifications_list_newest_first_until_since(

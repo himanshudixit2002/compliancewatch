@@ -3,9 +3,12 @@
 Every request carries the crawler's user agent, respects the host's robots.txt (fetched once
 per host and cached), waits a minimum delay between requests to the same host, and retries
 transport errors and 5xx responses with exponential backoff, five tries in all (guide section 7).
-Tests replace the transport with ``httpx2.MockTransport`` so nothing touches the network.
+The delay holds across threads: activities fetch on threads of their own, and a request to a host
+waits its turn behind the others to that host. Tests replace the transport with
+``httpx2.MockTransport`` so nothing touches the network.
 """
 
+import threading
 import time
 import urllib.robotparser
 from collections.abc import Callable, Mapping
@@ -58,6 +61,8 @@ class PoliteClient:
         self._sleep = sleep
         self._last_request_at: dict[str, float] = {}
         self._robots: dict[str, urllib.robotparser.RobotFileParser | None] = {}
+        self._hosts_lock = threading.Lock()
+        self._host_locks: dict[str, threading.RLock] = {}
 
     def close(self) -> None:
         self._client.close()
@@ -112,20 +117,28 @@ class PoliteClient:
             f"{method} {url} failed after {self._config.max_tries} tries"
         ) from last_error
 
+    def _host_lock(self, host: str) -> threading.RLock:
+        with self._hosts_lock:
+            return self._host_locks.setdefault(host, threading.RLock())
+
     def _wait_for(self, host: str) -> None:
-        last = self._last_request_at.get(host)
-        if last is not None:
-            remaining = self._config.min_delay_seconds - (self._clock() - last)
-            if remaining > 0:
-                self._sleep(remaining)
-        self._last_request_at[host] = self._clock()
+        """Hold the host's turn: whoever comes next to the host waits the delay after this."""
+        with self._host_lock(host):
+            last = self._last_request_at.get(host)
+            if last is not None:
+                remaining = self._config.min_delay_seconds - (self._clock() - last)
+                if remaining > 0:
+                    self._sleep(remaining)
+            self._last_request_at[host] = self._clock()
 
     def _allowed(self, url: str) -> bool:
         parts = urlsplit(url)
         host = parts.netloc
-        if host not in self._robots:
-            self._robots[host] = self._load_robots(f"{parts.scheme}://{host}/robots.txt", host)
-        parser = self._robots[host]
+        with self._host_lock(host):
+            if host not in self._robots:
+                robots = f"{parts.scheme}://{host}/robots.txt"
+                self._robots[host] = self._load_robots(robots, host)
+            parser = self._robots[host]
         return True if parser is None else parser.can_fetch(self._config.user_agent, url)
 
     def _load_robots(self, robots_url: str, host: str) -> urllib.robotparser.RobotFileParser | None:

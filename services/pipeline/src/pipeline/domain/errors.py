@@ -1,5 +1,5 @@
 """What can go wrong when the pipeline hands regulator records and their embeddings to the
-rulebook, and when it keeps fetched files in the raw store.
+rulebook, keeps fetched files in the raw store, or looks a source up.
 
 Plain exceptions, like the rest of the pipeline's: they cross Temporal as failure types, and the
 activities list the ones a retry cannot fix as non-retryable.
@@ -44,3 +44,7 @@ class RawObjectMissingError(RawStoreError):
 
 class RawObjectCorruptError(RawStoreError):
     """The stored bytes do not have the digest their key names; retrying cannot help."""
+
+
+class UnknownSourceError(LookupError):
+    """No source with this id is known to the pipeline; retrying cannot help."""
