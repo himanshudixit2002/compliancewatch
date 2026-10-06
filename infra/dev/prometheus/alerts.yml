@@ -2,9 +2,9 @@
 # express. Every rule links its runbook; infra/scripts/check_alert_runbooks.py fails CI when a
 # link is missing or points at a file that does not exist. promtool checks the rules and runs the
 # unit tests in alerts.test.yml (`make alerts-check`, the ops job in ci.yml), so a change to a
-# tested rule changes its cases there too. The remaining paging alerts of the guide (source
-# freshness, decision-flip rate, LLM spend past 80% of budget) arrive with the metrics that feed
-# them; docs/runbooks/README.md lists them as pending.
+# tested rule changes its cases there too. The remaining paging alerts of the guide (decision-flip
+# rate, LLM spend past 80% of budget) arrive with the metrics that feed them; docs/runbooks/README.md
+# lists them as pending.
 groups:
   - name: api-slo
     rules:
@@ -155,3 +155,22 @@ groups:
         annotations:
           summary: "Email bounces and complaints passed 2% of the email notifications sent over 6 hours"
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/notification-delivery.md#notificationemailbounces
+  - name: pipeline
+    rules:
+      # pipeline_source_freshness_seconds{source} is the time since a crawl last listed the source
+      # (since the source was added, before its first listing) and pipeline_source_cadence_seconds
+      # its cadence. The pipeline's app reports both for every enabled, unpaused source while
+      # crawling is on (CW_PIPELINE_CRAWL_ENABLED), so a paused source and a product with crawling
+      # off page nobody. Guide section 21: freshness alerts page within two cadences. Every app
+      # replica reports the same reading, so both sides are taken per source.
+      - alert: SourceStale
+        expr: |
+          max by (source) (pipeline_source_freshness_seconds)
+            > 2 * max by (source) (pipeline_source_cadence_seconds)
+        for: 5m
+        labels:
+          severity: page
+          team: regulatory-intelligence
+        annotations:
+          summary: "No crawl has listed {{ $labels.source }} for more than two cadences"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/source-stale.md

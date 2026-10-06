@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 pipeline-backfill = "pipeline.backfill:main"
+pipeline-crawl-report = "pipeline.crawl_report:main"
 pipeline-embed = "pipeline.embed:main"
 pipeline-label = "pipeline.label:main"
 
