@@ -100,6 +100,20 @@ groups:
         annotations:
           summary: "More than 500 entity review items have been open for 6 hours"
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/entity-review-queue.md
+      # rulebook_review_task_oldest_open_age_seconds is how long the oldest review task not decided
+      # yet (claimed or not) has waited since it was opened; every replica reports the same
+      # reading, so the max is taken, and the gauge reads 0 when no task waits. Rule publication
+      # aims at 90% within 4 business hours of reaching the queue (guide section 18); a task
+      # waiting two days has missed that whatever the weekend, so a ticket goes to the team.
+      - alert: RuleReviewQueueStale
+        expr: max(rulebook_review_task_oldest_open_age_seconds) > 172800
+        for: 1h
+        labels:
+          severity: ticket
+          team: regulatory-intelligence
+        annotations:
+          summary: "The oldest rule review task has waited more than 48 hours for a decision"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/rule-review-queue.md
   - name: notification
     rules:
       # notification_sends_total counts every delivery attempt by outcome. The share is the
