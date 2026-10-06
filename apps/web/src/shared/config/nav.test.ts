@@ -183,7 +183,8 @@ describe("navFor", () => {
       const status = screenById(link.id as Parameters<typeof screenById>[0]).status;
       expect(link.status, link.id).toBe(status === "live" ? undefined : status);
     }
-    expect(links.find((link) => link.id === "admin.sources")?.status).toBe("waiting");
+    expect(links.find((link) => link.id === "admin.sources")?.status).toBe("ready");
+    expect(links.find((link) => link.id === "admin.pipeline")?.status).toBe("waiting");
     expect(links.find((link) => link.id === "admin.backfill")?.status).toBe("planned");
   });
 

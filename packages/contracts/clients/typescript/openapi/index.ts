@@ -6,6 +6,7 @@ export type * as identity from "./identity.v1";
 export type * as llmGateway from "./llm-gateway.v1";
 export type * as notification from "./notification.v1";
 export type * as obligation from "./obligation.v1";
+export type * as pipeline from "./pipeline.v1";
 export type * as profile from "./profile.v1";
 export type * as qa from "./qa.v1";
 export type * as rulebook from "./rulebook.v1";
@@ -18,6 +19,7 @@ export const OPENAPI_SERVICES = [
   "llm-gateway",
   "notification",
   "obligation",
+  "pipeline",
   "profile",
   "qa",
   "rulebook",
