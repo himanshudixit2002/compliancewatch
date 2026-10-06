@@ -131,6 +131,7 @@ export const api = {
   openDoc: (id) => post(`/api/docs/${enc(id)}/open`),
   github: () => get("/api/github"),
   heartbeat: () => post("/api/heartbeat"),
+  quit: () => post("/api/quit"),
   prefs: () => get("/api/prefs"),
   savePrefs: (prefs) => request("PUT", "/api/prefs", prefs),
 };
@@ -143,6 +144,8 @@ export const api = {
  */
 export function connectEvents({ onEvent, onState, onOpen }) {
   let stopped = false;
+  let paused = false;
+  let looping = false;
   let controller = null;
   let lastId = "";
   let failures = 0;
@@ -219,33 +222,53 @@ export function connectEvents({ onEvent, onState, onOpen }) {
   }
 
   async function loop() {
-    while (!stopped) {
-      try {
-        await readOnce();
-        if (stopped) return;
-        failures += 1;
-      } catch (error) {
-        if (stopped) return;
-        if (error instanceof ApiError && error.code === "unauthorized") {
-          onState("unauthorized");
-          return;
+    looping = true;
+    try {
+      while (!stopped && !paused) {
+        try {
+          await readOnce();
+          if (stopped || paused) return;
+          failures += 1;
+        } catch (error) {
+          if (stopped || paused) return;
+          if (error instanceof ApiError && error.code === "unauthorized") {
+            onState("unauthorized");
+            return;
+          }
+          failures += 1;
+        } finally {
+          window.clearTimeout(watchdog);
         }
-        failures += 1;
-      } finally {
-        window.clearTimeout(watchdog);
+        onState(failures >= 4 ? "offline" : "reconnecting");
+        const wait = [1000, 2000, 4000][failures - 1] ?? 10000;
+        await new Promise((resolve) => window.setTimeout(resolve, wait));
       }
-      onState(failures >= 4 ? "offline" : "reconnecting");
-      const wait = [1000, 2000, 4000][failures - 1] ?? 10000;
-      await new Promise((resolve) => window.setTimeout(resolve, wait));
+    } finally {
+      looping = false;
     }
   }
 
   loop();
   return {
+    /** Ends the stream for good (the page is going away). */
     close() {
       stopped = true;
       window.clearTimeout(watchdog);
       controller?.abort();
+    },
+    /** Lets go of the stream while the window is hidden; ``resume`` picks it up again. */
+    pause() {
+      if (stopped || paused) return;
+      paused = true;
+      window.clearTimeout(watchdog);
+      controller?.abort();
+    },
+    /** Reads the stream again, from the last event it saw (the helper replays what it missed). */
+    resume() {
+      if (stopped || !paused) return;
+      paused = false;
+      failures = 0;
+      if (!looping) loop();
     },
     reconnect() {
       controller?.abort();

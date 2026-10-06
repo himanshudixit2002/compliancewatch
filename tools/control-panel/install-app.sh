@@ -179,7 +179,8 @@ touch "$APP"  # Finder and the Dock pick up the new icon
 
 # LaunchServices: the paths the new and the old app passed through, and any other copy of this
 # app it knows at another path (an install this one replaces), are unregistered, so macOS lists
-# the app once. A same-path swap needs nothing more.
+# the app once; then the app is registered again (-f), which makes Finder and the Dock read its
+# new icon. The Dock is not restarted.
 if [ -n "$LSREGISTER" ] && [ -x "$LSREGISTER" ]; then
   forget=("$new")
   [ -n "$aside" ] && forget+=("$aside/$NAME.app")
@@ -195,7 +196,9 @@ if [ -n "$LSREGISTER" ] && [ -x "$LSREGISTER" ]; then
     /^path:/ { path = $0; sub(/^path:[[:space:]]+/, "", path); sub(/ \(0x[0-9a-fA-F]+\)$/, "", path); next }
     /^identifier:/ { if ($2 == id && path != "") { print path; path = "" } }')
   for known in "${forget[@]}"; do "$LSREGISTER" -u "$known" >/dev/null 2>&1 || true; done
+  "$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true
 fi
+touch "$APP" "$APP/Contents" "$APP/Contents/Info.plist"  # and Finder's view of it
 
 echo "built $APP"
 echo "  window: $([ "$shell" = swift ] && echo "the Swift shell" || echo "a browser (no swiftc)"), icon: ${icon:-none}"

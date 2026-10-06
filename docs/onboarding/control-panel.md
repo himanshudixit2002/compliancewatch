@@ -22,7 +22,16 @@ in only when it is complete, and on any failure the old one stays. Built somewhe
 
 Open the app like any other. It starts a small helper on this Mac, and the window talks only to
 that helper. The first time, a short tour shows you around (five steps; skip it whenever you
-like, and replay it from the Guide).
+like, and replay it from the Guide). If your checkout is on the Desktop (or in Documents or
+Downloads), macOS first asks whether the app may use that folder: click Allow. It asks again
+after each new build of the app.
+
+To close it, close the window or press Quit at the bottom of the sidebar (or ⌘Q). With nothing
+running it quits at once. If something is still running, closing the window asks first: Keep
+Running in Background closes the window and lets it finish (click ComplianceWatch Control in the
+Dock to bring the window back), Quit stops it now. Quit and ⌘Q always quit, within a few
+seconds, and stop whatever runs. The helper's messages are kept in
+`~/Library/Logs/ComplianceWatch Control/helper.log`.
 
 On this Mac:
 
@@ -248,6 +257,8 @@ problem up below. Still stuck? Every output has a Copy button: send it to a deve
 | Docker did not stop in time                            | Each step of a stop has a time limit, and `colima stop` overran its 2 minutes.                          | The failure offers Force-stop Docker, which asks first: a forced stop gives the databases no time to close their files.                                     |
 | The branch chip at the top is red                      | Another session is working in this checkout, for example Claude's build agent running tests.            | Wait for it to finish, or see what it is in Processes. Stop everything, Start fresh and Restore a backup would break its work, and their questions say so.  |
 | The window says it lost its connection                 | The app's helper stopped, or the Mac went to sleep.                                                     | Wait a few seconds; it reconnects by itself. If it does not, quit the app and open it again.                                                                |
+| The app asks to use your Desktop folder, or says it is waiting for macOS | Your checkout is in a folder macOS keeps private (Desktop, Documents or Downloads). macOS asks once, and again after each new build of the app. | Click Allow. If you clicked Don't Allow: System Settings, Privacy & Security, Files & Folders, turn on the folder under ComplianceWatch Control, then press Try again. |
+| Closing the window asks what to do                     | Something is still running, and closing the window would stop it.                                       | Keep Running in Background closes the window and lets it finish; click ComplianceWatch Control in the Dock to bring the window back. Quit stops it now. Quit at the bottom of the sidebar, or ⌘Q, always quits. |
 | The window says "Open this window from the app"        | The page was reloaded without the key the app gives it.                                                 | Open the app again (or run `make control-panel` again).                                                                                                     |
 | The window is empty, or says it could not load         | Part of the window did not arrive from the app's helper. The window loads itself again once on its own. | Press ⌘R to load it again. If it stays empty, quit the app and open it again.                                                                               |
 | The Mac feels slow                                     | Docker's virtual machine uses memory and processor time while it runs.                                  | Stop everything when you are done. Your data is kept for next time.                                                                                         |
@@ -395,6 +406,17 @@ own helper.
   `/health` and `/ready`, git, the processes) and pushes changes to the window over the event
   stream; the window never polls, it only sends a heartbeat every 20 seconds. rpk runs at most
   once every 30 seconds. Every program a probe runs has a hard time limit.
+- **Bounded.** A window keeps one event stream, and lets go of it while it is hidden or after it
+  reloads; the helper keeps at most four streams (a fifth closes the oldest) and 48 connections,
+  and an idle connection lets go of its thread after 20 seconds. A run whose runner stopped
+  without saying how it ended shows as "It stopped unexpectedly" two seconds later, so nothing
+  shows as running when nothing runs.
+- **Its lifetime.** The app holds a pipe on the helper's input: closing it (quitting) stops the
+  helper, and while the app runs the helper stays up, hidden window or not. A helper nobody
+  holds (`make control-panel`, the browser fallback) stops ten minutes after the last window. A
+  helper told to stop exits within three seconds. Quitting the app always ends within five
+  seconds: the input closes, SIGTERM two seconds later, SIGKILL a second after that; SIGTERM to
+  the app does the same, even while a question is open.
 
 ### Developing the window
 

@@ -34,6 +34,7 @@ import re
 import secrets
 import shutil
 import signal
+import socketserver
 import stat
 import subprocess
 import sys
@@ -63,6 +64,21 @@ TICKET_SECONDS: Final = 30.0
 LAUNCH_SECONDS: Final = 30.0
 """How long a launch code works: the code an address carries instead of the token."""
 PING_SECONDS: Final = 15.0
+MAX_STREAMS: Final = 4
+"""Event streams open at once: one per window. A fifth closes the oldest, which a window that
+went away without saying so (a reload, a crash) may have left behind."""
+CONNECTION_IDLE_SECONDS: Final = 20.0
+"""How long a kept-alive connection may sit idle before its thread lets go of it; a stream whose
+window stopped reading lets go after as long."""
+MAX_CONNECTIONS: Final = 48
+"""Connections served at once (a window uses about ten); one past it is closed unanswered."""
+STALE_RUN_SECONDS: Final = 2.0
+"""How long a run may still show as running after its runner went idle (a runner clears its busy
+flag a moment before its last event lands); past it the run is finished as stopped unexpectedly."""
+QUIT_DELAY_SECONDS: Final = 0.3
+"""After ``POST /api/quit``, how long the helper waits before it stops: the answer goes out."""
+SHUTDOWN_SECONDS: Final = 3.0
+"""How long the helper's exit may take before it exits regardless (a slow probe, a connection)."""
 EVENT_BUFFER: Final = 500
 CLIENT_QUEUE: Final = 1000
 RUN_LINES: Final = 2000
@@ -179,7 +195,7 @@ class Hub:
         self._lock = threading.Lock()
         self._next = 1
         self._buffer: collections.deque[Event] = collections.deque(maxlen=EVENT_BUFFER)
-        self._subscribers: set[Subscriber] = set()
+        self._subscribers: dict[Subscriber, None] = {}  # oldest first
 
     def publish(self, name: str, data: Mapping[str, Any]) -> int:
         text = dumps(data)
@@ -191,12 +207,19 @@ class Hub:
                 try:
                     sub.queue.put_nowait(event)
                 except queue.Full:
-                    sub.closed = True
-                    self._subscribers.discard(sub)
-                    with contextlib.suppress(queue.Full):
-                        sub.queue.get_nowait()
-                        sub.queue.put_nowait(None)
+                    self._drop(sub)
             return event.id
+
+    def _drop(self, sub: Subscriber) -> None:
+        """Ends one stream: its thread sees ``None`` and lets go of its connection. The caller
+        holds the lock."""
+        sub.closed = True
+        self._subscribers.pop(sub, None)
+        with contextlib.suppress(queue.Empty):
+            while sub.queue.full():
+                sub.queue.get_nowait()
+        with contextlib.suppress(queue.Full):
+            sub.queue.put_nowait(None)
 
     def subscribe(self, last_id: int | None) -> tuple[Subscriber, list[Event] | None]:
         """A new stream, with the events to replay after ``last_id``; None when that id is too
@@ -210,12 +233,14 @@ class Hub:
                     replay = None
                 else:
                     replay = [event for event in self._buffer if event.id > last_id]
-            self._subscribers.add(sub)
+            while len(self._subscribers) >= MAX_STREAMS:
+                self._drop(next(iter(self._subscribers)))
+            self._subscribers[sub] = None
         return sub, replay
 
     def unsubscribe(self, sub: Subscriber) -> None:
         with self._lock:
-            self._subscribers.discard(sub)
+            self._subscribers.pop(sub, None)
 
     def count(self) -> int:
         with self._lock:
@@ -223,11 +248,8 @@ class Hub:
 
     def close_all(self) -> None:
         with self._lock:
-            subscribers, self._subscribers = list(self._subscribers), set()
-        for sub in subscribers:
-            sub.closed = True
-            with contextlib.suppress(queue.Full):
-                sub.queue.put_nowait(None)
+            for sub in list(self._subscribers):
+                self._drop(sub)
 
 
 # ---- tokens: confirms and stream tickets -------------------------------------------------------
@@ -907,6 +929,7 @@ class RunManager:
         self._runs: collections.OrderedDict[str, Run] = collections.OrderedDict()
         self._current: dict[str, Run | None] = {"steps": None, "reads": None}
         self._count = 0
+        self._idle_since: dict[str, float] = {}
         self.runners: dict[str, RunnerLike] = {
             name: backend.make_runner(name, self._emitter(name)) for name in ("steps", "reads")
         }
@@ -922,12 +945,46 @@ class RunManager:
 
     def current(self, kind: str) -> Run | None:
         with self._lock:
+            self._heal()
             return self._current["reads" if kind == "read" else "steps"]
+
+    def _heal(self) -> None:
+        """A run shown as running whose runner is idle, past :data:`STALE_RUN_SECONDS`: its last
+        event never landed, so it is finished as stopped unexpectedly, and nothing shows as
+        running when nothing runs. The caller holds the lock."""
+        now = time.monotonic()
+        for name, run in list(self._current.items()):
+            if run is None or self.runners[name].busy:
+                self._idle_since.pop(name, None)
+                continue
+            since = self._idle_since.setdefault(name, now)
+            if now - since < STALE_RUN_SECONDS:
+                continue
+            self._idle_since.pop(name, None)
+            self._current[name] = None
+            if run.state != "running":
+                continue
+            log(f"run {run.run_id} ({run.title}) had no runner at work: finished as stopped")
+            run.state = "failed"
+            run.finished_at = self.wall()
+            run.current_step = None
+            for step in run.steps:
+                if step["state"] in ("queued", "running"):
+                    step["state"] = "cancelled"
+            run.error = {
+                "code": "stopped",
+                "message": "It stopped unexpectedly",
+                "detail": "Its runner stopped without saying how the run ended.",
+                "fix": "Look at its output, then run it again.",
+                "action": None,
+            }
+            self._publish_finished(run)
 
     def start(self, spec: catalog.Spec, plan: core.Plan, params: Mapping[str, Any]) -> Run:
         name = "reads" if spec.kind == "read" else "steps"
         runner = self.runners[name]
         with self._lock:
+            self._heal()
             busy = self._current[name]
             if busy is not None or runner.busy:
                 title = busy.title if busy else "Another task"
@@ -955,11 +1012,29 @@ class RunManager:
                     break
                 self._runs.pop(oldest)
             self._current[name] = run
+        try:
             if isinstance(runner, Preparable):
                 runner.prepare(spec.id)
-        if not runner.start(plan):
+            started = runner.start(plan)
+        except Exception as exc:  # a defect: the run must not stay "running" with nothing at work
+            log(f"{spec.title} could not start:\n" + traceback.format_exc())
             with self._lock:
-                self._current[name] = None
+                if self._current[name] is run:
+                    self._current[name] = None
+                run.state = "failed"
+                run.finished_at = self.wall()
+                run.error = {
+                    "code": "failed",
+                    "message": f"{spec.title} could not start",
+                    "detail": repr(exc),
+                    "fix": "Try again.",
+                    "action": None,
+                }
+            raise ApiError(500, "internal", f"{spec.title} could not start.", repr(exc)) from exc
+        if not started:
+            with self._lock:
+                if self._current[name] is run:
+                    self._current[name] = None
                 run.state = "failed"
                 run.finished_at = self.wall()
                 lines = [line["text"] for line in run.lines]
@@ -994,12 +1069,14 @@ class RunManager:
     def recent(self, limit: int) -> list[dict[str, Any]]:
         now = self.wall()
         with self._lock:
+            self._heal()
             runs = list(self._runs.values())[-limit:]
             return [run.summary(now) for run in reversed(runs)]
 
     def detail(self, run_id: str) -> dict[str, Any] | None:
         now = self.wall()
         with self._lock:
+            self._heal()
             run = self._runs.get(run_id)
             if run is None:
                 return None
@@ -1079,16 +1156,25 @@ class RunManager:
                 self._finish(name, run, event)
 
     def _finish(self, name: str, run: Run, event: core.End) -> None:
+        # the run is over whatever happens below: nothing may leave it "running"
+        self._current[name] = None
+        self._idle_since.pop(name, None)
         run.finished_at = self.wall()
         run.current_step = None
-        timed_out = any(result.state == "timeout" for result in event.results)
-        if event.cancelled:
-            run.state = "cancelled"
-        elif event.ok:
-            run.state = "ok"
-        else:
-            run.state = "failed"
-            run.error = classify_failure([line["text"] for line in run.lines], timed_out)
+        run.state = "cancelled" if event.cancelled else "ok" if event.ok else "failed"
+        if run.state == "failed":
+            timed_out = any(result.state == "timeout" for result in event.results)
+            try:
+                run.error = classify_failure([line["text"] for line in run.lines], timed_out)
+            except Exception:  # a defect in the words must not lose the run's end
+                log("classifying a failure failed:\n" + traceback.format_exc())
+                run.error = {
+                    "code": "failed",
+                    "message": f"{run.title} did not finish",
+                    "detail": "",
+                    "fix": "Look at its output.",
+                    "action": None,
+                }
             if any(
                 result.label == core.COLIMA_STOP_LABEL and result.state == "timeout"
                 for result in event.results
@@ -1099,7 +1185,14 @@ class RunManager:
                     "it to stop.",
                     "action": "force-stop-docker",
                 }
-        self._current[name] = None
+        self._publish_finished(run)
+        if self.on_finished is not None:
+            try:
+                self.on_finished(run)
+            except Exception:
+                log("after a run finished:\n" + traceback.format_exc())
+
+    def _publish_finished(self, run: Run) -> None:
         self.hub.publish(
             "run.finished",
             {
@@ -1114,8 +1207,6 @@ class RunManager:
                 "error": run.error,
             },
         )
-        if self.on_finished is not None:
-            self.on_finished(run)
 
     def _flush(self, run: Run) -> None:
         while run.pending:
@@ -1128,6 +1219,7 @@ class RunManager:
                 for run in self._current.values():
                     if run is not None:
                         self._flush(run)
+                self._heal()
 
 
 # ---- the app: every route's logic, apart from HTTP ---------------------------------------------
@@ -1193,6 +1285,8 @@ class App:
         self._cached: dict[str, tuple[float, Any]] = {}
         self.runs = RunManager(backend, self.hub, wall, self._run_finished)
         self.poller = Poller(self)
+        self.on_quit: Callable[[], None] | None = None
+        """Stops the helper (set by :func:`main`); ``POST /api/quit`` calls it."""
 
     # the context the catalog builds with
     @property
@@ -1937,6 +2031,17 @@ class App:
 
     def heartbeat(self) -> dict[str, Any]:
         return {"ok": True, "idle_exit_in": int(self.lifetime.idle_seconds)}
+
+    def quit(self) -> dict[str, Any]:
+        """``POST /api/quit``: the window's Quit when no app shell holds the helper (a browser).
+        The helper stops a moment later, once this answer is on its way; stopping cancels what
+        runs, as Quit in the app does."""
+        stop = self.on_quit
+        if stop is not None:
+            timer = threading.Timer(QUIT_DELAY_SECONDS, stop)
+            timer.daemon = True
+            timer.start()
+        return {"ok": True, "quitting": stop is not None}
 
     def save_prefs(self, body: Mapping[str, Any]) -> dict[str, Any]:
         try:
@@ -2765,6 +2870,7 @@ ROUTES: Final[tuple[tuple[str, re.Pattern[str], str], ...]] = tuple(
         ("POST", r"/api/docs/(?P<doc>[^/]+)/open", "open_doc"),
         ("GET", r"/api/github", "github"),
         ("POST", r"/api/heartbeat", "heartbeat"),
+        ("POST", r"/api/quit", "quit"),
         ("GET", r"/api/prefs", "prefs"),
         ("PUT", r"/api/prefs", "save_prefs"),
         ("POST", r"/api/demo/state", "demo_state"),
@@ -2774,9 +2880,39 @@ ROUTES: Final[tuple[tuple[str, re.Pattern[str], str], ...]] = tuple(
 
 class PanelServer(ThreadingHTTPServer):
     daemon_threads = True
+    block_on_close = False  # an exit never waits for a window's open connections
     allow_reuse_address = False
     request_queue_size = 64  # the window fetches its ~25 modules at once; 5 drops some on macOS
     app: App
+
+    def __init__(self, address: tuple[str, int], handler: type[BaseHTTPRequestHandler]) -> None:
+        self._slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+        super().__init__(address, handler)
+
+    def server_bind(self) -> None:
+        """Binds without HTTPServer's reverse lookup of its own address (socket.getfqdn), which
+        can stall a start on some networks: the name is the address."""
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = int(port)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        """One thread per connection, at most :data:`MAX_CONNECTIONS` at once."""
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         """A client that went away is not news; anything else is logged, without the request."""
@@ -2790,7 +2926,7 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "ComplianceWatchControl"
     sys_version = ""
-    timeout = 120  # an idle kept-alive connection lets go of its thread after two minutes
+    timeout = CONNECTION_IDLE_SECONDS  # an idle kept-alive connection lets go of its thread
 
     # no request lines on stderr: they would carry query strings (an EventSource's ticket)
     def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
@@ -2972,6 +3108,8 @@ class Handler(BaseHTTPRequestHandler):
             return 200, app.open_doc(args["doc"])
         if route == "github":
             return 200, app.github()
+        if route == "quit":
+            return 202, app.quit()
         if route == "heartbeat":
             return 200, app.heartbeat()
         if route == "prefs":
@@ -3164,6 +3302,17 @@ def watch_stdin(on_eof: Callable[[], None], fd: int | None = None) -> None:
     on_eof()
 
 
+def exit_reason(*, owned: bool, detached: bool, parent_gone: bool, idle: bool) -> str | None:
+    """Why the helper stops now, or None. Its parent exiting stops it unless it was started
+    detached; ten minutes without a window stop it only when nobody owns it: an owner (the app
+    shell) holds a pipe on its input, and closing that pipe is what stops it."""
+    if parent_gone and not detached:
+        return "its parent exited"
+    if idle and not owned:
+        return "ten minutes passed without a window"
+    return None
+
+
 def hand_off_line(port: int, token: str, *, opened: bool, tty: bool | None = None) -> str:
     """What goes to stdout: the one JSON line a program reads, or, when a person runs it in a
     terminal and it opens the window itself, plain words without the token."""
@@ -3220,7 +3369,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, *, hard_exit: bool = False) -> int:
+    """The helper. ``hard_exit`` (the script, not the tests): once it is told to stop, it exits
+    within :data:`SHUTDOWN_SECONDS` whatever is still in flight."""
     args = parse_args(argv)
     if args.demo:
         import panel_demo
@@ -3240,26 +3391,41 @@ def main(argv: Sequence[str] | None = None) -> int:
         reasons.append(reason)
         stop.set()
 
+    app.on_quit = lambda: halt("asked to quit")
     parent = os.getppid()
     for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(signum, lambda number, _: halt(signal.Signals(number).name))
+    # an owner that holds a pipe on the helper's input (the app shell) decides its lifetime:
+    # closing the pipe stops it, and the ten-minute rule is only for a helper nobody holds
+    owned = stdin_is_pipe()
     with serving(server):
         sys.stdout.write(hand_off_line(app.port, app.token, opened=bool(args.open)))
         sys.stdout.flush()
-        if stdin_is_pipe():
+        if owned:
             threading.Thread(
                 target=watch_stdin, args=(lambda: halt("stdin closed"),), daemon=True, name="stdin"
             ).start()
         if args.open:
             open_window(app.launch_url(), app=args.open == "app")
         while not stop.wait(1.0):
-            if not args.detach and os.getppid() != parent:
-                halt("its parent exited")
-            elif app.lifetime.expired():
-                halt("ten minutes passed without a window")
+            reason = exit_reason(
+                owned=owned,
+                detached=args.detach,
+                parent_gone=os.getppid() != parent,
+                idle=app.lifetime.expired(),
+            )
+            if reason is not None:
+                halt(reason)
         log(f"exiting: {reasons[0] if reasons else 'stopped'}")
+        if hard_exit:
+            watchdog = threading.Timer(SHUTDOWN_SECONDS, os._exit, args=(0,))
+            watchdog.daemon = True
+            watchdog.start()
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    code = main(hard_exit=True)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)  # no wait for the probe pools' threads at exit

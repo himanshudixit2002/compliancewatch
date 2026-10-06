@@ -1,10 +1,16 @@
 """The app icon of ComplianceWatch Control, drawn in pure Python.
 
-The ComplianceWatch mark (the web app's ``icon.svg``: a dark rounded square with a white tick) on
-the macOS icon grid, with a soft shadow at the larger sizes. Each size is drawn at its own pixel
-size, not scaled down from a big one, so the tick stays a clear two pixels wide at 16 px.
+The mark: a white shield with a blue tick, on a squircle in the brand's blue-to-teal gradient
+(packages/ui/src/styles/tokens.css: --focus #2563eb into --accent #0f766e, the tick --primary
+#1d4ed8), with a soft highlight at the top, a soft inner shadow at the bottom and a drop shadow on
+the macOS icon grid. ``ui/icon.svg`` is the same mark.
 
-    python3 app_icon.py AppIcon.iconset     # the ten PNGs iconutil turns into AppIcon.icns
+Each size is drawn at its own pixel size, not scaled down from a big one: at 16 and 32 px the
+squircle fills more of the canvas, the shield is a little larger and the tick at least 1.9 px
+wide, and the highlight and shadows that would only blur them are left out.
+
+    python3 app_icon.py AppIcon.iconset             # the ten PNGs iconutil turns into AppIcon.icns
+    python3 app_icon.py --preview <folder>          # the mark at 512 and 32 px, and two alternates
 
 Standard library only (``zlib`` for the PNG), and Python 3.9 or later, so the installer can run
 it with any Python on the Mac.
@@ -16,6 +22,8 @@ import math
 import struct
 import sys
 import zlib
+from bisect import bisect_left
+from dataclasses import dataclass
 from pathlib import Path
 
 ICONSET = (
@@ -32,16 +40,71 @@ ICONSET = (
 )
 """The files of an ``.iconset`` folder and their pixel sizes."""
 
-TOP = (0x2C, 0x2C, 0x31)
-BOTTOM = (0x10, 0x10, 0x12)
-"""The square's fill, top to bottom: the brand's #171717, lit from above."""
+Colour = tuple[float, float, float]
 
-TICK = (9.0, 17.0), (14.0, 22.0), (23.0, 11.0)
-"""The tick of the brand mark, in its 32-unit box: M9 17 l5 5 9-11."""
+
+@dataclass(frozen=True)
+class Style:
+    top_left: Colour
+    bottom_right: Colour
+    shield_top: Colour
+    shield_bottom: Colour
+    tick: Colour
+    gloss: float
+    outline: bool = False
+
+
+STYLES: dict[str, Style] = {
+    "shield": Style(
+        top_left=(0x25, 0x63, 0xEB),
+        bottom_right=(0x0F, 0x76, 0x6E),
+        shield_top=(0xFF, 0xFF, 0xFF),
+        shield_bottom=(0xE6, 0xEE, 0xFC),
+        tick=(0x1D, 0x4E, 0xD8),
+        gloss=0.20,
+    ),
+    "night": Style(
+        top_left=(0x1E, 0x29, 0x3B),
+        bottom_right=(0x0B, 0x12, 0x20),
+        shield_top=(0x8A, 0xB4, 0xFF),
+        shield_bottom=(0x2D, 0xD4, 0xBF),
+        tick=(0x0B, 0x12, 0x20),
+        gloss=0.10,
+    ),
+    "outline": Style(
+        top_left=(0x25, 0x63, 0xEB),
+        bottom_right=(0x0F, 0x76, 0x6E),
+        shield_top=(0xFF, 0xFF, 0xFF),
+        shield_bottom=(0xFF, 0xFF, 0xFF),
+        tick=(0xFF, 0xFF, 0xFF),
+        gloss=0.20,
+        outline=True,
+    ),
+}
+"""The mark (``shield``) and the two alternates the preview draws beside it."""
+
+# The shield and the tick in the squircle's 64-unit box (the path of ui/icon.svg).
+APEX = (32.0, 10.5)
+CORNER = (48.5, 16.2)
+SIDE_END = 31.0
+CURVE = ((48.5, 31.0), (48.5, 41.6), (41.6, 49.5), (32.0, 53.3))
+"""The right half of the shield's bottom, a cubic from the side down to the point."""
+TICK = ((24.2, 31.6), (30.1, 37.5), (40.1, 25.7))
+TICK_WIDTH = 4.8
+OUTLINE_WIDTH = 3.4
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return low if value < low else high if value > high else value
+
+
+def _smooth(edge0: float, edge1: float, value: float) -> float:
+    t = _clamp((value - edge0) / (edge1 - edge0))
+    return t * t * (3 - 2 * t)
+
+
+def _mix(a: Colour, b: Colour, t: float) -> Colour:
+    return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t)
 
 
 def _round_rect(px: float, py: float, half: float, centre: float, radius: float) -> float:
@@ -61,11 +124,56 @@ def _segment(px: float, py: float, a: tuple[float, float], b: tuple[float, float
     return math.hypot(px - ax - dx * h, py - ay - dy * h)
 
 
-def geometry(size: int) -> dict[str, float]:
-    """The icon's shapes at ``size`` pixels: the square, its corners, the tick and the shadow.
+def _bottom_table(steps: int = 2048) -> tuple[list[float], list[float]]:
+    """The shield's half width along its bottom curve, by height in the box: (heights, widths)."""
+    (x0, y0), (x1, y1), (x2, y2), (x3, y3) = CURVE
+    heights, widths = [], []
+    for i in range(steps + 1):
+        t = i / steps
+        s = 1 - t
+        x = s * s * s * x0 + 3 * s * s * t * x1 + 3 * s * t * t * x2 + t * t * t * x3
+        y = s * s * s * y0 + 3 * s * s * t * y1 + 3 * s * t * t * y2 + t * t * t * y3
+        heights.append(y)
+        widths.append(x - 32.0)
+    return heights, widths
 
-    From 128 px up it follows the macOS grid (an 824/1024 square); the small sizes fill more of
-    the canvas and draw the tick a little larger and at least 1.8 px wide, to stay legible."""
+
+_HEIGHTS, _WIDTHS = _bottom_table()
+_TIP = CURVE[-1][1]
+_TOP_SLOPE = (CORNER[1] - APEX[1], -(CORNER[0] - APEX[0]))  # the top edge's outward normal
+_TOP_NORM = math.hypot(*_TOP_SLOPE)
+
+
+def _bottom_half_width(v: float) -> tuple[float, float]:
+    """The half width of the shield's bottom at height ``v`` and its slope dw/dv; below the
+    point, the curve's last direction carried on (so the point is sharp, not rounded)."""
+    i = min(max(bisect_left(_HEIGHTS, v), 1), len(_HEIGHTS) - 1)
+    v0, v1 = _HEIGHTS[i - 1], _HEIGHTS[i]
+    w0, w1 = _WIDTHS[i - 1], _WIDTHS[i]
+    slope = 0.0 if v1 == v0 else (w1 - w0) / (v1 - v0)
+    return w0 + slope * (v - v0), slope
+
+
+def shield_distance(u: float, v: float) -> float:
+    """Signed distance in box units from (u, v) to the shield's outline: negative inside. Each
+    edge's own distance, the farthest counting (the shield is convex)."""
+    dx = abs(u - 32.0)
+    top = ((dx - 0.0) * _TOP_SLOPE[0] + (v - APEX[1]) * _TOP_SLOPE[1]) / _TOP_NORM
+    side = dx - (CORNER[0] - 32.0)
+    distance = max(top, side)
+    if v > SIDE_END:
+        width, slope = _bottom_half_width(v)
+        distance = max(distance, (dx - width) / math.sqrt(1.0 + slope * slope))
+    return distance
+
+
+def geometry(size: int) -> dict[str, float]:
+    """The icon's shapes at ``size`` pixels: the squircle, the mark's scale, the tick and the
+    shadows.
+
+    From 128 px up it follows the macOS grid (an 824/1024 squircle); the small sizes fill more of
+    the canvas, draw the shield a little larger and the tick at least 1.9 px wide at 16 px and
+    2.6 px at 32 px."""
     if size >= 128:
         inset = size * 100 / 1024
     elif size >= 64:
@@ -74,48 +182,50 @@ def geometry(size: int) -> dict[str, float]:
         inset = size / 16
     side = size - 2 * inset
     small = size <= 32
-    stroke = max(side * 3 / 32, 1.8 if small else 0.0)
+    tiny = size <= 16
+    unit = side / 64
+    scale = 1.2 if tiny else 1.1 if small else 1.0
     return {
         "size": float(size),
-        "half": side / 2,
-        "centre": size / 2,
-        "radius": side * (0.2237 if not small else 0.2),
         "inset": inset,
         "side": side,
-        "stroke": stroke,
-        "tick_scale": 1.1 if small else 1.0,
+        "half": side / 2,
+        "centre": size / 2,
+        "radius": side * (0.21 if small else 0.2237),
+        "unit": unit,
+        "scale": scale,
+        "tick": max(TICK_WIDTH * unit * scale, 1.9 if tiny else 2.6 if small else 0.0),
+        "outline": max(OUTLINE_WIDTH * unit * scale, 1.2),
+        "effects": 0.0 if size < 32 else 0.6 if small else 1.0,
         "shadow": 0.0 if size < 64 else size * 0.028,
         "shadow_dy": 0.0 if size < 64 else size * 0.012,
+        "shield_shadow": 0.0 if size < 64 else 2.2,
     }
 
 
-def tick_points(shape: dict[str, float]) -> list[tuple[float, float]]:
-    """The tick's three points in pixels, centred on the square."""
-    inset, side, scale = shape["inset"], shape["side"], shape["tick_scale"]
-    points = []
-    for vx, vy in TICK:
-        x = 16 + (vx - 16) * scale
-        y = 16.5 + (vy - 16.5) * scale
-        points.append((inset + x / 32 * side, inset + y / 32 * side))
-    return points
-
-
-def render(size: int) -> bytes:
+def render(size: int, style: str = "shield") -> bytes:
     """The icon as straight-alpha RGBA rows, ``size`` x ``size``."""
+    paint = STYLES[style]
     shape = geometry(size)
-    half, centre, radius = shape["half"], shape["centre"], shape["radius"]
-    stroke, blur, dy = shape["stroke"], shape["shadow"], shape["shadow_dy"]
-    a, b, c = tick_points(shape)
-    left = min(a[0], b[0], c[0]) - stroke
-    right = max(a[0], b[0], c[0]) + stroke
-    top = min(a[1], b[1], c[1]) - stroke
-    bottom = max(a[1], b[1], c[1]) + stroke
+    inset, side, half, centre = shape["inset"], shape["side"], shape["half"], shape["centre"]
+    radius, unit, scale = shape["radius"], shape["unit"], shape["scale"]
+    blur, dy, effects = shape["shadow"], shape["shadow_dy"], shape["effects"]
+    lift = shape["shield_shadow"]
+    top_left, bottom_right = paint.top_left, paint.bottom_right
+    shield_top, shield_bottom, tick = paint.shield_top, paint.shield_bottom, paint.tick
+    gloss = paint.gloss * effects
+    outlined = paint.outline
+    stroke, outline = shape["tick"], shape["outline"]
+    to_box = 64.0 / side / scale  # pixels to box units, through the mark's scale
+    to_px = 1.0 / to_box
+    a, b, c = TICK
+    inner = side * 0.06
     out = bytearray(size * size * 4)
     for y in range(size):
         py = y + 0.5
-        shade = _clamp((py - (centre - half)) / (2 * half))
-        fill = [TOP[i] + (BOTTOM[i] - TOP[i]) * shade for i in range(3)]
-        in_tick_rows = top <= py <= bottom
+        down = _clamp((py - inset) / side)
+        v = (py - inset) / side * 64.0
+        v = 32.0 + (v - 32.0) / scale
         row = y * size * 4
         for x in range(size):
             px = x + 0.5
@@ -125,28 +235,48 @@ def render(size: int) -> bytes:
             if blur > 0.0:
                 ds = _round_rect(px, py - dy, half, centre, radius)
                 if ds < blur:
-                    t = _clamp((ds + blur) / (2 * blur))
-                    shadow = 0.32 * (1.0 - t * t * (3 - 2 * t))
+                    shadow = 0.30 * (1.0 - _smooth(-blur, blur, ds))
             if body <= 0.0 and shadow <= 0.0:
                 continue
-            r, g, bl = fill
-            if body > 0.0 and blur > 0.0 and -1.6 * size / 512 < d < 0.0 and py < centre:
-                lift = 0.10 * (1.0 - (py - (centre - half)) / half)  # a faint top rim of light
-                r, g, bl = r + (255 - r) * lift, g + (255 - g) * lift, bl + (255 - bl) * lift
-            if in_tick_rows and left <= px <= right and body > 0.0:
-                dt = min(_segment(px, py, a, b), _segment(px, py, b, c)) - stroke / 2
-                mark = _clamp(0.5 - dt)
+            across = _clamp((px - inset) / side)
+            colour = _mix(top_left, bottom_right, (across + down) / 2)
+            if gloss > 0.0:  # a soft highlight on the top half
+                colour = _mix(
+                    colour, (255.0, 255.0, 255.0), gloss * (1.0 - _smooth(0.0, 0.55, down))
+                )
+            if effects > 0.0 and d > -inner:  # a soft inner shadow, darker towards the bottom
+                depth = (1.0 - _smooth(-inner, 0.0, -d)) * (0.3 + 0.7 * down) * 0.30 * effects
+                colour = _mix(colour, (0x0B, 0x12, 0x20), depth)
+            u = (px - inset) / side * 64.0
+            u = 32.0 + (u - 32.0) / scale
+            edge = shield_distance(u, v) * to_px
+            if lift > 0.0:  # the shield's own soft shadow
+                lifted = shield_distance(u, v - lift * 0.55) * to_px
+                spread = lift * unit
+                if lifted < spread:
+                    fall = 0.22 * (1.0 - _smooth(-spread, spread, lifted))
+                    colour = _mix(colour, (0x0B, 0x12, 0x20), fall * _clamp(0.5 + edge))
+            if outlined:
+                ring = _clamp(0.5 - (abs(edge) - outline / 2))
+                inside = _clamp(0.5 - edge)
+                colour = _mix(colour, (255.0, 255.0, 255.0), 0.12 * inside)
+                colour = _mix(colour, shield_top, ring)
+            else:
+                cover = _clamp(0.5 - edge)
+                if cover > 0.0:
+                    fill = _mix(shield_top, shield_bottom, _clamp((v - APEX[1]) / (_TIP - APEX[1])))
+                    colour = _mix(colour, fill, cover)
+            if edge < 0.0:
+                ink = min(_segment(u, v, a, b), _segment(u, v, b, c)) * to_px - stroke / 2
+                mark = _clamp(0.5 - ink)
                 if mark > 0.0:
-                    r, g, bl = r + (255 - r) * mark, g + (255 - g) * mark, bl + (255 - bl) * mark
-            # the square over its shadow (the shadow is black, so only its alpha counts)
+                    colour = _mix(colour, tick, mark)
             alpha = body + shadow * (1.0 - body)
-            if alpha <= 0.0:
-                continue
-            k = body / alpha
+            k = body / alpha  # the squircle over its shadow, which is black: only its alpha counts
             i = row + x * 4
-            out[i] = round(r * k)
-            out[i + 1] = round(g * k)
-            out[i + 2] = round(bl * k)
+            out[i] = round(colour[0] * k)
+            out[i + 1] = round(colour[1] * k)
+            out[i + 2] = round(colour[2] * k)
             out[i + 3] = round(alpha * 255)
     return bytes(out)
 
@@ -187,9 +317,29 @@ def write_iconset(folder: Path) -> list[Path]:
     return written
 
 
+def write_preview(folder: Path) -> list[Path]:
+    """The mark at 512 and 32 px, and the two alternates at 512 px, to choose from."""
+    folder.mkdir(parents=True, exist_ok=True)
+    written = []
+    for name, size, style in (
+        ("mark-512.png", 512, "shield"),
+        ("mark-32.png", 32, "shield"),
+        ("mark-16.png", 16, "shield"),
+        ("alternate-night-512.png", 512, "night"),
+        ("alternate-outline-512.png", 512, "outline"),
+    ):
+        path = folder / name
+        path.write_bytes(png(size, render(size, style)))
+        written.append(path)
+    return written
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) == 2 and argv[0] == "--preview":
+        write_preview(Path(argv[1]))
+        return 0
     if len(argv) != 1 or not argv[0].endswith(".iconset"):
-        sys.stderr.write("usage: app_icon.py <folder>.iconset\n")
+        sys.stderr.write("usage: app_icon.py <folder>.iconset | --preview <folder>\n")
         return 2
     write_iconset(Path(argv[0]))
     return 0

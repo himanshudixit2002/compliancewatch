@@ -41,10 +41,15 @@ checked or confirmed anything.
   - its parent process exits (not with `--detach`, which the browser fallback uses: it then
     lives until the idle rule below);
   - ten minutes pass with no authenticated request (the UI's heartbeat, every 20 s, keeps it
-    alive);
+    alive), but only when nobody owns it: while its standard input is a pipe (the app shell
+    holds it), the owner decides, and closing the pipe is what stops it;
+  - `POST /api/quit` asks it to (the window's Quit outside the app);
   - it gets SIGTERM, SIGINT or SIGHUP.
+- Once told to stop, it exits within 3 s, whatever is still in flight (a slow probe, an open
+  connection).
 - Diagnostics go to stderr, without the token or any request's query string. The last line says
-  why it exited (`panel_server: exiting: stdin closed`).
+  why it exited (`panel_server: exiting: stdin closed`). The app shell appends them to
+  `~/Library/Logs/ComplianceWatch Control/helper.log`.
 
 ## 2. Security
 
@@ -56,6 +61,7 @@ checked or confirmed anything.
 | Host | The `Host` header must be exactly `127.0.0.1:<port>`, on every request, static files included. Otherwise `403 bad-host` (this stops DNS rebinding). |
 | Origin | An `Origin` header, when present, must be exactly `http://127.0.0.1:<port>`; `null` is refused. A `Sec-Fetch-Site` header, when present, must be `same-origin` or `none`. Otherwise `403 bad-origin`. |
 | CORS | None. No `Access-Control-*` header is ever sent; `OPTIONS` is `405`. |
+| Connections | At most 48 at once (one past it is closed unanswered); a kept-alive connection idle for 20 s is closed. At most 4 event streams at once: a fifth closes the oldest (a window keeps one, and lets go of it while hidden). |
 | Bodies | Only `POST` and `PUT` take a body, sent with a `Content-Length`: a body sent with `Transfer-Encoding` (chunked) is `411`, and a request without a `Content-Length` is read as an empty body (`{}`), which a route that needs fields then refuses (`400 bad-params`, or `428` without a confirm token). A body that is not empty must be `Content-Type: application/json` (else `415`), at most 64 KiB (else `413`), and a JSON object (else `400 bad-json`). |
 | Static files | `GET` only, from `ui/` only (no path outside it, no dotfiles, known types only), with `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and on HTML a CSP: `default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`. |
 | Every response | `Cache-Control: no-store`; JSON is `application/json; charset=utf-8`. |
@@ -281,7 +287,10 @@ gave one; `confirm` is accepted as another name for it).
   else `timeout` or `failed`. When `colima stop` overran its two minutes, `message` is "Docker
   did not stop in time" and `action` is `"force-stop-docker"`.
 - `GET /api/runs?limit=20` (1 to 50) → `{"runs": [Run without "lines"]}`, newest first, this
-  launch only.
+  launch only. A run is `running` only while its runner is at work: one whose runner went idle
+  without its end (a defect) is finished as `failed` two seconds later, with `error.code`
+  `stopped` ("It stopped unexpectedly") and a `run.finished` event, and a run that could not
+  start is `failed` at once.
 - `GET /api/runs/{run_id}` → the Run with its last 2,000 `lines`.
 - `POST /api/runs/{run_id}/cancel` → `{"ok": true}`: SIGTERM to the running step's process
   group, SIGKILL five seconds later to what is left. Every step starts its program in a new
@@ -383,6 +392,7 @@ reads every 2 s while a window is connected and every 15 s otherwise (processes 
 | `POST /api/docs/{id}/open` | `{"ok": true, "opened": true, "target": "...", "message": "Opened Onboarding"}` (macOS `open`) |
 | `GET /api/github` | `{"available": true, "reason": "", "repo_url", "branch", "links": [{"label", "url"}], "prs": [{"number", "title", "url", "branch", "checks": "passing" \| "failing" \| "pending" \| "none"}], "loading", "reading"}`; read-only through `gh` when it is installed and signed in, cached 60 s, read like the features (a `github` event when a read lands); otherwise `available: false`, a plain `reason`, and the links |
 | `POST /api/heartbeat` | `{"ok": true, "idle_exit_in": 600}` |
+| `POST /api/quit` | `202 {"ok": true, "quitting": true}`: the helper stops 0.3 s later, cancelling what runs (the window's Quit outside the app; in the app the window asks the app, which stops the helper itself). `"quitting": false` when nothing owns the stop (tests). |
 | `GET /api/prefs` | `{"tour_done": false, "last_view": "", "dismissed": []}` |
 | `PUT /api/prefs` | the same keys, any subset → the merged prefs. Kept in `~/Library/Application Support/ComplianceWatch Control/prefs.json` (or `$CW_CONTROL_PREFS`), never in the checkout; in `--demo`, in memory only. Other keys: `400 bad-params`. |
 
@@ -538,6 +548,7 @@ terminal or arguments (`replay`, `golden-export`), or change the app or the git 
 - **Tests against `--demo`**: `POST /api/demo/state` takes the mock's `/__mock/state` body.
 - **Launch codes**: the window's address carries a single-use launch code, never the token
   (`POST /api/launch-code`, `POST /api/launch`).
+- **Quit**: `POST /api/quit` for the window's Quit outside the app.
 - **New**: `GET /api/meta`, `POST /api/docs/{id}/open`, `safety: "refused"`, status `level` and
   `warnings`, session `uses`, run `kind` and `current_step`, step state `queued`, catalog
   `preview` and `keywords`, feature state `error`, and the ids `migrations-check`,

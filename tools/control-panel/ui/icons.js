@@ -113,7 +113,7 @@ const PATHS = {
 };
 
 const BRAND_MARK =
-  '<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><rect width="32" height="32" rx="7" fill="#171717"/><path d="M9 17l5 5 9-11" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  '<svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><defs><linearGradient id="cw-mark-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2563eb"/><stop offset="1" stop-color="#0f766e"/></linearGradient><linearGradient id="cw-mark-gloss" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient><linearGradient id="cw-mark-shield" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#e6eefc"/></linearGradient></defs><rect width="64" height="64" rx="14.5" fill="url(#cw-mark-bg)"/><rect width="64" height="64" rx="14.5" fill="url(#cw-mark-gloss)"/><path d="M32 10.5 48.5 16.2V31c0 10.6-6.9 18.5-16.5 22.3C22.4 49.5 15.5 41.6 15.5 31V16.2z" fill="url(#cw-mark-shield)"/><path d="m24.2 31.6 5.9 5.9 10-11.8" fill="none" stroke="#1d4ed8" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 /** The markup of one icon, decorative unless a label is given (then it is an image). */
 export function iconMarkup(name, { label = "", size = 20 } = {}) {
@@ -132,7 +132,8 @@ export function icon(name, options = {}) {
   return holder.firstElementChild;
 }
 
-/** The ComplianceWatch mark (the web app's icon.svg): a dark square with a tick. */
+/** The ComplianceWatch Control mark (icon.svg, the app icon): a white shield with a tick on the
+ * brand's blue-to-teal square. */
 export function brandMark() {
   const holder = document.createElement("span");
   holder.className = "brand-mark";
