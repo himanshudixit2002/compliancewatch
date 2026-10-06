@@ -26,7 +26,14 @@ Design reference: Project Foundation guide, sections 7 and 14.
   November. Nothing already overdue is made. A period that ends on or before the version's
   `effective_from` is skipped even while it is still due (an earlier version governs it), and one
   that ends after its `effective_to` is refused; a one-off keeps its own date, `due_in_days`
-  after the decision's day.
+  after the decision's day (the kernel's `ObligationTemplate.due_on`). A version governs the
+  periods whose last day it is in force on (`holds_period` is the kernel's `governs`, the rule
+  the applicability engine judges by too), so a business that arrives after a version was
+  superseded still owes the periods that version governs and that are still due: the engine
+  decides a superseded version while one is (`CW_APPLICABILITY_ENGINE_SUPERSEDED_LOOKBACK_DAYS`),
+  and its decision makes exactly those. Superseded from 1 October and decided on 5 October, a
+  monthly return's older version makes September, due 20 October, and refuses October and
+  November, which the newer version's decision makes; decided on 25 October it makes nothing.
 - `application/changes.py`: `ApplyDeadlineChange` moves open obligations of a period and
   publishes `obligation.rescheduled`; `WithdrawRule` closes them with `rule_withdrawn`;
   `CloseSupersededPeriods` closes, with `rule_superseded`, the open obligations a superseding

@@ -100,6 +100,12 @@ What the build settled that the decision left open:
   makes only the periods it still governs, and a version without a verified citation makes
   nothing, whichever the cache or the rulebook says. The cache row is locked while a decision or
   a rule event about the version is applied, so the two never miss each other.
+- **A superseded version is still decided while a period it governs is due.** A business that
+  arrives after a supersession owes the older version's last periods (superseded from 1 October,
+  September's return is due 20 October), so the engine's recompute also decides the versions
+  superseded within a lookback (400 days, long enough for an annual return; the rulebook never
+  lists a withdrawn one) while the kernel's `Recurrence.periods_governed` still finds a period of
+  theirs due, and the guard makes exactly those periods.
 
 Not built yet: a deadline change of a period that has no obligation yet is not remembered, so an
 obligation made later for that period takes the version's own date; and `corrects` still closes
