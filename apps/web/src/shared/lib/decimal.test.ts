@@ -4,6 +4,8 @@ import {
   compareAmounts,
   fromPaise,
   isAmount,
+  isDecimalText,
+  ratioPercent,
   subtractAmounts,
   toPaise,
 } from "./decimal.ts";
@@ -34,5 +36,23 @@ describe("decimal amounts", () => {
     expect(compareAmounts("1.10", "1.1")).toBe(0);
     expect(compareAmounts("1.09", "1.10")).toBe(-1);
     expect(compareAmounts("2", "1.99")).toBe(1);
+  });
+});
+
+describe("ratioPercent", () => {
+  it("reads a share as a percentage rounded half up, without floats", () => {
+    expect(ratioPercent("0.061700")).toBe("6.17");
+    expect(ratioPercent("0.000060")).toBe("0.01");
+    expect(ratioPercent("0.000049")).toBe("0.00");
+    expect(ratioPercent("0.123456", 3)).toBe("12.346");
+    expect(ratioPercent("1.2")).toBe("120.00");
+    expect(ratioPercent("0", 0)).toBe("0");
+    expect(ratioPercent("-0.5")).toBe("-50.00");
+  });
+
+  it("refuses text that is not a decimal", () => {
+    expect(isDecimalText(" 0.5 ")).toBe(true);
+    expect(isDecimalText("0.")).toBe(false);
+    expect(() => ratioPercent("half")).toThrow(/not a decimal/);
   });
 });

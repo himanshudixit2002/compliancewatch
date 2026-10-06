@@ -18,6 +18,8 @@
 # ---- Apps -------------------------------------------------------------------
 /apps/web/                       @himanshudixit2002 # team: Core Product (shells, public pages, screen registry, shared code; narrower routes below)
 /apps/web/src/app/admin/         @himanshudixit2002 # team: Regulatory Intelligence (the /admin internal tools; tenant admin routes go to Identity and Partner once they exist)
+/apps/web/src/app/admin/llm/     @himanshudixit2002 # team: AI Platform (the LLM gateway's prompts, model routes and usage)
+/apps/web/src/features/llm-registry/ @himanshudixit2002 # team: AI Platform
 /apps/whatsapp-bot/              @himanshudixit2002 # team: Core Product
 
 # ---- Services ---------------------------------------------------------------
