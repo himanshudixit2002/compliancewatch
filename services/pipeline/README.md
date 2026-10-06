@@ -1,6 +1,6 @@
 # pipeline service
 
-Part of the ComplianceWatch monorepo. **Health routes; the pipeline store (sources, fetched documents, crawl runs, the outbox) and the raw store on disk or S3; the crawl, which reads every source at its cadence from its watermark (a 60-second tick in the worker, behind `CW_PIPELINE_CRAWL_ENABLED`) and ingests what is new in child workflows; the source manager API (the sources with how each stands, an admin's additions, edits and fetches, the documents and their stored files); the ingest workflow, whose `FetchAndStore` keeps each fetched file once and announces it with `document.discovered`; source adapters by type with parameters (CBIC notifications and circulars, GST Council press releases, GSTN advisories, Maharashtra GST notifications), PDF and HTML parsers, a change detector, a backfill command, the crawl report (the F1 check), the rule extractor with its validators behind the llm-gateway, and the labelling tool for the extraction golden set.**
+Part of the ComplianceWatch monorepo. **Health routes; the pipeline store (sources, fetched documents, crawl runs, the tasks people work, the outbox) and the raw store on disk or S3; the crawl, which reads every source at its cadence from its watermark (a 60-second tick in the worker, behind `CW_PIPELINE_CRAWL_ENABLED`) and ingests what is new in child workflows; the source manager API (the sources with how each stands, an admin's additions, edits and fetches, the documents and their stored files); uploads of a document to a source; the ingest workflow, whose `FetchAndStore` keeps each fetched file once and announces it with `document.discovered`, and whose parse goes through the parser chain (the PDF's text layer, a table-aware PDF parser, HTML and table-aware HTML) and announces `document.parsed`; manual parse, where a document no parser reads opens a task an analyst resolves with a transcript; source adapters by type with parameters (CBIC notifications and circulars, GST Council press releases, GSTN advisories, Maharashtra GST notifications, and upload-only statutes: the CGST Act, the CGST Rules, the IGST Act), a change detector, a backfill command, the crawl report (the F1 check), the rule extractor with its validators behind the llm-gateway, and the labelling tool for the extraction golden set.**
 Design reference: Project Foundation guide, sections 5, 7, 8, 11 and 14.
 
 - **Owns:** The regulatory intelligence pipeline as Temporal workers: source-crawler (source registry, fetch schedule, raw document store), change-detector (document classification, links to prior documents), doc-parser (clause-level structured text, OCR fallback), rule-extractor (schema-validated RuleCandidates with verified citations), review-service (ReviewTasks, decisions, edit diffs, two-person rule)
@@ -14,16 +14,23 @@ Design reference: Project Foundation guide, sections 5, 7, 8, 11 and 14.
 src/pipeline/
   api/             # routers, request/response schemas, auth dependencies
   api/sources.py, schemas.py, deps.py  # the source manager's routes, bodies and guards
+  api/uploads.py, tasks.py  # an upload to a source (multipart, size-capped); the task queue
   application/     # use cases, event handlers, unit of work; activities.py: the ingest activities
   application/store_document.py  # StoreDocument: fetch, keep the bytes, record once (FetchAndStore)
   application/sources.py  # the source manager: sync, list, add, edit, documents, stored bytes
   application/crawl.py    # StartCrawl, ScheduleCrawls (the tick), ListNewDocuments, FinishCrawl
   application/report.py   # CrawlReport: runs, failures, gaps, detection delays (the F1 check)
+  application/uploads.py  # UploadDocument: check, store, record, audit, start the ingest
+  application/tasks.py    # ListTasks, ResolveTask (with a transcript), DismissTask
   domain/          # entities, value objects, domain events, repository protocols
   domain/sources.py, raw_documents.py, crawl.py  # Source, RawDocumentRecord, CrawlRun: the rows
   domain/crawl.py          # also where a listing starts and how the watermark moves
   domain/schedule.py       # when a source is due, the crawl's ids, a source's status and freshness
-  domain/events.py         # DocumentDiscovered (document.discovered), keyed by its source
+  domain/events.py         # DocumentDiscovered and DocumentParsed, keyed by their source
+  domain/tasks.py          # PipelineTask: a manual parse or a triage, open, resolved, dismissed
+  domain/structure.py      # blocks (headings, paragraphs, tables) and the clauses they become
+  domain/transcripts.py    # an analyst's transcript: its JSON shape, its checks, manual@1
+  domain/language.py       # en, hi or mul from the letters of a text
   domain/repository.py     # the unit of work and the repositories the store implements
   application/detector.py  # document type, change kind, referenced notifications
   application/extractor.py # LlmRuleExtractor: one gateway call per document, then the validators
@@ -37,9 +44,12 @@ src/pipeline/
     s3.py          # S3Client: HEAD, PUT and GET signed with Signature Version 4 over httpx2
     adapters/      # one SourceAdapter per regulator site; registry.py: adapter types, sources, catalog
     adapters/catalog.py  # StoreCatalog: the store's sources, adapters built from their rows
-    temporal.py    # TemporalCrawls: starts pipeline.crawl_source, one workflow per id
+    temporal.py    # TemporalCrawls and TemporalIngests: start the crawl and an ingest by name
     source_metrics.py  # the freshness gauges SourceStale reads
-    parsers/       # PdfParser (pypdf text layer), HtmlParser, SourceParsers, language, clause split
+    parsers/       # ParserChain over PdfParser (text layer), PdfTableParser, HtmlParser,
+                   # HtmlTableParser; the clause split
+    adapters/upload.py   # UploadOnlyAdapter: lists and fetches nothing (the statutes)
+    task_metrics.py  # the open-tasks gauge ParseFailureQueueHigh reads
   workflows/       # Temporal workflows; ingest_document.py: discover, fetch, parse, register
   workflows/crawl_source.py  # list from the watermark, ingest the new documents, record the run
   application/knowledge_activities.py  # RegisterDocument: hand the parsed document to the rulebook
@@ -60,7 +70,7 @@ prompts/           # extraction.rule_candidate.v1.md (owner regulatory-intellige
   testing.py       # FixtureTransport (replays tests/fixtures), ScriptedProvider, ScriptedEmbedder, MemoryRulebook, StubS3, sample_activities
   worker.py        # python -m pipeline.worker: the Temporal worker on task queue "pipeline"
   main.py          # composition root: create_app(...) from py-common
-migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA); 0001: source, raw_document, crawl_run, outbox_event; 0002: source names, the URL index
+migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA); 0001: source, raw_document, crawl_run, outbox_event; 0002: source names, the URL index; 0003: pipeline_task, the parse of each document
 tests/
   unit/            # domain and application with fakes; adapter conformance over recorded fixtures
   fixtures/        # responses recorded from the regulator sites, and workflow histories (README lists what and when)
@@ -86,24 +96,43 @@ parser) on a thread while they heartbeat, so the worker's event loop never waits
    whose bytes are stored already is a duplicate: nothing is written, the result says
    `duplicate=true` and names the stored key;
 3. `pipeline.parse_document` reads the bytes back from the raw store and splits them into
-   clauses through `DocumentParser`.
+   clauses through the parser chain ([The parser chain](#the-parser-chain)), the way the
+   document's record says: as the type its uploader gave, by the parser that parsed it before,
+   from the analyst's transcript once there is one. In one transaction it records the parse on
+   the record (`parsed`, `parser_version`), writes `document.parsed` when that changed anything,
+   and closes a manual-parse task the parse made needless.
+
+An ingest an upload or a manual parse's resolution starts is handed the document as stored
+(`IngestRequest.stored`, with `transcript_key` naming the analyst's transcript for a resolution)
+and skips the first two steps, behind `workflow.patched("pipeline-stored-v1")`
+(`STORED_PATCH`).
+
+A stored document no parser reads (`UnparsedDocumentError`, or `UnsupportedDocumentError` for a
+media type no parser takes) does not fail the ingest, behind
+`workflow.patched("pipeline-parse-v1")` (`PARSE_PATCH`): `pipeline.open_manual_parse` sets the
+document `failed` and opens its manual-parse task in one transaction, and the ingest ends there
+with `parse_failed=true` and the task's id, so nothing of the document is registered
+([Manual parse](#manual-parse-and-uploads)). A document with a task open already keeps it, so a
+retry or a second ingest of the same bytes opens none. A crawl counts such a document as stored.
 
 The worker resolves a request's `source_id` through the sources the store holds (`StoreCatalog`,
 [Sources](#sources)): it finds the row whose key gives the id and builds the adapter from the
 row's adapter type and parameters (`ADAPTER_TYPES[...].validated()`), all over one polite client,
-and parses each document with the parsers of its source's document type (`SourceParsers`: the PDF
-parser, then the HTML one). An unknown source, or a row the code cannot read (a type it lacks,
+and parses each document through the chain as its source's document type unless its record
+names another (`ParserChain`). An unknown source, or a row the code cannot read (a type it lacks,
 parameters the type refuses), is refused and not retried.
 
 `FetchAndStore` replaced `pipeline.fetch_document`, which carried the bytes in its result, behind
 `workflow.patched("pipeline-store-v1")` (`STORE_PATCH`): a workflow started before it replays
 `FetchDocument` and finishes on the bytes in its history, so `FetchDocument` stays registered and
 `ParseRequest` takes either `fetched` (the bytes) or `stored` (the key).
-`tests/fixtures/histories` holds two runs recorded before the change and two recorded with the
-store and before `GIVEN_PATCH`, and `tests/unit/test_workflow_replay.py` replays all four on
-today's workflow (and shows that a workflow without the store's guard would not replay the
-first two). Remove `FetchDocument` and the old branch once no workflow started before the store
-is open (Temporal's UI lists the running ones).
+`tests/fixtures/histories` holds two runs recorded before the change, two recorded with the
+store and before `GIVEN_PATCH`, and three recorded with the crawl's given document and before
+`PARSE_PATCH` (one whose PDF has no text layer, so its parse failed the ingest), and
+`tests/unit/test_workflow_replay.py` replays all seven on today's workflow (and shows that a
+workflow without the store's guard, or without the parse's, would not replay them). Remove
+`FetchDocument` and the old branch once no workflow started before the store is open (Temporal's
+UI lists the running ones).
 
 ```bash
 make dev                        # Temporal at localhost:7233
@@ -132,11 +161,58 @@ flag is off by default (owner regulatory-intelligence; it goes when ADR-017 is a
 the activity answers `skipped` without a call. With the flag on, the request must name the
 regulator. A registration that fails (a refused write, a
 rulebook outage longer than the retries) does not fail the ingest: the result says
-`registered=False` with the reason in `registration_error`. A different parse of stored bytes,
-which a parser change can cause, is refused and never retried; the stored clauses stay, since
-mentions and citations point into them. Bump the parser's `PARSER_VERSION` with any change that
-can alter clause text, so the refusal names both versions; what to do with stored documents
-after such a change is an open decision (ADR-018). Deploy the rulebook before the pipeline.
+`registered=False` with the reason in `registration_error`. The registration parses the bytes
+again the way the parse did (the record names the parser) and sends the parser's name and version
+with the clauses. The rulebook keeps the first parse of a document (ADR-018, addendum of
+2026-10-06): a parse by another parser version is answered with the stored clauses and their
+parser, never a 409, and the pipeline then checks that those clauses carry the ids the kernel
+derives for their refs. A different parse by the same parser version is refused and never
+retried: bump the parser's `PARSER_VERSION` with any change that can alter clause text. Deploy the
+rulebook before the pipeline.
+
+Statutes are registered and their clauses embedded like any document, so rules can cite them,
+but nothing is extracted from them: the ingest asks `domain.candidate.is_extracted` of the
+document type before the extraction child, and the rule extraction step that is to follow it
+asks the same.
+
+## The parser chain
+
+`infrastructure/parsers/chain.py` (`ParserChain`) parses every document by its media type: the
+first parser of the chain that takes the type and reads the bytes gives its clauses, and names
+itself on them (`name@version`).
+
+| Parser | Takes | Gives |
+| --- | --- | --- |
+| `pdf@1` (`PdfParser`) | PDF | the text layer, split into paragraphs and numbered items; it gives way on a PDF with tables |
+| `pdf-tables@1` (`PdfTableParser`) | PDF | the same text, read in pypdf's layout mode, with each table row one clause of its cells joined by ` \| ` |
+| `html@1` (`HtmlParser`) | HTML | the text of the page's blocks, every table cell a paragraph; it gives way on a page with a data table |
+| `html-tables@1` (`HtmlTableParser`) | HTML | headings, paragraphs, and each table row one clause of its cells, the header row first |
+| `manual@1` (`domain.transcripts`) | an analyst's transcript | the transcript's blocks, the same way |
+
+A parser that gives way (`DeclinedDocumentError`) is asked again, to parse as it always did, when
+no later one reads the document, so a PDF the text-layer parser read before still parses. The
+text-layer parsers give the same clauses as before for every document they parse, so `pdf@1` and
+`html@1` keep their versions. The table-aware PDF parser finds rows on the layout grid: a wrapped
+row (a line of three or more cells with lines hanging under its last cell, as the entries of a
+jurisdiction table), aligned rows (lines whose cells start in the same columns), a single row of a
+row's columns found elsewhere in the document, and a cell's second paragraph; the rest is text.
+It joins again what the grid splits (a superscript ordinal, `13th`; a lone full stop, `102.`).
+pypdf, already a dependency, is all it uses. The recorded 10/2025-Central Tax (a table of
+Commissionerates and their districts) is its test: every row comes out as `“23. | Chennai Outer |
+Districts of Viluppuram, ...`.
+
+Clause refs are `<language>.p<n>` for every parser, counted per language in document order, so
+the rulebook takes them as they are and the same bytes give the same refs and ids every time.
+Each document keeps its parser: its record names the parser of its last parse
+(`raw_document.parser_version`), and the chain tries that one first, never letting it give way,
+so a document parsed before a new parser joined the chain keeps its clauses and their ids while
+the code has its parser. A version the chain no longer has is passed over; the rulebook then keeps
+the first parse it stored (ADR-018). A document an analyst transcribed is always parsed from the
+transcript its record names (`raw_document.transcript_key`).
+
+When no parser reads a document, `UnparsedDocumentError` names each parser's reason (`pdf@1:
+UnparsedDocumentError: the PDF has no text layer; pdf-tables@1: ...`); a parser that cannot open
+the bytes counts as one that does not read them. OCR is not built.
 
 ## The crawl
 
@@ -212,25 +288,86 @@ tenant, in the transaction of the change.
 | `GET /v1/pipeline/sources/{key}/documents` | the source's documents a page at a time (`limit`, `cursor`), newest publication first, undated last |
 | `GET /v1/pipeline/documents/{document_id}` | one stored document's record |
 | `GET /v1/pipeline/documents/{document_id}/raw` | its bytes from the raw store with the content type it was fetched with, served only when their SHA-256 is the record's (502 otherwise), with the digest as the ETag, inline, sandboxed and never sniffed |
+| `POST /v1/pipeline/sources/{key}/uploads` | upload a document to the source ([Manual parse and uploads](#manual-parse-and-uploads)): 202 with the stored document and its ingest's workflow id; audited as `pipeline.document.upload` |
+| `GET /v1/pipeline/tasks` | the tasks people work on stored documents, of a `status` (`open`, `resolved`, `dismissed`) and a `kind` (`manual_parse`, `triage`), both optional, a page at a time, oldest first, each with its document |
+| `POST /v1/pipeline/tasks/{task_id}/resolve` | resolve a manual parse with the analyst's transcript; audited as `pipeline.task.resolve` |
+| `POST /v1/pipeline/tasks/{task_id}/dismiss` | dismiss a task with the reason; audited as `pipeline.task.dismiss` |
 
-The spec is `packages/contracts/openapi/pipeline.v1.json` (`make openapi SERVICE=pipeline`).
+An upload-only source (an `upload` adapter type, the statutes) lists nothing: the schedule never
+crawls it and a fetch of it is a 409 `pipeline-source-upload-only`; `listable` says which sources
+are. The spec is `packages/contracts/openapi/pipeline.v1.json` (`make openapi SERVICE=pipeline`).
+
+## Manual parse and uploads
+
+**Uploads.** `POST /v1/pipeline/sources/{key}/uploads` takes `multipart/form-data`: `file`, a PDF
+or an HTML page, and the fields `actor_id`, `reason`, `title`, `published_on`, `external_ref` and
+`document_type` (the source's type when left out; recorded on the document when given). The body
+is refused before it is parsed once it passes `CW_PIPELINE_UPLOAD_MAX_BYTES` (25 MB by default)
+and room for the fields (413 `pipeline-upload-too-large`), and a file whose bytes are not a PDF
+or a page is a 415 `pipeline-upload-unsupported`. The bytes go to the raw store with no
+transaction open; the document is recorded at `upload://<source key>/<sha256>` with its
+`document.discovered` and the audit row in one transaction; then the ingest of the stored
+document starts (`pipeline-upload-<key>-<id>`, `TemporalIngests`), which parses it and, while
+`CW_PIPELINE_KNOWLEDGE_ENABLED` is on, registers it. Bytes stored before are a duplicate: nothing
+is recorded again and the ingest runs again. When Temporal does not answer the upload is a 503
+`pipeline-ingest-unavailable` and the document stays stored: upload it again.
+
+**Tasks.** Migration 0003's `pipeline_task` holds the work people do on stored documents. A
+`manual_parse` task opens when no parser reads a document: the ingest sets it `failed` and nothing
+of it is registered. A `triage` task is the triage step's, which is not built yet. A document has
+at most one open task of a kind. A task records why it opened (`reason`, each parser's), who
+claims it, who resolved or dismissed it and when, what the resolution did (`resolution`) and the
+note they gave. A parse that later succeeds closes the document's open manual parse itself (no
+person in `resolved_by`).
+
+**A transcript.** `POST /v1/pipeline/tasks/{task_id}/resolve` takes `transcript`, the document
+typed by hand in the shape the table-aware parsers read documents into (`domain/transcripts.py`):
+
+```json
+{
+  "title": "Example notification",
+  "blocks": [
+    {"type": "heading", "text": "Example heading", "page": 1},
+    {"type": "paragraph", "number": "1.", "text": "Example text of the first paragraph."},
+    {"type": "table", "header": ["S. No.", "Item"], "rows": [["1", "Example item"]]}
+  ]
+}
+```
+
+It is checked first (shape, empty text, at most 2,000 clauses of at most 50,000 characters, the
+rulebook's limits), with each problem named by its place (`blocks[2].rows[0] has no text in any
+cell`); a manual parse without one is a 422. The transcript is kept in the raw store as its
+canonical JSON; the task is resolved with the transcript's key, digest, parser (`manual@1`) and
+clause count, and audited; then the ingest of the stored document starts with the transcript
+(`pipeline-manual-parse-<task>`), which parses it as `manual@1`, records the transcript on the
+document and, while knowledge is on, registers it. From then on the document is parsed from its
+transcript. When the ingest could not start the task stays resolved and the same request starts
+it; a resolved task takes no other transcript (409 `pipeline-task-closed`).
+`POST /v1/pipeline/tasks/{task_id}/dismiss` closes a task with the reason; a dismissed manual
+parse leaves its document failed and unregistered.
+
+The app reports `pipeline_open_tasks{kind}` while telemetry is on, and `ParseFailureQueueHigh`
+opens a ticket when more than 20 manual parses have been open for 30 minutes
+([docs/runbooks/parse-failures.md](../../docs/runbooks/parse-failures.md)).
 
 ## The store
 
-Migration 0001 creates the `pipeline` schema's tables and 0002 adds the sources' names and the
-index the crawl looks known URLs up by (`source_key`, `source_url`). They hold regulatory data,
-the same for every tenant: no `tenant_id` and no row-level security, and
-`infra/scripts/migration_lint.toml` exempts the three with the reason.
+Migration 0001 creates the `pipeline` schema's tables, 0002 adds the sources' names and the
+index the crawl looks known URLs up by (`source_key`, `source_url`), and 0003 adds the parse of
+each document and `pipeline_task`. They hold regulatory data, the same for every tenant: no
+`tenant_id` and no row-level security, and `infra/scripts/migration_lint.toml` exempts the four
+with the reason.
 
 | Table | One row per | Columns |
 | --- | --- | --- |
 | `source` | source the pipeline reads | `key`, `name`, `adapter_type`, `parameters` (JSON), `cadence`, `enabled`, `paused`, `last_fetch_at`, `watermark` (JSON, `{"published_on": "2026-10-01"}`), `last_error`, `created_at`, `updated_at` |
-| `raw_document` | fetched file, by content | `id` (the first half of the SHA-256, checked by a constraint), `source_key`, `source_url`, `external_ref`, `fetched_at`, `published_on`, `content_type`, `size`, `sha256` (unique), `storage_key`, `title`, `status` (`discovered`, `parsed`, `failed`, `irrelevant`) |
+| `raw_document` | fetched (or uploaded) file, by content | `id` (the first half of the SHA-256, checked by a constraint), `source_key`, `source_url`, `external_ref`, `fetched_at`, `published_on`, `content_type`, `size`, `sha256` (unique), `storage_key`, `title`, `status` (`discovered`, `parsed`, `failed`, `irrelevant`), `parser_version` (the parser of its last parse, empty before one), `doc_type` (the type its uploader gave, null for its source's), `transcript_key` (the analyst's transcript it is parsed from) |
 | `crawl_run` | crawl of one source | `id`, `source_key`, `started_at`, `finished_at`, `status` (`running`, `completed`, `failed`), the counts `listed`, `stored`, `duplicates`, `failed`, and `error` |
+| `pipeline_task` | work a person does on a document | `id`, `kind` (`manual_parse`, `triage`), `document_id`, `source_key`, `status` (`open`, `resolved`, `dismissed`), `opened_at`, `reason`, `claimed_by`, `resolved_by`, `resolved_at`, `resolution` (JSON), `note`; at most one open task of a kind per document (`uq_pipeline_task_open`) |
 | `outbox_event` | event to publish | py-common's outbox (ADR-005) |
 
-A raw document never changes but for its status and is never deleted: a trigger refuses the
-rest. The worker adds the built-in sources the table lacks when it starts (`SyncSources`, which
+A raw document never changes but for its status and its parse (`parser_version`,
+`transcript_key`), and is never deleted: a trigger refuses the rest. The worker adds the built-in sources the table lacks when it starts (`SyncSources`, which
 also names a built-in row stored before names and changes nothing else), and so does the app on
 its store; `FetchAndStore` adds a source's row the first time it stores one of its documents.
 None of them changes a row that exists: an admin's edits stay. Crawl runs, `last_fetch_at`, the
@@ -245,10 +382,13 @@ default, `memory`); the worker refuses `memory`, since its activities record wha
 
 `document.discovered` 1.0.0 carries the source and document ids, the regulator, the URL, the
 listing's reference, title and date, the digest, the media type, the fetch time and the raw
-store's URI of the file. It has no tenant, and the outbox keys it by the source. The outbox relay
-publishes it: `make relay SERVICE=pipeline`, or `cw-mvp worker`, which runs a relay for every
-schema with an outbox table while `CW_WORKER_KAFKA_ENABLED` is on. Nothing consumes the topic
-yet.
+store's URI of the file. `document.parsed` 1.1.0 carries the document's type, title, language,
+date, clause count and refs and the parser's name and version; the parse writes it when it
+records a first parse, or a parse by another parser. The clause text is not in it: it is read
+from the rulebook once the document is registered. Neither has a tenant, and the outbox keys both
+by the source. The outbox relay publishes them: `make relay SERVICE=pipeline`, or
+`cw-mvp worker`, which runs a relay for every schema with an outbox table while
+`CW_WORKER_KAFKA_ENABLED` is on. Nothing consumes the topics yet.
 
 ## The raw store
 
@@ -376,6 +516,18 @@ effect at the next activity.
 | `gstcouncil_press` (GST Council press releases) | `gstcouncil` | 6 h | the press-release archive table, page by page until `since` | the PDF, or the Press Information Bureau page a row links to | press_release (announced, not in force) |
 | `gstn_advisories` (GSTN advisories) | `gstn` | 3 h | the JSON feed behind News and Updates | the advisory's HTML from the feed item | press_release (advisory) |
 | `mahagst_notifications` (Maharashtra GST notifications) | `mahagst` | 12 h | the notifications page (undated rows, user manuals mixed in) | PDF | notification |
+| `cgst_act` (The Central Goods and Services Tax Act, 2017) | `upload`: `document_type` statute | never crawled | nothing: upload-only | nothing | statute |
+| `cgst_rules` (The Central Goods and Services Tax Rules, 2017) | `upload`: `document_type` statute | never crawled | nothing: upload-only | nothing | statute |
+| `igst_act` (The Integrated Goods and Services Tax Act, 2017) | `upload`: `document_type` statute | never crawled | nothing: upload-only | nothing | statute |
+
+The `upload` type is not listable: it lists and fetches nothing, so the tick never crawls its
+sources (`schedule.is_due` asks the adapter type), a fetch of one is refused, and no freshness
+gauge is reported for one. It takes the `document_type` (statute by default) and the `regulator`
+(CBIC by default) of what is uploaded. The statutes are its built-in sources: an analyst uploads
+the Act or the Rules there (a PDF of the text, or an extract of the provisions the rules cite,
+such as rules 61, 62, 80 and 138 of the CGST Rules), so the seed rules' citations can be checked
+against stored clauses. A statute is registered and embedded but never extracted. The rulebook
+takes at most 2,000 clauses of one document, so an Act or the Rules in full is uploaded in parts.
 
 The CBIC type is one adapter for both portal listings: `listing` picks the API path and the
 fields of its items, `category` the portal's category. A category is accepted only when its
@@ -388,10 +540,10 @@ one request per second per host (across the threads the activities fetch on), fi
 exponential backoff on 5xx and transport errors. Source ids are UUID v5 of the key, so they are
 the same in every environment.
 
-Parsing keeps the text layer only: a scanned PDF raises `UnparsedDocumentError` and the backfill
-reports it as unparsed for a person (OCR is a later parser). Clause references are
-`<language>.p<n>`; CBIC gazette PDFs are bilingual and get `hi.` and `en.` clauses in one
-document. The detector (`application/detector.py`) reads the title and the first clauses and
+Parsing goes through the parser chain ([The parser chain](#the-parser-chain)): a scanned PDF
+raises `UnparsedDocumentError`, the ingest opens a manual-parse task for it, and the backfill
+reports it as unparsed (OCR is a later parser). Clause references are `<language>.p<n>`; CBIC
+gazette PDFs are bilingual and get `hi.` and `en.` clauses in one document. The detector (`application/detector.py`) reads the title and the first clauses and
 returns the document type, the change kind (corrigendum, withdrawal, amendment, extension or
 none), the canonical names of the notifications and circulars it cites (via
 `domain_kernel.knowledge.normalise_name`), and whether the document is a press release
@@ -407,10 +559,8 @@ content keys, never overwritten. The adapter tests replay `tests/fixtures/` thro
 `pipeline.testing.FixtureTransport`; nothing in the test suite reaches the network. The crawl's
 tests use the test adapter type `recorded` (`pipeline.testing.RECORDED_TYPE`), which lists
 recorded CBIC notifications from the recorded listings and fetches their recorded PDFs. What is
-not done: OCR; a parser chain and a queue for documents that do not parse (a crawl counts such a
-document as stored and its ingest fails); uploads; `document.parsed` (the ingest's
-`FetchAndStore` writes `document.discovered`, the backfill writes no event); and adapters for the
-other states.
+not done: OCR; the triage step and its tasks; a claim route for a task; events from the backfill
+(it writes none); and adapters for the other states.
 
 ## Extraction
 
@@ -452,7 +602,7 @@ From the repo root:
 
 ```bash
 make dev                          # infrastructure (Docker Compose)
-make migrate SERVICE=pipeline     # source, raw_document, crawl_run, outbox_event
+make migrate SERVICE=pipeline     # source, raw_document, crawl_run, pipeline_task, outbox_event
 make run SERVICE=pipeline           # http://localhost:8010/health, /ready, /v1/pipeline/sources
 make worker SERVICE=pipeline      # the Temporal worker of the crawl and the ingest; with
                                   # CW_PIPELINE_CRAWL_ENABLED=true it crawls the live sites

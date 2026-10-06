@@ -17,6 +17,11 @@ fixtures do not cover gets a 404 with the word "unrecorded" so the failure is ob
 The four notifications added after the first recording were fetched with
 `pipeline-label prepare --index evals/golden/extraction/cbic_notifications/index.yaml --number
 "<number>" --record services/pipeline/tests/fixtures/cbic`, which also writes the draft case file.
+10/2025-Central Tax is the table-heavy one: it substitutes entries of a table of
+Commissionerates and their districts, each entry wrapping over several lines, and the parser
+chain's tests read its rows with the table-aware PDF parser. The other four are prose. The GST
+Council archive pages and the Maharashtra GST page hold listing tables, which the table-aware
+HTML parser's tests read.
 Other sources are re-recorded by hand (the URLs are in each adapter module).
 
 ## Workflow histories

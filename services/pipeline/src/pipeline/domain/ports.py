@@ -55,8 +55,10 @@ class KnowledgeSink(Protocol):
     """Where parsed regulator documents and the knowledge found in them go: the rulebook."""
 
     def register_document(self, record: DocumentRecord) -> RegisteredDocument:
-        """Store the document and its clauses; idempotent for the same parse. Raises
-        ``RulebookConflictError`` for a different parse of stored bytes."""
+        """Store the document and its clauses; idempotent for the same parse. A parse by
+        another parser version is answered with the parse stored first (``parser_version`` of
+        the answer names it); ``RulebookConflictError`` for a different parse by the same
+        parser version."""
         ...
 
     def submit_mentions(self, submission: MentionSubmission) -> AlignmentReport:

@@ -11,10 +11,10 @@ from domain_kernel.errors import DomainError
 
 
 class RulebookConflictError(Exception):
-    """The rulebook stores this document with other clauses: a parser change made the same bytes
-    parse differently. Retrying cannot help. The stored clauses stay, because mentions and
-    citations point at them; what to do with stored documents after a parser change is a
-    decision for a person (ADR-018)."""
+    """The rulebook stores this document with other clauses from the same parser version: the
+    parser changed what it gives for the same bytes without a new version. Retrying cannot help.
+    The stored clauses stay, because mentions and citations point at them (ADR-018); a parse by
+    another parser version is answered with the stored one instead."""
 
 
 class RulebookRejectedError(Exception):
