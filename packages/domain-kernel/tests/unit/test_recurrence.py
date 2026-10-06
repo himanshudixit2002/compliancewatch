@@ -7,7 +7,9 @@ from hypothesis import strategies as st
 
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.financial_year import FinancialYear
-from domain_kernel.recurrence import Frequency, Period, Recurrence
+from domain_kernel.periods import EffectivePeriod
+from domain_kernel.recurrence import Frequency, Period, Recurrence, governs
+from domain_kernel.rules import ObligationTemplate, one_off_due_on
 
 _days = st.dates(min_value=date(2000, 1, 1), max_value=date(2099, 12, 31))
 _recurrences = st.builds(
@@ -118,6 +120,55 @@ def test_periods_due_reaches_back_as_far_as_the_offset_does() -> None:
         late.periods_due("2026-10-05", 2)  # type: ignore[arg-type]
 
 
+def test_a_version_governs_the_periods_whose_last_day_it_is_in_force_on() -> None:
+    monthly = Recurrence.monthly(20)
+    september = monthly.period_containing(date(2026, 9, 1))
+    october = monthly.period_containing(date(2026, 10, 1))
+    superseded = EffectivePeriod(date(2026, 4, 1), date(2026, 10, 1))
+    newer = EffectivePeriod(date(2026, 10, 1))
+    assert governs(superseded, september)
+    assert not governs(superseded, october)
+    assert governs(newer, october)
+    assert not governs(newer, september), "September ended before the newer version"
+    cut_mid_month = EffectivePeriod(date(2026, 4, 1), date(2026, 10, 15))
+    assert not governs(cut_mid_month, october), "October's last day is the newer version's"
+    with pytest.raises(InvariantViolationError, match="period"):
+        governs(superseded, "2026-09")  # type: ignore[arg-type]
+
+
+def test_a_superseded_version_still_owes_the_returns_due_after_it_ended() -> None:
+    monthly = Recurrence.monthly(20)
+    superseded = EffectivePeriod(date(2026, 4, 1), date(2026, 10, 1))
+    owed = monthly.periods_governed(superseded, date(2026, 10, 5), 2)
+    assert [period.label for period in owed] == ["2026-09"]
+    assert monthly.due_date(owed[0]) == date(2026, 10, 20)
+    assert monthly.periods_governed(superseded, date(2026, 10, 20), 2) == owed
+    assert monthly.periods_governed(superseded, date(2026, 10, 25), 2) == ()
+    newer = EffectivePeriod(date(2026, 10, 1))
+    assert [p.label for p in monthly.periods_governed(newer, date(2026, 10, 5), 2)] == [
+        "2026-10",
+        "2026-11",
+    ]
+
+    annual = Recurrence.annual(31, due_month_offset=8)
+    last_year = EffectivePeriod(date(2025, 4, 1), date(2026, 4, 1))
+    (year,) = annual.periods_governed(last_year, date(2026, 10, 5), 1)
+    assert (year.label, annual.due_date(year)) == ("2025-26", date(2026, 12, 31))
+    assert annual.periods_governed(last_year, date(2027, 1, 1), 1) == ()
+
+
+def test_a_one_off_is_due_its_days_after_the_decision() -> None:
+    assert one_off_due_on(date(2026, 10, 5), 30) == date(2026, 11, 4)
+    assert one_off_due_on(date(2026, 10, 5), 0) == date(2026, 10, 5)
+    assert one_off_due_on(date(2026, 10, 5), None) is None
+    assert ObligationTemplate("Display the certificate", due_in_days=45).due_on(
+        date(2026, 10, 1)
+    ) == date(2026, 11, 15)
+    assert ObligationTemplate("Display the certificate").due_on(date(2026, 10, 1)) is None
+    with pytest.raises(InvariantViolationError, match="due_in_days"):
+        one_off_due_on(date(2026, 10, 5), -1)
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
@@ -188,3 +239,18 @@ def test_due_date_moves_with_the_offset(recurrence: Recurrence, day: date) -> No
 def last_day_of_month(day: date) -> date:
     following = day.replace(day=28) + timedelta(days=4)
     return following - timedelta(days=following.day)
+
+
+@given(_recurrences, _days, st.integers(min_value=1, max_value=400), st.integers(1, 4))
+def test_consecutive_versions_share_no_period_and_an_ended_one_owes_the_same_at_any_count(
+    recurrence: Recurrence, as_of: date, days_ago: int, count: int
+) -> None:
+    replaced_on = as_of - timedelta(days=days_ago)
+    older = EffectivePeriod(replaced_on - timedelta(days=800), replaced_on)
+    newer = EffectivePeriod(replaced_on)
+    for period in recurrence.periods_due(as_of, count):
+        assert governs(older, period) is not governs(newer, period)
+    owed = recurrence.periods_governed(older, as_of, count)
+    assert owed == recurrence.periods_governed(older, as_of, 1)
+    assert all(period.end <= replaced_on for period in owed)
+    assert all(recurrence.due_date(period) >= as_of for period in owed)

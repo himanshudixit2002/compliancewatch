@@ -163,8 +163,8 @@ from domain_kernel.protocols import (
     VectorStore,
     WorkflowHandle,
 )
-from domain_kernel.recurrence import Frequency, Period, Recurrence
-from domain_kernel.rules import ObligationTemplate, RuleVersionSnapshot
+from domain_kernel.recurrence import Frequency, Period, Recurrence, governs
+from domain_kernel.rules import ObligationTemplate, RuleVersionSnapshot, one_off_due_on
 from domain_kernel.status import (
     OBLIGATION_TRANSITIONS,
     RULE_VERSION_TRANSITIONS,
@@ -350,8 +350,10 @@ __all__ = [
     "document_id_for",
     "evaluate_predicate",
     "evidence_tokens_missing",
+    "governs",
     "negate",
     "normalise_name",
+    "one_off_due_on",
     "parse_closure_reason",
     "qualified_name",
     "quote_match_ratio",

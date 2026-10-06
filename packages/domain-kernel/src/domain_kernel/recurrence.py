@@ -17,6 +17,12 @@ already ended: on 5 October, September's monthly return (due 20 October) is stil
 ``periods_due`` lists the periods still due on a day: those earlier periods, then the one the day
 falls in and the ones after it. Due dates rise from one period to the next, so the periods still
 due on a day are every period from the first one due on or after it.
+
+A rule version governs the periods whose last day it is in force on (``governs``), so the
+versions of a rule never share a period, and a version keeps the periods it governed after a newer
+one replaces it: superseded from 1 October, a monthly return's version still governs September,
+due 20 October. ``periods_governed`` lists the periods still due on a day that a version
+governs.
 """
 
 import calendar
@@ -34,6 +40,7 @@ from domain_kernel._validation import (
 )
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.financial_year import FIRST_MONTH, FinancialYear
+from domain_kernel.periods import EffectivePeriod
 
 
 class Frequency(StrEnum):
@@ -66,6 +73,16 @@ class Period:
     def contains(self, day: date) -> bool:
         require_date(day, "day")
         return self.start <= day < self.end
+
+
+def governs(effective: EffectivePeriod, period: Period) -> bool:
+    """Whether a rule version in force over ``effective`` governs ``period``: whether it is in
+    force on the period's last day. A period that ends on or before the version takes effect is
+    an earlier version's, and one that ends after the version's ``effective_to`` belongs to the
+    version that replaced it."""
+    require_instance(effective, EffectivePeriod, "effective")
+    require_instance(period, Period, "period")
+    return effective.contains(period.end - timedelta(days=1))
 
 
 def _add_months(year: int, month: int, months: int) -> tuple[int, int]:
@@ -200,6 +217,22 @@ class Recurrence:
             earlier.append(period)
             period = self.previous_period(period)
         return (*reversed(earlier), *ahead)
+
+    def periods_governed(
+        self, effective: EffectivePeriod, as_of: date, count: int
+    ) -> tuple[Period, ...]:
+        """The periods of ``periods_due(as_of, count)`` that a version in force over
+        ``effective`` governs (``governs``).
+
+        For a version that stopped being in force by ``as_of`` these are the returns it still
+        owes, and any ``count`` of at least 1 lists the same ones: each ends by the version's
+        ``effective_to``, so before the period containing ``as_of``. Superseded from 1 October,
+        a monthly return due on the 20th still owes September on 5 October and nothing on 25
+        October.
+        """
+        return tuple(
+            period for period in self.periods_due(as_of, count) if governs(effective, period)
+        )
 
     def due_date(self, period: Period) -> date:
         """When the duty for ``period`` falls due."""

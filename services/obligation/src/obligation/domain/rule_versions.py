@@ -39,7 +39,7 @@ from domain_kernel._validation import require_aware, require_instance, require_i
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId, UserId
 from domain_kernel.periods import EffectivePeriod
-from domain_kernel.recurrence import Period
+from domain_kernel.recurrence import Period, governs
 from domain_kernel.rules import RuleVersionSnapshot
 from domain_kernel.status import RuleVersionStatus
 from obligation.domain.model import Obligation
@@ -165,8 +165,9 @@ def refusal(ref: RuleVersionRef) -> Refusal | None:
 
 
 def holds_period(ref: RuleVersionRef, period: Period) -> bool:
-    """Whether the version is still in force on the period's last day."""
-    return ref.effective_to is None or period.end <= ref.effective_to
+    """Whether the version is still in force on the period's last day (the kernel's
+    ``governs``)."""
+    return governs(ref.effective, period)
 
 
 def holds_due(ref: RuleVersionRef, due_on: date | None) -> bool:
