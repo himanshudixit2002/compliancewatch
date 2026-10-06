@@ -334,8 +334,9 @@ class DraftIncompleteError(DomainError, ValueError):
         super().__init__("; ".join(self.problems))
 
 
-class RuleKeyUnknownError(DomainError, LookupError):
-    """No rule has the key a draft names; a new rule needs its regulator and level."""
+class RuleKeyUnknownError(DomainError, ValueError):
+    """No rule has the key a draft names; a new rule needs its regulator and level. The key is a
+    field of the request body, not the resource the path names, so this is a 422."""
 
     type_slug = "rulebook-rule-key-unknown"
     title = "Rule key is not known"

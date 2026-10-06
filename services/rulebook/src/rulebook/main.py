@@ -187,7 +187,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     CandidateAlreadyDraftedError: 409,
     CandidateNotDraftedError: 409,
     DraftIncompleteError: 422,
-    RuleKeyUnknownError: 404,
+    RuleKeyUnknownError: 422,
     RuleKeyTakenError: 409,
     CandidatePayloadInvalidError: 422,
 }

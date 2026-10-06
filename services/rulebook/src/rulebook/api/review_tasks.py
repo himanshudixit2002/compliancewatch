@@ -151,7 +151,7 @@ def draft_from_candidate(
     """Only the analyst who claimed the task (409 rulebook-review-task-not-claimed), once per
     candidate (409 rulebook-candidate-already-drafted). The version is the next of the rule
     ``rule_key`` names, or the first of a new rule when ``new_rule`` gives its regulator and
-    level (404 rulebook-rule-key-unknown without it; 409 rulebook-rule-key-taken with it for a
+    level (422 rulebook-rule-key-unknown without it; 409 rulebook-rule-key-taken with it for a
     key a rule has). It is a draft that names the candidate and starts high impact when the
     candidate suggests it. Its content is the candidate's with ``edits`` applied, checked as the
     seed calendar is: what is missing, does not map or fails the checks is 422

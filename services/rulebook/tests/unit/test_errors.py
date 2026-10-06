@@ -31,7 +31,7 @@ def test_the_candidate_errors_answer_as_the_routes_document() -> None:
     assert PROBLEM_STATUS[errors.CandidateAlreadyDraftedError] == 409
     assert PROBLEM_STATUS[errors.CandidateNotDraftedError] == 409
     assert PROBLEM_STATUS[errors.DraftIncompleteError] == 422
-    assert PROBLEM_STATUS[errors.RuleKeyUnknownError] == 404
+    assert PROBLEM_STATUS[errors.RuleKeyUnknownError] == 422
     assert PROBLEM_STATUS[errors.RuleKeyTakenError] == 409
     assert PROBLEM_STATUS[errors.CandidatePayloadInvalidError] == 422
     assert PROBLEM_STATUS[errors.RuleVersionClosedError] == 409

@@ -265,7 +265,7 @@ def test_drafting_answers_its_problem_types(client: TestClient) -> None:
     assert incomplete.json()["detail"] == "effective_from: the candidate gives none"
     fixed = {"edits": {"effective_from": "2000-02-01"}}
     unknown = draft(client, task_id, rule_key="example_unknown", new_rule=None, **fixed)
-    assert (unknown.status_code, problem(unknown)) == (404, "rulebook-rule-key-unknown")
+    assert (unknown.status_code, problem(unknown)) == (422, "rulebook-rule-key-unknown")
     taken = draft(client, task_id, rule_key=MONTHLY, **fixed)
     assert (taken.status_code, problem(taken)) == (409, "rulebook-rule-key-taken")
     unverified = draft(
