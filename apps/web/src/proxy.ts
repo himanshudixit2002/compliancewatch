@@ -17,8 +17,11 @@ import { matchScreen } from "@/shared/config/screens";
  * never during a render.
  */
 export const config = {
-  // Everything except Next's own assets, route handlers under /api and files with an extension.
-  matcher: ["/((?!_next/static|_next/image|api/|.*\\..*).*)"],
+  // Everything except Next's own assets, route handlers under /api and /api-bff, and files with an
+  // extension. The /api-bff handlers check the session themselves, and a request the proxy runs
+  // on has its body buffered (up to 10 MB, cut silently past it) so the proxy could read it: an
+  // upload streamed through /api-bff must not pass here.
+  matcher: ["/((?!_next/static|_next/image|api/|api-bff/|.*\\..*).*)"],
 };
 
 export type ProxyDecision = { kind: "pass" } | { kind: "sign-in"; next: string };

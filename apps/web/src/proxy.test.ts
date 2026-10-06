@@ -27,12 +27,14 @@ describe("next/experimental/testing/server", () => {
 });
 
 describe("the matcher", () => {
-  it("covers pages and skips Next assets, /api handlers and files", () => {
+  it("covers pages and skips Next assets, /api and /api-bff handlers and files", () => {
     const matches = (url: string) => doesProxyMatch({ config, url });
     expect(matches("/")).toBe(true);
     expect(matches("/admin/review/stats")).toBe(true);
     expect(matches("/sign-in?next=%2Faccount")).toBe(true);
-    expect(matches("/api-bff/data-requests/1/export")).toBe(true);
+    expect(matches("/api-bffx")).toBe(true);
+    expect(matches("/api-bff/data-requests/1/export")).toBe(false);
+    expect(matches("/api-bff/pipeline/sources/example/uploads")).toBe(false);
     expect(matches("/api/health")).toBe(false);
     expect(matches("/_next/static/chunks/main.js")).toBe(false);
     expect(matches("/_next/image?url=x")).toBe(false);

@@ -5,7 +5,7 @@ Do not edit by hand: `pnpm --filter web screens:check` (also `make web-screens-c
 of `make check`) and the vitest test `src/test/screens-doc.test.ts` fail when this file and
 the registry differ.
 
-105 entries: 62 live, 16 ready, 13 waiting, 14 planned.
+105 entries: 64 live, 14 ready, 13 waiting, 14 planned.
 
 A screen moves through the statuses in the order planned, waiting, ready, live.
 
@@ -42,8 +42,8 @@ hides the screen while it is off. Guide numbers refer to the Project Foundation 
 | `system.sign-in-sso`        | `/sign-in/sso`                                 | Single sign-on       | page       | compliance_lead                                                             | planned | `POST /v1/identity/sso/exchange` (not scheduled; indicative path; no design exists)                                                          | 10; G92             |
 | `system.quality`            | `/quality`                                     | Quality numbers      | page       | owner, staff, ca_admin, ca_staff, compliance_lead, analyst, reviewer, admin | planned | `GET /v1/eval/quality` (not scheduled; indicative path; no design exists)                                                                    | 1 commitment 3      |
 | `system.hindi-ui`           | `/`                                            | Hindi interface      | capability | public                                                                      | planned | `file packages/ontology/src/ontology/data/wording.hi.yaml` (not scheduled); `file apps/web/src/shared/i18n/messages/hi.json` (not scheduled) | G54                 |
-| `system.raw-document`       | `/api-bff/pipeline/documents/[documentId]/raw` | Raw document stream  | handler    | analyst, reviewer, admin                                                    | ready   | `GET /v1/pipeline/documents/{document_id}/raw` (services track, WP18)                                                                        | 15                  |
-| `system.uploads`            | `/api-bff/pipeline/sources/[key]/uploads`      | Document upload      | handler    | analyst, reviewer, admin                                                    | ready   | `POST /v1/pipeline/sources/{key}/uploads` (services track, WP19)                                                                             | 7, 15               |
+| `system.raw-document`       | `/api-bff/pipeline/documents/[documentId]/raw` | Raw document stream  | handler    | analyst, reviewer, admin                                                    | live    |                                                                                                                                              | 15                  |
+| `system.uploads`            | `/api-bff/pipeline/sources/[key]/uploads`      | Document upload      | handler    | admin                                                                       | live    |                                                                                                                                              | 7, 15               |
 | `system.data-export`        | `/api-bff/data-requests/[requestId]/export`    | Data export download | handler    | owner, ca_admin                                                             | waiting | `GET /v1/identity/data-requests/{request_id}/export` (services track, WP24)                                                                  | 16                  |
 
 ## Owner and staff
@@ -175,7 +175,7 @@ An `x` marks a role that may open the screen; a public screen needs no session.
 | `system.quality`                         |        | x     | x     | x        | x        | x               | x       | x        | x     |
 | `system.hindi-ui`                        | x      |       |       |          |          |                 |         |          |       |
 | `system.raw-document`                    |        |       |       |          |          |                 | x       | x        | x     |
-| `system.uploads`                         |        |       |       |          |          |                 | x       | x        | x     |
+| `system.uploads`                         |        |       |       |          |          |                 |         |          | x     |
 | `system.data-export`                     |        | x     |       | x        |          |                 |         |          |       |
 | `account.home`                           |        | x     | x     | x        | x        | x               | x       | x        | x     |
 | `account.mfa`                            |        | x     | x     | x        | x        | x               | x       | x        | x     |
