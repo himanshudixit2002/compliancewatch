@@ -26,23 +26,37 @@ synthetic start so that it governs the March period the notification moves.
    rule.deadline_changed for the March 2026 period, due 21 April 2026.
 5. The rule events reach obligation's handler (group ``obligation.rules``) on a SQLite inbox and
    the app's obligation memory store, which moves a business's March obligation to the new day.
+
+The ``corrected`` run rejects the first draft after step 3 (``wrong_extraction``): the draft is
+closed, the rules listing leaves its rule out, and the staged extension is open again. A corrected
+extraction (a later prompt version, synthetic) is drafted into the same rule as its version 2 with
+that extension, and steps 4 and 5 go through it.
 """
 
 import base64
 import json
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Final
 from uuid import UUID, uuid4
 
 import httpx2
+import pytest
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.pool import NullPool
 
 from cw_mvp.testing import MEMORY_SERVICES, running_app
 from domain_kernel.documents import DocumentType
 from domain_kernel.events import DomainEvent
-from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId
+from domain_kernel.ids import (
+    BusinessId,
+    CandidateId,
+    DecisionId,
+    EventId,
+    RuleVersionId,
+    TenantId,
+)
 from domain_kernel.predicates import specification_to_mapping
 from domain_kernel.status import RuleVersionStatus
 from obligation import worker as obligation_worker
@@ -76,6 +90,7 @@ from pipeline.application.knowledge_activities import (
     SubmitRelations,
 )
 from pipeline.application.relations import LlmRelationExtractor, RelationStage
+from pipeline.domain.events import RuleCandidateCreated
 from pipeline.infrastructure.adapters import StoreCatalog
 from pipeline.infrastructure.gateway import GatewayProvider
 from pipeline.infrastructure.memory import MemoryStore
@@ -289,9 +304,12 @@ def publish_monthly(rulebook: MemoryKnowledgeStore) -> RuleVersionId:
     return version
 
 
+@pytest.mark.parametrize("corrected", [False, True], ids=["as_extracted", "corrected"])
 async def test_a_recorded_notification_becomes_a_published_extension_that_moves_a_due_date(
-    tmp_path: Path,
+    tmp_path: Path, corrected: bool
 ) -> None:
+    """``corrected``: the first draft is rejected after drafting, which reopens the staged
+    extension, and a corrected extraction's draft takes it to the publication instead."""
     assert CASE.expected is not None
     assert CASE.label_status == "draft"
     scripted = ScriptedProvider({str(CASE.document.document_id): json.dumps(CASE.expected)})
@@ -329,9 +347,7 @@ async def test_a_recorded_notification_becomes_a_published_extension_that_moves_
             )
             _, document_id = await pipeline.ingest(internal)
             (created,) = [
-                event
-                for event in pipeline.store.events
-                if type(event).topic == "rule.candidate.created"
+                event for event in pipeline.store.events if isinstance(event, RuleCandidateCreated)
             ]
 
             # 2. the rulebook worker's handler opens the candidate's task
@@ -414,6 +430,10 @@ async def test_a_recorded_notification_becomes_a_published_extension_that_moves_
             (edited,) = drafted["decisions"]
             assert edited["action"] == "edited"
             assert "changed specification, obligation_template.due_in_days" in edited["note"]
+            if corrected:
+                task_id, version = await drafted_again(
+                    internal, intake, created, task_id, draft, relation["candidate_id"]
+                )
 
             # 4. two reviewers approve it, and it is published
             first = ok(
@@ -442,7 +462,9 @@ async def test_a_recorded_notification_becomes_a_published_extension_that_moves_
                     headers=REVIEW,
                 )
             )
-            events = rulebook.events()
+            rejected = [e for e in rulebook.events() if type(e).topic == "rule.rejected"]
+            assert len(rejected) == (1 if corrected else 0)
+            events = [e for e in rulebook.events() if type(e).topic != "rule.rejected"]
             assert [type(event).topic for event in events] == [
                 "rule.published",
                 "rule.deadline_changed",
@@ -485,7 +507,64 @@ async def test_a_recorded_notification_becomes_a_published_extension_that_moves_
     ]
     assert rescheduled.new_due_at.astimezone(IST).date() == date(2026, 4, 21)
     candidates = rulebook.rule_candidates()
-    assert [(c.status.value, c.suggested_rule_key) for c in candidates] == [("approved", MONTHLY)]
+    decided = [("rejected", MONTHLY)] if corrected else []
+    assert [(c.status.value, c.suggested_rule_key) for c in candidates] == [
+        *decided,
+        ("approved", MONTHLY),
+    ]
+
+
+async def drafted_again(
+    internal: httpx2.Client,
+    intake: IdempotentConsumer,
+    created: RuleCandidateCreated,
+    task_id: str,
+    draft: dict[str, Any],
+    relation_id: str,
+) -> tuple[str, dict[str, Any]]:
+    """The first draft rejected after drafting, and a corrected extraction of the notification
+    (a later prompt version, synthetic here) drafted again into the extension's rule with the
+    reopened extension: the new task and its version."""
+    rejected = ok(
+        internal.post(
+            f"{TASKS}/{task_id}/decide",
+            json={
+                "actor_id": REVIEWER,
+                "decision": "reject",
+                "reason": "wrong_extraction",
+                "note": "Synthetic: the model read the notification wrongly",
+            },
+            headers=REVIEW,
+        )
+    )
+    assert (rejected["candidate_status"], rejected["version"]["status"]) == ("rejected", "draft")
+    (reopened,) = ok(
+        internal.get(
+            f"{RULEBOOK}/review/relations",
+            params={"document_id": str(created.document_id)},
+            headers=REVIEW,
+        )
+    )
+    assert (reopened["candidate_id"], reopened["status"]) == (relation_id, "open")
+    listed = {rule["rule_key"] for rule in ok(internal.get(f"{RULEBOOK}/rules"))}
+    assert EXTENSION not in listed, "a rule only a closed draft holds is not listed"
+    later = replace(
+        created,
+        event_id=EventId.new(),
+        candidate_id=CandidateId.new(),
+        prompt_version="extraction.rule_candidate@2",
+    )
+    assert await intake.process(record(later, 2)) is Outcome.PROCESSED
+    (queued,) = ok(
+        internal.get(TASKS, params={"kind": "candidate", "status": "open"}, headers=REVIEW)
+    )["items"]
+    new_task = str(queued["task_id"])
+    ok(internal.post(f"{TASKS}/{new_task}/claim", json={"actor_id": ANALYST}, headers=REVIEW))
+    again = {key: value for key, value in draft.items() if key != "new_rule"}
+    drafted = ok(internal.post(f"{TASKS}/{new_task}/draft", json=again, headers=REVIEW))
+    version: dict[str, Any] = drafted["rule_version"]
+    assert (version["rule_key"], version["version"], version["status"]) == (EXTENSION, 2, "draft")
+    return new_task, version
 
 
 def due_in_march(

@@ -257,8 +257,8 @@ def reopen_relations(
     ``rule_relation`` row a relation candidate was approved into from ``rule_version_id`` is
     deleted, and the candidate is open again with ``note`` saying why, so an analyst can approve
     it onto another draft (approval takes only open candidates, and staging a proposal again
-    changes nothing). The caller has locked the version, a draft; the candidates reopened, by
-    id."""
+    changes nothing). The version is locked and must still be a draft: the relations of a
+    version past draft stand. Returns the candidates reopened, by id."""
     version = uow.rule_versions.lock(rule_version_id)
     if version is None:
         raise UnknownRuleVersionError(str(rule_version_id))
