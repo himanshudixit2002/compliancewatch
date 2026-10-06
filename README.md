@@ -152,7 +152,7 @@ compliancewatch/
       prompts/               # registry.toml: every prompt with a version, an owner and an eval case
     eval/
     pipeline/                # crawler, detector, parser, extractor, review as Temporal workers
-      src/pipeline/workflows/  # ingest_document: the sample workflow; worker.py runs the worker
+      src/pipeline/workflows/  # ingest_document: discover, fetch and store, parse; worker.py runs the worker
       src/pipeline/infrastructure/adapters/  # one SourceAdapter per regulator site; registry.py
       src/pipeline/infrastructure/parsers/   # PDF and HTML parsers, language detection
       src/pipeline/backfill.py  # pipeline-backfill: make backfill SERVICE=pipeline ARGS=...
