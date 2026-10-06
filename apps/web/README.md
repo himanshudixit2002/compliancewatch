@@ -136,8 +136,10 @@ scripts/seed/       the demo-tenant seed (pnpm --filter web seed, make web-seed)
                     record.py)
 e2e/                fixtures.ts (the axe check failing on serious or critical, the personas signed in through
                     the fake form, the seed-state reader, the stack's service URLs) and one spec per live page, plus a11y.spec.ts over
-                    every registered page; product/ holds the real-data journey the product project runs against
-                    make product (make product-e2e); tsconfig.scripts.json type-checks them
+                    every registered page; product/ holds the real-data journeys the product project runs
+                    against make product (make product-e2e): the owner's obligations, changes and ask, and
+                    the oversight tools (a fan-out and the hold, a dry run, a CA firm's change card);
+                    tsconfig.scripts.json type-checks them
 next.config.ts      typed routes, security headers; eslint.config.mjs: Next flat config plus repo rules
 vitest.config.mts   jsdom, Testing Library, 80% coverage floor (route files and proxy.ts are covered by e2e)
 playwright.config.ts  Playwright against `next start` on PORT with CW_WEB_ENV=test, the fake provider and a fixed

@@ -92,7 +92,7 @@ outside `src` and outside the floor.
 secret (32 bytes of `e2e`; it keys the cookies of one run and is not a secret), chromium only,
 and waits for `/api/health` before the first test. It has two projects: `chromium`, every spec but
 `e2e/product`, against the memory stack (`make web-e2e` and the `web-e2e` job run it with
-`--project=chromium`), and `product`, the real-data journey against `make product` (below). The
+`--project=chromium`), and `product`, the real-data journeys against `make product` (below). The
 config turns `web.publish_actions` and `web.qa_enabled` on for the run. Outside CI it reuses a
 server already listening on that port. On CI it retries once and writes the HTML report.
 `e2e/fixtures.ts` extends `test` with `checkA11y(selector?)`, which runs `AxeBuilder` on the page
