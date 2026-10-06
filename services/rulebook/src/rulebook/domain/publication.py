@@ -78,7 +78,9 @@ def required_approvals(high_impact: bool) -> int:
 
 
 class DecisionAction(StrEnum):
-    """What a row of the append-only ``rule_version_decision`` audit records."""
+    """What a row of the append-only ``rule_version_decision`` audit records. ``edited`` is an
+    analyst's change to a draft through its review task (content or citations); the version
+    stays a draft, and the note names what changed."""
 
     SUBMITTED = "submitted"
     RETURNED = "returned"
@@ -86,6 +88,7 @@ class DecisionAction(StrEnum):
     PUBLISHED = "published"
     WITHDRAWN = "withdrawn"
     SUPERSEDED = "superseded"
+    EDITED = "edited"
 
 
 @dataclass(frozen=True, slots=True)

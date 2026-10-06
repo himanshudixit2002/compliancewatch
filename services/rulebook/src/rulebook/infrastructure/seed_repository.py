@@ -6,6 +6,10 @@ nothing else; once a version has left draft it is never modified and the seed ad
 version only when its content differs from the latest one. ``seed_status`` is left out of that
 comparison: review sets it to reviewed while the file still says needs_review, and that alone is
 not a change to the rule.
+
+A rule whose latest version an analyst edited through its review task (an ``edited`` row in its
+decision audit) is the analyst's: the seed neither overwrites that draft nor adds a version after
+it, and reports the rule in ``kept_edited``.
 """
 
 import uuid
@@ -16,6 +20,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
 from domain_kernel.status import RuleVersionStatus
+from rulebook.domain.publication import DecisionAction
 from rulebook.domain.seed import (
     SEED_CONTENT_KEYS,
     SeedCalendar,
@@ -24,7 +29,7 @@ from rulebook.domain.seed import (
     reviewed_content,
     seed_content,
 )
-from rulebook.infrastructure.models import RuleRow, RuleVersionRow
+from rulebook.infrastructure.models import RuleRow, RuleVersionDecisionRow, RuleVersionRow
 
 __all__ = ["SeedOutcome", "SqlAlchemySeedRepository"]
 
@@ -43,6 +48,7 @@ class SqlAlchemySeedRepository:
         created_versions: list[str] = []
         updated: list[str] = []
         unchanged: list[str] = []
+        kept: list[str] = []
         with Session(self._engine, expire_on_commit=False) as session, session.begin():
             for rule in calendar.rules:
                 row = session.scalars(
@@ -68,6 +74,8 @@ class SqlAlchemySeedRepository:
                 if latest is None:
                     session.add(_version(row, rule, 1, content, now))
                     created_versions.append(f"{rule.rule_key}@1")
+                elif _edited(session, latest):
+                    kept.append(rule.rule_key)
                 elif latest.status == RuleVersionStatus.DRAFT.value:
                     if _content_of(latest) == content:
                         unchanged.append(rule.rule_key)
@@ -81,13 +89,30 @@ class SqlAlchemySeedRepository:
                     session.add(_version(row, rule, latest.version + 1, content, now))
                     created_versions.append(f"{rule.rule_key}@{latest.version + 1}")
         return SeedOutcome(
-            tuple(created_rules), tuple(created_versions), tuple(updated), tuple(unchanged)
+            tuple(created_rules),
+            tuple(created_versions),
+            tuple(updated),
+            tuple(unchanged),
+            tuple(kept),
         )
 
     def ping(self) -> bool:
         with self._engine.connect() as connection:
             connection.execute(text("SELECT 1"))
         return True
+
+
+def _edited(session: Session, row: RuleVersionRow) -> bool:
+    """Whether an analyst edited the version through its review task."""
+    found = session.scalar(
+        select(RuleVersionDecisionRow.id)
+        .where(
+            RuleVersionDecisionRow.rule_version_id == row.id,
+            RuleVersionDecisionRow.action == DecisionAction.EDITED.value,
+        )
+        .limit(1)
+    )
+    return found is not None
 
 
 def _content_of(row: RuleVersionRow) -> dict[str, object]:

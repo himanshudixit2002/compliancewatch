@@ -17,36 +17,47 @@ from domain_kernel.knowledge import RULE_VERSION_KIND, RULE_VERSION_ONLY, Entity
 from domain_kernel.status import RULE_VERSION_TRANSITIONS, RuleVersionStatus
 from rulebook.domain.documents import CLAUSE_REF_PATTERN
 from rulebook.domain.publication import DecisionAction
+from rulebook.domain.review_tasks import (
+    UNDECIDED,
+    ReviewDecision,
+    ReviewTaskKind,
+    ReviewTaskStatus,
+)
 from rulebook.infrastructure.models import (
     DECISION_ACTIONS,
     DOCUMENT_TYPES,
     ENTITY_TYPES,
     MENTION_METHODS,
     RELATION_KINDS,
+    REVIEW_DECISIONS,
+    REVIEW_TASK_KINDS,
+    REVIEW_TASK_STATUSES,
     RULE_VERSION_ONLY_RELATIONS,
     RULE_VERSION_STATUSES,
     RULE_VERSION_TARGET,
     TARGET_KINDS,
+    UNDECIDED_TASK,
     Base,
 )
 
 QUOTED = re.compile(r"'([a-z_]+)'")
 PAIR = re.compile(r"\('([a-z_]+)', '([a-z_]+)'\)")
-PUBLISH_FLOW = (
-    Path(__file__).resolve().parents[2]
-    / "migrations"
-    / "versions"
-    / "20260929_0007_publish_flow.py"
-)
+VERSIONS = Path(__file__).resolve().parents[2] / "migrations" / "versions"
+PUBLISH_FLOW = VERSIONS / "20260929_0007_publish_flow.py"
+REVIEW_TASKS = VERSIONS / "20261006_0009_review_tasks.py"
 
 
-def _publish_flow_migration() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("publish_flow_migration", PUBLISH_FLOW)
+def _migration(path: Path) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(f"migration_{path.stem}", path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _publish_flow_migration() -> ModuleType:
+    return _migration(PUBLISH_FLOW)
 
 
 def _check(table: str, name: str) -> str:
@@ -158,8 +169,11 @@ def test_the_insert_guard_admits_only_unpublished_drafts() -> None:
 
 def test_decision_actions_and_statuses_follow_the_domain() -> None:
     migration = _publish_flow_migration()
+    review_tasks = _migration(REVIEW_TASKS)
     assert tuple(action.value for action in DecisionAction) == DECISION_ACTIONS
-    assert migration.DECISION_ACTIONS == DECISION_ACTIONS
+    assert migration.DECISION_ACTIONS == review_tasks.ACTIONS_BEFORE
+    assert review_tasks.ACTIONS_AFTER == DECISION_ACTIONS
+    assert set(DECISION_ACTIONS) - set(migration.DECISION_ACTIONS) == {"edited"}
     assert migration.RULE_VERSION_STATUSES == RULE_VERSION_STATUSES
     assert QUOTED.findall(_check("rule_version_decision", "ck_rule_version_decision_action")) == (
         list(DECISION_ACTIONS)
@@ -170,3 +184,36 @@ def test_decision_actions_and_statuses_follow_the_domain() -> None:
     assert _check("rule_version_decision", "ck_rule_version_decision_actor") == (
         "actor_id IS NOT NULL OR caused_by_rule_version_id IS NOT NULL"
     )
+
+
+def test_review_task_checks_follow_the_domain() -> None:
+    migration = _migration(REVIEW_TASKS)
+    assert tuple(kind.value for kind in ReviewTaskKind) == REVIEW_TASK_KINDS == migration.KINDS
+    assert (
+        tuple(status.value for status in ReviewTaskStatus)
+        == REVIEW_TASK_STATUSES
+        == migration.STATUSES
+    )
+    assert (
+        tuple(decision.value for decision in ReviewDecision)
+        == REVIEW_DECISIONS
+        == migration.DECISIONS
+    )
+    assert QUOTED.findall(_check("review_task", "ck_review_task_kind")) == list(REVIEW_TASK_KINDS)
+    assert QUOTED.findall(_check("review_task", "ck_review_task_status")) == list(
+        REVIEW_TASK_STATUSES
+    )
+    assert QUOTED.findall(_check("review_task", "ck_review_task_decision")) == list(
+        REVIEW_DECISIONS
+    )
+    assert set(QUOTED.findall(UNDECIDED_TASK)) == {status.value for status in UNDECIDED}
+    assert migration.UNDECIDED == UNDECIDED_TASK
+    state = _check("review_task", "ck_review_task_state")
+    assert set(QUOTED.findall(state)) == set(REVIEW_TASK_STATUSES)
+
+
+def test_the_review_task_guard_keeps_decided_tasks_and_identities() -> None:
+    guard: str = _migration(REVIEW_TASKS).GUARD
+    assert "OLD.status = 'decided'" in guard
+    assert "TG_OP = 'DELETE'" in guard
+    assert "NEW.rule_version_id, NEW.kind, NEW.regulator, NEW.opened_at" in guard

@@ -171,16 +171,22 @@ def reviewed_content(content: Mapping[str, object]) -> dict[str, object]:
 
 @dataclass(frozen=True, slots=True)
 class SeedOutcome:
-    """What one run of the seed did, rule by rule (``rule_key@version`` for versions)."""
+    """What one run of the seed did, rule by rule (``rule_key@version`` for versions).
+    ``kept_edited`` names the rules whose latest version an analyst edited through its review
+    task: the analyst's text is the rule's now, and the seed leaves it alone."""
 
     created_rules: tuple[str, ...] = ()
     created_versions: tuple[str, ...] = ()
     updated_drafts: tuple[str, ...] = ()
     unchanged: tuple[str, ...] = ()
+    kept_edited: tuple[str, ...] = ()
 
     @property
     def summary(self) -> str:
-        return (
+        text = (
             f"{len(self.created_rules)} new rules, {len(self.created_versions)} new versions, "
             f"{len(self.updated_drafts)} drafts updated, {len(self.unchanged)} unchanged"
         )
+        if self.kept_edited:
+            text += f", {len(self.kept_edited)} kept as analysts edited them"
+        return text

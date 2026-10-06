@@ -257,3 +257,32 @@ class PublishingDisabledError(DomainError, PermissionError):
 
     def __init__(self) -> None:
         super().__init__("set CW_RULEBOOK_PUBLISH_ENABLED to publish, withdraw or sweep")
+
+
+class ReviewTaskNotFoundError(DomainError, LookupError):
+    type_slug = "rulebook-review-task-not-found"
+    title = "Review task not found"
+
+
+class ReviewTaskClosedError(DomainError, ValueError):
+    """The task was decided: a decision is final, and the table's trigger refuses any change to
+    a decided task."""
+
+    type_slug = "rulebook-review-task-closed"
+    title = "Review task already decided"
+
+
+class ReviewTaskClaimedError(DomainError, ValueError):
+    """Another analyst claimed the task. The claim stands until a decision: the claimant decides,
+    or a reviewer returns the version, which opens a new task anyone may claim."""
+
+    type_slug = "rulebook-review-task-claimed"
+    title = "Review task claimed by someone else"
+
+
+class ReviewTaskNotClaimedError(DomainError, ValueError):
+    """Only the analyst who claimed a task edits its draft, so two people never edit one draft
+    at once."""
+
+    type_slug = "rulebook-review-task-not-claimed"
+    title = "Review task not claimed by this analyst"
