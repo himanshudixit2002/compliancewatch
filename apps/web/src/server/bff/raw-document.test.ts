@@ -8,7 +8,9 @@ import { storedDocumentFromDto } from "@/entities/pipeline/mappers";
 import { resetEnvCache } from "../env";
 import {
   RAW_CONTENT_SECURITY_POLICY,
+  cleanName,
   contentDisposition,
+  forwardBytes,
   rawDocumentResponse,
   servedContentType,
 } from "./raw-document";
@@ -132,6 +134,62 @@ describe("rawDocumentResponse", () => {
     });
     expect(malformed.status).toBe(404);
     expect(fake.requests).toHaveLength(0);
+  });
+
+  it("names a file by a title whose cut falls inside a character outside the BMP", async () => {
+    // 99 letters and U+1D400: 101 UTF-16 units, 100 characters. Cut at 100 units, the name kept
+    // a lone surrogate and encodeURIComponent threw, after both pipeline calls.
+    const title = `${"a".repeat(99)}\u{1D400}`;
+    const named = `${"a".repeat(99)}%F0%9D%90%80.pdf`;
+    expect(cleanName(title)).toBe(title);
+    expect(cleanName(`${"a".repeat(100)}\u{1D400}`)).toBe("a".repeat(100));
+    expect(cleanName(`Example\uD835 title\uDC00`)).toBe("Example� title�");
+    expect(contentDisposition(storedDocumentFromDto(documentDto({ title })))).toBe(
+      `inline; filename="${DOCUMENT_ID}.pdf"; filename*=UTF-8''${named}`,
+    );
+    const fake = fakeFetch((request) =>
+      request.pathname === RECORD
+        ? jsonResponse(200, {
+            ...documentDto({ title, size: PDF.length }),
+            retries: [],
+            read_as: null,
+            classification: null,
+            extraction: null,
+          })
+        : new Response(PDF, { status: 200, headers: { "content-type": "application/pdf" } }),
+    );
+    const response = await rawDocumentResponse(get(), DOCUMENT_ID, ANALYST, {
+      fetchImpl: fake.fetchImpl,
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toBe(
+      `inline; filename="${DOCUMENT_ID}.pdf"; filename*=UTF-8''${named}`,
+    );
+    expect(await response.text()).toBe(PDF);
+  });
+
+  it("cancels the raw store's body when the answer cannot be built around it", async () => {
+    const cancelled: unknown[] = [];
+    const body = new ReadableStream<Uint8Array>({
+      cancel(reason) {
+        cancelled.push(reason);
+      },
+    });
+    expect(() => forwardBytes(body, { "content-disposition": "inline\r\nx-example: 1" })).toThrow(
+      TypeError,
+    );
+    await vi.waitFor(() => expect(cancelled).toHaveLength(1));
+    expect(cancelled[0]).toBeInstanceOf(TypeError);
+    const fine = forwardBytes(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("Example bytes"));
+          controller.close();
+        },
+      }),
+      { "content-type": "application/pdf" },
+    );
+    expect(await fine.text()).toBe("Example bytes");
   });
 
   it("says plainly what the pipeline refused", async () => {

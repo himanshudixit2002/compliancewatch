@@ -24,16 +24,18 @@ import { apiErrorResponse, problemResponse } from "./problem";
  *   answer a tenant role. The pipeline checks the role again once it reads tokens.
  * - The document's record is read first (`GET /v1/pipeline/documents/{id}`), so the content type
  *   and the file name come from the stored metadata, and an id the pipeline does not hold is a
- *   plain 404; then the bytes (`GET .../raw`), whose time limit covers only the wait for the
- *   response to start, and whose body stops when the browser goes away.
+ *   plain 404; the answer's headers are built from it before the bytes are asked for; then the
+ *   bytes (`GET .../raw`), whose time limit covers only the wait for the response to start, whose
+ *   body stops when the browser goes away, and which are cancelled if the answer cannot be built.
  * - What is sent on: the stored content type when it is one the pipeline takes (a PDF, an HTML
  *   page) and `application/octet-stream` otherwise; `Content-Disposition` inline for those types
  *   and as an attachment otherwise, named by the document's id (ASCII only) with its title in
- *   `filename*`; `nosniff`; `Cache-Control: private, no-store`, since the bytes are behind a
- *   session; an HTML page sandboxed with nothing loaded from anywhere (`sandbox; default-src
- *   'none'`), so a regulator's page runs no script under this site's origin and reaches no other
- *   site. The app's static headers (next.config.ts) still apply on top: `X-Frame-Options: DENY`,
- *   so no page frames the bytes, and the app's referrer policy, which replaces any a handler sets.
+ *   `filename*` (well formed, at most 100 characters by code point); `nosniff`; `Cache-Control:
+ *   private, no-store`, since the bytes are behind a session; an HTML page sandboxed with nothing
+ *   loaded from anywhere (`sandbox; default-src 'none'`), so a regulator's page runs no script
+ *   under this site's origin and reaches no other site. The app's static headers (next.config.ts)
+ *   still apply on top: `X-Frame-Options: DENY`, so no page frames the bytes, and the app's
+ *   referrer policy, which replaces any a handler sets.
  * - The pipeline's refusals are said plainly: an unknown document (404), the role (403), a file
  *   missing or altered in the raw store (502), the raw store away (503).
  */
@@ -70,18 +72,26 @@ export function servedContentType(stored: string): string {
   return charset === undefined ? base : `${base}; charset=${charset}`;
 }
 
-/** The title or reference as a file name: no control character, separator or quote; 100 at most. */
-function cleanName(text: string): string {
-  return text
+/** The most characters (code points) of a title a file name keeps. */
+export const FILE_NAME_MAX_CHARS = 100;
+
+/**
+ * The title or reference as a file name: well formed (a lone surrogate becomes U+FFFD), no
+ * control character, separator or quote, and at most 100 characters counted by code point, so a
+ * cut never splits a character outside the Basic Multilingual Plane into a lone surrogate, which
+ * `encodeURIComponent` refuses.
+ */
+export function cleanName(text: string): string {
+  const cleaned = text
+    .toWellFormed()
     .normalize("NFC")
     .replace(/[\u0000-\u001f\u007f"\\/:*?<>|]+/g, " ")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 100)
     .trim();
+  return Array.from(cleaned).slice(0, FILE_NAME_MAX_CHARS).join("").trim();
 }
 
-/** RFC 8187: UTF-8, every byte outside attr-char percent-encoded. */
+/** RFC 8187: UTF-8, every byte outside attr-char percent-encoded; the text is well formed. */
 function extValue(text: string): string {
   return encodeURIComponent(text).replace(
     /['()*]/g,
@@ -193,6 +203,11 @@ export async function rawDocumentResponse(
   );
   const document = mapBody(record, storedDocumentFromDto);
   if (!document.ok) return refused(document.error);
+  // The headers come from the record alone, so they are built before the bytes are asked for: a
+  // record they cannot be built from fails here, with no stream open. The raw store serves
+  // exactly the stored bytes (checked against the record's digest), so their length is the
+  // record's size.
+  const headers = rawHeaders(document.value, String(document.value.size));
   const bytes = await call(
     bytesClient(deps).GET("/v1/pipeline/documents/{document_id}/raw", {
       params: { path: { document_id: id } },
@@ -202,11 +217,22 @@ export async function rawDocumentResponse(
     }),
   );
   if (!bytes.ok) return refused(bytes.error);
-  const body = bytes.value as ReadableStream<Uint8Array> | null | undefined;
-  return new Response(body ?? null, {
-    status: 200,
-    // The raw store serves exactly the stored bytes (checked against the record's digest), so
-    // their length is the record's size.
-    headers: rawHeaders(document.value, String(document.value.size)),
-  });
+  return forwardBytes(bytes.value as ReadableStream<Uint8Array> | null | undefined, headers);
+}
+
+/**
+ * The stored bytes sent on under their headers. Anything that fails once the raw store's body is
+ * open cancels that body before the error goes on, so the pipeline's response is never left
+ * streaming into nothing.
+ */
+export function forwardBytes(
+  body: ReadableStream<Uint8Array> | null | undefined,
+  headers: HeadersInit,
+): Response {
+  try {
+    return new Response(body ?? null, { status: 200, headers });
+  } catch (error) {
+    void body?.cancel(error).catch(() => undefined);
+    throw error;
+  }
 }
