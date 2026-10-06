@@ -180,8 +180,11 @@ which starts `next start` on `PRODUCT_E2E_PORT` (3400) with every `CW_WEB_*_URL`
 listener (`CW_E2E_PRODUCT_URL=http://127.0.0.1:8080`; the config turns it into the app's service
 URLs). The spec reads the seed's state file (`var/seed/last.json`, or `CW_WEB_SEED_STATE_PATH`) for
 the tenant and its nodes and compares each page with the services' answers, read from the same
-listener. It writes as the seeded tenant only to a probe business of its own. Without
-`CW_E2E_PRODUCT_URL` or the state file it is skipped locally and fails on CI.
+listener. It writes as the seeded tenant only to a probe business of its own. The annual
+return's change is published by the fanout step of `make product-check`, so the project runs
+after the check; on CI the check's rollback step (`--destructive`) has withdrawn that return by
+then, and the spec reads its publication, which stays in the feed with the decisions the fan-out
+made. Without `CW_E2E_PRODUCT_URL` or the state file it is skipped locally and fails on CI.
 
 ## Running things
 

@@ -351,12 +351,14 @@ test.describe("the product journey", () => {
     checkA11y,
   }) => {
     const { tenantId, entityId } = seed as SeedState;
+    // The fanout step of make product-check publishes the annual return. On CI its rollback step
+    // (--destructive) then withdraws it: the publication stays in the feed, below the withdrawal,
+    // and the decisions the fan-out made stay too, so the publication is the card to find.
     const feed = await onProduct<{ items: ChangeBody[] }>(tenantId, "/v1/changes?limit=100");
-    const annual = feed.items.find((item) => item.rule_key === ANNUAL_RULE);
-    expect(
-      annual,
-      "make product-check (or an earlier check) publishes the annual return",
-    ).toBeDefined();
+    const annual = feed.items.find(
+      (item) => item.rule_key === ANNUAL_RULE && item.kind === "published",
+    );
+    expect(annual, "make product-check publishes the annual return").toBeDefined();
     const impact = await onProduct<{
       items: { entity_id: string; businesses: { result: string }[] }[];
     }>(tenantId, `/v1/changes/${annual?.rule_version_id}/impact?limit=200`);
@@ -365,11 +367,13 @@ test.describe("the product journey", () => {
 
     await signInAsSeededOwner(page, seed as SeedState, `/b/${entityId}/changes`);
     await expect(page.getByRole("heading", { level: 1, name: "Changes" })).toBeVisible();
-    let card = page.locator(`article[data-rule-version='${annual?.rule_version_id}']`).first();
+    const card = page.locator(`article[data-change='${annual?.change_id}']`);
     for (let pages = 0; pages < 5 && (await card.count()) === 0; pages += 1) {
+      const before = page.url();
       await page.getByRole("link", { name: "Older changes" }).click();
-      card = page.locator(`article[data-rule-version='${annual?.rule_version_id}']`).first();
+      await page.waitForURL((url) => url.toString() !== before);
     }
+    await expect(card).toHaveAttribute("data-rule-version", annual?.rule_version_id ?? "");
     await expect(card).toHaveAttribute("data-applicability", "applies");
     await expect(card.locator("[data-slot='applicability']")).toHaveText(
       "Applies to this business",
