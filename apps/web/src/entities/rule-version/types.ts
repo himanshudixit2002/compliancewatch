@@ -142,6 +142,11 @@ export interface RuleVersion {
   approvedBy: readonly string[];
   /** Publishing needs two different approvers (ADR-006). */
   highImpact: boolean;
+  /**
+   * A draft whose rule candidate was rejected: it stays a draft and never moves on (citing,
+   * submitting, approving, publishing and approving a relation onto it are refused).
+   */
+  closed: boolean;
   /** The four open mappings as stored, for the "as stored" view. */
   stored: {
     specification: Record<string, unknown>;
