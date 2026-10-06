@@ -404,7 +404,7 @@ the worker does a few seconds after the API answers, and a failed step does not 
 
 | Step | Proves |
 | --- | --- |
-| health | `/ready` on the internal listener lists every service's checks as ok, the public listener answers, and the worker's `/loops` runs the five consumer groups, the outbox relays, the dispatcher, the reminder sweep, the rolling window and the `applicability` and `pipeline` task queues |
+| health | `/ready` on the internal listener lists every service's checks as ok, the public listener answers, and the worker's `/loops` runs the five consumer groups, the outbox relays (the pipeline's, which publishes document.discovered, among them), the dispatcher, the reminder sweep, the rolling window and the `applicability` and `pipeline` task queues |
 | honesty | every published seed rule is one the world cites and reads needs_review, every other seed rule is a draft, nothing is marked reviewed, and the golden world and its cases are drafts |
 | loop | evaluates the business tenant, then waits for the decisions its answers call for, an obligation of each rule that applies whose version cites a verified clause, and a change card about the business sent through the sink (with its line in the sink file) |
 | isolation | the CA firm reads none of the business tenant's decisions, obligations, notifications or business, and the other way round |

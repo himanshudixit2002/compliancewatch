@@ -11,6 +11,7 @@ from pipeline.application.activities import (
     DiscoverDocument,
     Discovered,
     DiscoverRequest,
+    FetchAndStore,
     FetchDocument,
     Fetched,
     NothingDiscoveredError,
@@ -20,7 +21,13 @@ from pipeline.application.activities import (
     UnsupportedDocumentError,
     document_id_for,
 )
-from pipeline.infrastructure.fakes import SAMPLE_TEXT, FakePlainTextParser, FakeSourceAdapter
+from pipeline.domain.errors import UnknownSourceError
+from pipeline.infrastructure.fakes import (
+    SAMPLE_TEXT,
+    FakePlainTextParser,
+    FakeSourceAdapter,
+    sample_catalog,
+)
 
 SINCE = datetime(2026, 9, 1, tzinfo=UTC)
 
@@ -32,7 +39,9 @@ def adapter() -> FakeSourceAdapter:
 
 async def test_discover_returns_the_first_listed_document(adapter: FakeSourceAdapter) -> None:
     request = DiscoverRequest(source_id=adapter.source_id.value, since=SINCE)
-    discovered = await ActivityEnvironment().run(DiscoverDocument(adapter).definition(), request)
+    discovered = await ActivityEnvironment().run(
+        DiscoverDocument(sample_catalog(adapter)).definition(), request
+    )
     assert discovered == Discovered(
         source_id=adapter.source_id.value,
         url="https://example.invalid/notifications/17-2026",
@@ -47,22 +56,32 @@ async def test_discover_rejects_a_future_since(adapter: FakeSourceAdapter) -> No
         source_id=adapter.source_id.value, since=datetime.now(UTC) + timedelta(days=3)
     )
     with pytest.raises(ValueError, match="future"):
-        await DiscoverDocument(adapter).execute(request)
+        await DiscoverDocument(sample_catalog(adapter)).execute(request)
 
 
 async def test_discover_fails_when_the_source_lists_nothing() -> None:
     empty = FakeSourceAdapter(SourceId.new())
     with pytest.raises(NothingDiscoveredError):
-        await DiscoverDocument(empty).execute(
+        await DiscoverDocument(sample_catalog(empty)).execute(
             DiscoverRequest(source_id=empty.source_id.value, since=SINCE)
         )
 
 
+async def test_an_unknown_source_is_refused_and_not_retried() -> None:
+    request = DiscoverRequest(source_id=SourceId.new().value, since=SINCE)
+    with pytest.raises(UnknownSourceError):
+        await DiscoverDocument(sample_catalog()).execute(request)
+    for activity in (DiscoverDocument, FetchDocument, FetchAndStore):
+        assert "UnknownSourceError" in (activity.retry_policy.non_retryable_error_types or [])
+
+
 async def test_fetch_carries_bytes_digest_and_media_type(adapter: FakeSourceAdapter) -> None:
-    discovered = await DiscoverDocument(adapter).execute(
+    discovered = await DiscoverDocument(sample_catalog(adapter)).execute(
         DiscoverRequest(source_id=adapter.source_id.value, since=SINCE)
     )
-    fetched = await ActivityEnvironment().run(FetchDocument(adapter).definition(), discovered)
+    fetched = await ActivityEnvironment().run(
+        FetchDocument(sample_catalog(adapter)).definition(), discovered
+    )
     assert fetched.content == SAMPLE_TEXT.encode()
     assert fetched.media_type == "text/plain"
     assert (
@@ -79,7 +98,7 @@ async def test_fetch_of_an_unknown_document_is_not_retried() -> None:
     adapter = FakeSourceAdapter.with_sample()
     unknown = Discovered(source_id=adapter.source_id.value, url="https://example.invalid/other")
     with pytest.raises(InvariantViolationError, match="unknown document"):
-        await FetchDocument(adapter).execute(unknown)
+        await FetchDocument(sample_catalog(adapter)).execute(unknown)
     assert "InvariantViolationError" in (FetchDocument.retry_policy.non_retryable_error_types or [])
 
 
@@ -93,16 +112,16 @@ async def test_fetch_record_rejects_empty_content(adapter: FakeSourceAdapter) ->
         content=b"",
     )
     with pytest.raises(InvariantViolationError, match="empty"):
-        FetchDocument(adapter).record(
+        FetchDocument(sample_catalog(adapter)).record(
             Discovered(source_id=adapter.source_id.value, url="https://example.invalid/x"), fetched
         )
 
 
 async def test_parse_splits_paragraphs_into_clauses(adapter: FakeSourceAdapter) -> None:
-    discovered = await DiscoverDocument(adapter).execute(
+    discovered = await DiscoverDocument(sample_catalog(adapter)).execute(
         DiscoverRequest(source_id=adapter.source_id.value, since=SINCE)
     )
-    fetched = await FetchDocument(adapter).execute(discovered)
+    fetched = await FetchDocument(sample_catalog(adapter)).execute(discovered)
     request = ParseRequest(
         document_id=document_id_for(fetched).value, fetched=fetched, title=discovered.title
     )
@@ -127,10 +146,10 @@ def test_the_fake_parser_names_its_version() -> None:
 
 
 async def test_parse_refuses_an_unsupported_media_type(adapter: FakeSourceAdapter) -> None:
-    discovered = await DiscoverDocument(adapter).execute(
+    discovered = await DiscoverDocument(sample_catalog(adapter)).execute(
         DiscoverRequest(source_id=adapter.source_id.value, since=SINCE)
     )
-    fetched = await FetchDocument(adapter).execute(discovered)
+    fetched = await FetchDocument(sample_catalog(adapter)).execute(discovered)
     pdf = fetched.model_copy(update={"media_type": "application/pdf"})
     with pytest.raises(UnsupportedDocumentError, match="application/pdf"):
         await ParseDocument(FakePlainTextParser()).execute(

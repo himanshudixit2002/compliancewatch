@@ -70,10 +70,7 @@ class FakeRunner:
         self.catalog.schemas[step.schema] = self.heads.get(step.service)
 
 
-HEADS: dict[str, str | None] = {entry.name: "0001" for entry in REGISTRY} | {
-    "qa": None,
-    "pipeline": None,
-}
+HEADS: dict[str, str | None] = {entry.name: "0001" for entry in REGISTRY} | {"qa": None}
 
 
 def run(
@@ -122,7 +119,7 @@ def test_a_fresh_database_gets_every_schema_and_its_migrations_as_the_owner() ->
         "identity", "schema", "identity", "base", "->", "0001,", "schema", "created",
     ]  # fmt: skip
     assert "no migrations, schema created" in lines[7]
-    assert summary(results) == "migrate: 10 services, 8 migrated, 2 unchanged"
+    assert summary(results) == "migrate: 10 services, 9 migrated, 1 unchanged"
 
 
 def test_a_second_run_runs_alembic_again_and_reports_nothing_migrated() -> None:

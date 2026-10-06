@@ -119,9 +119,11 @@ evaluates the changed business and the registrations under it against every rule
 reading the profile and the rulebook over the internal listener with no transaction open, and
 the decisions it stores reach obligation's consumer through the engine's relay; the obligations
 it makes reach notification's consumer through obligation's relay. The reminder sweep writes its
-reminders to obligation's outbox, so they go out once a relay runs. A new consumer group reads a
-topic from its earliest offset, so the engine's first run recomputes every profile.updated the
-broker still holds.
+reminders to obligation's outbox, so they go out once a relay runs. The pipeline's ingest writes
+each new document's document.discovered to the pipeline's outbox with its row, and the pipeline
+schema's relay publishes it; nothing consumes it yet. A new consumer group reads a topic from its
+earliest offset, so the engine's first run recomputes every profile.updated the broker still
+holds.
 
 The worker shares the services' state through Postgres. A service on its memory store
 (`CW_OBLIGATION_STORE=memory` and the like) keeps its state in the app process, out of the
@@ -150,7 +152,7 @@ has nothing to share it with):
 CW_MVP_HOST=127.0.0.1 \
 CW_IDENTITY_STORE=memory CW_PROFILE_STORE=memory CW_RULEBOOK_STORE=memory \
 CW_APPLICABILITY_ENGINE_STORE=memory CW_OBLIGATION_STORE=memory \
-CW_NOTIFICATION_STORE=memory CW_EVAL_STORE=memory \
+CW_NOTIFICATION_STORE=memory CW_EVAL_STORE=memory CW_PIPELINE_STORE=memory \
 uv run cw-mvp serve
 curl -s 127.0.0.1:8080/ready                  # every service's checks
 curl -s 127.0.0.1:8000/v1/businesses -H "x-tenant-id: $(uuidgen)"   # a public route
@@ -297,7 +299,12 @@ refusal, so fixing one can bring the next to light. In staging and production it
   (`CW_WHATSAPP_ENABLED`), email's host, sender, feedback token and, with a username, password
   (`CW_EMAIL_ENABLED`), Razorpay's keys, `CW_RULEBOOK_REVIEW_TOKEN` for publishing and
   `CW_RULEBOOK_WRITE_TOKEN` for the pipeline's knowledge step outside token mode, and in token
-  mode the worker's `CW_SERVICE_CLIENT_SECRET` while its Kafka or Temporal switch is on.
+  mode the worker's `CW_SERVICE_CLIENT_SECRET` while its Kafka or Temporal switch is on;
+- a pipeline raw store other than `s3` (`CW_PIPELINE_RAW_STORE=local` or `memory`) while the
+  worker fetches regulator documents, which it does with `CW_WORKER_TEMPORAL_ENABLED` on
+  (`check_config.fetch_switches` lists the switches): the files would go with the machine. The
+  pipeline's own settings refuse `s3` without its bucket and key, and unencrypted files
+  (`CW_PIPELINE_RAW_ENCRYPTION=none`) in staging and production.
 
 ## Adding to a service
 
@@ -305,6 +312,8 @@ A change that adds a route, `build_app` argument, worker component or URL of ano
 registers it here in the same change: the route's class in `exposure.py`, the rest in
 `registry.py`. `tests/unit/test_exposure.py` and `tests/unit/test_registry.py` fail until it
 does. A store setting is named `<service>_store`, so the worker finds it, and goes into
-`cw_mvp.testing.MEMORY_SERVICES`. A new event topic or consumer group goes into `topics.toml`
-(`tests/unit/test_topics_file.py`), and a file a service reads at runtime stays beside its
-sources and inside the build context (`.dockerignore`).
+`cw_mvp.testing.MEMORY_SERVICES`; a setting that picks where a service keeps files rather than
+its state ends in `_raw_store` (`pipeline_raw_store`), and check-config has a rule for it. A new
+event topic or consumer group goes into `topics.toml` (`tests/unit/test_topics_file.py`), and a
+file a service reads at runtime stays beside its sources and inside the build context
+(`.dockerignore`).

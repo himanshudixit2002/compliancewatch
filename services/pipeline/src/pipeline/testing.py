@@ -1,20 +1,26 @@
 """Test doubles for adapter tests and demos: recorded sources, a scripted model and embedder,
-a rulebook.
+a rulebook, an S3 endpoint.
 
 ``FixtureTransport`` maps a request to a file under ``tests/fixtures`` (or a literal body) and
 answers 404 for anything else, so a test that reaches an unrecorded URL fails loudly instead of
 touching the network. Routes are exact matches on method and URL; the CBIC listing routes also
 insist on the token header the real site wants. ``MemoryRulebook`` stands in for the rulebook's
 write API with the same rules: ids from the kernel, a different parse of stored bytes refused,
-a clause's first vector from a model kept.
+a clause's first vector from a model kept. ``StubS3`` answers the raw store's S3 calls the way
+S3 does, signature checks included, from a dict. ``sample_activities`` are the worker's
+activities on the sample notification's source, the plain-text parser and memory stores.
 """
 
 import hashlib
 import json
 import math
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+from urllib.parse import unquote, urlsplit
 
 import httpx2
 
@@ -39,6 +45,13 @@ from pipeline.domain.knowledge import (
     RuleKey,
     StagingReport,
 )
+from pipeline.domain.repository import UnitOfWorkFactory
+from pipeline.infrastructure.fakes import FakePlainTextParser, sample_catalog
+from pipeline.infrastructure.memory import MemoryStore
+from pipeline.infrastructure.raw_store import MemoryRawStore
+from pipeline.infrastructure.s3 import S3Credentials, sign
+from pipeline.settings import PipelineSettings
+from py_common.temporal import ActivityBase
 
 Responder = Callable[[httpx2.Request], httpx2.Response]
 
@@ -338,3 +351,121 @@ def _to_embed(record: DocumentRecord) -> list[ClauseToEmbed]:
         )
         for clause in document.clauses
     ]
+
+
+_AUTHORIZATION = re.compile(
+    r"AWS4-HMAC-SHA256 Credential=(?P<key>[^/]+)/(?P<day>\d{8})/(?P<region>[^/]+)"
+    r"/s3/aws4_request, SignedHeaders=(?P<names>[a-z0-9;-]+), "
+    r"Signature=(?P<signature>[0-9a-f]{64})"
+)
+_FROM_SIGNATURE = frozenset({"x-amz-date", "x-amz-content-sha256", "x-amz-security-token"})
+
+
+@dataclass
+class StubS3:
+    """An S3 endpoint for tests, as the handler of ``httpx2.MockTransport(stub)``: HEAD, PUT and
+    GET of the objects of one bucket, path-style or virtual-hosted. It checks each request the
+    way S3 does: the body against ``x-amz-content-sha256``, every ``x-amz-*`` header signed, and
+    the signature over the headers the request names, with the same credentials. A PUT with
+    ``If-None-Match: *`` of a key that exists gets 412. ``objects`` keeps each object's bytes
+    and the headers it was written with, ``requests`` every request; ``fail`` answers the next
+    requests with these statuses before anything else."""
+
+    bucket: str
+    credentials: S3Credentials
+    region: str = "ap-south-1"
+    objects: dict[str, tuple[bytes, dict[str, str]]] = field(default_factory=dict)
+    requests: list[httpx2.Request] = field(default_factory=list)
+    fail: list[int] = field(default_factory=list)
+
+    def transport(self) -> httpx2.MockTransport:
+        return httpx2.MockTransport(self)
+
+    def methods(self) -> list[str]:
+        return [request.method for request in self.requests]
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        self.requests.append(request)
+        if self.fail:
+            return _s3_error(self.fail.pop(0), "InternalError")
+        key = self._key(request)
+        if key is None:
+            return _s3_error(404, "NoSuchBucket")
+        body = request.read()
+        if hashlib.sha256(body).hexdigest() != request.headers.get("x-amz-content-sha256"):
+            return _s3_error(400, "XAmzContentSHA256Mismatch")
+        if not self._signed(request):
+            return _s3_error(403, "SignatureDoesNotMatch")
+        stored = self.objects.get(key)
+        if request.method == "PUT":
+            if stored is not None and request.headers.get("if-none-match") == "*":
+                return _s3_error(412, "PreconditionFailed")
+            kept = {
+                name: value
+                for name, value in request.headers.items()
+                if name == "content-type" or name.startswith("x-amz-server-side-encryption")
+            }
+            self.objects[key] = (body, kept)
+            return httpx2.Response(200)
+        if stored is None:
+            return _s3_error(404, "NoSuchKey") if request.method == "GET" else httpx2.Response(404)
+        if request.method == "HEAD":
+            return httpx2.Response(200, headers={"content-length": str(len(stored[0]))})
+        if request.method == "GET":
+            return httpx2.Response(200, content=stored[0], headers=stored[1])
+        return _s3_error(405, "MethodNotAllowed")
+
+    def _key(self, request: httpx2.Request) -> str | None:
+        host, path = request.url.host, unquote(urlsplit(str(request.url)).path)
+        if host.startswith(f"{self.bucket}.s3."):
+            return path.removeprefix("/")
+        bucket, _, key = path.removeprefix("/").partition("/")
+        return key if bucket == self.bucket and key else None
+
+    def _signed(self, request: httpx2.Request) -> bool:
+        found = _AUTHORIZATION.fullmatch(request.headers.get("authorization", ""))
+        if found is None or found.group("key") != self.credentials.access_key_id:
+            return False
+        names = found.group("names").split(";")
+        if any(name.startswith("x-amz-") and name not in names for name in request.headers):
+            return False
+        headers = {name: request.headers[name] for name in names if name not in _FROM_SIGNATURE}
+        moment = datetime.strptime(request.headers["x-amz-date"], "%Y%m%dT%H%M%SZ")
+        expected = sign(
+            request.method,
+            str(request.url),
+            headers,
+            request.headers["x-amz-content-sha256"],
+            self.credentials,
+            self.region,
+            moment.replace(tzinfo=UTC),
+        )
+        return expected["authorization"] == request.headers["authorization"]
+
+
+def _s3_error(status: int, code: str) -> httpx2.Response:
+    body = f'<?xml version="1.0" encoding="UTF-8"?><Error><Code>{code}</Code></Error>'
+    return httpx2.Response(status, text=body, headers={"content-type": "application/xml"})
+
+
+def sample_activities(
+    settings: PipelineSettings | None = None,
+    *,
+    units: UnitOfWorkFactory | None = None,
+    raw_store: MemoryRawStore | None = None,
+    **overrides: Any,
+) -> list[ActivityBase[Any, Any]]:
+    """``pipeline.worker.activities`` on the sample notification's source (``UUID(int=1)``),
+    the plain-text parser and memory stores; pass ``units`` and ``raw_store`` to read them."""
+    # Imported here: the eval harness imports this module at run time and needs none of the
+    # worker's wiring.
+    from pipeline.worker import activities
+
+    return activities(
+        settings,
+        sources=sample_catalog(),
+        parser=FakePlainTextParser(),
+        units=units or MemoryStore(),
+        raw_store=raw_store or MemoryRawStore(),
+        **overrides,
+    )

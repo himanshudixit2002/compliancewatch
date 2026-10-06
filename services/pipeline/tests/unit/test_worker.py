@@ -26,7 +26,8 @@ def test_with_knowledge_off_no_prompt_is_read(tmp_path: Path) -> None:
     names = [a.name for a in activities(settings(pipeline_prompts_dir=tmp_path / "missing"))]
     assert "pipeline.propose_relations" in names
     assert "pipeline.embed_clauses" in names
-    assert len(names) == len(set(names)) == 8
+    assert len(names) == len(set(names)) == 9
+    assert "pipeline.fetch_and_store" in names
 
 
 def test_with_knowledge_on_the_prompt_must_be_there(tmp_path: Path) -> None:
@@ -34,7 +35,7 @@ def test_with_knowledge_on_the_prompt_must_be_there(tmp_path: Path) -> None:
         activities(
             settings(pipeline_knowledge_enabled=True, pipeline_prompts_dir=tmp_path / "missing")
         )
-    assert len(activities(settings(pipeline_knowledge_enabled=True))) == 8
+    assert len(activities(settings(pipeline_knowledge_enabled=True))) == 9
 
 
 def test_an_enabled_relation_activity_needs_its_stage() -> None:
@@ -63,6 +64,11 @@ def test_the_worker_serves_every_workflow_and_activity_on_the_pipeline_queue() -
     assert temporal.workflows == WORKFLOWS == (IngestDocumentWorkflow, ExtractKnowledgeWorkflow)
     assert [a.name for a in temporal.activities] == [a.name for a in activities(settings())]
     assert not components(settings()).loops()
+
+
+def test_the_worker_needs_the_postgres_store() -> None:
+    with pytest.raises(ValueError, match="CW_PIPELINE_STORE=postgres"):
+        components(settings(pipeline_store="memory"))
 
 
 def test_python_m_pipeline_worker_runs_the_components(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -76,6 +76,15 @@ NOT_FLAGS: Mapping[str, str] = {
     "CW_NOTIFICATION_STORE": _STORE,
     "CW_EVAL_STORE": _STORE,
     "CW_APPLICABILITY_ENGINE_STORE": _STORE,
+    "CW_PIPELINE_STORE": _STORE,
+    "CW_PIPELINE_RAW_STORE": (
+        "store selector of the pipeline's fetched files: local disk, memory for tests, s3; "
+        "check-config refuses all but s3 in staging and production while the worker fetches"
+    ),
+    "CW_PIPELINE_RAW_ENCRYPTION": (
+        "how the S3 raw store encrypts at rest (SSE-S3 or SSE-KMS); none is for a local MinIO "
+        "and refused in staging and production, so it never rolls out"
+    ),
     "CW_LLM_LEDGER": "store selector of the gateway's usage ledger: memory or postgres",
     "CW_RULEBOOK_SEED_ON_START": (
         "a store setting like the selectors above: the memory store starts with the seed "

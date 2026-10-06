@@ -29,6 +29,7 @@ MEMORY_SERVICES: Final[Mapping[str, Mapping[str, Any]]] = {
     "notification": {"notification_store": "memory"},
     "llm-gateway": {"llm_ledger": "memory", "llm_provider": "fake"},
     "eval": {"eval_store": "memory"},
+    "pipeline": {"pipeline_store": "memory"},
 }
 LOCALHOST: Final = "127.0.0.1"
 STARTUP_SECONDS: Final = 20.0

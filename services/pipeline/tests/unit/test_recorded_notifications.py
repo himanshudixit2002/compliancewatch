@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 
 from domain_kernel.documents import DocumentRef, DocumentType, clause_id_for, document_id_for
+from domain_kernel.protocols import SourceAdapter
 from pipeline.application.detector import ChangeKind, detect
-from pipeline.infrastructure.adapters import SOURCES
-from pipeline.infrastructure.adapters.cbic import CbicNotificationsAdapter
+from pipeline.infrastructure.adapters import SOURCES, build_adapter
 from pipeline.infrastructure.http import ClientConfig, PoliteClient
 from pipeline.infrastructure.parsers import PdfParser
 from pipeline.testing import CBIC_PDF, RECORDED_NOTIFICATIONS, recorded_sources
@@ -32,13 +32,13 @@ DETECTED = {
 
 
 @pytest.fixture(scope="module")
-def adapter() -> CbicNotificationsAdapter:
+def adapter() -> SourceAdapter:
     client = PoliteClient(
         ClientConfig(min_delay_seconds=0, respect_robots=False),
         transport=recorded_sources(FIXTURES),
         sleep=lambda _: None,
     )
-    return CbicNotificationsAdapter(client, SOURCES["cbic_notifications"].source_id)
+    return build_adapter("cbic_notifications", client)
 
 
 def test_five_notifications_are_recorded() -> None:
@@ -48,7 +48,7 @@ def test_five_notifications_are_recorded() -> None:
 
 @pytest.mark.parametrize(("number", "file_name"), sorted(RECORDED_NOTIFICATIONS.items()))
 def test_a_recorded_notification_replays_and_parses(
-    adapter: CbicNotificationsAdapter, number: str, file_name: str
+    adapter: SourceAdapter, number: str, file_name: str
 ) -> None:
     source_id = SOURCES["cbic_notifications"].source_id
     raw = adapter.fetch(DocumentRef(source_id, CBIC_PDF + file_name, external_ref=number))

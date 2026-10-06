@@ -18,3 +18,14 @@ The four notifications added after the first recording were fetched with
 `pipeline-label prepare --index evals/golden/extraction/cbic_notifications/index.yaml --number
 "<number>" --record services/pipeline/tests/fixtures/cbic`, which also writes the draft case file.
 Other sources are re-recorded by hand (the URLs are in each adapter module).
+
+## Workflow histories
+
+`histories/` holds two runs of `pipeline.ingest_document` recorded on 2026-10-06 on a local
+Temporal dev server, with the code before `FetchAndStore`, on the sample notification of
+`pipeline.infrastructure.fakes`: `ingest-before-store.json` with knowledge off, and
+`ingest-before-store-knowledge.json` with registration, embedding and the extraction child. Both
+fetched with `pipeline.fetch_document`, whose result carries the bytes. The worker's identity in
+them reads `1@pipeline-history`. `tests/unit/test_workflow_replay.py` replays them on today's
+workflow; record a new pair (`WorkflowHandle.fetch_history()`, `WorkflowHistory.to_json()`)
+before the next change that a patch guards.

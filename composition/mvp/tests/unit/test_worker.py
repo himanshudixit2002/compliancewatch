@@ -161,6 +161,20 @@ async def test_a_service_on_its_memory_store_is_left_to_the_app_process() -> Non
     assert "CW_OBLIGATION_STORE=memory" in skipped["reason"]
 
 
+async def test_the_pipeline_relays_its_outbox_unless_it_is_on_its_memory_store() -> None:
+    inspector = _inspector()
+    inspector.tables["pipeline"] = {OUTBOX_TABLE}
+    root = _root(worker_kafka_enabled=True, worker_temporal_enabled=True)
+    hosted = await build_registry(root, probe=inspector)
+    assert "pipeline/outbox-relay" in hosted.loops()
+    assert "pipeline" in hosted.task_queues()
+    in_memory = await build_registry(
+        root, probe=inspector, service_overrides={"pipeline": {"pipeline_store": "memory"}}
+    )
+    assert "pipeline" not in {entry.service for entry in in_memory.hosted}
+    assert "pipeline" not in in_memory.task_queues()
+
+
 async def test_temporal_workers_start_with_their_switch() -> None:
     hosted = await build_registry(_root(worker_temporal_enabled=True), probe=_inspector())
     assert hosted.task_queues() == ("applicability", "pipeline")

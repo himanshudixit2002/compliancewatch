@@ -1,11 +1,14 @@
-"""What the pipeline needs from the services it hands work to, as protocols. The adapters live
-in ``infrastructure`` (HTTP) and ``testing`` (memory)."""
+"""What the pipeline needs from the services it hands work to and from the store that keeps the
+files it fetches, as protocols. The adapters live in ``infrastructure`` (HTTP, S3, disk) and
+``testing`` (memory)."""
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Protocol
 
-from domain_kernel.documents import ParsedDocument
-from domain_kernel.ids import ClauseId, DocumentId
+from domain_kernel.documents import ParsedDocument, RawDocument
+from domain_kernel.ids import ClauseId, DocumentId, SourceId
+from domain_kernel.protocols import SourceAdapter
 from pipeline.domain.embedding import ClauseToEmbed, ClauseVector, EmbeddingBatch, EmbeddingsStored
 from pipeline.domain.knowledge import (
     AlignmentReport,
@@ -16,6 +19,7 @@ from pipeline.domain.knowledge import (
     RuleKey,
     StagingReport,
 )
+from pipeline.domain.sources import SourceDefinition
 
 
 class KnowledgeSink(Protocol):
@@ -81,4 +85,41 @@ class ClauseIndexSink(Protocol):
         self, model: str, dims: int, items: Sequence[ClauseVector]
     ) -> EmbeddingsStored:
         """Store the vectors under ``model``; a clause that has one from it keeps it."""
+        ...
+
+
+class RawStore(Protocol):
+    """Where fetched files are kept, by their content (guide section 7): the key names the
+    SHA-256 of the bytes, a file is never overwritten, and storing the same bytes again stores
+    nothing."""
+
+    def put(self, raw: RawDocument) -> str:
+        """Store the bytes unless they are stored; their storage key either way."""
+        ...
+
+    def get(self, storage_key: str) -> bytes:
+        """The bytes under ``storage_key``, checked against the digest it names. Raises
+        ``RawObjectMissingError`` or ``RawObjectCorruptError``."""
+        ...
+
+    def uri(self, storage_key: str) -> str:
+        """Where the key's bytes are, as a URI: ``s3://bucket/key``, ``file:///...``."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedSource:
+    """A source the pipeline can fetch from: its id, what it is, and the adapter that reads
+    it."""
+
+    source_id: SourceId
+    definition: SourceDefinition
+    adapter: SourceAdapter
+
+
+class SourceCatalog(Protocol):
+    """The sources the pipeline knows, by id."""
+
+    def resolve(self, source_id: SourceId) -> ResolvedSource:
+        """The source with this id; ``UnknownSourceError`` when there is none."""
         ...

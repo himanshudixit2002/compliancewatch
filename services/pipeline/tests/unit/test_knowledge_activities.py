@@ -9,10 +9,10 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
-from domain_kernel.documents import clause_id_for, document_id_for
-from domain_kernel.ids import DocumentId
+from domain_kernel.documents import DocumentRef, RawDocument, clause_id_for, document_id_for
+from domain_kernel.ids import DocumentId, SourceId
 from domain_kernel.knowledge import EntityType
-from pipeline.application.activities import Fetched, ParseRequest
+from pipeline.application.activities import Fetched, ParseRequest, Stored
 from pipeline.application.knowledge_activities import (
     ExtractMentions,
     MentionsRequest,
@@ -23,11 +23,17 @@ from pipeline.application.knowledge_activities import (
     SubmitRelations,
 )
 from pipeline.application.relations import LlmRelationExtractor, RelationStage
-from pipeline.domain.errors import KnowledgeContractError, RulebookConflictError
+from pipeline.domain.errors import (
+    KnowledgeContractError,
+    RawObjectMissingError,
+    RawStoreError,
+    RulebookConflictError,
+)
 from pipeline.domain.issues import Issue
 from pipeline.domain.knowledge import DocumentRecord, RegisteredDocument, RuleKey
 from pipeline.domain.prompt import PromptText
 from pipeline.infrastructure.fakes import SAMPLE_TEXT, FakePlainTextParser
+from pipeline.infrastructure.raw_store import MemoryRawStore
 from pipeline.testing import MemoryRulebook, ScriptedProvider
 from pipeline.workflows import IngestRequest
 
@@ -69,12 +75,60 @@ async def test_enabled_it_registers_once_and_then_finds_it_stored() -> None:
     again = await activity.run(request())
     assert (first.created, first.skipped, first.clause_count) == (True, False, 3)
     assert (again.created, again.skipped) == (False, False)
-    record = rulebook.records[document_id_for(request().parse.fetched.sha256)]
+    record = rulebook.records[document_id_for(request().parse.sha256)]
     assert record.regulator == "CBIC"
     assert record.document.parser_version == "fake@1"
     assert record.document.title == "Notification No. 17/2026 - Central Tax"
     assert record.document.published_at == date(2026, 9, 1)
     assert record.external_ref == "17/2026-Central Tax"
+
+
+def stored_request(raw_store: MemoryRawStore, content: bytes = CONTENT) -> RegisterRequest:
+    """The request of a workflow started since the store: the bytes are in the raw store."""
+    ref = DocumentRef(SourceId(UUID(int=1)), "https://example.invalid/notifications/17-2026")
+    raw = RawDocument.from_bytes(ref, content, "text/plain", datetime(2026, 9, 28, tzinfo=UTC))
+    key = raw_store.put(raw)
+    stored = Stored(
+        document_id=document_id_for(raw.sha256).value,
+        source_id=UUID(int=1),
+        source_key="sample",
+        regulator="CBIC",
+        url=ref.url,
+        external_ref="17/2026-Central Tax",
+        media_type=raw.media_type,
+        sha256=raw.sha256,
+        size=len(content),
+        fetched_at=raw.fetched_at,
+        storage_key=key,
+        raw_uri=raw_store.uri(key),
+    )
+    parse = ParseRequest(document_id=stored.document_id, stored=stored, title="Notification")
+    return RegisterRequest(parse=parse, regulator="CBIC")
+
+
+async def test_a_stored_document_is_read_back_from_the_raw_store() -> None:
+    rulebook, raw_store = MemoryRulebook(), MemoryRawStore()
+    activity = RegisterDocument(FakePlainTextParser(), rulebook, enabled=True, raw_store=raw_store)
+    outcome = await activity.run(stored_request(raw_store))
+    assert (outcome.created, outcome.clause_count) == (True, 3)
+    (record,) = rulebook.records.values()
+    assert record.raw_uri == raw_store.uri(stored_request(raw_store).parse.stored.storage_key)  # type: ignore[union-attr]
+    assert record.external_ref == "17/2026-Central Tax"
+    raw_store.files.clear()
+    with pytest.raises(RawObjectMissingError):
+        await activity.run(stored_request(MemoryRawStore()))
+    without = RegisterDocument(FakePlainTextParser(), rulebook, enabled=True)
+    with pytest.raises(RawStoreError, match="no raw store"):
+        await without.run(stored_request(MemoryRawStore()))
+
+
+def test_a_parse_request_names_its_bytes_once() -> None:
+    fetched = request().parse.fetched
+    with pytest.raises(ValidationError, match="exactly one of fetched and stored"):
+        ParseRequest(document_id=UUID(int=2))
+    stored = stored_request(MemoryRawStore()).parse.stored
+    with pytest.raises(ValidationError, match="exactly one of fetched and stored"):
+        ParseRequest(document_id=UUID(int=2), fetched=fetched, stored=stored)
 
 
 async def test_the_parsed_title_is_kept_when_the_listing_has_none() -> None:
@@ -116,6 +170,8 @@ def test_the_activity_declares_what_a_retry_cannot_fix() -> None:
         "RulebookRejectedError",
         "KnowledgeContractError",
         "UnsupportedDocumentError",
+        "RawObjectMissingError",
+        "RawObjectCorruptError",
     }
 
 
@@ -152,7 +208,7 @@ RELATION_ANSWER = json.dumps(
 
 async def registered(rulebook: MemoryRulebook) -> DocumentId:
     await RegisterDocument(FakePlainTextParser(), rulebook, enabled=True).run(request())
-    return document_id_for(request().parse.fetched.sha256)
+    return document_id_for(request().parse.sha256)
 
 
 def relation_stage(answer: str = RELATION_ANSWER) -> tuple[RelationStage, ScriptedProvider]:

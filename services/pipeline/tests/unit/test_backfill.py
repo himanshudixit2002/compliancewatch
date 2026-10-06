@@ -5,10 +5,11 @@ import pytest
 
 from domain_kernel.documents import DocumentType
 from pipeline import backfill
-from pipeline.backfill import BackfillResult, ingest, main, parsers_for
+from pipeline.backfill import BackfillResult, ingest, main
 from pipeline.infrastructure.adapters import build_adapter
 from pipeline.infrastructure.fakes import FakeSourceAdapter
 from pipeline.infrastructure.http import ClientConfig, PoliteClient
+from pipeline.infrastructure.parsers import parsers_for
 from pipeline.infrastructure.raw_store import LocalRawStore, MemoryRawStore
 from pipeline.testing import recorded_sources
 
@@ -80,11 +81,11 @@ def test_main_runs_a_recorded_backfill(
     assert code == 0
     lines = capsys.readouterr().out.strip().splitlines()
     assert lines[-1] == "gstn_advisories: listed 3, fetched 3, parsed 3, unparsed 0, failed 0"
-    stored = list((tmp_path / "raw" / "gstn_advisories").glob("*.html"))
+    stored = sorted((tmp_path / "raw").glob("*/*"))
     assert len(stored) == 3
-    assert (
-        LocalRawStore(tmp_path / "raw").get(stored[0].resolve().as_uri()) == stored[0].read_bytes()
-    )
+    key = f"{stored[0].parent.name}/{stored[0].name}"
+    assert LocalRawStore(tmp_path / "raw").get(key) == stored[0].read_bytes()
+    assert any(line.endswith(stored[0].resolve().as_uri()) for line in lines)
 
 
 def test_main_fails_when_nothing_could_be_fetched(

@@ -29,7 +29,9 @@ there:
 - secrets an enabled feature needs: WhatsApp's number id and token, email's SMTP host, sender,
   password (with a username) and feedback token, Razorpay's keys, the rulebook's review token
   for publishing and its write token for the pipeline outside token mode, and the worker's
-  service client secret in token mode.
+  service client secret in token mode;
+- a raw store other than S3 while the pipeline fetches documents (``fetch_switches``): the files
+  of a local or memory raw store go with the machine or the process.
 
 It never prints a secret's value.
 """
@@ -163,7 +165,7 @@ def deployed(
     for entry in registry:
         settings = built.get(entry.name)
         if settings is not None:
-            found += [Problem(entry.name, message) for message in _service(entry, settings)]
+            found += [Problem(entry.name, message) for message in _service(entry, settings, root)]
     return found
 
 
@@ -182,7 +184,7 @@ def _shared(root: MvpSettings) -> Iterator[str]:
         )
 
 
-def _service(entry: ServiceEntry[Any], settings: Settings) -> Iterator[str]:
+def _service(entry: ServiceEntry[Any], settings: Settings, root: MvpSettings) -> Iterator[str]:
     env = settings.env
     store = entry.store_field
     if store is not None and getattr(settings, store) == MEMORY:
@@ -206,7 +208,7 @@ def _service(entry: ServiceEntry[Any], settings: Settings) -> Iterator[str]:
     elif isinstance(settings, GatewaySettings):
         yield from _gateway(settings)
     elif isinstance(settings, PipelineSettings):
-        yield from _pipeline(settings)
+        yield from _pipeline(settings, root)
 
 
 def _profile(settings: ProfileSettings) -> Iterator[str]:
@@ -240,13 +242,28 @@ def _gateway(settings: GatewaySettings) -> Iterator[str]:
         )
 
 
-def _pipeline(settings: PipelineSettings) -> Iterator[str]:
+def fetch_switches(root: MvpSettings, settings: PipelineSettings) -> tuple[str, ...]:
+    """The switches that are on and have the pipeline fetch regulator documents and keep their
+    files: the worker's Temporal switch runs the pipeline's fetch activities."""
+    return ("CW_WORKER_TEMPORAL_ENABLED",) if root.worker_temporal_enabled else ()
+
+
+def _pipeline(settings: PipelineSettings, root: MvpSettings) -> Iterator[str]:
     shared_tokens = settings.auth_mode in SHARED_TOKEN_MODES
     missing = _unset(settings, "rulebook_write_token")
     if settings.pipeline_knowledge_enabled and shared_tokens and missing:
         yield (
             f"CW_PIPELINE_KNOWLEDGE_ENABLED in {settings.auth_mode} mode needs "
             f"{', '.join(missing)}: the rulebook refuses the pipeline's writes without it"
+        )
+    switches = fetch_switches(root, settings)
+    store = settings.pipeline_raw_store
+    if switches and store != "s3":
+        kept = "on one machine's disk" if store == "local" else "in one process's memory"
+        yield (
+            f"CW_PIPELINE_RAW_STORE={store} keeps the regulator files {kept}, which a restart "
+            f"or a new machine loses; CW_ENV={settings.env} needs s3 while "
+            f"{' and '.join(switches)} has the worker fetch documents"
         )
 
 

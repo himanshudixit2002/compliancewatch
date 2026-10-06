@@ -83,7 +83,7 @@ def test_a_release_makes_a_fresh_database_and_broker_whole_and_a_second_changes_
     settings = release_settings(owner_url, bootstrap)
     assert run_release(settings) == 0
     first = capsys.readouterr().out
-    assert f"migrate: {len(REGISTRY)} services, 8 migrated, 2 unchanged" in first
+    assert f"migrate: {len(REGISTRY)} services, 9 migrated, 1 unchanged" in first
     assert first.count("schema created") == len(REGISTRY)
     assert f"{len(load().topics)} created, 0 differing, 0 as the file says" in first
     assert first.rstrip().endswith("release: done")
@@ -92,8 +92,9 @@ def test_a_release_makes_a_fresh_database_and_broker_whole_and_a_second_changes_
         revisions = {entry.schema: catalog.revision(entry.schema) for entry in REGISTRY}
         assert catalog.has_schema("audit")
     assert revisions == heads()
-    assert revisions["qa"] is None
+    assert revisions["qa"] is None, "qa has no migration"
     assert revisions["identity"] is not None
+    assert revisions["pipeline"] == "0001"
 
     topics = broker_topics(bootstrap)
     for spec in load().topics:

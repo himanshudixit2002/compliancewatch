@@ -170,3 +170,30 @@ The rule versions obligations come from, cached from the rulebook: status, effec
 approvers of the published round and the verified citations. Rule-level data, the same for every
 tenant, so there is no tenant_id; it holds nothing of a tenant (migration 0004 of obligation).
 """
+
+[[exemptions]]
+table = "pipeline.source"
+kind = "exempt"
+reason = """
+The regulator sources the pipeline reads: the adapter type with its parameters, the cadence and
+how far the last crawl got. Global regulatory data, the same for every tenant, so there is no
+tenant_id; it holds nothing of a tenant (migration 0001 of pipeline).
+"""
+
+[[exemptions]]
+table = "pipeline.raw_document"
+kind = "exempt"
+reason = """
+One row per fetched regulator file, keyed by the SHA-256 of its bytes, with where it came from
+and its key in the raw store. Global regulatory data, the same for every tenant, so there is no
+tenant_id; it holds nothing of a tenant (migration 0001 of pipeline).
+"""
+
+[[exemptions]]
+table = "pipeline.crawl_run"
+kind = "exempt"
+reason = """
+One crawl of one regulator source: when it ran, its counts and how it ended. Global regulatory
+data, the same for every tenant, so there is no tenant_id; it holds nothing of a tenant (migration
+0001 of pipeline).
+"""
