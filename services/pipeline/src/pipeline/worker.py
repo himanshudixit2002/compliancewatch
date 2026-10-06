@@ -47,6 +47,7 @@ from pipeline.application.crawl import FinishCrawl, ListNewDocuments, ScheduleCr
 from pipeline.application.embedding import EmbeddingStage
 from pipeline.application.extraction import (
     RULE_PROMPT,
+    CheckExtraction,
     ExtractRules,
     RuleExtractionStage,
     StoreExtraction,
@@ -184,6 +185,7 @@ def activities(
         SubmitRelations(rulebook, enabled=enabled),
         ExtractRules(rulebook, rules, records, enabled=extracting),
         StoreExtraction(records),
+        CheckExtraction(enabled=extracting),
         ListNewDocuments(records, catalog, knowledge=enabled),
         FinishCrawl(records),
     ]

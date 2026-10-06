@@ -2,11 +2,14 @@
 
 The recorded notification 01/2026-Central Tax and a synthetic notification are ingested while the
 worker's extraction is off: both are classified, registered in a memory rulebook and left waiting
-as ``classified``. With the extraction on, the backlog command's sweep extracts both as children
-(the recorded one from a scripted model answering the draft label of its golden case, nobody
-reviewed it: it shows the plumbing, not the law; the synthetic one from a model whose answer is no
-candidate) and fails a document the rulebook does not hold. A second sweep finds the extracted
-ones done and asks no model again. The sweep's history replays."""
+as ``classified``. A sweep while the worker's extraction is still off asks the worker first and
+starts nothing, so no extraction id is used. With the extraction on, the backlog command's sweep
+extracts both as children (the recorded one from a scripted model answering the draft label of
+its golden case, nobody reviewed it: it shows the plumbing, not the law; the synthetic one from a
+model whose answer is no candidate) and fails a document the rulebook does not hold. A second
+sweep finds the extracted ones done and asks no model again. A child that a worker with the
+extraction off ran anyway (its check said on) counts as disabled, not as running. The sweeps'
+histories replay."""
 
 import base64
 import json
@@ -19,6 +22,7 @@ from pathlib import Path
 import pytest
 from temporalio.client import WorkflowHistory
 from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.service import RPCError, RPCStatusCode
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
@@ -27,8 +31,15 @@ from domain_kernel.ids import DocumentId
 from ontology import load as load_ontology
 from pipeline.application.activities import Stored
 from pipeline.application.backlog import ExtractionBacklog
-from pipeline.application.extraction import RULE_PROMPT, ExtractionRequest, RuleExtractionStage
+from pipeline.application.extraction import (
+    RULE_PROMPT,
+    RULE_PROMPT_REF,
+    CheckExtraction,
+    ExtractionRequest,
+    RuleExtractionStage,
+)
 from pipeline.application.extractor import LlmRuleExtractor
+from pipeline.domain.extraction import extraction_workflow_id
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.sources import Source
 from pipeline.infrastructure.adapters import (
@@ -148,21 +159,28 @@ class Pipeline:
 
     @asynccontextmanager
     async def worker(
-        self, environment: WorkflowEnvironment, *, extraction: bool
+        self, environment: WorkflowEnvironment, *, extraction: bool, says: bool | None = None
     ) -> AsyncIterator[None]:
+        """The worker with its extraction on or off; ``says`` makes its check answer otherwise,
+        as a worker whose flag turned off after the check, or another worker, would run it."""
         stage = RuleExtractionStage(
             LlmRuleExtractor(self.model, load_prompt(*RULE_PROMPT), load_ontology())
         )
-        wired = activities(
-            settings(extraction=extraction),
-            sink=self.rulebook,
-            embedder=ScriptedEmbedder(),
-            sources=self.catalog,
-            parser=ParserChain(self.catalog),
-            units=self.store,
-            raw_store=self.raw,
-            extraction=stage,
-        )
+        wired = [
+            CheckExtraction(enabled=says)
+            if says is not None and isinstance(activity, CheckExtraction)
+            else activity
+            for activity in activities(
+                settings(extraction=extraction),
+                sink=self.rulebook,
+                embedder=ScriptedEmbedder(),
+                sources=self.catalog,
+                parser=ParserChain(self.catalog),
+                units=self.store,
+                raw_store=self.raw,
+                extraction=stage,
+            )
+        ]
         async with Worker(
             environment.client,
             task_queue=self.queue,
@@ -207,8 +225,18 @@ async def test_the_classified_backlog_is_extracted_once_by_the_sweep(
                 True,
                 "off",
             )
-    backlog = ExtractionBacklog(pipeline.store, RegistryAdapterTypes()).run()
-    assert backlog.waiting == {"cbic_notifications": 2}
+        backlog = ExtractionBacklog(pipeline.store, RegistryAdapterTypes()).run()
+        assert backlog.waiting == {"cbic_notifications": 2}
+        skipped, off = await pipeline.sweep(environment, list(backlog.requests))
+    assert (skipped.documents, skipped.skipped, skipped.extracted) == (2, 2, 0)
+    assert skipped.extraction_enabled is False
+    assert "START_CHILD_WORKFLOW_EXECUTION_INITIATED" not in event_types(off)
+    for request in backlog.requests:
+        with pytest.raises(RPCError) as unknown:
+            await environment.client.get_workflow_handle(
+                extraction_workflow_id(request.document_id, RULE_PROMPT_REF)
+            ).describe()
+        assert unknown.value.status is RPCStatusCode.NOT_FOUND, "no extraction id was used"
     missing = ExtractionRequest(
         document_id=uuid.uuid4(),
         source_id=recorded.source_id,
@@ -229,5 +257,36 @@ async def test_the_classified_backlog_is_extracted_once_by_the_sweep(
             DocumentStatus.EXTRACTED
         )
     assert ExtractionBacklog(pipeline.store, RegistryAdapterTypes()).run().total == 0
+    replayer = Replayer(workflows=WORKFLOWS, data_converter=pydantic_data_converter)
+    assert (await replayer.replay_workflow(history)).replay_failure is None
+    assert (await replayer.replay_workflow(off)).replay_failure is None
+
+
+def event_types(history: WorkflowHistory) -> list[str]:
+    events = json.loads(history.to_json())["events"]
+    return [str(event["eventType"]).removeprefix("EVENT_TYPE_") for event in events]
+
+
+async def test_a_child_a_worker_with_the_extraction_off_ran_counts_as_disabled(
+    environment: WorkflowEnvironment,
+) -> None:
+    """The check said on, the worker that ran the child's extraction had it off: the child ends
+    disabled and is counted so, apart from the running ones; its id is used from then on."""
+    pipeline = Pipeline()
+    document = ExtractionRequest(
+        document_id=uuid.uuid4(),
+        source_id=source_id_for("cbic_notifications").value,
+        source_key="cbic_notifications",
+        regulator="CBIC",
+        doc_type=DocumentType.NOTIFICATION,
+    )
+    async with pipeline.worker(environment, extraction=False, says=True):
+        swept, history = await pipeline.sweep(environment, [document])
+    assert (swept.disabled, swept.running, swept.extracted, swept.failed) == (1, 0, 0, 0)
+    assert swept.extraction_enabled is True
+    async with pipeline.worker(environment, extraction=True):
+        again, _ = await pipeline.sweep(environment, [document])
+    assert (again.running, again.extracted) == (1, 0), "the disabled child's id is used"
+    assert pipeline.model.requests == [], "no model was asked"
     replayer = Replayer(workflows=WORKFLOWS, data_converter=pydantic_data_converter)
     assert (await replayer.replay_workflow(history)).replay_failure is None

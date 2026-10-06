@@ -12,10 +12,13 @@ is extracted twice. At most ``--limit`` documents (1,000 at most) go into one sw
 fetched first; run it again for the rest. The worker runs the sweep; this command returns once it
 started.
 
-It refuses (exit 2) while ``CW_PIPELINE_EXTRACTION_ENABLED`` is off, since the worker's
-extraction would then skip every document; ``--dry-run`` only counts, whatever the flag says.
-Exit status: 0 counted or started (or nothing waits), 1 when the store or Temporal does not
-answer, 2 refused.
+It refuses (exit 2) while ``CW_PIPELINE_EXTRACTION_ENABLED`` is off in its own environment;
+``--dry-run`` only counts, whatever the flag says. The flag that decides is the worker's, which the
+sweep asks before it starts anything (``pipeline.extraction_enabled``): with it off there, the
+sweep starts no extraction and counts every document ``skipped``, since an extraction a worker
+with the flag off runs ends ``disabled`` and uses its document's extraction id for good. Exit
+status: 0 counted or started (or nothing waits), 1 when the store or Temporal does not answer,
+2 refused.
 """
 
 import argparse
@@ -111,9 +114,8 @@ def run(
     if not args.dry_run:
         if not enabled:
             sys.stderr.write(
-                f"{SERVICE_NAME}: refused: {FLAG} is off (flag pipeline.extraction), so the "
-                "worker would skip every extraction; turn it on for the worker and here, or "
-                "count with --dry-run\n"
+                f"{SERVICE_NAME}: refused: {FLAG} is off (flag pipeline.extraction); turn it on "
+                "for the worker and here, or count with --dry-run\n"
             )
             return 2
         if backlog.requests:
@@ -136,7 +138,8 @@ def run(
     if workflow_id is not None:
         sys.stdout.write(
             f"started {workflow_id}: {len(backlog.requests)} document(s), "
-            f"{args.concurrency} at a time; the worker runs it (Temporal UI)\n"
+            f"{args.concurrency} at a time; the worker runs it (Temporal UI), and starts none "
+            "while its own extraction is off\n"
         )
     elif not args.dry_run:
         sys.stdout.write("nothing waits: no sweep started\n")

@@ -523,8 +523,15 @@ as `classified`; turning the flag on extracts only what is classified from then 
 prompt, and starts the sweep `pipeline.extract_backlog` on the worker, which runs each one's
 extraction as a child, three at a time (`--concurrency`, 10 at most), under the id the ingest's
 own extraction would have, so nothing is extracted twice. At most `--limit` documents (1,000 at
-most) go into one sweep, the first fetched first; run it again for the rest. It refuses while
-`CW_PIPELINE_EXTRACTION_ENABLED` is off; `--dry-run` only counts.
+most) go into one sweep, the first fetched first; run it again for the rest. The command refuses
+while `CW_PIPELINE_EXTRACTION_ENABLED` is off in its own environment; `--dry-run` only counts. The
+sweep then asks the worker (`pipeline.extraction_enabled`) and, while the worker's flag is off,
+starts nothing and counts every document `skipped`: an extraction a worker with the flag off runs
+ends `disabled`, and its id, which may be reused only after a failure, is used until Temporal's
+retention drops the closed run (`temporal workflow delete --workflow-id <id>` frees it sooner).
+A child that still meets a worker with the flag off (the flag turned off meanwhile, or workers
+that differ) is counted `disabled`, apart from the running ones. The ingest asks the same way,
+through its classify step, and starts no extraction while the flag is off.
 
 ```bash
 make extract-backlog ARGS="--dry-run"                               # per source, what waits

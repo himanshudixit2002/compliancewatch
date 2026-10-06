@@ -17,7 +17,11 @@ Two activities, so a failed write never asks the model again:
    document and the prompt version, with its ``rule.candidate.created`` and the document's
    ``extracted`` status, in one transaction; an extraction stored before writes nothing.
 
-Both answer ``skipped`` while ``CW_PIPELINE_EXTRACTION_ENABLED`` is off, with no call.
+Both answer ``skipped`` while ``CW_PIPELINE_EXTRACTION_ENABLED`` is off, with no call. The
+extraction workflow then ends ``disabled``, and its id, which may be reused only after a failure,
+is used: so nothing starts one without asking the worker first. The ingest asks through its
+classify step (``Classified.extraction_enabled``), the backlog sweep through
+``CheckExtraction`` (``pipeline.extraction_enabled``).
 """
 
 import dataclasses
@@ -277,6 +281,34 @@ class ExtractRules(ActivityBase[ExtractionRequest, ExtractionAnswer]):
             answer=got.answer[:MAX_ANSWER_CHARS],
             ontology_version=ONTOLOGY_VERSION,
         )
+
+
+class ExtractionCheck(Frozen):
+    """The backlog sweep's question before it starts any extraction; it carries nothing."""
+
+
+class ExtractionSwitch(Frozen):
+    """The answer: whether the worker that ran the check extracts
+    (``CW_PIPELINE_EXTRACTION_ENABLED``)."""
+
+    enabled: bool
+
+
+class CheckExtraction(ActivityBase[ExtractionCheck, ExtractionSwitch]):
+    """Whether the worker extracts, asked before an extraction is started (as the ingest reads
+    ``Classified.extraction_enabled``): an extraction a worker with the flag off runs ends
+    ``disabled`` with its id used, and extracts nothing more under that id."""
+
+    name: ClassVar[str] = "pipeline.extraction_enabled"
+    input_type: ClassVar[type[ExtractionCheck]] = ExtractionCheck
+    output_type: ClassVar[type[ExtractionSwitch]] = ExtractionSwitch
+    start_to_close: ClassVar[timedelta] = timedelta(seconds=30)
+
+    def __init__(self, *, enabled: bool) -> None:
+        self._enabled = enabled
+
+    async def run(self, input: ExtractionCheck) -> ExtractionSwitch:
+        return ExtractionSwitch(enabled=self._enabled)
 
 
 class StoreExtraction(ActivityBase[ExtractionAnswer, ExtractionStored]):
