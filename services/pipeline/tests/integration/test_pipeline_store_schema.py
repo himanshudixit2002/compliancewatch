@@ -575,6 +575,7 @@ def test_tasks_open_once_per_document_and_kind_and_page_oldest_first(
         assert unit.tasks.get(opened[1].id, for_update=True) == opened[1]
         unit.tasks.save(closed)
         assert unit.tasks.open_counts() == {TaskKind.MANUAL_PARSE: 2, TaskKind.TRIAGE: 1}
+        assert unit.tasks.oldest_open() == {TaskKind.MANUAL_PARSE: NOW, TaskKind.TRIAGE: NOW}
         assert unit.tasks.open_for(documents[1].document_id, TaskKind.MANUAL_PARSE) is None
         reopened = PipelineTask.opened(
             TaskKind.MANUAL_PARSE,

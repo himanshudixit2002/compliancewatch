@@ -185,6 +185,10 @@ class TaskRepository(Protocol):
         """How many tasks of each kind are open; a kind with none is absent."""
         ...
 
+    def oldest_open(self) -> Mapping[TaskKind, datetime]:
+        """When the oldest open task of each kind was opened; a kind with none is absent."""
+        ...
+
 
 class ClassificationRepository(Protocol):
     def get(self, document_id: DocumentId) -> Classification | None: ...

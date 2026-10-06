@@ -470,3 +470,51 @@ tests:
       - eval_time: 45m
         alertname: ParseFailureQueueHigh
         exp_alerts: []
+
+  # TriageQueueStale. Two replicas report the age of the oldest open triage task: 23 hours at the
+  # start, a minute older every minute, so more than a day from 61m; pending for an hour, it fires
+  # at 121m, once. A manual parse four days old never fires it.
+  - interval: 1m
+    input_series:
+      - series: 'pipeline_task_oldest_open_age_seconds{kind="triage", service_instance_id="a"}'
+        values: "82800+60x200"
+      - series: 'pipeline_task_oldest_open_age_seconds{kind="triage", service_instance_id="b"}'
+        values: "82800+60x200"
+      - series: 'pipeline_task_oldest_open_age_seconds{kind="manual_parse", service_instance_id="a"}'
+        values: "345600+60x200"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: TriageQueueStale
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: TriageQueueStale
+        exp_alerts: []
+      - eval_time: 121m
+        alertname: TriageQueueStale
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              team: regulatory-intelligence
+            exp_annotations:
+              summary: "The oldest triage task has waited more than 24 hours for an analyst's decision"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/pipeline-triage.md
+
+  # TriageQueueStale resolves once an analyst decides: a task 25 hours old waits 70 minutes more,
+  # then none is open (the age reads 0); it fires from 60m and nothing fires after 70m.
+  - interval: 1m
+    input_series:
+      - series: 'pipeline_task_oldest_open_age_seconds{kind="triage", service_instance_id="a"}'
+        values: "90000+60x70 0x60"
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: TriageQueueStale
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              team: regulatory-intelligence
+            exp_annotations:
+              summary: "The oldest triage task has waited more than 24 hours for an analyst's decision"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/pipeline-triage.md
+      - eval_time: 75m
+        alertname: TriageQueueStale
+        exp_alerts: []

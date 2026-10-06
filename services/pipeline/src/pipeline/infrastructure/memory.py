@@ -291,6 +291,13 @@ class MemoryTaskRepository:
                 counts[task.kind] = counts.get(task.kind, 0) + 1
         return counts
 
+    def oldest_open(self) -> Mapping[TaskKind, datetime]:
+        oldest: dict[TaskKind, datetime] = {}
+        for task in self._tasks.values():
+            if task.is_open and (task.kind not in oldest or task.opened_at < oldest[task.kind]):
+                oldest[task.kind] = task.opened_at
+        return oldest
+
 
 def _task_order(task: PipelineTask) -> tuple[datetime, int]:
     return (task.opened_at, task.id.value.int)

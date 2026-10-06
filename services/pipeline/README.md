@@ -55,7 +55,7 @@ src/pipeline/
     parsers/       # ParserChain over PdfParser (text layer), PdfTableParser, HtmlParser,
                    # HtmlTableParser; the clause split
     adapters/upload.py   # UploadOnlyAdapter: lists and fetches nothing (the statutes)
-    task_metrics.py  # the open-tasks gauge ParseFailureQueueHigh reads
+    task_metrics.py  # the open-task gauges ParseFailureQueueHigh and TriageQueueStale read
   workflows/       # Temporal workflows; ingest_document.py: discover, fetch, parse, register
   workflows/crawl_source.py  # list from the watermark, ingest the new documents, record the run
   workflows/extract_rules.py # ask the model, wait out a used-up budget, store the candidate
@@ -368,9 +368,12 @@ it; a resolved task takes no other transcript (409 `pipeline-task-closed`).
 parse leaves its document failed and unregistered, a dismissed triage leaves it held for triage
 and unregistered.
 
-The app reports `pipeline_open_tasks{kind}` while telemetry is on, and `ParseFailureQueueHigh`
-opens a ticket when more than 20 manual parses have been open for 30 minutes
-([docs/runbooks/parse-failures.md](../../docs/runbooks/parse-failures.md)).
+The app reports `pipeline_open_tasks{kind}` and `pipeline_task_oldest_open_age_seconds{kind}`
+(how long the oldest open task of each kind has waited) while telemetry is on.
+`ParseFailureQueueHigh` opens a ticket when more than 20 manual parses have been open for 30
+minutes ([docs/runbooks/parse-failures.md](../../docs/runbooks/parse-failures.md)), and
+`TriageQueueStale` when the oldest triage task has waited more than 24 hours, for an hour
+([docs/runbooks/pipeline-triage.md](../../docs/runbooks/pipeline-triage.md)).
 
 ## Classification and triage
 

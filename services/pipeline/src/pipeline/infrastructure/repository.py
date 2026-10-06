@@ -473,6 +473,17 @@ class SqlAlchemyTaskRepository:
         )
         return {TaskKind(kind): int(count) for kind, count in self._session.execute(statement)}
 
+    def oldest_open(self) -> Mapping[TaskKind, datetime]:
+        statement = (
+            select(PipelineTaskRow.kind, func.min(PipelineTaskRow.opened_at))
+            .where(PipelineTaskRow.status == TaskStatus.OPEN.value)
+            .group_by(PipelineTaskRow.kind)
+        )
+        return {
+            TaskKind(kind): opened.astimezone(UTC)
+            for kind, opened in self._session.execute(statement)
+        }
+
 
 def _task_values(task: PipelineTask) -> dict[str, object]:
     return {

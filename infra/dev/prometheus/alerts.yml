@@ -203,3 +203,18 @@ groups:
         annotations:
           summary: "More than 20 documents no parser reads have waited 30 minutes for a manual parse"
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/parse-failures.md
+      # pipeline_task_oldest_open_age_seconds{kind} is how long the oldest open task of each kind
+      # has waited since it opened, zero when none is open. An open triage task is a document whose
+      # text names another type than its source publishes: it is not registered, and no rule
+      # candidate is extracted from it, until an analyst decides. Every replica reports the same
+      # age, so the max is taken. A day is time enough for the queue to be looked at; the hour
+      # rules out a task decided just after the day passed.
+      - alert: TriageQueueStale
+        expr: max(pipeline_task_oldest_open_age_seconds{kind="triage"}) > 86400
+        for: 1h
+        labels:
+          severity: ticket
+          team: regulatory-intelligence
+        annotations:
+          summary: "The oldest triage task has waited more than 24 hours for an analyst's decision"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/pipeline-triage.md
