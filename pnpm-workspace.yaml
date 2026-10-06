@@ -18,3 +18,10 @@ allowBuilds:
 strictDepBuilds: true
 # minimumReleaseAge: 1440 (24 h quarantine for freshly published versions) is the pnpm 11
 # default and is kept deliberately.
+# A peer range a dependency has not widened yet, accepted only where a check proves the newer
+# version works. openapi-typescript 7.13.0 (its latest release) declares typescript ^5.x; on
+# TypeScript 6 make openapi-ts-check finds its output byte for byte the same (docs/web/decisions.md
+# D-054). Remove an entry once the package's own range covers the version.
+peerDependencyRules:
+  allowedVersions:
+    openapi-typescript>typescript: "6"
