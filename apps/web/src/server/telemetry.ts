@@ -64,23 +64,55 @@ async function vercelRegister(): Promise<Register> {
   return registerOTel;
 }
 
+/** What registration did: the plan it carried out, or that it failed and nothing registered. */
+export type TelemetryOutcome = TelemetryPlan & { failed?: true };
+
 /**
- * Registers OpenTelemetry when the flag is on, and says what it did. `load` gives the register
- * function (tests pass their own); it is only loaded when the flag is on.
+ * Where the outcome is kept for the life of the process. `instrumentation.ts` and the app's pages
+ * are separate bundles, each with its own copy of this module, in one Node.js process, so a
+ * module variable set at startup is not the one a page reads; `globalThis` is shared.
+ */
+const REGISTRATION: unique symbol = Symbol.for("compliancewatch.web.telemetry");
+
+type Holder = typeof globalThis & { [REGISTRATION]?: TelemetryOutcome };
+
+function remember(outcome: TelemetryOutcome): TelemetryOutcome {
+  (globalThis as Holder)[REGISTRATION] = outcome;
+  return outcome;
+}
+
+/**
+ * What registration did when this server started, or null when it has not run here (the edge
+ * runtime, a unit test). The system page shows this rather than asking the flag again: the flag is
+ * read once, and a change to it takes effect when the server restarts.
+ */
+export function registeredTelemetry(): TelemetryOutcome | null {
+  return (globalThis as Holder)[REGISTRATION] ?? null;
+}
+
+/** Forgets the outcome, so a test starts as a server that has not registered. */
+export function resetTelemetryRegistration(): void {
+  delete (globalThis as Holder)[REGISTRATION];
+}
+
+/**
+ * Registers OpenTelemetry when the flag is on, keeps what it did for the system page, and returns
+ * it. `load` gives the register function (tests pass their own); it is only loaded when the flag
+ * is on.
  */
 export async function registerTelemetry(
   load: () => Promise<Register> = vercelRegister,
   env: Environment = process.env,
-): Promise<TelemetryPlan> {
+): Promise<TelemetryOutcome> {
   try {
     const plan = await telemetryPlan(env);
-    if (!plan.enabled) return plan;
+    if (!plan.enabled) return remember(plan);
     const register = await load();
     register(otelConfiguration(plan));
     console.info(
       JSON.stringify({ level: "info", event: "telemetry_registered", exporting: plan.exporting }),
     );
-    return plan;
+    return remember(plan);
   } catch (error) {
     console.warn(
       JSON.stringify({
@@ -89,6 +121,6 @@ export async function registerTelemetry(
         error: error instanceof Error ? error.message : String(error),
       }),
     );
-    return { enabled: false, exporting: false };
+    return remember({ enabled: false, exporting: false, failed: true });
   }
 }

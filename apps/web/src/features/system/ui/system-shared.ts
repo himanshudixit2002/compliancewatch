@@ -10,6 +10,10 @@ export interface WebFacts {
   writeToken: boolean;
   reviewToken: boolean;
   flagProvider: { ok: true; name: string } | { ok: false; reason: string };
-  telemetry: { enabled: boolean; exporting: boolean };
+  /**
+   * What OpenTelemetry registration did when this server started; null when no registration was
+   * recorded in this process.
+   */
+  telemetry: { enabled: boolean; exporting: boolean; failed?: boolean } | null;
   node: string;
 }

@@ -36,6 +36,14 @@ function yesNo(value: boolean): string {
   return value ? t("system.set") : t("system.notSet");
 }
 
+/** OpenTelemetry as it registered when this server started, never the flag's value now. */
+function telemetryText(telemetry: WebFacts["telemetry"]): string {
+  if (telemetry === null) return t("system.telemetryUnknown");
+  if (telemetry.failed === true) return t("system.telemetryFailed");
+  if (!telemetry.enabled) return t("system.telemetryOff");
+  return telemetry.exporting ? t("system.telemetryExporting") : t("system.telemetryLocal");
+}
+
 function factItems(facts: WebFacts) {
   return [
     { key: "environment", label: t("system.fact.environment"), value: facts.environment },
@@ -63,11 +71,7 @@ function factItems(facts: WebFacts) {
     {
       key: "telemetry",
       label: t("system.fact.telemetry"),
-      value: !facts.telemetry.enabled
-        ? t("system.telemetryOff")
-        : facts.telemetry.exporting
-          ? t("system.telemetryExporting")
-          : t("system.telemetryLocal"),
+      value: telemetryText(facts.telemetry),
     },
   ];
 }

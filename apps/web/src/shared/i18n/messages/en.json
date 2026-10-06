@@ -2450,7 +2450,7 @@
   "system.fact.writeToken": "Rulebook write token",
   "system.fact.reviewToken": "Rulebook review token",
   "system.fact.flags": "Flag provider",
-  "system.fact.telemetry": "OpenTelemetry",
+  "system.fact.telemetry": "OpenTelemetry, as it registered when this server started",
   "system.notConfigured": "Not configured",
   "system.devBuild": "Development build",
   "system.ms": "{ms} ms",
@@ -2459,5 +2459,7 @@
   "system.flagsFailed": "Not configured: {reason}",
   "system.telemetryOff": "Off (web.otel_enabled)",
   "system.telemetryLocal": "On, with no exporter configured: spans stay in this server",
-  "system.telemetryExporting": "On, exporting over OTLP"
+  "system.telemetryExporting": "On, exporting over OTLP, with every query and personal value taken out of the spans",
+  "system.telemetryFailed": "Off: registration failed at startup (telemetry_registration_failed in the server's log)",
+  "system.telemetryUnknown": "Not known: no registration was recorded in this server process"
 }

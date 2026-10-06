@@ -7,6 +7,8 @@ import {
   otelConfiguration,
   otlpEndpointConfigured,
   registerTelemetry,
+  registeredTelemetry,
+  resetTelemetryRegistration,
   telemetryPlan,
   type Register,
 } from "./telemetry";
@@ -16,6 +18,7 @@ afterEach(async () => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   resetEnvCache();
+  resetTelemetryRegistration();
   await resetFlagReader();
 });
 
@@ -66,7 +69,8 @@ describe("the telemetry plan", () => {
     const plan = await registerTelemetry(async () => {
       throw new Error("Example load failure");
     }, {});
-    expect(plan).toEqual({ enabled: false, exporting: false });
+    expect(plan).toEqual({ enabled: false, exporting: false, failed: true });
+    expect(registeredTelemetry()).toEqual(plan);
     expect(JSON.parse(String(warn.mock.calls[0]?.[0]))).toMatchObject({
       event: "telemetry_registration_failed",
       error: "Example load failure",
@@ -77,5 +81,33 @@ describe("the telemetry plan", () => {
     expect(otlpEndpointConfigured({ OTEL_EXPORTER_OTLP_ENDPOINT: " " })).toBe(false);
     expect(otlpEndpointConfigured({})).toBe(false);
     expect(otelConfiguration({ enabled: true, exporting: false }).spanProcessors).toEqual([]);
+  });
+});
+
+describe("what registered", () => {
+  it("is nothing before registration runs", () => {
+    expect(registeredTelemetry()).toBeNull();
+  });
+
+  it("keeps the outcome for the process, so a later flag change shows only after a restart", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    await registerTelemetry(async () => vi.fn<Register>(), {});
+    expect(registeredTelemetry()).toEqual({ enabled: false, exporting: false });
+    flagOn();
+    expect((await telemetryPlan({})).enabled).toBe(true);
+    expect(registeredTelemetry()).toEqual({ enabled: false, exporting: false });
+  });
+
+  it("is kept on globalThis, where another bundle of this module finds it", async () => {
+    flagOn();
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const outcome = await registerTelemetry(async () => vi.fn<Register>(), {
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://localhost:4318/v1/traces",
+    });
+    const shared = (globalThis as Record<symbol, unknown>)[
+      Symbol.for("compliancewatch.web.telemetry")
+    ];
+    expect(shared).toEqual({ enabled: true, exporting: true });
+    expect(shared).toBe(outcome);
   });
 });

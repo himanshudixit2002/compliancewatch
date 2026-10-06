@@ -451,7 +451,8 @@ and never a failed page; a summary counts the services up and ready. From the sc
 each service's built screens and the routes screens still wait for from it, with who delivers
 them. Then the web server's own facts: the environment, the sign-in provider, the build, Node.js,
 the time limit of a service call, whether each rulebook token is set (never its value), the flag
-provider, and OpenTelemetry (off, on with no exporter, or exporting; D-057). Refresh probes again.
+provider, and OpenTelemetry as it registered when the server started (off, on with no exporter,
+exporting, or failed; the flag is not read again; D-057). Refresh probes again.
 
 ## What waits
 

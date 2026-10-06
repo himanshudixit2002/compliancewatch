@@ -77,8 +77,11 @@ tracer provider, and spans leave the process only when `OTEL_EXPORTER_OTLP_TRACE
 `OTEL_EXPORTER_OTLP_ENDPOINT` names a collector (OTLP over HTTP); otherwise no span processor is
 installed (D-057). Ahead of the exporter, `server/telemetry-redaction.ts` drops every query from the
 URLs in a span and replaces each segment or value that names a person (a preference's recipient, an
-email, a phone number, a PAN, a GSTIN) with a placeholder. The system page says which of the three
-applies.
+email, a phone number, a PAN, a GSTIN) with a placeholder. `registerTelemetry()` keeps what it did
+on `globalThis` for the life of the process (`instrumentation.ts` and the pages are separate bundles
+in one process, so a module variable would not reach a page), and the system page shows that: off,
+on with no exporter, exporting, or failed at startup. Nothing reads the flag again, so a change to
+it shows after a restart.
 
 ## The reader
 

@@ -97,4 +97,25 @@ describe("SystemView", () => {
     expect(screen.getByText("Off (web.otel_enabled)")).toBeDefined();
     expect(screen.getByText("abc123")).toBeDefined();
   });
+
+  it("says how OpenTelemetry registered at startup: exporting, failed, or not recorded", () => {
+    const view = (telemetry: WebFacts["telemetry"]) => (
+      <SystemView
+        title="System"
+        crumbs={crumbs}
+        rows={[serviceRow(health("qa"), ready("qa"))]}
+        summary={{ total: 1, up: 1, ready: 1 }}
+        facts={{ ...FACTS, telemetry }}
+        probeTimeoutSeconds={2}
+      />
+    );
+    const { container, rerender } = render(view({ enabled: true, exporting: true }));
+    const facts = () => container.querySelector("[data-slot='web-facts']")?.textContent ?? "";
+    expect(facts()).toContain("OpenTelemetry, as it registered when this server started");
+    expect(facts()).toContain("On, exporting over OTLP");
+    rerender(view({ enabled: false, exporting: false, failed: true }));
+    expect(facts()).toContain("Off: registration failed at startup");
+    rerender(view(null));
+    expect(facts()).toContain("Not known: no registration was recorded in this server process");
+  });
 });

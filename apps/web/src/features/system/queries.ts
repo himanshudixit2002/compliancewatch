@@ -4,7 +4,7 @@ import type { ClientContext } from "@/server/api/services";
 import { getEnv } from "@/server/env";
 import { flagProviderStatus } from "@/server/flags";
 import { HEALTH_TIMEOUT_MS, probeAllHealth, probeAllReady } from "@/server/health";
-import { telemetryPlan } from "@/server/telemetry";
+import { registeredTelemetry } from "@/server/telemetry";
 import { systemRows, type ServiceRow, type SystemSummary } from "./model/system";
 import type { WebFacts } from "./ui/system-shared";
 
@@ -12,7 +12,9 @@ import type { WebFacts } from "./ui/system-shared";
  * The system page's read: every service's /health and /ready probed from the web server in
  * parallel (twenty probes, two seconds each at most, no tenant header and no token), the
  * registry's facts per service, and the web server's own configuration as plain facts. A
- * secret's value never leaves this module: a token is only said to be set or not.
+ * secret's value never leaves this module: a token is only said to be set or not. OpenTelemetry
+ * is what registration did when the server started, not the flag's value now (the flag is read
+ * once, at startup).
  */
 export interface SystemView {
   rows: ServiceRow[];
@@ -22,13 +24,12 @@ export interface SystemView {
 }
 
 export async function getSystem(
-  deps: { fetchImpl?: ClientContext["fetchImpl"]; env?: Record<string, string | undefined> } = {},
+  deps: { fetchImpl?: ClientContext["fetchImpl"] } = {},
 ): Promise<SystemView> {
-  const [health, ready, flags, telemetry] = await Promise.all([
+  const [health, ready, flags] = await Promise.all([
     probeAllHealth({ fetchImpl: deps.fetchImpl }),
     probeAllReady({ fetchImpl: deps.fetchImpl }),
     flagProviderStatus(),
-    telemetryPlan(deps.env ?? process.env),
   ]);
   const env = getEnv();
   const { rows, summary } = systemRows(health, ready);
@@ -46,7 +47,7 @@ export async function getSystem(
       flagProvider: flags.ok
         ? { ok: true, name: flags.provider }
         : { ok: false, reason: flags.reason },
-      telemetry,
+      telemetry: registeredTelemetry(),
       node: process.version,
     },
   };
