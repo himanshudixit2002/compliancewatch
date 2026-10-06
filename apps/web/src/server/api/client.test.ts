@@ -102,6 +102,36 @@ describe("createServiceClient", () => {
     expect(signal?.aborted).toBe(false);
   });
 
+  it("leaves the time limit to the caller's own signal when asked", async () => {
+    let signal: AbortSignal | null | undefined;
+    const client = createServiceClient<identity.paths>({
+      service: "identity",
+      baseUrl: BASE,
+      timeoutMs: 20,
+      timeoutScope: "caller",
+      fetchImpl: async (_input, init) => {
+        signal = init?.signal;
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        return jsonResponse(200, []);
+      },
+    });
+    const answered = await client.GET("/v1/identity/billing/plans");
+    expect(answered.response.status).toBe(200);
+    expect(signal?.aborted).toBe(false);
+    const caller = new AbortController();
+    const hanging = hangingFetch();
+    const stopped = createServiceClient<identity.paths>({
+      service: "identity",
+      baseUrl: BASE,
+      timeoutMs: 20,
+      timeoutScope: "caller",
+      fetchImpl: hanging.fetchImpl,
+    });
+    const pending = stopped.GET("/v1/identity/billing/plans", { signal: caller.signal });
+    caller.abort(new DOMException("Example limit", "TimeoutError"));
+    await expect(pending).rejects.toBeInstanceOf(NetworkFailure);
+  });
+
   it("gives a cached read a request id made of its tags and hands next on to fetch", async () => {
     const fake = fakeFetch([{ method: "GET", path: "/v1/identity/billing/plans", body: [] }]);
     const client = identityClient(fake.fetchImpl);

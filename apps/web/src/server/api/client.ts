@@ -54,10 +54,12 @@ export interface ServiceClientOptions {
   timeoutMs: number;
   /**
    * What the time limit covers: the whole exchange (the default: the call fails when the body has
-   * not arrived in time either), or only the wait for the response to start, for a body streamed
-   * on to the browser (a stored document's bytes), which may take longer than any limit.
+   * not arrived in time either); only the wait for the response to start, for a body streamed on
+   * to the browser (a stored document's bytes), which may take longer than any limit; or nothing
+   * (`caller`): the call's own signal is its only limit, for a request body streamed up from the
+   * browser (an upload), whose caller times the stream and the wait for the answer itself.
    */
-  timeoutScope?: "exchange" | "response-start";
+  timeoutScope?: "exchange" | "response-start" | "caller";
   fetchImpl?: FetchImpl;
   /** Headers every request of this client sends, on top of accept and x-request-id. */
   headers?: Readonly<Record<string, string>>;
@@ -122,6 +124,14 @@ async function fetchUntilResponse(
   }
 }
 
+/** The init of a call its caller times: the call's own signal, plus its `next` options. */
+function callerInit(request: Request): RequestInit {
+  const init: RequestInit = { signal: request.signal };
+  const next = (request as CacheableRequest).next;
+  if (next !== undefined) init.next = next;
+  return init;
+}
+
 export function createServiceClient<Paths extends object>(
   options: ServiceClientOptions,
 ): Client<Paths> {
@@ -132,7 +142,9 @@ export function createServiceClient<Paths extends object>(
     fetch: (request) =>
       options.timeoutScope === "response-start"
         ? fetchUntilResponse(fetchImpl, request, options.timeoutMs)
-        : fetchImpl(request, fetchInit(request, options.timeoutMs)),
+        : options.timeoutScope === "caller"
+          ? fetchImpl(request, callerInit(request))
+          : fetchImpl(request, fetchInit(request, options.timeoutMs)),
   });
   client.use({
     onRequest({ request }) {

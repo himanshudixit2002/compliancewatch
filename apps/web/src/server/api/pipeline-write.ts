@@ -88,8 +88,13 @@ function explained<T>(result: Result<T>): Result<T> {
 }
 
 export interface PipelineWriteOptions {
-  /** A time limit for the whole exchange instead of the write default (an upload's). */
+  /** A time limit instead of the write default. */
   timeoutMs?: number;
+  /**
+   * `caller` leaves every limit to the call's own signal: an upload times the browser's stream
+   * and the wait for the pipeline's answer itself (server/bff/upload.ts).
+   */
+  timeoutScope?: "exchange" | "caller";
   fetchImpl?: FetchImpl;
 }
 
@@ -130,6 +135,7 @@ export function pipelineWriteClient(
       baseUrl: serviceUrl("pipeline", env),
       timeoutMs:
         options.timeoutMs ?? Math.max(env.CW_WEB_REQUEST_TIMEOUT_MS, PIPELINE_WRITE_TIMEOUT_MS),
+      timeoutScope: options.timeoutScope ?? "exchange",
       fetchImpl: options.fetchImpl ?? ctx.fetchImpl,
       // No tenant header: the pipeline's records belong to no tenant.
       headers: { [WRITE_TOKEN_HEADER]: token },

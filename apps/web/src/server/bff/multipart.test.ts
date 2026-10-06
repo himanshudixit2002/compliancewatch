@@ -217,6 +217,47 @@ describe("readUploadHead and fileBody", () => {
     expect(short.failure()?.failure).toBe("malformed");
   });
 
+  it("tells its caller of each chunk read and of the closing delimiter", async () => {
+    const reader = chunked(body(FIELDS), 16);
+    const head = await readUploadHead(reader, BOUNDARY, 64 * 1024);
+    const heard: string[] = [];
+    const sent = fileBody(head, reader, Buffer.alloc(0), newBoundary(), 4096, {
+      onBytes: () => heard.push("bytes"),
+      onEnd: () => heard.push("end"),
+    });
+    await drain(sent.stream);
+    expect(heard.filter((event) => event === "bytes").length).toBeGreaterThan(1);
+    expect(heard.at(-1)).toBe("end");
+    expect(heard.filter((event) => event === "end")).toHaveLength(1);
+  });
+
+  it("records no refusal of its own when the consumer cancels it", async () => {
+    let pulls = 0;
+    const whole = body(FIELDS);
+    const headEnd = whole.indexOf("\r\n\r\n%PDF") + 4;
+    const slow = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        pulls += 1;
+        if (pulls === 1) {
+          // The head whole and the file's first bytes; then the file only trickles.
+          controller.enqueue(new Uint8Array(whole.subarray(0, headEnd + 5)));
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        controller.enqueue(new Uint8Array(Buffer.alloc(16, 0x20)));
+      },
+    }).getReader();
+    const head = await readUploadHead(slow, BOUNDARY, 64 * 1024);
+    const sent = fileBody(head, slow, Buffer.alloc(0), newBoundary(), 1 << 20);
+    const consumer = sent.stream.getReader();
+    await consumer.read();
+    const waiting = consumer.read();
+    await consumer.cancel(new DOMException("Example abort", "AbortError"));
+    await waiting;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(sent.failure()).toBeNull();
+  });
+
   it("mints a fresh boundary each time", () => {
     expect(newBoundary()).toMatch(/^cw-upload-[0-9a-f]{32}$/);
     expect(newBoundary()).not.toBe(newBoundary());

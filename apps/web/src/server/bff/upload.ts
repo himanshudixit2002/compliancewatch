@@ -45,7 +45,13 @@ import { apiErrorResponse, problemResponse } from "./problem";
  * against the limit and hashed on the way. The limits are the pipeline's: its
  * CW_PIPELINE_UPLOAD_MAX_BYTES as the web app's CW_WEB_PIPELINE_UPLOAD_MAX_BYTES (25 MB by
  * default), and its 64 KiB allowance for the fields; upload.test.ts reads both, and the types,
- * from the service's code.
+ * from the service's code. A pipeline configured lower refuses on its own, and its refusal keeps
+ * its detail, which names its limit; this server's number names only this server's refusal.
+ *
+ * Time (`UPLOAD_TIMING`): while the file streams on, only a stall stops it (no byte from the
+ * browser for 30 seconds), never the file's size over a slow link; once the closing delimiter is
+ * sent, the pipeline has 60 seconds to answer. A stall is a 400 (the pipeline never had the whole
+ * body, so it stored nothing), and no answer in time a 504 (it may have stored the file).
  *
  * The answer: 202 with the stored document, whether its bytes were stored before, and the ingest's
  * workflow; or a problem in plain words. When Temporal does not answer, the pipeline has stored
@@ -61,8 +67,18 @@ export const UPLOAD_TYPES: Readonly<Record<string, string>> = {
 /** Room in the body for the fields beside the file: the pipeline's FORM_ALLOWANCE. */
 export const FORM_ALLOWANCE = 64 * 1024;
 
-/** The time limit of the whole exchange: the body streams up, then Temporal may take ten seconds. */
-export const UPLOAD_TIMEOUT_MS = 120_000;
+/**
+ * The upload's time limits. While the file streams up from the browser only a stall stops it: no
+ * byte for `stallMs`, so a slow link that keeps sending is never cut, whatever the file's size.
+ * Once the closing delimiter is sent, the pipeline stores the file, records it and waits up to
+ * ten seconds for Temporal; `answerMs` covers that wait for its answer, and only that.
+ */
+export interface UploadTiming {
+  stallMs: number;
+  answerMs: number;
+}
+
+export const UPLOAD_TIMING: UploadTiming = { stallMs: 30_000, answerMs: 60_000 };
 
 export const UPLOAD_LIMITS = {
   reasonMin: 10,
@@ -85,6 +101,8 @@ const SOURCE_KEY = /^[a-z][a-z0-9_]{0,62}$/;
 
 export interface UploadDeps {
   fetchImpl?: FetchImpl;
+  /** Shorter limits, for the tests. */
+  timing?: Partial<UploadTiming>;
 }
 
 export interface UploadFields {
@@ -195,8 +213,85 @@ function unsupported(sent: string | null): Response {
   });
 }
 
+function stalled(timing: UploadTiming): Response {
+  return problemResponse({
+    slug: "web-upload-stalled",
+    status: 400,
+    title: t("upload.error.stalled"),
+    detail: t("upload.error.stalledDetail", { seconds: Math.round(timing.stallMs / 1000) }),
+  });
+}
+
+function unanswered(timing: UploadTiming): Response {
+  return problemResponse({
+    slug: "web-upload-unanswered",
+    status: 504,
+    title: t("upload.error.unanswered"),
+    detail: t("upload.error.unansweredDetail", { seconds: Math.round(timing.answerMs / 1000) }),
+  });
+}
+
+export type UploadExpiry = "stalled" | "unanswered";
+
+export interface UploadClock {
+  /** Aborts the call to the pipeline when a limit passes. */
+  signal: AbortSignal;
+  /** Bytes arrived from the browser: the stall limit starts again. */
+  progress(): void;
+  /** The closing delimiter is sent: from now on only the wait for the answer is timed. */
+  sent(): void;
+  /** Which limit passed, if one did. */
+  expired(): UploadExpiry | null;
+  stop(): void;
+}
+
+/**
+ * The two limits of an upload on one signal: the stall limit while the file streams, restarted by
+ * every chunk from the browser (a pipeline that stops reading stops the reads too, so it counts as
+ * a stall), then the wait for the answer once the body is sent.
+ */
+export function uploadClock(timing: UploadTiming): UploadClock {
+  const controller = new AbortController();
+  let expiry: UploadExpiry | null = null;
+  let answering = false;
+  let handle: ReturnType<typeof setTimeout> | undefined;
+  const arm = (ms: number, why: UploadExpiry) => {
+    clearTimeout(handle);
+    if (controller.signal.aborted) return;
+    handle = setTimeout(() => {
+      expiry = why;
+      controller.abort(new DOMException(`the upload ${why} after ${ms} ms`, "TimeoutError"));
+    }, ms);
+  };
+  arm(timing.stallMs, "stalled");
+  return {
+    signal: controller.signal,
+    progress: () => {
+      if (!answering) arm(timing.stallMs, "stalled");
+    },
+    sent: () => {
+      answering = true;
+      arm(timing.answerMs, "unanswered");
+    },
+    expired: () => expiry,
+    stop: () => clearTimeout(handle),
+  };
+}
+
+/**
+ * The pipeline's own size refusal in words: its detail names its own limit (which may be lower
+ * than this server's CW_WEB_PIPELINE_UPLOAD_MAX_BYTES), so it is kept rather than replaced by this
+ * server's number.
+ */
+export function pipelineTooLargeDetail(detail: string | null | undefined): string {
+  const said = (detail ?? "").trim().replace(/[.\s]+$/, "");
+  return said === ""
+    ? t("upload.error.tooLargePipeline")
+    : t("upload.error.tooLargePipelineDetail", { detail: said });
+}
+
 /** A pipeline refusal of the upload, in plain words. */
-function refused(error: ApiError, sha256: string | null, max: number): Response {
+function refused(error: ApiError, sha256: string | null): Response {
   const explained = explainPipelineTokenProblem(error);
   const problem = explained.problem;
   if (isProblemOf(problem, "pipeline-ingest-unavailable")) {
@@ -209,7 +304,7 @@ function refused(error: ApiError, sha256: string | null, max: number): Response 
   if (isProblemOf(problem, "pipeline-upload-too-large")) {
     return apiErrorResponse(explained, {
       title: t("upload.error.tooLarge"),
-      detail: t("upload.error.tooLargeDetail", { limit: megabytes(max) }),
+      detail: pipelineTooLargeDetail(problem?.detail),
     });
   }
   if (isProblemOf(problem, "pipeline-upload-unsupported")) {
@@ -264,10 +359,12 @@ export async function uploadResponse(
     });
   }
   const max = env.CW_WEB_PIPELINE_UPLOAD_MAX_BYTES;
+  const timing: UploadTiming = { ...UPLOAD_TIMING, ...deps.timing };
+  // No limit of the client's own: the clock below times the stream and the answer.
   const client = pipelineWriteClient(
     { session, fetchImpl: deps.fetchImpl },
     "admin.sources.write",
-    { timeoutMs: UPLOAD_TIMEOUT_MS },
+    { timeoutMs: timing.answerMs, timeoutScope: "caller" },
   );
   if (!client.ok) return apiErrorResponse(client.error);
   if (!SOURCE_KEY.test(key)) {
@@ -337,28 +434,43 @@ export async function uploadResponse(
       : [textPart(outgoing, UPLOAD_FIELDS.documentType, fields.documentType)]),
     filePartHead(outgoing, `document.${extension}`, fileType),
   ]);
-  const sent = fileBody(head, reader, prefix, outgoing, max);
+  // The clock starts with the forwarding: the stall limit while the browser's bytes flow on, the
+  // wait for the answer once the closing delimiter is sent. The browser going away stops it too.
+  const clock = uploadClock(timing);
+  const sent = fileBody(head, reader, prefix, outgoing, max, {
+    onBytes: clock.progress,
+    onEnd: clock.sent,
+  });
   // The typed body names what the multipart parts carry; the serializer sends the stream instead.
   const typed: UploadFormDto = {
     actor_id: session.userId,
     reason: fields.reason,
     file: `document.${extension}`,
   };
-  const result = await call(
-    client.value.POST("/v1/pipeline/sources/{key}/uploads", {
-      params: { path: { key } },
-      body: typed,
-      bodySerializer: () => sent.stream,
-      headers: { "content-type": `multipart/form-data; boundary=${outgoing}` },
-      signal: request.signal,
-      // A streamed request body needs half duplex in Node's fetch.
-      ...({ duplex: "half" } as Record<string, string>),
-    }),
-  );
+  let result;
+  try {
+    result = await call(
+      client.value.POST("/v1/pipeline/sources/{key}/uploads", {
+        params: { path: { key } },
+        body: typed,
+        bodySerializer: () => sent.stream,
+        headers: { "content-type": `multipart/form-data; boundary=${outgoing}` },
+        signal: AbortSignal.any([request.signal, clock.signal]),
+        // A streamed request body needs half duplex in Node's fetch.
+        ...({ duplex: "half" } as Record<string, string>),
+      }),
+    );
+  } finally {
+    clock.stop();
+  }
+  // A limit that passed comes first: what the stream did after the abort is its consequence.
+  const expiry = result.ok ? null : clock.expired();
+  if (expiry === "stalled") return stalled(timing);
+  if (expiry === "unanswered") return unanswered(timing);
   const failure = sent.failure();
   if (failure !== null) return failure.failure === "too_large" ? tooLarge(max) : malformed();
   const stored = mapBody(result, uploadStoredFromDto);
-  if (!stored.ok) return refused(stored.error, sent.sha256(), max);
+  if (!stored.ok) return refused(stored.error, sent.sha256());
   return new Response(JSON.stringify(stored.value), {
     status: 202,
     headers: { "content-type": "application/json", "cache-control": "private, no-store" },

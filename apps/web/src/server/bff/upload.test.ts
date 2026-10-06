@@ -7,14 +7,17 @@ import { sessionWindow } from "@/entities/session/mappers";
 import type { SessionClaims } from "@/entities/session/types";
 import { fakeFetch, problemResponse, refusingFetch } from "@/test/fake-fetch";
 import { ACTOR_ID, UPLOAD_SOURCE_KEY, documentDto } from "@/test/pipeline-fixture";
-import { WRITE_TOKEN_HEADER } from "../api/client";
+import { WRITE_TOKEN_HEADER, type FetchImpl } from "../api/client";
 import { resetEnvCache } from "../env";
 import {
   FORM_ALLOWANCE,
+  UPLOAD_TIMING,
   UPLOAD_TYPES,
   checkUploadFields,
   documentIdOf,
   megabytes,
+  pipelineTooLargeDetail,
+  uploadClock,
   uploadResponse,
 } from "./upload";
 
@@ -82,6 +85,93 @@ function request(body: Buffer, headers: Record<string, string> = {}, url = URL_B
     body,
     duplex: "half",
   } as RequestInit);
+}
+
+/**
+ * A browser's body arriving `size` bytes at a time, `delayMs` apart, with one longer pause before
+ * the chunk `pause.before` when asked.
+ */
+function trickle(
+  body: Buffer,
+  size: number,
+  delayMs: number,
+  pause?: { before: number; ms: number },
+): ReadableStream<Uint8Array> {
+  const chunks: Buffer[] = [];
+  for (let at = 0; at < body.length; at += size) chunks.push(body.subarray(at, at + size));
+  let index = 0;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const chunk = chunks[index];
+      if (chunk === undefined) {
+        controller.close();
+        return;
+      }
+      const wait = pause !== undefined && index === pause.before ? pause.ms : delayMs;
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      index += 1;
+      controller.enqueue(new Uint8Array(chunk));
+    },
+  });
+}
+
+function streamed(stream: ReadableStream<Uint8Array>): Request {
+  return new Request(URL_BASE, {
+    method: "POST",
+    headers: {
+      host: "localhost:3000",
+      "sec-fetch-site": "same-origin",
+      "content-type": `multipart/form-data; boundary=${BOUNDARY}`,
+    },
+    body: stream,
+    duplex: "half",
+  } as RequestInit);
+}
+
+/**
+ * A pipeline that reads the body as it streams and then answers, or never answers when `answer`
+ * is null; it stops reading and rejects when the call is aborted, as fetch does.
+ */
+function readingPipeline(answer: (() => Response) | null): {
+  fetchImpl: FetchImpl;
+  seen: { bytes: number; aborted: boolean };
+} {
+  const seen = { bytes: 0, aborted: false };
+  const fetchImpl: FetchImpl = (input, init) =>
+    new Promise<Response>((resolve, reject) => {
+      const signal = init?.signal ?? undefined;
+      const reader = input.body?.getReader();
+      signal?.addEventListener(
+        "abort",
+        () => {
+          seen.aborted = true;
+          void reader?.cancel(signal.reason).catch(() => undefined);
+          reject(signal.reason as Error);
+        },
+        { once: true },
+      );
+      void (async () => {
+        for (;;) {
+          const next = await reader?.read();
+          if (next === undefined || next.done) break;
+          seen.bytes += next.value.length;
+        }
+        if (signal?.aborted === true || answer === null) return;
+        resolve(answer());
+      })().catch(() => undefined);
+    });
+  return { fetchImpl, seen };
+}
+
+function stored(): Response {
+  return new Response(
+    JSON.stringify({
+      document: documentDto({ source_key: UPLOAD_SOURCE_KEY, doc_type: "statute" }),
+      duplicate: false,
+      workflow_id: "pipeline-upload-example_statutes-2",
+    }),
+    { status: 202, headers: { "content-type": "application/json" } },
+  );
 }
 
 async function problemOf(response: Response): Promise<Record<string, unknown>> {
@@ -388,6 +478,118 @@ describe("uploadResponse: forwarding", () => {
       fetchImpl: fake.fetchImpl,
     });
     expect(after.status).toBe(400);
+  });
+
+  it("keeps the pipeline's own size limit in its refusal, and this server's in its own", async () => {
+    const fake = fakeFetch(() =>
+      problemResponse(413, {
+        type: "urn:compliancewatch:problem:pipeline-upload-too-large",
+        detail: "the file has 38 bytes; at most 20 are taken",
+      }),
+    );
+    const response = await uploadResponse(
+      request(multipart({ reason: REASON })),
+      UPLOAD_SOURCE_KEY,
+      ADMIN,
+      { fetchImpl: fake.fetchImpl },
+    );
+    expect(response.status).toBe(413);
+    const problem = await problemOf(response);
+    expect(problem.title).toBe("The file is larger than the pipeline takes");
+    expect(problem.detail).toBe(
+      "The pipeline refused it under its own limit: the file has 38 bytes; at most 20 are taken. Nothing was stored.",
+    );
+    expect(String(problem.detail)).not.toContain("25 MB");
+    expect(pipelineTooLargeDetail("the body passes 65556 bytes.")).toBe(
+      "The pipeline refused it under its own limit: the body passes 65556 bytes. Nothing was stored.",
+    );
+    expect(pipelineTooLargeDetail(null)).toBe(
+      "The pipeline refused it under its own limit, which is lower than this server's. Nothing was stored.",
+    );
+  });
+});
+
+describe("uploadResponse: time", () => {
+  const SLOW_FILE = Buffer.concat([PDF, Buffer.alloc(640, 0x20)]);
+
+  it("times only the wait for the answer, so a slow upload that keeps sending is never cut", async () => {
+    const body = multipart({ reason: REASON }, { bytes: SLOW_FILE, type: "application/pdf" });
+    // About 15 chunks 40 ms apart: 600 ms of upload, four times the 150 ms the answer may take.
+    const pipeline = readingPipeline(stored);
+    const started = Date.now();
+    const response = await uploadResponse(
+      streamed(trickle(body, 64, 40)),
+      UPLOAD_SOURCE_KEY,
+      ADMIN,
+      { fetchImpl: pipeline.fetchImpl, timing: { stallMs: 400, answerMs: 150 } },
+    );
+    expect(response.status).toBe(202);
+    expect(Date.now() - started).toBeGreaterThan(300);
+    expect(pipeline.seen.aborted).toBe(false);
+    expect(pipeline.seen.bytes).toBeGreaterThan(SLOW_FILE.length);
+  });
+
+  it("stops an upload whose file stops arriving, and says nothing was stored", async () => {
+    const body = multipart({ reason: REASON }, { bytes: SLOW_FILE, type: "application/pdf" });
+    // The pause falls inside the file, after the head the handler reads before forwarding.
+    const headEnd = body.indexOf("\r\n\r\n%PDF") + 4;
+    const pipeline = readingPipeline(stored);
+    const response = await uploadResponse(
+      streamed(trickle(body, 64, 5, { before: Math.floor(headEnd / 64) + 2, ms: 1_000 })),
+      UPLOAD_SOURCE_KEY,
+      ADMIN,
+      { fetchImpl: pipeline.fetchImpl, timing: { stallMs: 150, answerMs: 5_000 } },
+    );
+    expect(response.status).toBe(400);
+    const problem = await problemOf(response);
+    expect(problem.type).toBe("urn:compliancewatch:problem:web-upload-stalled");
+    expect(problem.detail).toContain("Nothing was stored");
+    expect(pipeline.seen.aborted).toBe(true);
+  });
+
+  it("gives the pipeline only so long to answer once the whole body is sent", async () => {
+    const body = multipart({ reason: REASON }, { bytes: SLOW_FILE, type: "application/pdf" });
+    const pipeline = readingPipeline(null);
+    const response = await uploadResponse(
+      streamed(trickle(body, 64, 2)),
+      UPLOAD_SOURCE_KEY,
+      ADMIN,
+      { fetchImpl: pipeline.fetchImpl, timing: { stallMs: 5_000, answerMs: 150 } },
+    );
+    expect(response.status).toBe(504);
+    const problem = await problemOf(response);
+    expect(problem.type).toBe("urn:compliancewatch:problem:web-upload-unanswered");
+    expect(problem.title).toBe("The pipeline did not answer in time");
+    expect(pipeline.seen.aborted).toBe(true);
+    expect(pipeline.seen.bytes).toBeGreaterThan(SLOW_FILE.length);
+  });
+
+  it("restarts the stall limit with each chunk and switches to the answer's once sent", async () => {
+    vi.useFakeTimers();
+    try {
+      const clock = uploadClock({ stallMs: 100, answerMs: 300 });
+      vi.advanceTimersByTime(90);
+      clock.progress();
+      vi.advanceTimersByTime(90);
+      expect(clock.signal.aborted).toBe(false);
+      clock.sent();
+      vi.advanceTimersByTime(250);
+      clock.progress();
+      expect(clock.signal.aborted).toBe(false);
+      vi.advanceTimersByTime(60);
+      expect(clock.signal.aborted).toBe(true);
+      expect(clock.expired()).toBe("unanswered");
+      const stalls = uploadClock({ stallMs: 100, answerMs: 300 });
+      vi.advanceTimersByTime(101);
+      expect(stalls.expired()).toBe("stalled");
+      expect((stalls.signal.reason as DOMException).name).toBe("TimeoutError");
+      const stopped = uploadClock(UPLOAD_TIMING);
+      stopped.stop();
+      vi.advanceTimersByTime(UPLOAD_TIMING.answerMs + UPLOAD_TIMING.stallMs);
+      expect(stopped.signal.aborted).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

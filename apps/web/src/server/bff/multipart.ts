@@ -197,11 +197,20 @@ export interface FileBody {
   failure(): UploadFormError | null;
 }
 
+/** What the body sent on reports as it goes, for a caller that times the upload. */
+export interface FileBodyEvents {
+  /** Bytes arrived from the browser's body. */
+  onBytes?(): void;
+  /** The closing delimiter was handed on: the whole body is sent. */
+  onEnd?(): void;
+}
+
 /**
  * The body sent on: `prefix` (the new fields and the file part's headers), then the file's bytes
  * from the head's leftover and the rest of the stream, up to the browser's closing delimiter, then
  * the new closing delimiter. A part after the file, a body that ends without its closing
  * delimiter, or more than `maxFileBytes` of file fail the stream with the reason recorded.
+ * `events` hears of each chunk read from the browser and of the closing delimiter.
  */
 export function fileBody(
   head: UploadHead,
@@ -209,6 +218,7 @@ export function fileBody(
   prefix: Buffer,
   outgoingBoundary: string,
   maxFileBytes: number,
+  events: FileBodyEvents = {},
 ): FileBody {
   const delimiter = Buffer.from(`\r\n--${head.boundary}`);
   const keep = delimiter.length + CLOSE.length - 1;
@@ -249,6 +259,7 @@ export function fileBody(
       readerDone = true;
       return false;
     }
+    events.onBytes?.();
     pending = Buffer.concat([pending, Buffer.from(next.value)]);
     return true;
   };
@@ -273,6 +284,7 @@ export function fileBody(
           controller.enqueue(new Uint8Array(Buffer.from(`\r\n--${outgoingBoundary}--\r\n`)));
           controller.close();
           void reader.cancel().catch(() => undefined);
+          events.onEnd?.();
           return;
         }
         if (index === -1 && pending.length > keep) {
@@ -282,13 +294,18 @@ export function fileBody(
           emit(controller, chunk);
           return;
         }
-        if (!(await read())) {
+        const more = await read();
+        // The consumer went away meanwhile (the call to the service aborted): that is not this
+        // module's refusal, so nothing is recorded and nothing more is read.
+        if (finished) return;
+        if (!more) {
           fail(controller, new UploadFormError("malformed", "the body ends inside the file"));
           return;
         }
       }
     },
     cancel(reason) {
+      finished = true;
       void reader.cancel(reason).catch(() => undefined);
     },
   });
