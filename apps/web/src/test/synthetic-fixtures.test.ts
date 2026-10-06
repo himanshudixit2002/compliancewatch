@@ -31,6 +31,8 @@ const ALLOWED: Readonly<Record<string, string>> = {
     "the catalogue's pattern of the regulatory vocabulary its fixtures must not contain",
   "apps/web/e2e/product/journey-product.spec.ts":
     "the product journey asks the seeded product the question cw-product check asks and finds the change of the seed calendar's annual return by its rule key; the answers come from the running product, the spec states no rule",
+  "apps/web/e2e/product/journey-oversight.spec.ts":
+    "the oversight journey finds the fan-out and the change of the seed calendar's annual return by its rule key, as cw-product check does; every count and outcome comes from the running product, the spec states no rule",
 };
 
 /** Realistic return and tax names, the regulator, and the stock business and person names. */
