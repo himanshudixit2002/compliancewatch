@@ -431,7 +431,10 @@ registered, not what became of it. A `reference` or `classified` document keeps 
 whether or not knowledge is on and its registration succeeded (the ingest's result says
 `registered`); a `classified` one stays so while the extraction is off or after it failed; and
 `extracted` says an extraction is stored, whatever its `outcome` (`rule_extraction`), so a
-document the model gave no candidate for is `extracted` too.
+document the model gave no candidate for is `extracted` too. Classified again (a retry, a triage,
+the detector's fresh reading), a document whose extraction by the current prompt is stored stays
+`extracted` while its route still leads to the extraction: that extraction's id is used, so no
+extraction would run again to set it.
 
 A document classified before keeps its classification: a second ingest of the same bytes, a
 triage's continuation and a retry from the parse or the extract stage find it and write nothing.
