@@ -34,6 +34,7 @@ def test_the_candidate_errors_answer_as_the_routes_document() -> None:
     assert PROBLEM_STATUS[errors.RuleKeyUnknownError] == 404
     assert PROBLEM_STATUS[errors.RuleKeyTakenError] == 409
     assert PROBLEM_STATUS[errors.CandidatePayloadInvalidError] == 422
+    assert PROBLEM_STATUS[errors.RuleVersionClosedError] == 409
     incomplete = errors.DraftIncompleteError(["title: missing", "effective_from: missing"])
     assert incomplete.problems == ("title: missing", "effective_from: missing")
     assert incomplete.detail == "title: missing; effective_from: missing"

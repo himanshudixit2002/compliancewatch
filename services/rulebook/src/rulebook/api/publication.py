@@ -5,8 +5,11 @@ sweep; without a bearer the review token opens them all, in header and dual mode
 user is the actor of the step, whatever ``actor_id`` the body names, so two approvals of a
 high-impact version come from two people. An approval marked ``synthetic`` (the local product's
 demo publication) leaves the version needs_review and is refused outside local and test.
-Publishing, withdrawing and the sweep also need ``CW_RULEBOOK_PUBLISH_ENABLED``."""
+Publishing, withdrawing and the sweep also need ``CW_RULEBOOK_PUBLISH_ENABLED``. A version
+drafted from a rule candidate that was rejected is closed: citing, submitting, approving and
+publishing it is 409 ``rulebook-rule-version-closed``."""
 
+from typing import Final
 from uuid import UUID
 
 from fastapi import APIRouter
@@ -35,10 +38,17 @@ from rulebook.api.publication_schemas import (
 
 router = APIRouter(tags=["publication"])
 
+CLOSED: Final = (
+    "A version drafted from a rule candidate that was rejected is closed: 409 "
+    "rulebook-rule-version-closed."
+)
+"""The description of the routes that refuse a closed version."""
+
 
 @router.put(
     "/rule-versions/{rule_version_id}/citations",
     summary="Cite clauses for a draft version; every quote must be in its clause",
+    description=CLOSED,
     responses=problem_responses(401, 403, 404, 409, 422, 503),
 )
 def add_citations(
@@ -53,6 +63,7 @@ def add_citations(
 @router.post(
     "/rule-versions/{rule_version_id}/submit",
     summary="Submit a draft for review; starts a new approval round",
+    description=CLOSED,
     responses=problem_responses(401, 403, 404, 409, 503),
 )
 def submit(rule_version_id: UUID, body: SubmitIn, drafter: Drafting, wired: Wired) -> LifecycleOut:
@@ -82,6 +93,7 @@ def return_to_draft(
 @router.post(
     "/rule-versions/{rule_version_id}/approve",
     summary="Approve a version under review; high-impact versions need two different approvers",
+    description=CLOSED,
     responses=problem_responses(401, 403, 404, 409, 422, 503),
 )
 def approve(
@@ -99,6 +111,7 @@ def approve(
 @router.post(
     "/rule-versions/{rule_version_id}/publish",
     summary="Publish an approved version, apply its relations and write the rule events",
+    description=CLOSED,
     responses=problem_responses(401, 403, 404, 409, 422, 503),
 )
 def publish(

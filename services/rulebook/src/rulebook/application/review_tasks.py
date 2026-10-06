@@ -523,10 +523,10 @@ class DraftFromCandidate:
         new_rule: NewRule | None,
         content: DraftedContent,
     ) -> RuleVersionRecord:
-        """The draft to insert: the next version of the rule with ``rule_key``, or the first of
-        a new one."""
-        latest = uow.rule_versions.latest_version(rule_key)
-        if latest is None:
+        """The draft to insert: the next version of the rule with ``rule_key`` (numbered past
+        every version it has, a closed draft's too), or the first of a new one."""
+        head = uow.rule_versions.lock_rule(rule_key)
+        if head is None:
             if new_rule is None:
                 raise RuleKeyUnknownError(rule_key)
             rule_id, regulator, level = (
@@ -538,8 +538,8 @@ class DraftFromCandidate:
         else:
             if new_rule is not None:
                 raise RuleKeyTakenError(rule_key)
-            rule_id, regulator, level = latest.rule_id, latest.regulator, latest.level
-            number = latest.version + 1
+            rule_id, regulator, level = head.rule_id, head.regulator, head.level
+            number = head.next_version
         if regulator.lower() != candidate.regulator:
             raise InvariantViolationError(
                 f"rule {rule_key} is {regulator}'s and the candidate {candidate.regulator}'s: "

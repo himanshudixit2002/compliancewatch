@@ -22,7 +22,8 @@ the kernel's forms and names what does not map, and ``drafted_content`` applies 
 edits, checks the result as the seed calendar is checked (``drafting.content_problems``) and
 names what the analyst changed. A candidate is ``open`` until drafted, ``drafted`` once a version
 is made from it, then ``approved`` when that version's review round completes, or ``rejected``
-with a reason, before or after drafting.
+with a reason, before or after drafting. A draft made from a rejected candidate is closed
+(``version_closed``): it stays a draft, since no transition discards one, but it never moves on.
 """
 
 import math
@@ -56,6 +57,7 @@ from rulebook.domain.errors import (
     CandidatePayloadInvalidError,
     DraftIncompleteError,
 )
+from rulebook.domain.rule_versions import RuleVersionRecord
 
 HIGH_IMPACT_PRIORITY: Final = 100
 HAND_DRAFT_PRIORITY: Final = 80
@@ -357,7 +359,8 @@ class RuleCandidate:
         return replace(self, status=RuleCandidateStatus.APPROVED, decided_by=by, decided_at=at)
 
     def rejected(self, reason: RuleRejectReason, *, by: UserId, at: datetime) -> "RuleCandidate":
-        """The candidate rejected, before or after drafting; a draft made from it stays."""
+        """The candidate rejected, before or after drafting; a draft made from it stays a draft,
+        closed (``version_closed``)."""
         if self.status not in (RuleCandidateStatus.OPEN, RuleCandidateStatus.DRAFTED):
             raise InvariantViolationError(
                 f"rule candidate {self.candidate_id} was {self.status.value} already"
@@ -370,6 +373,20 @@ class RuleCandidate:
             decided_by=by,
             decided_at=at,
         )
+
+
+def version_closed(version: RuleVersionRecord, candidate: RuleCandidate | None) -> bool:
+    """Whether ``version`` is closed: drafted from ``candidate``, which was rejected, and never
+    published. No transition discards a draft, so a closed version stays a draft, but it never
+    moves on: it is not its rule's latest version (the seed command, ``GET /v1/rulebook/rules``),
+    and nothing cites it, relates from it, submits, approves or publishes it. A version the
+    publish routes published before the rejection stands."""
+    return (
+        candidate is not None
+        and version.candidate_id == candidate.candidate_id
+        and candidate.status is RuleCandidateStatus.REJECTED
+        and version.published_at is None
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -14,7 +14,8 @@ opened, with no transaction of its own: drafting a version from a rule candidate
 relations the analyst picks onto the new draft in the drafting's own transaction.
 ``reopen_relations`` undoes the approvals onto a draft when the rule candidate it was drafted
 from is rejected: it deletes their ``rule_relation`` rows and opens the candidates again, in the
-rejection's transaction, so they can be approved onto another draft.
+rejection's transaction, so they can be approved onto another draft. That draft is closed from
+then on (``publication.require_open``) and takes no relation.
 """
 
 from collections.abc import Mapping, Sequence
@@ -25,6 +26,7 @@ from uuid import UUID
 from domain_kernel.ids import CanonicalEntityId, DocumentId, RuleVersionId
 from domain_kernel.knowledge import EntityType, RelationKind
 from rulebook.application.alignment import Clock, default_clock
+from rulebook.application.publication import require_open
 from rulebook.domain.alignment import Resolved, resolve
 from rulebook.domain.errors import (
     CandidateClosedError,
@@ -200,8 +202,9 @@ def approve_relation(
     note: str = "",
 ) -> Approval:
     """``ApproveRelationCandidate`` inside the caller's transaction: the candidate locked and
-    still open, the version it starts from locked and still a draft, the target known, no
-    supersession cycle; one ``rule_relation`` row and the candidate approved."""
+    still open, the version it starts from locked and still a draft that is not closed
+    (``publication.require_open``), the target known, no supersession cycle; one
+    ``rule_relation`` row and the candidate approved."""
     candidate = uow.candidates.lock(candidate_id)
     if candidate is None:
         raise CandidateNotFoundError(f"relation candidate {candidate_id} does not exist")
@@ -214,6 +217,7 @@ def approve_relation(
         raise RuleVersionNotEditableError(
             f"rule version {from_rule_version_id} is {version.status.value}"
         )
+    require_open(uow, version)
     if (
         target_rule_version_id is not None
         and uow.rules.version_status(target_rule_version_id) is None

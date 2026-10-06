@@ -7080,6 +7080,7 @@
     },
     "/v1/rulebook/review/relations/{candidate_id}/approve": {
       "post": {
+        "description": "The version the relation starts from must be a draft (409\nrulebook-rule-version-not-editable) that is not closed: a draft made from a rule candidate\nthat was rejected takes no relation (409 rulebook-rule-version-closed).",
         "operationId": "approve_relation_v1_rulebook_review_relations__candidate_id__approve_post",
         "parameters": [
           {
@@ -7857,7 +7858,7 @@
     },
     "/v1/rulebook/review/tasks/{task_id}/decide": {
       "post": {
-        "description": "approve submits a draft and approves it: the approval that completes the round (one\napprover, two different ones when high impact) approves the version and decides the task,\nan earlier one leaves the task open for another reviewer, and the same person twice is 409\nrulebook-duplicate-approver. Approving never publishes; POST .../rule-versions/{id}/publish\ndoes. return sends the version back to draft and opens the next task for it; reject closes\nthe task and leaves the version a draft. Both need a note. A candidate task's approval of\nthe round approves its candidate; its rejection names a reason, rejects the candidate before\nor after drafting and writes rule.rejected; before drafting it can only be rejected (409\nrulebook-candidate-not-drafted).",
+        "description": "approve submits a draft and approves it: the approval that completes the round (one\napprover, two different ones when high impact) approves the version and decides the task,\nan earlier one leaves the task open for another reviewer, and the same person twice is 409\nrulebook-duplicate-approver. Approving never publishes; POST .../rule-versions/{id}/publish\ndoes. return sends the version back to draft and opens the next task for it; reject closes\nthe task and leaves the version a draft. Both need a note. A candidate task's approval of\nthe round approves its candidate; its rejection names a reason, rejects the candidate before\nor after drafting and writes rule.rejected; before drafting it can only be rejected (409\nrulebook-candidate-not-drafted). A draft whose candidate is rejected is closed: it stays a\ndraft, is never cited, submitted, approved or published (409 rulebook-rule-version-closed)\nand is no longer its rule's latest version, and the relation candidates approved onto it are\nopen again, their rule relations deleted, for another draft to take.",
         "operationId": "decide_review_task_v1_rulebook_review_tasks__task_id__decide_post",
         "parameters": [
           {
@@ -8503,6 +8504,7 @@
     },
     "/v1/rulebook/rule-versions/{rule_version_id}/approve": {
       "post": {
+        "description": "A version drafted from a rule candidate that was rejected is closed: 409 rulebook-rule-version-closed.",
         "operationId": "approve_v1_rulebook_rule_versions__rule_version_id__approve_post",
         "parameters": [
           {
@@ -8696,6 +8698,7 @@
         ]
       },
       "put": {
+        "description": "A version drafted from a rule candidate that was rejected is closed: 409 rulebook-rule-version-closed.",
         "operationId": "add_citations_v1_rulebook_rule_versions__rule_version_id__citations_put",
         "parameters": [
           {
@@ -8833,6 +8836,7 @@
     },
     "/v1/rulebook/rule-versions/{rule_version_id}/publish": {
       "post": {
+        "description": "A version drafted from a rule candidate that was rejected is closed: 409 rulebook-rule-version-closed.",
         "operationId": "publish_v1_rulebook_rule_versions__rule_version_id__publish_post",
         "parameters": [
           {
@@ -9107,6 +9111,7 @@
     },
     "/v1/rulebook/rule-versions/{rule_version_id}/submit": {
       "post": {
+        "description": "A version drafted from a rule candidate that was rejected is closed: 409 rulebook-rule-version-closed.",
         "operationId": "submit_v1_rulebook_rule_versions__rule_version_id__submit_post",
         "parameters": [
           {
@@ -9381,6 +9386,7 @@
     },
     "/v1/rulebook/rules": {
       "get": {
+        "description": "Each rule with the title of its latest version. A draft made from a rule candidate that\nwas rejected is closed and never its rule's latest version, so a rule only such drafts have\nis left out.",
         "operationId": "list_rules_v1_rulebook_rules_get",
         "responses": {
           "200": {

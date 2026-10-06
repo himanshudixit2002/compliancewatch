@@ -342,7 +342,12 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Approve a candidate into a rule relation from a draft rule version */
+    /**
+     * Approve a candidate into a rule relation from a draft rule version
+     * @description The version the relation starts from must be a draft (409
+     *     rulebook-rule-version-not-editable) that is not closed: a draft made from a rule candidate
+     *     that was rejected takes no relation (409 rulebook-rule-version-closed).
+     */
     post: operations["approve_relation_v1_rulebook_review_relations__candidate_id__approve_post"];
     delete?: never;
     options?: never;
@@ -474,7 +479,10 @@ export type paths = {
      *     the task and leaves the version a draft. Both need a note. A candidate task's approval of
      *     the round approves its candidate; its rejection names a reason, rejects the candidate before
      *     or after drafting and writes rule.rejected; before drafting it can only be rejected (409
-     *     rulebook-candidate-not-drafted).
+     *     rulebook-candidate-not-drafted). A draft whose candidate is rejected is closed: it stays a
+     *     draft, is never cited, submitted, approved or published (409 rulebook-rule-version-closed)
+     *     and is no longer its rule's latest version, and the relation candidates approved onto it are
+     *     open again, their rule relations deleted, for another draft to take.
      */
     post: operations["decide_review_task_v1_rulebook_review_tasks__task_id__decide_post"];
     delete?: never;
@@ -598,7 +606,10 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Approve a version under review; high-impact versions need two different approvers */
+    /**
+     * Approve a version under review; high-impact versions need two different approvers
+     * @description A version drafted from a rule candidate that was rejected is closed: 409 rulebook-rule-version-closed.
+     */
     post: operations["approve_v1_rulebook_rule_versions__rule_version_id__approve_post"];
     delete?: never;
     options?: never;
@@ -615,7 +626,10 @@ export type paths = {
     };
     /** The clauses a rule version cites, with the quotes and their verification */
     get: operations["list_citations_v1_rulebook_rule_versions__rule_version_id__citations_get"];
-    /** Cite clauses for a draft version; every quote must be in its clause */
+    /**
+     * Cite clauses for a draft version; every quote must be in its clause
+     * @description A version drafted from a rule candidate that was rejected is closed: 409 rulebook-rule-version-closed.
+     */
     put: operations["add_citations_v1_rulebook_rule_versions__rule_version_id__citations_put"];
     post?: never;
     delete?: never;
@@ -633,7 +647,10 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Publish an approved version, apply its relations and write the rule events */
+    /**
+     * Publish an approved version, apply its relations and write the rule events
+     * @description A version drafted from a rule candidate that was rejected is closed: 409 rulebook-rule-version-closed.
+     */
     post: operations["publish_v1_rulebook_rule_versions__rule_version_id__publish_post"];
     delete?: never;
     options?: never;
@@ -667,7 +684,10 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Submit a draft for review; starts a new approval round */
+    /**
+     * Submit a draft for review; starts a new approval round
+     * @description A version drafted from a rule candidate that was rejected is closed: 409 rulebook-rule-version-closed.
+     */
     post: operations["submit_v1_rulebook_rule_versions__rule_version_id__submit_post"];
     delete?: never;
     options?: never;
@@ -699,7 +719,12 @@ export type paths = {
       path?: never;
       cookie?: never;
     };
-    /** Rules by key with their latest title */
+    /**
+     * Rules by key with their latest title
+     * @description Each rule with the title of its latest version. A draft made from a rule candidate that
+     *     was rejected is closed and never its rule's latest version, so a rule only such drafts have
+     *     is left out.
+     */
     get: operations["list_rules_v1_rulebook_rules_get"];
     put?: never;
     post?: never;

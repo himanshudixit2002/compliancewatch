@@ -76,6 +76,23 @@ class RuleVersionRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class RuleHead:
+    """A rule as its next version needs it: the rule's id, key, regulator and level, and the
+    highest number its versions have, every version counted (a closed draft keeps its number),
+    so the next one takes ``next_version``."""
+
+    rule_id: RuleId
+    rule_key: str
+    regulator: str
+    level: AttributeLevel
+    last_version: int
+
+    @property
+    def next_version(self) -> int:
+        return self.last_version + 1
+
+
+@dataclass(frozen=True, slots=True)
 class CitationRecord:
     """A rule version's quote of a clause, with the clause's ref and document."""
 

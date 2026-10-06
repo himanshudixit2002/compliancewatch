@@ -142,6 +142,9 @@ def list_relation_candidates(
 def approve_relation(
     candidate_id: UUID, body: ApproveIn, analyst: AnalystWrite, wired: Wired
 ) -> ApprovalOut:
+    """The version the relation starts from must be a draft (409
+    rulebook-rule-version-not-editable) that is not closed: a draft made from a rule candidate
+    that was rejected takes no relation (409 rulebook-rule-version-closed)."""
     approval = wired.approve_relation.run(
         candidate_id,
         RuleVersionId(body.from_rule_version_id),
@@ -171,4 +174,7 @@ def reject_relation(
 
 @router.get("/rules", summary="Rules by key with their latest title", tags=["rules"])
 def list_rules(wired: Wired) -> list[RuleOut]:
+    """Each rule with the title of its latest version. A draft made from a rule candidate that
+    was rejected is closed and never its rule's latest version, so a rule only such drafts have
+    is left out."""
     return [RuleOut.from_summary(rule) for rule in wired.list_rules.run()]

@@ -58,7 +58,12 @@ from rulebook.domain.graph import (
     RelationQuery,
     RelationRecord,
 )
-from rulebook.domain.intake import CandidateSummary, RuleCandidate, RuleCandidateStatus
+from rulebook.domain.intake import (
+    CandidateSummary,
+    RuleCandidate,
+    RuleCandidateStatus,
+    version_closed,
+)
 from rulebook.domain.publication import (
     REPLACING,
     DecisionAction,
@@ -85,6 +90,7 @@ from rulebook.domain.review_tasks import (
 from rulebook.domain.rule_versions import (
     IN_FORCE_STATUSES,
     CitationRecord,
+    RuleHead,
     RuleVersionRecord,
     VersionPage,
     ended_since,
@@ -127,7 +133,6 @@ class _Rule:
     rule_id: UUID
     rule_key: str
     regulator: str
-    title: str
     level: AttributeLevel = AttributeLevel.REGISTRATION
 
 
@@ -577,10 +582,16 @@ class MemoryRuleCatalog:
         self._tables = tables
 
     def list_rules(self) -> tuple[RuleSummary, ...]:
-        return tuple(
-            RuleSummary(rule.rule_key, rule.rule_id, rule.regulator, rule.title)
-            for rule in sorted(self._tables.rules.values(), key=lambda r: r.rule_key)
-        )
+        """Each rule with the title of its latest version, a closed draft skipped, as the
+        Postgres store reads it; a rule with no other version is left out."""
+        found: list[RuleSummary] = []
+        for rule in sorted(self._tables.rules.values(), key=lambda r: r.rule_key):
+            latest = _latest_open(self._tables, rule)
+            if latest is not None:
+                found.append(
+                    RuleSummary(rule.rule_key, rule.rule_id, rule.regulator, latest[1].title)
+                )
+        return tuple(found)
 
     def rule_id(self, rule_key: str) -> UUID | None:
         rule = self._tables.rules.get(rule_key)
@@ -795,27 +806,28 @@ class MemoryRuleVersionRepository:
         version = self._tables.versions.get(entry.rule_version_id)
         return None if version is None else self._tables.rules[version.rule_key].regulator
 
-    def latest_version(self, rule_key: str) -> RuleVersionRecord | None:
+    def lock_rule(self, rule_key: str) -> RuleHead | None:
         """Units of work already run one at a time here, so nothing is locked."""
         rule = self._tables.rules.get(rule_key)
         if rule is None:
             return None
-        versions = [
-            (version_id, version)
-            for version_id, version in self._tables.versions.items()
-            if version.rule_id == rule.rule_id
-        ]
-        if not versions:
-            return None
-        version_id, version = max(versions, key=lambda item: item[1].version)
-        return _version_record(self._tables, version_id, version)
+        return RuleHead(
+            rule_id=RuleId(rule.rule_id),
+            rule_key=rule.rule_key,
+            regulator=rule.regulator,
+            level=rule.level,
+            last_version=max(
+                (v.version for v in self._tables.versions.values() if v.rule_id == rule.rule_id),
+                default=0,
+            ),
+        )
 
     def add_rule_and_version(self, record: RuleVersionRecord, *, new_rule: bool) -> None:
         if new_rule:
             if record.rule_key in self._tables.rules:
                 raise RuleKeyTakenError(record.rule_key)
             self._tables.rules[record.rule_key] = _Rule(
-                record.rule_id.value, record.rule_key, record.regulator, record.title, record.level
+                record.rule_id.value, record.rule_key, record.regulator, record.level
             )
         rule = self._tables.rules[record.rule_key]
         if rule.rule_id != record.rule_id.value:
@@ -850,8 +862,6 @@ class MemoryRuleVersionRepository:
             high_impact=record.high_impact,
             candidate_id=record.candidate_id,
         )
-        # GET /v1/rulebook/rules lists a rule by the title of its latest version.
-        rule.title = record.title
 
 
 class MemoryRuleCandidateRepository:
@@ -1033,6 +1043,27 @@ def _version_record(
         submitted_at=version.submitted_at,
         candidate_id=version.candidate_id,
     )
+
+
+def _closed(tables: _Tables, rule_version_id: RuleVersionId, version: _Version) -> bool:
+    """``intake.version_closed``: drafted from a rule candidate that was rejected, never
+    published."""
+    if version.candidate_id is None:
+        return False
+    candidate = tables.rule_candidates.get(version.candidate_id)
+    return version_closed(_version_record(tables, rule_version_id, version), candidate)
+
+
+def _versions_of(tables: _Tables, rule: _Rule) -> list[tuple[RuleVersionId, _Version]]:
+    """Every version of the rule, by number."""
+    found = [(v_id, v) for v_id, v in tables.versions.items() if v.rule_id == rule.rule_id]
+    return sorted(found, key=lambda item: item[1].version)
+
+
+def _latest_open(tables: _Tables, rule: _Rule) -> tuple[RuleVersionId, _Version] | None:
+    """The rule's latest version, a closed draft skipped; None when it has no other."""
+    open_versions = [item for item in _versions_of(tables, rule) if not _closed(tables, *item)]
+    return open_versions[-1] if open_versions else None
 
 
 def _seed_version(rule: _Rule, seeded: SeedRule, number: int) -> _Version:
@@ -1406,7 +1437,7 @@ class MemoryKnowledgeStore:
         The version's content defaults to empty mappings: nothing here is a regulatory fact."""
         rule_id = RuleId(uuid4())
         with self._lock:
-            self._tables.rules[rule_key] = _Rule(rule_id.value, rule_key, regulator, title, level)
+            self._tables.rules[rule_key] = _Rule(rule_id.value, rule_key, regulator, level)
         version_id = self.add_version(
             rule_key,
             title=title,
@@ -1465,11 +1496,18 @@ class MemoryKnowledgeStore:
 
     def apply_seed(self, calendar: SeedCalendar) -> SeedOutcome:
         """The seed calendar's rules as draft versions, the way ``rulebook-seed`` writes them
-        into Postgres (``SqlAlchemySeedRepository``): a new rule gets version 1; while its
-        latest version is a draft it is updated in place; a version past draft is never changed,
-        and a rule whose content differs from it gets a new draft version. ``seed_status`` is
-        left out of that comparison. A rule whose latest version an analyst edited through its
-        review task, or drafted from a rule candidate, is left alone (``kept_edited``).
+        into Postgres (``SqlAlchemySeedRepository``), rule by rule:
+
+        - a rule with no version, or only closed drafts (``intake.version_closed``), gets the
+          next number;
+        - the seed's own draft (its latest version not drafted from a candidate, while it is a
+          draft) is updated in place, even beside a candidate's draft, unless an analyst edited
+          it through its review task (``kept_edited``);
+        - otherwise the rule's latest version, a closed draft skipped, decides: one drafted from
+          a candidate or edited by an analyst is left alone (``kept_edited``), and one past
+          draft gets a new draft version after it when its content differs (``seed_status`` is
+          left out of that comparison).
+
         Everything written is a draft that needs review; this is what
         ``CW_RULEBOOK_SEED_ON_START`` loads in local and test."""
         created_rules: list[str] = []
@@ -1481,51 +1519,53 @@ class MemoryKnowledgeStore:
             for rule in calendar.rules:
                 stored = self._tables.rules.get(rule.rule_key)
                 if stored is None:
-                    stored = _Rule(uuid4(), rule.rule_key, rule.regulator, rule.title, rule.level)
+                    stored = _Rule(uuid4(), rule.rule_key, rule.regulator, rule.level)
                     self._tables.rules[rule.rule_key] = stored
                     created_rules.append(rule.rule_key)
                 content = seed_content(rule)
-                versions = [
-                    (version_id, version)
-                    for version_id, version in self._tables.versions.items()
-                    if version.rule_id == stored.rule_id
-                ]
-                latest = max(versions, key=lambda item: item[1].version, default=None)
-                if latest is None:
-                    self._tables.versions[RuleVersionId.new()] = _seed_version(stored, rule, 1)
-                    created_versions.append(f"{rule.rule_key}@1")
-                elif latest[1].candidate_id is not None or any(
-                    decision.rule_version_id == latest[0]
-                    and decision.action is DecisionAction.EDITED
-                    for decision in self._tables.decisions
-                ):
-                    kept.append(rule.rule_key)
-                    continue
-                elif latest[1].status is RuleVersionStatus.DRAFT:
-                    latest_id, draft = latest
-                    if _seed_content_of(draft) == content:
-                        unchanged.append(rule.rule_key)
-                        continue
-                    seeded = _seed_version(stored, rule, draft.version)
-                    self._tables.versions[latest_id] = replace(
-                        draft, **{key: getattr(seeded, key) for key in SEED_CONTENT_KEYS}
-                    )
-                    updated.append(f"{rule.rule_key}@{draft.version}")
-                elif reviewed_content(_seed_content_of(latest[1])) == reviewed_content(content):
-                    unchanged.append(rule.rule_key)
-                    continue
-                else:
-                    number = latest[1].version + 1
+                versions = _versions_of(self._tables, stored)
+                number = 1 + (versions[-1][1].version if versions else 0)
+                current = [item for item in versions if not _closed(self._tables, *item)]
+                own = next(
+                    (item for item in reversed(current) if item[1].candidate_id is None), None
+                )
+                if not current:
                     self._tables.versions[RuleVersionId.new()] = _seed_version(stored, rule, number)
                     created_versions.append(f"{rule.rule_key}@{number}")
-                # GET /v1/rulebook/rules lists a rule by the title of its latest version.
-                stored.title = rule.title
+                elif own is not None and own[1].status is RuleVersionStatus.DRAFT:
+                    own_id, draft = own
+                    if self._edited(own_id):
+                        kept.append(rule.rule_key)
+                    elif _seed_content_of(draft) == content:
+                        unchanged.append(rule.rule_key)
+                    else:
+                        seeded = _seed_version(stored, rule, draft.version)
+                        self._tables.versions[own_id] = replace(
+                            draft, **{key: getattr(seeded, key) for key in SEED_CONTENT_KEYS}
+                        )
+                        updated.append(f"{rule.rule_key}@{draft.version}")
+                elif current[-1][1].candidate_id is not None or self._edited(current[-1][0]):
+                    kept.append(rule.rule_key)
+                elif reviewed_content(_seed_content_of(current[-1][1])) == reviewed_content(
+                    content
+                ):
+                    unchanged.append(rule.rule_key)
+                else:
+                    self._tables.versions[RuleVersionId.new()] = _seed_version(stored, rule, number)
+                    created_versions.append(f"{rule.rule_key}@{number}")
         return SeedOutcome(
             tuple(created_rules),
             tuple(created_versions),
             tuple(updated),
             tuple(unchanged),
             tuple(kept),
+        )
+
+    def _edited(self, rule_version_id: RuleVersionId) -> bool:
+        """Whether an analyst edited the version through its review task."""
+        return any(
+            decision.rule_version_id == rule_version_id and decision.action is DecisionAction.EDITED
+            for decision in self._tables.decisions
         )
 
     def add_citation(

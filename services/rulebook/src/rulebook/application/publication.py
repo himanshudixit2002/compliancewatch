@@ -9,7 +9,9 @@ made by no analyst (the local product's demo publication): it counts towards the
 marks the version reviewed, and it is refused outside local and test. Each step is
 one transaction: it locks the version, checks the move against the kernel's transition table,
 writes the new state and appends a row to the decision audit. Publishing writes its events to
-the outbox in the same transaction; ``rulebook.domain.publication`` decides what it changes.
+the outbox in the same transaction; ``rulebook.domain.publication`` decides what it changes. A
+version drafted from a rule candidate that was rejected is closed (``require_open``): it is
+never cited, submitted, approved or published, and stays a draft.
 
 Citing, submitting, returning and approving are also functions that run inside a unit of work
 the caller opened (``add_citations``, ``submit_for_review``, ``return_to_draft``,
@@ -40,6 +42,7 @@ from rulebook.domain.errors import (
     CitationNotVerifiedError,
     DuplicateApproverError,
     PublishingDisabledError,
+    RuleVersionClosedError,
     RuleVersionNotEditableError,
     SyntheticApprovalRefusedError,
     UnknownClauseError,
@@ -48,6 +51,7 @@ from rulebook.domain.errors import (
 from rulebook.domain.events import RuleEvent
 from rulebook.domain.graph import RelationQuery, RelationRecord
 from rulebook.domain.ids import citation_id_for
+from rulebook.domain.intake import version_closed
 from rulebook.domain.publication import (
     REPLACING,
     DecisionAction,
@@ -123,6 +127,23 @@ def _locked(uow: KnowledgeUnitOfWork, rule_version_id: RuleVersionId) -> RuleVer
     return record
 
 
+def require_open(uow: KnowledgeUnitOfWork, version: RuleVersionRecord) -> None:
+    """Refuse a closed version (``intake.version_closed``): one drafted from a rule candidate
+    that was rejected, which never moves on. The caller has locked the version; its candidate is
+    read without a lock, since a rejection locks the candidate and then the version: one that
+    races this step waits for it, then sees what it did."""
+    if version.candidate_id is None:
+        return
+    candidate = uow.rule_candidates.get(version.candidate_id)
+    if candidate is not None and version_closed(version, candidate):
+        reason = "" if candidate.reject_reason is None else f" ({candidate.reject_reason.value})"
+        raise RuleVersionClosedError(
+            f"rule version {version.rule_version_id} was drafted from rule candidate "
+            f"{candidate.candidate_id}, which was rejected{reason}: it stays a draft and never "
+            "moves on; draft the rule again from another candidate"
+        )
+
+
 def _own_relations(
     uow: KnowledgeUnitOfWork, rule_version_id: RuleVersionId
 ) -> Sequence[RelationRecord]:
@@ -173,6 +194,7 @@ def add_citations(
         raise RuleVersionNotEditableError(
             f"rule version {rule_version_id} is {version.status.value}"
         )
+    require_open(uow, version)
     records: dict[UUID, CitationRecord] = {}
     unknown: list[str] = []
     failures: list[str] = []
@@ -228,6 +250,7 @@ def submit_for_review(
 ) -> VersionState:
     """``SubmitForReview`` inside the caller's transaction."""
     version = _locked(uow, rule_version_id)
+    require_open(uow, version)
     RULE_VERSION_TRANSITIONS.assert_transition(version.status, RuleVersionStatus.IN_REVIEW)
     submitted = replace(
         version,
@@ -284,6 +307,7 @@ def approve_version(
     same person twice is ``DuplicateApproverError``. The caller decides whether a synthetic
     approval is allowed."""
     version = _locked(uow, rule_version_id)
+    require_open(uow, version)
     RULE_VERSION_TRANSITIONS.assert_transition(version.status, RuleVersionStatus.APPROVED)
     if version.submitted_at is None:
         raise InvariantViolationError(
@@ -431,6 +455,7 @@ class PublishVersion:
         with self._unit_of_work() as uow:
             uow.rule_versions.lock_publication()
             version = _locked(uow, rule_version_id)
+            require_open(uow, version)
             relations = _own_relations(uow, rule_version_id)
             replaced = [
                 r.to_rule_version_id

@@ -27,7 +27,7 @@ from rulebook.domain.publication import PendingReplacement, RuleVersionDecision
 from rulebook.domain.relations import CandidateStatus, RelationCandidate
 from rulebook.domain.review import EntityReviewItem, MentionGroup, ReviewQueueStats
 from rulebook.domain.review_tasks import QueuedTask, ReviewTask, ReviewTaskStats, TaskQuery
-from rulebook.domain.rule_versions import CitationRecord, RuleVersionRecord, VersionPage
+from rulebook.domain.rule_versions import CitationRecord, RuleHead, RuleVersionRecord, VersionPage
 from rulebook.domain.runs import ExtractionRun, RuleSummary
 from rulebook.domain.search import CitedClause, ClauseEmbedding
 
@@ -270,16 +270,16 @@ class RuleVersionRepository(Protocol):
         ``regulator`` issues, after ``after``, at most ``limit``."""
         ...
 
-    def latest_version(self, rule_key: str) -> RuleVersionRecord | None:
-        """The latest version of the rule with this key, in any status, with the rule locked
-        for the rest of the transaction so two drafts never take one version number; None when
-        no rule has the key."""
+    def lock_rule(self, rule_key: str) -> RuleHead | None:
+        """The rule with this key, locked for the rest of the transaction so two writers of its
+        next version never take one number, with the highest number its versions have, a closed
+        draft's included; None when no rule has the key."""
         ...
 
     def add_rule_and_version(self, record: RuleVersionRecord, *, new_rule: bool) -> None:
         """Insert ``record`` as a new draft version, its rule first when ``new_rule`` (with the
         record's rule id, key, regulator and level). A new rule whose key another rule has is
-        ``RuleKeyTakenError``; the version number must follow the rule's latest."""
+        ``RuleKeyTakenError``; the version number must follow the rule's highest."""
         ...
 
 
@@ -361,7 +361,10 @@ class EventSink(Protocol):
 
 
 class RuleCatalog(Protocol):
-    def list_rules(self) -> tuple[RuleSummary, ...]: ...
+    def list_rules(self) -> tuple[RuleSummary, ...]:
+        """Every rule by key with the title of its latest version, a closed draft skipped
+        (``intake.version_closed``); a rule with no other version is left out."""
+        ...
 
     def rule_id(self, rule_key: str) -> UUID | None: ...
 

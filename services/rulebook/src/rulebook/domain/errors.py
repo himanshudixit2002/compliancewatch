@@ -149,6 +149,15 @@ class RuleVersionNotEditableError(DomainError, ValueError):
     title = "Rule version is not a draft"
 
 
+class RuleVersionClosedError(DomainError, ValueError):
+    """The version was drafted from a rule candidate that was rejected. No transition discards a
+    draft, so it stays one, but it is closed: nothing cites it or relates from it, and it is never
+    submitted, approved or published. Draft the rule again from another candidate."""
+
+    type_slug = "rulebook-rule-version-closed"
+    title = "Rule version is closed"
+
+
 class SupersessionCycleError(DomainError, ValueError):
     type_slug = "rulebook-supersession-cycle"
     title = "Supersession would form a cycle"

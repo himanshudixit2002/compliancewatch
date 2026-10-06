@@ -8,6 +8,7 @@ Needs Docker."""
 import hashlib
 import json
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,7 @@ from py_common.outbox.testing import FakeProducer
 from rulebook import worker
 from rulebook.application.documents import RegisterDocument
 from rulebook.application.intake import IngestRuleCandidate
+from rulebook.application.publication import SubmitForReview
 from rulebook.application.review_tasks import (
     ClaimReviewTask,
     DecideReviewTask,
@@ -49,10 +51,12 @@ from rulebook.application.review_tasks import (
 )
 from rulebook.application.seed_loader import load_calendar
 from rulebook.domain.documents import StoredDocument
+from rulebook.domain.errors import RuleVersionClosedError
 from rulebook.domain.events import RuleRejected
 from rulebook.domain.intake import RuleCandidateStatus, RuleRejectReason
 from rulebook.domain.relations import RelationCandidate
 from rulebook.domain.review_tasks import ReviewDecision, ReviewTaskStatus
+from rulebook.domain.seed import SeedCalendar
 from rulebook.infrastructure.knowledge_repository import PostgresKnowledgeUnitOfWorkFactory
 from rulebook.infrastructure.seed_repository import SqlAlchemySeedRepository
 
@@ -554,7 +558,14 @@ def _relation(factory: PostgresKnowledgeUnitOfWorkFactory) -> UUID:
     return candidate.candidate_id
 
 
-def test_the_seed_command_and_seed_tasks_leave_a_candidates_draft_alone(
+def _retitled(calendar: SeedCalendar, rule_key: str, title: str) -> SeedCalendar:
+    rules = tuple(
+        replace(rule, title=title) if rule.rule_key == rule_key else rule for rule in calendar.rules
+    )
+    return replace(calendar, rules=rules)
+
+
+def test_the_seed_updates_its_own_draft_beside_a_candidates_draft(
     notification: PostgresKnowledgeUnitOfWorkFactory, engine: Engine
 ) -> None:
     factory, clock = notification, Clock(START + timedelta(days=2))
@@ -565,18 +576,68 @@ def test_the_seed_command_and_seed_tasks_leave_a_candidates_draft_alone(
         intake.task.task_id, by=ANALYST, rule_key="gstr1_quarterly"
     )
     assert detail.version is not None
-    outcome = SqlAlchemySeedRepository(engine).apply(load_calendar(ontology_package.load()))
-    assert "gstr1_quarterly" in outcome.kept_edited
+    calendar, seed = load_calendar(ontology_package.load()), SqlAlchemySeedRepository(engine)
+    outcome = seed.apply(calendar)
+    assert "gstr1_quarterly" in outcome.unchanged, "a candidate's draft beside it freezes nothing"
+    edited = seed.apply(_retitled(calendar, "gstr1_quarterly", "Example: edited"))
+    assert edited.updated_drafts == ("gstr1_quarterly@1",)
+    titles = (
+        "SELECT v.version, v.title FROM rule_version v JOIN rule r ON r.id = v.rule_id"
+        " WHERE r.rule_key = 'gstr1_quarterly' ORDER BY v.version"
+    )
+    assert [tuple(row) for row in _rows(engine, titles)] == [
+        (1, "Example: edited"),
+        (2, FIELDS["title"]),
+    ], "the seed updated its own draft, and not the candidate's"
+    assert seed.apply(calendar).updated_drafts == ("gstr1_quarterly@1",)
+    opened = OpenSeedReviewTasks(factory, clock).run().opened
+    assert detail.version.rule_version_id not in {task.rule_version_id for task in opened}
+
+
+def test_a_rejected_candidates_draft_is_closed_on_postgres(
+    notification: PostgresKnowledgeUnitOfWorkFactory, engine: Engine
+) -> None:
+    factory, clock = notification, Clock(START + timedelta(days=4))
+    seeded = "gstr3b_quarterly_group_a"
+    intake = IngestRuleCandidate(factory, clock).run(payload(), uuid4())
+    assert intake.task is not None
+    ClaimReviewTask(factory, clock).run(intake.task.task_id, by=ANALYST)
+    detail = DraftFromCandidate(factory, ontology_package.load, clock).run(
+        intake.task.task_id, by=ANALYST, rule_key=seeded
+    )
+    assert detail.version is not None
+    with factory() as uow:
+        listed = {rule.rule_key: rule.title for rule in uow.rules.list_rules()}
+    assert listed[seeded] == FIELDS["title"], "an open draft from a candidate is the latest version"
+    DecideReviewTask(factory, clock).run(
+        intake.task.task_id,
+        ReviewDecision.REJECT,
+        by=REVIEWER,
+        note="The model read the date wrongly",
+        reason=RuleRejectReason.WRONG_EXTRACTION,
+    )
+    calendar = load_calendar(ontology_package.load())
+    with factory() as uow:
+        listed = {rule.rule_key: rule.title for rule in uow.rules.list_rules()}
+        head = uow.rule_versions.lock_rule(seeded)
+    assert listed[seeded] == calendar.get(seeded).title, (
+        "a closed draft is never the latest version"
+    )
+    assert head is not None
+    assert head.last_version == 2
+    outcome = SqlAlchemySeedRepository(engine).apply(calendar)
+    assert seeded in outcome.unchanged
+    assert seeded not in outcome.kept_edited
+    with pytest.raises(RuleVersionClosedError):
+        SubmitForReview(factory, clock).run(detail.version.rule_version_id, actor_id=ANALYST)
     assert (
         scalar(
             engine,
-            "SELECT title FROM rule_version WHERE id = :id",
+            "SELECT status FROM rule_version WHERE id = :id",
             id=detail.version.rule_version_id.value,
         )
-        == FIELDS["title"]
-    ), "the seed did not overwrite the candidate's draft"
-    opened = OpenSeedReviewTasks(factory, clock).run().opened
-    assert detail.version.rule_version_id not in {task.rule_version_id for task in opened}
+        == "draft"
+    )
 
 
 # ---------------------------------------------------------------- the consumer

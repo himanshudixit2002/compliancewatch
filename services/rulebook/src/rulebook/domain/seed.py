@@ -172,8 +172,9 @@ def reviewed_content(content: Mapping[str, object]) -> dict[str, object]:
 @dataclass(frozen=True, slots=True)
 class SeedOutcome:
     """What one run of the seed did, rule by rule (``rule_key@version`` for versions).
-    ``kept_edited`` names the rules whose latest version an analyst edited through its review
-    task: the analyst's text is the rule's now, and the seed leaves it alone."""
+    ``kept_edited`` names the rules an analyst holds: the seed's own draft edited through its
+    review task, or a latest version edited or drafted from a rule candidate (a closed draft
+    skipped). The analyst's text is the rule's now, and the seed leaves it alone."""
 
     created_rules: tuple[str, ...] = ()
     created_versions: tuple[str, ...] = ()

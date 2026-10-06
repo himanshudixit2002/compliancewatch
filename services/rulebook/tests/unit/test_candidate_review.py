@@ -1,11 +1,14 @@
 """Rule candidates through review on the memory store: the intake of a rule.candidate.created
 payload into a candidate and its task, a version drafted from the candidate (into an existing
 rule or a new one, cited, with a relation candidate approved onto it, the analyst's changes in
-the audit), the decisions on a candidate task with rule.rejected, the queue, the detail, the
-stats, and the seed tasks and seed command that leave candidate drafts alone."""
+the audit), the decisions on a candidate task with rule.rejected, a rejection after drafting that
+closes the draft and reopens its relations, the queue, the detail, the stats, and the seed tasks
+and seed command, which leave candidate drafts alone and skip closed ones."""
 
 import hashlib
 import json
+from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -24,7 +27,14 @@ from domain_kernel.status import RuleVersionStatus
 from py_common.events import to_message
 from rulebook.application.documents import RegisterDocument
 from rulebook.application.intake import IngestRuleCandidate
-from rulebook.application.publication import ApproveVersion, CitationInput, PublishVersion
+from rulebook.application.publication import (
+    AddCitations,
+    ApproveVersion,
+    CitationInput,
+    PublishVersion,
+    SubmitForReview,
+)
+from rulebook.application.relations import ApproveRelationCandidate
 from rulebook.application.review_tasks import (
     ClaimReviewTask,
     DecideReviewTask,
@@ -49,6 +59,7 @@ from rulebook.domain.errors import (
     ReviewTaskNotClaimedError,
     RuleKeyTakenError,
     RuleKeyUnknownError,
+    RuleVersionClosedError,
     UnknownDocumentError,
 )
 from rulebook.domain.events import RuleRejected
@@ -61,6 +72,7 @@ from rulebook.domain.intake import (
 from rulebook.domain.publication import DecisionAction
 from rulebook.domain.relations import CandidateStatus, RelationCandidate
 from rulebook.domain.review_tasks import ReviewDecision, ReviewTaskKind, ReviewTaskStatus
+from rulebook.domain.seed import SeedCalendar
 from rulebook.infrastructure.memory import MemoryEventSink, MemoryKnowledgeStore
 
 SCHEMAS = Path(__file__).resolve().parents[4] / "packages" / "contracts" / "events" / "schemas"
@@ -424,7 +436,7 @@ def test_an_incomplete_draft_lists_every_problem_and_stores_nothing(review: Revi
     with pytest.raises(DraftIncompleteError, match="needs obligation_template"):
         review.draft_new_rule(task_id, edit=DraftEdit({"effective_from": date(2000, 2, 1)}))
     with review.store() as uow:
-        assert uow.rule_versions.latest_version(EXTENSION) is None
+        assert uow.rule_versions.lock_rule(EXTENSION) is None
     detail = review.draft_new_rule(
         task_id,
         edit=DraftEdit(
@@ -488,7 +500,7 @@ def test_a_quote_not_in_its_clause_or_a_relation_of_another_document_stores_noth
     assert detail.candidate is not None
     assert detail.candidate.candidate.status is RuleCandidateStatus.OPEN
     with review.store() as uow:
-        assert uow.rule_versions.latest_version(EXTENSION) is None
+        assert uow.rule_versions.lock_rule(EXTENSION) is None
 
 
 def _other_relation(review: Review) -> UUID:
@@ -802,23 +814,184 @@ def test_the_detail_carries_the_candidate_and_the_draft_it_proposes(review: Revi
     assert not candidate.suggested_rule_known
 
 
+# ---------------------------------------------------------------- closed drafts
+
+
+def rejected_after_drafting(review: Review, rule_key: str = EXTENSION, **draft: Any) -> Any:
+    """A candidate drafted into ``rule_key`` and then rejected; its draft, now closed."""
+    task_id = review.received()
+    review.claim.run(task_id, by=ANALYST)
+    detail = review.draft.run(task_id, by=ANALYST, rule_key=rule_key, **draft)
+    assert detail.version is not None
+    review.decide.run(
+        task_id,
+        ReviewDecision.REJECT,
+        by=REVIEWER,
+        note="The model read the date wrongly",
+        reason=RuleRejectReason.WRONG_EXTRACTION,
+    )
+    return detail.version
+
+
+def test_a_rejected_candidates_draft_is_closed_to_every_step(review: Review) -> None:
+    relation = review.relation()
+    closed = rejected_after_drafting(
+        review, new_rule=NewRule("cbic", AttributeLevel.REGISTRATION)
+    ).rule_version_id
+    steps: dict[str, Callable[[], object]] = {
+        "cite": lambda: AddCitations(review.store, review.clock).run(
+            closed, [CitationInput(clause_id_for(DOC, "en.p3"), QUOTE_EFFECT)]
+        ),
+        "submit": lambda: SubmitForReview(review.store, review.clock).run(closed, actor_id=ANALYST),
+        "approve": lambda: ApproveVersion(review.store, review.clock).run(
+            closed, actor_id=REVIEWER
+        ),
+        "publish": lambda: review.publish.run(closed, actor_id=REVIEWER),
+        "relate": lambda: ApproveRelationCandidate(review.store, review.clock).run(
+            relation, closed, review.monthly, decided_by=str(ANALYST)
+        ),
+    }
+    for step, run in steps.items():
+        with pytest.raises(RuleVersionClosedError, match=r"was rejected \(wrong_extraction\)"):
+            run()
+        with review.store() as uow:
+            record = uow.rule_versions.get(closed)
+        assert record is not None
+        assert record.status is RuleVersionStatus.DRAFT, step
+    assert review.store.rule_relations() == []
+
+
+def test_a_closed_draft_is_never_its_rules_latest_version(review: Review) -> None:
+    closed = rejected_after_drafting(review, rule_key=MONTHLY)
+    assert closed.version == 2
+    with review.store() as uow:
+        listed = {rule.rule_key: rule.title for rule in uow.rules.list_rules()}
+        head = uow.rule_versions.lock_rule(MONTHLY)
+    assert listed[MONTHLY] == "Example monthly return", "not the rejected candidate's title"
+    assert head is not None
+    assert head.last_version == 2, "the closed draft keeps its number"
+    task_id = review.received()
+    review.claim.run(task_id, by=ANALYST)
+    again = review.draft.run(task_id, by=ANALYST, rule_key=MONTHLY)
+    assert again.version is not None
+    assert again.version.version == 3
+    with review.store() as uow:
+        listed = {rule.rule_key: rule.title for rule in uow.rules.list_rules()}
+    assert listed[MONTHLY] == FIELDS["title"], "an open draft is the latest version"
+
+
+def test_a_rule_that_only_closed_drafts_hold_is_not_listed(review: Review) -> None:
+    rejected_after_drafting(review, new_rule=NewRule("cbic", AttributeLevel.REGISTRATION))
+    with review.store() as uow:
+        assert EXTENSION not in {rule.rule_key for rule in uow.rules.list_rules()}
+        head = uow.rule_versions.lock_rule(EXTENSION)
+    assert head is not None, "the rule stays, and its key can be drafted into again"
+    task_id = review.received()
+    review.claim.run(task_id, by=ANALYST)
+    again = review.draft.run(task_id, by=ANALYST, rule_key=EXTENSION)
+    assert again.version is not None
+    assert again.version.version == 2
+    with review.store() as uow:
+        assert EXTENSION in {rule.rule_key for rule in uow.rules.list_rules()}
+
+
 # ---------------------------------------------------------------- seed scoping
 
 
-def test_the_seed_command_leaves_a_candidates_draft_alone(review: Review) -> None:
+def _seed_versions(review: Review, rule_key: str) -> list[tuple[int, str, str, bool]]:
+    """(number, status, title, drafted from a candidate) for every version of the rule."""
+    with review.store() as uow:
+        head = uow.rule_versions.lock_rule(rule_key)
+        assert head is not None
+        return [
+            (record.version, record.status.value, record.title, record.candidate_id is not None)
+            for record in uow.rule_versions.of_rule(head.rule_id)
+        ]
+
+
+def _retitled(calendar: SeedCalendar, rule_key: str, title: str) -> SeedCalendar:
+    rules = tuple(
+        replace(rule, title=title) if rule.rule_key == rule_key else rule for rule in calendar.rules
+    )
+    return replace(calendar, rules=rules)
+
+
+def test_the_seed_updates_its_own_draft_beside_a_candidates_draft(review: Review) -> None:
     calendar = load_calendar(ontology_package.load())
     review.store.apply_seed(calendar)
-    seeded = calendar.get("gstr3b_monthly")
-    task_id = review.received(regulator="cbic", suggested_rule_key=None)
+    seeded = calendar.get("gstr1_quarterly")
+    task_id = review.received(suggested_rule_key=None)
     review.claim.run(task_id, by=ANALYST)
-    review.draft.run(task_id, by=ANALYST, rule_key=seeded.rule_key)
-    outcome = review.store.apply_seed(calendar)
-    assert seeded.rule_key in outcome.kept_edited
+    drafted = review.draft.run(task_id, by=ANALYST, rule_key=seeded.rule_key)
+    assert drafted.version is not None
+    assert seeded.rule_key in review.store.apply_seed(calendar).unchanged
+    outcome = review.store.apply_seed(_retitled(calendar, seeded.rule_key, "Example: edited"))
+    assert outcome.updated_drafts == (f"{seeded.rule_key}@1",)
+    assert outcome.kept_edited == ()
+    assert _seed_versions(review, seeded.rule_key) == [
+        (1, "draft", "Example: edited", False),
+        (2, "draft", FIELDS["title"], True),
+    ], "the candidate's draft is left as it is"
     opened = review.seed.run().opened
+    assert drafted.version.rule_version_id not in {task.rule_version_id for task in opened}
+
+
+def test_the_seed_leaves_a_candidates_version_after_its_own_alone(review: Review) -> None:
+    calendar = load_calendar(ontology_package.load())
+    review.store.apply_seed(calendar)
+    seeded = "gstr3b_monthly"
     with review.store() as uow:
-        drafted = uow.rule_versions.latest_version(seeded.rule_key)
-    assert drafted is not None
-    assert drafted.rule_version_id not in {task.rule_version_id for task in opened}
+        head = uow.rule_versions.lock_rule(seeded)
+        assert head is not None
+        (seed_version,) = uow.rule_versions.of_rule(head.rule_id)
+    SubmitForReview(review.store, review.clock).run(seed_version.rule_version_id, actor_id=ANALYST)
+    task_id = review.received(suggested_rule_key=None)
+    review.claim.run(task_id, by=ANALYST)
+    review.draft.run(task_id, by=ANALYST, rule_key=seeded)
+    outcome = review.store.apply_seed(_retitled(calendar, seeded, "Example: edited"))
+    assert seeded in outcome.kept_edited, "the analyst's draft is the rule's latest version"
+    assert [version[:2] for version in _seed_versions(review, seeded)] == [
+        (1, "in_review"),
+        (2, "draft"),
+    ]
+
+
+def test_a_closed_draft_never_freezes_the_seed(review: Review) -> None:
+    calendar = load_calendar(ontology_package.load())
+    review.store.apply_seed(calendar)
+    seeded = "gstr3b_monthly"
+    rejected_after_drafting(review, rule_key=seeded)
+    again = review.store.apply_seed(calendar)
+    assert seeded in again.unchanged
+    assert again.kept_edited == ()
+    updated = review.store.apply_seed(_retitled(calendar, seeded, "Example: edited"))
+    assert updated.updated_drafts == (f"{seeded}@1",)
+    with review.store() as uow:
+        head = uow.rule_versions.lock_rule(seeded)
+        assert head is not None
+        seed_version = uow.rule_versions.of_rule(head.rule_id)[0]
+    SubmitForReview(review.store, review.clock).run(seed_version.rule_version_id, actor_id=ANALYST)
+    moved = review.store.apply_seed(_retitled(calendar, seeded, "Example: edited again"))
+    assert moved.created_versions == (f"{seeded}@3",), "numbered past the closed draft"
+    assert [version[:3] for version in _seed_versions(review, seeded)] == [
+        (1, "in_review", "Example: edited"),
+        (2, "draft", FIELDS["title"]),
+        (3, "draft", "Example: edited again"),
+    ]
+
+
+def test_the_seed_numbers_a_rule_past_the_closed_drafts_it_only_has(review: Review) -> None:
+    seeded = "gstr3b_monthly"
+    rejected_after_drafting(
+        review, rule_key=seeded, new_rule=NewRule("cbic", AttributeLevel.REGISTRATION)
+    )
+    calendar = load_calendar(ontology_package.load())
+    outcome = review.store.apply_seed(calendar)
+    assert seeded not in outcome.created_rules
+    assert f"{seeded}@2" in outcome.created_versions
+    with review.store() as uow:
+        listed = {rule.rule_key: rule.title for rule in uow.rules.list_rules()}
+    assert listed[seeded] == calendar.get(seeded).title
 
 
 def _matches_its_schema(event: RuleRejected) -> None:

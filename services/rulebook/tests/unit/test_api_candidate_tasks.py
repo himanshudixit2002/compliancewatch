@@ -390,6 +390,40 @@ def test_a_rejection_after_drafting_reopens_the_relations_approved_onto_the_draf
     assert again.status_code == 200, again.text
 
 
+def test_a_rejected_candidates_draft_is_closed_over_http(client: TestClient) -> None:
+    task_id = received(client)
+    claim(client, task_id)
+    drafted = draft(client, task_id, rule_key=MONTHLY, new_rule=None)
+    assert drafted.status_code == 200, drafted.text
+    version = drafted.json()["rule_version"]
+    assert (version["version"], version["title"]) == (2, FIELDS["title"])
+    titles = {rule["rule_key"]: rule["title"] for rule in client.get(f"{BASE}/rules").json()}
+    assert titles[MONTHLY] == FIELDS["title"], "the candidate's draft is the latest version"
+    rejected = decide(
+        client,
+        task_id,
+        REVIEWER_ID,
+        decision="reject",
+        note="The model read the date wrongly",
+        reason="wrong_extraction",
+    )
+    assert rejected.status_code == 200, rejected.text
+    titles = {rule["rule_key"]: rule["title"] for rule in client.get(f"{BASE}/rules").json()}
+    assert titles[MONTHLY] == "Example monthly return", "a closed draft is never the latest"
+    path = f"{BASE}/rule-versions/{version['rule_version_id']}"
+    quote = {"clause_id": str(clause_id_for(DOC, "en.p3")), "quote": QUOTE_EFFECT}
+    refused = [
+        client.put(f"{path}/citations", json={"citations": [quote]}, headers=REVIEW),
+        client.post(f"{path}/submit", json={"actor_id": ANALYST_ID}, headers=REVIEW),
+        client.post(f"{path}/approve", json={"actor_id": REVIEWER_ID}, headers=REVIEW),
+        client.post(f"{path}/publish", json={"actor_id": REVIEWER_ID}, headers=REVIEW),
+    ]
+    assert [(r.status_code, problem(r)) for r in refused] == [
+        (409, "rulebook-rule-version-closed")
+    ] * 4
+    assert client.get(path).json()["status"] == "draft"
+
+
 def test_token_mode_lets_an_analyst_draft_and_not_a_reviewer() -> None:
     with TestClient(app_in("token")) as client:
         stored = client.put(f"{BASE}/documents/{DOC}", json=NOTIFICATION, headers=PIPELINE)

@@ -141,6 +141,7 @@ from rulebook.domain.rule_versions import (
     CITING_STATUSES,
     IN_FORCE_STATUSES,
     CitationRecord,
+    RuleHead,
     RuleVersionRecord,
     VersionPage,
 )
@@ -697,6 +698,7 @@ class SqlAlchemyRuleCatalog:
     def list_rules(self) -> tuple[RuleSummary, ...]:
         latest = (
             select(RuleVersionRow.rule_id, func.max(RuleVersionRow.version).label("version"))
+            .where(~closed_version())
             .group_by(RuleVersionRow.rule_id)
             .subquery()
         )
@@ -960,19 +962,24 @@ class SqlAlchemyRuleVersionRepository:
             for row in self._session.execute(statement).all()
         ]
 
-    def latest_version(self, rule_key: str) -> RuleVersionRecord | None:
-        rule_id = self._session.scalar(
-            select(RuleRow.id).where(RuleRow.rule_key == rule_key).with_for_update()
-        )
-        if rule_id is None:
-            return None
-        row = self._session.execute(
-            _versions()
-            .where(RuleVersionRow.rule_id == rule_id)
-            .order_by(RuleVersionRow.version.desc())
-            .limit(1)
+    def lock_rule(self, rule_key: str) -> RuleHead | None:
+        rule = self._session.execute(
+            select(RuleRow.id, RuleRow.regulator, RuleRow.level)
+            .where(RuleRow.rule_key == rule_key)
+            .with_for_update()
         ).first()
-        return None if row is None else _to_version(*row)
+        if rule is None:
+            return None
+        last = self._session.scalar(
+            select(func.max(RuleVersionRow.version)).where(RuleVersionRow.rule_id == rule.id)
+        )
+        return RuleHead(
+            rule_id=RuleId(rule.id),
+            rule_key=rule_key,
+            regulator=rule.regulator,
+            level=AttributeLevel(rule.level),
+            last_version=int(last or 0),
+        )
 
     def add_rule_and_version(self, record: RuleVersionRecord, *, new_rule: bool) -> None:
         if new_rule:
@@ -1674,6 +1681,17 @@ def _ended_since(since: date) -> ColumnElement[bool]:
         RuleVersionRow.effective_to.is_not(None),
         RuleVersionRow.effective_to >= since,
     )
+
+
+def closed_version() -> ColumnElement[bool]:
+    """``intake.version_closed`` in SQL, over the ``rule_version`` row of the enclosing query:
+    drafted from a rule candidate that was rejected, and never published. The seed command
+    skips such a version too (``seed_repository``)."""
+    rejected = select(RuleCandidateRow.id).where(
+        RuleCandidateRow.id == RuleVersionRow.candidate_id,
+        RuleCandidateRow.status == RuleCandidateStatus.REJECTED.value,
+    )
+    return and_(RuleVersionRow.published_at.is_(None), rejected.exists())
 
 
 def _after(rule_key: str, version: int | None) -> ColumnElement[bool]:

@@ -213,7 +213,10 @@ def decide_review_task(
     the task and leaves the version a draft. Both need a note. A candidate task's approval of
     the round approves its candidate; its rejection names a reason, rejects the candidate before
     or after drafting and writes rule.rejected; before drafting it can only be rejected (409
-    rulebook-candidate-not-drafted)."""
+    rulebook-candidate-not-drafted). A draft whose candidate is rejected is closed: it stays a
+    draft, is never cited, submitted, approved or published (409 rulebook-rule-version-closed)
+    and is no longer its rule's latest version, and the relation candidates approved onto it are
+    open again, their rule relations deleted, for another draft to take."""
     decision = wired.decide_review_task.run(
         task_id,
         body.decision,
