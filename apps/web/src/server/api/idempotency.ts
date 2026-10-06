@@ -99,6 +99,11 @@ export const IDEMPOTENT_ROUTES = {
     method: "POST",
     path: "/v1/notification/bulk",
   },
+  "pipeline.retry-document": {
+    service: "pipeline",
+    method: "POST",
+    path: "/v1/pipeline/documents/{document_id}/retry",
+  },
 } as const satisfies Readonly<Record<string, RouteRef>>;
 
 export type IdempotentOperation = keyof typeof IDEMPOTENT_ROUTES;
