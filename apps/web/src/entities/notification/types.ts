@@ -169,3 +169,37 @@ export interface NotificationPage {
   /** Send as the cursor for the next page; null on the last page. */
   nextCursor: string | null;
 }
+
+/**
+ * A CA firm's bulk change card (`POST /v1/notification/bulk`): one change and the client
+ * businesses it affects, each told once per person who follows it. The answer says what became of
+ * each business, in the order the request named them: its card queued for its client recipients,
+ * already sent to them (`duplicate`), nobody to tell (`no_recipient`), or no open obligation of
+ * the change (`not_affected`, which another tenant's business reads as too).
+ */
+export type BulkNotificationInDto = Schemas["BulkNotificationIn"];
+export type BulkNotificationOutDto = Schemas["BulkNotificationOut"];
+export type BulkOutcome = Schemas["BulkOutcome"];
+
+export interface BulkBusinessResult {
+  businessId: string;
+  outcome: BulkOutcome;
+  /** The obligation the card is about; null when not affected. */
+  obligationId: string | null;
+  /** Client recipients told now, those who had it already, and those with no open address. */
+  queued: number;
+  duplicates: number;
+  unreachable: number;
+}
+
+export interface BulkNotificationResult {
+  ruleVersionId: string;
+  /** Businesses whose card was queued for at least one person. */
+  queued: number;
+  skippedDuplicate: number;
+  skippedNoRecipient: number;
+  skippedNotAffected: number;
+  /** Change cards queued, one per person. */
+  notificationsQueued: number;
+  businesses: readonly BulkBusinessResult[];
+}

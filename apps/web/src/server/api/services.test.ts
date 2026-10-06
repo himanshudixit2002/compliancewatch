@@ -4,6 +4,7 @@ import { fakeFetch, type FakeFetch } from "@/test/fake-fetch";
 import { resetEnvCache } from "../env";
 import { REQUEST_ID_HEADER, TENANT_HEADER, WRITE_TOKEN_HEADER } from "./client";
 import {
+  applicabilityEngineAdminClient,
   applicabilityEngineClient,
   identityClient,
   llmGatewayClient,
@@ -94,6 +95,20 @@ describe("tenant-scoped clients", () => {
     const fake = fakeFetch([{ path: "/v1/profile/ping", body: {} }]);
     await profileClient(ctx(owner, fake)).GET("/v1/profile/ping");
     expect(fake.requests[0]?.url).toBe("http://localhost:9202/v1/profile/ping");
+  });
+});
+
+describe("applicabilityEngineAdminClient", () => {
+  it("sends no tenant header on the engine's admin routes, whoever is signed in", async () => {
+    const fake = fakeFetch([{ path: "/v1/applicability-engine/fan-out-hold", body: {} }]);
+    await applicabilityEngineAdminClient({ fetchImpl: fake.fetchImpl }).GET(
+      "/v1/applicability-engine/fan-out-hold",
+    );
+    expect(fake.requests[0]?.url).toBe(
+      "http://localhost:8004/v1/applicability-engine/fan-out-hold",
+    );
+    expect(fake.requests[0]?.headers[TENANT_HEADER]).toBeUndefined();
+    expect(fake.requests[0]?.headers[WRITE_TOKEN_HEADER]).toBeUndefined();
   });
 });
 
