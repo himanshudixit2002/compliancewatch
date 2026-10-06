@@ -81,3 +81,9 @@ def test_unencrypted_files_are_for_a_local_minio_only() -> None:
             settings(**S3, pipeline_raw_encryption="none", env=env, auth_mode="token")
     kms = settings(**S3, pipeline_raw_encryption="aws:kms", pipeline_raw_kms_key_id="alias/raw")
     assert kms.pipeline_raw_kms_key_id == "alias/raw"
+
+
+def test_crawling_is_off_unless_the_flag_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert settings().pipeline_crawl_enabled is False
+    monkeypatch.setenv("CW_PIPELINE_CRAWL_ENABLED", "true")
+    assert settings().pipeline_crawl_enabled is True

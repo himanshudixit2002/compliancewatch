@@ -1,11 +1,14 @@
-"""Histories recorded before the store replay on today's ingest workflow.
+"""Histories recorded before the store, and before the crawl, replay on today's ingest workflow.
 
-``tests/fixtures/histories`` holds two runs of ``pipeline.ingest_document`` as the worker ran it
-before ``FetchAndStore``: one with knowledge off, one with registration, embedding and the
-extraction child. Both fetched with ``pipeline.fetch_document``, whose result carries the bytes.
-``workflow.patched(STORE_PATCH)`` keeps a workflow like them on that path, so a worker deployed
-with the store finishes them; a workflow that took the new activity unconditionally would not
-replay them.
+``tests/fixtures/histories`` holds two pairs of runs of ``pipeline.ingest_document``, each pair
+one with knowledge off and one with registration, embedding and the extraction child:
+
+- ``ingest-before-store*`` as the worker ran it before ``FetchAndStore``: both fetched with
+  ``pipeline.fetch_document``, whose result carries the bytes. ``workflow.patched(STORE_PATCH)``
+  keeps a workflow like them on that path, so a worker deployed with the store finishes them; a
+  workflow that took the new activity unconditionally would not replay them.
+- ``ingest-with-store*`` as it ran with the store and before the crawl handed an ingest its
+  document (``GIVEN_PATCH``): both discovered the document first.
 """
 
 import json
@@ -25,6 +28,10 @@ HISTORIES = Path(__file__).resolve().parents[1] / "fixtures" / "histories"
 BEFORE_THE_STORE = [
     HISTORIES / "ingest-before-store.json",
     HISTORIES / "ingest-before-store-knowledge.json",
+]
+BEFORE_THE_CRAWL = [
+    HISTORIES / "ingest-with-store.json",
+    HISTORIES / "ingest-with-store-knowledge.json",
 ]
 
 
@@ -49,7 +56,7 @@ def scheduled_activities(path: Path) -> list[str]:
 
 
 def test_the_recorded_histories_fetched_before_the_store() -> None:
-    assert sorted(HISTORIES.glob("*.json")) == sorted(BEFORE_THE_STORE)
+    assert sorted(HISTORIES.glob("*.json")) == sorted([*BEFORE_THE_STORE, *BEFORE_THE_CRAWL])
     for path in BEFORE_THE_STORE:
         names = scheduled_activities(path)
         assert "pipeline.fetch_document" in names
@@ -57,8 +64,19 @@ def test_the_recorded_histories_fetched_before_the_store() -> None:
     assert "pipeline.register_document" in scheduled_activities(BEFORE_THE_STORE[1])
 
 
-@pytest.mark.parametrize("path", BEFORE_THE_STORE, ids=lambda path: path.stem)
-async def test_a_history_from_before_the_store_replays(path: Path) -> None:
+def test_the_histories_with_the_store_discovered_their_document() -> None:
+    for path in BEFORE_THE_CRAWL:
+        names = scheduled_activities(path)
+        assert names[:3] == [
+            "pipeline.discover_document",
+            "pipeline.fetch_and_store",
+            "pipeline.parse_document",
+        ]
+    assert "pipeline.register_document" in scheduled_activities(BEFORE_THE_CRAWL[1])
+
+
+@pytest.mark.parametrize("path", [*BEFORE_THE_STORE, *BEFORE_THE_CRAWL], ids=lambda path: path.stem)
+async def test_a_history_from_before_the_store_or_the_crawl_replays(path: Path) -> None:
     replayed = await replayer(IngestDocumentWorkflow, ExtractKnowledgeWorkflow).replay_workflow(
         history(path)
     )
@@ -73,7 +91,7 @@ class IngestWithoutTheGuard:
     @workflow.run
     async def run(self, request: IngestRequest) -> IngestResult:
         discovered = await DiscoverDocument.schedule(
-            DiscoverRequest(source_id=request.source_id, since=request.since)
+            DiscoverRequest(source_id=request.source_id, since=request.discover_since())
         )
         stored = await FetchAndStore.schedule(discovered)
         return IngestResult(

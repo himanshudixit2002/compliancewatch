@@ -17,3 +17,9 @@ regexTarget = "line"
 regexes = [
   '''rule_key"?\s*(?:==|:|=)\s*"?[a-z][a-z0-9_]*"?''',
 ]
+
+[[allowlists]]
+description = "Raw store keys: <ab>/<sha256> names the SHA-256 of a fetched file's bytes, not a credential (pipeline workflow histories)"
+regexes = [
+  '''^(?:[A-Za-z0-9!_.*'()-]+/)*[0-9a-f]{2}/[0-9a-f]{64}$''',
+]

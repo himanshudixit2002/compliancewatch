@@ -199,7 +199,7 @@ ts-dev: check-pnpm ## next dev (:3000) and whatsapp-bot (:8080) with reload
 	$(PNPM) turbo run dev
 
 # ---- Composition (guide sections 13, 17, 19) -------------------------------------------------
-.PHONY: install lint format typecheck test check eval eval-check label demo runbooks-check migrate run worker relay seed openapi contracts contracts-check hooks ci-lint
+.PHONY: install lint format typecheck test check eval eval-check label demo runbooks-check migrate run worker relay seed openapi contracts contracts-check hooks ci-lint crawl-report
 # The gates `make check` runs. A package adds its own with `CHECKS += <target>` in its section.
 # The prerequisites of check expand a second time when make runs them (.SECONDEXPANSION below),
 # so a `CHECKS +=` line counts wherever it sits in this file.
@@ -270,6 +270,16 @@ seed: check-uv ## Load the rulebook seed calendar as draft rule versions: make s
 backfill: check-uv ## Backfill one regulator source into var/raw: make backfill SERVICE=pipeline ARGS="--source cbic_notifications --since 2026-01-01"
 	@[ "$(SERVICE)" = "pipeline" ] || { echo "usage: make backfill SERVICE=pipeline ARGS=\"--source <key> [--since YYYY-MM-DD] [--limit N] [--list-only]\""; exit 1; }
 	@$(UV) run --package compliancewatch-pipeline pipeline-backfill $(ARGS)
+
+# The crawl's report over the pipeline store and the F1 check (every new CBIC notification detected
+# within 6 hours over the window): exit 0 when F1 is met, 1 when it is not, 2 when the store cannot
+# be read. It reads the database make migrate uses; on a deployment, run pipeline-crawl-report with
+# the pipeline's CW_DATABASE_URL.
+crawl-report: check-uv ## Crawl runs, failures, gaps and detection delays per source, and the F1 check: make crawl-report [ARGS="--days 30 --json"]
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3Dpipeline%2Cpublic"; \
+	CW_DATABASE_URL="$$url" CW_DB_SCHEMA=pipeline CW_PIPELINE_STORE=postgres CW_LOG_LEVEL=WARNING \
+	  $(UV) run --package compliancewatch-pipeline pipeline-crawl-report $(ARGS)
 
 worker: check-uv ## Run a service's worker process, python -m <pkg>.worker (consumers, relay, periodic jobs, Temporal): make worker SERVICE=pipeline
 	@[ -n "$(SERVICE)" ] || { echo "usage: make worker SERVICE=<pipeline|notification|...>"; exit 1; }
@@ -434,7 +444,8 @@ web-dev: check-pnpm ## next dev on WEB_PORT from .env; /admin lists the internal
 # clone and CI see the same states: memory stores (no container), the profile's built-in static
 # GSTIN lookup (the demo GSTIN pre-fills), the billing provider "none" (subscribe answers 503;
 # BILLING=memory starts subscriptions in memory for a manual demo, and make web-e2e takes the
-# same BILLING so the billing spec expects that state), the KAG layer off, the inter-service URLs
+# same BILLING so the billing spec expects that state), the KAG layer off, the pipeline's crawl
+# off (it would read the live regulator sites), the inter-service URLs
 # on the same base, and the rulebook's two tokens from .env or the placeholders local-write-token
 # and local-review-token (not secrets), as make product passes them. The rulebook publishes
 # (CW_RULEBOOK_PUBLISH_ENABLED=true) and, on the memory store, starts with the seed calendar's
@@ -467,8 +478,8 @@ web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_B
 	    url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$${schema}%2Cpublic"; \
 	  fi; \
 	  CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$$schema" \
-	  CW_IDENTITY_STORE=$(STORE) CW_PROFILE_STORE=$(STORE) CW_RULEBOOK_STORE=$(STORE) CW_OBLIGATION_STORE=$(STORE) CW_NOTIFICATION_STORE=$(STORE) CW_EVAL_STORE=$(STORE) CW_APPLICABILITY_ENGINE_STORE=$(STORE) CW_LLM_LEDGER=$(STORE) \
-	  CW_PROFILE_GSTIN_LOOKUP=static CW_BILLING_PROVIDER=$(BILLING) CW_RULEBOOK_PUBLISH_ENABLED=true CW_QA_KAG_ENABLED=false \
+	  CW_IDENTITY_STORE=$(STORE) CW_PROFILE_STORE=$(STORE) CW_RULEBOOK_STORE=$(STORE) CW_OBLIGATION_STORE=$(STORE) CW_NOTIFICATION_STORE=$(STORE) CW_EVAL_STORE=$(STORE) CW_APPLICABILITY_ENGINE_STORE=$(STORE) CW_PIPELINE_STORE=$(STORE) CW_LLM_LEDGER=$(STORE) \
+	  CW_PROFILE_GSTIN_LOOKUP=static CW_BILLING_PROVIDER=$(BILLING) CW_RULEBOOK_PUBLISH_ENABLED=true CW_QA_KAG_ENABLED=false CW_PIPELINE_CRAWL_ENABLED=false \
 	  CW_RULEBOOK_SEED_ON_START=$$seed CW_RULEBOOK_WRITE_TOKEN="$$token" CW_RULEBOOK_REVIEW_TOKEN="$$review" \
 	  CW_PROFILE_URL="http://localhost:$$((base+2))" CW_RULEBOOK_URL="http://localhost:$$((base+3))" \
 	  CW_OBLIGATION_URL="http://localhost:$$((base+5))" CW_LLM_GATEWAY_URL="http://localhost:$$((base+8))" \
@@ -589,7 +600,9 @@ openapi-ts-check: check-pnpm ## The generated OpenAPI types match the committed 
 # tokens local-write-token and local-review-token (not secrets; values in .env win); the profile's
 # static GSTIN lookup, so the demo GSTIN pre-fills; the notification sink in place of the real
 # channels, recording into var/product/sink.jsonl, with a five-second batching window so a change
-# card goes within the check's wait; and message links to the product's web app. The web app gets
+# card goes within the check's wait; message links to the product's web app; and the pipeline's
+# crawl off (CW_PIPELINE_CRAWL_ENABLED=false, whatever .env says): a crawl reads the live
+# regulator sites, which the local product and CI never do. The web app gets
 # every CW_WEB_*_URL at the internal listener and builds into .next/product, so it runs beside a
 # make web-dev of the same checkout (Next allows one dev server per build directory). Pids and
 # logs are under var/product; make product-down stops only the processes whose pids it recorded,
@@ -613,7 +626,7 @@ PRODUCT_ENV = CW_AUTH_MODE=header CW_MVP_HOST=127.0.0.1 \
   CW_RULEBOOK_REVIEW_TOKEN="$${CW_RULEBOOK_REVIEW_TOKEN:-local-review-token}" \
   CW_PROFILE_GSTIN_LOOKUP=static CW_NOTIFICATION_CHANNELS=sink \
   CW_NOTIFICATION_SINK_PATH=$(PRODUCT_DIR)/sink.jsonl CW_NOTIFICATION_BATCH_WINDOW_SECONDS=5 \
-  CW_WEB_BASE_URL="http://localhost:$${WEB_PORT:-3000}"
+  CW_WEB_BASE_URL="http://localhost:$${WEB_PORT:-3000}" CW_PIPELINE_CRAWL_ENABLED=false
 
 product: check-uv ## The local product: make dev, make migrate, the seed calendar, cw-mvp serve and worker (Kafka, Temporal on), next dev on WEB_PORT (3000): make product [WEB=0] [WEB_PORT=3400]
 	@$(MAKE) --no-print-directory dev

@@ -1,6 +1,11 @@
 """Ingest one document: discover, fetch and store, parse, and with ``knowledge`` register it in
 the rulebook, embed its clauses for search and extract its knowledge in a child workflow.
 
+A crawl (``workflows.crawl_source``) starts one ingest per new document it listed and hands it
+the document as listed (``IngestRequest.discovered``): that ingest skips the discovery, behind
+``workflow.patched(GIVEN_PATCH)``. A request without it discovers the first document since
+``since``, as before.
+
 Each step is an activity with its own retries and timeouts; the workflow itself does no I/O.
 The fetch is ``FetchAndStore``: the bytes go to the raw store, the document's row and its
 ``document.discovered`` to the pipeline's store in one transaction, and the workflow passes on the
@@ -47,14 +52,19 @@ from uuid import UUID
 
 TASK_QUEUE = "pipeline"
 STORE_PATCH = "pipeline-store-v1"
+GIVEN_PATCH = "pipeline-crawl-v1"
 REGISTER_PATCH = "kag-register-v1"
 EMBED_PATCH = "kag-embed-v1"
 EXTRACT_PATCH = "kag-extract-v1"
 
 
 class IngestRequest(Frozen):
+    """``discovered``: the document a crawl listed, to ingest as it is; without it the ingest
+    discovers the first document the source lists since ``since``."""
+
     source_id: UUID
-    since: datetime
+    since: datetime | None = None
+    discovered: Discovered | None = None
     knowledge: bool = False
     regulator: str = ""
 
@@ -63,6 +73,19 @@ class IngestRequest(Frozen):
         if self.knowledge and not self.regulator.strip():
             raise ValueError("regulator is required when knowledge is on")
         return self
+
+    @model_validator(mode="after")
+    def _a_document_or_a_time(self) -> Self:
+        if self.since is None and self.discovered is None:
+            raise ValueError("an ingest request names the document, or a time to discover since")
+        if self.discovered is not None and self.discovered.source_id != self.source_id:
+            raise ValueError("the document belongs to another source")
+        return self
+
+    def discover_since(self) -> datetime:
+        if self.since is None:
+            raise ValueError("this request names its document and discovers nothing")
+        return self.since
 
 
 class IngestResult(Frozen):
@@ -90,9 +113,13 @@ class IngestResult(Frozen):
 class IngestDocumentWorkflow:
     @workflow.run
     async def run(self, request: IngestRequest) -> IngestResult:
-        discovered: Discovered = await DiscoverDocument.schedule(
-            DiscoverRequest(source_id=request.source_id, since=request.since)
-        )
+        discovered: Discovered
+        if request.discovered is not None and workflow.patched(GIVEN_PATCH):
+            discovered = request.discovered
+        else:
+            discovered = await DiscoverDocument.schedule(
+                DiscoverRequest(source_id=request.source_id, since=request.discover_since())
+            )
         storage_key, duplicate = "", False
         if workflow.patched(STORE_PATCH):
             stored = await FetchAndStore.schedule(discovered)

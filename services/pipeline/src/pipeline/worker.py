@@ -1,12 +1,18 @@
 """The pipeline worker: ``python -m pipeline.worker`` (locally ``make worker SERVICE=pipeline``).
 
-Registers the ingest workflow and its activities on the ``pipeline`` task queue against
-``CW_TEMPORAL_ADDRESS``. The activities read the built-in sources of the adapter registry
-(``RegistryCatalog``) over one polite client, parse each document as its source's document type
-(``SourceParsers``), keep the fetched files in the raw store ``CW_PIPELINE_RAW_STORE`` names and
-record them, with their document.discovered, in the store ``CW_PIPELINE_STORE`` names, which must
-be postgres: ``pipeline.stores``. The outbox relay that publishes the events runs on its own
+Registers the crawl, ingest and extraction workflows and their activities on the ``pipeline``
+task queue against ``CW_TEMPORAL_ADDRESS``. The activities read the sources the store holds
+(``StoreCatalog``: each adapter built from its row's adapter type and parameters) over one polite
+client, parse each document as its source's document type (``SourceParsers``), keep the fetched
+files in the raw store ``CW_PIPELINE_RAW_STORE`` names and record them, with their
+document.discovered, in the store ``CW_PIPELINE_STORE`` names, which must be postgres:
+``pipeline.stores``. The outbox relay that publishes the events runs on its own
 (``make relay SERVICE=pipeline``), or in the combined worker.
+
+When it starts, the worker adds the built-in sources the store lacks (``SyncSources``, a startup
+hook). With ``CW_PIPELINE_CRAWL_ENABLED`` on it also runs the crawl's tick every 60 seconds
+(``pipeline-crawl-tick``, ``ScheduleCrawls``): a crawl of every enabled, unpaused source whose
+cadence has passed, started on Temporal under an id per source and cadence slot.
 
 Registration with the rulebook, clause embedding and knowledge extraction are wired to
 ``CW_RULEBOOK_URL`` and ``CW_LLM_GATEWAY_URL`` and only call them when
@@ -15,10 +21,12 @@ Registration with the rulebook, clause embedding and knowledge extraction are wi
 and llm:call), and the rulebook's writes also carry ``CW_RULEBOOK_WRITE_TOKEN`` while it is set.
 
 ``components(settings)`` is what the worker runs (``py_common.runtime.WorkerComponents``): one
-Temporal worker on the ``pipeline`` task queue with ``WORKFLOWS`` and ``activities(settings)``.
-A process that hosts several services adds it to its own.
+Temporal worker on the ``pipeline`` task queue with ``WORKFLOWS`` and ``activities(settings)``,
+the source sync at start, and the tick while crawling is on. A process that hosts several
+services adds them to its own.
 """
 
+from collections.abc import Callable
 from typing import Any, Final, Protocol
 
 from domain_kernel.protocols import DocumentParser
@@ -29,6 +37,7 @@ from pipeline.application.activities import (
     FetchDocument,
     ParseDocument,
 )
+from pipeline.application.crawl import FinishCrawl, ListNewDocuments, ScheduleCrawls
 from pipeline.application.embedding import EmbeddingStage
 from pipeline.application.knowledge_activities import (
     EmbedClauses,
@@ -38,9 +47,11 @@ from pipeline.application.knowledge_activities import (
     SubmitRelations,
 )
 from pipeline.application.relations import LlmRelationExtractor, RelationStage
+from pipeline.application.sources import SyncSources
 from pipeline.application.store_document import StoreDocument
 from pipeline.domain.ports import (
     ClauseIndexSink,
+    CrawlStarter,
     Embedder,
     KnowledgeSink,
     RawStore,
@@ -48,21 +59,40 @@ from pipeline.domain.ports import (
     SourceCatalog,
 )
 from pipeline.domain.repository import UnitOfWorkFactory
-from pipeline.infrastructure.adapters import RegistryCatalog
+from pipeline.infrastructure.adapters import SOURCES, StoreCatalog
 from pipeline.infrastructure.gateway import GatewayEmbedder, GatewayProvider
 from pipeline.infrastructure.http import PoliteClient
 from pipeline.infrastructure.parsers import SourceParsers
 from pipeline.infrastructure.prompts import PROMPTS_DIR, load_prompt
 from pipeline.infrastructure.rulebook_client import HttpRulebook
+from pipeline.infrastructure.temporal import TemporalCrawls
 from pipeline.settings import PipelineSettings
 from pipeline.stores import raw_store_of, unit_of_work_of
-from pipeline.workflows import TASK_QUEUE, ExtractKnowledgeWorkflow, IngestDocumentWorkflow
+from pipeline.workflows import (
+    TASK_QUEUE,
+    CrawlSourceWorkflow,
+    ExtractKnowledgeWorkflow,
+    IngestDocumentWorkflow,
+)
 from py_common.auth import service_auth_from
-from py_common.runtime import TemporalComponent, WorkerComponents, run_worker_process
+from py_common.runtime import (
+    LifecycleHook,
+    PeriodicComponent,
+    TemporalComponent,
+    WorkerComponents,
+    run_worker_process,
+)
 from py_common.temporal import ActivityBase, WorkerConfig
 
 SERVICE_NAME = "pipeline-worker"
-WORKFLOWS: Final[tuple[type[Any], ...]] = (IngestDocumentWorkflow, ExtractKnowledgeWorkflow)
+WORKFLOWS: Final[tuple[type[Any], ...]] = (
+    IngestDocumentWorkflow,
+    ExtractKnowledgeWorkflow,
+    CrawlSourceWorkflow,
+)
+TICK_JOB: Final = "pipeline-crawl-tick"
+TICK_SECONDS: Final = 60.0
+SYNC_HOOK: Final = "pipeline-sources-sync"
 
 
 class Rulebook(KnowledgeSink, RulebookReader, ClauseIndexSink, Protocol):
@@ -82,13 +112,14 @@ def activities(
 ) -> list[ActivityBase[Any, Any]]:
     """The worker's activities. The keywords replace what the settings would build: ``sink``
     the rulebook client, ``stage`` the relation stage, ``embedder`` the gateway's embeddings,
-    ``sources`` the registry's sources, ``parser`` the parsers by source, ``units`` the store
+    ``sources`` the store's sources, ``parser`` the parsers by source, ``units`` the store
     and ``raw_store`` the raw store (tests pass memory ones and the sample source)."""
     settings = settings or PipelineSettings(_env_file=None, service_name=SERVICE_NAME)
-    catalog = sources or RegistryCatalog(PoliteClient())
+    records = units or unit_of_work_of(settings)
+    catalog = sources or StoreCatalog(records, PoliteClient())
     parsers = parser or SourceParsers(catalog)
     raw = raw_store or raw_store_of(settings)
-    store = StoreDocument(catalog, units or unit_of_work_of(settings), raw)
+    store = StoreDocument(catalog, records, raw)
     auth = service_auth_from(settings)
     token = settings.rulebook_write_token
     rulebook: Rulebook = sink or HttpRulebook(
@@ -120,18 +151,49 @@ def activities(
         ExtractMentions(rulebook, rulebook, enabled=enabled),
         ProposeRelations(rulebook, relations, enabled=enabled),
         SubmitRelations(rulebook, enabled=enabled),
+        ListNewDocuments(records, catalog, knowledge=enabled),
+        FinishCrawl(records),
     ]
 
 
-def components(settings: PipelineSettings) -> WorkerComponents:
-    """The Temporal worker of the ``pipeline`` task queue: every workflow and activity. Its
-    activities record what they fetch in Postgres, so it needs ``CW_PIPELINE_STORE=postgres``."""
+def tick_job(schedule: ScheduleCrawls) -> Callable[[], None]:
+    """One tick: a crawl of every source that is due."""
+
+    def run() -> None:
+        schedule.run()
+
+    return run
+
+
+def components(
+    settings: PipelineSettings,
+    *,
+    units: UnitOfWorkFactory | None = None,
+    starter: CrawlStarter | None = None,
+) -> WorkerComponents:
+    """The Temporal worker of the ``pipeline`` task queue (every workflow and activity), the
+    sync of the built-in sources at start, and, while ``CW_PIPELINE_CRAWL_ENABLED`` is on, the
+    crawl's 60-second tick. Its activities record what they fetch in Postgres, so it needs
+    ``CW_PIPELINE_STORE=postgres``; ``units`` and ``starter`` replace the store and the Temporal
+    starter in tests."""
     if settings.pipeline_store != "postgres":
         raise ValueError("the pipeline worker needs CW_PIPELINE_STORE=postgres")
+    records = units or unit_of_work_of(settings)
+    sync = SyncSources(records, [spec.definition() for spec in SOURCES.values()])
+    periodic: tuple[PeriodicComponent, ...] = ()
+    if settings.pipeline_crawl_enabled:
+        schedule = ScheduleCrawls(records, starter or TemporalCrawls(settings), enabled=True)
+        periodic = (PeriodicComponent(TICK_JOB, tick_job(schedule), interval_seconds=TICK_SECONDS),)
     return WorkerComponents(
+        periodic=periodic,
         temporal=(
-            TemporalComponent(WorkerConfig(task_queue=TASK_QUEUE), WORKFLOWS, activities(settings)),
-        )
+            TemporalComponent(
+                WorkerConfig(task_queue=TASK_QUEUE),
+                WORKFLOWS,
+                activities(settings, units=records),
+            ),
+        ),
+        startup=(LifecycleHook(SYNC_HOOK, sync.run),),
     )
 
 

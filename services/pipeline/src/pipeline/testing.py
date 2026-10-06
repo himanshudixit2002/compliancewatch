@@ -1,5 +1,5 @@
 """Test doubles for adapter tests and demos: recorded sources, a scripted model and embedder,
-a rulebook, an S3 endpoint.
+a rulebook, an S3 endpoint, a recorded adapter type and a crawl starter.
 
 ``FixtureTransport`` maps a request to a file under ``tests/fixtures`` (or a literal body) and
 answers 404 for anything else, so a test that reaches an unrecorded URL fails loudly instead of
@@ -9,23 +9,39 @@ write API with the same rules: ids from the kernel, a different parse of stored 
 a clause's first vector from a model kept. ``StubS3`` answers the raw store's S3 calls the way
 S3 does, signature checks included, from a dict. ``sample_activities`` are the worker's
 activities on the sample notification's source, the plain-text parser and memory stores.
+
+The crawl's tests and demos read recorded sources only: ``RECORDED_TYPE`` is an adapter type,
+``recorded``, whose adapter lists the CBIC notifications its ``numbers`` parameter names from
+the recorded listing files (whatever today's date) and fetches their recorded PDFs through the
+client it is given, the fixture transport of ``recorded_sources``; ``recorded_types()`` are the
+registry's types with it. ``MemoryCrawls`` is a crawl starter that records what it would start
+and refuses an id it has seen, as Temporal does. ``pipeline_settings`` are the app's settings
+for tests: memory stores and the shared write token ``WRITE_TOKEN``.
 """
 
 import hashlib
 import json
 import math
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Final, Self
 from urllib.parse import unquote, urlsplit
 
 import httpx2
+from pydantic import Field, model_validator
 
-from domain_kernel.documents import ParsedDocument, clause_id_for
-from domain_kernel.ids import ClauseId, DocumentId
+from domain_kernel.documents import (
+    DiscoveredDocument,
+    DocumentRef,
+    DocumentType,
+    ParsedDocument,
+    RawDocument,
+    clause_id_for,
+)
+from domain_kernel.ids import ClauseId, DocumentId, SourceId
 from domain_kernel.knowledge import EntityType
 from domain_kernel.llm import CompletionRequest, CompletionResponse
 from domain_kernel.vectors import EMBEDDING_DIMS, Vector
@@ -45,8 +61,13 @@ from pipeline.domain.knowledge import (
     RuleKey,
     StagingReport,
 )
+from pipeline.domain.ports import CrawlStart
 from pipeline.domain.repository import UnitOfWorkFactory
+from pipeline.infrastructure.adapters._shared import on_or_after, parse_iso_date
+from pipeline.infrastructure.adapters.cbic import CbicAdapter
+from pipeline.infrastructure.adapters.registry import ADAPTER_TYPES, AdapterType, Parameters
 from pipeline.infrastructure.fakes import FakePlainTextParser, sample_catalog
+from pipeline.infrastructure.http import ClientConfig, PoliteClient
 from pipeline.infrastructure.memory import MemoryStore
 from pipeline.infrastructure.raw_store import MemoryRawStore
 from pipeline.infrastructure.s3 import S3Credentials, sign
@@ -469,3 +490,135 @@ def sample_activities(
         raw_store=raw_store or MemoryRawStore(),
         **overrides,
     )
+
+
+FIXTURES: Final = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
+"""The recorded responses, beside the service's sources (not in the image)."""
+WRITE_TOKEN: Final = "test-write-token"
+"""The shared write token ``pipeline_settings`` configures; send it as ``x-cw-write-token``."""
+RECORDED_LISTINGS: Final = (
+    "cbic/notifications-2026-p0.json",
+    "cbic/notifications-2025-p0.json",
+    "cbic/notifications-2025-p1.json",
+)
+"""The recorded CBIC notification listings, newest first."""
+
+
+def pipeline_settings(**overrides: Any) -> PipelineSettings:
+    """Settings that ignore the repo ``.env``: memory stores and ``WRITE_TOKEN``."""
+    values: dict[str, Any] = {
+        "_env_file": None,
+        "service_name": "pipeline",
+        "pipeline_store": "memory",
+        "pipeline_raw_store": "memory",
+        "rulebook_write_token": WRITE_TOKEN,
+    }
+    values.update(overrides)
+    return PipelineSettings(**values)
+
+
+def recorded_client(fixtures: Path = FIXTURES) -> PoliteClient:
+    """A polite client over ``recorded_sources``: no delay, no robots.txt, no network."""
+    return PoliteClient(
+        ClientConfig(min_delay_seconds=0, respect_robots=False),
+        transport=recorded_sources(fixtures),
+        sleep=lambda _: None,
+    )
+
+
+class RecordedParameters(Parameters):
+    """The recorded CBIC notifications the source lists, by number (``01/2026-Central Tax``);
+    each must have its PDF recorded (``RECORDED_NOTIFICATIONS``)."""
+
+    numbers: tuple[str, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _recorded(self) -> Self:
+        missing = [number for number in self.numbers if number not in RECORDED_NOTIFICATIONS]
+        if missing:
+            raise ValueError(f"no recorded PDF for {', '.join(missing)}")
+        return self
+
+
+class RecordedAdapter:
+    """Lists the named notifications from the recorded listing files, newest first, those
+    published since ``since``; fetches them as the CBIC adapter does, through ``client``."""
+
+    def __init__(
+        self,
+        client: PoliteClient,
+        source_id: SourceId,
+        numbers: Sequence[str],
+        *,
+        fixtures: Path = FIXTURES,
+    ) -> None:
+        self._cbic = CbicAdapter(client, source_id, listing="notifications", category="Central Tax")
+        self._source_id = source_id
+        self._items = [
+            item
+            for item in _recorded_items(fixtures)
+            if str(item.get("notificationNo", "")) in set(numbers)
+        ]
+
+    def list_documents(self, since: datetime) -> Iterable[DiscoveredDocument]:
+        for item in self._items:
+            published = parse_iso_date(item.get("notificationDt"))
+            if not on_or_after(published, since):
+                continue
+            path = str(item.get("docFilePath", "")).replace("\\", "/")
+            yield DiscoveredDocument(
+                ref=DocumentRef(
+                    self._source_id,
+                    f"{CBIC}/content/pdf/{path}",
+                    external_ref=str(item["notificationNo"]),
+                ),
+                title=str(item.get("notificationName", "")).strip(),
+                published_at=published,
+            )
+
+    def fetch(self, ref: DocumentRef) -> RawDocument:
+        return self._cbic.fetch(ref)
+
+
+def _recorded_items(fixtures: Path) -> Iterator[Mapping[str, Any]]:
+    for relative in RECORDED_LISTINGS:
+        items = json.loads((fixtures / relative).read_text(encoding="utf-8"))
+        yield from (item for item in items if isinstance(item, Mapping))
+
+
+def _recorded(client: PoliteClient, source_id: SourceId, parameters: Any) -> RecordedAdapter:
+    return RecordedAdapter(client, source_id, parameters.numbers)
+
+
+RECORDED_TYPE: Final = AdapterType(
+    "recorded",
+    "CBIC",
+    "taxinformation.cbic.gov.in",
+    RecordedParameters,
+    _recorded,
+    lambda _: DocumentType.NOTIFICATION,
+)
+"""An adapter type over the recorded CBIC notifications, for tests and demos only."""
+
+
+def recorded_types() -> dict[str, AdapterType]:
+    """The registry's adapter types and ``recorded``."""
+    return {**ADAPTER_TYPES, RECORDED_TYPE.name: RECORDED_TYPE}
+
+
+@dataclass
+class MemoryCrawls:
+    """A ``CrawlStarter`` that keeps what it starts and refuses an id it has seen, as Temporal's
+    REJECT_DUPLICATE does; ``fail`` makes the next start raise it."""
+
+    started: list[CrawlStart] = field(default_factory=list)
+    fail: Exception | None = None
+
+    def start(self, start: CrawlStart) -> bool:
+        if self.fail is not None:
+            error, self.fail = self.fail, None
+            raise error
+        if any(seen.workflow_id == start.workflow_id for seen in self.started):
+            return False
+        self.started.append(start)
+        return True
