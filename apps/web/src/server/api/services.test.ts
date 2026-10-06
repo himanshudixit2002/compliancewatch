@@ -4,6 +4,7 @@ import { fakeFetch, type FakeFetch } from "@/test/fake-fetch";
 import { resetEnvCache } from "../env";
 import { REQUEST_ID_HEADER, TENANT_HEADER, WRITE_TOKEN_HEADER } from "./client";
 import {
+  applicabilityEngineClient,
   identityClient,
   llmGatewayClient,
   notificationClient,
@@ -55,6 +56,7 @@ describe("tenant-scoped clients", () => {
     await llmGatewayClient(c).GET("/v1/llm-gateway/models");
     await obligationClient(c).GET("/v1/obligation/ping");
     await qaClient(c).GET("/v1/qa/ping");
+    await applicabilityEngineClient(c).GET("/v1/applicability-engine/ping");
     expect(fake.requests.map((request) => request.url)).toEqual([
       "http://localhost:8001/v1/identity/billing/plans",
       "http://localhost:8002/v1/profile/ping",
@@ -62,6 +64,7 @@ describe("tenant-scoped clients", () => {
       "http://localhost:8008/v1/llm-gateway/models",
       "http://localhost:8005/v1/obligation/ping",
       "http://localhost:8007/v1/qa/ping",
+      "http://localhost:8004/v1/applicability-engine/ping",
     ]);
     for (const request of fake.requests) {
       expect(request.headers[TENANT_HEADER]).toBe(TENANT);

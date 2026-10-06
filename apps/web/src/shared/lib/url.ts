@@ -52,3 +52,14 @@ export function activeHref(hrefs: readonly string[], currentPath: string): strin
   }
   return best;
 }
+
+/** An http or https address as a link target; anything else (javascript:, data:, junk) is null. */
+export function safeHttpUrl(value: string | null | undefined): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
