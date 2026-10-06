@@ -18,11 +18,12 @@ from pathlib import Path
 from domain_kernel.documents import DiscoveredDocument, DocumentType, ParsedDocument, RawDocument
 from domain_kernel.protocols import DocumentParser, SourceAdapter
 from pipeline.application.detector import Detection, detect
+from pipeline.domain.ports import RawStore
 from pipeline.infrastructure.adapters import SOURCES, build_adapter
 from pipeline.infrastructure.http import ClientConfig, PoliteClient
 from pipeline.infrastructure.parsers import HtmlParser, PdfParser
 from pipeline.infrastructure.parsers.pdf import UnparsedDocumentError
-from pipeline.infrastructure.raw_store import LocalRawStore, RawDocumentStore
+from pipeline.infrastructure.raw_store import LocalRawStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +51,7 @@ def parsers_for(doc_type: DocumentType) -> list[DocumentParser]:
 def ingest(
     adapter: SourceAdapter,
     parsers: Sequence[DocumentParser],
-    store: RawDocumentStore,
+    store: RawStore,
     *,
     source_key: str,
     since: datetime,
@@ -74,7 +75,7 @@ def ingest(
             _emit(out, f"{source_key}\t{discovered.published_at}\tfetch failed\t{exc}")
             continue
         fetched += 1
-        uri = store.put(source_key, raw)
+        uri = store.uri(store.put(raw))
         parser = next((p for p in parsers if p.supports(raw)), None)
         try:
             if parser is None:

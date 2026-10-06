@@ -12,6 +12,7 @@ import pytest
 from cw_mvp.exposure import EXPOSURE
 from cw_mvp.registry import (
     JWKS_PATH,
+    RAW_STORE_SUFFIX,
     REGISTRY,
     ServiceEntry,
     check_overrides,
@@ -123,7 +124,10 @@ def test_the_routes_a_caller_reaches_are_the_ones_listed() -> None:
 def test_a_store_setting_is_named_after_its_service(entry: ServiceEntry[Any]) -> None:
     own = set(entry.settings_type.model_fields) - set(Settings.model_fields)
     stores = {field for field in own if field.endswith("_store")}
-    assert stores == ({entry.store_field} if entry.store_field else set())
+    file_stores = {field for field in stores if field.endswith(RAW_STORE_SUFFIX)}
+    assert stores - file_stores == ({entry.store_field} if entry.store_field else set())
+    prefix = entry.name.replace("-", "_") + "_"
+    assert all(field.startswith(prefix) for field in file_stores)
 
 
 def test_the_memory_services_put_every_store_in_memory() -> None:

@@ -1,5 +1,5 @@
 """What can go wrong when the pipeline hands regulator records and their embeddings to the
-rulebook.
+rulebook, and when it keeps fetched files in the raw store.
 
 Plain exceptions, like the rest of the pipeline's: they cross Temporal as failure types, and the
 activities list the ones a retry cannot fix as non-retryable.
@@ -30,3 +30,17 @@ class EmbeddingContractError(Exception):
     """The gateway answered an embedding call with vectors the rulebook cannot store: another
     length than ``EMBEDDING_DIMS``, another count than the texts sent, or another model than the
     run pinned. The same call gets the same answer, so it is not retried."""
+
+
+class RawStoreError(Exception):
+    """The raw store did not store or return a file: refused, unreachable or failing after its
+    retries. Worth retrying unless a subclass says otherwise."""
+
+
+class RawObjectMissingError(RawStoreError):
+    """No file is stored under the key. A record names it, so the store lost it or the
+    deployment points at another store; retrying cannot help."""
+
+
+class RawObjectCorruptError(RawStoreError):
+    """The stored bytes do not have the digest their key names; retrying cannot help."""

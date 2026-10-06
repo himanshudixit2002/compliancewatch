@@ -20,7 +20,10 @@ entry names:
   authenticator and a source of service tokens minted in the process.
 
 An entry's ``store_field`` is the setting that picks where the service keeps its state,
-``<service>_store`` (``obligation_store``), when its settings have one.
+``<service>_store`` (``obligation_store``), when its settings have one. A setting that picks
+where a service keeps files rather than its state ends in ``_raw_store`` instead, such as the
+pipeline's ``pipeline_raw_store``: the worker shares no state through it, and check-config has
+its own rule for it.
 
 A package that adds ``build_app`` arguments, worker components, URL settings or routes that call
 other services registers them here in the same change; ``tests/unit/test_registry.py`` fails
@@ -64,6 +67,8 @@ from rulebook.worker import components as rulebook_components
 JWKS_PATH: Final = "/v1/identity/.well-known/jwks.json"
 URL_SUFFIX: Final = "_url"
 STORE_SUFFIX: Final = "_store"
+RAW_STORE_SUFFIX: Final = "_raw_store"
+"""A setting that picks where a service keeps files, not its state (``pipeline_raw_store``)."""
 SHARED_FIELDS_SET_PER_SERVICE: Final = frozenset({"service_name", "database_url", "db_schema"})
 """The shared settings each service gets its own value of; the rest are the root's."""
 

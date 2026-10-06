@@ -80,11 +80,11 @@ def test_main_runs_a_recorded_backfill(
     assert code == 0
     lines = capsys.readouterr().out.strip().splitlines()
     assert lines[-1] == "gstn_advisories: listed 3, fetched 3, parsed 3, unparsed 0, failed 0"
-    stored = list((tmp_path / "raw" / "gstn_advisories").glob("*.html"))
+    stored = sorted((tmp_path / "raw").glob("*/*"))
     assert len(stored) == 3
-    assert (
-        LocalRawStore(tmp_path / "raw").get(stored[0].resolve().as_uri()) == stored[0].read_bytes()
-    )
+    key = f"{stored[0].parent.name}/{stored[0].name}"
+    assert LocalRawStore(tmp_path / "raw").get(key) == stored[0].read_bytes()
+    assert any(line.endswith(stored[0].resolve().as_uri()) for line in lines)
 
 
 def test_main_fails_when_nothing_could_be_fetched(

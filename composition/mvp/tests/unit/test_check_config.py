@@ -20,6 +20,10 @@ STAGING: dict[str, str] = {
     "CW_LLM_PROVIDER": "vercel",
     "CW_AI_GATEWAY_API_KEY": "gateway-key-of-the-check",
     "CW_LLM_LEDGER": "postgres",
+    "CW_PIPELINE_RAW_STORE": "s3",
+    "CW_PIPELINE_RAW_BUCKET": "cw-raw-staging",
+    "CW_PIPELINE_RAW_ACCESS_KEY_ID": "raw-key-of-the-check",
+    "CW_PIPELINE_RAW_SECRET_ACCESS_KEY": "raw-secret-of-the-check",
 }
 """A staging environment with nothing to refuse."""
 PRODUCTION = STAGING | {"CW_ENV": "prod", "CW_AUTH_MODE": "token"}
@@ -306,6 +310,45 @@ def test_the_pipeline_needs_the_write_token_outside_token_mode(
         assert only(found).message.startswith(
             "CW_PIPELINE_KNOWLEDGE_ENABLED in dual mode needs CW_RULEBOOK_WRITE_TOKEN"
         )
+
+
+@pytest.mark.parametrize("base", [STAGING, PRODUCTION], ids=["staging", "prod"])
+@pytest.mark.parametrize("store", ["local", "memory"])
+def test_the_worker_fetches_documents_only_into_s3(
+    monkeypatch: pytest.MonkeyPatch, base: dict[str, str], store: str
+) -> None:
+    fetching = {"worker_temporal_enabled": "true", "service_client_secret": "worker-secret-x"}
+    found = report(monkeypatch, base, pipeline_raw_store=store, **fetching)
+    assert only(found).where == "pipeline"
+    assert only(found).message.startswith(f"CW_PIPELINE_RAW_STORE={store} keeps the regulator")
+    assert only(found).message.endswith(
+        "needs s3 while CW_WORKER_TEMPORAL_ENABLED has the worker fetch documents"
+    )
+    idle = report(monkeypatch, base, pipeline_raw_store=store, worker_temporal_enabled="false")
+    assert idle.ok, lines(idle)
+    s3 = report(monkeypatch, base, pipeline_raw_store="s3", **fetching)
+    assert s3.ok, lines(s3)
+
+
+def test_local_and_test_may_fetch_into_a_local_raw_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    local = {"CW_LLM_PROVIDER": "fake", "CW_WORKER_TEMPORAL_ENABLED": "true"}
+    found = report(monkeypatch, local, env="local", pipeline_raw_store="local")
+    assert found.ok, lines(found)
+
+
+@pytest.mark.parametrize(
+    ("changes", "says"),
+    [
+        ({"pipeline_raw_bucket": None}, "CW_PIPELINE_RAW_STORE=s3 needs CW_PIPELINE_RAW_BUCKET"),
+        ({"pipeline_raw_encryption": "none"}, "CW_PIPELINE_RAW_ENCRYPTION=none stores"),
+    ],
+)
+def test_the_s3_raw_store_is_checked_in_the_pipelines_words(
+    monkeypatch: pytest.MonkeyPatch, changes: dict[str, str | None], says: str
+) -> None:
+    found = report(monkeypatch, STAGING, **changes)
+    assert only(found).where == "pipeline"
+    assert says in only(found).message
 
 
 @pytest.mark.parametrize("switch", ["worker_kafka_enabled", "worker_temporal_enabled"])
