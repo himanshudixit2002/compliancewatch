@@ -21,11 +21,13 @@ from domain_kernel.documents import DocumentType
 from domain_kernel.ids import DocumentId, UserId
 from pipeline.application.activities import ParseRequest, Stored
 from pipeline.application.classify import ClassifyDocument
+from pipeline.application.extraction import RULE_PROMPT_REF
 from pipeline.application.sources import AdminAction
 from pipeline.application.tasks import ResolveTask, triage_workflow_id
 from pipeline.domain.classification import TRIAGE, Relevance, TriageDecision, TypeConfidence
 from pipeline.domain.errors import TaskClosedError
 from pipeline.domain.events import DocumentClassified
+from pipeline.domain.extraction import ExtractionOutcome, RuleExtraction, candidate_id_for
 from pipeline.domain.raw_documents import DocumentStatus
 from pipeline.domain.tasks import PipelineTask, TaskKind, TaskStatus
 from pipeline.infrastructure.adapters import RegistryAdapterTypes, RegistryCatalog
@@ -198,6 +200,39 @@ def test_a_relevant_triage_classifies_the_document_and_continues_it(triage: Tria
     assert len(triage.classified()) == 2
     other = triage.resolve(task, {"relevance": "relevant", "doc_type": "notification"})
     assert (other.status_code, problem(other)) == (409, "pipeline-task-closed")
+
+
+def test_a_triage_on_to_the_extraction_keeps_an_extracted_document_extracted(
+    triage: Triage,
+) -> None:
+    """A document extracted before a fresh reading held it for triage: its extraction's id is
+    used, so a decision that sends it on to the extraction leaves it extracted."""
+    task = triage.conflict()
+    document_id = DocumentId(task.document_id.value)
+    with triage.store() as unit:
+        unit.extractions.add(
+            RuleExtraction(
+                document_id=document_id,
+                prompt_version=RULE_PROMPT_REF,
+                candidate_id=candidate_id_for(document_id, RULE_PROMPT_REF),
+                outcome=ExtractionOutcome.UNPARSEABLE,
+                model="fake/echo",
+                attempts=2,
+                source_key="cbic_notifications",
+                doc_type=DocumentType.NOTIFICATION,
+                regulator="CBIC",
+                issues=(),
+                citation_count=0,
+                confidence=0.0,
+                needs_review=True,
+                answer="",
+                ontology_version="1",
+                extracted_at=NOW,
+            )
+        )
+    response = triage.resolve(task, {"relevance": "relevant", "doc_type": "circular"})
+    assert response.status_code == 200, response.text
+    assert response.json()["task"]["document"]["status"] == "extracted"
 
 
 def test_an_irrelevant_triage_sets_the_document_aside(triage: Triage) -> None:

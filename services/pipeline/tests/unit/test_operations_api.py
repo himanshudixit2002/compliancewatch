@@ -491,12 +491,9 @@ def test_a_held_document_and_nothing_to_extract_are_refused(ops: Ops) -> None:
     assert short.status_code == 422
 
 
-def test_an_extracted_document_has_nothing_left_to_extract(ops: Ops) -> None:
-    document_id = ops.upload(NOTIFICATION)["document_id"]
-    ops.classify(document_id)
-    extract = ops.retry(document_id, "example-key-11", stage="extract")
-    assert extract.status_code == 202, extract.text
-    ops.ingests.finish()
+def extracted(ops: Ops, document_id: str) -> None:
+    """The document's extraction by the current prompt, stored as the worker would, with its
+    status."""
     stored = DocumentId(UUID(document_id))
     with ops.store() as unit:
         unit.extractions.add(
@@ -519,9 +516,37 @@ def test_an_extracted_document_has_nothing_left_to_extract(ops: Ops) -> None:
                 extracted_at=NOW,
             )
         )
+        unit.documents.set_status(stored, DocumentStatus.EXTRACTED)
+
+
+def test_an_extracted_document_has_nothing_left_to_extract(ops: Ops) -> None:
+    document_id = ops.upload(NOTIFICATION)["document_id"]
+    ops.classify(document_id)
+    extract = ops.retry(document_id, "example-key-11", stage="extract")
+    assert extract.status_code == 202, extract.text
+    ops.ingests.finish()
+    extracted(ops, document_id)
     again = ops.retry(document_id, "example-key-12", stage="extract")
     assert (again.status_code, problem(again)) == (409, "pipeline-retry-refused")
     assert "is extracted already" in again.json()["detail"]
+
+
+def test_a_type_given_to_an_extracted_document_keeps_it_extracted_on_that_route(
+    ops: Ops,
+) -> None:
+    """Its extraction's id is used, so no extraction would set it extracted again: a type that
+    still leads to the extraction leaves it extracted, one kept for reference moves it."""
+    document_id = ops.upload(NOTIFICATION)["document_id"]
+    ops.classify(document_id)
+    extracted(ops, document_id)
+    circular = ops.retry(document_id, "example-key-15", doc_type="circular")
+    assert circular.status_code == 202, circular.text
+    assert circular.json()["reclassified"] is True
+    assert circular.json()["document"]["status"] == "extracted"
+    ops.ingests.finish()
+    reference = ops.retry(document_id, "example-key-16", doc_type="press_release")
+    assert reference.status_code == 202, reference.text
+    assert reference.json()["document"]["status"] == "reference"
 
 
 def test_in_token_mode_an_admin_retries_and_an_analyst_reads(token: Ops) -> None:

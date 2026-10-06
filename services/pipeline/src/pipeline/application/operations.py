@@ -36,7 +36,7 @@ from domain_kernel.ids import DocumentId
 from pipeline.application.extraction import RULE_PROMPT_REF
 from pipeline.application.sources import AdminAction, require_reason
 from pipeline.application.tasks import manual_parse_workflow_id, triage_workflow_id
-from pipeline.domain.classification import Classification, Route, extracts_rules
+from pipeline.domain.classification import Classification, Route, extracts_rules, status_after
 from pipeline.domain.crawl import CrawlRun
 from pipeline.domain.errors import (
     DocumentNotFoundError,
@@ -403,8 +403,10 @@ class RetryDocument:
         now: datetime,
         reason: str,
     ) -> RawDocumentRecord:
-        """The person's type as the document's classification, with its status and its
-        document.classified; the stored document's own type (its uploader's) never changes."""
+        """The person's type as the document's classification, with its status (``extracted``
+        kept while the type still leads to the extraction and the document's extraction by the
+        current prompt is stored) and its document.classified; the stored document's own type
+        (its uploader's) never changes."""
         given = Classification.given(
             record.document_id, doc_type=doc_type, by=_person(admin.actor), at=now, reason=reason
         )
@@ -412,7 +414,10 @@ class RetryDocument:
             unit.classifications.add(given)
         else:
             unit.classifications.save(given)
-        unit.documents.set_status(record.document_id, given.route.status)
+        extracted = unit.extractions.get(record.document_id, RULE_PROMPT_REF) is not None
+        unit.documents.set_status(
+            record.document_id, status_after(given.route, extracted=extracted)
+        )
         unit.events.publish(
             DocumentClassified.of(
                 given, source_id=source_id_of(record.source_key), source_key=record.source_key

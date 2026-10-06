@@ -34,7 +34,10 @@ anything is registered, in the transaction of the classification:
   extraction is off, when it failed, and when knowledge is off;
 - ``extracted``, set by the stored extraction: an extraction is stored, whatever its outcome,
   so an ``unparseable`` one, with no candidate for an analyst to review, is ``extracted`` too
-  (``domain.extraction``).
+  (``domain.extraction``). A document classified again (a retry, a triage, the detector's fresh
+  reading) stays ``extracted`` while its route still leads to the extraction and its extraction
+  by the current prompt is stored (``status_after``): that extraction's id is used, so no
+  extraction would run again to set it.
 """
 
 from collections.abc import Sequence
@@ -117,6 +120,15 @@ _STATUS: Final = {
     Route.IRRELEVANT: DocumentStatus.IRRELEVANT,
     Route.TRIAGE: DocumentStatus.TRIAGE,
 }
+
+
+def status_after(route: Route, *, extracted: bool) -> DocumentStatus:
+    """The status a document gets when it is classified (again): its route's, except that one
+    whose extraction by the current prompt is stored (``extracted``) stays ``extracted`` while
+    the route still leads to the extraction."""
+    if extracted and route is Route.EXTRACT:
+        return DocumentStatus.EXTRACTED
+    return route.status
 
 
 def route_of(doc_type: DocumentType, relevance: Relevance, confidence: TypeConfidence) -> Route:

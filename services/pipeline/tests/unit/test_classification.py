@@ -19,6 +19,7 @@ from pipeline.domain.classification import (
     extracts_rules,
     reasons_of,
     route_of,
+    status_after,
 )
 from pipeline.domain.raw_documents import DocumentStatus
 from pipeline.domain.tasks import TaskId
@@ -107,6 +108,13 @@ def test_the_route_and_status_follow_from_the_classification(
     found = classification(doc_type=doc_type, relevance=relevance, confidence=confidence)
     assert found.route is route
     assert route.stops is (route in (Route.TRIAGE, Route.IRRELEVANT))
+
+
+def test_an_extracted_document_classified_again_stays_extracted_on_its_way_there() -> None:
+    assert status_after(Route.EXTRACT, extracted=True) is DocumentStatus.EXTRACTED
+    assert status_after(Route.EXTRACT, extracted=False) is DocumentStatus.CLASSIFIED
+    for route in (Route.REFERENCE, Route.IRRELEVANT, Route.TRIAGE):
+        assert status_after(route, extracted=True) is route.status, route
 
 
 def test_rules_are_extracted_from_notifications_circulars_and_act_amendments_only() -> None:

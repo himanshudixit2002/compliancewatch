@@ -17,7 +17,9 @@ triage's resolution and a dismissal.
 - ``ResolveTask`` of a triage: the analyst's decision (``domain.classification.TriageDecision``:
   relevant with a type, or irrelevant) is stored on the task's resolution and becomes the
   document's classification, ``certain``, by the ``triage`` classifier; in one transaction with
-  the document's status, its ``document.classified`` and the audit row. The raw document's own
+  the document's status (``extracted`` kept for a document whose extraction by the current
+  prompt is stored, while its route leads there: ``domain.classification.status_after``), its
+  ``document.classified`` and the audit row. The raw document's own
   ``doc_type`` (the uploader's) is never changed. A relevant document then continues through the
   ingest of the stored document (``pipeline-triage-<task>``), which finds the decision, registers
   the document as the type it names while knowledge is on, and extracts its rule candidate while
@@ -40,8 +42,9 @@ from uuid import UUID
 from domain_kernel.audit import AuditActor, AuditActorKind, AuditEntry
 from domain_kernel.documents import DocumentRef, DocumentType, RawDocument
 from domain_kernel.events import utc_now
+from pipeline.application.extraction import RULE_PROMPT_REF
 from pipeline.application.sources import AdminAction, require_reason
-from pipeline.domain.classification import Classification, TriageDecision
+from pipeline.domain.classification import Classification, TriageDecision, status_after
 from pipeline.domain.errors import (
     DocumentNotFoundError,
     TaskClosedError,
@@ -306,7 +309,10 @@ class ResolveTask:
                 unit.classifications.add(classification)
             else:
                 unit.classifications.save(classification)
-            unit.documents.set_status(record.document_id, classification.route.status)
+            extracted = unit.extractions.get(record.document_id, RULE_PROMPT_REF) is not None
+            unit.documents.set_status(
+                record.document_id, status_after(classification.route, extracted=extracted)
+            )
             unit.events.publish(
                 DocumentClassified.of(
                     classification,

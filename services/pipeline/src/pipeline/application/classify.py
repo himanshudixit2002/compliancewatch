@@ -19,8 +19,10 @@ A document classified before (a retry, a second ingest of the same bytes, a pers
 its classification: nothing is read again or written, and the result says ``created=False``. A
 retry from the classify stage asks for it ``fresh``: the detector reads the document again and,
 when it reads it another way, its classification replaces the detector's earlier one, with the
-status, a document.classified and, for a conflict, a triage task. A person's decision (a triage,
-a type given on a retry) is never read again: the detector does not replace a person.
+status (``extracted`` kept while the route still leads to the extraction and its extraction by
+the current prompt is stored), a document.classified and, for a conflict, a triage task. A
+person's decision (a triage, a type given on a retry) is never read again: the detector does not
+replace a person.
 """
 
 import dataclasses
@@ -41,7 +43,8 @@ from pipeline.application.activities import (
     parse_request,
 )
 from pipeline.application.detector import detect
-from pipeline.domain.classification import Classification, Route
+from pipeline.application.extraction import RULE_PROMPT_REF
+from pipeline.domain.classification import Classification, Route, status_after
 from pipeline.domain.errors import ClassifiedMeanwhileError, DocumentNotFoundError
 from pipeline.domain.events import DocumentClassified
 from pipeline.domain.ports import DocumentParsers, RawStore
@@ -251,7 +254,8 @@ class ClassifyDocument(ActivityBase[ClassifyRequest, Classified]):
                 )
                 fresh = dataclasses.replace(fresh, task_id=task.id)
             unit.classifications.save(fresh)
-            unit.documents.set_status(document_id, fresh.route.status)
+            extracted = unit.extractions.get(document_id, RULE_PROMPT_REF) is not None
+            unit.documents.set_status(document_id, status_after(fresh.route, extracted=extracted))
             unit.events.publish(
                 DocumentClassified.of(
                     fresh, source_id=SourceId(request.source_id), source_key=source_key

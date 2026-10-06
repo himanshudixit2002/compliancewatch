@@ -14,9 +14,11 @@ from domain_kernel.documents import DocumentRef, DocumentType, RawDocument, docu
 from domain_kernel.ids import DocumentId
 from pipeline.application.activities import ParseRequest, Stored
 from pipeline.application.classify import ClassifyDocument, ClassifyRequest
+from pipeline.application.extraction import RULE_PROMPT_REF
 from pipeline.domain.classification import Classification, Relevance, Route, TypeConfidence
 from pipeline.domain.errors import ClassifiedMeanwhileError, DocumentNotFoundError
 from pipeline.domain.events import DocumentClassified
+from pipeline.domain.extraction import ExtractionOutcome, RuleExtraction, candidate_id_for
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.sources import Source
 from pipeline.domain.tasks import TaskKind, TaskStatus
@@ -389,6 +391,59 @@ async def test_a_fresh_reading_replaces_the_detectors_earlier_one() -> None:
     again = await pipeline.activity.run(ClassifyRequest(parse=request, fresh=True))
     assert (again.route, again.created) == ("extract", False), "the same reading writes nothing"
     assert len(pipeline.events()) == 1
+
+
+def extracted(pipeline: Pipeline, request: ParseRequest) -> None:
+    """The document's extraction by the current prompt, stored as an unparseable answer."""
+    document_id = DocumentId(request.document_id)
+    with pipeline.store() as unit:
+        unit.extractions.add(
+            RuleExtraction(
+                document_id=document_id,
+                prompt_version=RULE_PROMPT_REF,
+                candidate_id=candidate_id_for(document_id, RULE_PROMPT_REF),
+                outcome=ExtractionOutcome.UNPARSEABLE,
+                model="fake/echo",
+                attempts=2,
+                source_key="cbic_notifications",
+                doc_type=DocumentType.CIRCULAR,
+                regulator="CBIC",
+                issues=(),
+                citation_count=0,
+                confidence=0.0,
+                needs_review=True,
+                answer="",
+                ontology_version="1",
+                extracted_at=NOW,
+            )
+        )
+
+
+async def test_a_fresh_reading_of_an_extracted_document_keeps_it_extracted() -> None:
+    """The detector once read it as a circular, which was extracted; read again it is a
+    notification, still on its way to the extraction, whose id is used: it stays extracted.
+    Read again as nothing regulatory, it is set aside."""
+    pipeline = Pipeline()
+    request = pipeline.stored(NOTIFICATION, title="Notification No. 99/2026 - Central Tax")
+    circular = earlier(request, doc_type=DocumentType.CIRCULAR, relevance=Relevance.RELEVANT)
+    store_earlier(pipeline, circular, DocumentStatus.EXTRACTED)
+    extracted(pipeline, request)
+    found = await pipeline.activity.run(ClassifyRequest(parse=request, fresh=True))
+    assert (found.route, found.doc_type, found.created) == ("extract", "notification", True)
+    document_id = DocumentId(request.document_id)
+    assert pipeline.store.documents[document_id].status is DocumentStatus.EXTRACTED
+
+    manual = pipeline.stored(MANUAL, title="Reset Password User Manual")
+    store_earlier(
+        pipeline,
+        earlier(manual, doc_type=DocumentType.CIRCULAR, relevance=Relevance.RELEVANT),
+        DocumentStatus.EXTRACTED,
+    )
+    extracted(pipeline, manual)
+    aside = await pipeline.activity.run(ClassifyRequest(parse=manual, fresh=True))
+    assert aside.route == "irrelevant"
+    status = pipeline.store.documents[DocumentId(manual.document_id)].status
+    assert status is DocumentStatus.IRRELEVANT
 
 
 async def test_a_fresh_reading_never_replaces_a_persons_decision() -> None:
