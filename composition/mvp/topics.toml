@@ -36,6 +36,7 @@ replication_factor = 3
 # Regulatory and platform events, of no tenant: a few a day at most, so one partition keeps them
 # in the order they were published, and a month lets a consumer that fell behind, or a new one,
 # still see every recent change to the rules.
+"document.classified" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "document.discovered" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "document.parsed" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "eval.run.completed" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
