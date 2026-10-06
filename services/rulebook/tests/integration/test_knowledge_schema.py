@@ -209,7 +209,7 @@ def test_upgrade_head_creates_the_knowledge_tables(migrated: Config, engine: Eng
         version: str = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-    assert version == "0007"
+    assert version == "0008"
 
 
 def test_indexes_by_name_and_access_method(migrated: Config, engine: Engine) -> None:
