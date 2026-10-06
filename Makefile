@@ -605,10 +605,13 @@ openapi-ts-check: check-pnpm ## The generated OpenAPI types match the committed 
 # which the local product and CI never do; and its rule extraction (CW_PIPELINE_EXTRACTION_ENABLED)
 # on only while the gateway answers from its fake model, CW_LLM_PROVIDER unset or fake (read from
 # the environment or .env, as the gateway reads it), and off with a real provider whatever .env
-# says. The fake model answers deterministically, though the gateway still books each ask its cache
-# did not answer at a tiny estimated price in its ledger (in memory, or the dev database's with
-# CW_LLM_LEDGER=postgres); the product ingests nothing by itself, so the worker only builds the
-# extraction at start and the check's extraction step asks the gateway with its prompt. The web app
+# says. While it is on, make product-start also routes the gateway's extraction to the fake model
+# fake/echo (CW_LLM_ROUTES__EXTRACTION), so the routing table shows that a fake answers it: the
+# check's extraction step reads that there before it asks. The fake model answers
+# deterministically, though the gateway still books each ask its cache did not answer at a tiny
+# estimated price in its ledger (in memory, or the dev database's with CW_LLM_LEDGER=postgres);
+# the product ingests nothing by itself, so the worker only builds the extraction at start and the
+# check's extraction step asks the gateway with its prompt. The web app
 # gets every CW_WEB_*_URL at the internal listener and builds into .next/product, so it runs beside
 # a make web-dev of the same checkout (Next allows one dev server per build directory). Pids and
 # logs are under var/product; make product-down stops only the processes whose pids it recorded,
@@ -652,6 +655,7 @@ product-start: check-uv
 	[ "$(WEB)" = "0" ] || [ "$(WEB)" = "1" ] || { echo "usage: make product [WEB=0|1] [WEB_PORT=3000]"; exit 1; }; \
 	mkdir -p $(PRODUCT_DIR); \
 	public_port=$${CW_MVP_PUBLIC_PORT:-8000}; internal_port=$${CW_MVP_INTERNAL_PORT:-8080}; web_port=$${WEB_PORT:-3000}; \
+	if [ "$${CW_LLM_PROVIDER:-fake}" = fake ]; then export CW_LLM_ROUTES__EXTRACTION=fake/echo; fi; \
 	running() { [ -f "$(PRODUCT_DIR)/$$1.pid" ] && kill -0 "$$(cat "$(PRODUCT_DIR)/$$1.pid")" 2>/dev/null; }; \
 	taken() { for port in "$$@"; do if (exec 3<>"/dev/tcp/127.0.0.1/$$port") 2>/dev/null; then echo "$$port"; return 0; fi; done; return 1; }; \
 	start() { proc=$$1; ports=$$2; shift 2; \

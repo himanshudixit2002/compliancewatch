@@ -726,7 +726,9 @@ candidate applies to; null without both. It is a suggestion for the analyst, nev
 (`CW_LLM_PROVIDER` unset or `fake`), and off with a real provider. The fake is deterministic, but
 the gateway books each ask its cache did not answer at a tiny estimated price in its ledger (in
 memory unless `CW_LLM_LEDGER=postgres` keeps it in the dev database). The product ingests nothing
-by itself; the check's `extraction` step asks the gateway with the prompt and ingests nothing.
+by itself; the check's `extraction` step asks the gateway with the prompt only once its routing
+table routes the extraction to fake models alone (`make product` routes it to `fake/echo` while
+the provider is fake), and ingests nothing.
 The workflow tests (`tests/integration/test_extraction_workflow.py`)
 classify and extract the recorded 01/2026-Central Tax with a scripted model answering its draft
 golden label, hold a synthetic circular for triage and extract it once triaged, keep a statute and a
