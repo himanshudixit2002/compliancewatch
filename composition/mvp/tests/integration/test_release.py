@@ -94,7 +94,7 @@ def test_a_release_makes_a_fresh_database_and_broker_whole_and_a_second_changes_
     assert revisions == heads()
     assert revisions["qa"] is None, "qa has no migration"
     assert revisions["identity"] is not None
-    assert revisions["pipeline"] == "0001"
+    assert revisions["pipeline"] == "0002"
 
     topics = broker_topics(bootstrap)
     for spec in load().topics:
