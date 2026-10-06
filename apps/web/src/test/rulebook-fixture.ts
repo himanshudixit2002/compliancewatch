@@ -150,6 +150,16 @@ export function reviewItemDto(overrides: Partial<ReviewItemDto> = {}): ReviewIte
   };
 }
 
+/** `count` open mentions of one group, each with its own review id and text. */
+export function reviewItemDtos(count: number): ReviewItemDto[] {
+  return Array.from({ length: count }, (_, index) =>
+    reviewItemDto({
+      review_id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      mention_text: `Example clause ${index + 1}`,
+    }),
+  );
+}
+
 /** The group of the open mentions of the form "EXAMPLE-1", with one example. */
 export function mentionGroupDto(overrides: Partial<MentionGroupDto> = {}): MentionGroupDto {
   return {

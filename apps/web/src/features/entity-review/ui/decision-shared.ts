@@ -21,6 +21,23 @@ export const NOTE_MAX_LENGTH = 2000;
 /** One decision names at most 200 mentions. */
 export const REVIEW_IDS_MAX = 200;
 
+/**
+ * The rulebook lists at most 200 open mentions of a group (its page limit). A list that long is
+ * the first 200 of a group that may hold more, and a decision over the whole group covers every
+ * open mention, listed or not, so the page never states a count it does not know.
+ */
+export const GROUP_ITEMS_MAX = 200;
+
+/** Whether the list is the rulebook's first 200, so the group may hold more. */
+export function isCapped(listed: number): boolean {
+  return listed >= GROUP_ITEMS_MAX;
+}
+
+/** How many open mentions the group holds, as far as the list tells: "3", or "200 or more ...". */
+export function openCountText(listed: number): string {
+  return isCapped(listed) ? t("entityReview.openCapped", { max: GROUP_ITEMS_MAX }) : String(listed);
+}
+
 /** Whether the page may offer decisions: the role, the flag and the review token allow it. */
 export type AccessView = { allowed: true } | { allowed: false; title: string; detail?: string };
 

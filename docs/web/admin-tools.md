@@ -270,7 +270,10 @@ One group, named by the query rather than a path segment: a proposed name may ho
 (`01/2000-example`), `@` and spaces, and an empty name is a group too (D-055). The page shows the
 type, the name and how many mentions are open, every open mention with why it is open and a link
 marking it in its document, a link asking the canonical entities tool how the name resolves today,
-and the decision:
+and the decision. The rulebook lists at most 200 open mentions of a group, so a list of 200 is
+counted as "200 or more (the first 200 listed)" in the facts, the table's caption, the line saying
+what the decision covers and the dialog: a decision over the whole group covers every open mention,
+listed or not, and the page never states a count it does not know.
 
 - **Make the entity**: the rulebook makes the canonical entity with the proposed name (or finds the
   one that has it) and aligns the mentions to it; **Add the name to an entity**: the name becomes

@@ -3,7 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { runAxe } from "@compliancewatch/ui/test/axe";
 import { describe, expect, it, vi } from "vitest";
 import { reviewItemFromDto } from "@/entities/rulebook/mappers";
-import { EXAMPLE_ENTITY_ID, EXAMPLE_REVIEW_IDS, reviewItemDto } from "@/test/rulebook-fixture";
+import {
+  EXAMPLE_ENTITY_ID,
+  EXAMPLE_REVIEW_IDS,
+  reviewItemDto,
+  reviewItemDtos,
+} from "@/test/rulebook-fixture";
 import { itemRows } from "../model/group";
 import { DecisionPanel, type DecideAction } from "./decision-panel";
 
@@ -154,6 +159,35 @@ describe("DecisionPanel", () => {
     expect((submit as HTMLButtonElement).disabled).toBe(true);
     await user.click(screen.getByRole("checkbox", { name: "Include the mention Example second" }));
     expect((submit as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("says a whole-group decision over the rulebook's 200 covers 200 or more", async () => {
+    render(
+      <DecisionPanel
+        action={vi.fn<DecideAction>()}
+        items={itemRows(reviewItemDtos(200).map(reviewItemFromDto))}
+        typeLabel="Form"
+        nameLabel="EXAMPLE-1"
+        resolveHref={null}
+        queueHref="/admin/rulebook/entities?type=form"
+        nameable
+      />,
+    );
+    expect(screen.getByText(/^No mention is included/).textContent).toBe(
+      "No mention is included: the decision covers every open mention of the group, 200 or more (the first 200 listed).",
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("radio", { name: "Reject the mentions" }));
+    await user.selectOptions(screen.getByLabelText(/^Why reject/), "out_of_scope");
+    await user.click(screen.getByRole("button", { name: "Record the decision" }));
+    expect(screen.getByRole("dialog").textContent).toContain(
+      "closes every open mention of the group, 200 or more (the first 200 listed) as rejected",
+    );
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(
+      screen.getByRole("checkbox", { name: "Include the mention Example clause 7" }),
+    );
+    expect(screen.getByText("The decision covers the included mentions (1).")).toBeDefined();
   });
 
   it("says every mention is decided once none is left", async () => {

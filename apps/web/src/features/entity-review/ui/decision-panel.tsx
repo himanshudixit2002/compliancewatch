@@ -27,9 +27,11 @@ import { t } from "@/shared/i18n";
 import { fieldErrorOf, idleAction, type ActionState } from "@/shared/lib/action-state";
 import {
   DECISION_FIELDS,
+  GROUP_ITEMS_MAX,
   NOTE_MAX_LENGTH,
   decisionHelp,
   decisionLabel,
+  isCapped,
   rejectReasonLabel,
   type DecisionResult,
   type ItemRow,
@@ -57,18 +59,23 @@ export interface DecisionPanelProps {
   nameable: boolean;
 }
 
-/** The line under the mentions: what the decision covers as things stand. */
-function scopeOf(selected: number, open: number): string {
-  return selected === 0
-    ? t("entityReview.scope.group", { count: open })
-    : t("entityReview.scope.selected", { count: selected });
+/**
+ * The line under the mentions: what the decision covers as things stand. A list of the
+ * rulebook's first 200 may leave more open mentions unlisted, and the whole group covers them too.
+ */
+function scopeOf(selected: number, listed: number): string {
+  if (selected > 0) return t("entityReview.scope.selected", { count: selected });
+  return isCapped(listed)
+    ? t("entityReview.scope.groupCapped", { max: GROUP_ITEMS_MAX })
+    : t("entityReview.scope.group", { count: listed });
 }
 
 /** The same, as a phrase inside the dialog's sentence. */
-function scopePhrase(selected: number, open: number): string {
-  return selected === 0
-    ? t("entityReview.scope.groupPhrase", { count: open })
-    : t("entityReview.scope.selectedPhrase", { count: selected });
+function scopePhrase(selected: number, listed: number): string {
+  if (selected > 0) return t("entityReview.scope.selectedPhrase", { count: selected });
+  return isCapped(listed)
+    ? t("entityReview.scope.groupPhraseCapped", { max: GROUP_ITEMS_MAX })
+    : t("entityReview.scope.groupPhrase", { count: listed });
 }
 
 /**

@@ -11,7 +11,7 @@ import {
   TableRow,
 } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
-import type { ItemRow } from "./decision-shared";
+import { GROUP_ITEMS_MAX, isCapped, type ItemRow } from "./decision-shared";
 
 export interface ItemsTableProps {
   items: readonly ItemRow[];
@@ -34,7 +34,9 @@ export function ItemsTable({ items, nameLabel, selection }: ItemsTableProps) {
   return (
     <Table scrollLabel={t("entityReview.items.region")} data-slot="review-items">
       <TableCaption className="text-left text-sm text-fg-muted">
-        {t("entityReview.items.caption", { count: items.length, name: nameLabel })}
+        {isCapped(items.length)
+          ? t("entityReview.items.captionCapped", { max: GROUP_ITEMS_MAX, name: nameLabel })
+          : t("entityReview.items.caption", { count: items.length, name: nameLabel })}
       </TableCaption>
       <TableHeader>
         <TableRow>

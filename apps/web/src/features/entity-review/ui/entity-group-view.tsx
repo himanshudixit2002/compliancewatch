@@ -7,7 +7,7 @@ import { Breadcrumbs } from "@/shared/ui/breadcrumbs";
 import { ServiceError, type ServiceErrorLike } from "@/shared/ui/service-error";
 import type { GroupRead, GroupView } from "../model/group";
 import { DecisionPanel, type DecideAction } from "./decision-panel";
-import type { AccessView } from "./decision-shared";
+import { openCountText, type AccessView } from "./decision-shared";
 import { ItemsTable } from "./items-table";
 
 export interface EntityGroupViewProps {
@@ -89,7 +89,7 @@ export function EntityGroupView({
               {
                 key: "open",
                 label: t("entityReview.group.open"),
-                value: String(view.items.length),
+                value: openCountText(view.items.length),
               },
             ]}
           />
