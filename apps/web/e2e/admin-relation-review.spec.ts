@@ -108,7 +108,7 @@ test.describe("relation candidates", () => {
       );
       if (rejected.length === 0) {
         await expect(
-          page.getByRole("heading", { name: "No candidate is rejected yet" }),
+          page.getByRole("heading", { name: "No rejected candidate for this document" }),
         ).toBeVisible();
       } else {
         await expect(rows).toHaveCount(rejected.length);
