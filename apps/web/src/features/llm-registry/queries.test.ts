@@ -45,6 +45,13 @@ describe("getUsage", () => {
     );
     expect(usage.ok && usage.value.rows).toHaveLength(1);
     expect(usage.ok && usage.value.overview).toBe(false);
+    expect(usage.ok && usage.value.rows[0]?.scopeLabel).toBe("Tenant");
+    const narrowed = await getUsage(
+      { kind: "one", month: "2000-01", tenantId: EXAMPLE_TENANT_ID, feature: "qa" },
+      { fetchImpl: one.fetchImpl },
+    );
+    expect(new URL(one.requests[1]?.url ?? "").searchParams.get("feature")).toBe("qa");
+    expect(narrowed.ok && narrowed.value.rows[0]?.scopeLabel).toBe("Tenant budget, QA spend only");
     const failing = fakeFetch([
       { path: "/v1/llm-gateway/usage", status: 422, problem: { title: "Example refusal" } },
     ]);

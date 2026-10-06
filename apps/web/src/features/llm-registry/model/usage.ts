@@ -86,6 +86,13 @@ export interface UsageRow {
   scopeLabel: string;
   /** The feature's name, or the tenant's id. */
   keyLabel: string;
+  /** "Spent", or "Spent on QA" when a feature narrows a tenant's spend. */
+  spentLabel: string;
+  /**
+   * Set when a feature narrows a tenant's spend: the spend is that feature's alone, the budget the
+   * tenant's for every feature, and the share and the alarm compare the two.
+   */
+  note: string | null;
   spent: string;
   budget: string;
   /** "6.17%" of the budget spent. */
@@ -96,13 +103,27 @@ export interface UsageRow {
   resetsAt: string;
 }
 
-export function usageRow(usage: Usage): UsageRow {
+/**
+ * One budget as its card shows it. `narrowedTo` is the feature that narrowed a tenant's spend:
+ * the gateway then sums that feature's spend alone against the tenant's whole budget (and decides
+ * the alarm on that sum), so the card says so in its label rather than read as the tenant's spend.
+ */
+export function usageRow(usage: Usage, narrowedTo?: LlmFeature): UsageRow {
   const percent = ratioPercent(usage.ratio);
+  const narrowed =
+    usage.scope === "tenant" && narrowedTo !== undefined ? featureLabel(narrowedTo) : null;
   return {
     key: `${usage.scope}:${usage.key}`,
     scopeLabel:
-      usage.scope === "tenant" ? t("llm.usage.scope.tenant") : t("llm.usage.scope.feature"),
+      narrowed !== null
+        ? t("llm.usage.scope.tenantFeature", { feature: narrowed })
+        : usage.scope === "tenant"
+          ? t("llm.usage.scope.tenant")
+          : t("llm.usage.scope.feature"),
     keyLabel: usage.scope === "feature" ? featureLabel(usage.key) : usage.key,
+    spentLabel:
+      narrowed === null ? t("llm.usage.spent") : t("llm.usage.spentOn", { feature: narrowed }),
+    note: narrowed === null ? null : t("llm.usage.narrowedNote", { feature: narrowed }),
     spent: formatDecimalRupees(usage.spentInr),
     budget: formatDecimalRupees(usage.budgetInr),
     percent: `${percent}%`,

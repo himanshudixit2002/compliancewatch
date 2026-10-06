@@ -48,6 +48,8 @@ describe("the usage wording", () => {
       key: "feature:qa",
       scopeLabel: "Feature",
       keyLabel: "QA",
+      spentLabel: "Spent",
+      note: null,
       spent: "Rs 1,234.0012",
       budget: "Rs 20,000.00",
       percent: "6.17%",
@@ -69,6 +71,22 @@ describe("the usage wording", () => {
       percent: "150.00%",
       barValue: 100,
       alarmed: true,
+      note: null,
+    });
+  });
+
+  it("says plainly when a feature narrows a tenant's spend but not its budget", () => {
+    const tenant = usageFromDto(usageDto({ scope: "tenant", key: EXAMPLE_TENANT_ID }));
+    expect(usageRow(tenant, "qa")).toMatchObject({
+      scopeLabel: "Tenant budget, QA spend only",
+      keyLabel: EXAMPLE_TENANT_ID,
+      spentLabel: "Spent on QA",
+      note: "The spend is QA's alone; the budget is the tenant's for every feature, so the share and the alarm compare the two. Ask without a feature for the tenant's whole spend.",
+    });
+    expect(usageRow(usageFromDto(usageDto()), "qa")).toMatchObject({
+      scopeLabel: "Feature",
+      spentLabel: "Spent",
+      note: null,
     });
   });
 });

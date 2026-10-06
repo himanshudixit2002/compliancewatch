@@ -436,10 +436,12 @@ this month (the gateway counts months in UTC), one read per feature; a GET form 
 tenant's budget (a feature then narrows its spend) or one feature's, for a month as `YYYY-MM`. Each
 budget shows the spend and the ceiling in rupees to every place the ledger keeps (a spend of
 `0.0012` is `Rs 0.0012`, never rounded to nothing), the share spent as a bar and a percentage
-computed without floats, whether the gateway raised its alarm, and when the budget starts again. The
-reads carry no tenant header: the usage route takes its tenant from the header when the query names
-none, which would turn a feature's budget into the internal tenant's spend (D-056). Read-only: the
-budgets are the gateway's settings.
+computed without floats, whether the gateway raised its alarm, and when the budget starts again. A
+tenant's budget asked with a feature is labelled "Tenant budget, <feature> spend only", with a note
+and "Spent on <feature>": the gateway sums that feature's spend alone against the tenant's whole
+budget, and decides the alarm on that sum. The reads carry no tenant header: the usage route takes
+its tenant from the header when the query names none, which would turn a feature's budget into the
+internal tenant's spend (D-056). Read-only: the budgets are the gateway's settings.
 
 ## Profile review tasks: `/admin/profiles/review-tasks`
 

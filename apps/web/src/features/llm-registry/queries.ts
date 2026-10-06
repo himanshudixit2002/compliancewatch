@@ -48,10 +48,12 @@ export async function getUsage(
           },
         ];
   const results = await Promise.all(asked.map((query) => gateway.usage(query)));
+  // A feature asked with a tenant narrows the tenant's spend, not its budget.
+  const narrowedTo = read.kind === "one" && read.tenantId !== undefined ? read.feature : undefined;
   const rows: UsageRow[] = [];
   for (const result of results) {
     if (!result.ok) return result;
-    rows.push(usageRow(result.value));
+    rows.push(usageRow(result.value, narrowedTo));
   }
   return ok({
     month: read.month,

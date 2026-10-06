@@ -51,6 +51,11 @@ function UsageCard({ row }: { row: UsageRow }) {
           <StatusChip status="within" tone="success" label={t("llm.usage.within")} />
         )}
       </div>
+      {row.note === null ? null : (
+        <p className="text-sm text-fg-muted" data-slot="usage-note">
+          {row.note}
+        </p>
+      )}
       <ProgressBar
         label={t("llm.usage.share")}
         value={row.barValue}
@@ -58,7 +63,7 @@ function UsageCard({ row }: { row: UsageRow }) {
       />
       <KeyValue
         items={[
-          { key: "spent", label: t("llm.usage.spent"), value: row.spent },
+          { key: "spent", label: row.spentLabel, value: row.spent },
           { key: "budget", label: t("llm.usage.budget"), value: row.budget },
           { key: "resets", label: t("llm.usage.resetsAt"), value: row.resetsAt },
         ]}

@@ -119,6 +119,16 @@ test.describe("LLM gateway pages", () => {
       await expect(card).toContainText(formatDecimalRupees(usage.budget_inr));
       await expect(page.locator("[data-usage]")).toHaveCount(1);
 
+      // A feature narrows the tenant's spend, not its budget, and the card says so.
+      await page.getByLabel(/^Feature/).selectOption("qa");
+      await page.getByRole("button", { name: "Show spend" }).click();
+      await expect(page).toHaveURL(/feature=qa/);
+      await expect(card.getByRole("heading", { level: 3 })).toContainText(
+        "Tenant budget, QA spend only",
+      );
+      await expect(card).toContainText("Spent on QA");
+      await expect(card).toContainText(formatDecimalRupees(usage.budget_inr));
+
       await page.getByLabel(/^Month/).fill("2000-13");
       await page.getByRole("button", { name: "Show spend" }).click();
       await expect(page.getByText("Give the month as YYYY-MM, such as 2000-01.")).toBeVisible();

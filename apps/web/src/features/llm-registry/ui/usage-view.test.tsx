@@ -62,6 +62,7 @@ describe("UsageView", () => {
           rows: [
             usageRow(
               usageFromDto(usageDto({ scope: "tenant", key: EXAMPLE_TENANT_ID, alarmed: true })),
+              "qa",
             ),
           ],
         }}
@@ -71,7 +72,16 @@ describe("UsageView", () => {
       screen.getByRole("heading", { level: 2, name: "Budget for January 2000" }),
     ).toBeDefined();
     const card = container.querySelector(`[data-usage='tenant:${EXAMPLE_TENANT_ID}']`);
-    expect(card?.textContent).toContain(`Tenant: ${EXAMPLE_TENANT_ID}`);
+    expect(
+      screen.getByRole("heading", {
+        level: 3,
+        name: `Tenant budget, QA spend only: ${EXAMPLE_TENANT_ID}`,
+      }),
+    ).toBeDefined();
+    expect(card?.querySelector("[data-slot='usage-note']")?.textContent).toContain(
+      "the budget is the tenant's for every feature",
+    );
+    expect(card?.textContent).toContain("Spent on QA");
     expect(card?.textContent).toContain("Alarm raised");
     expect((screen.getByLabelText(/^Tenant id/) as HTMLInputElement).value).toBe(EXAMPLE_TENANT_ID);
     expect((screen.getByLabelText(/^Feature/) as HTMLSelectElement).value).toBe("qa");
