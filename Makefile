@@ -507,12 +507,18 @@ web-stack-down: ## Stop the web-stack services and remove their pid files (logs 
 	@for pidfile in $(WEB_STACK_DIR)/*.pid; do \
 	  [ -f "$$pidfile" ] || continue; \
 	  svc=$$(basename "$$pidfile" .pid); pid=$$(cat "$$pidfile"); \
-	  if kill -0 "$$pid" 2>/dev/null; then \
-	    pkill -TERM -P "$$pid" 2>/dev/null; kill -TERM "$$pid" 2>/dev/null; \
-	    n=0; while kill -0 "$$pid" 2>/dev/null && [ $$n -lt 20 ]; do n=$$((n+1)); sleep 0.25; done; \
-	    if kill -0 "$$pid" 2>/dev/null; then pkill -KILL -P "$$pid" 2>/dev/null; kill -KILL "$$pid" 2>/dev/null; fi; \
-	    echo "  $$svc stopped (pid $$pid)"; \
-	  else echo "  $$svc was not running"; fi; \
+	  if ! kill -0 "$$pid" 2>/dev/null; then echo "  $$svc was not running"; rm -f "$$pidfile"; continue; fi; \
+	  case "$$svc" in profile) pkg=profile_service ;; eval) pkg=eval_service ;; *) pkg=$$(echo "$$svc" | tr - _) ;; esac; \
+	  case "$$svc:$$(ps -o command= -p "$$pid")" in \
+	    web:*"--filter web dev"*|web:*"next dev"*) ;; \
+	    web:*) echo "  $$svc: pid $$pid now belongs to another program; left alone"; rm -f "$$pidfile"; continue ;; \
+	    *"uvicorn $$pkg.main:app"*) ;; \
+	    *) echo "  $$svc: pid $$pid now belongs to another program; left alone"; rm -f "$$pidfile"; continue ;; \
+	  esac; \
+	  pkill -TERM -P "$$pid" 2>/dev/null; kill -TERM "$$pid" 2>/dev/null; \
+	  n=0; while kill -0 "$$pid" 2>/dev/null && [ $$n -lt 20 ]; do n=$$((n+1)); sleep 0.25; done; \
+	  if kill -0 "$$pid" 2>/dev/null; then pkill -KILL -P "$$pid" 2>/dev/null; kill -KILL "$$pid" 2>/dev/null; fi; \
+	  echo "  $$svc stopped (pid $$pid)"; \
 	  rm -f "$$pidfile"; \
 	done; true
 
