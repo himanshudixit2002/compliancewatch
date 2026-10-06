@@ -3,8 +3,10 @@
 The protocols keep the relay and consumer logic testable with in-memory fakes; the Postgres
 classes hold the SQL. A relay batch is one transaction: rows are claimed with
 ``FOR UPDATE SKIP LOCKED`` so several relay processes can share a table, and every mark inside
-the batch commits together. A consumer unit of work is one transaction too: the handler's own
-writes, the ``processed_event`` row and the inbox check commit or roll back as one.
+the batch commits together. A row marked dead keeps the moment it went dead in ``available_at``
+(``py_common.outbox.admin`` reads it as ``dead_at``). A consumer unit of work is one transaction
+too: the handler's own writes, the ``processed_event`` row and the inbox check commit or roll
+back as one.
 """
 
 from collections.abc import AsyncIterator, Sequence
@@ -49,7 +51,10 @@ class OutboxBatch(Protocol):
         self, event_id: UUID, *, attempts: int, available_at: datetime, error: str
     ) -> None: ...
 
-    async def mark_dead(self, event_id: UUID, *, attempts: int, error: str) -> None: ...
+    async def mark_dead(self, event_id: UUID, *, attempts: int, error: str, at: datetime) -> None:
+        """The row went dead at ``at``: its ``available_at`` keeps that moment, since the relay
+        never claims a dead row."""
+        ...
 
 
 class OutboxStore(Protocol):
@@ -124,11 +129,16 @@ class PostgresOutboxBatch:
             .values(attempts=attempts, available_at=available_at, last_error=truncate_error(error))
         )
 
-    async def mark_dead(self, event_id: UUID, *, attempts: int, error: str) -> None:
+    async def mark_dead(self, event_id: UUID, *, attempts: int, error: str, at: datetime) -> None:
         await self.connection.execute(
             update(outbox_event)
             .where(outbox_event.c.id == event_id)
-            .values(status=STATUS_DEAD, attempts=attempts, last_error=truncate_error(error))
+            .values(
+                status=STATUS_DEAD,
+                attempts=attempts,
+                available_at=at,
+                last_error=truncate_error(error),
+            )
         )
 
 

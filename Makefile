@@ -199,7 +199,7 @@ ts-dev: check-pnpm ## next dev (:3000) and whatsapp-bot (:8080) with reload
 	$(PNPM) turbo run dev
 
 # ---- Composition (guide sections 13, 17, 19) -------------------------------------------------
-.PHONY: install lint format typecheck test check eval eval-check label demo runbooks-check migrate run worker relay seed openapi contracts contracts-check hooks ci-lint crawl-report
+.PHONY: install lint format typecheck test check eval eval-check label demo runbooks-check migrate run worker relay replay seed openapi contracts contracts-check hooks ci-lint crawl-report
 # The gates `make check` runs. A package adds its own with `CHECKS += <target>` in its section.
 # The prerequisites of check expand a second time when make runs them (.SECONDEXPANSION below),
 # so a `CHECKS +=` line counts wherever it sits in this file.
@@ -294,6 +294,15 @@ relay: check-uv ## Run the outbox relay for one service's schema: make relay SER
 	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$(SCHEMA)%2Cpublic"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \
 	  $(UV) run --package compliancewatch-$(SERVICE) python -m py_common.outbox
+
+# The dead letters on Kafka (py_common.outbox.replay): list reads a dead-letter topic from its first
+# offset with no consumer group, so it commits nothing; send puts one message, by its event id,
+# back on its origin topic without the dead-letter headers. CW_KAFKA_BOOTSTRAP (.env) names the
+# cluster.
+replay: check-uv ## List a dead-letter topic, or send one message back to its origin: make replay ARGS="list --topic <topic>.<group>.dlq" | ARGS="send --topic <dlq> --event-id <id> [--dry-run]"
+	@[ -n "$(ARGS)" ] || { echo 'usage: make replay ARGS="list --topic <dead-letter topic> [--json]" | ARGS="send --topic <dead-letter topic> --event-id <uuid> [--to <topic>] [--dry-run]"'; exit 1; }
+	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
+	CW_LOG_LEVEL=WARNING $(UV) run --package py-common python -m py_common.outbox.replay $(ARGS)
 
 openapi: check-uv ## Export a service's OpenAPI spec: make openapi SERVICE=llm-gateway -> packages/contracts/openapi/<svc>.v1.json
 	@[ -n "$(SERVICE)" ] || { echo "usage: make openapi SERVICE=<identity|profile|...>"; exit 1; }

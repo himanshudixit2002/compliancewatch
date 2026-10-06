@@ -3,7 +3,10 @@
 Each pass claims a batch of pending rows in one transaction, sends them in order, and marks each
 one published, scheduled for a retry, or dead. A send that fails schedules the row again after an
 exponential backoff; after ``max_attempts`` the message is sent to ``<topic>.dlq`` and the row
-is marked dead only when that send succeeds, so nothing is lost while the broker is down.
+is marked dead only when that send succeeds, so nothing is lost while the broker is down. A dead
+row keeps when it went dead in ``available_at``; ``py_common.outbox.admin`` lists the dead rows
+and puts one back to pending, and ``python -m py_common.outbox.replay`` (``make replay``) lists a
+dead-letter topic and sends a message back to its origin.
 Delivery is at least once: a crash between the send and the commit republishes the row.
 
 ``python -m py_common.outbox`` runs it against ``CW_DATABASE_URL`` (whose ``search_path``
@@ -205,7 +208,7 @@ class OutboxRelay:
                     attempts=attempts,
                     error=error,
                 )
-                await batch.mark_dead(message.id, attempts=attempts, error=error)
+                await batch.mark_dead(message.id, attempts=attempts, error=error, at=self._clock())
                 dead_counter.add(1, {"topic": message.topic})
                 return RelayStats(dead=1)
         available_at = self._clock() + timedelta(seconds=backoff_seconds(attempts, self._config))

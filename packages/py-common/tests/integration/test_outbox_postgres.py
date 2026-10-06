@@ -44,6 +44,7 @@ from py_common.outbox import (
     ConsumerConfig,
     IdempotentConsumer,
     InboundRecord,
+    OutboxAdmin,
     OutboxRelay,
     OutboxWriter,
     Outcome,
@@ -61,6 +62,7 @@ from py_common.outbox import (
     run_consumer,
     sync_handler,
 )
+from py_common.outbox.replay import AiokafkaTopicReader, DeadLetters, UnknownTopicError
 from py_common.outbox.testing import FakeProducer
 from py_common.settings import Settings
 
@@ -519,3 +521,76 @@ async def test_run_consumer_reads_the_broker_through_the_sync_store(
         ).scalar_one()
     assert sorted(titles) == ["c", "d"]
     assert inbox == 2
+
+
+async def test_a_dead_row_is_requeued_and_its_dead_letter_listed_and_replayed(
+    database_url: str, bootstrap: str, engine: AsyncEngine
+) -> None:
+    """The relay's dead row, as an operator recovers it: listed with when it went dead, put back
+    to pending and published; its copy on <topic>.dlq listed read only and sent back to its
+    topic through the broker."""
+    replay_topic = f"obligation.replayed_{uuid.uuid4().hex[:8]}"
+
+    @dataclass(frozen=True, slots=True, kw_only=True)
+    class Replayed(DomainEvent):
+        topic: ClassVar[str] = replay_topic
+        title: str
+
+    sync_engine = create_engine(database_url, poolclass=NullPool)
+    with sync_engine.begin() as writing:
+        written = OutboxWriter().write(writing, Replayed(tenant_id=TenantId.new(), title="late"))
+
+    class Away:
+        def __init__(self, inner: AiokafkaProducer) -> None:
+            self.inner, self.away = inner, True
+
+        async def send(
+            self, to: str, *, key: bytes, value: bytes, headers: Sequence[tuple[str, bytes]]
+        ) -> None:
+            if to == replay_topic and self.away:
+                raise ConnectionError("simulated broker outage")
+            await self.inner.send(to, key=key, value=value, headers=headers)
+
+    before = datetime.now(UTC)
+    async with AiokafkaProducer(bootstrap, client_id="test-replay") as inner:
+        producer = Away(inner)
+        relay = OutboxRelay(
+            store=PostgresOutboxStore(engine), producer=producer, config=RelayConfig(max_attempts=1)
+        )
+        assert await relay.run_once() == RelayStats(claimed=1, dead=1)
+        with sync_engine.begin() as connection:
+            admin = OutboxAdmin(connection)
+            (dead,) = admin.dead(topic=replay_topic)
+            assert dead.event_id == written.event_id
+            assert dead.dead_at is not None
+            assert dead.dead_at >= before - timedelta(seconds=5), "when it went dead"
+            assert admin.requeue(written.event_id, at=datetime.now(UTC))
+        producer.away = False
+        assert await relay.run_once() == RelayStats(claimed=1, published=1)
+        with sync_engine.connect() as connection:
+            published = OutboxAdmin(connection).get(written.event_id)
+        assert published is not None
+        assert (published.status, published.attempts) == ("published", 0)
+
+        reader = AiokafkaTopicReader(bootstrap)
+        letters = DeadLetters(reader, inner)
+        (letter,) = await letters.list(f"{replay_topic}.dlq")
+        assert (letter.event_id, letter.origin_topic, letter.attempts) == (
+            written.event_id,
+            replay_topic,
+            1,
+        )
+        assert len(await letters.list(f"{replay_topic}.dlq")) == 1, "listing commits nothing"
+        replayed = await letters.replay(f"{replay_topic}.dlq", written.event_id)
+        assert replayed.to == replay_topic
+        with pytest.raises(UnknownTopicError):
+            await reader.read(f"{replay_topic}.nothing.dlq")
+    sync_engine.dispose()
+    records = await read_topic(bootstrap, replay_topic, 2)
+    assert [decode(record.value).event_id for record in records] == [  # type: ignore[attr-defined]
+        written.event_id,
+        written.event_id,
+    ], "the requeued row's publication, then the replayed copy"
+    replayed_headers = dict(records[1].headers)  # type: ignore[attr-defined]
+    assert "origin_topic" not in replayed_headers
+    assert replayed_headers["event_id"] == str(written.event_id).encode()

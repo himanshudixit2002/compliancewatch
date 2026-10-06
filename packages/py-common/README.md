@@ -48,7 +48,9 @@ src/py_common/
     relay.py           # OutboxRelay: publish, retry with backoff, dead-letter; python -m py_common.outbox
     consumer.py        # IdempotentConsumer: once per event id and consumer group, consumer dead-letter topic
     sync.py            # SyncProcessedStore and sync_handler: sync handlers in the unit's transaction; run_consumer
-    testing.py         # FakeProducer, MemoryOutboxStore, MemoryProcessedStore for service tests
+    admin.py           # OutboxAdmin: the dead rows, one row, a dead row back to pending (admin routes)
+    replay.py          # DeadLetters: list a dead-letter topic, send a message back; python -m py_common.outbox.replay
+    testing.py         # FakeProducer, FakeConsumer, MemoryOutboxStore, MemoryProcessedStore for service tests
   idempotency/         # Idempotency-Key with 24 hour replay; the package itself loads no FastAPI or SQLAlchemy
     store.py           # fingerprint, the begin outcomes, IdempotencyStore and IdempotencyRecorder protocols
     memory.py          # MemoryIdempotencyStore
@@ -315,9 +317,20 @@ change, so the row commits or rolls back with it. `partition_key` is the Kafka k
 default for tenant events; pass the aggregate id for regulatory events). A relay process per
 service schema, `make relay SERVICE=<name>` locally, publishes pending rows, retries with
 exponential backoff and moves a message to `<topic>.dlq` after eight failures
-(`docs/runbooks/outbox-relay.md`). The relay installs telemetry as `outbox-relay`: with
-`CW_OTEL_ENDPOINT` set it exports its counters by topic and the `outbox_relay_pending` gauge by
-`db_schema` every 15 seconds, which the `OutboxBacklog` alert reads.
+(`docs/runbooks/outbox-relay.md`); the row is then `dead`, and keeps when it went dead in
+`available_at`. The relay installs telemetry as `outbox-relay`: with `CW_OTEL_ENDPOINT` set it
+exports its counters by topic and the `outbox_relay_pending` gauge by `db_schema` every 15
+seconds, which the `OutboxBacklog` alert reads.
+
+Dead rows and dead letters: `py_common.outbox.admin.OutboxAdmin(connection)` lists a schema's
+dead rows (the newest dead first, a page at a time), reads one, and puts a dead row back to
+`pending` with its attempts reset, inside the caller's transaction, so an admin route commits it
+with its audit row (the pipeline's `GET /v1/pipeline/outbox/dead` and
+`POST /v1/pipeline/outbox/{event_id}/requeue` do). `py_common.outbox.replay.DeadLetters` lists a
+dead-letter topic, the relay's `<topic>.dlq` or a consumer's `<topic>.<group>.dlq`, read only (no
+consumer group, nothing committed), and sends one message, by its event id, back to its origin
+topic without the dead-letter headers; `make replay` is its command line. `MemoryOutboxStore`
+answers the same three as `OutboxAdmin`, and `FakeConsumer` reads what a `FakeProducer` sent.
 
 Every Kafka client (the relay's producer, consumers, their dead-letter producers and the topic
 tooling) connects through `py_common.kafka.KafkaClientConfig.from_settings(settings)`, whose
