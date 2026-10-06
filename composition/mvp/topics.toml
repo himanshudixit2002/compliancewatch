@@ -43,6 +43,7 @@ replication_factor = 3
 "rule.candidate.created" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "rule.deadline_changed" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "rule.published" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"rule.rejected" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "rule.superseded" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "rule.withdrawn" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 
@@ -54,6 +55,7 @@ replication_factor = 3
 "obligation.due_soon.notification.obligations.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "obligation.rescheduled.notification.obligations.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "profile.updated.applicability-engine.profiles.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"rule.candidate.created.rulebook.rule-candidates.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "rule.deadline_changed.obligation.rules.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "rule.published.applicability-engine.rules.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "rule.published.obligation.rules.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }

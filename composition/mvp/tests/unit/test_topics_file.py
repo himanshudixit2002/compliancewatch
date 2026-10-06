@@ -30,9 +30,18 @@ async def no_tables(settings: Settings, table: str) -> bool:
     return False
 
 
+FLAGGED_CONSUMERS = {"rulebook": {"rulebook_candidate_intake_enabled": True}}
+"""The consumer groups the worker hosts only behind a flag of their own, turned on."""
+
+
 async def dead_letter_topics() -> set[str]:
-    """``<topic>.<group>.dlq`` of every consumer group the worker hosts with Kafka on."""
-    hosted = await build_registry(mvp_settings(worker_kafka_enabled=True), probe=no_tables)
+    """``<topic>.<group>.dlq`` of every consumer group the worker hosts with Kafka on, and every
+    flag that adds a group on."""
+    hosted = await build_registry(
+        mvp_settings(worker_kafka_enabled=True),
+        probe=no_tables,
+        service_overrides=FLAGGED_CONSUMERS,
+    )
     consumers = [consumer for entry in hosted.hosted for consumer in entry.components.consumers]
     assert consumers, "the worker hosts no consumer group"
     return {topic for consumer in consumers for topic in consumer.dead_letter_topics()}
@@ -53,6 +62,7 @@ def test_every_contract_topic_is_in_the_file() -> None:
 async def test_every_consumer_groups_dead_letter_topic_is_in_the_file() -> None:
     dead_letters = await dead_letter_topics()
     assert "profile.updated.applicability-engine.profiles.dlq" in dead_letters
+    assert "rule.candidate.created.rulebook.rule-candidates.dlq" in dead_letters
     missing = sorted(dead_letters - load().names)
     assert missing == [], f"add these dead-letter topics to {TOPICS_FILE.name}: {missing}"
 

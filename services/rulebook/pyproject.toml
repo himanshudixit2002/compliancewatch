@@ -15,6 +15,7 @@ dependencies = [
   "py-common",
   "domain-kernel",
   "ontology",
+  "compliancewatch-contracts",
   "pyyaml>=6.0",
 ]
 
@@ -27,6 +28,7 @@ rulebook-transitions = "rulebook.transitions:main"
 py-common = { workspace = true }
 domain-kernel = { workspace = true }
 ontology = { workspace = true }
+compliancewatch-contracts = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]
