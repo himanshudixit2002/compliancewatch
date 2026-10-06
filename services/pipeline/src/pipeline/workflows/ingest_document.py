@@ -24,7 +24,15 @@ them is registered. Everything else is registered as the type it was classified 
 
 Statutes are registered and their clauses embedded like any document, so rules can cite them,
 but nothing is extracted from them (``domain.candidate.is_extracted``): the extraction child is
-not started for one, and the rule extraction step that is to follow it asks the same.
+not started for one.
+
+A notification, circular or act amendment that was classified and registered gets its rule
+candidate extracted, behind ``workflow.patched(EXTRACTION_PATCH)`` and while the worker's
+``CW_PIPELINE_EXTRACTION_ENABLED`` is on (``Classified.extracts``): the ingest starts the child
+``pipeline.extract_rules`` (``workflows.extract_rules``) under the id
+``pipeline-extract-<document>-<prompt>``, which may be reused only after a failure, and leaves it
+running (``ParentClosePolicy.ABANDON``), so neither the ingest nor a crawl waits for a model or
+for a used-up budget. A press release and a statute are kept for reference and not extracted.
 
 Each step is an activity with its own retries and timeouts; the workflow itself does no I/O.
 The fetch is ``FetchAndStore``: the bytes go to the raw store, the document's row and its
@@ -39,6 +47,7 @@ than failing the ingest.
 from typing import Self
 
 from temporalio import workflow
+from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import (
     ActivityError,
     ApplicationError,
@@ -65,6 +74,7 @@ with workflow.unsafe.imports_passed_through():
         document_id_for,
     )
     from pipeline.application.classify import Classified, ClassifyDocument, ClassifyRequest
+    from pipeline.application.extraction import RULE_PROMPT_REF, ExtractionRequest
     from pipeline.application.knowledge_activities import (
         EmbedClauses,
         EmbedRequest,
@@ -79,6 +89,11 @@ with workflow.unsafe.imports_passed_through():
         KnowledgeRequest,
         KnowledgeResult,
     )
+    from pipeline.workflows.extract_rules import (
+        EXTRACTION_TIMEOUT,
+        ExtractRulesWorkflow,
+        extraction_workflow_id,
+    )
 
 from datetime import datetime
 from uuid import UUID
@@ -89,6 +104,7 @@ GIVEN_PATCH = "pipeline-crawl-v1"
 STORED_PATCH = "pipeline-stored-v1"
 PARSE_PATCH = "pipeline-parse-v1"
 CLASSIFY_PATCH = "pipeline-classify-v1"
+EXTRACTION_PATCH = "pipeline-extraction-v1"
 REGISTER_PATCH = "kag-register-v1"
 EMBED_PATCH = "kag-embed-v1"
 EXTRACT_PATCH = "kag-extract-v1"
@@ -163,7 +179,11 @@ class IngestResult(Frozen):
     clauses and was not registered. ``classification`` is the classify step's route
     (``extract``, ``reference``, ``irrelevant``, ``triage``; empty before the step) and
     ``doc_type`` the type it placed the document as; a document held for triage names its task
-    in ``task_id``, and neither it nor an irrelevant one is registered."""
+    in ``task_id``, and neither it nor an irrelevant one is registered. ``extraction`` says what
+    became of its rule extraction: ``started`` (``extraction_workflow_id`` names the child),
+    ``running`` (a child of that id runs or has completed), ``off`` (the worker's extraction is
+    off), ``not_registered`` (the extraction reads the document from the rulebook), or empty when
+    there is none to make (a reference document, a workflow from before the step)."""
 
     document_id: UUID
     sha256: str
@@ -185,6 +205,8 @@ class IngestResult(Frozen):
     relations_outcome: str = "disabled"
     relations_staged: int = 0
     knowledge_error: str = ""
+    extraction: str = ""
+    extraction_workflow_id: str = ""
 
 
 @workflow.defn(name="pipeline.ingest_document")
@@ -290,6 +312,11 @@ class IngestDocumentWorkflow:
             except (ChildWorkflowError, WorkflowAlreadyStartedError) as error:
                 knowledge_error = str(error.cause or error)[:500]
                 workflow.logger.warning("knowledge extraction failed: %s", knowledge_error)
+        extraction, extraction_workflow_id = "", ""
+        if classified is not None and classified.route == Route.EXTRACT:
+            extraction, extraction_workflow_id = await self._extract(
+                request, classified, registered, parse_request
+            )
         return IngestResult(
             document_id=parsed.document_id,
             sha256=parse_request.sha256,
@@ -309,7 +336,46 @@ class IngestDocumentWorkflow:
             relations_outcome=knowledge.relations_outcome,
             relations_staged=knowledge.relations_staged,
             knowledge_error=knowledge_error,
+            extraction=extraction,
+            extraction_workflow_id=extraction_workflow_id,
         )
+
+    async def _extract(
+        self,
+        request: IngestRequest,
+        classified: Classified,
+        registered: bool,
+        parse_request: ParseRequest,
+    ) -> tuple[str, str]:
+        """Start the rule extraction of a classified, registered rule kind and leave it running;
+        what became of it and the child's id."""
+        if not classified.extraction_enabled:
+            return "off", ""
+        if not registered or parse_request.stored is None:
+            return "not_registered", ""
+        if not workflow.patched(EXTRACTION_PATCH):
+            return "", ""
+        workflow_id = extraction_workflow_id(classified.document_id, RULE_PROMPT_REF)
+        try:
+            await workflow.start_child_workflow(
+                ExtractRulesWorkflow.run,
+                ExtractionRequest(
+                    document_id=classified.document_id,
+                    source_id=request.source_id,
+                    source_key=parse_request.stored.source_key,
+                    regulator=request.regulator,
+                    doc_type=DocumentType(classified.doc_type),
+                    own_ref=parse_request.external_ref,
+                ),
+                id=workflow_id,
+                task_queue=workflow.info().task_queue,
+                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+                parent_close_policy=workflow.ParentClosePolicy.ABANDON,
+                execution_timeout=EXTRACTION_TIMEOUT,
+            )
+        except WorkflowAlreadyStartedError:
+            return "running", workflow_id
+        return "started", workflow_id
 
     async def _fetch(self, request: IngestRequest) -> ParseRequest:
         """The listed (or discovered) document, fetched and stored (or, in a workflow from

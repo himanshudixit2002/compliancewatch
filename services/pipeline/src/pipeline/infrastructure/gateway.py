@@ -6,6 +6,10 @@ Once ``CW_SERVICE_CLIENT_SECRET`` is set every call carries the pipeline's own a
 calls only from a service with the llm:call scope, and a named tenant (``x-tenant-id``) also needs
 tenant:act. A token the identity service could not issue is a ``GatewayError``, which the
 activities retry like any other failed call.
+
+A call the gateway refuses because a monthly budget is used up (a 429 whose problem type is
+``BUDGET_PROBLEM``) is a ``ModelBudgetExhaustedError`` with the ``Retry-After`` the gateway sent,
+which the rule extraction waits out instead of failing; any other refusal is a ``GatewayError``.
 """
 
 from collections.abc import Mapping, Sequence
@@ -13,17 +17,42 @@ from typing import Any
 
 import httpx2
 
+from domain_kernel.errors import PROBLEM_TYPE_PREFIX
 from domain_kernel.llm import CompletionRequest, CompletionResponse
 from pipeline.domain.embedding import EmbeddingBatch
+from pipeline.domain.errors import ModelBudgetExhaustedError
 from py_common.auth import ServiceTokenUnavailableError
 
 COMPLETIONS_PATH = "/v1/llm-gateway/completions"
 EMBEDDINGS_PATH = "/v1/llm-gateway/embeddings"
 RETRIEVAL = "retrieval"
+BUDGET_PROBLEM = PROBLEM_TYPE_PREFIX + "llm-budget-exceeded"
+"""The gateway's problem type for a monthly budget used up (its ``BudgetExceededError``)."""
 
 
 class GatewayError(RuntimeError):
     """The gateway refused or failed the call; the body is the problem detail."""
+
+
+def budget_exhausted(response: httpx2.Response) -> ModelBudgetExhaustedError | None:
+    """The refusal as ``ModelBudgetExhaustedError`` when it is the gateway's budget problem
+    (a 429 of type ``BUDGET_PROBLEM``), with its ``Retry-After`` in seconds when it sent one."""
+    if response.status_code != 429:
+        return None
+    try:
+        problem = response.json()
+    except ValueError:
+        return None
+    if not isinstance(problem, dict) or problem.get("type") != BUDGET_PROBLEM:
+        return None
+    retry_after: float | None = None
+    header = response.headers.get("retry-after", "").strip()
+    if header.isdigit():
+        retry_after = float(header)
+    detail = str(problem.get("detail") or problem.get("title") or "budget exceeded")
+    return ModelBudgetExhaustedError(
+        f"the llm-gateway's budget is used up: {detail[:300]}", retry_after_seconds=retry_after
+    )
 
 
 def _post(
@@ -34,7 +63,8 @@ def _post(
     tenant_id: str | None,
     auth: httpx2.Auth | None,
 ) -> Any:
-    """POST ``body`` and return the JSON of a 200; anything else is a ``GatewayError``."""
+    """POST ``body`` and return the JSON of a 200; a budget used up is a
+    ``ModelBudgetExhaustedError``, anything else a ``GatewayError``."""
     headers = {"x-tenant-id": tenant_id} if tenant_id else {}
     try:
         response = client.post(
@@ -46,6 +76,9 @@ def _post(
     except ServiceTokenUnavailableError as exc:
         raise GatewayError(f"no service token for the gateway: {exc}") from exc
     if response.status_code != 200:
+        budget = budget_exhausted(response)
+        if budget is not None:
+            raise budget
         raise GatewayError(f"{response.status_code}: {response.text[:500]}")
     return response.json()
 

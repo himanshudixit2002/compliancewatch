@@ -17,9 +17,12 @@ cadence has passed, started on Temporal under an id per source and cadence slot.
 
 Registration with the rulebook, clause embedding and knowledge extraction are wired to
 ``CW_RULEBOOK_URL`` and ``CW_LLM_GATEWAY_URL`` and only call them when
-``CW_PIPELINE_KNOWLEDGE_ENABLED`` is on. Both clients carry the worker's own access token once
-``CW_SERVICE_CLIENT_SECRET`` is set (client ``CW_SERVICE_CLIENT_ID``, which needs rulebook:write
-and llm:call), and the rulebook's writes also carry ``CW_RULEBOOK_WRITE_TOKEN`` while it is set.
+``CW_PIPELINE_KNOWLEDGE_ENABLED`` is on; the rule extraction (``pipeline.extract_rules``, the
+registered prompt ``extraction.rule_candidate@1``) only when ``CW_PIPELINE_EXTRACTION_ENABLED`` is
+on, which is also when the worker reads that prompt. Both clients carry the worker's own access
+token once ``CW_SERVICE_CLIENT_SECRET`` is set (client ``CW_SERVICE_CLIENT_ID``, which needs
+rulebook:write and llm:call), and the rulebook's writes also carry ``CW_RULEBOOK_WRITE_TOKEN`` while
+it is set.
 
 ``components(settings)`` is what the worker runs (``py_common.runtime.WorkerComponents``): one
 Temporal worker on the ``pipeline`` task queue with ``WORKFLOWS`` and ``activities(settings)``,
@@ -30,6 +33,7 @@ services adds them to its own.
 from collections.abc import Callable
 from typing import Any, Final, Protocol
 
+from ontology import load as load_ontology
 from pipeline import __version__
 from pipeline.application.activities import (
     DiscoverDocument,
@@ -41,6 +45,13 @@ from pipeline.application.activities import (
 from pipeline.application.classify import ClassifyDocument
 from pipeline.application.crawl import FinishCrawl, ListNewDocuments, ScheduleCrawls
 from pipeline.application.embedding import EmbeddingStage
+from pipeline.application.extraction import (
+    RULE_PROMPT,
+    ExtractRules,
+    RuleExtractionStage,
+    StoreExtraction,
+)
+from pipeline.application.extractor import LlmRuleExtractor
 from pipeline.application.knowledge_activities import (
     EmbedClauses,
     ExtractMentions,
@@ -75,6 +86,7 @@ from pipeline.workflows import (
     TASK_QUEUE,
     CrawlSourceWorkflow,
     ExtractKnowledgeWorkflow,
+    ExtractRulesWorkflow,
     IngestDocumentWorkflow,
 )
 from py_common.auth import service_auth_from
@@ -91,6 +103,7 @@ SERVICE_NAME = "pipeline-worker"
 WORKFLOWS: Final[tuple[type[Any], ...]] = (
     IngestDocumentWorkflow,
     ExtractKnowledgeWorkflow,
+    ExtractRulesWorkflow,
     CrawlSourceWorkflow,
 )
 TICK_JOB: Final = "pipeline-crawl-tick"
@@ -112,11 +125,13 @@ def activities(
     parser: DocumentParsers | None = None,
     units: UnitOfWorkFactory | None = None,
     raw_store: RawStore | None = None,
+    extraction: RuleExtractionStage | None = None,
 ) -> list[ActivityBase[Any, Any]]:
     """The worker's activities. The keywords replace what the settings would build: ``sink``
     the rulebook client, ``stage`` the relation stage, ``embedder`` the gateway's embeddings,
-    ``sources`` the store's sources, ``parser`` the parser chain, ``units`` the store
-    and ``raw_store`` the raw store (tests pass memory ones and the sample source)."""
+    ``sources`` the store's sources, ``parser`` the parser chain, ``units`` the store,
+    ``raw_store`` the raw store and ``extraction`` the rule extraction's stage (tests pass memory
+    ones, the sample source and scripted models)."""
     settings = settings or PipelineSettings(_env_file=None, service_name=SERVICE_NAME)
     records = units or unit_of_work_of(settings)
     catalog = sources or StoreCatalog(records, PoliteClient())
@@ -144,6 +159,15 @@ def activities(
         embedding = EmbeddingStage(
             embedder or GatewayEmbedder(settings.llm_gateway_url, auth=auth), rulebook
         )
+    extracting = settings.pipeline_extraction_enabled
+    rules = extraction
+    if rules is None and extracting:
+        prompt = load_prompt(*RULE_PROMPT, settings.pipeline_prompts_dir or PROMPTS_DIR)
+        rules = RuleExtractionStage(
+            LlmRuleExtractor(
+                GatewayProvider(settings.llm_gateway_url, auth=auth), prompt, load_ontology()
+            )
+        )
     return [
         DiscoverDocument(catalog),
         FetchDocument(catalog),
@@ -156,6 +180,8 @@ def activities(
         ExtractMentions(rulebook, rulebook, enabled=enabled),
         ProposeRelations(rulebook, relations, enabled=enabled),
         SubmitRelations(rulebook, enabled=enabled),
+        ExtractRules(rulebook, rules, records, enabled=extracting),
+        StoreExtraction(records),
         ListNewDocuments(records, catalog, knowledge=enabled),
         FinishCrawl(records),
     ]

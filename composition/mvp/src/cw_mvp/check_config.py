@@ -32,7 +32,9 @@ there:
   service client secret in token mode;
 - a raw store other than S3 while the pipeline fetches documents (``fetch_switches``: the
   worker's Temporal switch, the crawl flag): the files of a local or memory raw store go with
-  the machine or the process.
+  the machine or the process;
+- the pipeline's rule extraction without its knowledge flag: the extraction reads the documents
+  the rulebook keeps, so without registration nothing would be extracted.
 
 It never prints a secret's value.
 """
@@ -262,6 +264,11 @@ def _pipeline(settings: PipelineSettings, root: MvpSettings) -> Iterator[str]:
         yield (
             f"CW_PIPELINE_KNOWLEDGE_ENABLED in {settings.auth_mode} mode needs "
             f"{', '.join(missing)}: the rulebook refuses the pipeline's writes without it"
+        )
+    if settings.pipeline_extraction_enabled and not settings.pipeline_knowledge_enabled:
+        yield (
+            "CW_PIPELINE_EXTRACTION_ENABLED needs CW_PIPELINE_KNOWLEDGE_ENABLED: the extraction "
+            "reads the documents the rulebook keeps, and without it none is registered"
         )
     switches = fetch_switches(root, settings)
     store = settings.pipeline_raw_store
