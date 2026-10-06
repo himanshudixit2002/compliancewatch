@@ -48,10 +48,9 @@ components to `shared`, `entities` and their own directory.
 
 ## Parked feature folders
 
-A feature folder exists for a screen that a page renders. Nine folders under `features/`
+A feature folder exists for a screen that a page renders. Seven folders under `features/`
 hold the model and the views of screens that are not built yet (the team, activity and
-data-rights settings, and the source, pipeline, audit, error-report, tenant and Q&A triage
-tools): no route file
+data-rights settings, and the audit, error-report, tenant and Q&A triage tools): no route file
 imports them, so no bundle carries them; their unit tests run with the rest. Each one is
 parked: `PARKED_FEATURES` in `src/test/architecture.ts` maps the folder to the registry ids
 of the screens it will serve, and `architecture.test.ts` holds the map to the tree and the
@@ -91,7 +90,10 @@ apps/web/
                                group, canonical ((resolve) and [entityId])), rulebook/relations ((queue),
                                [candidateId], graph), rulebook/rules, rulebook/search, decisions, fan-outs
                                ((list) and [ruleVersionId]), impact, llm/prompts, llm/models, llm/usage,
-                               profiles/review-tasks, system, the catch-all [...slug]
+                               profiles/review-tasks, system, sources ((list) and [key]), pipeline
+                               ((operations), documents/[documentId], tasks), the catch-all [...slug]
+    api-bff/pipeline/          route handlers outside the proxy: documents/[documentId]/raw (GET, a stored
+                               document's bytes streamed) and sources/[key]/uploads (POST, an upload streamed on)
     sign-out/route.ts          POST: clears the session cookie
     api/health/route.ts        {status, version, commit}
     error.tsx, global-error.tsx, not-found.tsx
@@ -113,8 +115,11 @@ apps/web/
                                approve and reject), rulebook-rules (the rule list), llm-registry (the
                                gateway's prompts, model routes and usage), profile-review-tasks (a tenant's
                                node, its review tasks and snapshot), system (the probes, the registry's
-                               view, the web server's facts); the parked folders above, which no page
-                               imports yet
+                               view, the web server's facts), admin-sources (the sources with the crawl
+                               switch, a source's settings, fetch, upload form, documents and runs),
+                               admin-pipeline (the runs, documents and dead outbox with the requeue, a
+                               stored document with its retry, the tasks with their resolution); the parked
+                               folders above, which no page imports yet
   src/entities/                screen/ (the view shapes of a registry entry), problem/ (RFC 9457), session/ (the claims),
                                ontology/ (the attributes and their wording from GET /v1/ontology),
                                business/ (a business, its nodes and values, onboarding, review tasks, snapshots),
@@ -126,9 +131,13 @@ apps/web/
                                step's lifecycle and a publication), obligation/ (obligations with their rule's
                                facts, citations, history and comments), applicability/ (decisions, a
                                change's impact, review items, fan-out runs, the hold and dry runs), change/
-                               (the changes feed), answer/ (an answer of the ask)
+                               (the changes feed), answer/ (an answer of the ask), pipeline/ (sources, crawl
+                               runs, stored documents with their classification and extraction, retries,
+                               tasks, outbox rows, uploads)
   src/server/                  env.ts (validated CW_WEB_*, parsed lazily), result.ts (Result, ApiError, webError),
-                               api/ (typed clients, problem parsing, idempotency), cache.ts (tags and revalidation),
+                               api/ (typed clients, problem parsing, idempotency, the rulebook's and the
+                               pipeline's write clients), bff/ (the raw and upload handlers' logic: the
+                               multipart reader, problem answers), cache.ts (tags and revalidation),
                                session.ts (the cookie), dal.ts (the gates), origin.ts (the same-origin check of a
                                POST handler), auth/ (the provider port and the fake adapter), legal.ts,
                                ontology.ts (the ontology read, cached an hour by tag), flags.ts (the flag
@@ -142,13 +151,15 @@ apps/web/
   src/shared/i18n/             messages/en.json and t()
   src/shared/ui/               TenantShell, InternalShell, RouterLink, Breadcrumbs, ScreenStatusChip, SessionMenu,
                                SignOutButton, ServiceError, RefreshButton, KeysetPager, FilterChips,
-                               RuleVersionStatusChip,
+                               RuleVersionStatusChip, the pipeline's words and RunsTable, WriteOutcome (a
+                               write's answer, kept for "Try again"),
                                SeedStatusChip, CitationList (verified quotes with their clause and source) and
                                NotLegalAdvice (the footer of every page that says what applies)
   src/test/                    vitest setup, the architecture rules and their test with the parked folder map,
                                the screens.md drift test, the synthetic fixtures guard, fake-fetch.ts and
                                fake-cookies.ts
-  src/proxy.ts                 the optimistic redirect to /sign-in for gated screens without a cookie
+  src/proxy.ts                 the optimistic redirect to /sign-in for gated screens without a cookie; it
+                               leaves /api/ and /api-bff/ alone, so an upload's body is never buffered (D-059)
   src/instrumentation.ts       register: OpenTelemetry on the Node.js runtime behind web.otel_enabled;
                                onRequestError: one JSON line per server error
   scripts/screens-doc.mts      generates docs/web/screens.md; --check and --audit modes

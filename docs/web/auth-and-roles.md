@@ -79,7 +79,9 @@ never a token field). Rotating the secret signs everyone out.
 ## The request path: proxy, then the gates
 
 **`src/proxy.ts`** runs before a route renders (Next 16's proxy, Node runtime). Its matcher
-skips `_next` assets, `/api/` handlers and paths with a file extension. For the rest,
+skips `_next` assets, `/api/` and `/api-bff/` handlers and paths with a file extension (Next buffers
+a request body for the proxy, which would cut an upload short; each `/api-bff/` handler gates
+itself, D-059). For the rest,
 `decide(pathname, search, hasCookie)` sends the visitor to `/sign-in?next=<path and query>`
 when the path is under `/admin` or matches a registry page whose roles are not `"public"`, and
 no `cw_session` cookie is present at all. It does not decrypt, check roles or write anything:
@@ -165,7 +167,8 @@ constructor refuses again (D-016).
 
 The cookie is `SameSite=Lax`, so a cross-site POST does not carry it. Next compares a server
 action's `Origin` with the host before running it, and the sign-out handler runs the same kind
-of check itself (`server/origin.ts`): `Sec-Fetch-Site` decides when the browser sends it (only
+of check itself (`server/origin.ts`), as does the upload handler under `/api-bff/`:
+`Sec-Fetch-Site` decides when the browser sends it (only
 `same-origin` passes); otherwise `Origin`'s host must equal the request's `Host` header, or the
 first `X-Forwarded-Host` value when `CW_WEB_TRUST_FORWARDED_IP` says the deployment trusts its
 proxy's forwarded headers; a request with neither header is not a browser's cross-site

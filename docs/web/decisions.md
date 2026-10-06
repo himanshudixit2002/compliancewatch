@@ -972,3 +972,70 @@ rather than reading the flag again, which would show a state that never register
 with the flag on and no endpoint, spans (Next.js's own, the fetch instrumentation and the product
 events) stay in the process; turning export on is two variables; a new route that names a person
 in its path joins `PERSONAL_ROUTES` with a test.
+
+## D-058: The source and pipeline tools write with the shared token as an admin, and show the crawl switch as declared
+
+2026-10-07. The pipeline's source manager and operations routes take an admin a token names or, in
+`header` and `dual` mode, the shared write token. The web server has no tokens yet, so every write
+goes through `server/api/pipeline-write.ts` with the value the rulebook's admin client already sends
+(`CW_WEB_RULEBOOK_WRITE_TOKEN`), and only for an admin: `admin.sources.write` for a source's settings,
+fetch and uploads, `admin.pipeline.control` for retries, requeues and tasks, checked before any
+request; analysts and reviewers read every page. Each body names the session's user as `actor_id`
+with a reason of ten characters or more. The crawl switch (`pipeline.crawl`) is the pipeline's own
+environment, and no route reads it; the web server's environment could hold a different value, so
+the sources page shows the flag as the registry declares it (off by default), what off means and,
+as evidence, the schedule's latest crawl, and a refused "Fetch now" says plainly that crawling is
+off and nothing was read. A source's record comes from the list, since the pipeline has no read of
+one source. A stored document has a page of its own (`admin.pipeline.document`) rather than a row
+that expands: the retry's Idempotency-Key is minted per render, and the source pages, the task list
+and the review work link to one document. The retry key replays for as long as the pipeline keeps
+the retry; a task's resolution takes no key, because the pipeline answers the same resolution again
+as it answered the first, and the page says that as done. Adding a source is the ready capability
+`admin.sources.add` (D-039), so the list went live without its form. Consequences: once identity
+issues tokens, `pipeline-write.ts` sends the admin's token instead of the shared one and the
+pipeline names the person from it; a pipeline route that reports its flags would let the banner
+show the value itself.
+
+## D-059: Stored bytes and uploads stream through route handlers the proxy does not see
+
+2026-10-07. A server action cannot stream bytes to the browser, and its body limit (1 MB by default)
+would have to rise for every action to carry a 25 MB file it then holds whole. Two route handlers
+under `/api-bff/pipeline/` take the work instead: `system.raw-document` streams a stored document's
+bytes, and `system.uploads` streams an admin's file on to the pipeline. The proxy is left off that
+prefix (its matcher skips `api-bff/`): Next 16 buffers a request body for the proxy and cuts it at
+`proxyClientMaxBodySize` (10 MB) with only a warning, which would have truncated an upload silently.
+Each handler gates itself: the session (`verifySession`), the role, and for the upload the origin
+check of the sign-out handler and the write token. The raw handler reads the document's record
+first, so the content type and the file name come from the stored metadata rather than the byte
+stream; the bytes' time limit covers only the wait for the response to start; the answer is
+`nosniff` and `private, no-store`, inline for a PDF or an HTML page and an attachment otherwise,
+named by the id with the title in `filename*`. An HTML page is served under `sandbox; default-src
+'none'`, so a regulator's page runs no script under this origin and loads nothing (the e2e suite
+checks both); a PDF is not, because Chrome's PDF viewer does not render under a sandbox. The app's
+static headers still apply: `X-Frame-Options: DENY`, and the app's referrer policy replaces any a
+handler sets. The upload form sends its fields first and the file last; the handler reads at most
+64 KiB of fields, checks them as the pipeline does, and sends a new multipart body with the
+session's user as `actor_id` and the file part streamed through, counted against the limit and
+hashed on the way, so nothing is held whole and a file past the limit stops with a 413. The limit
+and the types are the pipeline's, and a test reads them from the service's code. Consequences: a
+proxy in front of the app must allow bodies of the upload limit on `/api-bff/`; a page that wants
+to show a stored PDF inside itself needs a framing decision first.
+
+## D-060: The web stack's pipeline has no Temporal, and the specs stage their own sources
+
+2026-10-07. `make web-stack` gives the pipeline a Temporal address nothing listens on
+(`127.0.0.1:1`) and, on the memory store, its raw files in memory. With the developer's Temporal
+from `make dev`, an upload or a retry from the web stack would queue an ingest that the product's
+worker runs against another store, which holds no such document; without one, the pipeline stores
+the document and answers 503, which the pages say as "stored, but its ingest did not start" and
+"Temporal did not answer: send the same request again", the same on CI, which runs no Temporal. The
+specs stage what they act on through the pipeline's routes with the write token (as `stageReview`
+does for the rulebook): an upload-only source of their own per test (`example_<nine digits>`) and
+synthetic PDF and HTML bytes, so they run again on the same stack and never touch a built-in
+source. A spec fetches a built-in source only after asking whether crawling is off (a fetch of a
+key no source has answers `pipeline-crawl-disabled`, as `cw-product check` asks), so nothing reads
+a regulator's site. Tasks open only inside the ingest and outbox rows die only in the relay, and no
+route creates either, so on this stack the specs check the task and dead-row views and their empty
+states against the pipeline's answers, and the unit tests cover resolving, dismissing and
+requeueing against the spec's shapes. Consequences: resolving a task end to end needs a staging
+route in the pipeline for local and test, or a spec on the product stack, which runs the worker.

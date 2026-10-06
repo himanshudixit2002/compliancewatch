@@ -47,9 +47,9 @@ browser except the form and its pending state.
 
 `make openapi-ts` writes `packages/contracts/clients/typescript/openapi/<service>.v1.d.ts` for
 every committed spec (`applicability-engine`, `eval`, `identity`, `llm-gateway`, `notification`,
-`obligation`, `profile`, `qa`, `rulebook`) with `openapi-typescript`, formatted with prettier,
-plus an `index.ts` that exports each file as a namespace (`applicabilityEngine`, `eval`,
-`identity`, `llmGateway`, `notification`, `obligation`, `profile`, `qa`, `rulebook`). `make openapi-ts-check` (in `make check` and in the `web-e2e` CI job)
+`obligation`, `pipeline`, `profile`, `qa`, `rulebook`) with `openapi-typescript`, formatted with
+prettier, plus an `index.ts` that exports each file as a namespace (`applicabilityEngine`, `eval`,
+`identity`, `llmGateway`, `notification`, `obligation`, `pipeline`, `profile`, `qa`, `rulebook`). `make openapi-ts-check` (in `make check` and in the `web-e2e` CI job)
 regenerates in memory and fails on any difference, so a spec change lands with its types. App
 code imports them type-only:
 
@@ -64,9 +64,8 @@ checked against the generated union both ways, so a value a service adds breaks 
 entity's `types.ts` instead of going missing from a filter, a form or a page. A list that is a
 subset on purpose (the relations that only point at a version) stays `as const satisfies`.
 
-`pipeline` has no committed spec, so the app has no client for it; a screen that needs one of
-its routes is a waiting entry in the registry until the spec lands. There is no hand-written or
-untyped client.
+Every service has a committed spec and a typed client; there is no hand-written or untyped
+client.
 
 ## Configuration
 
@@ -77,7 +76,8 @@ at build time; `loadEnv(record)` in tests). The data layer reads:
 | ----------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------- |
 | `CW_WEB_<SERVICE>_URL`        | `http://localhost:8001` ... `:8010` | one per service, in the Makefile's `SERVICES` order; a trailing slash is dropped         |
 | `CW_WEB_REQUEST_TIMEOUT_MS`   | `10000` (at most `120000`)          | the time limit of every call; past it the call is a `network` error                      |
-| `CW_WEB_RULEBOOK_WRITE_TOKEN` | unset                               | the rulebook's `x-cw-write-token`; unset means the write client answers "not configured" |
+| `CW_WEB_RULEBOOK_WRITE_TOKEN` | unset                               | the shared `x-cw-write-token` of the rulebook and the pipeline; unset means the write clients answer "not configured" |
+| `CW_WEB_PIPELINE_UPLOAD_MAX_BYTES` | `25000000` (at most `100000000`) | the largest file the upload handler forwards: the pipeline's `CW_PIPELINE_UPLOAD_MAX_BYTES`, which it must equal |
 | `CW_WEB_SEED_STATE_PATH`      | `../../var/seed/last.json`          | the file the seed writes, relative to `apps/web`; the sign-in form offers its tenant     |
 
 `<SERVICE>` is `IDENTITY`, `PROFILE`, `RULEBOOK`, `APPLICABILITY_ENGINE`, `OBLIGATION`,
@@ -104,6 +104,8 @@ lists every variable; none is `NEXT_PUBLIC_*`.
 | `applicabilityEngineAdminClient(ctx)`         | applicability-engine | never (fan-outs, the hold and dry runs belong to no tenant) |                    |
 | `rulebookClient(ctx?)`                        | rulebook     | never (records shared by tenants) |                                                   |
 | `rulebookAdmin(ctx)` returns `Result<Client>` | rulebook     | never                             | `x-cw-write-token`, after a regulatory-role check |
+| `pipelineClient(ctx)`                         | pipeline     | never (no record of the pipeline belongs to a tenant) |                               |
+| `pipelineWriteClient(ctx, capability)` returns `Result<Client>` (`server/api/pipeline-write.ts`) | pipeline | never | `x-cw-write-token`, after an admin capability check |
 
 Every request carries:
 
@@ -118,7 +120,10 @@ Every request carries:
   decision review and the profile review task lookup read the tenant their lookup names
   ([admin-tools.md](admin-tools.md)).
 - The time limit: `AbortSignal.timeout(CW_WEB_REQUEST_TIMEOUT_MS)`, combined with the request's
-  own signal.
+  own signal. A client may take a longer one (`timeoutMs`: the pipeline's writes that start a
+  workflow wait for at least 30 seconds, an upload 120) and may time only the wait for the
+  response to start (`timeoutScope: "response-start"`), which the raw handler uses so that a long
+  download is not cut off once its bytes flow; the request's own signal still stops the body.
 
 Body fields that record who did something (`decided_by`, `recorded_by`, `changed_by`, `by`) are
 filled from `session.userId` by the gateway, never from the form; every write follows that
@@ -183,8 +188,8 @@ title, detail?, fieldErrors?)`: the same `ApiError` shape with a problem typed
 `urn:compliancewatch:problem:web-<slug>` and no request id, since no service was called. The
 ones on `main`: `web-write-token-missing`, `web-regulatory-role-required`,
 `web-auth-provider-missing`, `web-auth-provider-not-implemented`, `web-fake-sign-in-invalid`,
-`web-fake-provider-no-challenge`, `web-fake-provider-input`, and
-`web-cross-origin-request` from the sign-out handler. In a form, a failure that came without a
+`web-fake-provider-no-challenge`, `web-fake-provider-input`, `web-admin-role-required` from the
+pipeline's write client, and `web-cross-origin-request` from the sign-out and upload handlers. In a form, a failure that came without a
 problem body (a refused connection, a proxy's plain-text 502) is typed `web-<kind>`, for
 example `web-network`, by `toActionProblem`.
 
@@ -247,6 +252,7 @@ Tenant data is never cached; a handful of records every tenant sees the same way
 | a rulebook clause                                             | `cachedRead([tags.rulebook.clause(id)])`            | `rulebook:clause:<id>`                                                                |
 | rule versions, citations, relations, entities                 | `uncachedRead()`                                    | none: versions move through review outside this server, and an action renders the page again |
 | the entity and relation review queues                         | `uncachedRead()`                                    | none: the pipeline fills them and decisions empty them outside this server (D-036, D-055) |
+| the pipeline's sources, runs, documents, tasks and dead outbox | `uncachedRead()`                                   | none: crawls, ingests, the relay and people's writes move them outside this server   |
 | notification templates                                        | `cachedRead([tags.notification.templates()])`       | `notification:templates`                                                              |
 | the ontology (`server/ontology.ts`)                           | `cachedRead([tags.profile.ontology()], 3600)`       | `profile:ontology`                                                                    |
 | gateway prompts and models                                    | `cachedRead([tags.llm.prompts()])`, ...             | `llm-gateway:prompts`, `llm-gateway:models`                                           |
@@ -558,6 +564,44 @@ facts (a token only as set or not). `server/telemetry.ts` decides at startup whe
 registers and exports, and `server/telemetry-redaction.ts` takes every query and personal value
 out of a span's URLs before export (D-057).
 
+## Sources and the pipeline
+
+`features/admin-sources/gateway.ts` reads the sources (`GET /v1/pipeline/sources`), a source's
+documents (`GET .../sources/{key}/documents`, keyset by `cursor`) and the runs (`GET
+/v1/pipeline/runs`); `features/admin-pipeline/gateway.ts` reads the runs, every source's documents,
+one document with its retries (`GET .../documents/{document_id}`), the dead outbox (`GET
+.../outbox/dead`) and the tasks (`GET .../tasks`), all over `pipelineClient` with no tenant header
+and no token, uncached. The DTOs map through `entities/pipeline/mappers.ts`; the words both
+features show for a document's status and type and a run's status and trigger, and the table of
+runs, are `shared/ui/pipeline.tsx`.
+
+The writes (a source's settings and fetch, a document's retry, a dead row's requeue, a task's
+resolution and dismissal) are server actions that run the page's gate again, refuse anyone but an
+admin, check the form's shape and go through `server/api/pipeline-write.ts` only: `pipelineWrites(ctx,
+capability)` gives the port for `admin.sources.write` or `admin.pipeline.control` with the write
+token set, and otherwise a port whose every method answers the refusal without a request;
+`pipelineWriteAccess` tells a form which refusal applies. Each body names the session's user as
+`actor_id` and carries the reason, which the pipeline keeps in its audit entry. The retry sends the
+form's Idempotency-Key and says whether the answer was a replay; a task's resolution needs no key,
+since the pipeline answers the same resolution again as it answered the first. A refusal the pages
+know (crawling off, an ingest running, a retry refused, Temporal not answering, the key reused or
+missing, a closed task) is said in their own words (`refusals.ts` in each feature); the rest pass
+on as they came. Client forms use `shared/ui/write-outcome.tsx` (`useWriteAction` and
+`WriteOutcome`): the answer where focus lands, a request whose answer never came kept whole for
+"Try again", and "Send the same request again" for a refusal that asks for it.
+
+Two route handlers stream what an action cannot carry, outside the proxy (D-059):
+`server/bff/raw-document.ts` behind `GET /api-bff/pipeline/documents/[documentId]/raw` reads the
+document's record and then its bytes with `parseAs: "stream"` and `timeoutScope:
+"response-start"`, and passes the body on untouched with headers built from the record;
+`server/bff/upload.ts` behind `POST /api-bff/pipeline/sources/[key]/uploads` checks the origin, the
+session, the key and the declared length, reads the form's fields (`server/bff/multipart.ts`: at
+most 64 KiB before the file part, the fields first and the file last, as the upload form sends
+them), and sends the pipeline a new multipart body whose file part is the incoming bytes streamed
+through, counted against the limit and hashed on the way (`duplex: "half"`). Both answer problems
+as `application/problem+json` (`server/bff/problem.ts`). [admin-tools.md](admin-tools.md) has the
+pages and the handlers.
+
 ## Rule versions, citations and the publish workflow
 
 `features/rule-versions/gateway.ts` reads the rulebook's rules (`GET /v1/rulebook/rules`), each
@@ -657,7 +701,13 @@ component handles one.
   without a regulatory role (`web-regulatory-role-required`, before any request) and for an
   unset token (`web-write-token-missing`, kind `unavailable`), and otherwise a client that
   sends `x-cw-write-token`. A wrong token is still the rulebook's 401. The local stack and CI
-  use the placeholder `local-write-token`, which is not a secret.
+  use the placeholder `local-write-token`, which is not a secret. The pipeline reads the same
+  value in `header` and `dual` mode, and `server/api/pipeline-write.ts` is the only module that
+  sends it there: `pipelineWriteClient(ctx, capability)` refuses a session without the admin
+  capability (`web-admin-role-required`) and an unset token (`web-write-token-missing`) before any
+  request, and the pipeline's 401 (`pipeline-write-token-invalid`) and 503
+  (`pipeline-writes-disabled`) are reworded to name the variable to set and the side that needs
+  it, never its value.
 - **Rulebook review token** (`CW_WEB_RULEBOOK_REVIEW_TOKEN`, the rulebook's
   `CW_RULEBOOK_REVIEW_TOKEN`): the rulebook's analyst routes (entity decisions, relation
   approvals and rejections, a rule version's citations and the steps of its publish workflow)
@@ -725,7 +775,11 @@ passes them (D-020, D-042). On the memory store the rulebook starts with the see
 draft rule versions (`CW_RULEBOOK_SEED_ON_START`, honoured in local and test only), every one
 needing review; with `STORE=postgres`, `make seed SERVICE=rulebook` writes them. `make web-e2e`
 gives the web app the same two tokens and the e2e config turns `web.publish_actions`,
-`web.admin_rulebook_writes` and `web.qa_enabled` on.
+`web.admin_rulebook_writes` and `web.qa_enabled` on. The pipeline starts with crawling off, its
+raw files in memory on the memory store (`CW_PIPELINE_RAW_STORE=memory`), and its Temporal address
+at `127.0.0.1:1`, where nothing listens: an upload or a retry from the web stack is stored and
+answered 503 (Temporal did not answer) without starting an ingest on a developer's Temporal, and
+CI has no Temporal anyway (D-060).
 `make web-stack-wait` waits for every `/health`; `make web-stack-down` stops them, and the
 memory stores forget their rows (the rule versions an e2e run moved included).
 
