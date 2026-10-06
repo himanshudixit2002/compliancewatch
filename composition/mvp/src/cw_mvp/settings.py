@@ -35,11 +35,17 @@ Temporal Cloud, serves staging and production):
 Periodic jobs (notification dispatch and retention, the rulebook's transitions, obligation's
 reminder sweep, the idempotency purge of every schema with the table) run with either switch
 off, each behind its service's own switch where it has one.
+
+``ReleaseSettings`` are what the release commands read (``cw-mvp migrate``, ``topics``,
+``release`` and ``check-config``): these, and ``migration_database_url``
+(``CW_MIGRATION_DATABASE_URL``, a secret), the URL of the role that owns the service schemas.
+Migrations run as that role and never over the app's runtime URL (``CW_DATABASE_URL``), whose
+role row-level security applies to.
 """
 
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 
 from py_common.settings import Settings
 
@@ -81,3 +87,7 @@ class MvpSettings(Settings):
                 "CW_MVP_WORKER_STALE_SECONDS must be longer than CW_MVP_WORKER_HEARTBEAT_SECONDS"
             )
         return self
+
+
+class ReleaseSettings(MvpSettings):
+    migration_database_url: SecretStr | None = None
