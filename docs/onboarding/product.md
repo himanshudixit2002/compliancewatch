@@ -105,10 +105,10 @@ answers from its fake model: `CW_LLM_PROVIDER` unset or `fake`, read from the en
 so nothing the local product ingests reaches a real model. While it passes `true`, it also routes
 the gateway's extraction to the fake model `fake/echo` (`CW_LLM_ROUTES__EXTRACTION`), as the
 image product does (`x-mvp-env`), so the gateway's routing table shows that a fake model answers
-it. With the extraction on, the ingest
-classifies each parsed document and, for a notification, circular or act amendment it registered
-(which needs `CW_PIPELINE_KNOWLEDGE_ENABLED`, off unless `.env` turns it on), extracts its rule
-candidate through the llm-gateway (`services/pipeline/README.md`, "Extraction in the workflow").
+it. With the extraction on, the ingest classifies each parsed document and, for a notification,
+circular or act amendment it registered (which needs `CW_PIPELINE_KNOWLEDGE_ENABLED`, off unless
+`.env` turns it on), extracts its rule candidate through the llm-gateway
+(`services/pipeline/README.md`, "Extraction in the workflow").
 The fake model is deterministic, a placeholder that cites no clause, so a candidate made here is
 stored unparseable for an analyst. It is not free of bookkeeping: the gateway books each ask its
 cache did not answer at a tiny estimated price
