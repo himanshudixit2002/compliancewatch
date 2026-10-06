@@ -126,7 +126,7 @@ that a published rule becomes decisions, obligations and a change card
 ([docs/onboarding/product.md](docs/onboarding/product.md)). `make web-stack` is the UI-only stack,
 without the worker.
 
-Prerequisites: Node 22.18+ (type stripping for the bot's dev script), Docker (Docker Desktop or `brew install colima docker docker-compose docker-buildx && colima start --cpu 4 --memory 8 --disk 60`), `uv`, `pnpm` and Node 22+. Details and troubleshooting in [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
+Prerequisites: Node 22.22.2+ (jsdom 30's floor; the unit tests of the web app and the UI kit run in it), Docker (Docker Desktop or `brew install colima docker docker-compose docker-buildx && colima start --cpu 4 --memory 8 --disk 60`), `uv`, `pnpm` and Node 22+. Details and troubleshooting in [docs/onboarding/local-dev.md](docs/onboarding/local-dev.md).
 
 ## Layout principles (section 13)
 
