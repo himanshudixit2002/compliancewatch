@@ -11,6 +11,13 @@ one transaction: it locks the version, checks the move against the kernel's tran
 writes the new state and appends a row to the decision audit. Publishing writes its events to
 the outbox in the same transaction; ``rulebook.domain.publication`` decides what it changes.
 
+Citing, submitting, returning and approving are also functions that run inside a unit of work
+the caller opened (``add_citations``, ``submit_for_review``, ``return_to_draft``,
+``approve_version``), with no transaction of their own: a review task's decision
+(``rulebook.application.review_tasks``) runs them in its own transaction, so the decision and
+the version's transition commit together or not at all. The classes are those functions in a
+transaction each.
+
 Days are days in India: "today" is the date in Asia/Kolkata when the step runs. A replacement
 dated in the future cuts the replaced version's ``effective_to`` at publication and moves its
 status when the day comes, which ``ApplyDueTransitions`` does once a day.
@@ -150,6 +157,159 @@ def _decision(
     )
 
 
+def add_citations(
+    uow: KnowledgeUnitOfWork,
+    rule_version_id: RuleVersionId,
+    citations: Sequence[CitationInput],
+    *,
+    now: datetime,
+) -> CitationReport:
+    """``AddCitations`` inside the caller's transaction: the version locked, every quote checked
+    against its clause, all of them stored or none."""
+    if not 1 <= len(citations) <= MAX_CITATIONS:
+        raise InvariantViolationError(f"send 1 to {MAX_CITATIONS} citations at a time")
+    version = _locked(uow, rule_version_id)
+    if version.status not in EDITABLE_FROM_STATUSES:
+        raise RuleVersionNotEditableError(
+            f"rule version {rule_version_id} is {version.status.value}"
+        )
+    records: dict[UUID, CitationRecord] = {}
+    unknown: list[str] = []
+    failures: list[str] = []
+    for citation in citations:
+        detail = uow.documents.clause(citation.clause_id)
+        if detail is None:
+            unknown.append(str(citation.clause_id))
+            continue
+        check = check_quote(citation.quote, detail.clause.text)
+        if not check.verified:
+            missing = f", missing {', '.join(check.missing)}" if check.missing else ""
+            failures.append(
+                f"{detail.clause.clause_ref} of {detail.clause.document_id}: score "
+                f"{check.score:.2f}{missing}"
+            )
+            continue
+        citation_id = citation_id_for(rule_version_id, citation.clause_id, citation.quote)
+        records[citation_id] = CitationRecord(
+            citation_id=citation_id,
+            rule_version_id=rule_version_id,
+            clause_id=citation.clause_id,
+            document_id=detail.clause.document_id,
+            clause_ref=detail.clause.clause_ref,
+            quote=citation.quote,
+            verified=True,
+            match_score=round(check.score, 3),
+            verified_at=now,
+        )
+    if unknown:
+        raise UnknownClauseError(
+            f"{len(unknown)} clauses are not stored: " + ", ".join(sorted(unknown)[:5])
+        )
+    if failures:
+        raise CitationNotVerifiedError(
+            f"{len(failures)} quotes are not in their clause: " + "; ".join(failures[:5])
+        )
+    added = sum(uow.citations.add(record) for record in records.values())
+    return CitationReport(
+        added=added,
+        unchanged=len(records) - added,
+        citations=uow.citations.for_version(rule_version_id),
+    )
+
+
+def submit_for_review(
+    uow: KnowledgeUnitOfWork,
+    rule_version_id: RuleVersionId,
+    *,
+    actor_id: UserId,
+    now: datetime,
+    high_impact: bool = False,
+    note: str = "",
+) -> VersionState:
+    """``SubmitForReview`` inside the caller's transaction."""
+    version = _locked(uow, rule_version_id)
+    RULE_VERSION_TRANSITIONS.assert_transition(version.status, RuleVersionStatus.IN_REVIEW)
+    submitted = replace(
+        version,
+        status=RuleVersionStatus.IN_REVIEW,
+        submitted_at=now,
+        high_impact=version.high_impact or high_impact,
+    )
+    uow.rule_versions.save_lifecycle(submitted)
+    uow.rule_versions.record_decision(
+        _decision(
+            version, DecisionAction.SUBMITTED, submitted.status, now, actor_id=actor_id, note=note
+        )
+    )
+    return VersionState(submitted)
+
+
+def return_to_draft(
+    uow: KnowledgeUnitOfWork,
+    rule_version_id: RuleVersionId,
+    *,
+    actor_id: UserId,
+    now: datetime,
+    note: str = "",
+) -> VersionState:
+    """``ReturnToDraft`` inside the caller's transaction."""
+    version = _locked(uow, rule_version_id)
+    RULE_VERSION_TRANSITIONS.assert_transition(version.status, RuleVersionStatus.DRAFT)
+    returned = replace(
+        version,
+        status=RuleVersionStatus.DRAFT,
+        submitted_at=None,
+        seed_status=SeedStatus.NEEDS_REVIEW,
+    )
+    uow.rule_versions.save_lifecycle(returned)
+    uow.rule_versions.record_decision(
+        _decision(
+            version, DecisionAction.RETURNED, returned.status, now, actor_id=actor_id, note=note
+        )
+    )
+    return VersionState(returned)
+
+
+def approve_version(
+    uow: KnowledgeUnitOfWork,
+    rule_version_id: RuleVersionId,
+    *,
+    actor_id: UserId,
+    now: datetime,
+    note: str = "",
+    synthetic: bool = False,
+) -> VersionState:
+    """``ApproveVersion`` inside the caller's transaction. The approvers of the round are read
+    from the decision audit (approvals since ``submitted_at``), never from anywhere else; the
+    same person twice is ``DuplicateApproverError``. The caller decides whether a synthetic
+    approval is allowed."""
+    version = _locked(uow, rule_version_id)
+    RULE_VERSION_TRANSITIONS.assert_transition(version.status, RuleVersionStatus.APPROVED)
+    if version.submitted_at is None:
+        raise InvariantViolationError(
+            f"rule version {rule_version_id} has no review round: return it to draft "
+            "and submit it again"
+        )
+    earlier = uow.rule_versions.approvers(rule_version_id, version.submitted_at)
+    if actor_id in earlier:
+        raise DuplicateApproverError(
+            f"{actor_id} already approved rule version {rule_version_id} in this round"
+        )
+    approvers = earlier | {actor_id}
+    after = version
+    if len(approvers) >= required_approvals(version.high_impact):
+        after = replace(
+            version,
+            status=RuleVersionStatus.APPROVED,
+            seed_status=version.seed_status if synthetic else SeedStatus.REVIEWED,
+        )
+        uow.rule_versions.save_lifecycle(after)
+    uow.rule_versions.record_decision(
+        _decision(version, DecisionAction.APPROVED, after.status, now, actor_id=actor_id, note=note)
+    )
+    return VersionState(after, tuple(sorted(approvers, key=str)))
+
+
 class AddCitations:
     """Cite clauses for a draft version. All or nothing: every quote must be in its
     clause (a fuzzy score of at least 0.85 and every number, form code and month name present),
@@ -163,57 +323,9 @@ class AddCitations:
     def run(
         self, rule_version_id: RuleVersionId, citations: Sequence[CitationInput]
     ) -> CitationReport:
-        if not 1 <= len(citations) <= MAX_CITATIONS:
-            raise InvariantViolationError(f"send 1 to {MAX_CITATIONS} citations at a time")
         now = self._clock()
         with self._unit_of_work() as uow:
-            version = _locked(uow, rule_version_id)
-            if version.status not in EDITABLE_FROM_STATUSES:
-                raise RuleVersionNotEditableError(
-                    f"rule version {rule_version_id} is {version.status.value}"
-                )
-            records: dict[UUID, CitationRecord] = {}
-            unknown: list[str] = []
-            failures: list[str] = []
-            for citation in citations:
-                detail = uow.documents.clause(citation.clause_id)
-                if detail is None:
-                    unknown.append(str(citation.clause_id))
-                    continue
-                check = check_quote(citation.quote, detail.clause.text)
-                if not check.verified:
-                    missing = f", missing {', '.join(check.missing)}" if check.missing else ""
-                    failures.append(
-                        f"{detail.clause.clause_ref} of {detail.clause.document_id}: score "
-                        f"{check.score:.2f}{missing}"
-                    )
-                    continue
-                citation_id = citation_id_for(rule_version_id, citation.clause_id, citation.quote)
-                records[citation_id] = CitationRecord(
-                    citation_id=citation_id,
-                    rule_version_id=rule_version_id,
-                    clause_id=citation.clause_id,
-                    document_id=detail.clause.document_id,
-                    clause_ref=detail.clause.clause_ref,
-                    quote=citation.quote,
-                    verified=True,
-                    match_score=round(check.score, 3),
-                    verified_at=now,
-                )
-            if unknown:
-                raise UnknownClauseError(
-                    f"{len(unknown)} clauses are not stored: " + ", ".join(sorted(unknown)[:5])
-                )
-            if failures:
-                raise CitationNotVerifiedError(
-                    f"{len(failures)} quotes are not in their clause: " + "; ".join(failures[:5])
-                )
-            added = sum(uow.citations.add(record) for record in records.values())
-            return CitationReport(
-                added=added,
-                unchanged=len(records) - added,
-                citations=uow.citations.for_version(rule_version_id),
-            )
+            return add_citations(uow, rule_version_id, citations, now=now)
 
 
 class SubmitForReview:
@@ -234,26 +346,9 @@ class SubmitForReview:
     ) -> VersionState:
         now = self._clock()
         with self._unit_of_work() as uow:
-            version = _locked(uow, rule_version_id)
-            RULE_VERSION_TRANSITIONS.assert_transition(version.status, RuleVersionStatus.IN_REVIEW)
-            submitted = replace(
-                version,
-                status=RuleVersionStatus.IN_REVIEW,
-                submitted_at=now,
-                high_impact=version.high_impact or high_impact,
+            return submit_for_review(
+                uow, rule_version_id, actor_id=actor_id, now=now, high_impact=high_impact, note=note
             )
-            uow.rule_versions.save_lifecycle(submitted)
-            uow.rule_versions.record_decision(
-                _decision(
-                    version,
-                    DecisionAction.SUBMITTED,
-                    submitted.status,
-                    now,
-                    actor_id=actor_id,
-                    note=note,
-                )
-            )
-        return VersionState(submitted)
 
 
 class ReturnToDraft:
@@ -270,26 +365,7 @@ class ReturnToDraft:
     ) -> VersionState:
         now = self._clock()
         with self._unit_of_work() as uow:
-            version = _locked(uow, rule_version_id)
-            RULE_VERSION_TRANSITIONS.assert_transition(version.status, RuleVersionStatus.DRAFT)
-            returned = replace(
-                version,
-                status=RuleVersionStatus.DRAFT,
-                submitted_at=None,
-                seed_status=SeedStatus.NEEDS_REVIEW,
-            )
-            uow.rule_versions.save_lifecycle(returned)
-            uow.rule_versions.record_decision(
-                _decision(
-                    version,
-                    DecisionAction.RETURNED,
-                    returned.status,
-                    now,
-                    actor_id=actor_id,
-                    note=note,
-                )
-            )
-        return VersionState(returned)
+            return return_to_draft(uow, rule_version_id, actor_id=actor_id, now=now, note=note)
 
 
 class ApproveVersion:
@@ -327,38 +403,9 @@ class ApproveVersion:
             raise SyntheticApprovalRefusedError()
         now = self._clock()
         with self._unit_of_work() as uow:
-            version = _locked(uow, rule_version_id)
-            RULE_VERSION_TRANSITIONS.assert_transition(version.status, RuleVersionStatus.APPROVED)
-            if version.submitted_at is None:
-                raise InvariantViolationError(
-                    f"rule version {rule_version_id} has no review round: return it to draft "
-                    "and submit it again"
-                )
-            earlier = uow.rule_versions.approvers(rule_version_id, version.submitted_at)
-            if actor_id in earlier:
-                raise DuplicateApproverError(
-                    f"{actor_id} already approved rule version {rule_version_id} in this round"
-                )
-            approvers = earlier | {actor_id}
-            after = version
-            if len(approvers) >= required_approvals(version.high_impact):
-                after = replace(
-                    version,
-                    status=RuleVersionStatus.APPROVED,
-                    seed_status=version.seed_status if synthetic else SeedStatus.REVIEWED,
-                )
-                uow.rule_versions.save_lifecycle(after)
-            uow.rule_versions.record_decision(
-                _decision(
-                    version,
-                    DecisionAction.APPROVED,
-                    after.status,
-                    now,
-                    actor_id=actor_id,
-                    note=note,
-                )
+            return approve_version(
+                uow, rule_version_id, actor_id=actor_id, now=now, note=note, synthetic=synthetic
             )
-        return VersionState(after, tuple(sorted(approvers, key=str)))
 
 
 class PublishVersion:
