@@ -162,8 +162,16 @@ class Pipeline:
             for spec in SOURCES.values():
                 unit.sources.add(Source.of(spec.definition(), NOW))
 
-    def upload(self, content: bytes, media_type: str, *, key: str = "cbic_notifications") -> Stored:
-        """What an upload does before it starts the ingest."""
+    def upload(
+        self,
+        content: bytes,
+        media_type: str,
+        *,
+        key: str = "cbic_notifications",
+        title: str = "Example upload",
+    ) -> Stored:
+        """What an upload does before it starts the ingest, the document listed under
+        ``title``."""
         ref = DocumentRef(source_id_for(key), f"upload://{key}/{uuid.uuid4().hex}")
         raw = RawDocument.from_bytes(ref, content, media_type, NOW)
         storage_key = self.raw.put(raw)
@@ -179,7 +187,7 @@ class Pipeline:
                     size=len(content),
                     sha256=raw.sha256,
                     storage_key=storage_key,
-                    title="Example upload",
+                    title=title,
                 )
             )
         return Stored(
@@ -195,7 +203,7 @@ class Pipeline:
             storage_key=storage_key,
             raw_uri=self.raw.uri(storage_key),
             duplicate=True,
-            title="Example upload",
+            title=title,
         )
 
     @asynccontextmanager
@@ -396,29 +404,32 @@ async def test_a_conflict_waits_for_triage_and_its_resolution_extracts_the_circu
 
 
 @pytest.mark.parametrize(
-    ("content", "key", "classification", "registered"),
+    ("title", "text", "key", "classification", "registered"),
     [
-        (page("Example rules", "Rule 1. Example text of a rule."), "cgst_rules", "reference", True),
+        ("Example rules", "Rule 1. Example text of a rule.", "cgst_rules", "reference", True),
         (
-            page("Press release", "Recommendations of the 99th meeting of the GST Council"),
+            "Press release",
+            "Recommendations of the 99th meeting of the GST Council",
             "gstcouncil_press",
             "reference",
             True,
         ),
-        (page("Reset Password User Manual", "Step 1"), "cbic_notifications", "irrelevant", False),
+        ("Reset Password User Manual", "Step 1", "cbic_notifications", "irrelevant", False),
     ],
     ids=["statute", "press-release", "user-manual"],
 )
 async def test_statutes_and_press_releases_are_kept_for_reference_and_never_extracted(
     environment: WorkflowEnvironment,
-    content: bytes,
+    title: str,
+    text: str,
     key: str,
     classification: str,
     registered: bool,
 ) -> None:
     model = AnswersInTurn()
     pipeline = Pipeline(model)
-    stored = pipeline.upload(content, "text/html", key=key)
+    # Listed under its own title, the one it would be registered under and the classify step reads.
+    stored = pipeline.upload(page(title, text), "text/html", key=key, title=title)
     async with pipeline.worker(environment):
         result, history = await pipeline.ingest(environment, ingest(stored))
     assert (result.classification, result.registered) == (classification, registered)
