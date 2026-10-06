@@ -2325,11 +2325,11 @@ def extraction_models(product: Product) -> list[str]:
 def extraction(context: CheckContext) -> list[str]:
     product = context.product
     models = extraction_models(product)
-    if not all(model.startswith(FAKE_MODEL) for model in models):
+    if not models or not all(model.startswith(FAKE_MODEL) for model in models):
         raise StepSkippedError(
             f"the product's gateway routes the extraction to {', '.join(models)}, and no route "
             "of it says whether its provider is the fake one, so the check asks no model (make "
-            f"product routes the extraction to {FAKE_MODEL}echo while CW_LLM_PROVIDER is fake)"
+            "product routes the extraction to fake/echo while CW_LLM_PROVIDER is fake)"
         )
     queue = ok(product.internal.get(TASKS, params={"kind": "triage"}))["items"]
     if any(item.get("kind") != "triage" for item in queue):
