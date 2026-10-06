@@ -122,12 +122,11 @@ the API answers. One failed step does not stop the next.
   publish`` publishes seed rules outside the review flow) is reported, not judged. The step claims
   one task as the synthetic check analyst (``analysts.CHECK_ANALYST``): the one it holds from an
   earlier run, or the first open one in the queue whose version is a draft; claiming it again
-  changes nothing. It reads that task (its
-  draft, the specification described, the citations with their verification, the history) and
-  the stats, which count the waiting tasks. The public listener answers the queue 404 in header
-  mode. Nothing is edited or decided, so no seed draft changes, none is approved or published
-  and none is marked reviewed: ``tools/demo/tests/unit/test_review_flow.py`` edits, approves
-  and publishes on memory stores.
+  changes nothing. It reads that task (its draft, the specification described, the citations
+  with their verification, the history) and the stats, which count the waiting tasks. The
+  public listener answers the queue 404 in header mode. Nothing is edited or decided, so no seed
+  draft changes, none is approved or published and none is marked reviewed:
+  ``tools/demo/tests/unit/test_review_flow.py`` edits, approves and publishes on memory stores.
 """
 
 import io
