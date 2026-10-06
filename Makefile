@@ -602,10 +602,13 @@ openapi-ts-check: check-pnpm ## The generated OpenAPI types match the committed 
 # var/product/sink.jsonl, with a five-second batching window so a change card goes within the
 # check's wait; message links to the product's web app; the pipeline's crawl off
 # (CW_PIPELINE_CRAWL_ENABLED=false, whatever .env says): a crawl reads the live regulator sites,
-# which the local product and CI never do; and its rule extraction on
-# (CW_PIPELINE_EXTRACTION_ENABLED=true): the gateway's fake model, the default, answers it
-# deterministically and for nothing, and the product ingests nothing by itself, so the worker only
-# builds it at start and the check's extraction step asks the gateway with its prompt. The web app
+# which the local product and CI never do; and its rule extraction (CW_PIPELINE_EXTRACTION_ENABLED)
+# on only while the gateway answers from its fake model, CW_LLM_PROVIDER unset or fake (read from
+# the environment or .env, as the gateway reads it), and off with a real provider whatever .env
+# says. The fake model answers deterministically, though the gateway still books each ask its cache
+# did not answer at a tiny estimated price in its ledger (in memory, or the dev database's with
+# CW_LLM_LEDGER=postgres); the product ingests nothing by itself, so the worker only builds the
+# extraction at start and the check's extraction step asks the gateway with its prompt. The web app
 # gets every CW_WEB_*_URL at the internal listener and builds into .next/product, so it runs beside
 # a make web-dev of the same checkout (Next allows one dev server per build directory). Pids and
 # logs are under var/product; make product-down stops only the processes whose pids it recorded,
@@ -630,7 +633,7 @@ PRODUCT_ENV = CW_AUTH_MODE=header CW_MVP_HOST=127.0.0.1 \
   CW_PROFILE_GSTIN_LOOKUP=static CW_NOTIFICATION_CHANNELS=sink \
   CW_NOTIFICATION_SINK_PATH=$(PRODUCT_DIR)/sink.jsonl CW_NOTIFICATION_BATCH_WINDOW_SECONDS=5 \
   CW_WEB_BASE_URL="http://localhost:$${WEB_PORT:-3000}" CW_PIPELINE_CRAWL_ENABLED=false \
-  CW_PIPELINE_EXTRACTION_ENABLED=true
+  CW_PIPELINE_EXTRACTION_ENABLED=$$([ "$${CW_LLM_PROVIDER:-fake}" = fake ] && echo true || echo false)
 
 product: check-uv ## The local product: make dev, make migrate, the seed calendar, cw-mvp serve and worker (Kafka, Temporal on), next dev on WEB_PORT (3000): make product [WEB=0] [WEB_PORT=3400]
 	@$(MAKE) --no-print-directory dev

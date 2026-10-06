@@ -97,19 +97,25 @@ refused 415 `pipeline-upload-unsupported` before anything is stored, and reads t
 (`GET /v1/pipeline/tasks`). An upload, the manual-parse task of a document no parser reads and
 its transcript run in `tools/demo/tests/unit/test_manual_parse_flow.py`.
 
-### The rule extraction is on, and asks the fake model
+### The rule extraction is on only with the fake model
 
-`make product` passes `CW_PIPELINE_EXTRACTION_ENABLED=true`: the ingest classifies each parsed
-document and, for a notification, circular or act amendment it registered (which needs
-`CW_PIPELINE_KNOWLEDGE_ENABLED`, off unless `.env` turns it on), extracts its rule candidate
-through the llm-gateway (`services/pipeline/README.md`, "Extraction in the workflow"). The
-product's gateway answers from its fake model unless `.env` names another provider: deterministic
-and free, a placeholder that cites no clause, so a candidate made here is stored unparseable for
-an analyst. The product ingests nothing by itself, so nothing is extracted unless someone uploads
-a document to it. The check's extraction step uploads nothing either: it proves the triage routes
-and asks the gateway with the registered prompt about a synthetic notification it stores nowhere,
-and it reports itself skipped when the gateway answers from a real model. A recorded notification
-becomes a classified, extracted candidate in `tools/demo/tests/unit/test_extraction_flow.py`.
+`make product` passes `CW_PIPELINE_EXTRACTION_ENABLED=true` only while the product's gateway
+answers from its fake model: `CW_LLM_PROVIDER` unset or `fake`, read from the environment or
+`.env` as the gateway reads it. With another provider it passes `false`, whatever `.env` says,
+so nothing the local product ingests reaches a real model. With the extraction on, the ingest
+classifies each parsed document and, for a notification, circular or act amendment it registered
+(which needs `CW_PIPELINE_KNOWLEDGE_ENABLED`, off unless `.env` turns it on), extracts its rule
+candidate through the llm-gateway (`services/pipeline/README.md`, "Extraction in the workflow").
+The fake model is deterministic, a placeholder that cites no clause, so a candidate made here is
+stored unparseable for an analyst. It is not free of bookkeeping: the gateway books each ask its
+cache did not answer at a tiny estimated price
+(`services/llm-gateway/src/llm_gateway/domain/pricing.py`) in its ledger, which is in memory
+unless `CW_LLM_LEDGER=postgres` keeps it in the dev database. The product ingests nothing by
+itself, so nothing is extracted unless someone uploads a document to it. The check's extraction
+step uploads nothing either: it proves the triage routes and asks the gateway with the
+registered prompt about a synthetic notification it stores nowhere, and it reports itself
+skipped when the gateway answers from a real model. A recorded notification becomes a
+classified, extracted candidate in `tools/demo/tests/unit/test_extraction_flow.py`.
 
 ## The product from its image
 
