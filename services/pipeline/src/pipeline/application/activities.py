@@ -17,6 +17,7 @@ before it finish on it.
 """
 
 import asyncio
+import dataclasses
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any, ClassVar, Final, Self
@@ -39,6 +40,7 @@ from pipeline.application.store_document import StoreDocument, StoreRequest
 from pipeline.domain.errors import RawStoreError
 from pipeline.domain.ports import RawStore, SourceCatalog
 from py_common.temporal import ActivityBase
+from py_common.temporal.activity import DEFAULT_RETRY_POLICY
 
 HEARTBEAT_SECONDS: Final = 10.0
 SHA256_PATTERN: Final = r"^[0-9a-f]{64}$"
@@ -185,8 +187,8 @@ class DiscoverDocument(ActivityBase[DiscoverRequest, Discovered]):
     input_type: ClassVar[type[DiscoverRequest]] = DiscoverRequest
     output_type: ClassVar[type[Discovered]] = Discovered
     start_to_close: ClassVar[timedelta] = timedelta(minutes=2)
-    retry_policy: ClassVar[RetryPolicy] = RetryPolicy(
-        maximum_attempts=5, non_retryable_error_types=["UnknownSourceError"]
+    retry_policy: ClassVar[RetryPolicy] = dataclasses.replace(
+        DEFAULT_RETRY_POLICY, non_retryable_error_types=["UnknownSourceError"]
     )
 
     def __init__(self, sources: SourceCatalog) -> None:
@@ -270,11 +272,8 @@ class FetchAndStore(ActivityBase[Discovered, Stored]):
     output_type: ClassVar[type[Stored]] = Stored
     start_to_close: ClassVar[timedelta] = timedelta(minutes=10)
     heartbeat_timeout: ClassVar[timedelta | None] = timedelta(minutes=1)
-    retry_policy: ClassVar[RetryPolicy] = RetryPolicy(
-        initial_interval=FETCH_RETRIES.initial_interval,
-        backoff_coefficient=FETCH_RETRIES.backoff_coefficient,
-        maximum_interval=FETCH_RETRIES.maximum_interval,
-        maximum_attempts=FETCH_RETRIES.maximum_attempts,
+    retry_policy: ClassVar[RetryPolicy] = dataclasses.replace(
+        FETCH_RETRIES,
         non_retryable_error_types=[
             *(FETCH_RETRIES.non_retryable_error_types or []),
             "RawObjectCorruptError",
