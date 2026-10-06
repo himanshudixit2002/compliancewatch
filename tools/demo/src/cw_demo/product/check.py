@@ -101,7 +101,8 @@ the API answers. One failed step does not stop the next.
   (with any an interrupted check left). A service-to-service route, ``POST /v1/notification/send``,
   answers 404 on the public listener.
 - ``sources``: the pipeline's source manager on the internal listener. Every built-in source is
-  listed with its name, regulator, cadence, status and freshness. The product never fetches a
+  listed with its name, regulator, cadence, status and freshness (any other source the database
+  holds is counted, not judged). The product never fetches a
   live regulator site, so crawling stays off (``make product`` passes
   ``CW_PIPELINE_CRAWL_ENABLED=false``) and no source of the product is pointed at recorded
   fixtures: the step proves the refusal instead. A fetch of a key no source has must be refused
@@ -2153,7 +2154,8 @@ def sources(context: CheckContext) -> list[str]:
         return items
 
     items = poll(listed, timeout=context.timeout, interval=context.interval)
-    problems = [problem for item in items for problem in _source_problems(item)]
+    built_in = [item for item in items if item["key"] in BUILT_IN_SOURCES]
+    problems = [problem for item in built_in for problem in _source_problems(item)]
     if problems:
         raise StepFailedError("; ".join(problems))
     probe = _fetch(product, NO_SOURCE)
@@ -2183,9 +2185,11 @@ def sources(context: CheckContext) -> list[str]:
         raise StepFailedError(
             f"GET {SOURCES} on the public listener answered {hidden.status_code}, not 404"
         )
-    standing = ", ".join(f"{item['key']} {item['status']}" for item in items)
+    standing = ", ".join(f"{item['key']} {item['status']}" for item in built_in)
+    others = len(items) - len(built_in)
     return [
-        f"sources: {len(items)} listed ({standing})",
+        f"sources: the {len(built_in)} built-in ones listed ({standing})"
+        + (f", and {others} more" if others else ""),
         f"fetch refused while crawling is off: 503 {CRAWL_DISABLED}, no crawl run recorded",
         f"GET {SOURCES} on the public listener: 404 {ROUTE_NOT_FOUND}",
         "a crawl over recorded fixtures: not configured in the product, which never fetches; "
