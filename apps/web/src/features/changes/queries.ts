@@ -5,7 +5,7 @@ import type { ImpactBusiness } from "@/entities/applicability/types";
 import type { ClauseDetail } from "@/entities/rulebook/types";
 import type { ClientContext } from "@/server/api/services";
 import { ok, type Result } from "@/server/result";
-import { hrefFor, screenById } from "@/shared/config/screens";
+import { hrefFor, isVisibleTo, screenById } from "@/shared/config/screens";
 import { t } from "@/shared/i18n";
 import {
   CHANGES_PAGE_SIZE,
@@ -112,6 +112,9 @@ export async function getChanges(
   for (const clause of clauses) if (clause.ok) clauseMap.set(clause.value.clauseId, clause.value);
   const names = nodeNames(business.value);
   const pathname = hrefFor(screenById("owner.changes"), { businessId });
+  // A CA firm's people may open every client a change affects; nobody else sees the link.
+  const impactScreen = screenById("ca.change-impact");
+  const offersImpact = isVisibleTo(impactScreen, session.roles, session.tenantKind);
   return ok({
     business: { id: business.value.id, name: business.value.name, pan: business.value.pan },
     cards: feed.value.items.map((change) =>
@@ -121,6 +124,9 @@ export async function getChanges(
           impactOf.get(change.ruleVersionId) ?? { state: "read", businesses: [] },
           names,
         ),
+        impactHref: offersImpact
+          ? hrefFor(impactScreen, { ruleVersionId: change.ruleVersionId })
+          : null,
       }),
     ),
     ...feedHrefs(pathname, cursor, feed.value.nextCursor),

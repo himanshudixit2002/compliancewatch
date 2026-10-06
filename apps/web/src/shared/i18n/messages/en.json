@@ -1743,5 +1743,16 @@
   "ask.reason.noEvidence": "no clause in force says enough to answer it",
   "ask.reason.answererDeclined": "the clauses found do not answer it",
   "ask.reason.citationCheckFailed": "a drafted answer's quotes did not match their clauses, so it was withheld",
-  "ask.answer.heading": "The answer"
+  "ask.answer.heading": "The answer",
+  "applicability.applies": "Applies",
+  "applicability.notApplicable": "Does not apply",
+  "applicability.unsure": "Not sure",
+  "applicability.withReview": "{result}, needs review",
+  "applicability.level.entity": "Legal entities (PAN)",
+  "applicability.level.registration": "Registrations (GSTIN)",
+  "applicability.level.location": "Places of business",
+  "obligations.column.decision": "Decision",
+  "obligations.decision.none": "Not decided",
+  "obligations.decision.unknown": "Not known now",
+  "changes.allClients": "See every client this change affects"
 }

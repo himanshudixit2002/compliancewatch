@@ -92,6 +92,37 @@ describe("ObligationsView", () => {
     expect(await runAxe(container)).toHaveNoViolations();
   });
 
+  it("shows the engine's latest decision of each row, or that it is not decided or not known", () => {
+    const states = [
+      { state: "decided", result: "unsure", needsReview: true },
+      { state: "none" },
+    ] as const;
+    const base = view();
+    const { container, rerender } = renderView({
+      ...base,
+      rows: base.rows.map((row, index) => ({ ...row, applicability: states[index] ?? null })),
+    });
+    const cells = container.querySelectorAll("[data-slot='row-decision']");
+    expect(cells[0]?.textContent).toBe("Not sure, needs review");
+    expect(cells[1]?.textContent).toBe("Not decided");
+    rerender(
+      <ObligationsView
+        title="Obligations"
+        view={{
+          ...base,
+          rows: base.rows.map((row) => ({ ...row, applicability: { state: "unknown" } })),
+        }}
+        header={HEADER}
+        pageHref="/b/x/obligations"
+        statusOptions={statusFilterOptions()}
+        severalNodes
+      />,
+    );
+    expect(container.querySelector("[data-slot='row-decision']")?.textContent).toBe(
+      "Not known now",
+    );
+  });
+
   it("leaves the node out for a business with one", () => {
     const { container } = renderView(view(), false);
     expect(container.textContent).not.toContain("(Example registration)");

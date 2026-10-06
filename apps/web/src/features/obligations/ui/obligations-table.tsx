@@ -13,6 +13,7 @@ import {
   cn,
 } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
+import { ApplicabilityBadge } from "@/shared/ui/applicability";
 import type { ObligationRow } from "../model/list";
 
 export interface ObligationsTableProps {
@@ -24,7 +25,8 @@ export interface ObligationsTableProps {
 /**
  * A page of obligations by due date: the title (which opens the obligation) with its period and
  * the GSTIN it is kept for, the status, the due date in India with how it relates to today (an
- * overdue one says so in words), and whether its rule has been reviewed with its citations.
+ * overdue one says so in words), whether its rule has been reviewed with its citations, and the
+ * engine's latest decision of the rule for the node it is kept for.
  */
 export function ObligationsTable({ rows, showNode }: ObligationsTableProps) {
   return (
@@ -38,6 +40,7 @@ export function ObligationsTable({ rows, showNode }: ObligationsTableProps) {
           <TableHead scope="col">{t("obligations.column.status")}</TableHead>
           <TableHead scope="col">{t("obligations.column.due")}</TableHead>
           <TableHead scope="col">{t("obligations.column.rule")}</TableHead>
+          <TableHead scope="col">{t("obligations.column.decision")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -85,6 +88,20 @@ export function ObligationsTable({ rows, showNode }: ObligationsTableProps) {
                     : t("obligations.citationsMany", { count: row.citations })}
                 </span>
               </div>
+            </TableCell>
+            <TableCell className="align-top" data-slot="row-decision">
+              {row.applicability === null ? null : row.applicability.state === "decided" ? (
+                <ApplicabilityBadge
+                  result={row.applicability.result}
+                  needsReview={row.applicability.needsReview}
+                />
+              ) : (
+                <span className="text-xs text-fg-muted">
+                  {row.applicability.state === "none"
+                    ? t("obligations.decision.none")
+                    : t("obligations.decision.unknown")}
+                </span>
+              )}
             </TableCell>
           </TableRow>
         ))}

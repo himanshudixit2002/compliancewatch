@@ -103,6 +103,53 @@ describe("getObligationList", () => {
     expect(list.value.rows[0]?.href).toBe(`/b/${ENTITY_ID}/obligations/${id(2)}`);
   });
 
+  it("reads the latest decision once per node and rule version, and marks a failed read", async () => {
+    const decisions: string[] = [];
+    const lists = nodeLists({
+      [ENTITY_ID]: [row(1, "2000-01-15", ENTITY_ID)],
+      [REGISTRATION_ID]: [row(2, "2000-01-10"), row(3, "2000-01-20")],
+    });
+    const fake = fakeFetch((request) => {
+      const decided = /^\/v1\/applicability-engine\/businesses\/([^/]+)\/decisions$/.exec(
+        request.pathname,
+      );
+      if (decided === null) return lists(request);
+      decisions.push(request.url);
+      if (decided[1] === ENTITY_ID) return problemResponse(503);
+      return jsonResponse(
+        200,
+        decisionPageDto([decisionDto({ result: "unsure", needs_review: true })]),
+      );
+    });
+    const list = await getObligationList(session, ENTITY_ID, readListFilter({}), {
+      fetchImpl: fake.fetchImpl,
+      now: NOW,
+    });
+    if (!list.ok) throw new Error(list.error.message);
+    expect(list.value.rows.map((item) => [item.title, item.applicability])).toEqual([
+      ["Example return 2", { state: "decided", result: "unsure", needsReview: true }],
+      ["Example return 1", { state: "unknown" }],
+      ["Example return 3", { state: "decided", result: "unsure", needsReview: true }],
+    ]);
+    // The registration's two periods share one rule version: one read.
+    expect(decisions).toHaveLength(2);
+    expect(decisions.every((url) => url.includes("limit=1"))).toBe(true);
+  });
+
+  it("says a node has no decision of the version", async () => {
+    const lists = nodeLists({ [REGISTRATION_ID]: [row(2, "2000-01-10")] });
+    const fake = fakeFetch((request) =>
+      request.pathname.endsWith("/decisions")
+        ? jsonResponse(200, decisionPageDto([]))
+        : lists(request),
+    );
+    const list = await getObligationList(session, ENTITY_ID, readListFilter({}), {
+      fetchImpl: fake.fetchImpl,
+      now: NOW,
+    });
+    expect(list.ok && list.value.rows[0]?.applicability).toEqual({ state: "none" });
+  });
+
   it("pages after the last row's key, asking each node from its due day", async () => {
     const many = Array.from({ length: 30 }, (_, index) =>
       row(index + 1, `2000-01-${String((index % 28) + 1).padStart(2, "0")}`),

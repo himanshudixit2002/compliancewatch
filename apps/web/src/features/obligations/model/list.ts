@@ -1,4 +1,5 @@
 import type { Tone } from "@compliancewatch/ui";
+import type { Applicability } from "@/entities/applicability/types";
 import type { ListedObligation, ObligationStatus } from "@/entities/obligation/types";
 import { t } from "@/shared/i18n";
 import { daysBetween, formatDate, isDateKey } from "@/shared/lib/dates";
@@ -207,6 +208,21 @@ export interface NamedNode {
   name: string;
 }
 
+/**
+ * The engine's latest decision of an obligation's rule version for its node: what the row's
+ * badge says. `none` is a node the engine has no decision of the version for (made before the
+ * engine kept them); `unknown` is a read that failed, said without failing the list.
+ */
+export type RowApplicability =
+  | { state: "decided"; result: Applicability; needsReview: boolean }
+  | { state: "none" }
+  | { state: "unknown" };
+
+/** The key of a row's decision: its node and its rule version. */
+export function decisionKey(item: Pick<ListedObligation, "businessId" | "ruleVersionId">): string {
+  return `${item.businessId}:${item.ruleVersionId}`;
+}
+
 /** One obligation, worded for the table. */
 export interface ObligationRow {
   id: string;
@@ -225,11 +241,18 @@ export interface ObligationRow {
   overdue: boolean;
   review: { label: string; tone: Tone; reviewed: boolean };
   citations: number;
+  /** The engine's latest decision for the row's node, when the list read it. */
+  applicability: RowApplicability | null;
 }
 
 export function obligationRow(
   item: ListedObligation,
-  options: { href: string; nodes: readonly NamedNode[]; now?: Date },
+  options: {
+    href: string;
+    nodes: readonly NamedNode[];
+    now?: Date;
+    applicability?: RowApplicability;
+  },
 ): ObligationRow {
   const now = options.now ?? new Date();
   const node = options.nodes.find((candidate) => candidate.id === item.businessId);
@@ -247,6 +270,7 @@ export function obligationRow(
     overdue: isObligationOverdue(item, now),
     review: reviewState(item.ruleVersion),
     citations: item.citations.length,
+    applicability: options.applicability ?? null,
   };
 }
 
