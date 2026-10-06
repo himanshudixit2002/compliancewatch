@@ -7,9 +7,10 @@ triage's resolution and a dismissal.
   with no transaction open; then, in one transaction, the task is resolved by the actor with what
   the resolution did, and its ``audit.event`` row (``pipeline.task.resolve``, of no tenant) is
   written. With the transaction closed the ingest of the stored document starts with the
-  transcript (``pipeline-manual-parse-<task>``), which parses it as ``manual@1`` and, while
-  knowledge is on, registers it. When the start fails the task stays resolved and the same
-  request starts it again; a resolved task takes no other transcript.
+  transcript (``pipeline-manual-parse-<task>``), which parses it as ``manual@1``, classifies it
+  and, unless the classification sets it aside or holds it for a triage, registers it while
+  knowledge is on. When the start fails the task stays resolved and the same request starts it
+  again; a resolved task takes no other transcript.
 - ``ResolveTask`` of a triage: the analyst's decision (``domain.classification.TriageDecision``:
   relevant with a type, or irrelevant) is stored on the task's resolution and becomes the
   document's classification, ``certain``, by the ``triage`` classifier; in one transaction with

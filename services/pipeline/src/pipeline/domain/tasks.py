@@ -4,8 +4,10 @@
   a file no parser opens). The ingest opens the task, sets the document ``failed`` and registers
   nothing. An analyst resolves it with a transcript (``domain.transcripts``), from which the
   document is parsed as ``manual@1`` and registered, or dismisses it with a reason.
-- ``triage``: a document the detector cannot place; opened and resolved by the triage step,
-  which is not built yet.
+- ``triage``: a document the classify step cannot place, because its text names another type
+  than its source publishes (``domain.classification``). The classify step opens the task and
+  holds the document, unregistered; an analyst resolves it with a decision (relevant with a
+  type, or irrelevant) or dismisses it with a reason.
 
 A document has at most one open task of a kind (a partial unique index), so the ingest's retry
 and a second ingest of the same bytes find the task that is open. A task opens with why

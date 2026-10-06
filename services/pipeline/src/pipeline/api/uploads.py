@@ -103,12 +103,15 @@ def upload_document(
     key: str = Path(pattern=SOURCE_KEY_PATTERN, description="The source's key"),
 ) -> UploadOut:
     """Store the file under the source, record it with its document.discovered and start its
-    ingest, which parses it and, while knowledge is on, registers it in the rulebook. Answers
-    202 at once with the stored document and the ingest's workflow id; a document no parser
-    reads opens a manual-parse task (GET /v1/pipeline/tasks). Bytes stored before are a
-    duplicate: nothing is recorded again and the ingest runs again. 413 past the upload limit,
-    415 for a file that is not a PDF or an HTML page, 404 for an unknown source, 503 when
-    Temporal does not answer (the document stays stored: upload it again). Audited as
+    ingest, which parses and classifies it. The classification decides whether it is registered
+    in the rulebook (while knowledge is on): a document that is no regulatory one is set aside,
+    and one whose text names another type than its source publishes waits for a person's
+    triage, neither registered; a document_type given here is taken as it is. Answers 202 at
+    once with the stored document and the ingest's workflow id; a document no parser reads opens
+    a manual-parse task and a held one a triage task (GET /v1/pipeline/tasks). Bytes stored
+    before are a duplicate: nothing is recorded again and the ingest runs again. 413 past the
+    upload limit, 415 for a file that is not a PDF or an HTML page, 404 for an unknown source,
+    503 when Temporal does not answer (the document stays stored: upload it again). Audited as
     pipeline.document.upload with the reason."""
     content = file.file.read()
     outcome = wired.upload_document.run(

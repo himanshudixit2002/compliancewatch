@@ -325,9 +325,11 @@ and room for the fields (413 `pipeline-upload-too-large`), and a file whose byte
 or a page is a 415 `pipeline-upload-unsupported`. The bytes go to the raw store with no
 transaction open; the document is recorded at `upload://<source key>/<sha256>` with its
 `document.discovered` and the audit row in one transaction; then the ingest of the stored
-document starts (`pipeline-upload-<key>-<id>`, `TemporalIngests`), which parses it and, while
-`CW_PIPELINE_KNOWLEDGE_ENABLED` is on, registers it. Bytes stored before are a duplicate: nothing
-is recorded again and the ingest runs again. When Temporal does not answer the upload is a 503
+document starts (`pipeline-upload-<key>-<id>`, `TemporalIngests`), which parses and classifies it
+([Classification and triage](#classification-and-triage)) and, while
+`CW_PIPELINE_KNOWLEDGE_ENABLED` is on, registers it unless the classification set it aside or
+holds it for a triage. Bytes stored before are a duplicate: nothing is recorded again and the
+ingest runs again. When Temporal does not answer the upload is a 503
 `pipeline-ingest-unavailable` and the document stays stored: upload it again.
 
 **Tasks.** Migration 0003's `pipeline_task` holds the work people do on stored documents. A
@@ -359,8 +361,8 @@ cell`); a manual parse without one is a 422. The transcript is kept in the raw s
 canonical JSON; the task is resolved with the transcript's key, digest, parser (`manual@1`) and
 clause count, and audited; then the ingest of the stored document starts with the transcript
 (`pipeline-manual-parse-<task>`), which parses it as `manual@1`, records the transcript on the
-document and, while knowledge is on, registers it. From then on the document is parsed from its
-transcript. When the ingest could not start the task stays resolved and the same request starts
+document, classifies it and, while knowledge is on, registers it unless the classification set
+it aside or holds it for a triage. From then on the document is parsed from its transcript. When the ingest could not start the task stays resolved and the same request starts
 it; a resolved task takes no other transcript (409 `pipeline-task-closed`).
 `POST /v1/pipeline/tasks/{task_id}/dismiss` closes a task with the reason; a dismissed manual
 parse leaves its document failed and unregistered, a dismissed triage leaves it held for triage

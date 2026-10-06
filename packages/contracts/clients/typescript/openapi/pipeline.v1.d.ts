@@ -206,12 +206,15 @@ export type paths = {
     /**
      * Upload a document to a source
      * @description Store the file under the source, record it with its document.discovered and start its
-     *     ingest, which parses it and, while knowledge is on, registers it in the rulebook. Answers
-     *     202 at once with the stored document and the ingest's workflow id; a document no parser
-     *     reads opens a manual-parse task (GET /v1/pipeline/tasks). Bytes stored before are a
-     *     duplicate: nothing is recorded again and the ingest runs again. 413 past the upload limit,
-     *     415 for a file that is not a PDF or an HTML page, 404 for an unknown source, 503 when
-     *     Temporal does not answer (the document stays stored: upload it again). Audited as
+     *     ingest, which parses and classifies it. The classification decides whether it is registered
+     *     in the rulebook (while knowledge is on): a document that is no regulatory one is set aside,
+     *     and one whose text names another type than its source publishes waits for a person's
+     *     triage, neither registered; a document_type given here is taken as it is. Answers 202 at
+     *     once with the stored document and the ingest's workflow id; a document no parser reads opens
+     *     a manual-parse task and a held one a triage task (GET /v1/pipeline/tasks). Bytes stored
+     *     before are a duplicate: nothing is recorded again and the ingest runs again. 413 past the
+     *     upload limit, 415 for a file that is not a PDF or an HTML page, 404 for an unknown source,
+     *     503 when Temporal does not answer (the document stays stored: upload it again). Audited as
      *     pipeline.document.upload with the reason.
      */
     post: operations["upload_document_v1_pipeline_sources__key__uploads_post"];
@@ -282,9 +285,10 @@ export type paths = {
      *     A manual parse takes the document typed by hand (``transcript``): headings, numbered
      *     paragraphs and tables in document order, checked first (422 names each problem). The
      *     transcript is kept in the raw store, the task is resolved and audited as
-     *     pipeline.task.resolve, and an ingest starts that parses the document from it as manual@1
-     *     and, while knowledge is on, registers it in the rulebook; from then on the document is
-     *     parsed from its transcript.
+     *     pipeline.task.resolve, and an ingest starts that parses the document from it as manual@1,
+     *     classifies it and, unless the classification sets it aside or holds it for a triage,
+     *     registers it in the rulebook while knowledge is on; from then on the document is parsed
+     *     from its transcript.
      *
      *     A triage takes the analyst's decision (``triage``): relevant with the document's type, or
      *     irrelevant. It is stored on the task's resolution and becomes the document's classification
@@ -453,8 +457,10 @@ export type components = {
      * @description Where a stored document stands: just discovered; parsed into clauses; failed to parse
      *     (a manual parse waits); set aside as not a regulatory document (a user manual listed among
      *     notifications); classified and on its way to the rule extraction; held for a person's
-     *     triage; kept for reference (a press release, a statute: registered, nothing extracted); or
-     *     extracted, its rule candidate made.
+     *     triage; kept for reference (a press release, a statute: on its way to be registered, nothing
+     *     extracted); or extracted, its extraction stored, a candidate or an unparseable answer. The
+     *     statuses a classification sets are its route, not outcomes (``domain.classification``): a
+     *     ``reference`` or ``classified`` document is registered only while knowledge is on.
      * @enum {string}
      */
     DocumentStatus:

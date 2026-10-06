@@ -81,9 +81,10 @@ def resolve_task(task_id: UUID, body: ResolveIn, admin: SourceWrite, wired: Wire
     A manual parse takes the document typed by hand (``transcript``): headings, numbered
     paragraphs and tables in document order, checked first (422 names each problem). The
     transcript is kept in the raw store, the task is resolved and audited as
-    pipeline.task.resolve, and an ingest starts that parses the document from it as manual@1
-    and, while knowledge is on, registers it in the rulebook; from then on the document is
-    parsed from its transcript.
+    pipeline.task.resolve, and an ingest starts that parses the document from it as manual@1,
+    classifies it and, unless the classification sets it aside or holds it for a triage,
+    registers it in the rulebook while knowledge is on; from then on the document is parsed
+    from its transcript.
 
     A triage takes the analyst's decision (``triage``): relevant with the document's type, or
     irrelevant. It is stored on the task's resolution and becomes the document's classification
