@@ -1,5 +1,6 @@
-"""The entity review queue numbers: the domain type, the memory store, the use case, and the
-OpenTelemetry gauges read through an in-memory metric reader."""
+"""The review queue numbers: the entity review queue's domain type, memory store and use case,
+and the OpenTelemetry gauges of both queues (entity review items and review tasks) read through
+an in-memory metric reader."""
 
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -8,18 +9,31 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader, NumberDataPoint
 from structlog.testing import capture_logs
 
-from domain_kernel.ids import ClauseId, DocumentId
+from domain_kernel.ids import ClauseId, DocumentId, RuleVersionId, UserId
 from domain_kernel.knowledge import EntityType
 from py_common.telemetry import Telemetry
 from rulebook.application.review import ReadReviewQueueStats
 from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.review import EntityRejectReason, EntityReviewItem, ReviewQueueStats
+from rulebook.domain.review_tasks import (
+    SEED_PRIORITY,
+    RegulatorCounts,
+    ReviewDecision,
+    ReviewTask,
+    ReviewTaskKind,
+    ReviewTaskStats,
+    task_stats,
+)
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 from rulebook.infrastructure.review_metrics import (
     OLDEST_OPEN_AGE,
+    OLDEST_TASK_AGE,
     OPEN_ITEMS,
+    OPEN_TASKS,
     ReviewQueueGauges,
+    ReviewTaskGauges,
     register_review_queue_gauges,
+    register_review_task_gauges,
 )
 from rulebook.main import build_app, install_review_metrics
 from rulebook.testing import rulebook_settings
@@ -59,8 +73,8 @@ def queue(store: MemoryKnowledgeStore, *items: EntityReviewItem) -> None:
             assert uow.reviews.enqueue(queued)
 
 
-def points(reader: InMemoryMetricReader) -> dict[str, dict[str, float]]:
-    """Each gauge's values keyed by its ``entity_type`` attribute ("" when it has none)."""
+def points(reader: InMemoryMetricReader, label: str = "entity_type") -> dict[str, dict[str, float]]:
+    """Each gauge's values keyed by its ``label`` attribute ("" when it has none)."""
     found: dict[str, dict[str, float]] = {}
     data = reader.get_metrics_data()
     if data is None:
@@ -72,7 +86,7 @@ def points(reader: InMemoryMetricReader) -> dict[str, dict[str, float]]:
                 for point in metric.data.data_points:
                     assert isinstance(point, NumberDataPoint)
                     attributes = point.attributes or {}
-                    values[str(attributes.get("entity_type", ""))] = point.value
+                    values[str(attributes.get(label, ""))] = point.value
     return found
 
 
@@ -196,3 +210,66 @@ def test_the_app_registers_the_gauges_only_when_telemetry_is_on() -> None:
     found = points(reader)
     assert found[OPEN_ITEMS]["form"] == 0
     assert found[OLDEST_OPEN_AGE] == {"": 0.0}
+    assert found[OLDEST_TASK_AGE] == {"": 0.0}, "no task waits"
+    assert found.get(OPEN_TASKS, {}) == {}, "no regulator has had a task"
+
+
+def seed_task(regulator: str, opened_at: datetime) -> ReviewTask:
+    return ReviewTask(
+        task_id=uuid4(),
+        rule_version_id=RuleVersionId.new(),
+        kind=ReviewTaskKind.SEED,
+        priority=SEED_PRIORITY,
+        regulator=regulator,
+        opened_at=opened_at,
+    )
+
+
+def test_task_gauges_report_waiting_tasks_by_regulator_and_the_oldest_age() -> None:
+    clock = Clock()
+    waiting = seed_task("cbic", T0)
+    claimed = seed_task("cbic", T0 + timedelta(hours=1)).claim(UserId.new(), T0)
+    decided = seed_task("gstn", T0 - timedelta(days=9)).decide(
+        ReviewDecision.REJECT, by=UserId.new(), at=T0, note="example"
+    )
+    tasks = [waiting, claimed, decided]
+    clock.advance(hours=49)
+    reader = InMemoryMetricReader()
+    register_review_task_gauges(
+        lambda: task_stats(tasks), clock, MeterProvider(metric_readers=[reader]).get_meter("t")
+    )
+    found = points(reader, "regulator")
+    assert found[OPEN_TASKS] == {"cbic": 2, "gstn": 0}, "claimed counts; a decided one does not"
+    assert found[OLDEST_TASK_AGE] == {"": 49 * 3600.0}
+
+
+def test_task_gauges_share_a_cached_reading_and_report_nothing_after_a_failure() -> None:
+    clock = Clock()
+    answers: list[ReviewTaskStats | Exception] = [
+        RuntimeError("database unavailable"),
+        ReviewTaskStats(by_regulator=(RegulatorCounts("cbic", open=3),), oldest_open_at=T0),
+    ]
+
+    def read() -> ReviewTaskStats:
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    gauges = ReviewTaskGauges(read, clock)
+    reader = InMemoryMetricReader()
+    meter = MeterProvider(metric_readers=[reader]).get_meter("t")
+    meter.create_observable_gauge(OPEN_TASKS, callbacks=[gauges.open_tasks])
+    meter.create_observable_gauge(OLDEST_TASK_AGE, callbacks=[gauges.oldest_open_age])
+    with capture_logs() as logs:
+        found = points(reader, "regulator")
+    assert (found.get(OPEN_TASKS, {}), found.get(OLDEST_TASK_AGE, {})) == ({}, {})
+    [line] = logs
+    assert line["event"] == "review_metrics.tasks_read_failed"
+    clock.advance(seconds=30)
+    assert points(reader, "regulator").get(OPEN_TASKS, {}) == {}, "the failure is cached too"
+    clock.advance(seconds=30)
+    found = points(reader, "regulator")
+    assert found[OPEN_TASKS] == {"cbic": 3}
+    assert found[OLDEST_TASK_AGE] == {"": 60.0}
+    assert answers == []

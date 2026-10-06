@@ -31,6 +31,15 @@ from rulebook.application.relations import (
     StageRelationCandidates,
 )
 from rulebook.application.review import DecideMentionGroup, ListGroupItems, ListMentionGroups
+from rulebook.application.review_tasks import (
+    ClaimReviewTask,
+    DecideReviewTask,
+    EditReviewDraft,
+    ListReviewTasks,
+    OpenSeedReviewTasks,
+    ReadReviewStats,
+    ReadReviewTask,
+)
 from rulebook.application.rule_versions import (
     ListCitations,
     ListEndedVersions,
@@ -80,3 +89,10 @@ class Wiring:
     withdraw_version: WithdrawVersion
     apply_transitions: ApplyDueTransitions
     list_changes: ListChanges
+    open_seed_tasks: OpenSeedReviewTasks
+    list_review_tasks: ListReviewTasks
+    claim_review_task: ClaimReviewTask
+    read_review_task: ReadReviewTask
+    edit_review_draft: EditReviewDraft
+    decide_review_task: DecideReviewTask
+    read_review_stats: ReadReviewStats

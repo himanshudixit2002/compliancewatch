@@ -16,7 +16,10 @@ Which roles an analyst's route takes:
   reviewer or admin (``analyst_write``);
 - citing a version and submitting it: analyst, or a service with rulebook:write
   (``Drafting``); returning it to draft also takes a reviewer (``Returning``);
-- approving, publishing and withdrawing it: reviewer (``Reviewing``).
+- approving, publishing and withdrawing it: reviewer (``Reviewing``);
+- claiming a review task and editing its draft: analyst (``AnalystWork``), a person and never a
+  service; deciding a task and opening the seed tasks: analyst, reviewer or admin
+  (``AnalystWrite``).
 
 The shared tokens are accepted only in ``header`` and ``dual`` mode and without a bearer; token
 mode takes the bearer alone. Without a bearer, an unset token is a 503 in ``header`` mode and a
@@ -29,10 +32,10 @@ With a user's token the routes record that user as the one who decided or acted
 before tokens existed.
 
 The review queues an analyst works through (open entity groups, their mentions, relation
-candidates) are read with ``ReviewRead``: in ``token`` mode a user with a regulatory role, and in
-``dual`` mode such a user when a bearer is sent. Without a token they stay open as before. The
-rest of the read API (rule versions, rules, documents, entities, relations, clauses, search) is
-the same for every tenant and needs no token in any mode.
+candidates, review tasks and their stats) are read with ``ReviewRead``: in ``token`` mode a user
+with a regulatory role, and in ``dual`` mode such a user when a bearer is sent. Without a token
+they stay open as before. The rest of the read API (rule versions, rules, documents, entities,
+relations, clauses, search) is the same for every tenant and needs no token in any mode.
 """
 
 from collections.abc import Awaitable, Callable, Iterable
@@ -99,12 +102,16 @@ analyst_write = analyst_action(REGULATORY_ROLES)
 drafting = analyst_action(Role.ANALYST, scopes=[Scope.RULEBOOK_WRITE])
 returning = analyst_action(Role.ANALYST, Role.REVIEWER, scopes=[Scope.RULEBOOK_WRITE])
 reviewing = analyst_action(Role.REVIEWER)
+analyst_work = analyst_action(Role.ANALYST)
 
 PipelineWrite = Annotated[Principal, Depends(pipeline_write)]
 AnalystWrite = Annotated[Principal, Depends(analyst_write)]
 Drafting = Annotated[Principal, Depends(drafting)]
 Returning = Annotated[Principal, Depends(returning)]
 Reviewing = Annotated[Principal, Depends(reviewing)]
+AnalystWork = Annotated[Principal, Depends(analyst_work)]
+"""Claiming a review task and editing its draft: an analyst a token names, or the review token
+without a bearer; no service."""
 
 ReviewRead = Depends(require_roles(REGULATORY_ROLES))
 """For the review queues: an analyst, reviewer or admin a token names; a service is refused."""

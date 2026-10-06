@@ -147,6 +147,70 @@
         "title": "AttributeLevel",
         "type": "string"
       },
+      "AuditEntryOut": {
+        "description": "A row of the version's decision audit.",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/DecisionAction"
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Id"
+          },
+          "caused_by_rule_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caused By Rule Version Id"
+          },
+          "decided_at": {
+            "format": "date-time",
+            "title": "Decided At",
+            "type": "string"
+          },
+          "decision_id": {
+            "format": "uuid",
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "from_status": {
+            "$ref": "#/components/schemas/RuleVersionStatus"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "to_status": {
+            "$ref": "#/components/schemas/RuleVersionStatus"
+          }
+        },
+        "required": [
+          "decision_id",
+          "action",
+          "from_status",
+          "to_status",
+          "actor_id",
+          "caused_by_rule_version_id",
+          "note",
+          "decided_at"
+        ],
+        "title": "AuditEntryOut",
+        "type": "object"
+      },
       "CandidateIn": {
         "additionalProperties": false,
         "properties": {
@@ -427,6 +491,22 @@
         "title": "CitationsOut",
         "type": "object"
       },
+      "ClaimIn": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "description": "The analyst claiming the task; a signed-in user's token overrides it",
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id"
+        ],
+        "title": "ClaimIn",
+        "type": "object"
+      },
       "ClauseDetailOut": {
         "properties": {
           "clause_id": {
@@ -670,6 +750,77 @@
           "new_due_on"
         ],
         "title": "DeadlineExtensionOut",
+        "type": "object"
+      },
+      "DecideIn": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "description": "Who decides; a signed-in user's token overrides it",
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ReviewDecision"
+          },
+          "high_impact": {
+            "default": false,
+            "description": "With approve: tag the version high impact before this approval counts, so it needs two different approvers; a tag, once set, stays",
+            "title": "High Impact",
+            "type": "boolean"
+          },
+          "note": {
+            "default": "",
+            "description": "Why; required to return or reject",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id",
+          "decision"
+        ],
+        "title": "DecideIn",
+        "type": "object"
+      },
+      "DecisionAction": {
+        "description": "What a row of the append-only ``rule_version_decision`` audit records. ``edited`` is an\nanalyst's change to a draft through its review task (content or citations); the version\nstays a draft, and the note names what changed.",
+        "enum": [
+          "submitted",
+          "returned",
+          "approved",
+          "published",
+          "withdrawn",
+          "superseded",
+          "edited"
+        ],
+        "title": "DecisionAction",
+        "type": "string"
+      },
+      "DecisionCountsOut": {
+        "description": "The decided tasks by their decision.",
+        "properties": {
+          "approved": {
+            "title": "Approved",
+            "type": "integer"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "returned": {
+            "title": "Returned",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "approved",
+          "returned",
+          "rejected"
+        ],
+        "title": "DecisionCountsOut",
         "type": "object"
       },
       "DecisionIn": {
@@ -974,6 +1125,152 @@
         ],
         "title": "DocumentType",
         "type": "string"
+      },
+      "DraftEditIn": {
+        "additionalProperties": false,
+        "description": "The fields to change, each one optional: a field left out keeps its value, and null\nclears ``recurrence`` or ``effective_to``. ``citations`` are added, never removed, and every\nquote must be in its clause. At least one field or one citation.",
+        "properties": {
+          "actor_id": {
+            "description": "The analyst who claimed the task; a signed-in user's token overrides it",
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "citations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CitationIn"
+                },
+                "maxItems": 50,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citations"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exclusive; null: open-ended",
+            "title": "Effective To"
+          },
+          "note": {
+            "default": "",
+            "description": "Why, for the audit",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "obligation_template": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Obligation Template"
+          },
+          "recurrence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null: no recurrence",
+            "title": "Recurrence"
+          },
+          "specification": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The kernel's predicate tree mapping",
+            "title": "Specification"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "todo": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 500,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The open questions, all of them",
+            "title": "Todo"
+          }
+        },
+        "required": [
+          "actor_id"
+        ],
+        "title": "DraftEditIn",
+        "type": "object"
       },
       "EmbeddingIn": {
         "additionalProperties": false,
@@ -1648,6 +1945,35 @@
         "title": "MentionsIn",
         "type": "object"
       },
+      "Page_QueuedTaskOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QueuedTaskOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Send as cursor to read the next page; null on the last page",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[QueuedTaskOut]",
+        "type": "object"
+      },
       "Page_RuleChangeOut_": {
         "properties": {
           "items": {
@@ -1890,6 +2216,158 @@
         "title": "PublicationOut",
         "type": "object"
       },
+      "QueuedTaskOut": {
+        "properties": {
+          "approvals": {
+            "description": "Distinct approvers of the version's current review round",
+            "title": "Approvals",
+            "type": "integer"
+          },
+          "claimed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed At"
+          },
+          "claimed_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The analyst who claimed the task",
+            "title": "Claimed By"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "high_impact": {
+            "title": "High Impact",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ReviewTaskKind",
+            "description": "seed: a draft the seed calendar wrote"
+          },
+          "note": {
+            "description": "The decision's note",
+            "title": "Note",
+            "type": "string"
+          },
+          "opened_at": {
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "priority": {
+            "description": "Higher comes first within a regulator",
+            "title": "Priority",
+            "type": "integer"
+          },
+          "regulator": {
+            "title": "Regulator",
+            "type": "string"
+          },
+          "required_approvals": {
+            "description": "One, or two different ones when high impact",
+            "title": "Required Approvals",
+            "type": "integer"
+          },
+          "rule_key": {
+            "title": "Rule Key",
+            "type": "string"
+          },
+          "rule_version_id": {
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReviewTaskStatus"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "version_status": {
+            "$ref": "#/components/schemas/RuleVersionStatus"
+          }
+        },
+        "required": [
+          "task_id",
+          "rule_version_id",
+          "kind",
+          "priority",
+          "regulator",
+          "status",
+          "opened_at",
+          "claimed_by",
+          "claimed_at",
+          "decision",
+          "decided_by",
+          "decided_at",
+          "note",
+          "rule_key",
+          "version",
+          "title",
+          "version_status",
+          "high_impact",
+          "approvals",
+          "required_approvals"
+        ],
+        "title": "QueuedTaskOut",
+        "type": "object"
+      },
       "ReadyResponse": {
         "properties": {
           "checks": {
@@ -1956,6 +2434,34 @@
           "parser_version"
         ],
         "title": "RegisteredOut",
+        "type": "object"
+      },
+      "RegulatorCountsOut": {
+        "properties": {
+          "claimed": {
+            "title": "Claimed",
+            "type": "integer"
+          },
+          "decided": {
+            "title": "Decided",
+            "type": "integer"
+          },
+          "open": {
+            "title": "Open",
+            "type": "integer"
+          },
+          "regulator": {
+            "title": "Regulator",
+            "type": "string"
+          }
+        },
+        "required": [
+          "open",
+          "claimed",
+          "decided",
+          "regulator"
+        ],
+        "title": "RegulatorCountsOut",
         "type": "object"
       },
       "RejectIn": {
@@ -2377,6 +2883,16 @@
         "title": "ResolutionStatus",
         "type": "string"
       },
+      "ReviewDecision": {
+        "description": "What a reviewer decides. ``approve`` counts as an approval of the version's round;\n``return`` sends the version back to draft for rework and opens the next task for it;\n``reject`` closes the task and leaves the version a draft.",
+        "enum": [
+          "approve",
+          "return",
+          "reject"
+        ],
+        "title": "ReviewDecision",
+        "type": "string"
+      },
       "ReviewItemOut": {
         "properties": {
           "clause_id": {
@@ -2422,6 +2938,285 @@
         ],
         "title": "ReviewItemOut",
         "type": "object"
+      },
+      "ReviewStatsOut": {
+        "properties": {
+          "by_regulator": {
+            "items": {
+              "$ref": "#/components/schemas/RegulatorCountsOut"
+            },
+            "title": "By Regulator",
+            "type": "array"
+          },
+          "by_status": {
+            "$ref": "#/components/schemas/StatusCountsOut"
+          },
+          "decisions": {
+            "$ref": "#/components/schemas/DecisionCountsOut"
+          },
+          "median_seconds_to_decide": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "From a task's opening to its decision, over every decided task",
+            "title": "Median Seconds To Decide"
+          },
+          "oldest_open_age_seconds": {
+            "description": "Its age now; 0 when none waits",
+            "title": "Oldest Open Age Seconds",
+            "type": "number"
+          },
+          "oldest_open_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The oldest task not decided yet",
+            "title": "Oldest Open At"
+          }
+        },
+        "required": [
+          "by_status",
+          "by_regulator",
+          "decisions",
+          "median_seconds_to_decide",
+          "oldest_open_at",
+          "oldest_open_age_seconds"
+        ],
+        "title": "ReviewStatsOut",
+        "type": "object"
+      },
+      "ReviewTaskDetailOut": {
+        "properties": {
+          "approved_by": {
+            "description": "Approvers of the version's current round",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Approved By",
+            "type": "array"
+          },
+          "citations": {
+            "description": "With each quote's verification",
+            "items": {
+              "$ref": "#/components/schemas/CitationOut"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "decisions": {
+            "description": "The version's decision audit",
+            "items": {
+              "$ref": "#/components/schemas/AuditEntryOut"
+            },
+            "title": "Decisions",
+            "type": "array"
+          },
+          "documents": {
+            "description": "The documents the citations cite",
+            "items": {
+              "$ref": "#/components/schemas/TaskDocumentOut"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "required_approvals": {
+            "title": "Required Approvals",
+            "type": "integer"
+          },
+          "rule_version": {
+            "$ref": "#/components/schemas/RuleVersionOut"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The link the seed calendar gives, if any",
+            "title": "Source Url"
+          },
+          "specification_described": {
+            "description": "The predicate tree as lines, two spaces deeper per level",
+            "items": {
+              "type": "string"
+            },
+            "title": "Specification Described",
+            "type": "array"
+          },
+          "task": {
+            "$ref": "#/components/schemas/ReviewTaskOut"
+          },
+          "tasks": {
+            "description": "Every task of the version, oldest first",
+            "items": {
+              "$ref": "#/components/schemas/ReviewTaskOut"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "task",
+          "rule_version",
+          "specification_described",
+          "citations",
+          "documents",
+          "source_url",
+          "approved_by",
+          "required_approvals",
+          "decisions",
+          "tasks"
+        ],
+        "title": "ReviewTaskDetailOut",
+        "type": "object"
+      },
+      "ReviewTaskKind": {
+        "description": "What a task reviews. ``seed``: a draft the seed calendar wrote. The pipeline's candidates\nget a kind of their own when their intake is built.",
+        "enum": [
+          "seed"
+        ],
+        "title": "ReviewTaskKind",
+        "type": "string"
+      },
+      "ReviewTaskOut": {
+        "properties": {
+          "claimed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed At"
+          },
+          "claimed_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The analyst who claimed the task",
+            "title": "Claimed By"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ReviewTaskKind",
+            "description": "seed: a draft the seed calendar wrote"
+          },
+          "note": {
+            "description": "The decision's note",
+            "title": "Note",
+            "type": "string"
+          },
+          "opened_at": {
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "priority": {
+            "description": "Higher comes first within a regulator",
+            "title": "Priority",
+            "type": "integer"
+          },
+          "regulator": {
+            "title": "Regulator",
+            "type": "string"
+          },
+          "rule_version_id": {
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReviewTaskStatus"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "rule_version_id",
+          "kind",
+          "priority",
+          "regulator",
+          "status",
+          "opened_at",
+          "claimed_by",
+          "claimed_at",
+          "decision",
+          "decided_by",
+          "decided_at",
+          "note"
+        ],
+        "title": "ReviewTaskOut",
+        "type": "object"
+      },
+      "ReviewTaskStatus": {
+        "enum": [
+          "open",
+          "claimed",
+          "decided"
+        ],
+        "title": "ReviewTaskStatus",
+        "type": "string"
       },
       "RuleChangeCitationOut": {
         "description": "A verified quote of the clause the version cites.",
@@ -3239,6 +4034,29 @@
         "title": "SeedStatus",
         "type": "string"
       },
+      "SeedTasksOut": {
+        "properties": {
+          "opened": {
+            "description": "Tasks this request opened; 0 when every draft has one",
+            "title": "Opened",
+            "type": "integer"
+          },
+          "task_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Task Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "opened",
+          "task_ids"
+        ],
+        "title": "SeedTasksOut",
+        "type": "object"
+      },
       "StagingOut": {
         "properties": {
           "candidate_ids": {
@@ -3264,6 +4082,29 @@
           "candidate_ids"
         ],
         "title": "StagingOut",
+        "type": "object"
+      },
+      "StatusCountsOut": {
+        "properties": {
+          "claimed": {
+            "title": "Claimed",
+            "type": "integer"
+          },
+          "decided": {
+            "title": "Decided",
+            "type": "integer"
+          },
+          "open": {
+            "title": "Open",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "open",
+          "claimed",
+          "decided"
+        ],
+        "title": "StatusCountsOut",
         "type": "object"
       },
       "SubmitIn": {
@@ -3292,6 +4133,89 @@
           "actor_id"
         ],
         "title": "SubmitIn",
+        "type": "object"
+      },
+      "TaskDecisionOut": {
+        "properties": {
+          "next_task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The task a return opened for the rework",
+            "title": "Next Task Id"
+          },
+          "task": {
+            "$ref": "#/components/schemas/ReviewTaskOut",
+            "description": "Decided, or open again when the round needs another approver"
+          },
+          "version": {
+            "$ref": "#/components/schemas/LifecycleOut"
+          }
+        },
+        "required": [
+          "task",
+          "version",
+          "next_task_id"
+        ],
+        "title": "TaskDecisionOut",
+        "type": "object"
+      },
+      "TaskDocumentOut": {
+        "description": "A document the version cites: its stored clauses are at ``GET /v1/rulebook/documents/\n{document_id}``, its file at the pipeline's ``GET /v1/pipeline/documents/{document_id}/raw``.",
+        "properties": {
+          "doc_type": {
+            "$ref": "#/components/schemas/DocumentType"
+          },
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "external_ref": {
+            "title": "External Ref",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "regulator": {
+            "title": "Regulator",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "regulator",
+          "doc_type",
+          "external_ref",
+          "title",
+          "url",
+          "published_at"
+        ],
+        "title": "TaskDocumentOut",
         "type": "object"
       },
       "TransitionOut": {
@@ -5482,6 +6406,767 @@
           }
         ],
         "summary": "Reject a candidate with a reason",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/review/stats": {
+      "get": {
+        "operationId": "review_stats_v1_rulebook_review_stats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewStatsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The review queue in numbers: counts, decisions, time to decide and queue age",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/review/tasks": {
+      "get": {
+        "description": "Each task with its version's rule, number, title and status, whether it is high impact\nand how many people approved its current round. A task open again after the first of two\napprovals waits for a second, different reviewer.",
+        "operationId": "list_review_tasks_v1_rulebook_review_tasks_get",
+        "parameters": [
+          {
+            "description": "Only tasks of this status",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReviewTaskStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks of this status",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Only this regulator's",
+            "in": "query",
+            "name": "regulator",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this regulator's",
+              "title": "Regulator"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 200",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Items per page, 1 to 200",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page; absent for the first page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_cursor of the previous page; absent for the first page",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_QueuedTaskOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The review queue: by regulator, higher priority first, then oldest first",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/review/tasks/seed": {
+      "post": {
+        "description": "One task of kind seed per draft that needs review and has no task open or claimed.\nIdempotent: a second request opens nothing new. A draft whose task was rejected gets a new\none here.",
+        "operationId": "open_seed_tasks_v1_rulebook_review_tasks_seed_post",
+        "parameters": [
+          {
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
+            "in": "header",
+            "name": "x-cw-review-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
+              "title": "X-Cw-Review-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeedTasksOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Open a review task for every seed draft that has none waiting",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/review/tasks/{task_id}": {
+      "get": {
+        "description": "The version's content with its specification described, every citation with its\nverification, the documents they cite, the approvers of its current round, its decision\naudit and every task it has had.",
+        "operationId": "read_review_task_v1_rulebook_review_tasks__task_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTaskDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "A review task with its version, citations, documents and history",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/review/tasks/{task_id}/claim": {
+      "post": {
+        "description": "409 rulebook-review-task-claimed when someone else holds it, 409\nrulebook-review-task-closed when it was decided.",
+        "operationId": "claim_review_task_v1_rulebook_review_tasks__task_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
+            "in": "header",
+            "name": "x-cw-review-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
+              "title": "X-Cw-Review-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTaskOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Claim a review task; the claimant claiming again changes nothing",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/review/tasks/{task_id}/decide": {
+      "post": {
+        "description": "approve submits a draft and approves it: the approval that completes the round (one\napprover, two different ones when high impact) approves the version and decides the task,\nan earlier one leaves the task open for another reviewer, and the same person twice is 409\nrulebook-duplicate-approver. Approving never publishes; POST .../rule-versions/{id}/publish\ndoes. return sends the version back to draft and opens the next task for it; reject closes\nthe task and leaves the version a draft. Both need a note.",
+        "operationId": "decide_review_task_v1_rulebook_review_tasks__task_id__decide_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
+            "in": "header",
+            "name": "x-cw-review-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
+              "title": "X-Cw-Review-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDecisionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve, return or reject; the version's transition commits with the decision",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/review/tasks/{task_id}/draft": {
+      "patch": {
+        "description": "Only the analyst who claimed the task (409 rulebook-review-task-not-claimed), only while\nthe version is a draft (409 rulebook-rule-version-not-editable). Content is checked against\nthe ontology as the seed calendar is, and citations go through the citation step: a quote\nnot in its clause is 422 rulebook-citation-not-verified and nothing is stored. The edit is\nrecorded in the version's decision audit as edited.",
+        "operationId": "edit_review_draft_v1_rulebook_review_tasks__task_id__draft_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
+            "in": "header",
+            "name": "x-cw-review-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
+              "title": "X-Cw-Review-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftEditIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTaskDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Edit the draft of a claimed task: its content and citations, every quote verified",
         "tags": [
           "rulebook",
           "review"
