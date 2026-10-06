@@ -368,7 +368,8 @@ async def test_a_set_aside_notification_comes_back_and_ends_as_a_draft_golden_ca
         assert await consumer.process(inbound(relayed, 0)) is Outcome.DEAD
         assert consumer_dlq.topics() == [DLQ]
         assert ok(internal.get(TASKS, params={"kind": "candidate"}, headers=REVIEW))["items"] == []
-        held = FakeConsumer.of(consumer_dlq)
+        # The broker holds the dead letter and the candidates' topic it goes back to.
+        held = FakeConsumer.of(consumer_dlq).create(TOPIC)
         capsys.readouterr()
         listed_dead = await dead_letters.run(
             ["list", "--topic", DLQ], reader=held, producer=FakeProducer
