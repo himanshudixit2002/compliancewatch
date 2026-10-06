@@ -564,7 +564,7 @@ class OpenManualParse(ActivityBase[ParseFailure, TaskOpened]):
             record = unit.documents.get(document_id)
             if record is None:
                 raise DocumentNotFoundError(f"no stored document has the id {document_id}")
-            if record.status in (DocumentStatus.PARSED, DocumentStatus.IRRELEVANT):
+            if not record.status.unparsed:
                 log.info(
                     "pipeline.manual_parse_not_needed",
                     document_id=str(document_id),

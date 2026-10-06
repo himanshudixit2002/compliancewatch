@@ -1,8 +1,9 @@
-"""The Postgres unit of work: one transaction with the source, document, crawl-run and task
-repositories on it, the outbox writer as the event sink and the audit writer as the audit sink,
-so a stored document and the outbox row of its document.discovered commit or roll back together,
-and so does an admin's change and its ``audit.event`` row. There is no tenant setting: the
-pipeline's data is regulatory, the same for every tenant, and its audit entries have no tenant.
+"""The Postgres unit of work: one transaction with the source, document, crawl-run, task,
+classification and extraction repositories on it, the outbox writer as the event sink and the audit
+writer as the audit sink, so a stored document and the outbox row of its document.discovered commit
+or roll back together, and so do a stored extraction and its rule.candidate.created, and an admin's
+change and its ``audit.event`` row. There is no tenant setting: the pipeline's data is regulatory,
+the same for every tenant, and its audit entries have no tenant.
 
 ``PostgresUnitOfWorkFactory.on_connection(connection)`` makes units inside a transaction someone
 else owns, such as a consumer's inbox transaction (``py_common.outbox.sync``), so a handler's
@@ -19,6 +20,7 @@ from sqlalchemy import (
     Connection,
     Engine,
     and_,
+    case,
     create_engine,
     func,
     or_,
@@ -32,14 +34,24 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
 from domain_kernel.documents import DocumentType
-from domain_kernel.ids import DocumentId
+from domain_kernel.ids import CandidateId, DocumentId
+from pipeline.domain.classification import Classification, Relevance, TypeConfidence
 from pipeline.domain.crawl import CrawlCounts, CrawlRun, CrawlRunId, CrawlStatus
 from pipeline.domain.events import DocumentEvent
+from pipeline.domain.extraction import ExtractionOutcome, RuleExtraction
+from pipeline.domain.issues import Issue
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.repository import DocumentKey, TaskKey, UnitOfWork, UnitOfWorkFactory
 from pipeline.domain.sources import Source
 from pipeline.domain.tasks import PipelineTask, TaskId, TaskKind, TaskStatus
-from pipeline.infrastructure.models import CrawlRunRow, PipelineTaskRow, RawDocumentRow, SourceRow
+from pipeline.infrastructure.models import (
+    CrawlRunRow,
+    DocumentClassificationRow,
+    PipelineTaskRow,
+    RawDocumentRow,
+    RuleExtractionRow,
+    SourceRow,
+)
 from py_common.audit.writer import PostgresAuditSink
 from py_common.outbox import OutboxWriter
 
@@ -164,14 +176,14 @@ class SqlAlchemyRawDocumentRepository:
     def record_parse(
         self, document_id: DocumentId, parser_version: str, *, transcript_key: str = ""
     ) -> bool:
+        unparsed = RawDocumentRow.status.in_(
+            [status.value for status in DocumentStatus if status.unparsed]
+        )
         values: dict[str, object] = {
-            "status": DocumentStatus.PARSED.value,
+            "status": case((unparsed, DocumentStatus.PARSED.value), else_=RawDocumentRow.status),
             "parser_version": parser_version,
         }
-        changed = or_(
-            RawDocumentRow.status != DocumentStatus.PARSED.value,
-            RawDocumentRow.parser_version != parser_version,
-        )
+        changed = or_(unparsed, RawDocumentRow.parser_version != parser_version)
         if transcript_key:
             values["transcript_key"] = func.coalesce(RawDocumentRow.transcript_key, transcript_key)
             changed = or_(changed, RawDocumentRow.transcript_key.is_(None))
@@ -496,6 +508,146 @@ def _to_task(row: PipelineTaskRow) -> PipelineTask:
     )
 
 
+class SqlAlchemyClassificationRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, document_id: DocumentId) -> Classification | None:
+        row = self._session.get(
+            DocumentClassificationRow, document_id.value, populate_existing=True
+        )
+        return None if row is None else _to_classification(row)
+
+    def add(self, classification: Classification) -> bool:
+        statement = (
+            insert(DocumentClassificationRow)
+            .values(**_classification_values(classification))
+            .on_conflict_do_nothing(index_elements=["document_id"])
+            .returning(DocumentClassificationRow.document_id)
+        )
+        return self._session.execute(statement).first() is not None
+
+    def save(self, classification: Classification) -> None:
+        values = _classification_values(classification)
+        del values["document_id"]
+        self._session.execute(
+            update(DocumentClassificationRow)
+            .where(DocumentClassificationRow.document_id == classification.document_id.value)
+            .values(values)
+        )
+
+
+def _classification_values(classification: Classification) -> dict[str, object]:
+    return {
+        "document_id": classification.document_id.value,
+        "doc_type": classification.doc_type.value,
+        "relevance": classification.relevance.value,
+        "confidence": classification.confidence.value,
+        "reasons": list(classification.reasons),
+        "classifier": classification.classifier,
+        "decided_by": classification.decided_by,
+        "task_id": None if classification.task_id is None else classification.task_id.value,
+        "classified_at": classification.classified_at,
+    }
+
+
+def _to_classification(row: DocumentClassificationRow) -> Classification:
+    return Classification(
+        document_id=DocumentId(row.document_id),
+        doc_type=DocumentType(row.doc_type),
+        relevance=Relevance(row.relevance),
+        confidence=TypeConfidence(row.confidence),
+        reasons=tuple(row.reasons),
+        classified_at=row.classified_at.astimezone(UTC),
+        classifier=row.classifier,
+        decided_by=row.decided_by,
+        task_id=None if row.task_id is None else TaskId(row.task_id),
+    )
+
+
+class SqlAlchemyExtractionRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, document_id: DocumentId, prompt_version: str) -> RuleExtraction | None:
+        row = self._session.get(
+            RuleExtractionRow, (document_id.value, prompt_version), populate_existing=True
+        )
+        return None if row is None else _to_extraction(row)
+
+    def add(self, extraction: RuleExtraction) -> bool:
+        statement = (
+            insert(RuleExtractionRow)
+            .values(**_extraction_values(extraction))
+            .on_conflict_do_nothing(index_elements=["document_id", "prompt_version"])
+            .returning(RuleExtractionRow.document_id)
+        )
+        return self._session.execute(statement).first() is not None
+
+
+def _extraction_values(extraction: RuleExtraction) -> dict[str, object]:
+    return {
+        "document_id": extraction.document_id.value,
+        "prompt_version": extraction.prompt_version,
+        "candidate_id": extraction.candidate_id.value,
+        "outcome": extraction.outcome.value,
+        "model": extraction.model,
+        "attempts": extraction.attempts,
+        "source_key": extraction.source_key,
+        "doc_type": extraction.doc_type.value,
+        "regulator": extraction.regulator,
+        "fields": None if extraction.fields is None else _json(extraction.fields),
+        "issues": [
+            {"code": issue.code, "detail": issue.detail, "clause_ref": issue.clause_ref}
+            for issue in extraction.issues
+        ],
+        "citation_count": extraction.citation_count,
+        "confidence": extraction.confidence,
+        "needs_review": extraction.needs_review,
+        "answer": extraction.answer,
+        "ontology_version": extraction.ontology_version,
+        "extracted_at": extraction.extracted_at,
+    }
+
+
+def _json(value: object) -> object:
+    """Mappings and sequences as the dicts and lists JSONB takes."""
+    if isinstance(value, Mapping):
+        return {str(key): _json(item) for key, item in value.items()}
+    if isinstance(value, tuple | list):
+        return [_json(item) for item in value]
+    return value
+
+
+def _to_extraction(row: RuleExtractionRow) -> RuleExtraction:
+    return RuleExtraction(
+        document_id=DocumentId(row.document_id),
+        prompt_version=row.prompt_version,
+        candidate_id=CandidateId(row.candidate_id),
+        outcome=ExtractionOutcome(row.outcome),
+        model=row.model,
+        attempts=row.attempts,
+        source_key=row.source_key,
+        doc_type=DocumentType(row.doc_type),
+        regulator=row.regulator,
+        issues=tuple(
+            Issue(str(item["code"]), str(item["detail"]), _optional_text(item.get("clause_ref")))
+            for item in row.issues
+        ),
+        citation_count=row.citation_count,
+        confidence=row.confidence,
+        needs_review=row.needs_review,
+        answer=row.answer,
+        ontology_version=row.ontology_version,
+        extracted_at=row.extracted_at.astimezone(UTC),
+        fields=row.fields,
+    )
+
+
+def _optional_text(value: object) -> str | None:
+    return None if value is None else str(value)
+
+
 class OutboxSink:
     """Writes each event into ``outbox_event`` on the unit of work's connection, keyed by its
     source, so the event commits or rolls back with the change it describes."""
@@ -514,6 +666,8 @@ class SqlAlchemyUnitOfWork:
         self.documents = SqlAlchemyRawDocumentRepository(session)
         self.crawl_runs = SqlAlchemyCrawlRunRepository(session)
         self.tasks = SqlAlchemyTaskRepository(session)
+        self.classifications = SqlAlchemyClassificationRepository(session)
+        self.extractions = SqlAlchemyExtractionRepository(session)
         self.events = OutboxSink(session.connection(), writer)
         self.audit = PostgresAuditSink(session.connection())
 

@@ -1,13 +1,14 @@
 """In-memory store and unit of work: the fakes for tests, demos and the app before Postgres.
 
-A unit of work works on copies of the sources, documents, crawl runs and tasks and replaces the
-stored ones when the block exits cleanly; its events and audit entries wait until then too, so
-they are published exactly when the rows they describe are. Units run one at a time (a
-store-level lock held from open to commit or rollback), so two overlapping units cannot both
-start from the same copy, and a unit that reads a source "for update" holds nothing more. The
+A unit of work works on copies of the sources, documents, crawl runs, tasks, classifications and
+extractions and replaces the stored ones when the block exits cleanly; its events and audit entries
+wait until then too, so they are published exactly when the rows they describe are. Units run one at
+a time (a store-level lock held from open to commit or rollback), so two overlapping units cannot
+both start from the same copy, and a unit that reads a source "for update" holds nothing more. The
 store keeps the same rules the tables do: a document's source must be stored, a document never
-changes but for its status and its parse, a task's document must be stored, and a document has
-at most one open task of a kind.
+changes but for its status and its parse, a task's document must be stored, a document has at most
+one open task of a kind, a classification's or an extraction's document must be stored, and an
+extraction is kept as written.
 """
 
 import threading
@@ -18,8 +19,10 @@ from datetime import datetime
 
 from domain_kernel.audit import AuditEntry
 from domain_kernel.ids import DocumentId
+from pipeline.domain.classification import Classification
 from pipeline.domain.crawl import CrawlRun, CrawlRunId, CrawlStatus
 from pipeline.domain.events import DocumentEvent
+from pipeline.domain.extraction import RuleExtraction
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.repository import DocumentKey, TaskKey, UnitOfWork
 from pipeline.domain.sources import Source
@@ -82,7 +85,7 @@ class MemoryRawDocumentRepository:
             return False
         parsed = replace(
             stored,
-            status=DocumentStatus.PARSED,
+            status=DocumentStatus.PARSED if stored.status.unparsed else stored.status,
             parser_version=parser_version,
             transcript_key=stored.transcript_key or transcript_key,
         )
@@ -293,6 +296,66 @@ def _task_order(task: PipelineTask) -> tuple[datetime, int]:
     return (task.opened_at, task.id.value.int)
 
 
+class MemoryClassificationRepository:
+    def __init__(
+        self,
+        classifications: dict[DocumentId, Classification],
+        documents: dict[DocumentId, RawDocumentRecord],
+        tasks: dict[TaskId, PipelineTask],
+    ) -> None:
+        self._classifications = classifications
+        self._documents = documents
+        self._tasks = tasks
+
+    def get(self, document_id: DocumentId) -> Classification | None:
+        return self._classifications.get(document_id)
+
+    def add(self, classification: Classification) -> bool:
+        self._check(classification)
+        if classification.document_id in self._classifications:
+            return False
+        self._classifications[classification.document_id] = classification
+        return True
+
+    def save(self, classification: Classification) -> None:
+        self._check(classification)
+        if classification.document_id not in self._classifications:
+            raise KeyError(f"no classification of {classification.document_id} to save")
+        self._classifications[classification.document_id] = classification
+
+    def _check(self, classification: Classification) -> None:
+        if classification.document_id not in self._documents:
+            raise KeyError(f"classification of {classification.document_id}: no such document")
+        if classification.task_id is not None and classification.task_id not in self._tasks:
+            raise KeyError(f"classification of {classification.document_id}: no such task")
+
+
+class MemoryExtractionRepository:
+    def __init__(
+        self,
+        extractions: dict[tuple[DocumentId, str], RuleExtraction],
+        documents: dict[DocumentId, RawDocumentRecord],
+    ) -> None:
+        self._extractions = extractions
+        self._documents = documents
+
+    def get(self, document_id: DocumentId, prompt_version: str) -> RuleExtraction | None:
+        return self._extractions.get((document_id, prompt_version))
+
+    def add(self, extraction: RuleExtraction) -> bool:
+        if extraction.document_id not in self._documents:
+            raise KeyError(f"extraction of {extraction.document_id}: no such document")
+        key = (extraction.document_id, extraction.prompt_version)
+        if key in self._extractions:
+            return False
+        if any(
+            stored.candidate_id == extraction.candidate_id for stored in self._extractions.values()
+        ):
+            raise ValueError(f"candidate {extraction.candidate_id} is stored already")
+        self._extractions[key] = extraction
+        return True
+
+
 class MemoryEventSink:
     def __init__(self, published: list[DocumentEvent]) -> None:
         self._published = published
@@ -313,10 +376,16 @@ class MemoryUnitOfWork:
         self._documents: dict[DocumentId, RawDocumentRecord] = {}
         self._runs: dict[CrawlRunId, CrawlRun] = {}
         self._tasks: dict[TaskId, PipelineTask] = {}
+        self._classifications: dict[DocumentId, Classification] = {}
+        self._extractions: dict[tuple[DocumentId, str], RuleExtraction] = {}
         self.sources = MemorySourceRepository(self._sources)
         self.documents = MemoryRawDocumentRepository(self._documents, self._sources)
         self.crawl_runs = MemoryCrawlRunRepository(self._runs, self._sources)
         self.tasks = MemoryTaskRepository(self._tasks, self._documents, self._sources)
+        self.classifications = MemoryClassificationRepository(
+            self._classifications, self._documents, self._tasks
+        )
+        self.extractions = MemoryExtractionRepository(self._extractions, self._documents)
         self.events = MemoryEventSink(store.events)
         self.audit = MemoryAuditSink(store.audit)
 
@@ -325,6 +394,8 @@ class MemoryUnitOfWork:
         self._documents.update(self._store.documents)
         self._runs.update(self._store.crawl_runs)
         self._tasks.update(self._store.tasks)
+        self._classifications.update(self._store.classifications)
+        self._extractions.update(self._store.extractions)
         return self
 
     def __exit__(self, exc_type: object, *exc_info: object) -> None:
@@ -337,6 +408,10 @@ class MemoryUnitOfWork:
             self._store.crawl_runs.update(self._runs)
             self._store.tasks.clear()
             self._store.tasks.update(self._tasks)
+            self._store.classifications.clear()
+            self._store.classifications.update(self._classifications)
+            self._store.extractions.clear()
+            self._store.extractions.update(self._extractions)
             self.events.commit()
             self.audit.commit()
         else:
@@ -344,14 +419,16 @@ class MemoryUnitOfWork:
 
 
 class MemoryStore:
-    """Holds the sources, documents, crawl runs, tasks, published events and audit entries;
-    makes units of work."""
+    """Holds the sources, documents, crawl runs, tasks, classifications, extractions, published
+    events and audit entries; makes units of work."""
 
     def __init__(self) -> None:
         self.sources: dict[str, Source] = {}
         self.documents: dict[DocumentId, RawDocumentRecord] = {}
         self.crawl_runs: dict[CrawlRunId, CrawlRun] = {}
         self.tasks: dict[TaskId, PipelineTask] = {}
+        self.classifications: dict[DocumentId, Classification] = {}
+        self.extractions: dict[tuple[DocumentId, str], RuleExtraction] = {}
         self.events: list[DocumentEvent] = []
         self.audit: list[AuditEntry] = []
         self._lock = threading.Lock()

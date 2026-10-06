@@ -14,8 +14,10 @@ from typing import Protocol
 
 from domain_kernel.audit import AuditSink
 from domain_kernel.ids import DocumentId
+from pipeline.domain.classification import Classification
 from pipeline.domain.crawl import CrawlRun, CrawlRunId
 from pipeline.domain.events import DocumentEvent
+from pipeline.domain.extraction import RuleExtraction
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.sources import Source
 from pipeline.domain.tasks import PipelineTask, TaskId, TaskKind, TaskStatus
@@ -84,9 +86,11 @@ class RawDocumentRepository(Protocol):
     def record_parse(
         self, document_id: DocumentId, parser_version: str, *, transcript_key: str = ""
     ) -> bool:
-        """Set the document ``parsed`` by ``parser_version`` (from the transcript under
-        ``transcript_key``, when one is given; a transcript once named stays); True when that
-        changed anything, False when it stood so already or there is no such document."""
+        """Record the document's parse by ``parser_version`` (from the transcript under
+        ``transcript_key``, when one is given; a transcript once named stays), and set it
+        ``parsed`` when no parse was recorded before (``DocumentStatus.unparsed``): a document
+        classified, held for triage, kept for reference or extracted keeps its status. True when
+        that changed anything, False when it stood so already or there is no such document."""
         ...
 
     def recent(self, source_key: str, *, limit: int) -> Sequence[RawDocumentRecord]:
@@ -182,6 +186,28 @@ class TaskRepository(Protocol):
         ...
 
 
+class ClassificationRepository(Protocol):
+    def get(self, document_id: DocumentId) -> Classification | None: ...
+
+    def add(self, classification: Classification) -> bool:
+        """Insert the document's classification unless it has one, which is left as it is; True
+        when it was inserted."""
+        ...
+
+    def save(self, classification: Classification) -> None:
+        """Replace the stored classification of the document (a person's triage)."""
+        ...
+
+
+class ExtractionRepository(Protocol):
+    def get(self, document_id: DocumentId, prompt_version: str) -> RuleExtraction | None: ...
+
+    def add(self, extraction: RuleExtraction) -> bool:
+        """Insert the extraction unless one of its document and prompt version is stored,
+        which is kept as written; True when it was inserted."""
+        ...
+
+
 class EventSink(Protocol):
     """Where events go inside the transaction: the outbox, keyed by the event's source."""
 
@@ -200,6 +226,12 @@ class UnitOfWork(Protocol):
 
     @property
     def tasks(self) -> TaskRepository: ...
+
+    @property
+    def classifications(self) -> ClassificationRepository: ...
+
+    @property
+    def extractions(self) -> ExtractionRepository: ...
 
     @property
     def events(self) -> EventSink: ...

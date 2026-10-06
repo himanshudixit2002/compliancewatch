@@ -1,6 +1,7 @@
-"""Migrations 0001 to 0003 on Postgres: the tables, the unit of work with the outbox and the
+"""Migrations 0001 to 0004 on Postgres: the tables, the unit of work with the outbox and the
 audit log, the rules the tables keep, the crawl's queries, the parse of a document and the tasks
-on it, the catalog lint, and a downgrade back to nothing. Needs Docker.
+on it, its classification and its rule extraction with the candidate's event, the catalog lint,
+and a downgrade back to nothing. Needs Docker.
 
 The repositories run as a plain database role with the grants infra/dev/postgres/50-app-role.sql
 gives the product's cw_app: it owns nothing and is not a superuser. ``audit.event`` is made as
@@ -28,8 +29,12 @@ from domain_kernel.audit import AuditActor, AuditEntryId
 from domain_kernel.documents import DocumentType, document_id_for
 from domain_kernel.ids import SourceId, UserId
 from pipeline.application.sources import AddSource, AdminAction, NewSource
+from pipeline.domain.candidate import candidate_from_mapping
+from pipeline.domain.classification import Classification, Relevance, TypeConfidence
 from pipeline.domain.crawl import CrawlCounts, CrawlRun, CrawlStatus
-from pipeline.domain.events import DocumentDiscovered
+from pipeline.domain.events import DocumentClassified, DocumentDiscovered
+from pipeline.domain.extraction import ExtractionOutcome, RuleExtraction, candidate_id_for
+from pipeline.domain.issues import Issue
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.repository import DocumentKey, TaskKey
 from pipeline.domain.sources import Source, SourceDefinition
@@ -42,7 +47,14 @@ from py_common.audit.testing import install_audit_table, read_audit_entries
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "pipeline"
-STORE_TABLES = {"source", "raw_document", "crawl_run", "pipeline_task"}
+STORE_TABLES = {
+    "source",
+    "raw_document",
+    "crawl_run",
+    "pipeline_task",
+    "document_classification",
+    "rule_extraction",
+}
 TABLES = {*STORE_TABLES, "outbox_event", "alembic_version"}
 APP_ROLE = "pipeline_app"
 APP_PASSWORD = "app-role-for-tests"
@@ -157,7 +169,7 @@ def test_migration_creates_the_tables_without_tenant_columns(engine: Engine) -> 
         assert "tenant_id" not in columns, "the pipeline's data is regulatory"
     with engine.connect() as connection:
         version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    assert version == "0003"
+    assert version == "0004"
     names = {column["name"] for column in inspector.get_columns("source", schema=SCHEMA)}
     assert "name" in names
     indexes = {index["name"] for index in inspector.get_indexes("raw_document", schema=SCHEMA)}
@@ -593,7 +605,179 @@ def test_tasks_open_once_per_document_and_kind_and_page_oldest_first(
         )
 
 
+def classified(document: RawDocumentRecord, **overrides: object) -> Classification:
+    values: dict[str, object] = {
+        "document_id": document.document_id,
+        "doc_type": DocumentType.NOTIFICATION,
+        "relevance": Relevance.RELEVANT,
+        "confidence": TypeConfidence.CERTAIN,
+        "reasons": ("its opening names it a notification, the type its source publishes",),
+        "classified_at": NOW,
+    }
+    values.update(overrides)
+    return Classification(**values)  # type: ignore[arg-type]
+
+
+def test_a_classification_is_added_once_and_a_triage_replaces_it(
+    units: PostgresUnitOfWorkFactory, engine: Engine
+) -> None:
+    conflict = record(b"%PDF-1.7 a circular among notifications")
+    task = PipelineTask.opened(TaskKind.TRIAGE, conflict.document_id, DEFINITION.key, at=NOW)
+    first = classified(
+        conflict,
+        doc_type=DocumentType.CIRCULAR,
+        confidence=TypeConfidence.CONFLICT,
+        task_id=task.id,
+    )
+    with units() as unit:
+        unit.sources.add(Source.of(DEFINITION, NOW))
+        unit.documents.add(conflict)
+        unit.tasks.open(task)
+        assert unit.classifications.add(first)
+        assert not unit.classifications.add(classified(conflict))
+        unit.events.publish(
+            DocumentClassified.of(first, source_id=SOURCE_ID, source_key=DEFINITION.key)
+        )
+    triaged = Classification.triaged(
+        conflict.document_id,
+        relevance=Relevance.RELEVANT,
+        doc_type=DocumentType.CIRCULAR,
+        by=UserId.new().value,
+        task_id=task.id,
+        at=NOW + timedelta(hours=1),
+        reason="Read the text: a circular",
+    )
+    with units() as unit:
+        assert unit.classifications.get(conflict.document_id) == first
+        unit.classifications.save(triaged)
+    with units() as unit:
+        assert unit.classifications.get(conflict.document_id) == triaged
+        assert unit.classifications.get(record(b"never stored").document_id) is None
+    with engine.connect() as connection:
+        (message,) = connection.execute(
+            text("SELECT message FROM outbox_event WHERE topic = 'document.classified'")
+        ).scalars()
+    assert message["payload"]["confidence"] == "conflict"
+    assert message["payload"]["task_id"] == str(task.id)
+    with (
+        pytest.raises(IntegrityError, match="ck_document_classification_decided_by"),
+        engine.begin() as connection,
+    ):
+        connection.execute(
+            text(
+                "UPDATE document_classification SET classifier = 'detector@1'"
+                " WHERE document_id = :id"
+            ),
+            {"id": conflict.document_id.value},
+        )
+
+
+def test_a_classified_document_keeps_its_status_when_parsed_again(
+    units: PostgresUnitOfWorkFactory,
+) -> None:
+    stored = record(b"%PDF-1.7 classified then parsed again")
+    with units() as unit:
+        unit.sources.add(Source.of(DEFINITION, NOW))
+        unit.documents.add(stored)
+        assert unit.documents.record_parse(stored.document_id, "pdf@1")
+        assert unit.documents.set_status(stored.document_id, DocumentStatus.EXTRACTED)
+    with units() as unit:
+        assert not unit.documents.record_parse(stored.document_id, "pdf@1")
+        assert unit.documents.record_parse(stored.document_id, "pdf-tables@1")
+    with units() as unit:
+        again = unit.documents.get(stored.document_id)
+    assert again is not None
+    assert (again.status, again.parser_version) == (DocumentStatus.EXTRACTED, "pdf-tables@1")
+
+
+ANSWER = {
+    "title": "Example: the due date of an example return is extended",
+    "summary": "An example notification extends the due date of FORM GSTR-3B.",
+    "doc_kind": "notification",
+    "change_kind": "extension",
+    "effective_from": None,
+    "effective_to": None,
+    "references": [],
+    "applies_to": [
+        {
+            "attribute": "filing_scheme",
+            "operator": "eq",
+            "value": "regular_monthly",
+            "clause_ref": "en.p3",
+        }
+    ],
+    "obligation": None,
+    "recurrence": None,
+    "amounts": [],
+    "citations": [{"clause_ref": "en.p3", "quote": "extends the due date"}],
+    "confidence": 0.9,
+}
+
+
+def test_an_extraction_and_its_candidate_event_commit_together_and_stay(
+    units: PostgresUnitOfWorkFactory, engine: Engine
+) -> None:
+    stored = record(b"%PDF-1.7 extracted")
+    prompt = "extraction.rule_candidate@1"
+    extraction = RuleExtraction(
+        document_id=stored.document_id,
+        prompt_version=prompt,
+        candidate_id=candidate_id_for(stored.document_id, prompt),
+        outcome=ExtractionOutcome.EXTRACTED,
+        model="scripted/golden",
+        attempts=2,
+        source_key=DEFINITION.key,
+        doc_type=DocumentType.NOTIFICATION,
+        regulator="CBIC",
+        issues=(Issue("date_not_in_cited_clauses", "effective_from 2026-04-20", None),),
+        citation_count=1,
+        confidence=0.9,
+        needs_review=True,
+        answer="{}",
+        ontology_version="0.2.0",
+        extracted_at=NOW,
+        fields=candidate_from_mapping(ANSWER).to_mapping(),
+    )
+    with units() as unit:
+        unit.sources.add(Source.of(DEFINITION, NOW))
+        unit.documents.add(stored)
+        assert unit.extractions.add(extraction)
+        unit.events.publish(extraction.event(SOURCE_ID))
+    with units() as unit:
+        assert not unit.extractions.add(extraction), "kept as written"
+        assert unit.extractions.get(stored.document_id, prompt) == extraction
+        assert unit.extractions.get(stored.document_id, "extraction.rule_candidate@2") is None
+    with engine.connect() as connection:
+        (message,) = connection.execute(
+            text("SELECT message FROM outbox_event WHERE topic = 'rule.candidate.created'")
+        ).scalars()
+    payload = message["payload"]
+    assert (payload["candidate_id"], payload["suggested_rule_key"], payload["outcome"]) == (
+        str(extraction.candidate_id),
+        "gstr3b_monthly",
+        "extracted",
+    )
+    assert payload["candidate"] == ANSWER
+    for statement in (
+        "UPDATE rule_extraction SET needs_review = false WHERE document_id = :id",
+        "DELETE FROM rule_extraction WHERE document_id = :id",
+    ):
+        with pytest.raises(DBAPIError, match="kept as written"), engine.begin() as connection:
+            connection.execute(text(statement), {"id": stored.document_id.value})
+
+
 def test_downgrade_removes_everything(engine: Engine, migrated: Config) -> None:
+    command.downgrade(migrated, "0003")
+    try:
+        tables = set(inspect(engine).get_table_names(schema=SCHEMA))
+        assert not {"document_classification", "rule_extraction"} & tables
+        with engine.connect() as connection:
+            statuses = set(
+                connection.execute(text("SELECT DISTINCT status FROM raw_document")).scalars()
+            )
+        assert statuses <= {"discovered", "parsed", "failed", "irrelevant"}
+    finally:
+        command.upgrade(migrated, "head")
     command.downgrade(migrated, "0002")
     try:
         assert "pipeline_task" not in inspect(engine).get_table_names(schema=SCHEMA)
