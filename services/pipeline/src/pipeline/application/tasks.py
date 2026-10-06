@@ -19,7 +19,9 @@ triage's resolution and a dismissal.
   ingest of the stored document (``pipeline-triage-<task>``), which finds the decision, registers
   the document as the type it names while knowledge is on, and extracts its rule candidate while
   the extraction is on; an irrelevant one is set aside and nothing starts. The same decision
-  again starts the ingest if it did not start; another decision is refused.
+  again replays, also when it arrives while the first is being written (it finds the task
+  resolved once it holds the row lock): nothing is written twice, and the ingest is the first's,
+  started only if it did not start. Another decision is refused.
 - ``DismissTask``: the task dismissed with the actor's reason, audited as
   ``pipeline.task.dismiss``; a manual parse's document stays ``failed`` and unregistered, a
   triage's ``triage``.
@@ -229,20 +231,41 @@ class ResolveTask:
         self, view: TaskView, decision: TriageDecision, admin: AdminAction, reason: str
     ) -> Resolution:
         """Store the decision on the task, make it the document's classification with its
-        status and document.classified, audit it, then continue a relevant document."""
-        task = view.task
+        status and document.classified, audit it, then continue a relevant document.
+
+        The same decision on a task resolved with it replays, whether the task was resolved
+        before (the ingest did not start, or the caller retried) or while this request waited
+        for its row lock (two requests at once): nothing is written, and the ingest is the one
+        the first request started, started now only if it had not. Another decision on a
+        closed task is refused."""
         recorded = decision.resolution()
-        if not task.is_open:
-            if task.status is TaskStatus.RESOLVED and _decided(task, recorded):
-                # The same decision again: its ingest did not start, or the caller retried.
-                return self._continue(view)
-            raise TaskClosedError(f"task {task.id} is {task.status.value}; it does not change")
+        if view.task.is_open:
+            view = self._decide(view, decision, recorded, admin, reason)
+        task = view.task
+        if task.status is TaskStatus.RESOLVED and _decided(task, recorded):
+            return self._continue(view)
+        raise TaskClosedError(f"task {task.id} is {task.status.value}; it does not change")
+
+    def _decide(
+        self,
+        view: TaskView,
+        decision: TriageDecision,
+        recorded: dict[str, object],
+        admin: AdminAction,
+        reason: str,
+    ) -> TaskView:
+        """Resolve the open task with the decision, in one transaction with the document's
+        classification, status, document.classified and audit row. A task another request
+        closed first is returned as it is now, and nothing is written."""
+        task = view.task
         now = self._clock()
         record = view.document
         with self._units() as unit:
             current = unit.tasks.get(task.id, for_update=True)
             if current is None:
                 raise TaskNotFoundError(f"no task has the id {task.id}")
+            if not current.is_open:
+                return TaskView(current, unit.documents.get(record.document_id) or record)
             stored = unit.classifications.get(record.document_id)
             read_as = stored.doc_type if stored is not None else self._type_of(unit, record)
             classification = Classification.triaged(
@@ -295,7 +318,7 @@ class ResolveTask:
             doc_type=classification.doc_type.value,
             route=classification.route.value,
         )
-        return self._continue(TaskView(resolved, document))
+        return TaskView(resolved, document)
 
     def _type_of(self, unit: UnitOfWork, record: RawDocumentRecord) -> DocumentType:
         """The type the document is read as without a classification: its uploader's, else its

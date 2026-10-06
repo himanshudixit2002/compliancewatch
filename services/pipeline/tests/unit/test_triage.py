@@ -6,7 +6,8 @@ so a triage task opens. The analyst's decision resolves it: relevant with a type
 document through an ingest of the stored document; irrelevant sets it aside. The stored
 document's own type is never changed."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -15,12 +16,18 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from domain_kernel.ids import DocumentId
+from domain_kernel.audit import AuditActor
+from domain_kernel.documents import DocumentType
+from domain_kernel.ids import DocumentId, UserId
 from pipeline.application.activities import ParseRequest, Stored
 from pipeline.application.classify import ClassifyDocument
-from pipeline.domain.classification import TRIAGE, Relevance, TypeConfidence
+from pipeline.application.sources import AdminAction
+from pipeline.application.tasks import ResolveTask, triage_workflow_id
+from pipeline.domain.classification import TRIAGE, Relevance, TriageDecision, TypeConfidence
+from pipeline.domain.errors import TaskClosedError
 from pipeline.domain.events import DocumentClassified
 from pipeline.domain.raw_documents import DocumentStatus
+from pipeline.domain.repository import UnitOfWork
 from pipeline.domain.tasks import PipelineTask, TaskKind, TaskStatus
 from pipeline.infrastructure.adapters import RegistryAdapterTypes, RegistryCatalog
 from pipeline.infrastructure.http import PoliteClient
@@ -35,6 +42,7 @@ from pipeline.workflows import IngestRequest
 BASE = "/v1/pipeline"
 WRITE = {"x-cw-write-token": WRITE_TOKEN}
 ANALYST = UUID(int=99)
+OTHER_ANALYST = UUID(int=98)
 REASON = "Read the text for the tests: it clarifies the law"
 FIELDS = {"actor_id": str(ANALYST), "reason": REASON}
 NOW = datetime(2026, 10, 6, 6, 0, tzinfo=UTC)
@@ -90,13 +98,47 @@ class Triage:
     def classified(self) -> list[DocumentClassified]:
         return [e for e in self.store.events if isinstance(e, DocumentClassified)]
 
+    def resolver(self) -> ResolveTask:
+        """The resolution as the app wires it, on the store itself."""
+        return ResolveTask(
+            self.store, self.raw, self.ingests, RegistryAdapterTypes(), knowledge=True
+        )
 
-@pytest.fixture
-def triage() -> Iterator[Triage]:
-    store, raw, ingests = MemoryStore(), MemoryRawStore(), MemoryIngests()
+    def by_another(self, task: PipelineTask, decision: TriageDecision) -> Callable[[], object]:
+        """Another analyst's request resolving ``task`` with ``decision``."""
+        admin = AdminAction(actor=AuditActor.user(UserId(OTHER_ANALYST)), reason=REASON)
+        return lambda: self.resolver().run(task.id, None, admin, triage=decision)
+
+
+class LockRace:
+    """The memory store's units of work, letting another request in once: what ``let_in``
+    names runs, and commits, just before the ``before``-th unit opened from then on, as a request
+    that took a task's row lock first commits while this one waits for the lock. A triage's
+    resolution opens its second unit to lock the task."""
+
+    def __init__(self, store: MemoryStore) -> None:
+        self.store = store
+        self._meanwhile: Callable[[], object] | None = None
+        self._left = 0
+
+    def let_in(self, meanwhile: Callable[[], object], *, before: int) -> None:
+        self._meanwhile, self._left = meanwhile, before
+
+    def __call__(self) -> AbstractContextManager[UnitOfWork]:
+        if self._meanwhile is not None:
+            self._left -= 1
+            if self._left == 0:
+                meanwhile, self._meanwhile = self._meanwhile, None
+                meanwhile()
+        return self.store()
+
+
+@contextmanager
+def app_on(race: LockRace) -> Iterator[Triage]:
+    raw, ingests = MemoryRawStore(), MemoryIngests()
     app = build_app(
         pipeline_settings(pipeline_knowledge_enabled=True),
-        units=store,
+        units=race,
         raw_store=raw,
         starter=MemoryCrawls(),
         adapter_types=RegistryAdapterTypes(),
@@ -104,7 +146,18 @@ def triage() -> Iterator[Triage]:
     )
     app.state.ingests = ingests
     with TestClient(app) as client:
-        yield Triage(client, store, raw)
+        yield Triage(client, race.store, raw)
+
+
+@pytest.fixture
+def race() -> LockRace:
+    return LockRace(MemoryStore())
+
+
+@pytest.fixture
+def triage(race: LockRace) -> Iterator[Triage]:
+    with app_on(race) as wired:
+        yield wired
 
 
 def problem(response: Any) -> str:
@@ -243,3 +296,62 @@ def test_a_manual_parse_takes_no_triage_and_a_dismissed_triage_stays_held(
     )
     assert dismissed.status_code == 200
     assert dismissed.json()["document"]["status"] == DocumentStatus.TRIAGE.value
+
+
+def test_resolve_task_replays_the_decision_another_request_wrote_while_it_waited(
+    triage: Triage, race: LockRace
+) -> None:
+    task = triage.conflict()
+    decision = TriageDecision(Relevance.RELEVANT, DocumentType.CIRCULAR)
+    resolve = ResolveTask(race, triage.raw, triage.ingests, RegistryAdapterTypes(), knowledge=True)
+    admin = AdminAction(actor=AuditActor.user(UserId(ANALYST)), reason=REASON)
+    race.let_in(triage.by_another(task, decision), before=2)
+    replayed = resolve.run(task.id, None, admin, triage=decision)
+    assert (replayed.workflow_id, replayed.started) == (triage_workflow_id(task.id), False)
+    assert (replayed.task.task.status, replayed.task.task.resolved_by) == (
+        TaskStatus.RESOLVED,
+        OTHER_ANALYST,
+    ), "the first request's resolution stands"
+    started = [start.workflow_id for start in triage.ingests.started]
+    assert started.count(triage_workflow_id(task.id)) == 1, "one ingest, the first request's"
+    assert [entry.action for entry in triage.store.audit].count("pipeline.task.resolve") == 1
+    assert len(triage.classified()) == 2, "the conflict's, then the first decision's"
+    with pytest.raises(TaskClosedError):
+        resolve.run(task.id, None, admin, triage=TriageDecision(Relevance.IRRELEVANT))
+
+
+def test_the_same_decision_sent_twice_at_once_answers_both(triage: Triage, race: LockRace) -> None:
+    task = triage.conflict()
+    race.let_in(
+        triage.by_another(task, TriageDecision(Relevance.RELEVANT, DocumentType.CIRCULAR)),
+        before=2,
+    )
+    response = triage.resolve(task, {"relevance": "relevant", "doc_type": "circular"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["workflow_id"], body["started"]) == (triage_workflow_id(task.id), False)
+    assert body["task"]["resolution"] == {
+        "relevance": "relevant",
+        "doc_type": "circular",
+        "route": "extract",
+    }
+    assert body["task"]["resolved_by"] == str(OTHER_ANALYST), "the first request's resolution"
+    assert body["task"]["document"]["status"] == "classified"
+    started = [start.workflow_id for start in triage.ingests.started]
+    assert started.count(triage_workflow_id(task.id)) == 1
+    assert [entry.action for entry in triage.store.audit].count("pipeline.task.resolve") == 1
+    assert len(triage.classified()) == 2
+
+
+def test_another_decision_written_while_it_waited_is_refused(
+    triage: Triage, race: LockRace
+) -> None:
+    task = triage.conflict()
+    race.let_in(triage.by_another(task, TriageDecision(Relevance.IRRELEVANT)), before=2)
+    response = triage.resolve(task, {"relevance": "relevant", "doc_type": "circular"})
+    assert (response.status_code, problem(response)) == (409, "pipeline-task-closed")
+    resolution = triage.store.tasks[task.id].resolution
+    assert resolution is not None
+    assert resolution["relevance"] == "irrelevant", "the first decision stands"
+    assert len(triage.classified()) == 2
+    assert [entry.action for entry in triage.store.audit].count("pipeline.task.resolve") == 1

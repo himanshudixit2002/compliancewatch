@@ -425,8 +425,10 @@ uploader's) is never changed: the guard trigger keeps it. A relevant document th
 through an ingest of the stored document (`pipeline-triage-<task>`), which finds the decision,
 registers the document as the decided type while knowledge is on, and extracts its candidate
 while the extraction is on; an irrelevant one is set aside and nothing starts. The same decision
-again starts that ingest if it did not start (503 when Temporal does not answer); another is a
-409. A relevant triage needs a type and an irrelevant one takes none (422).
+again replays it and starts that ingest if it did not start (503 when Temporal does not answer),
+also when two requests send it at once: the second finds the task resolved once it holds its row
+lock, writes nothing and answers 200 like the first. Another decision is a 409. A relevant
+triage needs a type and an irrelevant one takes none (422).
 
 ## The store
 
