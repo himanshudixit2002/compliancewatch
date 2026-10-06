@@ -116,6 +116,7 @@ const RESOLUTIONS: Readonly<Record<string, MessageKey>> = {
 export function decisionResult(decided: EntityGroupDecided): DecisionResult {
   const resolutionKey = decided.resolution === null ? undefined : RESOLUTIONS[decided.resolution];
   return {
+    kind: "decided",
     message: t("entityReview.done", { count: decided.itemsClosed }),
     statusLabel: humanise(decided.status),
     resolutionLabel:
@@ -131,5 +132,17 @@ export function decisionResult(decided: EntityGroupDecided): DecisionResult {
         : hrefFor(screenById("admin.rulebook.canonical.entity"), { entityId: decided.entityId }),
     itemsClosed: decided.itemsClosed,
     relationTargetsUpdated: decided.relationTargetsUpdated,
+  };
+}
+
+/**
+ * A decision the rulebook refused because its mentions had been decided before it arrived: the
+ * whole group's, or the ones included. The group read lists open mentions only, so who decided
+ * them is not known here and not claimed.
+ */
+export function alreadyDecidedResult(included: boolean): DecisionResult {
+  return {
+    kind: "already",
+    message: included ? t("entityReview.already.included") : t("entityReview.already.group"),
   };
 }

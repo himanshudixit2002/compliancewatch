@@ -10,6 +10,7 @@ import {
 } from "@/test/rulebook-fixture";
 import { ruleVersionDto } from "@/test/rule-version-fixture";
 import {
+  alreadyDecidedResult,
   approvedResult,
   candidateFacts,
   evidenceOf,
@@ -173,14 +174,50 @@ describe("versionOptions", () => {
 describe("the results", () => {
   it("say what an approval wrote and where to see it, and why a candidate was rejected", () => {
     expect(approvedResult("relation-1", "v-a2")).toEqual({
+      kind: "decided",
       message: "Approved: rule relation relation-1 recorded.",
       ruleRelationId: "relation-1",
       graphHref: "/admin/rulebook/relations/graph?rule_version_id=v-a2",
     });
     expect(rejectedResult("A duplicate")).toEqual({
+      kind: "decided",
       message: "Rejected: A duplicate.",
       ruleRelationId: null,
       graphHref: null,
     });
+  });
+
+  it("say who had decided a candidate already, and how", () => {
+    const analyst = "00000000-0000-5000-8000-0000000000b1";
+    const other = "00000000-0000-5000-8000-0000000000b2";
+    expect(
+      alreadyDecidedResult({ status: "approved", decidedBy: analyst, rejectReason: null }, analyst),
+    ).toEqual({
+      kind: "already",
+      message:
+        "Already decided: this candidate was approved by you before this decision arrived, so nothing was recorded again.",
+      ruleRelationId: null,
+      graphHref: null,
+    });
+    expect(
+      alreadyDecidedResult(
+        { status: "rejected", decidedBy: other, rejectReason: "duplicate" },
+        analyst,
+      ).message,
+    ).toBe(
+      `Already decided: this candidate was rejected by ${other} (A duplicate) before this decision arrived, so nothing was recorded again.`,
+    );
+    expect(
+      alreadyDecidedResult({ status: "rejected", decidedBy: "", rejectReason: null }, analyst)
+        .message,
+    ).toContain("rejected by an analyst the rulebook does not name (no reason recorded)");
+    expect(
+      alreadyDecidedResult(
+        { status: "example_state", decidedBy: other, rejectReason: null },
+        analyst,
+      ).message,
+    ).toBe(
+      `Already decided: this candidate is Example state, decided by ${other}, so nothing was recorded again.`,
+    );
   });
 });

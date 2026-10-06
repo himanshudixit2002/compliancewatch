@@ -29,6 +29,12 @@ export type AccessView = { allowed: true } | { allowed: false; title: string; de
 
 /** What a decision answered, as the panel announces it. */
 export interface CandidateDecisionResult {
+  /**
+   * "decided" for the rulebook's answer to this decision; "already" when the candidate had been
+   * decided before it arrived (often this analyst's own decision, sent again after its answer was
+   * lost), shown as information with the decision it found.
+   */
+  kind: "decided" | "already";
   message: string;
   /** The rule relation an approval wrote. */
   ruleRelationId: string | null;

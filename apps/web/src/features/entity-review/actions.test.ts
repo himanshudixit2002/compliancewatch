@@ -11,7 +11,12 @@ import { resetFlagReader } from "@/server/flags";
 import { encryptSession } from "@/server/session";
 import { fakeCookies } from "@/test/fake-cookies";
 import { fakeFetch } from "@/test/fake-fetch";
-import { EXAMPLE_ENTITY_ID, EXAMPLE_REVIEW_IDS, groupDecisionDto } from "@/test/rulebook-fixture";
+import {
+  EXAMPLE_ENTITY_ID,
+  EXAMPLE_REVIEW_IDS,
+  groupDecisionDto,
+  reviewItemDto,
+} from "@/test/rulebook-fixture";
 import { decideEntityGroup } from "./actions";
 import { DECISION_FIELDS } from "./ui/decision-shared";
 
@@ -22,6 +27,11 @@ const KEY = new Uint8Array(randomBytes(32));
 const IDLE = { status: "idle" } as const;
 const ANALYST_ID = "00000000-0000-5000-8000-0000000000b1";
 const DECISIONS = "/v1/rulebook/review/entities/decisions";
+const ITEMS = "/v1/rulebook/review/entities/items";
+const GROUP_CLOSED = {
+  type: "urn:compliancewatch:problem:rulebook-review-group-closed",
+  title: "Example group closed",
+};
 
 async function signedInAs(roles: SessionClaims["roles"]): Promise<void> {
   const claims: SessionClaims = {
@@ -175,19 +185,52 @@ describe("decideEntityGroup", () => {
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("passes the rulebook's refusal of a group already decided", async () => {
+  it("shows a group decided before this decision arrived as information, read again", async () => {
     await signedInAs(["admin"]);
+    const fake = fakeFetch([
+      { method: "POST", path: DECISIONS, status: 409, problem: GROUP_CLOSED },
+      { method: "GET", path: ITEMS, body: [] },
+    ]);
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await decideEntityGroup(
+      "form",
+      "EXAMPLE-1",
+      IDLE,
+      form({ decision: "create_entity" }),
+    );
+    expect(state).toEqual({
+      status: "ok",
+      message:
+        "Already decided: no open mention of this group was left when this decision arrived, so nothing was recorded again.",
+      value: {
+        kind: "already",
+        message:
+          "Already decided: no open mention of this group was left when this decision arrived, so nothing was recorded again.",
+      },
+    });
+    expect(fake.requests.map((request) => `${request.method} ${request.pathname}`)).toEqual([
+      `POST ${DECISIONS}`,
+      `GET ${ITEMS}`,
+    ]);
+    expect(new URL(fake.requests[1]?.url ?? "").searchParams.get("proposed_name")).toBe(
+      "EXAMPLE-1",
+    );
+    expect(vi.mocked(revalidatePath).mock.calls.map(([path]) => path)).toEqual([
+      "/admin/rulebook/entities",
+      "/admin/rulebook/entities/group",
+    ]);
+  });
+
+  it("says the included mentions were decided before when none of them is open now", async () => {
+    await signedInAs(["analyst"]);
     vi.stubGlobal(
       "fetch",
       fakeFetch([
+        { method: "POST", path: DECISIONS, status: 409, problem: GROUP_CLOSED },
         {
-          method: "POST",
-          path: DECISIONS,
-          status: 409,
-          problem: {
-            type: "urn:compliancewatch:problem:rulebook-review-group-closed",
-            title: "Example group closed",
-          },
+          method: "GET",
+          path: ITEMS,
+          body: [reviewItemDto({ review_id: EXAMPLE_REVIEW_IDS.second })],
         },
       ]).fetchImpl,
     );
@@ -195,9 +238,70 @@ describe("decideEntityGroup", () => {
       "form",
       "EXAMPLE-1",
       IDLE,
-      form({ decision: "create_entity" }),
+      form({
+        [DECISION_FIELDS.decision]: "reject",
+        [DECISION_FIELDS.rejectReason]: "out_of_scope",
+        [DECISION_FIELDS.reviewIds]: [EXAMPLE_REVIEW_IDS.first.toUpperCase()],
+      }),
     );
-    expect(state).toMatchObject({ status: "error", problem: { title: "Example group closed" } });
+    expect(state).toMatchObject({
+      status: "ok",
+      value: { kind: "already", message: expect.stringMatching(/the mentions you included/) },
+    });
+  });
+
+  it("passes the refusal on when the group cannot be read again or an included one is open", async () => {
+    await signedInAs(["admin"]);
+    vi.stubGlobal(
+      "fetch",
+      fakeFetch([
+        { method: "POST", path: DECISIONS, status: 409, problem: GROUP_CLOSED },
+        { method: "GET", path: ITEMS, status: 503, problem: { title: "Example outage" } },
+      ]).fetchImpl,
+    );
+    expect(
+      await decideEntityGroup("form", "EXAMPLE-1", IDLE, form({ decision: "create_entity" })),
+    ).toMatchObject({ status: "error", problem: { title: "Example group closed" } });
+    vi.stubGlobal(
+      "fetch",
+      fakeFetch([
+        { method: "POST", path: DECISIONS, status: 409, problem: GROUP_CLOSED },
+        { method: "GET", path: ITEMS, body: [reviewItemDto()] },
+      ]).fetchImpl,
+    );
+    expect(
+      await decideEntityGroup(
+        "form",
+        "EXAMPLE-1",
+        IDLE,
+        form({ decision: "create_entity", review_ids: [EXAMPLE_REVIEW_IDS.first] }),
+      ),
+    ).toMatchObject({ status: "error", problem: { title: "Example group closed" } });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("passes any other refusal on without reading the group again", async () => {
+    await signedInAs(["admin"]);
+    const fake = fakeFetch([
+      {
+        method: "POST",
+        path: DECISIONS,
+        status: 409,
+        problem: {
+          type: "urn:compliancewatch:problem:rulebook-entity-type-mismatch",
+          title: "Example type mismatch",
+        },
+      },
+    ]);
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await decideEntityGroup(
+      "form",
+      "EXAMPLE-1",
+      IDLE,
+      form({ decision: "add_alias", entity_id: EXAMPLE_ENTITY_ID }),
+    );
+    expect(state).toMatchObject({ status: "error", problem: { title: "Example type mismatch" } });
+    expect(fake.requests).toHaveLength(1);
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 

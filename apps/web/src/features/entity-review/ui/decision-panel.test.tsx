@@ -48,6 +48,7 @@ describe("DecisionPanel", () => {
         status: "ok",
         message: "Example decided.",
         value: {
+          kind: "decided",
           message: "Example decided.",
           statusLabel: "Resolved",
           resolutionLabel: "A new entity was made",
@@ -144,6 +145,28 @@ describe("DecisionPanel", () => {
     );
     await waitFor(() => expect(screen.getByText("Example group closed")).toBeDefined());
     expect(screen.getByText("req-example-9")).toBeDefined();
+  });
+
+  it("shows mentions decided before this decision as information, not an error", async () => {
+    const action = vi.fn<DecideAction>().mockResolvedValue({
+      status: "ok",
+      message: "Example already decided.",
+      value: { kind: "already", message: "Example already decided." },
+    });
+    const { container } = renderPanel(action);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("radio", { name: "Make the entity" }));
+    await user.click(screen.getByRole("button", { name: "Record the decision" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Record the decision" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe("Example already decided."),
+    );
+    expect(container.querySelector("[data-slot='decision-already']")).not.toBeNull();
+    expect(container.querySelector("[data-slot='decision-done']")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(await runAxe(container)).toHaveNoViolations();
   });
 
   it("keeps making an entity off for a name that cannot name one, and asks for mentions", async () => {

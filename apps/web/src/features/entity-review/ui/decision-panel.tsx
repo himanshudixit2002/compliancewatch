@@ -78,6 +78,55 @@ function scopePhrase(selected: number, listed: number): string {
     : t("entityReview.scope.groupPhrase", { count: listed });
 }
 
+/** The rulebook's answer to a decision: its status, how the name resolved, the entity, counts. */
+function DecidedOutcome({ result }: { result: Extract<DecisionResult, { kind: "decided" }> }) {
+  return (
+    <div role="status" className="flex flex-col gap-3" data-slot="decision-done">
+      <p className="text-sm font-medium text-fg">{result.message}</p>
+      <KeyValue
+        items={[
+          { key: "status", label: t("entityReview.result.status"), value: result.statusLabel },
+          ...(result.resolutionLabel === null
+            ? []
+            : [
+                {
+                  key: "resolution",
+                  label: t("entityReview.result.resolution"),
+                  value: result.resolutionLabel,
+                },
+              ]),
+          ...(result.entityId === null || result.entityHref === null
+            ? []
+            : [
+                {
+                  key: "entity",
+                  label: t("entityReview.result.entity"),
+                  value: (
+                    <Link
+                      href={result.entityHref as Route}
+                      className="font-mono text-xs text-primary underline-offset-2 hover:underline"
+                    >
+                      {result.entityId}
+                    </Link>
+                  ),
+                },
+              ]),
+          {
+            key: "closed",
+            label: t("entityReview.result.itemsClosed"),
+            value: String(result.itemsClosed),
+          },
+          {
+            key: "targets",
+            label: t("entityReview.result.relationTargets"),
+            value: String(result.relationTargetsUpdated),
+          },
+        ]}
+      />
+    </div>
+  );
+}
+
 /**
  * Deciding a group: the decision (make the entity, add the name to an entity, or reject the
  * mentions), what it needs (the entity's id, a reason), an optional note, and the mentions it
@@ -170,6 +219,7 @@ export function DecisionPanel({
             })
           : "";
   const formErrors = state.status === "error" ? (state.formErrors ?? []) : [];
+  const outcome = state.status === "ok" ? state.value : undefined;
   const decisionError = fieldErrorOf(state, DECISION_FIELDS.decision);
   const reviewIdsError = fieldErrorOf(state, DECISION_FIELDS.reviewIds);
 
@@ -327,54 +377,12 @@ export function DecisionPanel({
         data-slot="decision-outcome"
         className="flex flex-col gap-3 outline-none"
       >
-        {state.status === "ok" && state.value !== undefined ? (
-          <div role="status" className="flex flex-col gap-3" data-slot="decision-done">
-            <p className="text-sm font-medium text-fg">{state.value.message}</p>
-            <KeyValue
-              items={[
-                {
-                  key: "status",
-                  label: t("entityReview.result.status"),
-                  value: state.value.statusLabel,
-                },
-                ...(state.value.resolutionLabel === null
-                  ? []
-                  : [
-                      {
-                        key: "resolution",
-                        label: t("entityReview.result.resolution"),
-                        value: state.value.resolutionLabel,
-                      },
-                    ]),
-                ...(state.value.entityId === null || state.value.entityHref === null
-                  ? []
-                  : [
-                      {
-                        key: "entity",
-                        label: t("entityReview.result.entity"),
-                        value: (
-                          <Link
-                            href={state.value.entityHref as Route}
-                            className="font-mono text-xs text-primary underline-offset-2 hover:underline"
-                          >
-                            {state.value.entityId}
-                          </Link>
-                        ),
-                      },
-                    ]),
-                {
-                  key: "closed",
-                  label: t("entityReview.result.itemsClosed"),
-                  value: String(state.value.itemsClosed),
-                },
-                {
-                  key: "targets",
-                  label: t("entityReview.result.relationTargets"),
-                  value: String(state.value.relationTargetsUpdated),
-                },
-              ]}
-            />
-          </div>
+        {outcome?.kind === "already" ? (
+          <p role="status" className="text-sm font-medium text-fg" data-slot="decision-already">
+            {outcome.message}
+          </p>
+        ) : outcome !== undefined ? (
+          <DecidedOutcome result={outcome} />
         ) : state.status === "error" ? (
           <>
             {state.problem === undefined ? null : (

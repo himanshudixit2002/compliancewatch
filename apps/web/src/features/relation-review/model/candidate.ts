@@ -218,6 +218,7 @@ export function approvedResult(
   fromRuleVersionId: string,
 ): CandidateDecisionResult {
   return {
+    kind: "decided",
     message: t("relationReview.approved", { id: ruleRelationId }),
     ruleRelationId,
     graphHref: withQuery(hrefFor(screenById("admin.rulebook.relations.graph")), {
@@ -228,8 +229,39 @@ export function approvedResult(
 
 export function rejectedResult(reasonLabel: string): CandidateDecisionResult {
   return {
+    kind: "decided",
     message: t("relationReview.rejected", { reason: reasonLabel }),
     ruleRelationId: null,
     graphHref: null,
   };
+}
+
+/**
+ * A candidate found decided after the rulebook refused a decision as already made: who decided
+ * it ("you" for the signed-in analyst) and how, as information rather than a failure.
+ */
+export function alreadyDecidedResult(
+  candidate: Pick<RelationCandidate, "status" | "decidedBy" | "rejectReason">,
+  userId: string,
+): CandidateDecisionResult {
+  const who =
+    candidate.decidedBy === ""
+      ? t("relationReview.already.unknown")
+      : candidate.decidedBy === userId
+        ? t("relationReview.already.you")
+        : candidate.decidedBy;
+  const message =
+    candidate.status === "approved"
+      ? t("relationReview.already.approved", { who })
+      : candidate.status === "rejected"
+        ? t("relationReview.already.rejected", {
+            who,
+            reason:
+              rejectReasonText(candidate.rejectReason) ?? t("relationReview.already.noReason"),
+          })
+        : t("relationReview.already.other", {
+            who,
+            status: candidateStatusLabel(candidate.status),
+          });
+  return { kind: "already", message, ruleRelationId: null, graphHref: null };
 }

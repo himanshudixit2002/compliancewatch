@@ -292,8 +292,12 @@ listed or not, and the page never states a count it does not know.
   written.
 - The panel then shows the rulebook's answer (the status, how the name was resolved, the entity
   with a link to its page, the mentions closed and the candidates updated) and stays on the page
-  when the last mention is decided, beside the empty state. A refusal (a group already decided, an
-  entity of another type, a name that is not canonical) is shown with the rulebook's problem.
+  when the last mention is decided, beside the empty state. A refusal (an entity of another type,
+  a name that is not canonical) is shown with the rulebook's problem. Mentions decided before the
+  decision arrived (often the analyst's own decision, sent again after its answer was lost: the
+  route takes no Idempotency-Key) are information, not an error: the group is read again, the
+  page renders with what is open now, and the panel says they were already decided. Who decided
+  them is not shown, since the group read lists open mentions only.
 - The decision is offered only with `web.admin_rulebook_writes` on for the session's tenant and
   `CW_WEB_RULEBOOK_REVIEW_TOKEN` set; otherwise the page names the flag or the variable and lists
   the mentions read-only. Without a group in the address the page says how to open one.
@@ -333,9 +337,11 @@ it word for word, else the quote alone.
 - Both take an optional note and record the signed-in user as `decided_by`. The panel shows the
   answer (the rule relation written, with a link to the relations graph around the draft) and stays
   on the page as the candidate renders again in its new status; every refusal (a draft that is not
-  editable or closed, a target that is not aligned, a supersession cycle, a candidate already
-  decided) comes with the rulebook's problem. A decided candidate offers nothing. The same flag and
-  token as the entity group apply.
+  editable or closed, a target that is not aligned, a supersession cycle) comes with the rulebook's
+  problem. A candidate decided before the decision arrived is read again and shown as information:
+  "already decided", approved or rejected (with the reason), by whom ("you" for the signed-in
+  analyst, whose earlier answer may have been lost), and the page renders in that state. A decided
+  candidate offers nothing. The same flag and token as the entity group apply.
 
 ## Rules: `/admin/rulebook/rules`
 

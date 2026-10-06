@@ -540,7 +540,12 @@ minus one and `limit=1`, once per status until it turns up (D-055). The decision
 through `rulebookWrites(ctx)` in `server/api/rulebook-write.ts`, which checks the role,
 `web.admin_rulebook_writes` and the review token, sends `decided_by` from the session, and on success
 render the queue and the page again (`afterMutation({ paths })`). The routes take no
-Idempotency-Key: a repeat is refused as a decided group or candidate (409).
+Idempotency-Key: a repeat is refused as a decided group or candidate (409), so a decision sent again
+after its answer was lost would read as a failure although it was recorded. On that 409 the action
+reads the group's open mentions or the candidate again, and when they confirm it (none of the
+included mentions open, the candidate no longer open), renders the page again and answers "already
+decided" as information: by whom and how for a candidate, without a name for a group, whose read
+lists open mentions only. A read that fails passes the refusal on.
 `features/rulebook-rules/gateway.ts` reads the cached rule list. `features/llm-registry/gateway.ts`
 reads the gateway's prompts and model routes (cached under `llm-gateway:prompts` and
 `llm-gateway:models`) and its usage (fresh, the tenant in the `tenant_id` query only), over

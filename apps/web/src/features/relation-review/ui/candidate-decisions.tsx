@@ -273,7 +273,11 @@ export function CandidateDecisions({
         className="flex flex-col gap-3 outline-none"
       >
         {state.status === "ok" && state.value !== undefined ? (
-          <div role="status" className="flex flex-col gap-1" data-slot="candidate-done">
+          <div
+            role="status"
+            className="flex flex-col gap-1"
+            data-slot={state.value.kind === "already" ? "candidate-already" : "candidate-done"}
+          >
             <p className="text-sm font-medium text-fg">{state.value.message}</p>
             {state.value.graphHref === null ? null : (
               <Link

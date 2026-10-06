@@ -44,6 +44,7 @@ describe("CandidateDecisions", () => {
         status: "ok",
         message: "Example approved.",
         value: {
+          kind: "decided",
           message: "Example approved.",
           ruleRelationId: "relation-1",
           graphHref: "/admin/rulebook/relations/graph?rule_version_id=example",
@@ -114,6 +115,32 @@ describe("CandidateDecisions", () => {
     await waitFor(() => expect(screen.getByText("Example candidate closed")).toBeDefined());
     expect(screen.getByText("req-example-3")).toBeDefined();
     expect(sent).toEqual([{ reason: "duplicate", note: "Example note" }]);
+  });
+
+  it("shows a candidate decided before this decision as information, not an error", async () => {
+    const reject = vi.fn<CandidateAction>().mockResolvedValue({
+      status: "ok",
+      message: "Example already rejected.",
+      value: {
+        kind: "already",
+        message: "Example already rejected.",
+        ruleRelationId: null,
+        graphHref: null,
+      },
+    });
+    const { container } = renderPanel({ reject });
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText(/^Why reject/), "duplicate");
+    await user.click(screen.getByRole("button", { name: "Reject the candidate" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Reject the candidate" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe("Example already rejected."),
+    );
+    expect(container.querySelector("[data-slot='candidate-already']")).not.toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("link", { name: /relations graph/ })).toBeNull();
   });
 
   it("lets an aligned target go without a version, and says when no draft exists", async () => {

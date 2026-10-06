@@ -28,6 +28,11 @@ const IDLE = { status: "idle" } as const;
 const ANALYST_ID = "00000000-0000-5000-8000-0000000000b1";
 const APPROVE = `/v1/rulebook/review/relations/${EXAMPLE_CANDIDATE_ID}/approve`;
 const REJECT = `/v1/rulebook/review/relations/${EXAMPLE_CANDIDATE_ID}/reject`;
+const LIST = "/v1/rulebook/review/relations";
+const CANDIDATE_CLOSED = {
+  type: "urn:compliancewatch:problem:rulebook-relation-candidate-closed",
+  title: "Example candidate closed",
+};
 
 async function signedInAs(roles: SessionClaims["roles"]): Promise<void> {
   const claims: SessionClaims = {
@@ -155,6 +160,94 @@ describe("approveCandidate", () => {
       form({ from_rule_version_id: EXAMPLE_VERSION_ID }),
     );
     expect(state).toMatchObject({ status: "error", problem: { title: "Example draft closed" } });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("a decision the rulebook found already made", () => {
+  it("reads the candidate again and shows the analyst's own approval as information", async () => {
+    await signedInAs(["analyst"]);
+    const fake = fakeFetch([
+      { method: "POST", path: APPROVE, status: 409, problem: CANDIDATE_CLOSED },
+      {
+        method: "GET",
+        path: LIST,
+        body: [relationCandidateDto({ status: "approved", decided_by: ANALYST_ID })],
+      },
+    ]);
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const state = await approveCandidate(
+      EXAMPLE_CANDIDATE_ID,
+      false,
+      IDLE,
+      form({ from_rule_version_id: EXAMPLE_VERSION_ID }),
+    );
+    const message =
+      "Already decided: this candidate was approved by you before this decision arrived, so nothing was recorded again.";
+    expect(state).toEqual({
+      status: "ok",
+      message,
+      value: { kind: "already", message, ruleRelationId: null, graphHref: null },
+    });
+    const read = new URL(fake.requests[1]?.url ?? "");
+    expect(read.pathname).toBe(LIST);
+    expect(read.searchParams.get("status")).toBe("approved");
+    expect(read.searchParams.get("limit")).toBe("1");
+    expect(vi.mocked(revalidatePath).mock.calls.map(([path]) => path)).toEqual([
+      "/admin/rulebook/relations",
+      `/admin/rulebook/relations/${EXAMPLE_CANDIDATE_ID}`,
+    ]);
+  });
+
+  it("names who rejected it, and why", async () => {
+    await signedInAs(["analyst"]);
+    const other = "00000000-0000-5000-8000-0000000000b2";
+    vi.stubGlobal(
+      "fetch",
+      fakeFetch([
+        { method: "POST", path: REJECT, status: 409, problem: CANDIDATE_CLOSED },
+        {
+          method: "GET",
+          path: LIST,
+          body: [
+            relationCandidateDto({
+              status: "rejected",
+              decided_by: other,
+              reject_reason: "not_in_text",
+            }),
+          ],
+        },
+      ]).fetchImpl,
+    );
+    const state = await rejectCandidate(EXAMPLE_CANDIDATE_ID, IDLE, form({ reason: "duplicate" }));
+    expect(state).toMatchObject({
+      status: "ok",
+      message: `Already decided: this candidate was rejected by ${other} (Not in the text) before this decision arrived, so nothing was recorded again.`,
+    });
+  });
+
+  it("passes the refusal on when the candidate cannot be read again or is still open", async () => {
+    await signedInAs(["analyst"]);
+    vi.stubGlobal(
+      "fetch",
+      fakeFetch([
+        { method: "POST", path: REJECT, status: 409, problem: CANDIDATE_CLOSED },
+        { method: "GET", path: LIST, status: 503, problem: { title: "Example outage" } },
+      ]).fetchImpl,
+    );
+    expect(
+      await rejectCandidate(EXAMPLE_CANDIDATE_ID, IDLE, form({ reason: "duplicate" })),
+    ).toMatchObject({ status: "error", problem: { title: "Example candidate closed" } });
+    vi.stubGlobal(
+      "fetch",
+      fakeFetch([
+        { method: "POST", path: REJECT, status: 409, problem: CANDIDATE_CLOSED },
+        { method: "GET", path: LIST, body: [relationCandidateDto()] },
+      ]).fetchImpl,
+    );
+    expect(
+      await rejectCandidate(EXAMPLE_CANDIDATE_ID, IDLE, form({ reason: "duplicate" })),
+    ).toMatchObject({ status: "error", problem: { title: "Example candidate closed" } });
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 });

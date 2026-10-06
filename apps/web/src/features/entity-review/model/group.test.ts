@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { entityDecidedFromDto, reviewItemFromDto } from "@/entities/rulebook/mappers";
 import { EXAMPLE_ENTITY_ID, groupDecisionDto, reviewItemDto } from "@/test/rulebook-fixture";
-import { canName, decisionResult, groupView, itemRows, readGroup } from "./group";
+import {
+  alreadyDecidedResult,
+  canName,
+  decisionResult,
+  groupView,
+  itemRows,
+  readGroup,
+} from "./group";
 import { reviewReasonLabel } from "./labels";
 
 describe("readGroup", () => {
@@ -72,6 +79,7 @@ describe("groupView", () => {
 describe("decisionResult", () => {
   it("says how many mentions closed and links the entity made", () => {
     expect(decisionResult(entityDecidedFromDto(groupDecisionDto()))).toEqual({
+      kind: "decided",
       message: "Decision recorded. Mentions closed: 2.",
       statusLabel: "Resolved",
       resolutionLabel: "A new entity was made",
@@ -90,9 +98,21 @@ describe("decisionResult", () => {
     );
     expect(rejected).toMatchObject({ resolutionLabel: null, entityId: null, entityHref: null });
     expect(
-      decisionResult(entityDecidedFromDto(groupDecisionDto({ resolution: "example_way" })))
-        .resolutionLabel,
-    ).toBe("Example way");
+      decisionResult(entityDecidedFromDto(groupDecisionDto({ resolution: "example_way" }))),
+    ).toMatchObject({ resolutionLabel: "Example way" });
+  });
+});
+
+describe("alreadyDecidedResult", () => {
+  it("says the mentions were decided before, without naming who", () => {
+    expect(alreadyDecidedResult(false)).toEqual({
+      kind: "already",
+      message:
+        "Already decided: no open mention of this group was left when this decision arrived, so nothing was recorded again.",
+    });
+    expect(alreadyDecidedResult(true).message).toMatch(
+      /^Already decided: the mentions you included/,
+    );
   });
 });
 

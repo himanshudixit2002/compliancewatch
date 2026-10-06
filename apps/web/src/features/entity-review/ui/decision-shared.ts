@@ -52,16 +52,27 @@ export interface ItemRow {
 }
 
 /** What a decision recorded, as the panel announces it. */
-export interface DecisionResult {
-  message: string;
-  statusLabel: string;
-  resolutionLabel: string | null;
-  entityId: string | null;
-  /** The canonical entity the decision made or extended, once there is one. */
-  entityHref: string | null;
-  itemsClosed: number;
-  relationTargetsUpdated: number;
-}
+export type DecisionResult =
+  | {
+      /** The rulebook's answer to this decision. */
+      kind: "decided";
+      message: string;
+      statusLabel: string;
+      resolutionLabel: string | null;
+      entityId: string | null;
+      /** The canonical entity the decision made or extended, once there is one. */
+      entityHref: string | null;
+      itemsClosed: number;
+      relationTargetsUpdated: number;
+    }
+  | {
+      /**
+       * The mentions had been decided before this decision arrived (often its own repeat after a
+       * lost answer): information, with the group read again.
+       */
+      kind: "already";
+      message: string;
+    };
 
 const DECISIONS: Readonly<Record<MentionDecision, { label: MessageKey; help: MessageKey }>> = {
   create_entity: {
