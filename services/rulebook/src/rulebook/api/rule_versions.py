@@ -1,13 +1,16 @@
-"""Rule versions: the ones in force on a date, every version of one rule, one version with its
-citations and approvers. Open reads."""
+"""Rule versions: the ones in force on a date or that ended on or after one, every version of one
+rule, one version with its citations and approvers. Open reads."""
 
 from datetime import date
+from enum import StrEnum
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Path, Query
 
+from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import RuleVersionId
+from domain_kernel.status import RuleVersionStatus
 from py_common.problems import problem_responses
 from rulebook.api.deps import Wired
 from rulebook.api.read_schemas import CitationOut, RuleVersionDetailOut, RuleVersionOut
@@ -17,23 +20,84 @@ router = APIRouter(tags=["rules"])
 RULE_KEY = r"^[a-z][a-z0-9_]*$"
 
 
+class ListedStatus(StrEnum):
+    """The statuses a listing of versions holds: those of a version that has been published and
+    was not withdrawn."""
+
+    PUBLISHED = "published"
+    SUPERSEDED = "superseded"
+
+
 @router.get(
     "/rule-versions",
-    summary="Rule versions in force on a date: published or superseded, as_of in their period",
+    summary=(
+        "Rule versions in force on a date, or that ended on or after one: published or "
+        "superseded, never withdrawn"
+    ),
+    responses=problem_responses(422),
 )
 def list_rule_versions(
     wired: Wired,
-    as_of: date,
+    as_of: Annotated[
+        date | None,
+        Query(description="The versions in force on this day: as_of in their effective period"),
+    ] = None,
+    ended_on_or_after: Annotated[
+        date | None,
+        Query(
+            description=(
+                "Instead of as_of, the versions whose effective_to (exclusive) is on or after this "
+                "day: the ones superseded since then, whose periods may still be due, and the "
+                "published ones a replacement has cut to end then or later; never a withdrawn one"
+            )
+        ),
+    ] = None,
+    status: Annotated[
+        ListedStatus | None, Query(description="Only the versions of this status")
+    ] = None,
     rule_key: Annotated[str | None, Query(max_length=80)] = None,
     regulator: Annotated[str | None, Query(max_length=40)] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     after: Annotated[
         str | None, Query(max_length=80, description="Continue after this rule key")
     ] = None,
+    after_version: Annotated[
+        int | None,
+        Query(
+            ge=1,
+            description=(
+                "With after: continue after this version of that rule key, since a listing of "
+                "ended versions can hold several versions of a rule"
+            ),
+        ),
+    ] = None,
 ) -> list[RuleVersionOut]:
-    found = wired.list_rules_in_force.run(
-        as_of, rule_key=rule_key, regulator=regulator, limit=limit, after=after
-    )
+    """Name exactly one of ``as_of`` and ``ended_on_or_after`` (422 otherwise). Both listings are
+    ordered by rule key, then version, and paged with ``limit``, ``after`` and
+    ``after_version``."""
+    wanted = None if status is None else RuleVersionStatus(status.value)
+    if as_of is not None and ended_on_or_after is None:
+        found = wired.list_rules_in_force.run(
+            as_of,
+            rule_key=rule_key,
+            regulator=regulator,
+            limit=limit,
+            after=after,
+            status=wanted,
+            after_version=after_version,
+        )
+    elif ended_on_or_after is not None and as_of is None:
+        found = wired.list_ended_versions.run(
+            ended_on_or_after,
+            rule_key=rule_key,
+            regulator=regulator,
+            limit=limit,
+            after=after,
+            status=wanted,
+            after_version=after_version,
+        )
+    else:
+        raise InvariantViolationError("name exactly one of as_of and ended_on_or_after")
     return [RuleVersionOut.from_record(record) for record in found]
 
 

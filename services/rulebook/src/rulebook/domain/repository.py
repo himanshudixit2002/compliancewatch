@@ -25,7 +25,7 @@ from rulebook.domain.graph import (
 from rulebook.domain.publication import PendingReplacement, RuleVersionDecision
 from rulebook.domain.relations import CandidateStatus, RelationCandidate
 from rulebook.domain.review import EntityReviewItem, MentionGroup, ReviewQueueStats
-from rulebook.domain.rule_versions import CitationRecord, RuleVersionRecord
+from rulebook.domain.rule_versions import CitationRecord, RuleVersionRecord, VersionPage
 from rulebook.domain.runs import ExtractionRun, RuleSummary
 from rulebook.domain.search import CitedClause, ClauseEmbedding
 
@@ -185,17 +185,15 @@ class RelationRepository(Protocol):
 
 
 class RuleVersionRepository(Protocol):
-    def in_force(
-        self,
-        as_of: date,
-        *,
-        rule_key: str | None,
-        regulator: str | None,
-        limit: int,
-        after: str | None,
-    ) -> Sequence[RuleVersionRecord]:
-        """Versions in force on ``as_of`` (``rule_versions.in_force``), ordered by rule key then
-        version, with rule keys after ``after``."""
+    def in_force(self, as_of: date, page: VersionPage) -> Sequence[RuleVersionRecord]:
+        """Versions in force on ``as_of`` (``rule_versions.in_force``) that ``page`` admits,
+        ordered by rule key then version, at most ``page.limit``."""
+        ...
+
+    def ended(self, since: date, page: VersionPage) -> Sequence[RuleVersionRecord]:
+        """Versions that ended on or after ``since`` (``rule_versions.ended_since``: never a
+        withdrawn one) that ``page`` admits, ordered by rule key then version, at most
+        ``page.limit``."""
         ...
 
     def get(self, rule_version_id: RuleVersionId) -> RuleVersionRecord | None:

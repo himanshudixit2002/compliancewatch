@@ -69,6 +69,8 @@ from rulebook.domain.rule_versions import (
     IN_FORCE_STATUSES,
     CitationRecord,
     RuleVersionRecord,
+    VersionPage,
+    ended_since,
     in_force,
     out_of_force,
 )
@@ -559,26 +561,23 @@ class MemoryRuleVersionRepository:
     def __init__(self, tables: _Tables) -> None:
         self._tables = tables
 
-    def in_force(
-        self,
-        as_of: date,
-        *,
-        rule_key: str | None,
-        regulator: str | None,
-        limit: int,
-        after: str | None,
-    ) -> Sequence[RuleVersionRecord]:
+    def in_force(self, as_of: date, page: VersionPage) -> Sequence[RuleVersionRecord]:
+        return self._page(lambda record: in_force(record, as_of), page)
+
+    def ended(self, since: date, page: VersionPage) -> Sequence[RuleVersionRecord]:
+        return self._page(lambda record: ended_since(record, since), page)
+
+    def _page(
+        self, listed: Callable[[RuleVersionRecord], bool], page: VersionPage
+    ) -> list[RuleVersionRecord]:
         found = [
             record
             for record in (
                 _version_record(self._tables, v_id, v) for v_id, v in self._tables.versions.items()
             )
-            if in_force(record, as_of)
-            and rule_key in (None, record.rule_key)
-            and regulator in (None, record.regulator)
-            and (after is None or record.rule_key > after)
+            if listed(record) and page.admits(record)
         ]
-        return sorted(found, key=lambda record: (record.rule_key, record.version))[:limit]
+        return sorted(found, key=lambda record: (record.rule_key, record.version))[: page.limit]
 
     def get(self, rule_version_id: RuleVersionId) -> RuleVersionRecord | None:
         version = self._tables.versions.get(rule_version_id)

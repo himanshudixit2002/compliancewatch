@@ -374,7 +374,12 @@ export type paths = {
       path?: never;
       cookie?: never;
     };
-    /** Rule versions in force on a date: published or superseded, as_of in their period */
+    /**
+     * Rule versions in force on a date, or that ended on or after one: published or superseded, never withdrawn
+     * @description Name exactly one of ``as_of`` and ``ended_on_or_after`` (422 otherwise). Both listings are
+     *     ordered by rule key, then version, and paged with ``limit``, ``after`` and
+     *     ``after_version``.
+     */
     get: operations["list_rule_versions_v1_rulebook_rule_versions_get"];
     put?: never;
     post?: never;
@@ -1172,6 +1177,13 @@ export type components = {
       /** Version */
       version: number;
     };
+    /**
+     * ListedStatus
+     * @description The statuses a listing of versions holds: those of a version that has been published and
+     *     was not withdrawn.
+     * @enum {string}
+     */
+    ListedStatus: "published" | "superseded";
     /**
      * MentionDecision
      * @enum {string}
@@ -3267,13 +3279,20 @@ export interface operations {
   };
   list_rule_versions_v1_rulebook_rule_versions_get: {
     parameters: {
-      query: {
+      query?: {
         /** @description Continue after this rule key */
         after?: string | null;
-        as_of: string;
+        /** @description With after: continue after this version of that rule key, since a listing of ended versions can hold several versions of a rule */
+        after_version?: number | null;
+        /** @description The versions in force on this day: as_of in their effective period */
+        as_of?: string | null;
+        /** @description Instead of as_of, the versions whose effective_to (exclusive) is on or after this day: the ones superseded since then, whose periods may still be due, and the published ones a replacement has cut to end then or later; never a withdrawn one */
+        ended_on_or_after?: string | null;
         limit?: number;
         regulator?: string | null;
         rule_key?: string | null;
+        /** @description Only the versions of this status */
+        status?: components["schemas"]["ListedStatus"] | null;
       };
       header?: never;
       path?: never;
