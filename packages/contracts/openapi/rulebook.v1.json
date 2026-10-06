@@ -1399,6 +1399,15 @@
         "title": "LifecycleOut",
         "type": "object"
       },
+      "ListedStatus": {
+        "description": "The statuses a listing of versions holds: those of a version that has been published and\nwas not withdrawn.",
+        "enum": [
+          "published",
+          "superseded"
+        ],
+        "title": "ListedStatus",
+        "type": "string"
+      },
       "MentionDecision": {
         "enum": [
           "create_entity",
@@ -5470,16 +5479,63 @@
     },
     "/v1/rulebook/rule-versions": {
       "get": {
+        "description": "Name exactly one of ``as_of`` and ``ended_on_or_after`` (422 otherwise). Both listings are\nordered by rule key, then version, and paged with ``limit``, ``after`` and\n``after_version``.",
         "operationId": "list_rule_versions_v1_rulebook_rule_versions_get",
         "parameters": [
           {
+            "description": "The versions in force on this day: as_of in their effective period",
             "in": "query",
             "name": "as_of",
-            "required": true,
+            "required": false,
             "schema": {
-              "format": "date",
-              "title": "As Of",
-              "type": "string"
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The versions in force on this day: as_of in their effective period",
+              "title": "As Of"
+            }
+          },
+          {
+            "description": "Instead of as_of, the versions whose effective_to (exclusive) is on or after this day: the ones superseded since then, whose periods may still be due, and the published ones a replacement has cut to end then or later; never a withdrawn one",
+            "in": "query",
+            "name": "ended_on_or_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instead of as_of, the versions whose effective_to (exclusive) is on or after this day: the ones superseded since then, whose periods may still be due, and the published ones a replacement has cut to end then or later; never a withdrawn one",
+              "title": "Ended On Or After"
+            }
+          },
+          {
+            "description": "Only the versions of this status",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ListedStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the versions of this status",
+              "title": "Status"
             }
           },
           {
@@ -5546,6 +5602,25 @@
               "description": "Continue after this rule key",
               "title": "After"
             }
+          },
+          {
+            "description": "With after: continue after this version of that rule key, since a listing of ended versions can hold several versions of a rule",
+            "in": "query",
+            "name": "after_version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With after: continue after this version of that rule key, since a listing of ended versions can hold several versions of a rule",
+              "title": "After Version"
+            }
           }
         ],
         "responses": {
@@ -5574,7 +5649,7 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "Rule versions in force on a date: published or superseded, as_of in their period",
+        "summary": "Rule versions in force on a date, or that ended on or after one: published or superseded, never withdrawn",
         "tags": [
           "rulebook",
           "rules"

@@ -33,6 +33,7 @@ from rulebook.application.relations import (
 from rulebook.application.review import DecideMentionGroup, ListGroupItems, ListMentionGroups
 from rulebook.application.rule_versions import (
     ListCitations,
+    ListEndedVersions,
     ListRulesInForce,
     ListRuleVersions,
     ReadRuleVersion,
@@ -59,6 +60,7 @@ class Wiring:
     reject_relation: RejectRelationCandidate
     list_rules: ListRules
     list_rules_in_force: ListRulesInForce
+    list_ended_versions: ListEndedVersions
     list_rule_versions: ListRuleVersions
     read_rule_version: ReadRuleVersion
     list_citations: ListCitations

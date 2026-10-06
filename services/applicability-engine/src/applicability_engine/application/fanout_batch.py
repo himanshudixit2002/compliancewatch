@@ -1,9 +1,13 @@
 """Decide one batch of a fan-out: a page of the business directory, one tenant at a time.
 
-``EvaluateBatch.run(request)`` reads the published version from the rulebook, then the next page
-of the directory for the version's level (``request.limit`` entries after ``request.after``, by
-tenant then node) in a read of its own. Entries of one tenant sit together on the page, and each
-tenant's group is handled in two steps, so no HTTP call is made while a transaction is open:
+``EvaluateBatch.run(request)`` reads the version from the rulebook, then the next page of the
+directory for the version's level (``request.limit`` entries after ``request.after``, by tenant
+then node) in a read of its own. The version must still be decided today in India
+(``RuleVersionSpec.still_governs``): published, or superseded while it still governs a duty due,
+since the businesses a fan-out overtaken by a newer version has not reached yet still owe its
+last periods; otherwise ``RuleVersionNotPublishedError``, which ends the run. Entries of one
+tenant sit together on the page, and each tenant's group is handled in two steps, so no HTTP call
+is made while a transaction is open:
 
 1. for each business, its snapshot from the profile service for the current financial year in
    India, with no unit of work open, and the version evaluated against it; a business the profile
@@ -56,10 +60,9 @@ from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ids import BusinessId, TenantId
 from domain_kernel.ontology import Ontology
 from domain_kernel.predicates import Applicability
-from domain_kernel.status import RuleVersionStatus
 
 IST = timezone(timedelta(hours=5, minutes=30))
-"""Financial years are India's."""
+"""Financial years, and the days duties fall due on, are India's."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,13 +128,14 @@ class EvaluateBatch:
         rule = self._rulebook.rule_version(start.rule_version_id)
         if rule is None:
             raise RuleVersionNotFoundError(str(start.rule_version_id))
-        if rule.status is not RuleVersionStatus.PUBLISHED:
+        now = self._clock()
+        today = now.astimezone(IST).date()
+        if not rule.still_governs(today):
             raise RuleVersionNotPublishedError(str(rule.rule_version_id), rule.status.value)
         entries = self._directory.entries(
             level=start.level, after=request.after, limit=request.limit
         )
-        now = self._clock()
-        fy = FinancialYear.for_date(now.astimezone(IST).date())
+        fy = FinancialYear.for_date(today)
         evaluated = 0
         totals = _Stored()
         for tenant_id, group in groupby(entries, key=lambda entry: entry.tenant_id):

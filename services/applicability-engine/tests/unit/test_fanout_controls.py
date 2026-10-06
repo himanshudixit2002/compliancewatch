@@ -3,7 +3,7 @@ together, of no tenant, and signals the workflow only once that has committed; t
 hold; and what the run's own steps and the rule events do to the row."""
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -43,6 +43,7 @@ from applicability_engine.domain.fanout import (
     FanOutStart,
     FanOutStatus,
 )
+from applicability_engine.domain.model import Schedule
 from applicability_engine.infrastructure.memory import MemoryBusinessDirectory, MemoryStore
 from applicability_engine.testing import MemoryRulebook, rule_version
 from domain_kernel.access import Role
@@ -50,6 +51,8 @@ from domain_kernel.audit import AuditActor
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import BusinessId, CorrelationId, EventId, RuleVersionId, TenantId, UserId
 from domain_kernel.ontology import AttributeLevel
+from domain_kernel.periods import EffectivePeriod
+from domain_kernel.recurrence import Recurrence
 from domain_kernel.status import RuleVersionStatus
 
 NOW = datetime(2026, 10, 5, 6, 0, tzinfo=UTC)
@@ -343,6 +346,32 @@ def test_a_version_the_rulebook_cannot_fan_out_records_nothing(world: World) -> 
         assert events.apply(plan, world.store.fanouts) is None
     assert world.store.fanout_runs == {}
     assert world.workflows.started == []
+
+
+def test_a_superseded_version_fans_out_while_it_still_owes_a_return(world: World) -> None:
+    """A publication read after a newer version took over (a consumer behind on its topic): on
+    5 October a version superseded from 1 October still governs September, due 20 October, so
+    its fan-out starts; one superseded from 1 September owes nothing, and fans out nowhere."""
+    rulebook = MemoryRulebook()
+    superseded = RuleVersionStatus.SUPERSEDED
+
+    def ended(on: date) -> RuleVersionId:
+        schedule = Schedule(EffectivePeriod(date(2026, 4, 1), on), Recurrence.monthly(20))
+        return rulebook.put(
+            rule_version(REGULAR, status=superseded, schedule=schedule)
+        ).rule_version_id
+
+    owing, settled = ended(date(2026, 10, 1)), ended(date(2026, 9, 1))
+    events = RuleEvents(rulebook, world.workflows, enabled=True, clock=world.clock)
+    plan = events.plan_published(RulePublished(EventId.new(), owing))
+    assert (plan.started, plan.skipped) == (True, "")
+    run = events.apply(plan, world.store.fanouts)
+    assert run is not None
+    assert run.status is FanOutStatus.RUNNING
+    skipped = events.plan_published(RulePublished(EventId.new(), settled))
+    assert skipped.skipped == "the version is superseded and governs no duty still due"
+    assert events.apply(skipped, world.store.fanouts) is None
+    assert [start.rule_version_id for start in world.workflows.started] == [owing]
 
 
 def test_a_withdrawal_cancels_a_run_that_has_not_finished(world: World) -> None:

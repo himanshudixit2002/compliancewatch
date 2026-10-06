@@ -108,6 +108,7 @@ from rulebook.domain.rule_versions import (
     IN_FORCE_STATUSES,
     CitationRecord,
     RuleVersionRecord,
+    VersionPage,
 )
 from rulebook.domain.runs import ExtractionRun, RuleSummary
 from rulebook.domain.search import CitedClause, ClauseEmbedding
@@ -686,27 +687,27 @@ class SqlAlchemyRuleVersionRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def in_force(
-        self,
-        as_of: date,
-        *,
-        rule_key: str | None,
-        regulator: str | None,
-        limit: int,
-        after: str | None,
-    ) -> Sequence[RuleVersionRecord]:
+    def in_force(self, as_of: date, page: VersionPage) -> Sequence[RuleVersionRecord]:
+        return self._page(_in_force_on(as_of), page)
+
+    def ended(self, since: date, page: VersionPage) -> Sequence[RuleVersionRecord]:
+        return self._page(_ended_since(since), page)
+
+    def _page(self, listed: ColumnElement[bool], page: VersionPage) -> list[RuleVersionRecord]:
         statement = (
             _versions()
-            .where(_in_force_on(as_of))
+            .where(listed)
             .order_by(RuleRow.rule_key, RuleVersionRow.version)
-            .limit(limit)
+            .limit(page.limit)
         )
-        if rule_key is not None:
-            statement = statement.where(RuleRow.rule_key == rule_key)
-        if regulator is not None:
-            statement = statement.where(RuleRow.regulator == regulator)
-        if after is not None:
-            statement = statement.where(RuleRow.rule_key > after)
+        if page.status is not None:
+            statement = statement.where(RuleVersionRow.status == page.status.value)
+        if page.rule_key is not None:
+            statement = statement.where(RuleRow.rule_key == page.rule_key)
+        if page.regulator is not None:
+            statement = statement.where(RuleRow.regulator == page.regulator)
+        if page.after is not None:
+            statement = statement.where(_after(page.after, page.after_version))
         return [_to_version(*row) for row in self._session.execute(statement).all()]
 
     def get(self, rule_version_id: RuleVersionId) -> RuleVersionRecord | None:
@@ -1251,6 +1252,26 @@ def _in_force_on(as_of: date) -> ColumnElement[bool]:
         RuleVersionRow.status.in_(PUBLISHED_STATUSES),
         RuleVersionRow.effective_from <= as_of,
         or_(RuleVersionRow.effective_to.is_(None), RuleVersionRow.effective_to > as_of),
+    )
+
+
+def _ended_since(since: date) -> ColumnElement[bool]:
+    """``rule_versions.ended_since`` in SQL: published or superseded, and an ``effective_to``
+    on or after ``since``."""
+    return and_(
+        RuleVersionRow.status.in_(PUBLISHED_STATUSES),
+        RuleVersionRow.effective_to.is_not(None),
+        RuleVersionRow.effective_to >= since,
+    )
+
+
+def _after(rule_key: str, version: int | None) -> ColumnElement[bool]:
+    """``VersionPage.follows`` in SQL: a later rule key, or a later version of ``rule_key``."""
+    if version is None:
+        return RuleRow.rule_key > rule_key
+    return or_(
+        RuleRow.rule_key > rule_key,
+        and_(RuleRow.rule_key == rule_key, RuleVersionRow.version > version),
     )
 
 

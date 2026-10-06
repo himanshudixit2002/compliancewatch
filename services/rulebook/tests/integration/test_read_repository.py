@@ -5,6 +5,7 @@ import hashlib
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -26,7 +27,12 @@ from rulebook.application.graph import (
     ReadEntity,
     ResolveEntity,
 )
-from rulebook.application.rule_versions import ListCitations, ListRulesInForce, ReadRuleVersion
+from rulebook.application.rule_versions import (
+    ListCitations,
+    ListEndedVersions,
+    ListRulesInForce,
+    ReadRuleVersion,
+)
 from rulebook.domain.documents import StoredDocument
 from rulebook.domain.errors import ClauseNotStoredError
 from rulebook.domain.graph import RelationQuery, ResolutionStatus
@@ -179,6 +185,39 @@ def test_versions_in_force_filter_order_and_page(
     assert record.todo == ("question",)
     assert (record.recurrence, record.published_at, citations) == (None, None, ())
     assert ReadRuleVersion(factory).run(state).record.regulator == "KA-CTD"
+
+
+def test_versions_that_ended_filter_order_and_page(
+    factory: PostgresKnowledgeUnitOfWorkFactory,
+) -> None:
+    """Dates in 2030, so the versions the other tests add (in 2026) end before every day asked."""
+    april, july, october = date(2030, 4, 1), date(2030, 7, 1), date(2030, 10, 1)
+    monthly = rule(factory, "re_monthly")
+    first = version(factory, monthly, 1, "superseded", april, july)
+    second = version(factory, monthly, 2, "superseded", july, october)
+    version(factory, monthly, 3, "published", october)
+    version(factory, rule(factory, "re_withdrawn"), 1, "withdrawn", april, october)
+    cut = version(factory, rule(factory, "re_cut"), 1, "published", april, date(2031, 1, 1))
+    version(factory, rule(factory, "re_open"), 1, "published", april)
+    state = version(
+        factory, rule(factory, "re_state", regulator="KA-CTD"), 1, "superseded", april, october
+    )
+    use_case = ListEndedVersions(factory)
+    superseded = RuleVersionStatus.SUPERSEDED
+
+    def ids(since: date, **page: Any) -> list[RuleVersionId]:
+        return [r.rule_version_id for r in use_case.run(since, **page)]
+
+    assert ids(july) == [cut, first, second, state]
+    assert ids(july, status=superseded) == [first, second, state]
+    assert ids(date(2030, 7, 2), status=superseded) == [second, state]
+    assert ids(july, status=RuleVersionStatus.PUBLISHED) == [cut]
+    assert ids(july, regulator="KA-CTD") == [state]
+    assert ids(july, rule_key="re_monthly") == [first, second]
+    assert ids(date(2031, 1, 2)) == []
+    assert ids(july, status=superseded, limit=1) == [first]
+    assert ids(july, status=superseded, after="re_monthly", after_version=1) == [second, state]
+    assert ids(july, status=superseded, after="re_monthly") == [state]
 
 
 def test_citations_come_in_clause_order(factory: PostgresKnowledgeUnitOfWorkFactory) -> None:

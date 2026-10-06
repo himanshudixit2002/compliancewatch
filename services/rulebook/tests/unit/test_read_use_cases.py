@@ -23,6 +23,7 @@ from rulebook.application.graph import (
 )
 from rulebook.application.rule_versions import (
     ListCitations,
+    ListEndedVersions,
     ListRulesInForce,
     ListRuleVersions,
     ReadRuleVersion,
@@ -152,6 +153,46 @@ def test_versions_in_force_are_filtered_ordered_and_paged(store: MemoryKnowledge
     assert [r.rule_key for r in first] == ["cmp08_quarterly", "gstr1_monthly"]
     rest = use_case.run(as_of, after=first[-1].rule_key, limit=0)
     assert [r.rule_key for r in rest] == ["gstr3b_monthly"]
+
+
+@pytest.mark.parametrize("status", list(RuleVersionStatus))
+def test_only_published_and_superseded_versions_are_listed_as_ended(
+    store: MemoryKnowledgeStore, status: RuleVersionStatus
+) -> None:
+    """A withdrawn version governs nothing, so it is never listed; nor is a version that was
+    never published."""
+    store.add_rule("r", status=status, effective_from=APRIL, effective_to=JULY)
+    found = ListEndedVersions(store).run(JULY)
+    assert bool(found) is (status in IN_FORCE_STATUSES)
+
+
+def test_ended_versions_end_on_or_after_the_day_and_never_open_ended(
+    store: MemoryKnowledgeStore,
+) -> None:
+    superseded = RuleVersionStatus.SUPERSEDED
+    _, old = store.add_rule("gstr3b_monthly", status=superseded, effective_to=JULY)
+    store.add_version("gstr3b_monthly", status=RuleVersionStatus.PUBLISHED, effective_from=JULY)
+    use_case = ListEndedVersions(store)
+    assert [r.rule_version_id for r in use_case.run(JULY)] == [old]
+    assert [r.rule_version_id for r in use_case.run(date(2026, 6, 1), status=superseded)] == [old]
+    assert use_case.run(date(2026, 7, 2)) == []
+    assert use_case.run(JULY, status=RuleVersionStatus.PUBLISHED) == []
+    assert ListRulesInForce(store).run(JULY, status=superseded) == []
+
+
+@pytest.mark.parametrize(
+    ("page", "message"),
+    [
+        ({"status": RuleVersionStatus.WITHDRAWN}, "published or superseded"),
+        ({"status": RuleVersionStatus.DRAFT}, "published or superseded"),
+        ({"after_version": 2}, "name after"),
+    ],
+)
+def test_a_listing_page_holds_listed_statuses_and_a_whole_cursor(
+    store: MemoryKnowledgeStore, page: dict[str, object], message: str
+) -> None:
+    with pytest.raises(InvariantViolationError, match=message):
+        ListEndedVersions(store).run(JULY, **page)  # type: ignore[arg-type]
 
 
 def test_a_version_reads_in_any_status_with_its_citations(store: MemoryKnowledgeStore) -> None:

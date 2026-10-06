@@ -134,9 +134,8 @@ def _plan(
 ) -> list[tuple[Period | None, datetime | None]]:
     recurrence = rule.recurrence
     if recurrence is None:
-        days = rule.obligation_template.due_in_days
-        due = None if days is None else due_at_end_of_day(as_of + timedelta(days=days), IST)
-        return [(None, due)]
+        due_on = rule.obligation_template.due_on(as_of)
+        return [(None, None if due_on is None else due_at_end_of_day(due_on, IST))]
     return [
         (period, due_at_end_of_day(recurrence.due_date(period), IST))
         for period in recurrence.periods_due(as_of, window)

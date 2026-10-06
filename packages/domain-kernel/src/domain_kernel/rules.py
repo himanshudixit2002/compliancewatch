@@ -2,15 +2,30 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Self
 
-from domain_kernel._validation import require_instance, require_int, require_mapping, require_text
+from domain_kernel._validation import (
+    require_date,
+    require_instance,
+    require_int,
+    require_mapping,
+    require_text,
+)
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import RuleId, RuleVersionId
 from domain_kernel.periods import EffectivePeriod
 from domain_kernel.predicates import Specification
 from domain_kernel.recurrence import Recurrence
+
+
+def one_off_due_on(as_of: date, due_in_days: int | None) -> date | None:
+    """The due day of a one-off duty decided on ``as_of``: ``due_in_days`` later, or None when
+    it has no due date."""
+    require_date(as_of, "as_of")
+    if due_in_days is None:
+        return None
+    return as_of + timedelta(days=require_int(due_in_days, "due_in_days", minimum=0))
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +44,12 @@ class ObligationTemplate:
         if self.due_in_days is not None:
             require_int(self.due_in_days, "due_in_days", minimum=0)
         require_instance(self.evidence_type, str, "evidence_type")
+
+    def due_on(self, as_of: date) -> date | None:
+        """The due day of the one-off obligation a decision made on ``as_of`` implies:
+        ``due_in_days`` later, or None (undated) when the template sets none. The obligation
+        belongs to the rule version in force on that day."""
+        return one_off_due_on(as_of, self.due_in_days)
 
     def to_mapping(self) -> dict[str, object]:
         """JSON-ready form, the inverse of ``from_mapping``."""

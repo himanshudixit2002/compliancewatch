@@ -17,6 +17,8 @@ DIGEST = "51f5dbee1615f0ec47256abddb11061a348e81b883051e89733a06b062bcebed"
 DOC = document_id_for(DIGEST)
 BASE = "/v1/rulebook"
 TEXT = "hereby extends the due date for furnishing the return in FORM GSTR-3B for March, 2026"
+JULY = date(2026, 7, 1)
+OCTOBER = date(2026, 10, 1)
 
 
 @pytest.fixture
@@ -65,6 +67,100 @@ def test_rule_versions_in_force_on_a_date(client: TestClient, store: MemoryKnowl
         f"{BASE}/rule-versions", params={"as_of": "2026-06-30", "after": "gstr3b_monthly"}
     )
     assert paged.json() == []
+
+
+def test_rule_versions_that_ended_on_or_after_a_date(
+    client: TestClient, store: MemoryKnowledgeStore
+) -> None:
+    """The versions superseded since a day, whose periods may still be due; never a withdrawn
+    one, and never one still open-ended."""
+    superseded, published = RuleVersionStatus.SUPERSEDED, RuleVersionStatus.PUBLISHED
+    _, old = store.add_rule(
+        "gstr3b_monthly", status=superseded, effective_from=date(2026, 4, 1), effective_to=OCTOBER
+    )
+    store.add_version("gstr3b_monthly", status=published, effective_from=OCTOBER)
+    _, cut = store.add_rule(
+        "gstr1_monthly",
+        status=published,
+        effective_from=date(2026, 4, 1),
+        effective_to=date(2027, 1, 1),
+    )
+    store.add_rule(
+        "cmp08_quarterly",
+        status=RuleVersionStatus.WITHDRAWN,
+        effective_from=date(2026, 4, 1),
+        effective_to=OCTOBER,
+    )
+    store.add_rule("gstr9_annual", status=published, effective_from=date(2026, 4, 1))
+
+    def listed(**params: str) -> list[tuple[str, str]]:
+        response = client.get(f"{BASE}/rule-versions", params=params)
+        assert response.status_code == 200, response.text
+        return [(v["rule_version_id"], v["status"]) for v in response.json()]
+
+    since = {"ended_on_or_after": "2026-09-15"}
+    assert listed(**since, status="superseded") == [(str(old), "superseded")]
+    assert listed(**since) == [(str(cut), "published"), (str(old), "superseded")]
+    assert listed(**since, status="published") == [(str(cut), "published")]
+    assert listed(ended_on_or_after="2026-10-01", status="superseded") == [(str(old), "superseded")]
+    assert listed(ended_on_or_after="2026-10-02", status="superseded") == []
+    assert listed(as_of="2026-10-01", status="superseded") == [], "no longer in force"
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {},
+        {"as_of": "2026-10-01", "ended_on_or_after": "2026-09-01"},
+        {"ended_on_or_after": "2026-09-01", "status": "withdrawn"},
+        {"ended_on_or_after": "2026-09-01", "status": "draft"},
+        {"ended_on_or_after": "2026-09-01", "after_version": "1"},
+        {"ended_on_or_after": "2026-09-01", "after": "a_rule", "after_version": "0"},
+    ],
+)
+def test_a_listing_names_one_day_and_a_listed_status(
+    client: TestClient, params: dict[str, str]
+) -> None:
+    response = client.get(f"{BASE}/rule-versions", params=params)
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/problem+json")
+
+
+def test_ended_versions_page_by_rule_key_and_version(
+    client: TestClient, store: MemoryKnowledgeStore
+) -> None:
+    superseded = RuleVersionStatus.SUPERSEDED
+    store.add_rule(
+        "gstr3b_monthly", status=superseded, effective_from=date(2026, 4, 1), effective_to=JULY
+    )
+    store.add_version(
+        "gstr3b_monthly", status=superseded, effective_from=JULY, effective_to=OCTOBER
+    )
+    store.add_version("gstr3b_monthly", status=RuleVersionStatus.PUBLISHED, effective_from=OCTOBER)
+    store.add_rule(
+        "gstr1_monthly", status=superseded, effective_from=date(2026, 4, 1), effective_to=OCTOBER
+    )
+    pages: list[list[tuple[str, int]]] = []
+    params: dict[str, str | int] = {
+        "ended_on_or_after": "2026-07-01",
+        "status": "superseded",
+        "limit": 1,
+    }
+    while True:
+        page = client.get(f"{BASE}/rule-versions", params=params).json()
+        if not page:
+            break
+        pages.append([(v["rule_key"], v["version"]) for v in page])
+        params.update(after=page[-1]["rule_key"], after_version=page[-1]["version"])
+    assert pages == [[("gstr1_monthly", 1)], [("gstr3b_monthly", 1)], [("gstr3b_monthly", 2)]]
+    by_key = client.get(
+        f"{BASE}/rule-versions",
+        params={"ended_on_or_after": "2026-07-01", "after": "gstr1_monthly"},
+    )
+    assert [(v["rule_key"], v["version"]) for v in by_key.json()] == [
+        ("gstr3b_monthly", 1),
+        ("gstr3b_monthly", 2),
+    ]
 
 
 def test_a_rule_version_with_its_citations(client: TestClient, store: MemoryKnowledgeStore) -> None:

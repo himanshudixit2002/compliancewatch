@@ -1,22 +1,51 @@
-"""Read rule versions: the ones in force on a date, every version of one rule in any status, one
-version in any status with its citations (and, once published, its approvers), and the citations
-alone.
+"""Read rule versions: the ones in force on a date, the ones that ended on or after a date, every
+version of one rule in any status, one version in any status with its citations (and, once
+published, its approvers), and the citations alone.
 
 The Q&A service answers from exactly what ``ListRulesInForce`` returns for the question's date,
 so a draft, a version under review or a withdrawn one never reaches an answer.
-``ListRuleVersions`` is the editorial view: the drafts the seed command writes and the versions
-past them, which is how a workbench finds a version to cite and submit.
+``ListEndedVersions`` is how the applicability engine finds the superseded versions whose returns
+are still due: a version keeps the periods whose last day it was in force on. Neither lists a
+withdrawn version. ``ListRuleVersions`` is the editorial view: the drafts the seed command writes
+and the versions past them, which is how a workbench finds a version to cite and submit.
 """
 
 from collections.abc import Sequence
 from datetime import date
 
 from domain_kernel.ids import RuleId, RuleVersionId
+from domain_kernel.status import RuleVersionStatus
 from rulebook.domain.errors import UnknownRuleError, UnknownRuleVersionError
 from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
-from rulebook.domain.rule_versions import CitationRecord, RuleVersionDetail, RuleVersionRecord
+from rulebook.domain.rule_versions import (
+    CitationRecord,
+    RuleVersionDetail,
+    RuleVersionRecord,
+    VersionPage,
+)
 
 MAX_VERSIONS = 500
+
+
+def version_page(
+    *,
+    rule_key: str | None,
+    regulator: str | None,
+    status: RuleVersionStatus | None,
+    limit: int,
+    after: str | None,
+    after_version: int | None,
+) -> VersionPage:
+    """The filters and the page of a listing, its ``limit`` brought within 1 to
+    ``MAX_VERSIONS``."""
+    return VersionPage(
+        rule_key=rule_key,
+        regulator=regulator,
+        status=status,
+        limit=min(max(limit, 1), MAX_VERSIONS),
+        after=after,
+        after_version=after_version,
+    )
 
 
 class ListRulesInForce:
@@ -31,15 +60,51 @@ class ListRulesInForce:
         regulator: str | None = None,
         limit: int = 100,
         after: str | None = None,
+        status: RuleVersionStatus | None = None,
+        after_version: int | None = None,
     ) -> Sequence[RuleVersionRecord]:
+        page = version_page(
+            rule_key=rule_key,
+            regulator=regulator,
+            status=status,
+            limit=limit,
+            after=after,
+            after_version=after_version,
+        )
         with self._unit_of_work() as uow:
-            return uow.rule_versions.in_force(
-                as_of,
-                rule_key=rule_key,
-                regulator=regulator,
-                limit=min(max(limit, 1), MAX_VERSIONS),
-                after=after,
-            )
+            return uow.rule_versions.in_force(as_of, page)
+
+
+class ListEndedVersions:
+    """The versions whose ``effective_to`` is on or after ``since``, published or superseded and
+    never withdrawn (``rule_versions.ended_since``), by rule key then version, paged like
+    ``ListRulesInForce``. One rule can have several versions here, which ``after_version`` pages
+    through."""
+
+    def __init__(self, unit_of_work: KnowledgeUnitOfWorkFactory) -> None:
+        self._unit_of_work = unit_of_work
+
+    def run(
+        self,
+        since: date,
+        *,
+        rule_key: str | None = None,
+        regulator: str | None = None,
+        limit: int = 100,
+        after: str | None = None,
+        status: RuleVersionStatus | None = None,
+        after_version: int | None = None,
+    ) -> Sequence[RuleVersionRecord]:
+        page = version_page(
+            rule_key=rule_key,
+            regulator=regulator,
+            status=status,
+            limit=limit,
+            after=after,
+            after_version=after_version,
+        )
+        with self._unit_of_work() as uow:
+            return uow.rule_versions.ended(since, page)
 
 
 class ListRuleVersions:

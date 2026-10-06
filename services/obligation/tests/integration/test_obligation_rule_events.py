@@ -6,6 +6,7 @@ superuser, so row-level security holds as in a deployment. Needs Docker.
 - a withdrawal closes the obligations of both tenants in one consumer transaction while each
   tenant still reads only its own, and replaying it changes nothing;
 - a supersession closes the periods the newer version takes over and leaves the earlier ones;
+- a business new after a supersession gets the period the older version still governs, once;
 - a deadline change reschedules the period's obligations of both tenants;
 - the guard refuses a late decision, whether it was planned before or after the withdrawal;
 - ``obligation-sweep --once --now`` sends the reminders due then and rolls the window, for the
@@ -35,10 +36,13 @@ from domain_kernel.predicates import Applicability
 from domain_kernel.status import RuleVersionStatus
 from obligation import sweep, worker
 from obligation.application.decisions import ApplyDecision, Decision, DecisionOutcome
+from obligation.application.materialise import IST
 from obligation.application.rule_events import RuleEvents
+from obligation.application.window import RollWindow
 from obligation.domain.rule_versions import Refusal
 from obligation.infrastructure.models import Base
 from obligation.infrastructure.repository import (
+    PostgresTenantDirectory,
     PostgresUnitOfWorkFactory,
     SqlAlchemyRuleVersionRefs,
 )
@@ -190,6 +194,8 @@ class Worker:
         business: BusinessId,
         version: RuleVersionId,
         result: str = "applies",
+        *,
+        decided_at: datetime = DECIDED_AT,
     ) -> Outcome:
         data = json.loads(
             (EXAMPLES / "applicability.decided" / "applies-after-rule-published.json").read_text(
@@ -203,7 +209,7 @@ class Worker:
             business_id=str(business),
             rule_version_id=str(version),
             result=result,
-            decided_at=DECIDED_AT.isoformat(),
+            decided_at=decided_at.isoformat(),
         )
         return await self.decisions.process(inbound("applicability.decided", data))
 
@@ -327,6 +333,40 @@ async def test_a_supersession_closes_the_periods_the_newer_version_takes_over(
     assert sorted(labels) == ["2026-09", "2026-09", "2026-10", "2026-10", "2026-11"], (
         "only September, still due, and October for a new business"
     )
+
+
+async def test_a_business_new_after_a_supersession_gets_the_month_before_once(
+    app_engine: Engine,
+) -> None:
+    """For a business onboarded on 5 October the engine decides the version superseded from 1
+    October, which still governs September (due 20 October), and its replacement: September is
+    made once, of the older version, October and November of the newer. Another decision of the
+    older version (a later profile change) and the rolling window of that day add nothing."""
+    older, newer = rule(), rule(effective_from=date(2026, 10, 1))
+    superseded = ref_of(older, status=RuleVersionStatus.SUPERSEDED, effective_to=date(2026, 10, 1))
+    app = Worker(app_engine, FakeRuleVersionReader([older, newer], refs=[superseded]))
+    tenant, business = TenantId.new(), BusinessId.new()
+    on_the_5th = datetime(2026, 10, 5, 4, 30, tzinfo=UTC)
+    for version in (older, newer, older):
+        decided = await app.decide(tenant, business, version.rule_version_id, decided_at=on_the_5th)
+        assert decided is Outcome.PROCESSED
+    rolled = RollWindow(
+        PostgresUnitOfWorkFactory(app_engine),
+        PostgresTenantDirectory(app_engine),
+        app.rules,
+        clock=lambda: on_the_5th,
+    ).run(only={tenant})
+    assert (rolled.tenants, rolled.created) == (1, ())
+
+    made = [(row["period_label"], row["rule_version_id"]) for row in app.obligations(tenant)]
+    assert made == [
+        ("2026-09", older.rule_version_id.value),
+        ("2026-10", newer.rule_version_id.value),
+        ("2026-11", newer.rule_version_id.value),
+    ]
+    assert app.outbox(tenant, "obligation.created") == 3
+    september = app.obligations(tenant)[0]
+    assert september["due_at"].astimezone(IST).date() == date(2026, 10, 20)
 
 
 async def test_a_deadline_change_reschedules_both_tenants(app_engine: Engine) -> None:

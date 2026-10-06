@@ -55,6 +55,7 @@ from rulebook.application.review import (
 )
 from rulebook.application.rule_versions import (
     ListCitations,
+    ListEndedVersions,
     ListRulesInForce,
     ListRuleVersions,
     ReadRuleVersion,
@@ -198,6 +199,7 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
         reject_relation=RejectRelationCandidate(unit_of_work),
         list_rules=ListRules(unit_of_work),
         list_rules_in_force=ListRulesInForce(unit_of_work),
+        list_ended_versions=ListEndedVersions(unit_of_work),
         list_rule_versions=ListRuleVersions(unit_of_work),
         read_rule_version=ReadRuleVersion(unit_of_work),
         list_citations=ListCitations(unit_of_work),

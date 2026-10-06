@@ -112,8 +112,9 @@ that many results, which is more often a fault than a change of law.
 ## A run failed
 
 A batch failed for about 40 minutes with backoff (the profile service or the rulebook did not
-answer), or at once because the version was withdrawn or is not published. `last_error` holds the
-cause; the worker log has `activity.failed` lines for `applicability.fanout.evaluate_batch`. The
+answer), or at once because the version was withdrawn, or superseded and governing no return still
+due (a run its supersession overtook carries on while one is). `last_error` holds the cause; the
+worker log has `activity.failed` lines for `applicability.fanout.evaluate_batch`. The
 decisions made before the failure stay. A run does not restart: once the cause is fixed, each
 business is decided again when its profile changes (the profile.updated recompute), and a new
 version of the rule fans out in full.

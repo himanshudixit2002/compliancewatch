@@ -41,7 +41,21 @@ Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
   and, with `CW_APPLICABILITY_ENGINE_RECOMPUTE_LOOKAHEAD_DAYS` (92), the ones that take effect
   within that many days: a version published to take effect later already makes the obligations
   of the periods of the obligation service's window it governs, so its decision has to follow
-  the profile before it takes effect. The profile service lists no locations, so a change on an
+  the profile before it takes effect. With `CW_APPLICABILITY_ENGINE_SUPERSEDED_LOOKBACK_DAYS`
+  (400, enough for an annual return; 0 turns it off) they also include the versions superseded
+  within that many days (`rules_superseded_since`: the rulebook's
+  `GET /v1/rulebook/rule-versions?ended_on_or_after=&status=superseded`, never a withdrawn
+  version, which governs nothing) that still govern a duty due today or later
+  (`RuleVersionSpec.still_governs`). A version governs the periods whose last day it is in force
+  on, so a monthly return's version superseded from 1 October still governs September, due 20
+  October: a business onboarded on 5 October is decided for it, and the obligation service makes
+  September of that decision and refuses October and November, the newer version's; onboarded on
+  25 October, nothing of it is due and it is left out. The kernel judges it
+  (`Recurrence.periods_governed`, the rule the obligation service makes periods by); a one-off
+  belongs to the version in force on its due day, so a superseded one is never decided. These
+  decisions have the usual trigger and ids, so a replayed event stores nothing. Until the
+  rulebook's daily sweep moves a version its replacement took over that day (00:05 IST), the
+  version is in neither listing. The profile service lists no locations, so a change on an
   entity or a registration does not reach the locations under it; a change on a location
   recomputes the location.
 - `domain/review.py`, `application/review.py`: the review queue. A decision opens an item when
@@ -61,16 +75,23 @@ Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
   `workflows/fan_out.py`: the fan-out of a published version over the business directory
   (ADR-004 and its 2026-10-05 addendum; [the runbook](../../docs/runbooks/fan-out-control.md)).
   - `RuleEvents` is what the consumer of group `applicability-engine.rules` does, in the same
-    two phases as the recompute. On rule.published it drops the rulebook client's in-force cache,
-    reads the version (status, rule key, level) and, with the flag `applicability.fanout` on
-    (`CW_APPLICABILITY_FANOUT_ENABLED`, off by default), starts its workflow, all with no
+    two phases as the recompute. On rule.published it drops the rulebook client's cached listings,
+    reads the version (status, rule key, level, schedule) and, with the flag `applicability.fanout`
+    on (`CW_APPLICABILITY_FANOUT_ENABLED`, off by default), starts its workflow, all with no
     transaction open; then it records the run in `fanout_run` (`running`, or `disabled` with the
-    flag off, which never runs). On rule.withdrawn it drops the cache and cancels the version's run
-    that has not finished, audited as the system.
+    flag off, which never runs). A version the rulebook no longer has or withdrew fans out nowhere,
+    nor does a superseded one unless it still governs a duty due today: an event read after a
+    newer version took over still fans the older one out to the businesses that owe its last
+    periods. A newer version's fan-out decides the newer version alone, since the businesses keep
+    their decisions of the one it supersedes. On rule.withdrawn it drops the cache and cancels the
+    version's run that has not finished, audited as the system.
   - `FanOutWorkflow` runs `fanout_flow.drive` on the task queue `applicability`, workflow id
     `applicability-fan-out-<rule version id>`, a duplicate start refused (`REJECT_DUPLICATE`).
     `EvaluateBatch` decides 1,000 directory entries of the version's level per batch, one tenant
-    group at a time: the profiles over HTTP with no transaction open, then the group's decisions
+    group at a time, while the version is published, or superseded and still governing a duty due
+    today (a run its supersession overtook carries on for the businesses it has not reached; one
+    that owes nothing more fails as not published): the profiles over HTTP with no transaction
+    open, then the group's decisions
     (trigger `rule_published`, `trigger_ref` `rule.published:<event id>`) with their events by the
     recompute's emit rule and `track_review`, in one unit of work of the tenant. It counts flips
     against the latest decision of the versions the event's `supersedes` names. After 100
@@ -114,9 +135,12 @@ Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
   made the result, those that ruled it out, made it apply or left it unsure), by result again,
   and keeps up to `sample_size` (0 to 50, 10) decisions, a result at a time.
 - `infrastructure/`: the HTTP clients (`profile_client.py`, `rulebook_client.py`; a 404 is
-  `None`, anything else unexpected is `DependencyUnavailableError`, 503); the rulebook's in-force
-  listing is paged by rule key and cached per day for `CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS`
-  (60; 0 turns it off), and dropped at once on every rule event (`forget_in_force`). The Postgres
+  `None`, anything else unexpected is `DependencyUnavailableError`, 503); the rulebook's listings,
+  in force on a day (paged by rule key) and superseded since a day (paged by rule key and version,
+  since a rule can have several), are each cached per day for
+  `CW_APPLICABILITY_ENGINE_RULES_CACHE_SECONDS` (60; 0 turns it off), and dropped at once on every
+  rule event (`forget_in_force`); every version read carries its schedule (effective dates,
+  recurrence, the template's `due_in_days`). The Postgres
   unit of work sets `app.tenant_id` per transaction and writes events to the outbox and audit
   entries to `audit.event` on the same connection; `PostgresUnitOfWorkFactory.on_connection`
   makes units inside the consumer's transaction, and `PostgresBusinessDirectory` reads the

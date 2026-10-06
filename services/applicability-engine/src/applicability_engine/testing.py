@@ -25,12 +25,14 @@ from applicability_engine.application.fanout_flow import (
     drive,
 )
 from applicability_engine.domain.fanout import FanOutSignal, FanOutStart
-from applicability_engine.domain.model import RuleInForce, RuleVersionSpec
+from applicability_engine.domain.model import RuleInForce, RuleVersionSpec, Schedule
 from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ids import BusinessId, RuleVersionId, TenantId
 from domain_kernel.ontology import AttributeLevel
+from domain_kernel.periods import EffectivePeriod
 from domain_kernel.predicates import Specification, specification_from_mapping
 from domain_kernel.profiles import ProfileSnapshot
+from domain_kernel.recurrence import Recurrence
 from domain_kernel.status import RuleVersionStatus
 from py_common.temporal import ActivityBase
 
@@ -53,6 +55,7 @@ def rule_version(
     rule_version_id: RuleVersionId | None = None,
     rule_key: str | None = "example_rule",
     level: AttributeLevel | None = AttributeLevel.REGISTRATION,
+    schedule: Schedule | None = None,
 ) -> RuleVersionSpec:
     return RuleVersionSpec(
         rule_version_id=rule_version_id or RuleVersionId.new(),
@@ -62,6 +65,7 @@ def rule_version(
         else specification_from_mapping(specification),
         rule_key=rule_key,
         level=level,
+        schedule=schedule,
     )
 
 
@@ -73,16 +77,51 @@ def rule_in_force(
     effective_from: date = EFFECTIVE,
     effective_to: date | None = None,
     rule_version_id: RuleVersionId | None = None,
+    status: RuleVersionStatus = RuleVersionStatus.PUBLISHED,
+    recurrence: Recurrence | None = None,
+    due_in_days: int | None = None,
 ) -> RuleInForce:
-    """A published version in force from ``effective_from`` for nodes of ``level``."""
+    """A version in force from ``effective_from`` for nodes of ``level``, published unless
+    ``status`` says otherwise, with its schedule: ``recurrence`` for a duty that repeats, else a
+    one-off due ``due_in_days`` after the decision."""
+    schedule = Schedule(EffectivePeriod(effective_from, effective_to), recurrence, due_in_days)
     return RuleInForce(
         spec=rule_version(
-            specification, rule_version_id=rule_version_id, rule_key=rule_key, level=level
+            specification,
+            status=status,
+            rule_version_id=rule_version_id,
+            rule_key=rule_key,
+            level=level,
+            schedule=schedule,
         ),
         rule_key=rule_key,
         level=level,
         effective_from=effective_from,
         effective_to=effective_to,
+    )
+
+
+def superseded_rule(
+    specification: Specification | Mapping[str, object],
+    *,
+    effective_from: date,
+    effective_to: date,
+    recurrence: Recurrence | None,
+    due_in_days: int | None = None,
+    rule_key: str = "example_rule",
+    level: AttributeLevel = AttributeLevel.REGISTRATION,
+) -> RuleInForce:
+    """A version superseded from ``effective_to``, as the listing of the versions superseded
+    since a day gives it."""
+    return rule_in_force(
+        specification,
+        rule_key=rule_key,
+        level=level,
+        effective_from=effective_from,
+        effective_to=effective_to,
+        status=RuleVersionStatus.SUPERSEDED,
+        recurrence=recurrence,
+        due_in_days=due_in_days,
     )
 
 
@@ -137,12 +176,15 @@ class MemoryProfiles:
 
 @dataclass
 class MemoryRulebook:
-    """``RulebookReader`` over rule versions keyed by id, and the versions in force; records
-    the days asked for and how often the listing was forgotten."""
+    """``RulebookReader`` over rule versions keyed by id, the versions in force and the
+    superseded ones; records the days asked for (``asked`` of the in-force listing,
+    ``asked_superseded`` of the other) and how often the listings were forgotten."""
 
     versions: dict[RuleVersionId, RuleVersionSpec] = field(default_factory=dict)
     in_force: list[RuleInForce] = field(default_factory=list)
+    superseded: list[RuleInForce] = field(default_factory=list)
     asked: list[date] = field(default_factory=list)
+    asked_superseded: list[date] = field(default_factory=list)
     forgotten: int = 0
 
     def put(self, version: RuleVersionSpec) -> RuleVersionSpec:
@@ -152,6 +194,14 @@ class MemoryRulebook:
     def put_in_force(self, rule: RuleInForce) -> RuleInForce:
         self.put(rule.spec)
         self.in_force.append(rule)
+        return rule
+
+    def put_superseded(self, rule: RuleInForce) -> RuleInForce:
+        """A version that ended: read by id, and listed among the versions superseded since a
+        day on or before its ``effective_to``. The listing gives whatever status was put (the
+        rulebook never lists a withdrawn one), so a test can show the engine refuses one too."""
+        self.put(rule.spec)
+        self.superseded.append(rule)
         return rule
 
     def rule_version(self, rule_version_id: RuleVersionId) -> RuleVersionSpec | None:
@@ -165,6 +215,14 @@ class MemoryRulebook:
             if rule.level is level
             and rule.effective_from <= as_of
             and (rule.effective_to is None or as_of < rule.effective_to)
+        )
+
+    def rules_superseded_since(self, since: date, level: AttributeLevel) -> Sequence[RuleInForce]:
+        self.asked_superseded.append(since)
+        return tuple(
+            rule
+            for rule in self.superseded
+            if rule.level is level and rule.effective_to is not None and rule.effective_to >= since
         )
 
     def forget_in_force(self) -> None:

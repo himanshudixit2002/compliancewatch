@@ -2,7 +2,7 @@
 memory: what a profile.updated event evaluates, stores, publishes and opens for review."""
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -15,7 +15,7 @@ from applicability_engine.application.recompute import (
 from applicability_engine.application.review import ReviewChange
 from applicability_engine.domain.directory import DirectoryEntry
 from applicability_engine.domain.events import ApplicabilityDecided
-from applicability_engine.domain.model import Decision, Trigger, decision_id_for
+from applicability_engine.domain.model import Decision, RuleInForce, Trigger, decision_id_for
 from applicability_engine.domain.review import Resolution, ReviewReason, ReviewStatus
 from applicability_engine.infrastructure.memory import MemoryStore
 from applicability_engine.testing import (
@@ -26,11 +26,14 @@ from applicability_engine.testing import (
     MemoryProfiles,
     MemoryRulebook,
     rule_in_force,
+    superseded_rule,
 )
 from domain_kernel.confidence import CERTAIN, ZERO
 from domain_kernel.ids import BusinessId, CorrelationId, DecisionId, EventId
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.predicates import Applicability
+from domain_kernel.recurrence import Recurrence
+from domain_kernel.status import RuleVersionStatus
 
 ENTITY = BusinessId.new()
 REGISTRATION = BusinessId.new()
@@ -45,13 +48,14 @@ TODAY = date(2026, 10, 1)
 
 @dataclass
 class Ticking:
-    """A clock one second later on every call."""
+    """A clock one second later on every call, from ``start``."""
 
     ticks: int = 0
+    start: datetime = NOW
 
     def __call__(self) -> datetime:
         self.ticks += 1
-        return NOW + timedelta(seconds=self.ticks)
+        return self.start + timedelta(seconds=self.ticks)
 
 
 @dataclass
@@ -61,15 +65,22 @@ class Setup:
     rulebook: MemoryRulebook = field(default_factory=MemoryRulebook)
     clock: Ticking = field(default_factory=Ticking)
 
-    def recompute(self, *, enabled: bool = True, lookahead_days: int = 0) -> ApplyProfileUpdate:
+    def recompute(
+        self, *, enabled: bool = True, lookahead_days: int = 0, superseded_lookback_days: int = 0
+    ) -> ApplyProfileUpdate:
         return ApplyProfileUpdate(
             self.profiles,
             self.rulebook,
             ontology_package.load(),
             enabled=enabled,
             lookahead_days=lookahead_days,
+            superseded_lookback_days=superseded_lookback_days,
             clock=self.clock,
         )
+
+    def on(self, day: date) -> None:
+        """The clock at 10:00 in India on ``day``."""
+        self.clock = Ticking(start=datetime(day.year, day.month, day.day, 4, 30, tzinfo=UTC))
 
     def hierarchy(self, registration: dict[str, object] | None = None) -> None:
         """An entity with two registrations and a location under the first."""
@@ -367,3 +378,159 @@ def test_a_free_text_leaf_the_tree_does_not_need_opens_nothing(setup: Setup) -> 
 def test_the_lookahead_cannot_be_negative() -> None:
     with pytest.raises(ValueError, match="lookahead_days"):
         Setup().recompute(lookahead_days=-1)
+    with pytest.raises(ValueError, match="superseded_lookback_days"):
+        Setup().recompute(superseded_lookback_days=-1)
+
+
+# ---------------------------------------------------------------- versions superseded, still due
+
+MONTHLY_ON_THE_20TH = Recurrence.monthly(20)
+APRIL = date(2026, 4, 1)
+OCTOBER = date(2026, 10, 1)
+LOOKBACK = 400
+OBLIGATION_WINDOW = 2
+"""The obligation service's window: the periods still due, through the one containing the day
+and the next."""
+
+
+def superseded_monthly(setup: Setup) -> tuple[RuleInForce, RuleInForce]:
+    """A monthly return due on the 20th: v1 from April, superseded from 1 October by v2."""
+    v1 = setup.rulebook.put_superseded(
+        superseded_rule(
+            REGULAR, effective_from=APRIL, effective_to=OCTOBER, recurrence=MONTHLY_ON_THE_20TH
+        )
+    )
+    v2 = setup.rulebook.put_in_force(
+        rule_in_force(REGULAR, effective_from=OCTOBER, recurrence=MONTHLY_ON_THE_20TH)
+    )
+    return v1, v2
+
+
+def made_of(rule: RuleInForce, day: date) -> list[str]:
+    """The periods the obligation service makes of a decision of ``rule`` on ``day``: those of its
+    window whose last day the version is in force on (its guard refuses the others)."""
+    schedule = rule.spec.schedule
+    assert schedule is not None
+    assert schedule.recurrence is not None
+    governed = schedule.recurrence.periods_governed(schedule.effective, day, OBLIGATION_WINDOW)
+    return [period.label for period in governed]
+
+
+def test_a_business_new_after_a_supersession_is_decided_for_the_version_owing_september(
+    setup: Setup,
+) -> None:
+    """Onboarded on 5 October: v2 does not govern September, v1 does, and September's return is
+    due on 20 October, so v1 is decided too, and the obligation service makes September of it."""
+    v1, v2 = superseded_monthly(setup)
+    day = date(2026, 10, 5)
+    setup.on(day)
+    event = update()
+    recompute = setup.recompute(superseded_lookback_days=LOOKBACK)
+    done = recompute.run(event, setup.store)
+
+    decided = {d.rule_version_id: d for d in done.appended}
+    assert set(decided) == {v1.rule_version_id, v2.rule_version_id}
+    old = decided[v1.rule_version_id]
+    assert (old.business_id, old.result, old.trigger, old.trigger_ref) == (
+        REGISTRATION,
+        Applicability.APPLIES,
+        Trigger.PROFILE_UPDATED,
+        event.trigger_ref,
+    )
+    assert old.decision_id == decision_id_for(event.trigger_ref, REGISTRATION, v1.rule_version_id)
+    assert set(done.published) == {decision.decision_id for decision in decided.values()}
+    assert setup.rulebook.asked_superseded == [day - timedelta(days=LOOKBACK)]
+    assert made_of(v1, day) == ["2026-09"], "October and November are v2's"
+    assert made_of(v2, day) == ["2026-10", "2026-11"], "September is v1's"
+
+    again = recompute.run(event, setup.store)
+    assert again.appended == (), "the same event decides nothing twice"
+
+
+@pytest.mark.parametrize(
+    ("day", "owes_september"),
+    [
+        (date(2026, 10, 1), True),
+        (date(2026, 10, 20), True),
+        (date(2026, 10, 21), False),
+        (date(2026, 10, 25), False),
+    ],
+)
+def test_the_superseded_version_is_decided_until_its_last_return_falls_due(
+    setup: Setup, day: date, owes_september: bool
+) -> None:
+    """Onboarded on 25 October, nothing of v1 is still due, so v1 needs no decision."""
+    v1, v2 = superseded_monthly(setup)
+    setup.on(day)
+    done = setup.recompute(superseded_lookback_days=LOOKBACK).run(update(), setup.store)
+    expected = {v2.rule_version_id} | ({v1.rule_version_id} if owes_september else set())
+    assert {d.rule_version_id for d in done.appended} == expected
+    assert bool(made_of(v1, day)) is owes_september
+
+
+def test_an_annual_return_keeps_its_superseded_version_decided_for_months(setup: Setup) -> None:
+    """Superseded from 1 April 2026, the version still governs the year 2025-26, whose annual
+    return is due on 31 December 2026; a lookback shorter than that misses it."""
+    annual = Recurrence.annual(31, due_month_offset=8)
+    v1 = setup.rulebook.put_superseded(
+        superseded_rule(
+            REGULAR,
+            rule_key="annual_return",
+            effective_from=date(2025, 4, 1),
+            effective_to=APRIL,
+            recurrence=annual,
+        )
+    )
+    v2 = setup.rulebook.put_in_force(
+        rule_in_force(REGULAR, rule_key="annual_return", effective_from=APRIL, recurrence=annual)
+    )
+    both, newer = {v1.rule_version_id, v2.rule_version_id}, {v2.rule_version_id}
+
+    def decided(day: date, lookback: int) -> set[object]:
+        setup.on(day)
+        done = setup.recompute(superseded_lookback_days=lookback).run(update(), setup.store)
+        return {d.rule_version_id for d in done.appended}
+
+    assert decided(date(2026, 10, 5), LOOKBACK) == both
+    assert made_of(v1, date(2026, 10, 5)) == ["2025-26"]
+    assert decided(date(2026, 12, 31), LOOKBACK) == both
+    assert decided(date(2027, 1, 1), LOOKBACK) == newer
+    assert decided(date(2026, 10, 5), 92) == newer, "v1 ended before the lookback"
+
+
+def test_a_withdrawn_version_or_a_one_off_that_ended_is_never_decided(setup: Setup) -> None:
+    """A withdrawal closes a version's obligations, so it governs nothing; a one-off belongs to
+    the version in force on its due day, never one that ended."""
+    setup.rulebook.put_superseded(
+        rule_in_force(
+            REGULAR,
+            rule_key="withdrawn_return",
+            effective_from=APRIL,
+            effective_to=OCTOBER,
+            status=RuleVersionStatus.WITHDRAWN,
+            recurrence=MONTHLY_ON_THE_20TH,
+        )
+    )
+    for rule_key, due_in_days in (("dated_one_off", 30), ("undated_one_off", None)):
+        setup.rulebook.put_superseded(
+            superseded_rule(
+                REGULAR,
+                rule_key=rule_key,
+                effective_from=APRIL,
+                effective_to=OCTOBER,
+                recurrence=None,
+                due_in_days=due_in_days,
+            )
+        )
+    setup.on(date(2026, 10, 5))
+    done = setup.recompute(superseded_lookback_days=LOOKBACK).run(update(), setup.store)
+    assert done.appended == ()
+    assert len(setup.rulebook.superseded) == 3, "each was listed and refused"
+
+
+def test_with_the_lookback_off_no_superseded_version_is_read(setup: Setup) -> None:
+    _, v2 = superseded_monthly(setup)
+    setup.on(date(2026, 10, 5))
+    done = setup.recompute().run(update(), setup.store)
+    assert [d.rule_version_id for d in done.appended] == [v2.rule_version_id]
+    assert setup.rulebook.asked_superseded == []

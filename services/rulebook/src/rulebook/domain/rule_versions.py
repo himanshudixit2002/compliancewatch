@@ -8,6 +8,12 @@ A withdrawn version never counts, and neither does one that was never published.
 A clause is out of force on a date when a version that has been published (published, superseded
 or withdrawn) cites it with a verified quote and none of those versions is in force then: the
 text still reads as a rule, but the rule it states does not apply on that date.
+
+A version ended on or after a date when it was published, was not withdrawn, and its
+``effective_to`` (exclusive) is that day or later (``ended_since``). A superseded version still
+governs the periods whose last day it was in force on, and their returns may fall due long after
+it ended, so a reader that decides who owes them asks for the versions superseded since a day. A
+withdrawn version never counts: withdrawing closes its obligations, so it governs nothing.
 """
 
 from collections.abc import Iterable, Mapping
@@ -20,6 +26,7 @@ from domain_kernel.citations import (
     evidence_tokens_missing,
     quote_match_ratio,
 )
+from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import ClauseId, DocumentId, RuleId, RuleVersionId, UserId
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.periods import EffectivePeriod
@@ -91,10 +98,64 @@ class RuleVersionDetail:
     approved_by: tuple[UserId, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class VersionPage:
+    """What narrows and pages a listing of versions: only those of ``status`` (published or
+    superseded, the statuses a listing holds), of ``rule_key`` and of ``regulator``; at most
+    ``limit``, by rule key then version, after the rule key ``after`` or, with
+    ``after_version``, after that version of it (a listing of ended versions can hold several
+    versions of one rule)."""
+
+    rule_key: str | None = None
+    regulator: str | None = None
+    status: RuleVersionStatus | None = None
+    limit: int = 100
+    after: str | None = None
+    after_version: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.status is not None and self.status not in IN_FORCE_STATUSES:
+            raise InvariantViolationError(
+                f"status must be published or superseded, got {self.status.value}"
+            )
+        if self.after_version is not None and self.after is None:
+            raise InvariantViolationError("after_version continues after a rule key: name after")
+
+    def admits(self, record: RuleVersionRecord) -> bool:
+        """Whether ``record`` has the status, rule key and regulator asked and follows
+        ``after``."""
+        return (
+            self.status in (None, record.status)
+            and self.rule_key in (None, record.rule_key)
+            and self.regulator in (None, record.regulator)
+            and self.follows(record)
+        )
+
+    def follows(self, record: RuleVersionRecord) -> bool:
+        """Whether ``record`` comes after the page's cursor: a later rule key, or a later version
+        of the rule key ``after`` when ``after_version`` names one."""
+        if self.after is None:
+            return True
+        if record.rule_key != self.after:
+            return record.rule_key > self.after
+        return self.after_version is not None and record.version > self.after_version
+
+
 def in_force(record: RuleVersionRecord, as_of: date) -> bool:
     """Whether the version was published and ``as_of`` falls in ``[effective_from,
     effective_to)``."""
     return record.status in IN_FORCE_STATUSES and record.effective.contains(as_of)
+
+
+def ended_since(record: RuleVersionRecord, since: date) -> bool:
+    """Whether the version was published, never withdrawn, and its ``effective_to`` is on or
+    after ``since``: the versions superseded since that day, and the published ones a
+    replacement has cut to end then or later. An open-ended version has not ended."""
+    return (
+        record.status in IN_FORCE_STATUSES
+        and record.effective_to is not None
+        and record.effective_to >= since
+    )
 
 
 def out_of_force(citing: Iterable[RuleVersionRecord], as_of: date | None) -> bool:

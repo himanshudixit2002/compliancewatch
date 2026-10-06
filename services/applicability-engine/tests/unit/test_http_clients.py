@@ -11,6 +11,7 @@ import httpx2
 import pytest
 
 from applicability_engine.domain.errors import DependencyUnavailableError
+from applicability_engine.domain.model import Schedule
 from applicability_engine.infrastructure.profile_client import HttpProfiles
 from applicability_engine.infrastructure.rulebook_client import HttpRulebook
 from applicability_engine.testing import BUSINESS, TENANT
@@ -18,7 +19,9 @@ from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ids import BusinessId, RuleVersionId
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.operators import Operator
+from domain_kernel.periods import EffectivePeriod
 from domain_kernel.predicates import AllOf, Predicate
+from domain_kernel.recurrence import Recurrence
 from domain_kernel.status import RuleVersionStatus
 
 OPENAPI = Path(__file__).resolve().parents[4] / "packages" / "contracts" / "openapi"
@@ -106,6 +109,28 @@ def test_the_rule_version_is_read_with_its_status_and_specification() -> None:
     assert (spec.rule_version_id, spec.status) == (RULE_VERSION, RuleVersionStatus.PUBLISHED)
     assert spec.specification == AllOf((Predicate("registration_type", Operator.EQ, "regular"),))
     assert (spec.rule_key, spec.level) == ("gst.gstr3b.monthly", AttributeLevel.REGISTRATION)
+    assert spec.schedule == Schedule(EffectivePeriod(date(2026, 4, 1)))
+
+
+def test_a_superseded_version_is_read_with_its_schedule() -> None:
+    superseded = {
+        **DETAIL,
+        "status": "superseded",
+        "effective_to": "2026-10-01",
+        "recurrence": {"frequency": "monthly", "due_day": 20, "due_month_offset": 0},
+        "obligation_template": {"title": "File GSTR-3B", "due_in_days": None},
+    }
+
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=superseded)
+
+    spec = HttpRulebook(client=answering(answer)).rule_version(RULE_VERSION)
+    assert spec is not None
+    assert spec.schedule == Schedule(
+        EffectivePeriod(date(2026, 4, 1), date(2026, 10, 1)), Recurrence.monthly(20)
+    )
+    assert spec.still_governs(date(2026, 10, 5)), "September is due on 20 October"
+    assert not spec.still_governs(date(2026, 10, 21))
 
 
 def test_a_404_is_none() -> None:
@@ -124,8 +149,20 @@ def test_a_404_is_none() -> None:
         lambda request: httpx2.Response(200, text="not json"),
         lambda request: httpx2.Response(200, json={**DETAIL, "specification": {"oops": []}}),
         lambda request: httpx2.Response(200, json={**DETAIL, "status": "invented"}),
+        lambda request: httpx2.Response(200, json={**DETAIL, "recurrence": {"due_day": 20}}),
+        lambda request: httpx2.Response(
+            200, json={**DETAIL, "obligation_template": {"due_in_days": -1}}
+        ),
     ],
-    ids=["5xx", "refused", "not-json", "bad-specification", "bad-status"],
+    ids=[
+        "5xx",
+        "refused",
+        "not-json",
+        "bad-specification",
+        "bad-status",
+        "bad-recurrence",
+        "bad-due-in-days",
+    ],
 )
 def test_anything_else_is_a_dependency_failure(handler: Handler) -> None:
     with pytest.raises(DependencyUnavailableError):
@@ -232,6 +269,56 @@ def test_the_rules_in_force_are_paged_by_rule_key_and_kept_by_level_and_status()
     assert len(asked) == 4, "no cache: each read asks again"
 
 
+def test_the_superseded_versions_are_paged_by_rule_key_and_version_and_kept_by_level() -> None:
+    """A rule can have several superseded versions, so a page continues after a rule key and a
+    version; a withdrawn version the rulebook would never list is left out all the same."""
+    monthly = {"frequency": "monthly", "due_day": 20, "due_month_offset": 0}
+
+    def ended(rule_key: str, version: int, **changes: Any) -> dict[str, Any]:
+        return {
+            **version_body(rule_key, status="superseded"),
+            "version": version,
+            "effective_to": "2026-10-01",
+            "recurrence": monthly,
+            **changes,
+        }
+
+    first = [ended(f"rule_{index:03d}", 1) for index in range(499)] + [ended("rule_499", 1)]
+    first[1]["status"] = "withdrawn"
+    first[2]["level"] = "entity"
+    second = [ended("rule_499", 2, effective_from="2026-10-01", effective_to="2026-11-01")]
+    asked: list[httpx2.QueryParams] = []
+
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        assert request.url.path == "/v1/rulebook/rule-versions"
+        asked.append(request.url.params)
+        return httpx2.Response(200, json=first if "after" not in request.url.params else second)
+
+    rulebook = HttpRulebook(client=answering(answer))
+    found = rulebook.rules_superseded_since(date(2025, 9, 1), AttributeLevel.REGISTRATION)
+    assert [(p.get("after"), p.get("after_version")) for p in asked] == [
+        (None, None),
+        ("rule_499", "1"),
+    ]
+    assert {(p["ended_on_or_after"], p["status"], p["limit"]) for p in asked} == {
+        ("2025-09-01", "superseded", "500")
+    }
+    assert "as_of" not in asked[0]
+    assert len(found) == 499, "the withdrawn one and the one of the entity level left out"
+    assert {rule.spec.status for rule in found} == {RuleVersionStatus.SUPERSEDED}
+    last = found[-1]
+    assert (last.rule_key, last.effective_from, last.effective_to) == (
+        "rule_499",
+        date(2026, 10, 1),
+        date(2026, 11, 1),
+    )
+    assert last.spec.schedule == Schedule(
+        EffectivePeriod(date(2026, 10, 1), date(2026, 11, 1)), Recurrence.monthly(20)
+    )
+    (entity,) = rulebook.rules_superseded_since(date(2025, 9, 1), AttributeLevel.ENTITY)
+    assert entity.rule_key == "rule_002"
+
+
 def test_the_listing_of_a_day_is_cached_for_its_ttl() -> None:
     asked: list[str] = []
     now = [100.0]
@@ -256,6 +343,31 @@ def test_the_listing_of_a_day_is_cached_for_its_ttl() -> None:
     assert len(asked) == 4
     with pytest.raises(ValueError, match="negative"):
         HttpRulebook(client=answering(answer), cache_seconds=-1)
+
+
+def test_the_listing_of_superseded_versions_is_cached_apart_and_forgotten_with_it() -> None:
+    asked: list[tuple[str, str]] = []
+    now = [100.0]
+
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        params = request.url.params
+        listing = "as_of" if "as_of" in params else "ended_on_or_after"
+        asked.append((listing, params[listing]))
+        body = version_body("only", status="published" if listing == "as_of" else "superseded")
+        return httpx2.Response(200, json=[{**body, "effective_to": "2026-10-01"}])
+
+    rulebook = HttpRulebook(client=answering(answer), cache_seconds=5, monotonic=lambda: now[0])
+    day = date(2026, 10, 1)
+    for _ in range(2):
+        assert len(rulebook.rules_superseded_since(day, AttributeLevel.REGISTRATION)) == 1
+        rulebook.rules_in_force(day, AttributeLevel.REGISTRATION)
+    assert asked == [("ended_on_or_after", "2026-10-01"), ("as_of", "2026-10-01")]
+    rulebook.forget_in_force()
+    rulebook.rules_superseded_since(day, AttributeLevel.ENTITY)
+    assert asked[-1] == ("ended_on_or_after", "2026-10-01"), "a rule event drops both listings"
+    now[0] += 5.0
+    rulebook.rules_superseded_since(day, AttributeLevel.REGISTRATION)
+    assert len(asked) == 4, "read again once expired"
 
 
 def test_a_listing_of_the_wrong_shape_is_a_dependency_failure() -> None:
