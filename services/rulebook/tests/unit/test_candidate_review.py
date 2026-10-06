@@ -34,7 +34,7 @@ from rulebook.application.publication import (
     PublishVersion,
     SubmitForReview,
 )
-from rulebook.application.relations import ApproveRelationCandidate
+from rulebook.application.relations import ApproveRelationCandidate, RejectRelationCandidate
 from rulebook.application.review_tasks import (
     ClaimReviewTask,
     DecideReviewTask,
@@ -70,7 +70,7 @@ from rulebook.domain.intake import (
     RuleRejectReason,
 )
 from rulebook.domain.publication import DecisionAction
-from rulebook.domain.relations import CandidateStatus, RelationCandidate
+from rulebook.domain.relations import CandidateRejectReason, CandidateStatus, RelationCandidate
 from rulebook.domain.review_tasks import ReviewDecision, ReviewTaskKind, ReviewTaskStatus
 from rulebook.domain.seed import SeedCalendar
 from rulebook.infrastructure.memory import MemoryEventSink, MemoryKnowledgeStore
@@ -228,8 +228,9 @@ class Review:
         assert intake.task is not None
         return intake.task.task_id
 
-    def relation(self) -> UUID:
-        """The extension the knowledge child staged for the notification, as staging does."""
+    def relation(self, rule_key: str = MONTHLY) -> UUID:
+        """The extension the knowledge child staged for the notification, as staging does, of
+        the rule ``rule_key``."""
         clause = clause_id_for(DOC, "en.p2")
         text = CLAUSES[1].text
         candidate = RelationCandidate(
@@ -247,7 +248,7 @@ class Review:
             prompt_version="extraction.rule_relations@1",
             confidence=0.9,
             needs_review=False,
-            target_rule_key=MONTHLY,
+            target_rule_key=rule_key,
             period_label="2000-01",
             new_due_on=date(2000, 2, 25),
         )
@@ -315,6 +316,18 @@ def test_the_suggestion_is_a_real_rule_key_when_one_is_known(review: Review) -> 
     assert from_relations.suggested_rule_key == MONTHLY, "the one key its relations name"
     named = review.ingest.run(payload(suggested_rule_key="example_quarterly"), uuid4()).candidate
     assert named.suggested_rule_key == MONTHLY, "a known key wins over an unknown one"
+
+
+def test_the_suggestion_leaves_a_rejected_relation_candidate_out(review: Review) -> None:
+    wrong = review.relation()
+    RejectRelationCandidate(review.store, review.clock).run(
+        wrong, CandidateRejectReason.WRONG_TARGET, decided_by=str(ANALYST)
+    )
+    alone = review.ingest.run(payload(suggested_rule_key=None), uuid4()).candidate
+    assert alone.suggested_rule_key is None, "only a rejected relation candidate names a key"
+    review.relation("example_quarterly")
+    named = review.ingest.run(payload(suggested_rule_key=None), uuid4()).candidate
+    assert named.suggested_rule_key == "example_quarterly", "the one key the others name"
 
 
 def test_an_extension_is_suggested_high_impact_and_queued_first(review: Review) -> None:
