@@ -11,30 +11,41 @@
   signal (never the panel, never a process outside the checkout);
 - the command plan behind every button, and the checks that keep the forbidden targets out of
   every plan;
-- the runner that streams a plan's output and cancels its process group.
+- the runner that streams a plan's output, stops a step that overruns its time and cancels its
+  process group;
+- what keeps the window responsive: when a wrapped label re-wraps, one probe of each kind at a
+  time, hard timeouts on every program it reads from, and the watch that logs a stalled event
+  loop.
 
 Every program runs as an argument list, never through a shell.
 """
 
 from __future__ import annotations
 
+import codecs
 import contextlib
 import http.client
 import json
 import os
 import re
+import select
 import shlex
 import signal
 import subprocess
+import sys
+import tempfile
 import threading
 import time
+import traceback
 import urllib.parse
 import urllib.request
 from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import FrameType
 from typing import Any, Final, Literal, Protocol
 
 # ---- the checkout and the environment ---------------------------------------------------------
@@ -953,11 +964,14 @@ def control_panels(procs: Mapping[int, Proc]) -> set[int]:
 
 
 def short_command(command: str, repo: Path, limit: int = 90) -> str:
-    """A command line without the checkout's path or the venv's interpreter in front."""
+    """A command line without the checkout's path or the venv's interpreter in front (``python
+    -m pytest -q`` reads ``pytest -q``)."""
     text = command.replace(str(repo) + "/", "")
     parts = text.split()
     if len(parts) > 1 and re.search(r"(^|/)(python[0-9.]*|node)$", parts[0]):
         parts = parts[1:]
+        if len(parts) > 1 and parts[0] == "-m":
+            parts = parts[1:]
     if parts and "/" in parts[0] and (parts[0].startswith(".venv/") or parts[0][0] != "."):
         parts[0] = Path(parts[0]).name
     text = " ".join(parts)
@@ -986,30 +1000,114 @@ class ProcessSnapshot:
             if self.origins.get(pid, "").startswith(("other", "control panel"))
         )
 
-    def foreign_summary(self, repo: Path) -> list[str]:
-        """One line per process group of :meth:`foreign`, naming its top process."""
+    def foreign_groups(self) -> list[list[Proc]]:
+        """:meth:`foreign` by process group, the oldest group first."""
         groups: dict[int, list[Proc]] = defaultdict(list)
         for pid in self.foreign():
             proc = self.procs[pid]
             groups[proc.pgid].append(proc)
-        lines: list[str] = []
-        for members in sorted(groups.values(), key=lambda m: min(p.pid for p in m)):
-            pids = {proc.pid for proc in members}
-            top = next((p for p in members if p.ppid not in pids), members[0])
-            maker = next(
-                (p for p in members if Path(p.command.split(" ", 1)[0]).name == "make"), top
-            )
-            if PANEL_MARKER in top.command:
-                text = (
-                    f"another control panel window (pid {top.pid}, {format_seconds(top.elapsed)})"
-                )
-            else:
-                head = short_command(maker.command, repo, 48)
-                text = f"{head} (pid {maker.pid}, {format_seconds(maker.elapsed)})"
-            if len(members) > 1:
-                text += f" with {len(members) - 1} more"
-            lines.append(text)
-        return lines
+        return sorted(groups.values(), key=lambda m: min(p.pid for p in m))
+
+    def foreign_summary(self, repo: Path) -> list[str]:
+        """One line per process group of :meth:`foreign`, naming its top process."""
+        return [describe_group(members, repo) for members in self.foreign_groups()]
+
+
+def describe_group(members: Sequence[Proc], repo: Path) -> str:
+    """A process group as one line: its make process, else its top process, with its pid, how
+    long it has run and how many more processes the group has."""
+    pids = {proc.pid for proc in members}
+    top = next((p for p in members if p.ppid not in pids), members[0])
+    maker = next((p for p in members if Path(p.command.split(" ", 1)[0]).name == "make"), top)
+    if PANEL_MARKER in top.command:
+        text = f"another control panel window (pid {top.pid}, {format_seconds(top.elapsed)})"
+    else:
+        head = short_command(maker.command, repo, 48)
+        text = f"{head} (pid {maker.pid}, {format_seconds(maker.elapsed)})"
+    if len(members) > 1:
+        text += f" with {len(members) - 1} more"
+    return text
+
+
+_USES_THE_PRODUCT = re.compile(r"product|playwright|\be2e\b|\bcw-(?:mvp|product)\b", re.I)
+_USES_DOCKER = re.compile(
+    r"\b(?:pytest|uvicorn|alembic|psql|pg_dump|pg_restore|docker|rpk|temporal|playwright|next)\b"
+    r"|\bcw-(?:mvp|product|demo)\b|_service\b|\.(?:worker|relay)\b"
+)
+DOCKER_FREE_TARGETS: Final = frozenset(
+    {
+        "help", "check-uv", "check-pnpm", "py-sync", "lock-check", "py-lint", "py-format",
+        "py-typecheck", "importlint", "ts-install", "ts-lint", "ts-format", "ts-typecheck",
+        "ts-test", "ts-build", "install", "lint", "format", "typecheck", "runbooks-check",
+        "openapi", "contracts", "contracts-check", "hooks", "ci-lint", "alerts-check",
+        "openapi-check", "openapi-compat", "sast", "deps-scan", "ci-gate-check", "flags",
+        "flags-check", "openapi-public", "openapi-ts", "openapi-ts-check", "web-screens",
+        "web-screens-check",
+    }
+)  # fmt: skip
+"""Make targets that need neither Docker nor the product: lint, format, type checks, unit tests
+of the web app, contract and OpenAPI checks."""
+
+
+def _make_targets(command: str) -> list[str] | None:
+    """The targets of a make command line (empty: the default goal); None when it is not make."""
+    parts = command.split()
+    if not parts or Path(parts[0]).name not in ("make", "gmake"):
+        return None
+    return [part for part in parts[1:] if "=" not in part and not part.startswith("-")]
+
+
+def _uses_docker(members: Sequence[Proc]) -> bool:
+    """A group led by make uses Docker when one of its targets is not a Docker-free one (the
+    tools a lint target runs say nothing); any other group, when it runs tests, services,
+    migrations, the database's clients, the web app's dev server or the product."""
+    makes = [targets for p in members if (targets := _make_targets(p.command)) is not None]
+    if makes:
+        return any(t not in DOCKER_FREE_TARGETS for targets in makes for t in targets)
+    return bool(_USES_DOCKER.search(" ".join(proc.command for proc in members)))
+
+
+@dataclass(frozen=True)
+class StackUsers:
+    """Other sessions' process groups in the checkout that need what a stop takes away."""
+
+    docker: tuple[str, ...]
+    product: tuple[str, ...]
+
+
+def stack_users(snapshot: ProcessSnapshot, repo: Path) -> StackUsers:
+    """The foreign process groups that use Docker's databases and queues (tests, make targets,
+    services, migrations, the web app) and those that use the product (make product and its
+    checks, the browser journeys). Another control panel window is neither: it only reads."""
+    docker: list[str] = []
+    product: list[str] = []
+    for members in snapshot.foreign_groups():
+        commands = " ".join(proc.command for proc in members)
+        if PANEL_MARKER in commands:
+            continue
+        text = describe_group(members, repo)
+        if _USES_THE_PRODUCT.search(commands):
+            product.append(text)
+        if _uses_docker(members):
+            docker.append(text)
+    return StackUsers(tuple(docker), tuple(product))
+
+
+def breaks_note(users: StackUsers, *, docker: bool = False, product: bool = False) -> str:
+    """What a confirm says about other sessions before it stops Docker or the product: each
+    process group that uses them, by name, and plainly that the stop breaks them."""
+    parts: list[str] = []
+    if docker and users.docker:
+        parts.append(
+            "Other sessions are using Docker's databases and queues from this checkout right "
+            "now. Stopping Docker will break them:\n  " + "\n  ".join(users.docker[:8])
+        )
+    if product and users.product:
+        parts.append(
+            "Other sessions are using the product right now. Stopping the product will break "
+            "them:\n  " + "\n  ".join(users.product[:8])
+        )
+    return "\n\n".join(parts)
 
 
 def pid_files(directory: Path) -> dict[str, int]:
@@ -1241,10 +1339,10 @@ def command_problems(
 
     No shell and no tool that reads the regulator sites; no --destructive, on the command line or
     in the environment; the crawl off (with ``complete_env``, ``env`` is the program's whole
-    environment and must say so); none of :data:`DROPPED_VARIABLES`, which make would read; and
-    for make: no forbidden target, no option, no shell character in a variable, product-seed
-    without arguments, a destructive target only when ``confirmed``, and with ``known_targets``
-    only the checkout's targets.
+    environment and must say so); none of :data:`DROPPED_VARIABLES`, which make would read;
+    ``colima stop --force`` only when ``confirmed``; and for make: no forbidden target, no
+    option, no shell character in a variable, product-seed without arguments, a destructive
+    target only when ``confirmed``, and with ``known_targets`` only the checkout's targets.
     """
     if not argv:
         return ["no program"]
@@ -1262,6 +1360,9 @@ def command_problems(
         problems.append("does not keep the crawl off (CW_PIPELINE_CRAWL_ENABLED=false)")
     if inherited := sorted(set(env) & set(DROPPED_VARIABLES)):
         problems.append("carries " + ", ".join(inherited) + ", which make would read")
+    forced = any(part in ("--force", "-f") for part in argv[1:])
+    if program == "colima" and forced and not confirmed:
+        problems.append("colima --force without a confirm")
     if program != "make":
         return problems
     targets = [part for part in argv[1:] if "=" not in part and not part.startswith("-")]
@@ -1308,6 +1409,35 @@ class Capture(Protocol):
     ) -> tuple[int | None, str, str]: ...
 
 
+PIPE_GRACE_SECONDS: Final = 2.0
+"""How long the panel still reads a program's output once the program is gone or killed: a
+process it left behind may hold the pipe open, and must not hold the panel."""
+
+
+def kill_group(proc: subprocess.Popen[Any]) -> None:
+    """SIGKILL to the process group a program the panel started leads (it starts a session of its
+    own), so whatever it started goes with it."""
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    with contextlib.suppress(OSError):
+        proc.kill()
+
+
+def _output_after_kill(proc: subprocess.Popen[str]) -> tuple[str, str]:
+    """What a killed program had written, read for :data:`PIPE_GRACE_SECONDS` at most."""
+    try:
+        out, err = proc.communicate(timeout=PIPE_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                with contextlib.suppress(OSError):
+                    stream.close()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=PIPE_GRACE_SECONDS)
+        return "", ""
+    return out or "", err or ""
+
+
 def run_capture(
     argv: Sequence[str],
     *,
@@ -1316,9 +1446,13 @@ def run_capture(
     timeout: float,
     stdin_path: Path | None = None,
 ) -> tuple[int | None, str, str]:
-    """Run a program to its end and return its exit status and output; (None, "", why) when it is
-    refused, missing or overruns the timeout. Every program the panel reads from runs through
-    here, so the rules of :func:`command_problems` hold for each of them."""
+    """Run a program to its end and return its exit status and output; (None, output, why) when
+    it is refused, missing or overruns the timeout. Every program the panel reads from runs
+    through here, so the rules of :func:`command_problems` hold for each of them.
+
+    The timeout is hard: the program starts a session of its own, and when it overruns, SIGKILL
+    goes to its whole process group (``docker info`` hangs while Colima stops, and docker's
+    plugins outlive a killed CLI); the wait for its output after that is bounded too."""
     problems = command_problems(argv, env, complete_env=True)
     if problems:
         return None, "", "refused: " + "; ".join(problems)
@@ -1327,21 +1461,28 @@ def run_capture(
             stdin: Any = subprocess.DEVNULL
             if stdin_path is not None:
                 stdin = stack.enter_context(stdin_path.open("rb"))
-            done = subprocess.run(
+            proc = subprocess.Popen(
                 list(argv),
                 cwd=cwd,
                 env=dict(env),
                 stdin=stdin,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=timeout,
-                check=False,
+                start_new_session=True,
             )
+            try:
+                out, err = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                kill_group(proc)
+                out, err = _output_after_kill(proc)
+                why = f"{Path(argv[0]).name} overran its {format_seconds(timeout)}; stopped"
+                return None, out, f"{err}\n{why}".strip()
     except (OSError, subprocess.SubprocessError) as exc:
         return None, "", str(exc)
-    return done.returncode, done.stdout, done.stderr
+    return proc.returncode, out, err
 
 
 def spawn_detached(argv: Sequence[str], env: Mapping[str, str]) -> None:
@@ -1388,7 +1529,18 @@ def process_commands(env: Mapping[str, str], capture: Capture = run_capture) -> 
 
 DOCKER_INFO: Final = ("docker", "info")
 COLIMA_STOP: Final = ("colima", "stop")
+COLIMA_FORCE_STOP: Final = ("colima", "stop", "--force")
 PG_RESTORE_LIST: Final = ("docker", "compose", "exec", "-T", "postgres", "pg_restore", "--list")
+
+# How long each step of a stop may run before the panel stops it (SIGTERM to its process group,
+# SIGKILL five seconds later) and marks it timed out.
+WEB_STOP_SECONDS: Final = 60.0
+MAKE_DOWN_SECONDS: Final = 120.0
+BACKGROUND_STOP_SECONDS: Final = 60.0
+DEV_DOWN_SECONDS: Final = 180.0
+COLIMA_STOP_SECONDS: Final = 120.0
+COLIMA_STOP_LABEL: Final = "stop Docker (colima stop)"
+"""The step whose timeout makes the window offer ``colima stop --force``."""
 
 
 def docker_running(repo: Path, env: Mapping[str, str], capture: Capture = run_capture) -> bool:
@@ -1760,9 +1912,17 @@ def status_urls(ports: Ports) -> dict[str, str]:
     return urls
 
 
+def _answered(future: Any, seconds: float) -> bool:
+    try:
+        return bool(future.result(timeout=seconds))
+    except FutureTimeoutError:
+        return False
+
+
 def probe_status(project: Project, manager: BackgroundManager) -> Status:
     """The quick probe the window repeats every few seconds: Docker, the containers, each
-    service's and listener's health, and the background processes."""
+    service's and listener's health, and the background processes. Every part has a hard limit:
+    6 s for docker info, 8 s for docker compose ps, 0.8 s a URL (5 s for all of them)."""
     urls = status_urls(project.ports)
     pending = {key: _POOL.submit(http_ok, url) for key, url in urls.items()}
     docker = docker_running(project.repo, project.env)
@@ -1773,7 +1933,11 @@ def probe_status(project: Project, manager: BackgroundManager) -> Status:
         )
         if code == 0:
             containers = parse_compose_ps(out)
-    up = {key: future.result() for key, future in pending.items()}
+    deadline = time.monotonic() + 5.0
+    up = {
+        key: _answered(future, max(deadline - time.monotonic(), 0.0))
+        for key, future in pending.items()
+    }
     background = manager.states(project.backgrounds())
     product = {
         proc: (
@@ -2216,7 +2380,8 @@ class StepContext(Protocol):
 
 @dataclass(frozen=True)
 class Cmd:
-    """A program run in the foreground, its output streamed into the panel."""
+    """A program run in the foreground, its output streamed into the panel. Past ``timeout``
+    seconds the runner stops it and marks the step timed out."""
 
     label: str
     argv: tuple[str, ...]
@@ -2228,12 +2393,14 @@ class Cmd:
 class Call:
     """A step the panel performs itself. ``commands`` is every program it may run, streamed or
     captured, and ``env`` what it adds to their environment: the plan checks read them, and the
-    runner refuses any other program the step tries to run."""
+    runner refuses any other program the step tries to run. ``timeout`` bounds the whole step:
+    its programs get what is left of it, and its waits end when it runs out."""
 
     label: str
     fn: Callable[[StepContext], bool]
     commands: tuple[tuple[str, ...], ...] = ()
     env: tuple[tuple[str, str], ...] = ()
+    timeout: float | None = None
 
 
 type Step = Cmd | Call
@@ -2260,8 +2427,10 @@ class Plan:
     gates: bool = False
 
 
-def make(*args: str, label: str = "", env: Iterable[tuple[str, str]] = ()) -> Cmd:
-    return Cmd(label or "make " + " ".join(args), ("make", *args), tuple(env))
+def make(
+    *args: str, label: str = "", env: Iterable[tuple[str, str]] = (), timeout: float | None = None
+) -> Cmd:
+    return Cmd(label or "make " + " ".join(args), ("make", *args), tuple(env), timeout)
 
 
 def plan_problems(plan: Plan, known_targets: Collection[str] | None = None) -> list[str]:
@@ -2388,20 +2557,35 @@ class Plans:
             return True
         return ctx.run(COLIMA_START)
 
-    def _docker_down(self, ctx: StepContext) -> bool:
+    def _dev_down(self, ctx: StepContext) -> bool:
         if not docker_running(self.project.repo, self.project.env, ctx.capture):
-            ctx.log("Docker is already stopped")
+            ctx.log("Docker is already stopped (docker info does not answer)")
             return True
-        return ctx.run(("make", "dev-down")) and ctx.run(COLIMA_STOP)
+        return ctx.run(("make", "dev-down"))
+
+    def _colima_stop(self, ctx: StepContext) -> bool:
+        if not docker_running(self.project.repo, self.project.env, ctx.capture):
+            ctx.log("Docker is already stopped (docker info does not answer)")
+            return True
+        return ctx.run(COLIMA_STOP)
 
     def docker_up(self) -> Call:
         return Call("start Docker", self._docker_up, (DOCKER_INFO, COLIMA_START))
 
-    def docker_down(self) -> Call:
+    def dev_down_call(self) -> Call:
         return Call(
-            "stop databases and Docker",
-            self._docker_down,
-            (DOCKER_INFO, ("make", "dev-down"), COLIMA_STOP),
+            "stop the dev stack's containers (make dev-down)",
+            self._dev_down,
+            (DOCKER_INFO, ("make", "dev-down")),
+            timeout=DEV_DOWN_SECONDS,
+        )
+
+    def colima_stop_call(self) -> Call:
+        return Call(
+            COLIMA_STOP_LABEL,
+            self._colima_stop,
+            (DOCKER_INFO, COLIMA_STOP),
+            timeout=COLIMA_STOP_SECONDS,
         )
 
     def _start_background(self, spec: Background, settle: float = 3.0) -> Call:
@@ -2494,7 +2678,7 @@ class Plans:
                 self.project.web().pid_file.unlink(missing_ok=True)
             return True
 
-        return Call("stop web app", stop, scan_commands())
+        return Call("stop web app", stop, scan_commands(), timeout=WEB_STOP_SECONDS)
 
     def _stop_all_background(self, ctx: StepContext) -> bool:
         ok = True
@@ -2504,7 +2688,12 @@ class Plans:
         return ok
 
     def stop_all_background_call(self) -> Call:
-        return Call("stop the panel's workers and relays", self._stop_all_background, (PS_ARGV,))
+        return Call(
+            "stop the panel's workers and relays",
+            self._stop_all_background,
+            (PS_ARGV,),
+            timeout=BACKGROUND_STOP_SECONDS,
+        )
 
     def _product_ready(self, ctx: StepContext) -> bool:
         url = self.project.product_internal_url + "/ready"
@@ -2537,16 +2726,20 @@ class Plans:
             "stop everything",
             (
                 self.stop_web_call(expected_web),
-                make("web-stack-down", label="stop the UI-only stack"),
-                make("product-down", label="stop the product's processes"),
+                make("web-stack-down", label="stop the UI-only stack", timeout=MAKE_DOWN_SECONDS),
+                make(
+                    "product-down", label="stop the product's processes", timeout=MAKE_DOWN_SECONDS
+                ),
                 self.stop_all_background_call(),
-                self.docker_down(),
+                self.dev_down_call(),
+                self.colima_stop_call(),
             ),
             confirm=(
                 "Stop everything: the web app, the UI-only stack (make web-stack-down), the "
                 "product's processes (make product-down), the panel's workers and relays, the dev "
                 "stack's containers (make dev-down; the data stays in the volumes) and Docker "
-                "itself (colima stop)."
+                "itself (colima stop). Each step has a time limit; if colima stop overruns its "
+                f"{format_seconds(COLIMA_STOP_SECONDS)}, the panel offers a force stop."
             ),
         )
 
@@ -2556,10 +2749,29 @@ class Plans:
     def docker_stop(self) -> Plan:
         return Plan(
             "stop Docker",
-            (Cmd("stop Docker", COLIMA_STOP),),
+            (Cmd(COLIMA_STOP_LABEL, COLIMA_STOP, timeout=COLIMA_STOP_SECONDS),),
             confirm=(
                 "Stop Docker (colima stop)? Every container stops: Postgres, Redis, Redpanda and "
                 "Temporal, for every session using them. The data stays in the volumes."
+            ),
+        )
+
+    def colima_force_stop(self) -> Plan:
+        return Plan(
+            "force-stop Docker",
+            (
+                Cmd(
+                    "force-stop Docker (colima stop --force)",
+                    COLIMA_FORCE_STOP,
+                    timeout=COLIMA_STOP_SECONDS,
+                ),
+            ),
+            confirm=(
+                f"colima stop did not finish within {format_seconds(COLIMA_STOP_SECONDS)}. "
+                "Force-stop Docker (colima stop --force)? Colima's VM stops at once, with no "
+                "graceful shutdown: the containers get no time to close their files, so Postgres "
+                "replays its write-ahead log at the next start, and a write in flight is lost. "
+                "Every session using Docker loses it."
             ),
         )
 
@@ -2567,7 +2779,7 @@ class Plans:
         return Plan("make dev", (make("dev"),))
 
     def databases_stop(self) -> Plan:
-        return Plan("make dev-down", (make("dev-down"),))
+        return Plan("make dev-down", (make("dev-down", timeout=DEV_DOWN_SECONDS),))
 
     def ui_start(self) -> Plan:
         return Plan(
@@ -2579,7 +2791,7 @@ class Plans:
         )
 
     def ui_stop(self) -> Plan:
-        return Plan("stop the UI-only stack", (make("web-stack-down"),))
+        return Plan("stop the UI-only stack", (make("web-stack-down", timeout=MAKE_DOWN_SECONDS),))
 
     def ui_restart(self) -> Plan:
         return Plan(
@@ -2650,7 +2862,7 @@ class Plans:
         )
 
     def product_stop(self) -> Plan:
-        return Plan("stop the product", (make("product-down"),))
+        return Plan("stop the product", (make("product-down", timeout=MAKE_DOWN_SECONDS),))
 
     def product_wait(self) -> Plan:
         return Plan("wait for the product", (make("product-wait", f"WEB_PORT={PRODUCT_WEB_PORT}"),))
@@ -2759,8 +2971,8 @@ class Plans:
         if backup_first:
             steps.append(make("dev-backup", label="back up the database first"))
         steps += [
-            make("web-stack-down", label="stop the UI-only stack"),
-            make("product-down", label="stop the product's processes"),
+            make("web-stack-down", label="stop the UI-only stack", timeout=MAKE_DOWN_SECONDS),
+            make("product-down", label="stop the product's processes", timeout=MAKE_DOWN_SECONDS),
             self.stop_all_background_call(),
             make("dev-reset"),
             make("dev"),
@@ -2854,6 +3066,7 @@ class Plans:
             self.stop_everything(expected_web=(4242,)),
             self.docker_start(),
             self.docker_stop(),
+            self.colima_force_stop(),
             self.databases_start(),
             self.databases_stop(),
             self.ui_start(),
@@ -2933,7 +3146,8 @@ class Begin:
     plan: Plan
 
 
-type StepState = Literal["running", "ok", "failed", "cancelled", "skipped"]
+type StepState = Literal["running", "ok", "failed", "timeout", "cancelled", "skipped"]
+"""``timeout``: the step overran its own time limit and the runner stopped it."""
 
 
 @dataclass(frozen=True)
@@ -2983,11 +3197,23 @@ def line_tag(text: str) -> str | None:
 
 
 class _Context:
-    """A :class:`StepContext` for one Call: the programs it runs must be ones it declares."""
+    """A :class:`StepContext` for one Call: the programs it runs must be ones it declares, and
+    with a ``deadline`` (the Call's timeout) its programs get what is left of it and its waits
+    end when it runs out."""
 
-    def __init__(self, runner: Runner, call: Call) -> None:
+    def __init__(self, runner: Runner, call: Call, deadline: float | None = None) -> None:
         self._runner = runner
         self._call = call
+        self._deadline = deadline
+
+    def remaining(self) -> float | None:
+        if self._deadline is None:
+            return None
+        return max(self._deadline - time.monotonic(), 0.0)
+
+    @property
+    def expired(self) -> bool:
+        return self._deadline is not None and time.monotonic() >= self._deadline
 
     def log(self, text: str, tag: str | None = None) -> None:
         self._runner.line(text, tag)
@@ -3001,9 +3227,11 @@ class _Context:
         return False
 
     def run(self, argv: Sequence[str], env: Iterable[tuple[str, str]] = ()) -> bool:
-        if not self.allows(argv):
+        if not self.allows(argv) or self.expired:
             return False
-        return self._runner.execute(self._call.label, argv, (*self._call.env, *env))
+        return self._runner.execute(
+            self._call.label, argv, (*self._call.env, *env), timeout=self.remaining()
+        )
 
     def capture(
         self,
@@ -3016,23 +3244,30 @@ class _Context:
     ) -> tuple[int | None, str, str]:
         if not self.allows(argv):
             return None, "", f"refused: {self._call.label} does not declare it"
-        return run_capture(argv, cwd=cwd, env=env, timeout=timeout, stdin_path=stdin_path)
+        left = self.remaining()
+        limit = timeout if left is None else max(min(timeout, left), 0.1)
+        return run_capture(argv, cwd=cwd, env=env, timeout=limit, stdin_path=stdin_path)
 
     def wait(self, seconds: float) -> bool:
+        left = self.remaining()
+        if left is not None and left < seconds:
+            self._runner.cancel_event.wait(left)
+            return False
         return not self._runner.cancel_event.wait(seconds)
 
     @property
     def cancelled(self) -> bool:
-        return self._runner.cancel_event.is_set()
+        return self._runner.cancel_event.is_set() or self.expired
 
 
 class Runner:
     """Runs one plan at a time on a thread of its own and streams its output as events.
 
     It refuses a plan :func:`plan_problems` finds anything wrong with, and checks every program
-    again where it starts it. Each program starts a session of its own, so :meth:`cancel` can end
-    the running step's whole process group without touching the panel: SIGTERM, then SIGKILL
-    after a grace period to whatever of the group is left.
+    again where it starts it. Each program starts a session of its own, so :meth:`cancel`, or a
+    step overrunning its time limit, can end the running step's whole process group without
+    touching the panel: SIGTERM, then SIGKILL after a grace period to whatever of the group is
+    left. A step that overruns ends as ``timeout``.
     """
 
     def __init__(
@@ -3056,7 +3291,8 @@ class Runner:
         self._lock = threading.Lock()
         self._busy = False
         self._plan: Plan | None = None
-        self._proc: subprocess.Popen[str] | None = None
+        self._proc: subprocess.Popen[bytes] | None = None
+        self._timed_out = False
 
     @property
     def busy(self) -> bool:
@@ -3100,12 +3336,12 @@ class Runner:
     def line(self, text: str, tag: str | None = None) -> None:
         self.emit(Line(self.name, text, tag))
 
-    def _terminate(self, proc: subprocess.Popen[str]) -> None:
+    def _terminate(self, proc: subprocess.Popen[bytes]) -> None:
         """SIGTERM to the step's process group, and SIGKILL after the grace period to whatever of
         the group is left, its first process gone or not."""
-        if proc.poll() is not None:
-            return
         pgid = proc.pid
+        if proc.poll() is not None and not group_alive(pgid):
+            return
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, signal.SIGTERM)
 
@@ -3117,13 +3353,25 @@ class Runner:
 
         threading.Thread(target=escalate, daemon=True).start()
 
-    def _expire(self, proc: subprocess.Popen[str], limit: float) -> None:
-        self.line(f"error: still running after {format_seconds(limit)}; stopped", "err")
+    def _expire(self, proc: subprocess.Popen[bytes], label: str, limit: float) -> None:
+        self._timed_out = True
+        self.line(
+            f"error: {label} overran its {format_seconds(limit)}: SIGTERM to its process group, "
+            f"SIGKILL {format_seconds(KILL_GRACE_SECONDS)} later if it is still running",
+            "err",
+        )
         self._terminate(proc)
 
-    def execute(self, label: str, argv: Sequence[str], env: Iterable[tuple[str, str]] = ()) -> bool:
+    def execute(
+        self,
+        label: str,
+        argv: Sequence[str],
+        env: Iterable[tuple[str, str]] = (),
+        timeout: float | None = None,
+    ) -> bool:
         """Run one program to its end, streaming its lines; True when it exits 0. The program and
-        its whole environment are checked first, whoever asks."""
+        its whole environment are checked first, whoever asks. Past ``timeout`` seconds (else the
+        runner's own limit) the program's group is stopped and the step marked timed out."""
         if self.cancel_event.is_set():
             return False
         full_env = {**self.env, **dict(env)}
@@ -3143,10 +3391,6 @@ class Runner:
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
                 start_new_session=True,
             )
         except OSError as exc:
@@ -3158,31 +3402,74 @@ class Runner:
             self._terminate(proc)
         if self.registry is not None:
             self.registry.add_group(proc.pid, label, argv)
-        timer = (
-            threading.Timer(self.timeout, self._expire, (proc, self.timeout))
-            if self.timeout
-            else None
-        )
-        if timer is not None:
-            timer.daemon = True
-            timer.start()
+        limit = timeout if timeout is not None else self.timeout
         try:
-            for raw in proc.stdout or ():
-                text = clean_line(raw)
-                if text:
-                    self.line(text, line_tag(text))
-            code = proc.wait()
+            code = self._follow(proc, label, limit)
         finally:
-            if timer is not None:
-                timer.cancel()
             with self._lock:
                 self._proc = None
-        return code == 0 and not self.cancel_event.is_set()
+        return code == 0 and not self.cancel_event.is_set() and not self._timed_out
+
+    def _follow(self, proc: subprocess.Popen[bytes], label: str, limit: float | None) -> int:
+        """Stream a program's lines until it ends, and stop it past ``limit``. Once it has
+        exited, its output is read for :data:`PIPE_GRACE_SECONDS` more at most: a process it left
+        behind may hold the pipe open, and must not hold the step."""
+        stdout = proc.stdout
+        assert stdout is not None
+        fd = stdout.fileno()
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        rest = ""
+        deadline = time.monotonic() + limit if limit else None
+        exited_at: float | None = None
+        while True:
+            now = time.monotonic()
+            if deadline is not None and now >= deadline and not self._timed_out:
+                self._expire(proc, label, limit or 0.0)
+            ready, _, _ = select.select([fd], [], [], 0.2)
+            if ready:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                rest = self._lines(rest + decoder.decode(chunk))
+                continue
+            if proc.poll() is not None:
+                exited_at = exited_at if exited_at is not None else now
+                if now - exited_at >= PIPE_GRACE_SECONDS:
+                    self.line("a process the step started still holds its output; not read", None)
+                    break
+        self._lines(rest + decoder.decode(b"", final=True) + "\n")
+        stdout.close()
+        while True:
+            try:
+                return proc.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                if deadline is not None and time.monotonic() >= deadline and not self._timed_out:
+                    self._expire(proc, label, limit or 0.0)
+
+    def _lines(self, text: str) -> str:
+        """Stream every complete line of ``text`` (a newline, a carriage return or both end
+        one) and return what is left of it."""
+        *complete, rest = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        for raw in complete:
+            cleaned = clean_line(raw)
+            if cleaned:
+                self.line(cleaned, line_tag(cleaned))
+        return rest
 
     def _run_step(self, step: Step) -> bool:
+        self._timed_out = False
         if isinstance(step, Cmd):
-            return self.execute(step.label, step.argv, step.env)
-        return bool(step.fn(_Context(self, step)))
+            return self.execute(step.label, step.argv, step.env, step.timeout)
+        deadline = time.monotonic() + step.timeout if step.timeout else None
+        context = _Context(self, step, deadline)
+        ok = bool(step.fn(context))
+        if context.expired and not self.cancel_event.is_set():
+            if not self._timed_out:
+                self.line(
+                    f"error: {step.label} overran its {format_seconds(step.timeout or 0.0)}", "err"
+                )
+            self._timed_out = True
+        return ok and not self._timed_out
 
     def _work(self, plan: Plan) -> None:
         results: list[StepResult] = []
@@ -3204,13 +3491,19 @@ class Runner:
                     self.line(f"error: {step.label}: {exc!r}", "err")
                     ok = False
                 seconds = time.monotonic() - started
-                state = "cancelled" if self.cancel_event.is_set() else ("ok" if ok else "failed")
+                if self.cancel_event.is_set():
+                    state = "cancelled"
+                elif self._timed_out:
+                    state = "timeout"
+                else:
+                    state = "ok" if ok else "failed"
                 results.append(StepResult(step.label, state, seconds))
                 self.emit(StepUpdate(self.name, plan, index, step.label, state, seconds))
-                if state == "failed":
+                if state in ("failed", "timeout"):
                     failed = True
                     tail = "" if plan.keep_going else " — stopped here"
-                    self.line(f"✗ {step.label} failed after {format_seconds(seconds)}{tail}", "err")
+                    what = "timed out" if state == "timeout" else "failed"
+                    self.line(f"✗ {step.label} {what} after {format_seconds(seconds)}{tail}", "err")
             cancelled = self.cancel_event.is_set()
             if len(plan.steps) > 1 and plan.keep_going:
                 self._summary(plan, results)
@@ -3239,11 +3532,265 @@ class Runner:
         self.line(
             f"\n{plan.title}: {passed} of {len(results)} passed in {format_seconds(total)}", "step"
         )
-        marks = {"ok": "✓", "failed": "✗", "cancelled": "■", "skipped": "·", "running": "…"}
+        marks = {
+            "ok": "✓",
+            "failed": "✗",
+            "timeout": "✗",
+            "cancelled": "■",
+            "skipped": "·",
+            "running": "…",
+        }
         width = max(len(r.label) for r in results)
         for result in results:
             duration = format_seconds(result.seconds) if result.seconds else "not run"
+            if result.state == "timeout":
+                duration += ", timed out"
             self.line(
                 f"  {marks[result.state]} {result.label.ljust(width)}  {duration}",
-                "err" if result.state == "failed" else ("ok" if result.state == "ok" else None),
+                "err"
+                if result.state in ("failed", "timeout")
+                else ("ok" if result.state == "ok" else None),
             )
+
+
+# ---- keeping the window responsive -------------------------------------------------------------
+
+WRAP_STEP: Final = 8
+"""A wrapped label re-wraps only when its width moves by this many pixels or more."""
+WRAP_MARGIN: Final = 8
+"""The wrap length sits this far inside the label's width, so a narrowing smaller than
+:data:`WRAP_STEP` never clips the text."""
+WRAP_MINIMUM: Final = 160
+WRAP_FLIP_SECONDS: Final = 2.0
+
+
+def rewrap_width(current: int | None, width: int, *, minimum: int = WRAP_MINIMUM) -> int | None:
+    """The wrap length a label ``width`` pixels wide should take, or None to keep ``current``: a
+    label not placed yet (one pixel wide) keeps it, and so does one whose width moved by less
+    than :data:`WRAP_STEP`."""
+    if width <= 1:
+        return None
+    target = max(width - WRAP_MARGIN, minimum)
+    if current is not None and abs(target - current) < WRAP_STEP:
+        return None
+    return target
+
+
+class WrapState:
+    """The wrap length of one label, following its width (:func:`rewrap_width`).
+
+    A label whose width depends on its own wrap (its parent sized from what the label asks for)
+    can flip between two wrap lengths for ever: each length makes the label as wide as the
+    other one wants. A re-wrap back to the length it had two re-wraps ago, within
+    :data:`WRAP_FLIP_SECONDS`, is such a flip: the state then keeps the narrower of the two
+    lengths (it never clips) and refuses the wider one until the width settles somewhere new.
+    """
+
+    def __init__(
+        self, minimum: int = WRAP_MINIMUM, clock: Callable[[], float] = time.monotonic
+    ) -> None:
+        self.minimum = minimum
+        self.current: int | None = None
+        self._clock = clock
+        self._previous: tuple[int, float] | None = None
+        self._refused: int | None = None
+
+    def wants(self, width: int) -> bool:
+        """Whether a label of this width would re-wrap (cheap; changes nothing)."""
+        target = rewrap_width(self.current, width, minimum=self.minimum)
+        return target is not None and not self._is_refused(target)
+
+    def _is_refused(self, target: int) -> bool:
+        return self._refused is not None and abs(target - self._refused) < WRAP_STEP
+
+    def decide(self, width: int) -> int | None:
+        """The wrap length to apply now, or None to leave the label as it is."""
+        target = rewrap_width(self.current, width, minimum=self.minimum)
+        if target is None or self._is_refused(target):
+            return None
+        now = self._clock()
+        previous = self._previous
+        flipping = (
+            previous is not None
+            and abs(target - previous[0]) < WRAP_STEP
+            and now - previous[1] < WRAP_FLIP_SECONDS
+        )
+        if flipping and self.current is not None:
+            self._refused = max(target, self.current)
+            if target > self.current:
+                return None
+        else:
+            self._refused = None
+        if self.current is not None:
+            self._previous = (self.current, now)
+        self.current = target
+        return target
+
+
+class SingleFlight:
+    """At most one probe of each kind in flight: :meth:`begin` refuses a kind that is running.
+    Safe to use from any thread."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._running: set[str] = set()
+
+    def begin(self, key: str) -> bool:
+        with self._lock:
+            if key in self._running:
+                return False
+            self._running.add(key)
+            return True
+
+    def end(self, key: str) -> None:
+        with self._lock:
+            self._running.discard(key)
+
+    def running(self) -> frozenset[str]:
+        with self._lock:
+            return frozenset(self._running)
+
+
+HANG_SECONDS: Final = 5.0
+HANG_CPU_SHARE: Final = 0.5
+"""A late beat counts as a hang when the main thread is inside a callback, or when the process
+used at least this share of a CPU since the beat: a loop that only waits (macOS's App Nap delays
+the timers of a hidden window) is not hung."""
+
+
+def describe_stack(frame: FrameType | None) -> str:
+    return "".join(traceback.format_stack(frame)) if frame is not None else "  (no frame)\n"
+
+
+class HangWatch:
+    """Notices when the window's event loop stops running, from a thread that never touches Tk.
+
+    The window calls :meth:`beat` from a Tk timer a few times a second, with what ``after info``
+    lists then (the timers and idle callbacks waiting to run). When a beat is more than
+    ``threshold`` seconds late and the main thread is busy (:meth:`busy`), :meth:`check` (on the
+    watch thread) writes the main thread's Python stack, the other threads' stacks and that list
+    to ``hang-<time>.log`` in ``directory`` (a temporary folder when it cannot be written), once
+    per stall. When the loop runs again, :meth:`recovered` says once where the log is and how
+    long the loop stood still, so the window can show it.
+    """
+
+    def __init__(
+        self,
+        directory: Path,
+        main_ident: int,
+        *,
+        threshold: float = HANG_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
+        wall: Callable[[], float] = time.time,
+        frames: Callable[[], Mapping[int, FrameType]] = sys._current_frames,
+        cpu: Callable[[], float] = time.process_time,
+        context: Callable[[], str] = lambda: "",
+    ) -> None:
+        self.directory = directory
+        self.main_ident = main_ident
+        self.threshold = threshold
+        self._clock = clock
+        self._wall = wall
+        self._frames = frames
+        self._cpu = cpu
+        self._context = context
+        self._lock = threading.Lock()
+        self._last = clock()
+        self._cpu_at_last = cpu()
+        self._pending = ""
+        self._written_for: float | None = None
+        self._stalled: tuple[Path, float] | None = None
+        self._report: tuple[Path, float] | None = None
+
+    def beat(self, pending: str = "") -> None:
+        """The event loop ran: note when, and what it had waiting."""
+        now = self._clock()
+        with self._lock:
+            if self._stalled is not None:
+                path, since = self._stalled
+                self._report = (path, now - since)
+                self._stalled = None
+            self._last = now
+            self._cpu_at_last = self._cpu()
+            self._pending = pending
+
+    def busy(self, late: float, cpu_at_last: float) -> bool:
+        """Whether the main thread is working rather than waiting for events: inside a callback
+        (its innermost Python frame is not tkinter's mainloop), or with the process using at
+        least :data:`HANG_CPU_SHARE` of a CPU since the last beat (Tcl spinning on its own)."""
+        frame = self._frames().get(self.main_ident)
+        if frame is not None and frame.f_code.co_name != "mainloop":
+            return True
+        return (self._cpu() - cpu_at_last) / max(late, 1e-6) >= HANG_CPU_SHARE
+
+    def check(self) -> Path | None:
+        """On the watch thread: write the log of a stall over the threshold, once per stall."""
+        with self._lock:
+            last, pending, cpu_at_last = self._last, self._pending, self._cpu_at_last
+            late = self._clock() - last
+            if self._written_for == last or late <= self.threshold:
+                return None
+        if not self.busy(late, cpu_at_last):
+            return None
+        with self._lock:
+            if self._written_for == last or self._last != last:
+                return None
+            self._written_for = last
+        path = self._write(late, pending)
+        with self._lock:
+            if self._last == last:
+                self._stalled = (path, last)
+            else:
+                self._report = (path, self._last - last)
+        return path
+
+    def recovered(self) -> tuple[Path, float] | None:
+        """Once after a logged stall, when the loop runs again: the log and the seconds lost."""
+        with self._lock:
+            report, self._report = self._report, None
+        return report
+
+    def start(self, interval: float = 0.5) -> threading.Thread:
+        def watch() -> None:
+            while True:
+                time.sleep(interval)
+                with contextlib.suppress(Exception):  # the watch must outlive any one failure
+                    self.check()
+
+        thread = threading.Thread(target=watch, daemon=True, name="hang-watch")
+        thread.start()
+        return thread
+
+    def report_text(self, late: float, pending: str) -> str:
+        frames = self._frames()
+        names = {thread.ident: thread.name for thread in threading.enumerate()}
+        when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self._wall()))
+        lines = [
+            f"The control panel's event loop had not run for {late:.1f} s at {when}.",
+            "",
+            "The main thread's Python stack (most recent call last):",
+            describe_stack(frames.get(self.main_ident)),
+            "Timers and idle callbacks waiting at the last beat (after info):",
+            pending or "  (none)",
+        ]
+        for ident, frame in frames.items():
+            if ident in (self.main_ident, threading.get_ident()):
+                continue
+            lines += ["", f"Thread {names.get(ident, ident)}:", describe_stack(frame)]
+        if context := self._context():
+            lines += ["", context]
+        return "\n".join(lines) + "\n"
+
+    def _write(self, late: float, pending: str) -> Path:
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(self._wall()))
+        text = self.report_text(late, pending)
+        fallback = Path(tempfile.gettempdir()) / "compliancewatch-control-panel"
+        for directory in (self.directory, fallback):
+            path = directory / f"hang-{stamp}.log"
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            except OSError:
+                continue
+            return path
+        return self.directory / f"hang-{stamp}.log"

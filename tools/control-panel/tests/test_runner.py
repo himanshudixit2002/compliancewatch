@@ -274,8 +274,98 @@ def test_cancel_kills_what_of_the_group_outlives_sigterm(
 def test_a_step_that_overruns_its_time_is_stopped(tmp_path: Path) -> None:
     plan = core.Plan("slow", (python("sleep", "import time; time.sleep(30)"),))
     events = run(tmp_path, plan, timeout=1)
-    assert "error: still running after 1 s; stopped" in events.lines()
-    assert not events.end().ok
+    assert (
+        "error: sleep overran its 1 s: SIGTERM to its process group, SIGKILL 5 s later if it is "
+        "still running"
+    ) in events.lines()
+    assert "✗ sleep timed out after 1 s — stopped here" in events.lines()
+    end = events.end()
+    assert not end.ok
+    assert [result.state for result in end.results] == ["timeout"]
+
+
+def test_a_step_s_own_time_limit_stops_its_group_and_the_plan(tmp_path: Path) -> None:
+    started = time.monotonic()
+    plan = core.Plan(
+        "limited",
+        (core.Cmd("spawns", (PY, "-c", SPAWN), timeout=1), python("after", "print('after')")),
+    )
+    events = run(tmp_path, plan)  # the runner itself has no limit; the step has one
+    assert time.monotonic() - started < 10
+    assert [result.state for result in events.end().results] == ["timeout", "skipped"]
+    assert "after" not in events.lines()
+    wait_for(lambda: gone(child_of(events)))
+
+
+def test_a_process_left_holding_the_output_does_not_hold_the_step(tmp_path: Path) -> None:
+    leaves = (
+        "import subprocess, sys\n"
+        "code = 'import os, time; os.setsid(); time.sleep(8)'\n"
+        "subprocess.Popen([sys.executable, '-c', code])\n"
+        "print('started', flush=True)\n"
+    )
+    started = time.monotonic()
+    events = run(tmp_path, core.Plan("leaves", (python("leaves", leaves),)))
+    assert time.monotonic() - started < 6
+    assert events.end().ok
+    assert "started" in events.lines()
+    assert "a process the step started still holds its output; not read" in events.lines()
+
+
+def test_a_call_s_time_limit_ends_its_waits_and_bounds_its_programs(tmp_path: Path) -> None:
+    sleeper = (PY, "-c", "import time; time.sleep(30)")
+
+    def waits(ctx: core.StepContext) -> bool:
+        return ctx.wait(30)
+
+    def runs(ctx: core.StepContext) -> bool:
+        return ctx.run(sleeper)
+
+    started = time.monotonic()
+    events = run(tmp_path, core.Plan("waits", (core.Call("waits", waits, timeout=1),)))
+    assert [result.state for result in events.end().results] == ["timeout"]
+    assert "error: waits overran its 1 s" in events.lines()
+    events = run(tmp_path, core.Plan("runs", (core.Call("runs", runs, (sleeper,), timeout=1),)))
+    assert [result.state for result in events.end().results] == ["timeout"]
+    assert time.monotonic() - started < 10
+
+
+CAPTURE_SPAWN = (
+    "import subprocess, sys, time\n"
+    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+    "open(sys.argv[1], 'w').write(str(child.pid))\n"
+    "time.sleep(60)\n"
+)
+
+
+def test_a_capture_that_overruns_is_killed_with_what_it_started(tmp_path: Path) -> None:
+    marker = tmp_path / "child.pid"
+    started = time.monotonic()
+    code, _, err = core.run_capture(
+        (PY, "-c", CAPTURE_SPAWN, str(marker)), cwd=tmp_path, env=core.program_env(), timeout=1
+    )
+    assert time.monotonic() - started < 5
+    assert code is None
+    assert err.endswith("overran its 1 s; stopped")
+    wait_for(lambda: marker.exists())
+    wait_for(lambda: gone(int(marker.read_text())))
+
+
+def test_a_capture_does_not_wait_for_a_pipe_held_outside_its_group(tmp_path: Path) -> None:
+    # like docker's plugins: a process the program started, in a session of its own, still
+    # holds the program's output after the program is killed
+    escapes = (
+        "import subprocess, sys, time\n"
+        "code = 'import os, time; os.setsid(); time.sleep(8)'\n"
+        "subprocess.Popen([sys.executable, '-c', code])\n"
+        "time.sleep(60)\n"
+    )
+    started = time.monotonic()
+    code, _, _ = core.run_capture(
+        (PY, "-c", escapes), cwd=tmp_path, env=core.program_env(), timeout=1
+    )
+    assert code is None
+    assert time.monotonic() - started < 1 + 2 * core.PIPE_GRACE_SECONDS + 1.5
 
 
 def test_the_registry_records_each_step_s_group_and_forgets_dead_ones(tmp_path: Path) -> None:
