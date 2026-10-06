@@ -100,6 +100,16 @@ the API answers. One failed step does not stop the next.
   ``records``), the contact's card goes out through the sink, and the contact is removed afterwards
   (with any an interrupted check left). A service-to-service route, ``POST /v1/notification/send``,
   answers 404 on the public listener.
+- ``sources``: the pipeline's source manager on the internal listener. Every built-in source is
+  listed with its name, regulator, cadence, status and freshness. The product never fetches a
+  live regulator site, so crawling stays off (``make product`` passes
+  ``CW_PIPELINE_CRAWL_ENABLED=false``) and no source of the product is pointed at recorded
+  fixtures: the step proves the refusal instead. A fetch of a key no source has must be refused
+  as crawling off (with crawling on it would be a 404, and the step stops there without touching
+  a real source); then a fetch of ``cbic_notifications`` must be refused the same way and record
+  no crawl run. The public listener answers the list 404 in header mode. A crawl over recorded
+  fixtures runs in ``tools/demo/tests/unit/test_pipeline_crawl_flow.py`` and the pipeline's
+  crawl workflow tests instead.
 """
 
 import io
@@ -117,7 +127,15 @@ from uuid import UUID, uuid4
 import httpx2
 
 from cw_demo.product.analysts import FIRST_REVIEWER, NOTE, REVIEWERS
-from cw_demo.product.client import GOLDEN, Product, ProductError, as_tenant, ok, problem_slug
+from cw_demo.product.client import (
+    GOLDEN,
+    Product,
+    ProductError,
+    as_tenant,
+    describe,
+    ok,
+    problem_slug,
+)
 from cw_demo.product.evaluate import (
     IDEMPOTENCY_HEADER,
     IST,
@@ -248,6 +266,24 @@ client: GSTR-9, and the quarterly return of the client's state once a rollback w
 LOOKAHEAD: Final = timedelta(days=365)
 """How far ahead the structured layer looks for the next due date of a form."""
 ROUTE_NOT_FOUND: Final = "route-not-found"
+SOURCES: Final = "/v1/pipeline/sources"
+BUILT_IN_SOURCES: Final = (
+    "cbic_circulars",
+    "cbic_notifications",
+    "gstcouncil_press",
+    "gstn_advisories",
+    "mahagst_notifications",
+)
+SOURCE_STATUSES: Final = frozenset({"healthy", "fetching", "failing", "paused"})
+FRESHNESS_STATES: Final = frozenset({"fresh", "late", "stale", "never"})
+CRAWL_DISABLED: Final = "pipeline-crawl-disabled"
+NO_SOURCE: Final = "product_check_no_such_source"
+"""A key no source has: a fetch of it is refused before any lookup while crawling is off, and
+is a 404 that starts nothing while it is on."""
+FETCHED_SOURCE: Final = "cbic_notifications"
+FETCH_ACTOR: Final = UUID("00000000-0000-4000-8000-0000000c0001")
+"""The synthetic admin the check's fetches name."""
+FETCH_REASON: Final = "cw-product check: a fetch must be refused while crawling is off"
 
 SweepRunner = Callable[[Sequence[str]], tuple[int, dict[str, Any]]]
 """Runs ``obligation-sweep --once --json`` with more arguments: its exit code and its report."""
@@ -2073,6 +2109,90 @@ def internal_hidden(context: CheckContext) -> list[str]:
     return [f"POST {SEND} on the public listener: 404 {ROUTE_NOT_FOUND}"]
 
 
+# ---------------------------------------------------------------- sources
+
+
+def _source_problems(item: Mapping[str, Any]) -> list[str]:
+    key = item.get("key", "?")
+    found: list[str] = []
+    if item.get("status") not in SOURCE_STATUSES:
+        found.append(f"{key} has the status {item.get('status')!r}")
+    if item.get("freshness", {}).get("state") not in FRESHNESS_STATES:
+        found.append(f"{key} has no freshness")
+    if not item.get("regulator") or not item.get("name"):
+        found.append(f"{key} has no regulator or name")
+    if not isinstance(item.get("cadence_seconds"), int) or item["cadence_seconds"] < 60:
+        found.append(f"{key} has no cadence")
+    return found
+
+
+def _latest_runs(product: Product) -> dict[str, str | None]:
+    items = ok(product.internal.get(SOURCES))["items"]
+    return {
+        item["key"]: None if item["latest_run"] is None else item["latest_run"]["run_id"]
+        for item in items
+    }
+
+
+def _fetch(product: Product, key: str) -> httpx2.Response:
+    return product.internal.post(
+        f"{SOURCES}/{key}/fetch",
+        json={"actor_id": str(FETCH_ACTOR), "reason": FETCH_REASON},
+        headers=product.write_headers(),
+    )
+
+
+def sources(context: CheckContext) -> list[str]:
+    product = context.product
+
+    def listed() -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = answered(product.internal.get(SOURCES))["items"]
+        missing = sorted(set(BUILT_IN_SOURCES) - {item["key"] for item in items})
+        if missing:
+            raise NotYetError(f"{SOURCES} lacks {', '.join(missing)}: has the worker started?")
+        return items
+
+    items = poll(listed, timeout=context.timeout, interval=context.interval)
+    problems = [problem for item in items for problem in _source_problems(item)]
+    if problems:
+        raise StepFailedError("; ".join(problems))
+    probe = _fetch(product, NO_SOURCE)
+    if probe.status_code == 404:
+        raise StepFailedError(
+            "crawling is on in this product (a fetch of a key no source has got to the source "
+            "lookup): the check never fetches a live regulator site, so it starts no crawl; "
+            "make product runs with CW_PIPELINE_CRAWL_ENABLED=false"
+        )
+    if (probe.status_code, problem_slug(probe)) != (503, CRAWL_DISABLED):
+        raise StepFailedError(
+            f"POST {SOURCES}/{NO_SOURCE}/fetch answered {describe(probe)}, not 503 {CRAWL_DISABLED}"
+        )
+    before = _latest_runs(product)
+    refused = _fetch(product, FETCHED_SOURCE)
+    if refused.status_code == 202:
+        raise StepFailedError(f"a crawl of {FETCHED_SOURCE} started: crawling must stay off")
+    if (refused.status_code, problem_slug(refused)) != (503, CRAWL_DISABLED):
+        raise StepFailedError(
+            f"POST {SOURCES}/{FETCHED_SOURCE}/fetch answered {describe(refused)}, not 503 "
+            f"{CRAWL_DISABLED}"
+        )
+    if _latest_runs(product) != before:
+        raise StepFailedError(f"the refused fetch of {FETCHED_SOURCE} recorded a crawl run")
+    hidden = product.public.get(SOURCES)
+    if (hidden.status_code, problem_slug(hidden)) != (404, ROUTE_NOT_FOUND):
+        raise StepFailedError(
+            f"GET {SOURCES} on the public listener answered {hidden.status_code}, not 404"
+        )
+    standing = ", ".join(f"{item['key']} {item['status']}" for item in items)
+    return [
+        f"sources: {len(items)} listed ({standing})",
+        f"fetch refused while crawling is off: 503 {CRAWL_DISABLED}, no crawl run recorded",
+        f"GET {SOURCES} on the public listener: 404 {ROUTE_NOT_FOUND}",
+        "a crawl over recorded fixtures: not configured in the product, which never fetches; "
+        "test_pipeline_crawl_flow.py runs one",
+    ]
+
+
 # ---------------------------------------------------------------- the command
 
 STEPS: list[Step] = [
@@ -2114,6 +2234,11 @@ STEPS: list[Step] = [
         "public",
         "the public listener lists obligations, answers a question and sends a bulk change card",
         public,
+    ),
+    Step(
+        "sources",
+        "the pipeline lists its sources and refuses a fetch while crawling is off",
+        sources,
     ),
 ]
 """The steps in the order they run. A later package appends its own."""
