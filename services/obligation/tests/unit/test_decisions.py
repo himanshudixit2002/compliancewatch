@@ -21,6 +21,7 @@ from obligation.application.decisions import (
     DecisionOutcome,
     DecisionPlan,
 )
+from obligation.application.materialise import IST
 from obligation.domain.errors import RulebookUnavailableError, RuleVersionNotFoundError
 from obligation.domain.events import ObligationClosed, ObligationCreated
 from obligation.domain.rule_versions import AppliedDecision, Refusal
@@ -265,6 +266,44 @@ def test_a_superseded_version_makes_only_the_periods_before_its_replacement() ->
     assert applied.outcome is DecisionOutcome.MATERIALISED
     assert (applied.refusal, applied.refused_periods) == (Refusal.RULE_SUPERSEDED, ("2026-11",))
     assert [o.period_label for o in store.of_tenant(tenant)] == ["2026-09", "2026-10"]
+
+
+def test_a_version_superseded_on_the_1st_still_makes_the_month_before() -> None:
+    """The engine decides a version superseded within its lookback while it still governs a
+    return due. Superseded from 1 October and decided on 5 October, the guard admits it and it
+    makes September, due 20 October, once, refusing October and November, the newer version's;
+    decided on 25 October it makes nothing."""
+    store, tenant, the_rule = MemoryStore(), TenantId.new(), rule()
+    first, later = BusinessId.new(), BusinessId.new()
+    superseded = ref_of(
+        the_rule, status=RuleVersionStatus.SUPERSEDED, effective_to=date(2026, 10, 1)
+    )
+    apply = ApplyDecision(FakeRuleVersionReader([the_rule], refs=[superseded]), clock=lambda: NOW)
+    on_the_5th = decision(
+        the_rule, tenant=tenant, business=first, decided_at=datetime(2026, 10, 5, 4, 30, tzinfo=UTC)
+    )
+
+    made = apply.run(on_the_5th, store)
+    assert (made.outcome, made.refusal, made.refused_periods) == (
+        DecisionOutcome.MATERIALISED,
+        Refusal.RULE_SUPERSEDED,
+        ("2026-10", "2026-11"),
+    )
+    (september,) = store.of_tenant(tenant)
+    assert (september.period_label, september.business_id) == ("2026-09", first)
+    assert september.due_at is not None
+    assert september.due_at.astimezone(IST).date() == date(2026, 10, 20)
+    assert apply.run(replace(on_the_5th, decision_id=DecisionId.new()), store).created == ()
+
+    on_the_25th = decision(
+        the_rule,
+        tenant=tenant,
+        business=later,
+        decided_at=datetime(2026, 10, 25, 4, 30, tzinfo=UTC),
+    )
+    nothing = apply.run(on_the_25th, store)
+    assert (nothing.created, nothing.refused_periods) == ((), ("2026-10", "2026-11"))
+    assert [o.period_label for o in store.of_tenant(tenant)] == ["2026-09"]
 
 
 def test_a_one_off_due_after_the_replacement_is_refused() -> None:

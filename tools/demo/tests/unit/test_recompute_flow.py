@@ -9,7 +9,9 @@ listener with no transaction open, recompute on), and every applicability.decide
 stored to obligation's handler, each through an ``IdempotentConsumer`` on a SQLite inbox, as the
 relays and Kafka do in the product. The recompute step of ``cw-product check`` then runs against
 it unchanged. A second journey settles a review item through the engine's admin routes, which the
-public listener does not serve outside token mode, and finds the resolution in the audit log.
+public listener does not serve outside token mode, and finds the resolution in the audit log. A
+third makes a business after a rule's version was superseded from the first of the month, and
+finds last month's return, still due, made once, of the older version.
 """
 
 import asyncio
@@ -17,7 +19,7 @@ import hashlib
 import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Final
 from uuid import UUID, uuid4
@@ -34,6 +36,7 @@ from applicability_engine.settings import ApplicabilityEngineSettings
 from cw_demo.product import check
 from cw_demo.product.check import CheckContext
 from cw_demo.product.client import Product, ProductSettings
+from cw_demo.product.evaluate import IST
 from cw_demo.product.tenants import BUSINESS_TENANT
 from cw_mvp.app import CombinedApp
 from cw_mvp.testing import LOCALHOST, running_app
@@ -42,6 +45,8 @@ from domain_kernel.documents import Clause, DocumentType, clause_id_for, documen
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import RuleVersionId, SourceId, TenantId
 from domain_kernel.predicates import specification_from_mapping, specification_to_mapping
+from domain_kernel.recurrence import Recurrence
+from domain_kernel.rules import ObligationTemplate
 from domain_kernel.status import ObligationStatus, RuleVersionStatus
 from obligation import worker as obligation_worker
 from obligation.application.decisions import ApplyDecision
@@ -364,3 +369,117 @@ def test_a_review_item_is_settled_through_the_admin_routes_and_makes_obligations
         assert audited.correlation_id == settled.headers["x-request-id"]
         assert audited.after is not None
         assert audited.after["resolution_decision_id"] == decision_id
+
+
+SUPERSEDED_RULE: Final = "example_superseded_monthly"
+REGULAR: Final = {"attribute": "registration_type", "operator": "eq", "value": "regular"}
+DUE_AT_MONTH_END: Final = Recurrence.monthly(31)
+"""Due on the last day of the next month, so last month's return is still due on any day."""
+
+
+def month_start(day: date, months: int) -> date:
+    """The first day of the month ``months`` after the one ``day`` falls in."""
+    index = day.year * 12 + day.month - 1 + months
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def label(day: date) -> str:
+    return f"{day.year:04d}-{day.month:02d}"
+
+
+def supersede(app: CombinedApp, replaced_on: date) -> tuple[RuleVersionId, RuleVersionId]:
+    """A synthetic monthly rule whose first version, from three months before ``replaced_on``,
+    is superseded from that day by a second; both cite a verified clause."""
+    store = app.services["rulebook"].state.wiring.unit_of_work
+    assert isinstance(store, MemoryKnowledgeStore)
+    content: dict[str, Any] = {
+        "specification": REGULAR,
+        "obligation_template": ObligationTemplate(
+            "File the example monthly return (synthetic)"
+        ).to_mapping(),
+        "recurrence": DUE_AT_MONTH_END.to_mapping(),
+        "published_at": datetime.now(UTC),
+    }
+    _, older = store.add_rule(
+        SUPERSEDED_RULE,
+        title="Example monthly return (synthetic)",
+        status=RuleVersionStatus.SUPERSEDED,
+        effective_from=month_start(replaced_on, -3),
+        effective_to=replaced_on,
+        **content,
+    )
+    newer = store.add_version(
+        SUPERSEDED_RULE,
+        title="Example monthly return (synthetic)",
+        status=RuleVersionStatus.PUBLISHED,
+        effective_from=replaced_on,
+        **content,
+    )
+    for version in (older, newer):
+        cite(store, version)
+    return older, newer
+
+
+def test_a_business_new_after_a_supersession_gets_the_return_still_due_once(
+    tmp_path: Path,
+) -> None:
+    """The older version still governs last month, whose return is due at the end of this
+    month, and nothing but the engine's listing of the versions superseded since a day decides it
+    for a business made now: profile.updated decides both versions, and the obligation service
+    makes last month once, of the older version, and this month and the next of the newer."""
+    tenant = {"x-tenant-id": str(BUSINESS_TENANT.tenant_id)}
+    this_month = month_start(datetime.now(IST).date(), 0)
+    with running_app() as app:
+        older, newer = supersede(app, this_month)
+        pump = Pump(app, tmp_path)
+        public_url = f"http://{LOCALHOST}:{app.settings.mvp_public_port}"
+        with (
+            pump.running(),
+            httpx2.Client(base_url=app.settings.mvp_internal_url, timeout=30.0) as internal,
+            httpx2.Client(base_url=public_url, timeout=30.0) as public,
+        ):
+            created = public.post(
+                "/v1/businesses",
+                json={
+                    "name": "Example Superseded Traders (synthetic)",
+                    "gstin": "29ZZZJD0001Z1Z5",
+                    "answers": [{"key": "registration_type", "value": "regular"}],
+                },
+                headers={**tenant, "Idempotency-Key": str(uuid4())},
+            )
+            assert created.status_code == 201, created.text
+            (registration,) = created.json()["business"]["registrations"]
+
+            def made() -> list[dict[str, Any]]:
+                listed: list[dict[str, Any]] = check.answered(
+                    internal.get(
+                        "/v1/obligation/obligations",
+                        params={"business_id": registration["id"]},
+                        headers=tenant,
+                    )
+                )
+                if len(listed) < 3:
+                    raise check.NotYetError(f"{len(listed)} obligations so far")
+                return listed
+
+            listed = check.poll(made, timeout=30.0, interval=0.1)
+
+        expected = [
+            (label(month_start(this_month, -1)), str(older)),
+            (label(this_month), str(newer)),
+            (label(month_start(this_month, 1)), str(newer)),
+        ]
+        assert sorted((o["period_label"], o["rule_version_id"]) for o in listed) == expected
+        stored = [
+            (o.period_label or "", str(o.rule_version_id))
+            for o in pump.obligations.obligations.values()
+            if str(o.business_id) == registration["id"]
+        ]
+        assert sorted(stored) == expected, "every event handed on: last month's return made once"
+        decisions = pump.decisions_of(registration["id"])
+        assert {d.rule_version_id for d in decisions} == {older, newer}
+        assert {(d.trigger, d.result.value) for d in decisions} == {
+            (Trigger.PROFILE_UPDATED, "applies")
+        }
+        assert Outcome.DEAD not in pump.outcomes
+        assert pump.producer.sent == []
