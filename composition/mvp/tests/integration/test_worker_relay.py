@@ -116,7 +116,7 @@ async def test_the_worker_relays_the_schemas_that_have_an_outbox(
     assert not await has_table(worker_settings(unmigrated, root, internal_url=url), OUTBOX_TABLE)
 
     hosted = await build_registry(root, registry=(profile, unmigrated))
-    assert hosted.loops() == ("profile/outbox-relay",)
+    assert hosted.loops() == ("profile/consumer:profile.erasure", "profile/outbox-relay")
 
     message = write_event(database_url)
     stop = asyncio.Event()
