@@ -257,8 +257,8 @@ def test_the_stored_row_is_masked_but_its_ids_are_not(app: Engine) -> None:
         TENANT_A,
         subject_id=node,
         reason="Example Owner, 9876543210, asked to correct the PAN",
-        before={"pan": "ABCDE1234F", "node_id": node},
-        after={"pan": "ABCDE9876F", "emails": ["owner@example.com"], "node": node},
+        before={"pan": "ABCDE1234F", "node_id": "234567890123"},
+        after={"pan": "ABCDE9876F", "emails": ["owner@example.com"], "set_by": node},
     )
     write_as(app, TENANT_A, entry)
     with app.begin() as connection:
@@ -266,12 +266,8 @@ def test_the_stored_row_is_masked_but_its_ids_are_not(app: Engine) -> None:
         [stored] = [found for found in read_audit_entries(connection) if found.subject_id == node]
     assert stored.entry_id == entry.entry_id
     assert stored.reason == "Example Owner, [PHONE], asked to correct the PAN"
-    assert stored.before == {"pan": "[PAN]", "node_id": node}
-    assert stored.after == {
-        "pan": "[PAN]",
-        "emails": ("[EMAIL]",),
-        "node": "5a3c6a0e-0d7b-4f43-9a4e-[AADHAAR]",
-    }
+    assert stored.before == {"pan": "[PAN]", "node_id": "234567890123"}
+    assert stored.after == {"pan": "[PAN]", "emails": ("[EMAIL]",), "set_by": node}
 
 
 def test_the_drop_removes_the_table_and_its_function_but_keeps_the_schema(admin: Engine) -> None:

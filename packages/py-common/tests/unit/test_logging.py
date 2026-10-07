@@ -92,7 +92,7 @@ def test_a_bound_service_wins_over_the_configured_one() -> None:
 # ---- personal identifiers (every value below is made up) --------------------------------------
 
 UUID_WITH_TWELVE_DIGITS = "5a3c6a0e-0d7b-4f43-9a4e-234567890123"
-"""A UUID whose last group reads as an Aadhaar number: kept whole under an id key only."""
+"""A made-up UUID whose last group, on its own, would read as an Aadhaar number."""
 
 
 def _lines(buffer: io.StringIO) -> list[dict[str, Any]]:
@@ -151,29 +151,43 @@ def test_the_fields_every_line_carries_and_id_keys_are_left_alone() -> None:
     configure_logging(service_name="test-svc", stream=buffer)
     with structlog.contextvars.bound_contextvars(
         correlation_id="234567890123",
-        tenant_id=UUID_WITH_TWELVE_DIGITS,
-        actor=f"user:{UUID_WITH_TWELVE_DIGITS}",
+        tenant_id="9876543210",
+        actor="service:client-9876543210",
         trace_id="9876543210",
         span_id="234567890123",
     ):
         get_logger("py_common.tests").info(
             "stored",
-            node_id=UUID_WITH_TWELVE_DIGITS,
-            obligation_ids=[UUID_WITH_TWELVE_DIGITS, "9876543210"],
-            nested={"business_id": UUID_WITH_TWELVE_DIGITS, "node": UUID_WITH_TWELVE_DIGITS},
-            node=UUID_WITH_TWELVE_DIGITS,
+            node_id="234567890123",
+            obligation_ids=["234567890123", "9876543210"],
+            nested={"business_id": "9876543210", "reference": "9876543210"},
+            reference="234567890123",
         )
     record = _last_record(buffer)
     assert record["correlation_id"] == "234567890123"
-    assert record["tenant_id"] == UUID_WITH_TWELVE_DIGITS
-    assert record["actor"] == f"user:{UUID_WITH_TWELVE_DIGITS}"
+    assert record["tenant_id"] == "9876543210"
+    assert record["actor"] == "service:client-9876543210"
     assert (record["trace_id"], record["span_id"]) == ("9876543210", "234567890123")
-    assert record["node_id"] == UUID_WITH_TWELVE_DIGITS
-    assert record["obligation_ids"] == [UUID_WITH_TWELVE_DIGITS, "9876543210"]
-    # By design: outside an id key, a twelve-digit piece of an id reads as an Aadhaar number.
-    masked = "5a3c6a0e-0d7b-4f43-9a4e-[AADHAAR]"
-    assert record["nested"] == {"business_id": UUID_WITH_TWELVE_DIGITS, "node": masked}
-    assert record["node"] == masked
+    assert record["node_id"] == "234567890123"
+    assert record["obligation_ids"] == ["234567890123", "9876543210"]
+    assert record["nested"] == {"business_id": "9876543210", "reference": "[PHONE]"}
+    assert record["reference"] == "[AADHAAR]"
+
+
+def test_a_uuid_is_kept_whole_wherever_it_stands() -> None:
+    buffer = io.StringIO()
+    configure_logging(service_name="test-svc", stream=buffer)
+    get_logger("py_common.tests").info(
+        f"resolved {UUID_WITH_TWELVE_DIGITS} for owner@example.com",
+        resolved_by=UUID_WITH_TWELVE_DIGITS,
+    )
+    logging.getLogger("uvicorn.access").info(
+        '"GET /v1/nodes/%s HTTP/1.1" 200', UUID_WITH_TWELVE_DIGITS
+    )
+    first, second = _lines(buffer)[-2:]
+    assert first["event"] == f"resolved {UUID_WITH_TWELVE_DIGITS} for [EMAIL]"
+    assert first["resolved_by"] == UUID_WITH_TWELVE_DIGITS
+    assert second["event"] == f'"GET /v1/nodes/{UUID_WITH_TWELVE_DIGITS} HTTP/1.1" 200'
 
 
 def test_ten_and_twelve_digit_numbers_outside_id_keys_are_masked_by_design() -> None:

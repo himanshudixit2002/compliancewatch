@@ -15,16 +15,18 @@ adjacent five-digit amounts in regulator text would otherwise read as a phone nu
 
 This is pattern matching, and it errs towards masking: a ten-digit number that starts with 6 to
 9 reads as a phone number, and a twelve-digit number that starts with 2 to 9 (spaces or hyphens
-after every fourth digit allowed) as an Aadhaar number, whatever it really is: an amount, a
-reference, or a piece of a UUID. That is why ``mask_pii_in`` leaves the value of a key ending in
-``_id`` or ``_ids`` alone.
+after every fourth digit allowed) as an Aadhaar number, whatever it really is, such as an amount or
+a reference. A digit run inside a UUID can read the same way (about one random UUID in seventy has
+one), so ``mask_pii_in`` keeps every UUID written in its canonical form whole, and leaves the value
+of a key ending in ``_id`` or ``_ids`` alone. ``mask_pii`` applies the patterns alone, as the
+gateway always has.
 """
 
 import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final
+from typing import Final, overload
 
 from domain_kernel._validation import require_instance
 
@@ -51,6 +53,14 @@ ID_KEY_SUFFIXES: Final[tuple[str, ...]] = ("_id", "_ids")
 """A key with one of these endings holds our own ids (``tenant_id``, ``obligation_ids``), whose
 value ``mask_pii_in`` never masks."""
 
+_UUID: Final = re.compile(
+    r"(?<![0-9A-Za-z-])"
+    r"([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})"
+    r"(?![0-9A-Za-z-])",
+    re.ASCII,
+)
+"""A UUID in its canonical form, standing on its own: none of the five kinds has its shape, so
+``mask_pii_in`` masks only the text around it."""
 _DIGIT: Final = re.compile(r"[0-9]", re.ASCII)
 """Every pattern but the email needs an ASCII digit, and the email needs an ``@``: text with
 neither is returned as it is, and the email pattern, whose cost grows with the square of a long
@@ -86,8 +96,13 @@ def mask_pii(text: str) -> MaskResult:
     return MaskResult(text, counts)
 
 
+@overload
+def mask_pii_in(value: str, *, keep: Collection[str] = ...) -> str: ...
+@overload
+def mask_pii_in(value: object, *, keep: Collection[str] = ...) -> object: ...
 def mask_pii_in(value: object, *, keep: Collection[str] = frozenset()) -> object:
-    """A copy of the JSON-like ``value`` with every text in it masked by ``mask_pii``.
+    """A copy of the JSON-like ``value`` with every text in it masked by ``mask_pii``, except
+    that a UUID in its canonical form is kept whole.
 
     Mappings, lists and tuples are walked at any depth: a mapping comes back as a dict, a list as
     a list and a tuple as a tuple, so nothing the caller holds is changed. Text is masked and
@@ -95,7 +110,7 @@ def mask_pii_in(value: object, *, keep: Collection[str] = frozenset()) -> object
     that ends in ``_id`` or ``_ids``, or that ``keep`` names, is returned as it is.
     """
     if isinstance(value, str):
-        return mask_pii(value).text
+        return _masked_text(value)
     if isinstance(value, Mapping):
         return {
             key: item if _kept(key, keep) else mask_pii_in(item, keep=keep)
@@ -106,6 +121,14 @@ def mask_pii_in(value: object, *, keep: Collection[str] = frozenset()) -> object
     if isinstance(value, tuple):
         return tuple(mask_pii_in(item, keep=keep) for item in value)
     return value
+
+
+def _masked_text(text: str) -> str:
+    """``text`` masked around the UUIDs in it, each of which is kept whole."""
+    pieces = _UUID.split(text)
+    return "".join(
+        piece if index % 2 else mask_pii(piece).text for index, piece in enumerate(pieces)
+    )
 
 
 def _kept(key: object, keep: Collection[str]) -> bool:

@@ -16,12 +16,13 @@ at any depth (inside dicts, lists and tuples) and, in JSON output, in the except
 and the locals of its frames. Masking runs last in the shared chain, so it covers structlog events
 and stdlib records alike. It leaves alone the fields every line carries (``timestamp``,
 ``level``, ``logger``, ``service``, ``correlation_id``, ``tenant_id``, ``actor``, ``trace_id``,
-``span_id``) and the value of any key ending in ``_id`` or ``_ids``, at any depth. By design,
-any other ten-digit number from 6 to 9, and any twelve-digit one from 2 to 9, is masked as a
-phone or an Aadhaar number, whatever it is: an amount, a reference, or a piece of a UUID in a URL
-or in the event text. Log an id under a key ending in ``_id`` to keep it whole. Only text is
-masked: a number logged as an int stays as it is. The console renderer (``CW_LOG_JSON=false``,
-for a developer's terminal) formats a traceback after the chain, so its traceback is not masked.
+``span_id``), the value of any key ending in ``_id`` or ``_ids``, at any depth, and every UUID
+in its canonical form, wherever it stands (a request path, the event text). By design, any other
+ten-digit number from 6 to 9, and any twelve-digit one from 2 to 9, is masked as a phone or an
+Aadhaar number, whatever it is: an amount or a reference. Log such an id under a key ending in
+``_id`` to keep it whole. Only text is masked: a number logged as an int stays as it is. The
+console renderer (``CW_LOG_JSON=false``, for a developer's terminal) formats a traceback after
+the chain, so its traceback is not masked.
 """
 
 import logging

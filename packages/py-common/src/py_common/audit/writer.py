@@ -10,11 +10,12 @@ and with it the transaction.
 The row is masked for personal identifiers before it is written (``domain_kernel.pii``, the
 patterns the log lines are masked with): GSTINs, PANs, Aadhaar numbers, phone numbers and email
 addresses in the reason, and in every text of ``before`` and ``after`` at any depth, become
-``[GSTIN]``, ``[PAN]``, ``[AADHAAR]``, ``[PHONE]`` and ``[EMAIL]``. The value of a key ending in
-``_id`` or ``_ids`` is left alone, as on a log line, since a twelve-digit piece of an id would
-read as an Aadhaar number. The action, the subject and its id, the actor and the correlation id
-are never masked: they say who did what to which record. The memory twin (``MemoryAuditSink``)
-keeps the entry as the use case built it.
+``[GSTIN]``, ``[PAN]``, ``[AADHAAR]``, ``[PHONE]`` and ``[EMAIL]``. As on a log line, a UUID in
+its canonical form is kept whole wherever it stands (a reviewer's user id under ``resolved_by``,
+say), and the value of a key ending in ``_id`` or ``_ids`` is left alone, since a twelve-digit
+piece of an id would read as an Aadhaar number. The action, the subject and its id, the actor and
+the correlation id are never masked: they say who did what to which record. The memory twin
+(``MemoryAuditSink``) keeps the entry as the use case built it.
 """
 
 from collections.abc import Mapping
@@ -23,7 +24,7 @@ from typing import Any
 from sqlalchemy import Connection, insert
 
 from domain_kernel.audit import AuditEntry
-from domain_kernel.pii import mask_pii, mask_pii_in
+from domain_kernel.pii import mask_pii_in
 from py_common.audit.schema import audit_event
 
 
@@ -40,7 +41,7 @@ def audit_row(entry: AuditEntry) -> dict[str, Any]:
         "actor_kind": entry.actor.kind.value,
         "actor_id": entry.actor.id,
         "actor_label": entry.actor.label,
-        "reason": mask_pii(entry.reason).text,
+        "reason": mask_pii_in(entry.reason),
         "before": _plain(mask_pii_in(entry.before)),
         "after": _plain(mask_pii_in(entry.after)),
         "correlation_id": entry.correlation_id,

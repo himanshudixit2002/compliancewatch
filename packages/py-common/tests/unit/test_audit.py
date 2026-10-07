@@ -225,7 +225,7 @@ def test_an_entry_read_from_a_zoneless_time_is_utc() -> None:
 
 
 NODE = "5a3c6a0e-0d7b-4f43-9a4e-234567890123"
-"""A made-up id whose last group reads as an Aadhaar number."""
+"""A made-up UUID whose last group, on its own, would read as an Aadhaar number."""
 
 
 def test_the_reason_and_the_state_are_masked_but_ids_and_the_actor_are_not() -> None:
@@ -233,24 +233,31 @@ def test_the_reason_and_the_state_are_masked_but_ids_and_the_actor_are_not() -> 
         subject_type="profile_node",
         subject_id=NODE,
         actor=AuditActor.service("client-9876543210"),
-        reason="Example Owner asked on 9876543210 to correct PAN ABCDE1234F",
+        reason=f"Example Owner asked on 9876543210 to correct PAN ABCDE1234F of {NODE}",
         before={
             "contact": {"email": "owner@example.com", "phones": ["+91 98765 43210"]},
-            "node_id": NODE,
+            "node_id": "234567890123",
         },
-        after={"gstin": "29ABCDE1234F1Z5", "registration_ids": [NODE], "note": NODE, "count": 2},
+        after={
+            "gstin": "29ABCDE1234F1Z5",
+            "registration_ids": ["234567890123"],
+            "reference": "234567890123",
+            "resolved_by": NODE,
+            "count": 2,
+        },
         correlation_id="234567890123",
     )
     row = audit_row(entry)
-    assert row["reason"] == "Example Owner asked on [PHONE] to correct PAN [PAN]"
+    assert row["reason"] == f"Example Owner asked on [PHONE] to correct PAN [PAN] of {NODE}"
     assert row["before"] == {
         "contact": {"email": "[EMAIL]", "phones": ["[PHONE]"]},
-        "node_id": NODE,
+        "node_id": "234567890123",
     }
     assert row["after"] == {
         "gstin": "[GSTIN]",
-        "registration_ids": [NODE],
-        "note": "5a3c6a0e-0d7b-4f43-9a4e-[AADHAAR]",
+        "registration_ids": ["234567890123"],
+        "reference": "[AADHAAR]",
+        "resolved_by": NODE,
         "count": 2,
     }
     assert (row["subject_id"], row["actor_id"], row["actor_label"], row["correlation_id"]) == (
@@ -259,7 +266,7 @@ def test_the_reason_and_the_state_are_masked_but_ids_and_the_actor_are_not() -> 
         "service:client-9876543210",
         "234567890123",
     )
-    assert entry.reason == "Example Owner asked on 9876543210 to correct PAN ABCDE1234F"
+    assert entry.reason.startswith("Example Owner asked on 9876543210 to correct PAN ABCDE")
     assert entry.before is not None
     assert entry.before["contact"] == {
         "email": "owner@example.com",

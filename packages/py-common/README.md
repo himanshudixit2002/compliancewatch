@@ -257,12 +257,13 @@ setting to turn it off: GSTINs, PANs, Aadhaar numbers, phone numbers and email a
 llm-gateway masks prompts with). It masks the event text, every other text value at any depth
 (inside dicts, lists and tuples) and, in JSON output, the exception's message and the locals of
 its frames. What the caller logged is copied, never changed. It leaves alone the fields listed
-above and the value of any key ending in `_id` or `_ids`, at any depth.
+above, the value of any key ending in `_id` or `_ids` at any depth, and every UUID in its
+canonical form wherever it stands (a request path, the event text), whose digit runs would
+otherwise read as Aadhaar or phone numbers in about one random UUID in seventy.
 
 By design, any other ten-digit number that starts with 6 to 9, and any twelve-digit number that
-starts with 2 to 9, is masked as a phone or an Aadhaar number, whatever it is: an amount, a
-reference, or a piece of a UUID in a request path or in the event text. Log an id under a key
-ending in `_id` and a number as an int to keep it whole. The console renderer formats a traceback
+starts with 2 to 9, is masked as a phone or an Aadhaar number, whatever it is: an amount or a
+reference. Log such an id under a key ending in `_id`, and a number as an int, to keep it whole. The console renderer formats a traceback
 itself, after the chain, so a traceback printed with `CW_LOG_JSON=false` is not masked.
 
 ## Telemetry
@@ -417,9 +418,10 @@ what the table refuses.
 - `AuditWriter` masks personal identifiers before the row is written, with the patterns the log
   lines are masked with (`domain_kernel.pii`): GSTINs, PANs, Aadhaar numbers, phone numbers and
   email addresses in the reason, and in every text of `before` and `after` at any depth, become
-  `[GSTIN]`, `[PAN]`, `[AADHAAR]`, `[PHONE]` and `[EMAIL]`. The value of a key ending in `_id` or
-  `_ids` is left alone, as on a log line. The action, the subject and its id, the actor and the
-  correlation id are never masked. A use case still keeps personal data out of an entry where it
+  `[GSTIN]`, `[PAN]`, `[AADHAAR]`, `[PHONE]` and `[EMAIL]`. As on a log line, a UUID in its
+  canonical form is kept whole wherever it stands (a reviewer's user id under `resolved_by`), and
+  the value of a key ending in `_id` or `_ids` is left alone. The action, the subject and its id,
+  the actor and the correlation id are never masked. A use case still keeps personal data out of an entry where it
   can: masking is pattern matching, and it masks any ten-digit number from 6 to 9 and any
   twelve-digit one from 2 to 9 outside an id key. The memory twin keeps the entry as the use case
   built it.

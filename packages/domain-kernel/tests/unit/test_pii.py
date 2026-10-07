@@ -4,6 +4,7 @@ Every identifier here is made up: none belongs to a real person or business.
 """
 
 from types import MappingProxyType
+from uuid import UUID
 
 import pytest
 from hypothesis import given
@@ -167,22 +168,42 @@ def test_every_text_at_any_depth_is_masked() -> None:
 
 
 def test_id_keys_and_kept_keys_are_left_alone_at_any_depth() -> None:
-    node = "5a3c6a0e-0d7b-4f43-9a4e-234567890123"
     value = {
-        "node_id": node,
-        "obligation_ids": [node, "9876543210"],
-        "node": node,
-        "inner": {"tenant_id": "234567890123", "reference": "234567890123"},
+        "node_id": "234567890123",
+        "obligation_ids": ["234567890123", "9876543210"],
+        "reference": "234567890123",
+        "inner": {"tenant_id": "9876543210", "phone": "9876543210"},
         "stamp": "9876543210",
     }
     masked = mask_pii_in(value, keep={"stamp"})
     assert masked == {
-        "node_id": node,
-        "obligation_ids": [node, "9876543210"],
-        "node": "5a3c6a0e-0d7b-4f43-9a4e-[AADHAAR]",
-        "inner": {"tenant_id": "234567890123", "reference": "[AADHAAR]"},
+        "node_id": "234567890123",
+        "obligation_ids": ["234567890123", "9876543210"],
+        "reference": "[AADHAAR]",
+        "inner": {"tenant_id": "9876543210", "phone": "[PHONE]"},
         "stamp": "9876543210",
     }
+
+
+NODE = "5a3c6a0e-0d7b-4f43-9a4e-234567890123"
+"""A made-up UUID whose last group reads as an Aadhaar number to ``mask_pii``."""
+
+
+def test_a_uuid_is_kept_whole_wherever_it_stands() -> None:
+    assert mask_pii(NODE).text == "5a3c6a0e-0d7b-4f43-9a4e-[AADHAAR]", "the patterns alone"
+    value = {
+        "resolved_by": NODE,
+        "path": f"/v1/nodes/{NODE.upper()}/attributes",
+        "actor": f"user:{NODE}",
+        "note": f"{NODE}: owner@example.com, 9876543210 and 234567890123",
+    }
+    assert mask_pii_in(value) == {
+        "resolved_by": NODE,
+        "path": f"/v1/nodes/{NODE.upper()}/attributes",
+        "actor": f"user:{NODE}",
+        "note": f"{NODE}: [EMAIL], [PHONE] and [AADHAAR]",
+    }
+    assert mask_pii_in(f"x{NODE}") == "x5a3c6a0e-0d7b-4f43-9a4e-[AADHAAR]", "not on its own"
 
 
 def test_keys_are_never_masked_and_the_input_is_never_changed() -> None:
@@ -247,6 +268,7 @@ _LEAVES = st.one_of(
     _IDENTIFIERS["pan"],
     _IDENTIFIERS["phone"],
     _IDENTIFIERS["email"],
+    st.uuids().map(str),
     st.integers(),
     st.booleans(),
     st.none(),
@@ -273,6 +295,13 @@ def _leaves(
     return [(path, value)]
 
 
+def _is_uuid(text: str) -> bool:
+    try:
+        return str(UUID(text)) == text.lower()
+    except ValueError:
+        return False
+
+
 def _shape(value: object) -> object:
     """``value`` with every text emptied: the containers, their types, keys and other leaves."""
     if isinstance(value, dict):
@@ -290,7 +319,7 @@ def test_a_value_keeps_its_shape_and_each_text_outside_id_keys_is_masked(value: 
     assert _shape(masked) == _shape(value)
     for (path, leaf), (_, out) in zip(_leaves(value), _leaves(masked), strict=True):
         under_an_id = any(isinstance(key, str) and key.endswith(("_id", "_ids")) for key in path)
-        if isinstance(leaf, str) and not under_an_id:
+        if isinstance(leaf, str) and not under_an_id and not _is_uuid(leaf):
             assert out == mask_pii(leaf).text
         else:
             assert out == leaf
