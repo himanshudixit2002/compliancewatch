@@ -37,6 +37,7 @@ from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.predicates import Applicability
 from py_common.audit import MemoryAuditSink
+from py_common.erasure import MemoryErasedTenants
 
 
 def _require_tenant(owner: TenantId, tenant_id: TenantId, what: str) -> None:
@@ -462,6 +463,7 @@ class MemoryStore:
         self.audit: list[AuditEntry] = []
         self.fanout_runs: dict[RuleVersionId, FanOutRun] = {}
         self.fanout_hold: list[FanOutHold] = []
+        self.erased = MemoryErasedTenants()
         self.lock = threading.Lock()
         self.fanouts = MemoryFanOutUnits(self)
         """The units over the fan-out runs and the hold."""

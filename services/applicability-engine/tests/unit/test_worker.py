@@ -9,6 +9,7 @@ is covered by tests/integration/test_recompute_schema.py.
 import json
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -33,7 +34,8 @@ from applicability_engine.testing import (
     rule_version,
 )
 from applicability_engine.wiring import Readers
-from domain_kernel.ids import BusinessId, RuleVersionId, TenantId
+from domain_kernel.erasure import TenantDataErased
+from domain_kernel.ids import BusinessId, EventId, RuleVersionId, TenantId
 from domain_kernel.ontology import AttributeLevel
 from py_common.outbox import (
     ConsumerConfig,
@@ -101,7 +103,9 @@ class Setup:
         self.consumer = IdempotentConsumer(
             group_id=worker.GROUP_ID,
             store=read_first_store(inbox, worker.GROUP_ID),
-            handler=worker.profile_handler(recompute, units_on=self.units_on),
+            handler=worker.profile_handler(
+                recompute, units_on=self.units_on, erased_on=lambda _: self.store.erased
+            ),
             producer=self.producer,
             config=ConsumerConfig(max_handler_attempts=2, retry_backoff_seconds=0),
         )
@@ -138,6 +142,24 @@ async def test_a_profile_change_is_recomputed_once(inbox: Engine) -> None:
     assert str(decided.causation_id.value) == json.loads(event.value)["event_id"]
     assert NODE in setup.store.directory
     assert setup.producer.sent == []
+
+
+async def test_a_late_profile_change_of_an_erased_tenant_writes_nothing(inbox: Engine) -> None:
+    setup = Setup(inbox)
+    setup.store.erased.mark(
+        TenantDataErased(
+            tenant_id=TENANT,
+            service="applicability-engine",
+            deletion_event_id=EventId.new(),
+            erased_at=datetime(2000, 1, 3, tzinfo=UTC),
+        )
+    )
+    event = record()
+    assert await setup.consumer.process(event) is Outcome.PROCESSED, "marked processed"
+    assert await setup.consumer.process(event) is Outcome.SKIPPED
+    assert setup.decided() == []
+    assert setup.store.directory == {}, "no directory entry comes back"
+    assert setup.store.decisions == {}
 
 
 async def test_the_reads_happen_with_no_transaction_open(

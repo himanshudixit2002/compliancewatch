@@ -6,14 +6,17 @@
 of ``applicability_decision`` lets its DELETE through. It deletes the tenant's review items
 (they reference the decisions), its decisions, its entries in ``business_directory`` (a routing
 directory every session may read and only the tenant's own setting may write: these are the
-tenant's rows), its idempotency keys and its published or dead events in ``outbox_event``.
+tenant's rows), its idempotency keys and its published or dead events in ``outbox_event``, and
+writes the erased marker with its answer (``erased_tenant``).
 
 It keeps ``fanout_run`` and ``fanout_hold``: rule-level runs of a published version over every
 tenant, with counters only and no tenant reference.
 
-A profile.updated or rule event still in flight when the engine erased the tenant can write a
-directory entry or a decision again; the staging drill checks for it, and
-``identity-admin erasure resend`` erases again (docs/runbooks/data-requests.md).
+From then on its routes answer the tenant 410, and its consumer of profile.updated writes no
+directory entry or decision for it (``py_common.erasure.skip_erased_write``, under the erasure's
+lock, so one that started before the erasure commits first and is erased with the rest). A
+fan-out batch that read the directory before the erasure can still write a decision after it;
+identity's second pass of the deletion request erases that (docs/runbooks/data-requests.md).
 
 ``MemoryEngineEraser`` does the same to a ``MemoryStore`` (tests and the in-process journey).
 """
@@ -26,12 +29,14 @@ from domain_kernel.erasure import Erased, TenantDataErased, retained
 from domain_kernel.ids import TenantId
 from py_common.audit import MemoryAuditSink
 from py_common.erasure import (
+    ERASED_RETAINED,
     OUTBOX_RETAINED,
     PostgresTenantEraser,
     begin_erasure,
     delete_rows,
     prune_outbox,
 )
+from py_common.idempotency import MemoryIdempotencyStore
 
 TABLES: Final = (
     "review_item",
@@ -49,6 +54,7 @@ RETAINED: Final = (
         ),
         ("fanout_hold", "the global hold of the fan-outs, no tenant reference"),
     ),
+    ERASED_RETAINED,
     OUTBOX_RETAINED,
 )
 
@@ -64,8 +70,11 @@ class PostgresEngineEraser(PostgresTenantEraser):
 class MemoryEngineEraser:
     """The eraser on a memory store, under its lock."""
 
-    def __init__(self, store: MemoryStore) -> None:
+    def __init__(
+        self, store: MemoryStore, *, idempotency: MemoryIdempotencyStore | None = None
+    ) -> None:
         self._store = store
+        self._idempotency = idempotency
 
     def erase(self, tenant_id: TenantId) -> Erased:
         store = self._store
@@ -84,7 +93,7 @@ class MemoryEngineEraser:
                 "review_item": len(reviews),
                 "applicability_decision": len(decisions),
                 "business_directory": len(entries),
-                "idempotency_key": 0,
+                "idempotency_key": _forget(self._idempotency, tenant_id),
                 "outbox_event": 0,
             },
             RETAINED,
@@ -94,6 +103,21 @@ class MemoryEngineEraser:
         store = self._store
         with store.lock:
             store.events.append(event)
-            sink = MemoryAuditSink(store.audit, tenant_id=event.tenant_id)
-            sink.write(entry)
-            sink.commit()
+            store.erased.mark(event)
+            _audit(store, entry)
+
+    def write_audit(self, entry: AuditEntry) -> None:
+        with self._store.lock:
+            _audit(self._store, entry)
+
+
+def _audit(store: MemoryStore, entry: AuditEntry) -> None:
+    sink = MemoryAuditSink(store.audit, tenant_id=entry.tenant_id)
+    sink.write(entry)
+    sink.commit()
+
+
+def _forget(idempotency: MemoryIdempotencyStore | None, tenant_id: TenantId) -> int:
+    """The tenant's idempotency keys dropped from the service's memory store of them, when the
+    eraser was given it."""
+    return 0 if idempotency is None else idempotency.forget(tenant_id)

@@ -6,6 +6,7 @@ the worker runs it; tests/integration/test_erasure_postgres.py runs the Postgres
 import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import UUID
 
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
@@ -18,22 +19,24 @@ from applicability_engine.infrastructure.erasure import MemoryEngineEraser
 from applicability_engine.infrastructure.memory import MemoryStore
 from domain_kernel.confidence import CERTAIN, ZERO
 from domain_kernel.erasure import TenantDataErased
-from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId
+from domain_kernel.ids import BusinessId, DecisionId, EventId, RuleVersionId, TenantId
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.operators import Operator
 from domain_kernel.predicates import Applicability, Predicate, PredicateResult
 from py_common.erasure import erasure_component
+from py_common.erasure_testing import FakeIdentity
 from py_common.events import EventMessage, encode
 from py_common.outbox import (
     ConsumerConfig,
     IdempotentConsumer,
     InboundRecord,
     Outcome,
-    SyncProcessedStore,
     processed_event,
+    read_first_store,
 )
 from py_common.outbox.testing import FakeProducer
 
+SENT = EventId(UUID("a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"))
 START = datetime(2000, 4, 1, 9, 0, tzinfo=UTC)
 
 REGULAR = Predicate("registration_type", Operator.EQ, "regular")
@@ -75,7 +78,7 @@ def keep(factory: UnitOfWorkFactory, tenant: TenantId, count: int) -> None:
 def deletion(tenant: TenantId) -> InboundRecord:
     message = EventMessage.model_validate(
         {
-            "event_id": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d",
+            "event_id": str(SENT),
             "topic": "tenant.deletion.requested",
             "schema_version": "1.0.1",
             "occurred_at": START.isoformat(),
@@ -95,18 +98,26 @@ def deletion(tenant: TenantId) -> InboundRecord:
     )
 
 
-def consume(store: MemoryStore, tenant: TenantId, tmp_path: Path, *, on: bool) -> Outcome:
+def consume(
+    store: MemoryStore,
+    tenant: TenantId,
+    tmp_path: Path,
+    *,
+    on: bool,
+    identity: FakeIdentity | None = None,
+) -> Outcome:
     component = erasure_component(
         "applicability-engine",
         lambda _: MemoryEngineEraser(store),
         enabled=lambda _: on,
+        verifier=identity or FakeIdentity(SENT),
         clock=lambda: START,
     )
     engine = create_engine(f"sqlite:///{tmp_path / 'inbox.sqlite'}", poolclass=NullPool)
     processed_event.create(engine, checkfirst=True)
     consumer = IdempotentConsumer(
         group_id=component.group_id,
-        store=SyncProcessedStore(engine, group_id=component.group_id),
+        store=read_first_store(engine, component.group_id),
         handler=component.handler,
         producer=FakeProducer(),
         config=ConsumerConfig(max_handler_attempts=1, retry_backoff_seconds=0),
@@ -135,9 +146,26 @@ def test_with_the_flag_on_the_tenant_s_decisions_go(tmp_path: Path) -> None:
     assert (answer.service, answer.tenant_id) == ("applicability-engine", tenant)
     assert (answer.tables["applicability_decision"], answer.tables["review_item"]) == (4, 2)
     assert answer.tables["business_directory"] == 4
-    assert [item.table for item in answer.retained] == ["fanout_run", "fanout_hold", "outbox_event"]
+    assert [item.table for item in answer.retained] == [
+        "fanout_run",
+        "fanout_hold",
+        "erased_tenant",
+        "outbox_event",
+    ]
     (entry,) = [e for e in store.audit if e.action == "tenant.erased"]
     assert entry.actor.label == "system:applicability-engine"
+    assert store.erased.is_erased(tenant)
+
+
+def test_an_event_identity_did_not_send_erases_nothing(tmp_path: Path) -> None:
+    store = MemoryStore()
+    tenant = TenantId.new()
+    keep(store, tenant, 2)
+    before = rows_of(store, tenant)
+    identity = FakeIdentity(SENT, status="active")
+    assert consume(store, tenant, tmp_path, on=True, identity=identity) is Outcome.REFUSED
+    assert rows_of(store, tenant) == before
+    assert not store.erased.is_erased(tenant)
 
 
 def test_with_the_flag_off_it_only_logs(tmp_path: Path) -> None:

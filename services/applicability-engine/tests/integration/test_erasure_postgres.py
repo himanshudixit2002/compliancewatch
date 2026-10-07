@@ -1,6 +1,7 @@
 """The engine's erasure on Postgres, as its own role cw_applicability under forced row-level
 security: the append-only decisions go only inside an erasure, the tenant's review items,
-decisions and directory entries go and another tenant's stay. Needs Docker."""
+decisions and directory entries go and another tenant's stay, and the catalog shows every table
+of the schema with a tenant column erased or retained with a reason. Needs Docker."""
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -35,6 +36,7 @@ from domain_kernel.predicates import Applicability, Predicate, PredicateResult
 from py_common.audit.testing import install_audit_table
 from py_common.db_roles import apply_roles, as_role
 from py_common.erasure import count_rows, erase_and_record
+from py_common.erasure_testing import assert_nothing_left
 
 pytestmark = pytest.mark.integration
 
@@ -80,7 +82,7 @@ def keep(factory: UnitOfWorkFactory, tenant: TenantId, count: int) -> None:
 
 
 @pytest.fixture(scope="module")
-def engine() -> Iterator[Engine]:
+def database_url() -> Iterator[str]:
     with PostgresContainer(IMAGE, driver="psycopg") as postgres:
         base_url = postgres.get_connection_url()
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
@@ -94,9 +96,14 @@ def engine() -> Iterator[Engine]:
             env.setenv("CW_DB_SCHEMA", SCHEMA)
             command.upgrade(Config(str(SERVICE_DIR / "alembic.ini")), "head")
         apply_roles(url)
-        engine = create_engine(as_role(url, SCHEMA))
-        yield engine
-        engine.dispose()
+        yield url
+
+
+@pytest.fixture(scope="module")
+def engine(database_url: str) -> Iterator[Engine]:
+    engine = create_engine(as_role(database_url, SCHEMA))
+    yield engine
+    engine.dispose()
 
 
 def counts(engine: Engine, tenant: TenantId) -> dict[str, int]:
@@ -117,7 +124,7 @@ def refused_outside_an_erasure(engine: Engine, tenant: TenantId) -> bool:
     return False
 
 
-def test_the_tenant_s_decisions_go_and_another_s_stay(engine: Engine) -> None:
+def test_the_tenant_s_decisions_go_and_another_s_stay(engine: Engine, database_url: str) -> None:
     factory = PostgresUnitOfWorkFactory(engine)
     tenant, other = TenantId.new(), TenantId.new()
     keep(factory, tenant, 4)
@@ -139,3 +146,8 @@ def test_the_tenant_s_decisions_go_and_another_s_stay(engine: Engine) -> None:
     assert {table: answer.tables[table] for table in TABLES} == before
     assert counts(engine, tenant) == dict.fromkeys(TABLES, 0)
     assert counts(engine, other) == theirs, "another tenant's rows stay"
+    owner = create_engine(database_url)
+    with owner.connect() as connection:
+        retained = assert_nothing_left(connection, SCHEMA, tenant, answer)
+    owner.dispose()
+    assert retained == {"erased_tenant.tenant_id": 1, "outbox_event.tenant_id": 1}

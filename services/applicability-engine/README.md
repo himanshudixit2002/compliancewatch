@@ -275,16 +275,23 @@ over indexed profile attributes that lets a fan-out skip businesses a version ca
 
 ## Erasure
 
-The worker's consumer of tenant.deletion.requested, group `applicability-engine.erasure`, only
-logs `erasure.off` while the flag `identity.tenant_erasure` (`CW_TENANT_ERASURE_ENABLED`, per tenant with `CW_TENANT_ERASURE_TENANTS`; off by default) is off for the tenant. On, under the tenant's setting and
-`app.erasure` (the only way past the decisions' append-only guard), it deletes the tenant's
-`review_item`, `applicability_decision` and `business_directory` rows, its idempotency keys and
-its published events, and answers tenant.data.erased (service applicability-engine) with the row
-counts and a `tenant.erased` audit row, in the transaction that marks the event processed
-(`infrastructure.erasure`). It keeps `fanout_run` and `fanout_hold`, rule-level counters with no
-tenant. A profile.updated or rule event still in flight can write a directory entry or a decision
-after the erasure; the staging drill checks for it and `identity-admin erasure resend` erases
-again.
+The worker's consumer of tenant.deletion.requested, group `applicability-engine.erasure`, only logs
+`erasure.off` while the flag `identity.tenant_erasure` (`CW_TENANT_ERASURE_ENABLED`, per tenant with
+`CW_TENANT_ERASURE_TENANTS`; off by default) is off for the tenant. On, it first checks the event
+with identity (`GET /v1/identity/erasures/{tenant_id}` at `CW_IDENTITY_URL`, the service client with
+`erasure:verify`, 5 s): one identity did not send for the tenant's open deletion request, or one for
+the internal tenant, erases nothing and is refused (a `tenant.erasure_refused` audit row,
+dead-lettered at once); identity unreachable is retried, then dead-lettered. Otherwise, under the
+tenant's setting and `app.erasure` (the only way past the decisions' append-only guard), it deletes
+the tenant's `review_item`, `applicability_decision` and `business_directory` rows, its idempotency
+keys and its published events, and answers tenant.data.erased (service applicability-engine) with
+the row counts, a `tenant.erased` audit row and its erased marker (`erased_tenant`, migration 0005),
+in the transaction that marks the event processed (`infrastructure.erasure`). It keeps `fanout_run`
+and `fanout_hold`, rule-level counters with no tenant. From then on every route answers the tenant
+410 `tenant-erased`, and the consumer of profile.updated writes no directory entry or decision for
+it (outcome `erased_tenant`, under the erasure's lock). A fan-out batch that read the directory
+before the erasure can still write a decision after it; identity's second pass of the deletion
+request erases it.
 
 ## Layout
 
