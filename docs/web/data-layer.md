@@ -574,7 +574,8 @@ stats (`GET .../review/stats`), each document a task rests on (`GET /v1/rulebook
 cached under its tag) with the pipeline's record of its stored file (`GET
 /v1/pipeline/documents/{document_id}`, a 404 meaning none is stored), and for a candidate's draft
 form the document's open relation candidates (`GET .../review/relations?document_id=`), the rules
-(cached under `rulebook:rules`) and each rule's versions; the rule's versions also give the previous
+(cached under `rulebook:rules`) and the versions a relation may point at (only the rules the
+candidates name, every rule's when one names none); the rule's versions also give the previous
 version the diff compares with (D-066). Everything but the documents and the rules is read fresh,
 over `rulebookClient` and `pipelineClient` with no tenant header and no token. The DTOs map through
 `entities/rule-version/mappers.ts`, which holds the review task shapes beside the versions they
@@ -582,16 +583,22 @@ review.
 
 The steps (claim, open the seed tasks, draft from a candidate, edit the draft, decide) are server
 actions that run the page's gate again, check the task id and the form's shape (`model/forms.ts`:
-only the content fields that changed from the values the form was rendered with are sent, D-064)
-and, for an approval, the role (`admin.review.approve`, D-061), then go through `rulebookWrites(ctx)`
-in `server/api/rulebook-write.ts` like the entity and relation decisions: the role,
+only the content fields that changed from the values the form was rendered with are sent, D-064,
+and a condition is bounded in depth and size before any walk), for an approval the role
+(`admin.review.approve`, D-061), for a decision that moves the version `web.publish_actions` too
+(`rulebookWorkflowAccess`), and read again what they check against: a draft's relation
+candidates against the ones the form offers, an edit's fields against the draft as it is now
+(D-058's check, D-064). Then they go through `rulebookWrites(ctx)` in
+`server/api/rulebook-write.ts` like the entity and relation decisions: the role,
 `web.admin_rulebook_writes` and the review token, with the session's user as `actor_id`. The routes
 take no Idempotency-Key and each is safe to send again: claiming one's own task changes nothing, a
 second draft is refused as drafted already, an edit with the same values records nothing, and a
 second decision is refused as decided. On a refusal that a task moved (decided, or claimed by
-someone else), the action reads the task again and says who decided it (as information) or who holds
-it, and renders the pages again; the other refusals are said plainly (`model/refusals.ts`, an
-incomplete draft with every problem the rulebook listed). On success the queue, the task and the
+someone else), the action reads the task again and says who decided it (as information for a
+decision, as an error that nothing was saved for a claim, a draft or an edit) or who holds it, and
+renders the pages again; the other refusals are said plainly (`model/refusals.ts`: an incomplete
+draft or a content `invariant-violation` with every problem the rulebook listed, a relation's
+refusal on the row it names). On success the queue, the task and the
 stats render again (`afterMutation({ paths })`). The client panels use `useWriteAction` and
 `WriteOutcome` from `shared/ui/write-outcome.tsx`, so a request whose answer never came is kept
 whole for "Try again".
