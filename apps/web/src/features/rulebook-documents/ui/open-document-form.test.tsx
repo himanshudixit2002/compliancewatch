@@ -48,7 +48,7 @@ describe("DocumentsOpenView", () => {
     const input = screen.getByLabelText(/Document id or sha256/) as HTMLInputElement;
     expect(input.value).toBe("example-id");
     expect(input.getAttribute("aria-invalid")).toBe("true");
-    expect(document.activeElement).toBe(input);
+    await waitFor(() => expect(document.activeElement).toBe(input));
   });
 
   it("shows the service's problem with its reference and focuses it", async () => {

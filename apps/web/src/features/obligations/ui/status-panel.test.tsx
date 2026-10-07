@@ -48,7 +48,7 @@ describe("StatusPanel", () => {
     await user.click(screen.getByRole("button", { name: "Start work" }));
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Example done."));
     await user.click(screen.getByRole("button", { name: "Mark as done" }));
-    const dialog = screen.getByRole("dialog", { name: "Mark this obligation as done?" });
+    const dialog = await screen.findByRole("dialog", { name: "Mark this obligation as done?" });
     expect(dialog.textContent).toContain("“Example return 1” closes as done");
     await user.click(within(dialog).getByRole("button", { name: "Mark as done" }));
     await waitFor(() => expect(sent).toHaveLength(2));
@@ -65,7 +65,7 @@ describe("StatusPanel", () => {
     renderPanel(action);
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Waive" }));
-    const dialog = screen.getByRole("dialog", { name: "Waive this obligation?" });
+    const dialog = await screen.findByRole("dialog", { name: "Waive this obligation?" });
     const confirm = within(dialog).getByRole("button", { name: "Waive" });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
     await user.type(within(dialog).getByRole("textbox"), "Example reason for waiving");

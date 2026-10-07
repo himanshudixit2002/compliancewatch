@@ -431,7 +431,7 @@ describe("DecidePanel", () => {
     await user.click(screen.getByRole("checkbox", { name: /Mark it high impact/ }));
     await user.type(screen.getByLabelText(/^Note \(optional\)/), "Example note");
     await user.click(screen.getByRole("button", { name: "Approve" }));
-    const dialog = screen.getByRole("dialog", { name: "Approve this version?" });
+    const dialog = await screen.findByRole("dialog", { name: "Approve this version?" });
     expect(dialog.textContent).toContain("tags the version high impact");
     await user.click(within(dialog).getByRole("button", { name: "Approve" }));
     await waitFor(() =>

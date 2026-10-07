@@ -68,7 +68,9 @@ describe("AnswerForm", () => {
       screen.getByRole("radio", { name: "Example second kind" }).getAttribute("aria-checked"),
     ).toBe("true");
     expect(screen.getByText("Check the answer marked below.")).toBeDefined();
-    expect(document.activeElement?.getAttribute("data-slot")).toBe("answer-errors");
+    await waitFor(() =>
+      expect(document.activeElement?.getAttribute("data-slot")).toBe("answer-errors"),
+    );
     expect(await runAxe(container)).toHaveNoViolations();
   });
 

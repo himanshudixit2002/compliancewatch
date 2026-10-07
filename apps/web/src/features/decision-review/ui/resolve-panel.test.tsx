@@ -20,7 +20,7 @@ describe("ResolvePanel", () => {
     await user.type(screen.getByLabelText(/^Note/), "  Example reason it does not apply  ");
     expect((submit as HTMLButtonElement).disabled).toBe(false);
     await user.click(submit);
-    const dialog = screen.getByRole("dialog", {
+    const dialog = await screen.findByRole("dialog", {
       name: "Settle the review item of example_rule v2?",
     });
     expect(dialog.textContent).toContain("closes the obligations it made");
@@ -49,15 +49,15 @@ describe("ResolvePanel", () => {
     await user.click(screen.getByRole("radio", { name: "Dismissed, with no decision" }));
     await user.type(screen.getByLabelText(/^Note/), "Example note");
     await user.click(screen.getByRole("button", { name: "Settle the item" }));
-    expect(screen.getByRole("dialog").textContent).toContain("nothing is appended");
+    expect((await screen.findByRole("dialog")).textContent).toContain("nothing is appended");
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Settle the item" }),
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Settle the item" }),
     );
     await waitFor(() => expect(screen.getByText("Example already resolved")).toBeDefined());
     expect(screen.getByText("req-example-5")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Settle the item" }));
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Settle the item" }),
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Settle the item" }),
     );
     await waitFor(() => expect(screen.getByText("Example note refused")).toBeDefined());
   });

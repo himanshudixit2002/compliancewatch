@@ -70,7 +70,7 @@ describe("DecisionPanel", () => {
     await user.click(screen.getByRole("radio", { name: "Make the entity" }));
     await user.type(screen.getByLabelText(/^Note/), "Example note");
     await user.click(submit);
-    const dialog = screen.getByRole("dialog", { name: "Decide EXAMPLE-1?" });
+    const dialog = await screen.findByRole("dialog", { name: "Decide EXAMPLE-1?" });
     expect(dialog.textContent).toContain('makes the canonical Form "EXAMPLE-1"');
     expect(dialog.textContent).toContain("the included mentions (1)");
     await user.click(within(dialog).getByRole("button", { name: "Record the decision" }));
@@ -107,7 +107,9 @@ describe("DecisionPanel", () => {
     await user.type(screen.getByLabelText(/^Entity id/), EXAMPLE_ENTITY_ID);
     await user.click(submit);
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Record the decision" }),
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Record the decision",
+      }),
     );
     await waitFor(() => expect(screen.getByText("Example entity refused")).toBeDefined());
     expect(sent[0]).toEqual({
@@ -120,7 +122,7 @@ describe("DecisionPanel", () => {
     expect((submit as HTMLButtonElement).disabled).toBe(true);
     await user.selectOptions(screen.getByLabelText(/^Why reject/), "wrong_type");
     await user.click(submit);
-    const dialog = screen.getByRole("dialog");
+    const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain("as rejected (Wrong entity type)");
     await user.click(within(dialog).getByRole("button", { name: "Record the decision" }));
     await waitFor(() => expect(sent).toHaveLength(2));
@@ -141,7 +143,9 @@ describe("DecisionPanel", () => {
     await user.click(screen.getByRole("radio", { name: "Make the entity" }));
     await user.click(screen.getByRole("button", { name: "Record the decision" }));
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Record the decision" }),
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Record the decision",
+      }),
     );
     await waitFor(() => expect(screen.getByText("Example group closed")).toBeDefined());
     expect(screen.getByText("req-example-9")).toBeDefined();
@@ -158,7 +162,9 @@ describe("DecisionPanel", () => {
     await user.click(screen.getByRole("radio", { name: "Make the entity" }));
     await user.click(screen.getByRole("button", { name: "Record the decision" }));
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Record the decision" }),
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Record the decision",
+      }),
     );
     await waitFor(() =>
       expect(screen.getByRole("status").textContent).toBe("Example already decided."),
@@ -203,7 +209,7 @@ describe("DecisionPanel", () => {
     await user.click(screen.getByRole("radio", { name: "Reject the mentions" }));
     await user.selectOptions(screen.getByLabelText(/^Why reject/), "out_of_scope");
     await user.click(screen.getByRole("button", { name: "Record the decision" }));
-    expect(screen.getByRole("dialog").textContent).toContain(
+    expect((await screen.findByRole("dialog")).textContent).toContain(
       "closes every open mention of the group, 200 or more (the first 200 listed) as rejected",
     );
     await user.click(screen.getByRole("button", { name: "Cancel" }));
