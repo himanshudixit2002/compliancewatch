@@ -282,10 +282,10 @@ test.describe("the review workbench's steps", () => {
         decision: "reject",
       });
       expect((await versionNow(version.rule_version_id)).status).toBe("draft");
-      expect(await undecidedTaskOf(version.rule_version_id)).toBeNull();
       await checkA11y();
 
-      // The rejected seed draft gets its next task when the seed tasks are opened.
+      // A rejection opens no task itself: the draft's next one comes from "Open seed tasks",
+      // pressed here (or by another spec meanwhile, which is why no "none waits" is checked).
       await openSeedTasks(page);
       const next = await undecidedTaskOf(version.rule_version_id);
       expect(next?.task_id).not.toBe(task.task_id);
