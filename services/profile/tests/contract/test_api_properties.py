@@ -44,6 +44,7 @@ OPERATIONS = frozenset(
         "GET /v1/businesses/{business_id}/onboarding",
         "POST /v1/businesses/{business_id}/registrations",
         "GET /v1/ontology",
+        "GET /v1/profile/data-export",
         "POST /v1/profile/entities",
         "POST /v1/profile/financial-year-confirmations",
         "POST /v1/profile/locations",

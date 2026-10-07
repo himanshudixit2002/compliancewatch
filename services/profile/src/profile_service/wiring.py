@@ -18,6 +18,7 @@ from profile_service.application.businesses import (
     ReadBusiness,
     UpdateBusiness,
 )
+from profile_service.application.export import ExportTenantData
 from profile_service.application.onboarding import OnboardingChecklist
 from profile_service.application.prefill import PrefillFromGstin
 from profile_service.application.registration import RegisterNodes
@@ -46,3 +47,4 @@ class Wiring:
     list_businesses: ListBusinesses
     add_registration: AddRegistration
     onboarding: OnboardingChecklist
+    export_data: ExportTenantData

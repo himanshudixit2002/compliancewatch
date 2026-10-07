@@ -2,13 +2,22 @@
 
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
+from datetime import datetime
 from typing import Protocol
 
 from domain_kernel.audit import AuditSink
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, TenantId
 from domain_kernel.ontology import AttributeLevel
-from profile_service.domain.model import ProfileNode, ReviewTask
+from profile_service.domain.model import NodeAttribute, ProfileNode, ProfileVersion, ReviewTask
+
+type NodeCursor = tuple[datetime, BusinessId]
+"""Where a page of nodes or review tasks ends: (created_at, id) of the last one."""
+type AttributeCursor = tuple[datetime, BusinessId, str, str]
+"""Where a page of attribute values ends: (updated_at, node_id, key, financial year label or
+'') of the last one."""
+type VersionCursor = tuple[datetime, BusinessId, int]
+"""Where a page of history rows ends: (at, node_id, version) of the last one."""
 
 
 class ProfileRepository(Protocol):
@@ -54,6 +63,27 @@ class ProfileRepository(Protocol):
     def add_review_task(self, task: ReviewTask) -> None: ...
 
     def open_review_tasks(self, node_id: BusinessId | None = None) -> Sequence[ReviewTask]: ...
+
+    # The data export reads every row of the tenant a page at a time, each section in a stable
+    # order (oldest first, then the key), starting after the cursor of the previous page.
+
+    def export_nodes(self, after: NodeCursor | None, limit: int) -> Sequence[ProfileNode]:
+        """At most ``limit`` nodes of every level in the order of (created_at, id)."""
+        ...
+
+    def export_attributes(
+        self, after: AttributeCursor | None, limit: int
+    ) -> Sequence[NodeAttribute]:
+        """At most ``limit`` stored values in the order of (updated_at, node_id, key, year)."""
+        ...
+
+    def export_versions(self, after: VersionCursor | None, limit: int) -> Sequence[ProfileVersion]:
+        """At most ``limit`` history rows in the order of (at, node_id, version)."""
+        ...
+
+    def export_review_tasks(self, after: NodeCursor | None, limit: int) -> Sequence[ReviewTask]:
+        """At most ``limit`` review tasks, open or closed, in the order of (created_at, id)."""
+        ...
 
 
 class EventSink(Protocol):

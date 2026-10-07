@@ -427,3 +427,61 @@ class ReviewTask:
             self.reason,
             None if self.as_of_fy is None else self.as_of_fy.label,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class NodeAttribute:
+    """One stored attribute value with the node it belongs to, as a data export lists it."""
+
+    node_id: BusinessId
+    record: AttributeRecord
+
+    def __post_init__(self) -> None:
+        require_instance(self.node_id, BusinessId, "node_id")
+        require_instance(self.record, AttributeRecord, "record")
+        if self.record.updated_at is None:
+            raise InvariantViolationError(f"{self.record.key}: an exported value has updated_at")
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileVersion:
+    """The attributes of a node after one save, kept as history. ``attributes`` maps
+    ``key@fy`` (an empty year for a value not per year) to each known value."""
+
+    node_id: BusinessId
+    tenant_id: TenantId
+    version: int
+    changed_attributes: tuple[str, ...]
+    attributes: Mapping[str, object]
+    source: str
+    changed_by: UserId | None
+    at: datetime
+
+    def __post_init__(self) -> None:
+        require_instance(self.node_id, BusinessId, "node_id")
+        require_instance(self.tenant_id, TenantId, "tenant_id")
+        require_int(self.version, "version", minimum=1)
+        require_text(self.source, "source")
+        if self.changed_by is not None:
+            require_instance(self.changed_by, UserId, "changed_by")
+        require_aware(self.at, "at")
+        values = dict(require_mapping(self.attributes, "attributes"))
+        object.__setattr__(self, "attributes", MappingProxyType(values))
+
+    @classmethod
+    def of(cls, node: ProfileNode) -> Self:
+        """The history row a save of ``node`` writes: its known values, at its update time."""
+        return cls(
+            node_id=node.id,
+            tenant_id=node.tenant_id,
+            version=node.version,
+            changed_attributes=(),
+            attributes={
+                f"{key}@{fy or ''}": record.value
+                for (key, fy), record in node.attributes.items()
+                if record.state is ValueState.KNOWN
+            },
+            source="user_input",
+            changed_by=None,
+            at=node.updated_at,
+        )

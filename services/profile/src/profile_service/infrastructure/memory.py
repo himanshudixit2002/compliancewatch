@@ -2,14 +2,20 @@
 before Postgres. A unit's audit entries (``MemoryAuditSink``) join the store's ``audit`` log
 when it commits, and are dropped with the rest of the unit when it fails.
 
+A save keeps the node's history row (``versions``) as the Postgres store does, for the data
+export.
+
 A unit of work works on a copy of the store and replaces it when the block exits cleanly. Units
 run one at a time (a store-level lock held from open to commit or rollback), so two overlapping
 requests cannot both start from the same copy and lose each other's writes.
 """
 
 import threading
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
+from dataclasses import replace
+from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from domain_kernel.audit import AuditEntry
@@ -17,8 +23,13 @@ from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, TenantId
 from domain_kernel.ontology import AttributeLevel
 from profile_service.domain.errors import ProfileNodeNotFoundError
-from profile_service.domain.model import ProfileNode, ReviewTask
-from profile_service.domain.repository import UnitOfWork
+from profile_service.domain.model import NodeAttribute, ProfileNode, ProfileVersion, ReviewTask
+from profile_service.domain.repository import (
+    AttributeCursor,
+    NodeCursor,
+    UnitOfWork,
+    VersionCursor,
+)
 from py_common.audit import MemoryAuditSink
 
 
@@ -28,9 +39,11 @@ class MemoryProfileRepository:
         nodes: dict[BusinessId, ProfileNode],
         tasks: dict[BusinessId, ReviewTask],
         tenant_id: TenantId,
+        versions: dict[tuple[BusinessId, int], ProfileVersion] | None = None,
     ) -> None:
         self._nodes = nodes
         self._tasks = tasks
+        self._versions = {} if versions is None else versions
         self._tenant = tenant_id
 
     def _mine(self, node: ProfileNode | None) -> ProfileNode | None:
@@ -116,6 +129,7 @@ class MemoryProfileRepository:
 
     def save(self, node: ProfileNode) -> None:
         self._nodes[node.id] = node
+        self._versions[(node.id, node.version)] = ProfileVersion.of(node)
 
     def add_review_task(self, task: ReviewTask) -> None:
         self._tasks[task.id] = task
@@ -128,6 +142,56 @@ class MemoryProfileRepository:
             and task.open
             and (node_id is None or task.node_id == node_id)
         ]
+
+    def export_nodes(self, after: NodeCursor | None, limit: int) -> Sequence[ProfileNode]:
+        mine = (node for node in self._nodes.values() if node.tenant_id == self._tenant)
+        return _page(mine, lambda node: (node.created_at, node.id.value), after, limit)
+
+    def export_attributes(
+        self, after: AttributeCursor | None, limit: int
+    ) -> Sequence[NodeAttribute]:
+        values = (
+            NodeAttribute(
+                node.id,
+                record
+                if record.updated_at is not None
+                else replace(record, updated_at=node.updated_at),
+            )
+            for node in self._nodes.values()
+            if node.tenant_id == self._tenant
+            for record in node.attributes.values()
+        )
+        return _page(values, _attribute_position, after, limit)
+
+    def export_versions(self, after: VersionCursor | None, limit: int) -> Sequence[ProfileVersion]:
+        mine = (row for row in self._versions.values() if row.tenant_id == self._tenant)
+        return _page(mine, lambda row: (row.at, row.node_id.value, row.version), after, limit)
+
+    def export_review_tasks(self, after: NodeCursor | None, limit: int) -> Sequence[ReviewTask]:
+        mine = (task for task in self._tasks.values() if task.tenant_id == self._tenant)
+        return _page(mine, lambda task: (task.created_at, task.id.value), after, limit)
+
+
+def _page[T](
+    items: Iterable[T],
+    position: Callable[[T], tuple[Any, ...]],
+    after: tuple[Any, ...] | None,
+    limit: int,
+) -> list[T]:
+    """At most ``limit`` of ``items`` in the order of ``position``, after the cursor ``after``
+    (whose ids are compared by their UUIDs, as Postgres compares them)."""
+    ordered = sorted(items, key=position)
+    if after is not None:
+        start = tuple(part.value if isinstance(part, BusinessId) else part for part in after)
+        ordered = [item for item in ordered if position(item) > start]
+    return ordered[:limit]
+
+
+def _attribute_position(value: NodeAttribute) -> tuple[datetime, UUID, str, str]:
+    record = value.record
+    assert record.updated_at is not None
+    fy = "" if record.as_of_fy is None else record.as_of_fy.label
+    return (record.updated_at, value.node_id.value, record.key, fy)
 
 
 def _position(node: ProfileNode) -> tuple[str, UUID]:
@@ -166,7 +230,8 @@ class MemoryUnitOfWork:
         self._store = store
         self._nodes: dict[BusinessId, ProfileNode] = dict(store.nodes)
         self._tasks: dict[BusinessId, ReviewTask] = dict(store.tasks)
-        self.profiles = MemoryProfileRepository(self._nodes, self._tasks, tenant_id)
+        self._versions: dict[tuple[BusinessId, int], ProfileVersion] = dict(store.versions)
+        self.profiles = MemoryProfileRepository(self._nodes, self._tasks, tenant_id, self._versions)
         self.events = MemorySink(store.events)
         self.eval_cases = MemoryEvalRecorder(store.eval_cases)
         self.audit = MemoryAuditSink(store.audit, tenant_id=tenant_id)
@@ -176,6 +241,8 @@ class MemoryUnitOfWork:
         self._store.nodes.update(self._nodes)
         self._store.tasks.clear()
         self._store.tasks.update(self._tasks)
+        self._store.versions.clear()
+        self._store.versions.update(self._versions)
         self.events.commit()
         self.eval_cases.commit()
         self.audit.commit()
@@ -185,6 +252,7 @@ class MemoryStore:
     def __init__(self) -> None:
         self.nodes: dict[BusinessId, ProfileNode] = {}
         self.tasks: dict[BusinessId, ReviewTask] = {}
+        self.versions: dict[tuple[BusinessId, int], ProfileVersion] = {}
         self.events: list[DomainEvent] = []
         self.eval_cases: list[Mapping[str, object]] = []
         self.audit: list[AuditEntry] = []

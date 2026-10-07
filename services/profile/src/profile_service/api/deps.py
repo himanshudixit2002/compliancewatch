@@ -19,7 +19,7 @@ from uuid import UUID
 
 from fastapi import Depends, Request
 
-from domain_kernel.access import TENANT_MEMBER_ROLES, Principal, Role, Scope
+from domain_kernel.access import TENANT_ADMIN_ROLES, TENANT_MEMBER_ROLES, Principal, Role, Scope
 from domain_kernel.events import utc_now
 from domain_kernel.ids import TenantId, UserId
 from profile_service.domain.errors import TenantRequiredError
@@ -30,6 +30,10 @@ member = require_roles(TENANT_MEMBER_ROLES, scopes={Scope.TENANT_ACT})
 """A user with a tenant member role or a service with tenant:act; the anonymous principal of
 ``header`` mode passes."""
 tenant_of_request = tenant_scope(True, TenantRequiredError)
+exporter = require_roles(TENANT_ADMIN_ROLES, scopes=[Scope.DATA_EXPORT])
+"""Who may read the tenant's data export: an owner or ca_admin of the tenant, or a service with
+data:export (identity, assembling the export) naming the tenant; the anonymous principal of
+``header`` mode passes."""
 
 
 async def member_tenant(
@@ -60,6 +64,9 @@ PUBLIC_ROUTE: Final[dict[str, Any]] = {"x-roles": list(PUBLIC_ROLES)}
 """``openapi_extra`` of a public route every member of the tenant may call."""
 
 Tenant = Annotated[TenantId, Depends(member_tenant)]
+RequiredTenant = Annotated[TenantId, Depends(tenant_of_request)]
+"""The request's tenant with no member check: for a route whose own dependency decides who may
+call it."""
 Caller = CurrentPrincipal
 Wired = Annotated[Wiring, Depends(wiring)]
 
