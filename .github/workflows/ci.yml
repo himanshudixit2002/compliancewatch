@@ -743,9 +743,26 @@ jobs:
       - name: Start the services (memory stores, no container)
         run: make web-stack
       # The playwright package has no install script (strictDepBuilds stays satisfied); the
-      # browser and its system libraries are fetched here, explicitly.
+      # browser and its system libraries are fetched here, explicitly. The browser download is
+      # the slow part (one run reached the job's limit while still fetching it), so it is kept
+      # in the cache under the Playwright version apps/web pins. A hit still installs the system
+      # libraries, which the cache does not carry; a miss installs both, as before.
+      - name: Playwright version
+        id: playwright
+        run: |
+          version=$(node -p "require('./apps/web/package.json').devDependencies['@playwright/test']")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        id: playwright-browsers
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
       - name: Chromium for Playwright
+        if: steps.playwright-browsers.outputs.cache-hit != 'true'
         run: pnpm --filter web e2e:install
+      - name: System libraries for the cached Chromium
+        if: steps.playwright-browsers.outputs.cache-hit == 'true'
+        run: pnpm --filter web exec playwright install-deps chromium
       # Built with no CW_WEB_* variable, like the typescript job: the pages read the
       # environment per request, never at build time.
       - name: Build the web app
