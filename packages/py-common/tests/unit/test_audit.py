@@ -224,6 +224,62 @@ def test_an_entry_read_from_a_zoneless_time_is_utc() -> None:
     assert entry_from_row(row) == entry
 
 
+NODE = "5a3c6a0e-0d7b-4f43-9a4e-234567890123"
+"""A made-up id whose last group reads as an Aadhaar number."""
+
+
+def test_the_reason_and_the_state_are_masked_but_ids_and_the_actor_are_not() -> None:
+    entry = audit_entry(
+        subject_type="profile_node",
+        subject_id=NODE,
+        actor=AuditActor.service("client-9876543210"),
+        reason="Example Owner asked on 9876543210 to correct PAN ABCDE1234F",
+        before={
+            "contact": {"email": "owner@example.com", "phones": ["+91 98765 43210"]},
+            "node_id": NODE,
+        },
+        after={"gstin": "29ABCDE1234F1Z5", "registration_ids": [NODE], "note": NODE, "count": 2},
+        correlation_id="234567890123",
+    )
+    row = audit_row(entry)
+    assert row["reason"] == "Example Owner asked on [PHONE] to correct PAN [PAN]"
+    assert row["before"] == {
+        "contact": {"email": "[EMAIL]", "phones": ["[PHONE]"]},
+        "node_id": NODE,
+    }
+    assert row["after"] == {
+        "gstin": "[GSTIN]",
+        "registration_ids": [NODE],
+        "note": "5a3c6a0e-0d7b-4f43-9a4e-[AADHAAR]",
+        "count": 2,
+    }
+    assert (row["subject_id"], row["actor_id"], row["actor_label"], row["correlation_id"]) == (
+        NODE,
+        "client-9876543210",
+        "service:client-9876543210",
+        "234567890123",
+    )
+    assert entry.reason == "Example Owner asked on 9876543210 to correct PAN ABCDE1234F"
+    assert entry.before is not None
+    assert entry.before["contact"] == {
+        "email": "owner@example.com",
+        "phones": ("+91 98765 43210",),
+    }, "the entry itself is unchanged"
+
+
+def test_the_row_written_is_the_masked_one(engine: Engine) -> None:
+    entry = audit_entry(
+        reason="Mail from owner@example.com", before=None, after={"pan": "ABCDE1234F"}
+    )
+    with engine.begin() as connection:
+        AuditWriter().write(connection, entry)
+    with engine.connect() as connection:
+        [stored] = read_audit_entries(connection)
+    assert stored.entry_id == entry.entry_id
+    assert stored.reason == "Mail from [EMAIL]"
+    assert stored.after == {"pan": "[PAN]"}
+
+
 # ------------------------------------------------------------------------- the table's helpers
 
 

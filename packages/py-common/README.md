@@ -414,9 +414,18 @@ what the table refuses.
   reads the rows of no tenant yet.
 - `py_common.audit.testing` has `audit_entry(...)`, `install_audit_table(connection)` for a
   service's integration tests and `read_audit_entries(connection)`.
-Not built yet: the read route `GET /v1/identity/audit`, the NDJSON export, masking personal data,
-pseudonymising rows on a tenant's erasure, the call sites in every service and database roles that
-may only insert.
+- `AuditWriter` masks personal identifiers before the row is written, with the patterns the log
+  lines are masked with (`domain_kernel.pii`): GSTINs, PANs, Aadhaar numbers, phone numbers and
+  email addresses in the reason, and in every text of `before` and `after` at any depth, become
+  `[GSTIN]`, `[PAN]`, `[AADHAAR]`, `[PHONE]` and `[EMAIL]`. The value of a key ending in `_id` or
+  `_ids` is left alone, as on a log line. The action, the subject and its id, the actor and the
+  correlation id are never masked. A use case still keeps personal data out of an entry where it
+  can: masking is pattern matching, and it masks any ten-digit number from 6 to 9 and any
+  twelve-digit one from 2 to 9 outside an id key. The memory twin keeps the entry as the use case
+  built it.
+
+Not built yet: the read route `GET /v1/identity/audit`, the NDJSON export, pseudonymising rows on
+a tenant's erasure, the call sites in every service and database roles that may only insert.
 
 ## Worker processes
 

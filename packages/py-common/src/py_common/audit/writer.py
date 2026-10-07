@@ -6,6 +6,15 @@ back with the action. ``PostgresAuditSink`` is the kernel's ``AuditSink`` on one
 a unit of work exposes as ``audit``. Row-level security admits a row of the tenant the
 transaction's ``app.tenant_id`` names, or a row of no tenant; any other row fails the statement,
 and with it the transaction.
+
+The row is masked for personal identifiers before it is written (``domain_kernel.pii``, the
+patterns the log lines are masked with): GSTINs, PANs, Aadhaar numbers, phone numbers and email
+addresses in the reason, and in every text of ``before`` and ``after`` at any depth, become
+``[GSTIN]``, ``[PAN]``, ``[AADHAAR]``, ``[PHONE]`` and ``[EMAIL]``. The value of a key ending in
+``_id`` or ``_ids`` is left alone, as on a log line, since a twelve-digit piece of an id would
+read as an Aadhaar number. The action, the subject and its id, the actor and the correlation id
+are never masked: they say who did what to which record. The memory twin (``MemoryAuditSink``)
+keeps the entry as the use case built it.
 """
 
 from collections.abc import Mapping
@@ -14,11 +23,13 @@ from typing import Any
 from sqlalchemy import Connection, insert
 
 from domain_kernel.audit import AuditEntry
+from domain_kernel.pii import mask_pii, mask_pii_in
 from py_common.audit.schema import audit_event
 
 
 def audit_row(entry: AuditEntry) -> dict[str, Any]:
-    """The column values of ``entry``'s row; ``before`` and ``after`` as plain JSON."""
+    """The column values of ``entry``'s row: the reason, ``before`` and ``after`` masked for
+    personal identifiers, and ``before`` and ``after`` as plain JSON."""
     return {
         "id": entry.entry_id.value,
         "occurred_at": entry.occurred_at,
@@ -29,9 +40,9 @@ def audit_row(entry: AuditEntry) -> dict[str, Any]:
         "actor_kind": entry.actor.kind.value,
         "actor_id": entry.actor.id,
         "actor_label": entry.actor.label,
-        "reason": entry.reason,
-        "before": _plain(entry.before),
-        "after": _plain(entry.after),
+        "reason": mask_pii(entry.reason).text,
+        "before": _plain(mask_pii_in(entry.before)),
+        "after": _plain(mask_pii_in(entry.after)),
         "correlation_id": entry.correlation_id,
     }
 
