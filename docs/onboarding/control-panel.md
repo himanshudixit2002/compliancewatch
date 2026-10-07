@@ -124,7 +124,27 @@ the database); a database prompt in Terminal.
 
 **Checks.** The quick checks (`make check`, what CI runs before Docker) and every CI check in
 order; the product check (every step, or one) and the product's web journey; each check on its
-own; and the result of each check you ran since the window opened.
+own, Click through the web app among them; and the result of each check you ran since the
+window opened.
+
+**Click through the web app** runs the web app's browser tests, where a robot browser clicks
+through every page and checks each one for accessibility problems, on a separate, temporary
+copy of the services with throwaway data. The copy starts, the tests run against it, then it
+stops: when the tests pass or fail, and when you cancel. Your own data and running app are never
+touched: the copy uses none of your services, databases or ports, and the web app you have open
+keeps running while the check builds its own. The robot browser is Playwright's own Chromium
+when it is downloaded on this Mac; when it is not, the check uses your installed Google Chrome,
+and with neither it stops at the start and offers Download the test browser (about 150 MB,
+asked first). It takes 10 to 15 minutes. Its steps:
+
+1. Check that the test copy can start: no other web check or browser tests running in the
+   checkout, a browser for the tests, and its ports (9401 to 9410 for the services, 3410 for the
+   web app) free. What an earlier check left running is stopped first.
+2. Start a separate test copy of the services.
+3. Wait until the test copy answers.
+4. Add made-up demo data to the test copy.
+5. Build the web app and click through it in a robot browser.
+6. Stop the test copy.
 
 **Features.** What the product can do today: live numbers from the running product (review
 queue, pipeline tasks, fan-outs, obligations, changes, messages through the sink, flags, the
@@ -226,9 +246,11 @@ each minute.
 
 **Check your work before sharing it.** Run the quick checks (`make check`: code style, types,
 tests and the project's own rules; no Docker needed). If one fails, its name turns red in
-Checks; read its output, fix the cause, then run that check alone again. For a bigger change,
-run every CI check in order: it needs Docker, takes much longer and carries on past a failure,
-then lists each result.
+Checks; read its output, fix the cause, then run that check alone again. If you changed the web
+app or a service it uses, click through the web app: its browser tests run on a separate,
+temporary copy of the services, never on your own data. For a bigger change, run every CI check
+in order: it needs Docker, takes much longer and carries on past a failure, then lists each
+result.
 
 **Stop everything to free memory.** Stop everything stops the web app, the services, the
 product, this app's workers and relays, the databases and Docker itself. If another session is
@@ -250,6 +272,9 @@ problem up below. Still stuck? Every output has a Copy button: send it to a deve
 | Docker is not running                                  | The databases and the queue run inside Docker.                                                          | Start Docker. The first start takes a minute or two.                                                                                                        |
 | Start everything stopped part-way                      | One of its steps failed; the card names the step and the reason.                                        | Use the fix button the card offers, or read Show technical details. Then press Start everything again.                                                      |
 | A port is already in use                               | Another program, perhaps a second copy of the project, listens on a port this needs.                    | Processes lists every port with the program on it. Stop it there if it belongs to this checkout; otherwise quit that program, or change the port in `.env`. |
+| Click through the web app says a port is in use        | Its test copy needs ports 9401 to 9410 and 3410, and another program listens on one of them.            | Processes shows which program. What an earlier check left (for example after the app was quit during the check) is stopped by the next check on its own; stop anything else there, or wait for it, then check again. |
+| Click through the web app says there is no browser     | Its robot browser is Playwright's own Chromium, which is not downloaded on this Mac, and Google Chrome is not installed either. | Press Download the test browser (about 150 MB; it asks first), or install Google Chrome, then check again.                                                  |
+| Click through the web app says browser tests are running | Another session (another control window, or Claude's build agent) runs the web check or the web app's browser tests in this checkout; they share their results folder. | Wait for them to finish, then check again.                                                                                                                  |
 | The web app does not open                              | The first start builds it, which takes a minute or two.                                                 | Wait until the Web light turns green. If it stays grey, read its log in Logs, then stop and start the web app from Run.                                     |
 | The product check fails                                | One of its steps found something wrong; the others still run.                                           | Run that step on its own from Checks and read its output. [product.md](product.md) has a troubleshooting list for each step.                                |
 | "make ... is not a target of this checkout's Makefile" | The checkout is on a branch that does not have that command.                                            | Switch the checkout to `main` in a terminal, or ask whoever works on that branch.                                                                           |
@@ -288,6 +313,9 @@ button can get around them.
   `make contracts-check` regenerates the generated clients before it compares them.
 - **Delete data without asking.** Reset and Restore ask first, say what they delete and offer a
   backup.
+- **Test against your own data.** The web app's browser tests run on a separate test copy with
+  throwaway data, never on your own services, web app or database: Click through the web app
+  starts the copy and stops it, and `make web-e2e` on its own is never run from here.
 - **Run two changes at once.** One step runs at a time, and Cancel stops the running one with
   everything it started.
 
@@ -334,6 +362,7 @@ button can get around them.
 | Synthetic           | Made up for tests and demos. Synthetic businesses and people are not real.                                                           |
 | Temporal            | Runs long jobs as steps and tries a failed step again.                                                                               |
 | Tenant              | One customer account: a business or a CA firm. A tenant never sees another tenant's data.                                            |
+| Test copy           | A separate, temporary copy of the ten services with throwaway data, for the web app's browser tests. It stops when the check ends.   |
 | Topic               | A named stream of events in the queue, such as `obligation.created`.                                                                 |
 | UI-only stack       | The ten services and the web app, for clicking through screens. It has no worker.                                                    |
 | Uncommitted changes | Edits in the checkout that are not yet saved in git. This app shows how many there are.                                              |
@@ -385,13 +414,44 @@ own helper.
   or shell characters, a destructive target only in a step that asked first, and only the
   checkout's make targets. A step the app performs itself declares every program it runs, and
   the runner refuses any other. None of `ARGS`, `MAKEFLAGS`, `MFLAGS`, `GNUMAKEFLAGS`,
-  `MAKELEVEL`, `MAKEOVERRIDES`, `SERVICE`, `PROC`, `FOLLOW`, `FILE` or `WEB` is passed on from
-  the environment the app was opened in.
+  `MAKELEVEL`, `MAKEOVERRIDES`, `SERVICE`, `PROC`, `FOLLOW`, `FILE`, `WEB` or
+  `E2E_ALLOW_POSTGRES` is passed on from the environment the app was opened in.
 - **One step at a time.** Reads (logs, the container list, the crawl report) may run beside a
   step.
 - **Cancel.** Each step runs in a session of its own, so Cancel ends the running step's whole
   process group: SIGTERM, then, five seconds later, SIGKILL to whatever of the group is left.
-  Cancelling `make product` or `make web-stack` therefore also stops what they had started.
+  Cancelling `make product` or `make web-stack` therefore also stops what they had started. The
+  browser tests get SIGINT first (Playwright stops the web app it started on SIGINT, and leaves
+  it running on SIGTERM), SIGTERM 15 seconds later and SIGKILL five after that. A clean-up step
+  (the web check's "Stop the test copy") runs after a failure or a Cancel too, and Cancel does
+  not stop it; the Cancel question names it.
+- **The web check.** Click through the web app runs `make web-e2e` on a test copy, never on the
+  services Start everything runs (8001 to 8010, whose data is the shared development database)
+  or on `next dev`. Every make step gets `STORE=memory WEB_STACK_DIR=var/web-stack-check
+  SERVICE_PORT_BASE=9400` (make hands command-line variables to its recipes, where they win over
+  `.env`), and `make web-e2e` gets `WEB_PORT=3410`. Ports 9401 to 9410 and 3410 clash with
+  nothing else of the project's: the product (8000, 8080, 8081, 3400, 3401) and a second clone
+  (9201 to 9210, 3200; 3217 for a build agent's). The seed and the tests get every `CW_WEB_*_URL` on the test copy (they win
+  over `apps/web/.env.local`, which names your services) and `CW_WEB_SEED_STATE_PATH` in
+  `var/web-stack-check`, never `var/seed/last.json`. The test copy's services get no database,
+  Temporal, Kafka or Redis of yours (an address nothing listens on), keep uploads in memory,
+  send no telemetry, message or paid model call, and call each other on the test ports (as
+  `make web-stack` itself now arranges for every base; the app keeps its own settings for an
+  older Makefile). The tests drive Playwright's own Chromium when the headless shell of the
+  revision `playwright-core/browsers.json` names is downloaded, else Google Chrome
+  (`CW_E2E_BROWSER_CHANNEL=chrome`, read by `apps/web/playwright.config.ts`); the app finds out
+  from those files, without starting a browser or using the network. The web
+  app is built into `apps/web/.next/web-check` (`WEB_DIST_DIR`): Next.js 16 builds `next dev`
+  into `.next/dev`, which no build touches, so building beside a running `next dev` is safe, but
+  `next build` first empties its own folder (all but `cache`, `dev`, `lock` and `trace`), and a
+  build into `.next` would delete `make product`'s `.next/product` under its running dev server.
+  Before it starts, the check refuses while another web check (another control window's, whose
+  test copy it leaves alone) or another browser test run works in the checkout (the runs share
+  `apps/web/test-results`), or while anything answers on its ports, and it stops what an earlier
+  check left: only the pids of `var/web-stack-check` that still run that service on its
+  test port. At the end it stops the test copy (`make web-stack-down` with the same variables),
+  and the web app the browser tests left, if any: this checkout's `next start` on 3410, started
+  since they began.
 - **Time limits.** Each step of a stop has one: the web app 1 minute, `make web-stack-down` and
   `make product-down` 2, the workers and relays 1, `make dev-down` 3 and `colima stop` 2. A step
   that overruns is stopped the way Cancel stops it and shows as timed out. When `colima stop`
@@ -401,7 +461,10 @@ own helper.
   (the process group of every step and background process it started, so it can tell them from
   another session's), the pid and log file of each worker and relay it starts in
   `var/control-panel/`, the web app's in `var/web-stack/web.pid` and `web.log`, and
-  `var/control-panel/psql.command` for the database prompt. `var/` is git-ignored.
+  `var/control-panel/psql.command` for the database prompt. The web check writes its test
+  copy's pid files, logs and seed state in `var/web-stack-check/`, its build in
+  `apps/web/.next/web-check/` (and, as every `next build` does, `apps/web/next-env.d.ts`), and
+  Playwright's results in `apps/web/test-results/`. All of it is git-ignored.
 - **Live updates.** One poller in the helper reads the status (Docker, the containers, every
   `/health` and `/ready`, git, the processes) and pushes changes to the window over the event
   stream; the window never polls, it only sends a heartbeat every 20 seconds. rpk runs at most
