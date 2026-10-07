@@ -10,7 +10,7 @@ from domain_kernel.ids import TenantId
 from domain_kernel.vectors import Vector
 from qa.application.retrieval import OUT_OF_FORCE, HybridLayer
 from qa.domain.answer import Outcome, Reason
-from qa.domain.errors import ModelBudgetExceededError
+from qa.domain.errors import ModelBudgetExceededError, ModelResidencyRefusedError
 from qa.domain.records import QueryEmbedding, SearchHit
 from qa.testing import FakeEmbedder, answer_text
 
@@ -90,6 +90,24 @@ def test_an_embedding_refused_for_its_budget_leaves_the_search_lexical(world: Wo
     assert answer.reason is Reason.ANSWERER_DECLINED
     assert search.asked[0]["vector"] is None
     assert world.tracer.named("qa.retrieve")[0].attributes["qa.retrieve.lexical_only"] is True
+
+
+class RefusedHere:
+    """The gateway refusing the embedding under its residency policy."""
+
+    def embed(
+        self, text: str, *, tenant: TenantId | None, metadata: Mapping[str, str]
+    ) -> QueryEmbedding:
+        raise ModelResidencyRefusedError("llm-gateway refuses the call")
+
+
+def test_an_embedding_refused_under_the_residency_policy_ends_the_question(world: World) -> None:
+    """The answer's call would be refused too: no lexical search, no second call."""
+    search = Search(world)
+    hybrid = HybridLayer(search, RefusedHere(), world.answerer(), world.tracer)
+    with pytest.raises(ModelResidencyRefusedError):
+        hybrid.run(world.context("GSTR-3B March"))
+    assert (search.asked, world.provider.requests) == ([], [])
 
 
 def test_an_answer_refused_for_its_budget_ends_the_question(world: World) -> None:

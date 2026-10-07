@@ -37,6 +37,7 @@ from qa.domain.errors import (
     BusinessNotFoundError,
     DependencyUnavailableError,
     ModelBudgetExceededError,
+    ModelResidencyRefusedError,
     QaTenantRequiredError,
     QuestionInvalidError,
 )
@@ -59,6 +60,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     BusinessNotFoundError: 404,
     QuestionInvalidError: 422,
     ModelBudgetExceededError: 429,
+    ModelResidencyRefusedError: 503,
     DependencyUnavailableError: 503,
 }
 

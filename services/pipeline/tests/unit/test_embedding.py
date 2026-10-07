@@ -258,6 +258,7 @@ def test_the_activity_does_not_retry_what_a_retry_cannot_fix() -> None:
     assert set(policy.non_retryable_error_types or ()) == {
         "RulebookRejectedError",
         "EmbeddingContractError",
+        "ModelResidencyRefusedError",
     }
 
 

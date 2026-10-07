@@ -60,6 +60,10 @@ from py_common.temporal.activity import DEFAULT_RETRY_POLICY
 log = get_logger(__name__)
 
 HEARTBEAT_SECONDS: Final = 10.0
+RESIDENCY_ERROR: Final = "ModelResidencyRefusedError"
+"""The failure type of a call the llm-gateway refused under its residency policy
+(``domain.errors.ModelResidencyRefusedError``), which no activity that calls the gateway
+retries: the same call gets the same answer."""
 SHA256_PATTERN: Final = r"^[0-9a-f]{64}$"
 
 

@@ -165,7 +165,10 @@ def main(
         # as the product's check, keeps its own logging.
         chosen = ObligationSettings(service_name=PROG)
         configure_logging(
-            service_name=PROG, log_level=chosen.log_level, json_output=chosen.log_json
+            service_name=PROG,
+            log_level=chosen.log_level,
+            json_output=chosen.log_json,
+            env=chosen.env,
         )
     refused = refusal(args, chosen)
     if refused is not None:

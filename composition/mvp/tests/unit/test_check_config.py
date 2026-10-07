@@ -159,9 +159,61 @@ def test_staging_runs_dual_or_token(monkeypatch: pytest.MonkeyPatch, mode: str, 
 
 
 @pytest.mark.parametrize("base", [STAGING, PRODUCTION], ids=["staging", "prod"])
+def test_console_log_lines_are_refused(
+    monkeypatch: pytest.MonkeyPatch, base: dict[str, str]
+) -> None:
+    assert report(monkeypatch, base, log_json="true").ok
+    found = report(monkeypatch, base, log_json="false")
+    assert only(found) == Problem(
+        SHARED,
+        "CW_LOG_JSON=false prints console lines, whose tracebacks are formatted after the "
+        f"masking and keep their personal identifiers; CW_ENV={base['CW_ENV']} needs JSON lines",
+    )
+
+
+def test_local_and_test_may_print_console_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    local = {"CW_LLM_PROVIDER": "fake", "CW_NOTIFICATION_CHANNELS": "sink", "CW_LOG_JSON": "false"}
+    for env in ("local", "test"):
+        found = report(monkeypatch, local, env=env)
+        assert found.ok, lines(found)
+
+
+@pytest.mark.parametrize("base", [STAGING, PRODUCTION], ids=["staging", "prod"])
 def test_the_fake_model_is_refused(monkeypatch: pytest.MonkeyPatch, base: dict[str, str]) -> None:
     found = report(monkeypatch, base, llm_provider="fake", ai_gateway_api_key=None)
     assert only(found).where == "llm-gateway"
+    assert only(found).message.startswith("CW_LLM_PROVIDER=fake answers from a fake model")
+
+
+@pytest.mark.parametrize(
+    ("changes", "says"),
+    [
+        ({"llm_residency": ""}, "CW_LLM_RESIDENCY: CW_LLM_RESIDENCY is set but empty"),
+        (
+            {"flag_llm_gateway_residency": "india_only"},
+            "CW_LLM_RESIDENCY: CW_FLAG_LLM_GATEWAY_RESIDENCY is set, and nothing reads it",
+        ),
+    ],
+    ids=["empty", "flag-override"],
+)
+@pytest.mark.parametrize("env", ["local", "staging"])
+def test_a_residency_the_gateway_would_not_run_under_is_refused_everywhere(
+    monkeypatch: pytest.MonkeyPatch, env: str, changes: dict[str, str], says: str
+) -> None:
+    base = STAGING if env == "staging" else {"CW_ENV": "local", "CW_LLM_PROVIDER": "fake"}
+    found = report(monkeypatch, base, **changes)
+    assert only(found).where == "llm-gateway"
+    assert only(found).message.startswith(says)
+
+
+@pytest.mark.parametrize("base", [STAGING, PRODUCTION], ids=["staging", "prod"])
+def test_india_only_is_accepted_and_still_refuses_the_fake_model(
+    monkeypatch: pytest.MonkeyPatch, base: dict[str, str]
+) -> None:
+    """india_only refuses every real model call (ADR-020): the maintainer's choice, not a problem,
+    and no reason to answer from the fake model instead."""
+    assert report(monkeypatch, base, llm_residency="india_only").ok
+    found = report(monkeypatch, base, llm_provider="fake", ai_gateway_api_key=None)
     assert only(found).message.startswith("CW_LLM_PROVIDER=fake answers from a fake model")
 
 

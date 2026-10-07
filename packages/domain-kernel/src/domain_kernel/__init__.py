@@ -133,6 +133,15 @@ from domain_kernel.operators import (
     Operator,
 )
 from domain_kernel.periods import EffectivePeriod
+from domain_kernel.pii import (
+    ID_KEY_SUFFIXES,
+    PII_KINDS,
+    PII_PATTERNS,
+    RECORD_PII_PATTERNS,
+    MaskResult,
+    mask_pii,
+    mask_pii_in,
+)
 from domain_kernel.predicates import (
     AllOf,
     AnyOf,
@@ -198,6 +207,7 @@ __all__ = [
     "ENUM_TYPES",
     "FY_LABEL_PATTERN",
     "GSTIN_PATTERN",
+    "ID_KEY_SUFFIXES",
     "ID_NAMESPACE",
     "LANGUAGE_PATTERN",
     "MAX_ACTION_CHARS",
@@ -216,8 +226,11 @@ __all__ = [
     "ORDERED_OPERATORS",
     "PAN_PATTERN",
     "PARSER_VERSION_PATTERN",
+    "PII_KINDS",
+    "PII_PATTERNS",
     "PROBLEM_TYPE_PREFIX",
     "QUOTE_MATCH_THRESHOLD",
+    "RECORD_PII_PATTERNS",
     "REGULATORY_ROLES",
     "REVIEW_THRESHOLD",
     "RULE_VERSION_KIND",
@@ -291,6 +304,7 @@ __all__ = [
     "InvariantViolationError",
     "LLMProvider",
     "LeafEvaluator",
+    "MaskResult",
     "Mention",
     "Not",
     "NotificationChannel",
@@ -351,6 +365,8 @@ __all__ = [
     "evaluate_predicate",
     "evidence_tokens_missing",
     "governs",
+    "mask_pii",
+    "mask_pii_in",
     "negate",
     "normalise_name",
     "one_off_due_on",

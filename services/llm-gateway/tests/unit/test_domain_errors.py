@@ -9,6 +9,7 @@ from llm_gateway.domain.errors import (
     FeatureMismatchError,
     ProviderResponseError,
     ProviderUnavailableError,
+    ResidencyUnavailableError,
     UnknownFeatureError,
     UnknownPromptError,
 )
@@ -17,6 +18,11 @@ ERRORS: list[tuple[type[DomainError], str, str]] = [
     (BudgetExceededError, "llm-budget-exceeded", "LLM budget exceeded"),
     (ProviderUnavailableError, "llm-provider-unavailable", "LLM provider unavailable"),
     (ProviderResponseError, "llm-provider-response-invalid", "LLM provider response invalid"),
+    (
+        ResidencyUnavailableError,
+        "llm-residency-unavailable",
+        "LLM unavailable under the residency policy",
+    ),
     (UnknownPromptError, "llm-prompt-unregistered", "LLM prompt not registered"),
     (UnknownFeatureError, "llm-feature-unknown", "LLM feature unknown"),
     (FeatureMismatchError, "llm-feature-mismatch", "LLM feature mismatch"),

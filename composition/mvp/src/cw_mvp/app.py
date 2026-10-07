@@ -125,7 +125,10 @@ def build_app(
     # Every service's create_app configured logging under its own name; the process logs as
     # one, and the dispatcher binds the owning service to each request's lines.
     configure_logging(
-        service_name=APP_SERVICE_NAME, log_level=settings.log_level, json_output=settings.log_json
+        service_name=APP_SERVICE_NAME,
+        log_level=settings.log_level,
+        json_output=settings.log_json,
+        env=settings.env,
     )
     table = RouteTable.of(
         services,

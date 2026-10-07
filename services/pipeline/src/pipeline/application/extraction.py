@@ -39,7 +39,7 @@ from domain_kernel.documents import DocumentType, ExtractionContext, ParsedDocum
 from domain_kernel.events import utc_now
 from domain_kernel.ids import DocumentId, SourceId
 from ontology import VERSION as ONTOLOGY_VERSION
-from pipeline.application.activities import Frozen, on_thread
+from pipeline.application.activities import RESIDENCY_ERROR, Frozen, on_thread
 from pipeline.application.extractor import LlmRuleExtractor
 from pipeline.application.knowledge_activities import IssueOut
 from pipeline.application.validators import ValidationReport
@@ -188,13 +188,15 @@ EXTRACT_RETRIES: Final = RetryPolicy(
     maximum_attempts=6,
     non_retryable_error_types=[
         BUDGET_ERROR,
+        RESIDENCY_ERROR,
         "RulebookRejectedError",
         "KnowledgeContractError",
         "InvariantViolationError",
     ],
 )
 """A gateway or rulebook outage is waited out for a quarter of an hour; a used-up budget is the
-workflow's to wait out; a document the rulebook does not hold is not asked about again."""
+workflow's to wait out; a call the residency policy refuses fails the extraction at once; a
+document the rulebook does not hold is not asked about again."""
 
 STORE_RETRIES: Final = RetryPolicy(
     maximum_attempts=20,

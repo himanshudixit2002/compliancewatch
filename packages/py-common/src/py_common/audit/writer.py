@@ -6,6 +6,13 @@ back with the action. ``PostgresAuditSink`` is the kernel's ``AuditSink`` on one
 a unit of work exposes as ``audit``. Row-level security admits a row of the tenant the
 transaction's ``app.tenant_id`` names, or a row of no tenant; any other row fails the statement,
 and with it the transaction.
+
+The row is the entry masked for personal identifiers (``masking.masked_entry``, as the memory
+twin stores it): GSTINs, PANs, Aadhaar numbers, phone numbers and email addresses in the reason,
+and in every text of ``before`` and ``after`` at any depth, become ``[GSTIN]``, ``[PAN]``,
+``[AADHAAR]``, ``[PHONE]`` and ``[EMAIL]``, with UUIDs, hex ids and the values of ``_id`` keys
+kept whole. The action, the subject and its id, the actor and the correlation id are never
+masked: they say who did what to which record.
 """
 
 from collections.abc import Mapping
@@ -14,11 +21,14 @@ from typing import Any
 from sqlalchemy import Connection, insert
 
 from domain_kernel.audit import AuditEntry
+from py_common.audit.masking import masked_entry
 from py_common.audit.schema import audit_event
 
 
 def audit_row(entry: AuditEntry) -> dict[str, Any]:
-    """The column values of ``entry``'s row; ``before`` and ``after`` as plain JSON."""
+    """The column values of ``entry``'s row: the entry masked (``masked_entry``), with ``before``
+    and ``after`` as plain JSON."""
+    entry = masked_entry(entry)
     return {
         "id": entry.entry_id.value,
         "occurred_at": entry.occurred_at,

@@ -1,9 +1,13 @@
 import hashlib
 import tomllib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
+import httpx2
 import pytest
 
+from cw_evals import providers
 from cw_evals.cases import load_extraction_set
 from cw_evals.metrics import aggregate, score
 from cw_evals.providers import fake_gateway, provider_for, scripted
@@ -16,6 +20,7 @@ from domain_kernel.documents import ExtractionContext
 from ontology import load
 from pipeline.application.extractor import LlmRuleExtractor
 from pipeline.domain.prompt import PromptText
+from pipeline.infrastructure.gateway import RESIDENCY_PROBLEM, GatewayProvider
 
 ROOT = Path(__file__).resolve().parents[3]
 GOLDEN = ROOT / "golden"
@@ -145,6 +150,30 @@ def test_main_fails_when_a_gate_fails(tmp_path: Path, capsys: pytest.CaptureFixt
     )
     assert code == 1
     assert "FAILED" in capsys.readouterr().out
+
+
+def test_main_exits_2_when_the_gateway_refuses_under_its_residency_policy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The run stops at the first refusal: asking again gets the same answer."""
+    asked: list[httpx2.Request] = []
+
+    def refuse(request: httpx2.Request) -> httpx2.Response:
+        asked.append(request)
+        problem = {"type": RESIDENCY_PROBLEM, "detail": "CW_LLM_RESIDENCY=india_only"}
+        return httpx2.Response(503, json=problem)
+
+    @contextmanager
+    def refusing(_: str) -> Iterator[GatewayProvider]:
+        transport = httpx2.MockTransport(refuse)
+        yield GatewayProvider(client=httpx2.Client(transport=transport, base_url="http://gw"))
+
+    monkeypatch.setattr(providers, "http_gateway", refusing)
+    args = ["--profile", "nightly", "--provider", "gateway", "--suite", "extraction"]
+    assert main([*args, "--golden", str(GOLDEN), "--reports", str(tmp_path)]) == 2
+    out = capsys.readouterr().out
+    assert "eval: aborted: the llm-gateway refuses the call under its residency policy" in out
+    assert len(asked) == 1
 
 
 def test_main_needs_labelled_cases(tmp_path: Path) -> None:

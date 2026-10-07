@@ -172,10 +172,18 @@ describe("EditPanel", () => {
     await user.type(screen.getByLabelText(/^Summary/), " Example more.");
     await user.click(screen.getByRole("button", { name: "Save the draft" }));
     await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    // Let the first save settle before the condition changes: on a slow runner the clicks below
+    // overlapped it, and a second save went out.
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("status").some((node) => node.textContent?.includes("Example saved.")),
+      ).toBe(true),
+    );
     expect(sent[0]?.specification).toBe(sent[0]?.["base:specification"]);
     // Once the condition changes, its flagged parts hold the form back.
     await user.click(screen.getByRole("button", { name: "Add a condition to Group 1" }));
     await user.click(screen.getByRole("button", { name: "Save the draft" }));
+    await waitFor(() => expect(screen.getByText("Choose an attribute.")).toBeDefined());
     expect(action).toHaveBeenCalledTimes(1);
   });
 

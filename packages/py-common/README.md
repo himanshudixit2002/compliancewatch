@@ -17,6 +17,7 @@ src/py_common/
   flags.py             # configure_flags, flag_enabled, flag_value: OpenFeature over the flag registry (env or Unleash)
   flags_registry.json  # generated from packages/flags/registry.json by make flags; never edited by hand
   logging.py           # structlog JSON logging bridging stdlib records; correlation_id/tenant_id/actor contextvars
+                       # and personal identifiers masked on every line (redact_pii)
   health.py            # GET /health and GET /ready router with pluggable readiness checks
   request_context.py   # x-request-id middleware; correlation_id_of(request) for handlers and dependencies
   problems.py          # RFC 9457 problem+json handlers, Problem schema, problem_responses() for routers
@@ -243,6 +244,59 @@ built with `--no-dev`, and without the extra it would not start with `CW_FLAGS_P
 A malformed value or a flag Unleash does not hold answers the registry default, which is off,
 and logs `flag_evaluation_failed`.
 
+## Logging
+
+`configure_logging(service_name=..., env=settings.env)`, which `create_app` and every worker call,
+renders structlog events and stdlib records (uvicorn, httpx, sqlalchemy) through one processor
+chain as JSON lines with `timestamp`, `level`, `logger`, `event`, `service`, `correlation_id`,
+`tenant_id` and `actor`, plus `trace_id` and `span_id` inside a span (`CW_LOG_JSON=false` prints
+them for a terminal instead; `cw-mvp check-config` refuses it in staging and production).
+
+The last processor, `redact_pii`, masks personal identifiers on every line, always, with no
+setting to turn it off: GSTINs, PANs, Aadhaar numbers, phone numbers and email addresses become
+`[GSTIN]`, `[PAN]`, `[AADHAAR]`, `[PHONE]` and `[EMAIL]` (`domain_kernel.pii.mask_pii_in`). It
+masks the event text, every other value at any depth (inside dicts, lists and tuples) and, in
+JSON output, the exception. A value that is not text, a number, a boolean or None (an exception,
+a pydantic model, a dataclass, a set, bytes) is masked as its `repr`, which is what the JSON
+renderer would print. What the caller logged is copied, never changed. It leaves alone, at the
+top of the line only, the fields listed above; the value of any key ending in `_id` or `_ids` at
+any depth; and, wherever they stand (a request path, a workflow id, the event text), every UUID
+in its canonical form and every lower-case hex id of 16 or more with a letter in it (a SHA-256
+digest, a `uuid4().hex`, a span id), with no letter or digit next to it. Their digit runs would
+otherwise read as Aadhaar or phone numbers in about one UUID in 70, one digest in 31, one
+`.hex` in 61 and one span id in 152. Inside the exception nothing is left alone.
+
+The log line takes identifiers in more shapes than a prompt does, since URLs, keys and file names
+carry them. Each shape was checked against the repository's regulatory texts (the recorded
+notifications and listings, the golden sets, the seed calendar's quotes), where it masks nothing
+the prompt patterns leave, and is taken:
+
+- an email address URL-encoded, as in a query string: `owner%40example.com`;
+- an identifier glued to an underscore or to digits: `pan_ABCDE1234F`, `gstin_29ABCDE1234F1Z5`,
+  `ABCDE1234F09876543210`, `owner@example.com_old`;
+- a PAN or GSTIN in lower case (all of it; mixed case is left);
+- `+91 (987) 654 3210` (three, three and four digits behind a prefix) and `00919876543210`.
+
+Masking is idempotent (a second pass changes nothing) and linear in time: 64 KB of `a.a.a.…@` in
+a request path takes about 2 ms to mask, where it took 2.2 s and blocked the event loop.
+
+`redact_pii` never raises into the code that logs. A value it cannot mask (a `repr` that raises,
+say) turns the line into `log_redaction_failed`, with the fields above, the masked event text and
+the error's type; a value inside itself, or nested deeper than 32 levels, is cut there with
+`[CYCLE]` or `[TOO DEEP]`.
+
+A JSON traceback carries the locals of its frames only with `CW_ENV` local or test. Anywhere else
+it carries none, so a request body, a token or a secret held in a local never reaches the log
+collector. Where they are carried, each local is cut to 80 characters before it is masked, so an
+identifier cut in two may show in part on a developer's machine.
+
+By design, any other ten-digit number that starts with 6 to 9, and any twelve-digit number that
+starts with 2 to 9, is masked as a phone or an Aadhaar number, whatever it is: an amount or a
+reference. Log such an id under a key ending in `_id`, and a number as an int, to keep it whole.
+Masking is pattern matching, so a name, an address or free text is not masked. The console
+renderer formats a traceback itself, after the chain, so a traceback printed with
+`CW_LOG_JSON=false` is not masked. OpenTelemetry spans are not masked either.
+
 ## Telemetry
 
 `create_app` calls `configure_telemetry`: with `CW_OTEL_ENDPOINT` set (the dev stack's
@@ -392,10 +446,23 @@ what the table refuses.
   reads the rows of no tenant yet.
 - `py_common.audit.testing` has `audit_entry(...)`, `install_audit_table(connection)` for a
   service's integration tests and `read_audit_entries(connection)`.
+- The log keeps an entry masked for personal identifiers (`py_common.audit.masked_entry`), with
+  the patterns the log lines are masked with (`domain_kernel.pii.mask_pii_in`): GSTINs, PANs,
+  Aadhaar numbers, phone numbers and email addresses in the reason, and in every text of `before`
+  and `after` at any depth, become `[GSTIN]`, `[PAN]`, `[AADHAAR]`, `[PHONE]` and `[EMAIL]`. As on
+  a log line, a UUID in its canonical form and a lower-case hex id of 16 or more (a SHA-256 digest)
+  are kept whole wherever they stand (a reviewer's user id under `resolved_by`, a transcript's
+  digest), and the value of a key ending in `_id` or `_ids` is left alone. The action, the subject
+  and its id, the actor and the correlation id are never masked. `AuditWriter` and the memory twin
+  both store the masked entry, so a service's tests on its memory store see what the table would
+  hold. A reason that masking makes longer than 2,000 characters is cut. A use case still keeps
+  personal data out of an entry where it can: masking is pattern matching, it misses names and
+  free text, and it masks any ten-digit number from 6 to 9 and any twelve-digit one from 2 to 9
+  outside an id key. A masked row cannot show what a PAN, GSTIN, email or phone number changed
+  from or to.
 
-Not built yet: the read route `GET /v1/identity/audit`, the NDJSON export, masking personal data,
-pseudonymising rows on a tenant's erasure, the call sites in every service and database roles that
-may only insert.
+Not built yet: the read route `GET /v1/identity/audit`, the NDJSON export, pseudonymising rows on
+a tenant's erasure, the call sites in every service and database roles that may only insert.
 
 ## Worker processes
 

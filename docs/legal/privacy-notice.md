@@ -33,14 +33,19 @@ person. We treat them as personal data throughout.
 
 We do not sell personal data. We do not use it for advertising. We do not send marketing on
 WhatsApp; reminders are only what you opted in to. Model providers we use to read regulations
-and draft answers receive your questions with identifiers masked and do not retain them
-[confirm per provider contract].
+and draft answers receive your questions with identifiers masked where we recognise them and do
+not retain them [confirm per provider contract].
 
 ## 4. Who we share it with
 
 - Service providers that host and run the service in India (cloud hosting in the Mumbai region
   is the design assumption), send messages (Meta for WhatsApp, an email provider) and process
   payments. Each is bound by contract to use the data only for the service.
+- Model providers outside India that read regulations and draft answers for us: they receive
+  the text of your questions, with identifiers such as PAN, GSTIN, Aadhaar, phone numbers and
+  email addresses masked where we recognise them (a name or other free text is not), and are
+  asked not to keep it. [Draft - to be reviewed by a lawyer: this cross-border processing, or
+  keeping every model call in India instead.]
 - Your chartered accountant or adviser, when you link your business to their account.
 - Authorities, when the law requires it.
 

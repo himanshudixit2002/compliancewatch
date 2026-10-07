@@ -123,7 +123,9 @@ the rule's verified citations. Problems: 401
 have), 422 `qa-question-invalid` or `request-invalid`, 429 `qa-model-budget-exceeded` (the
 gateway refused a model call because a monthly budget is used up; `Retry-After` is the
 gateway's), 503 `qa-dependency-unavailable` (a service the answer depends on failed, including
-the gateway while answering). An embedding refused for its budget leaves the search to full
+the gateway while answering), 503 `qa-model-residency-refused` (the gateway refused a model call
+under `CW_LLM_RESIDENCY=india_only`; the question ends at that call, with no fallback layer, no
+second call and no `Retry-After`). An embedding refused for its budget leaves the search to full
 text. The spec is
 `packages/contracts/openapi/qa.v1.json`.
 

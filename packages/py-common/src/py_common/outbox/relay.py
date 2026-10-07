@@ -318,7 +318,10 @@ async def run_relay(
 def main() -> None:
     settings = Settings(service_name=SERVICE_NAME)
     configure_logging(
-        service_name=SERVICE_NAME, log_level=settings.log_level, json_output=settings.log_json
+        service_name=SERVICE_NAME,
+        log_level=settings.log_level,
+        json_output=settings.log_json,
+        env=settings.env,
     )
     telemetry = configure_telemetry(
         service_name=SERVICE_NAME, version=__version__, settings=settings

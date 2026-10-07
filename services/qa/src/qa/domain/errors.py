@@ -55,5 +55,15 @@ class ModelBudgetExceededError(DomainError):
         return {} if self.retry_after is None else {"Retry-After": self.retry_after}
 
 
+class ModelResidencyRefusedError(DomainError):
+    """The llm-gateway refused a model call under its residency policy (its problem type
+    ``llm-residency-unavailable``): ``CW_LLM_RESIDENCY=india_only`` keeps text in India, and the
+    model runs outside it. It is not an outage, and asking again, or with another layer, gets the
+    same answer: the question ends here, at once, with nothing retried."""
+
+    type_slug = "qa-model-residency-refused"
+    title = "Model calls are refused under the residency policy"
+
+
 class GatewayError(RuntimeError):
     """The llm-gateway refused or failed a completion; the text is the status and problem."""

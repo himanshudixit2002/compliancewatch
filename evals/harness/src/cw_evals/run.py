@@ -6,7 +6,9 @@ provider). ``--provider`` narrows the run to one provider for a quick look, ``--
 of the suites (extraction, relations, qa; all by default). The qa suite runs each provider twice,
 with the KAG layer on (``qa_kag``) and off (``qa_hybrid``). Reports land in ``evals/reports``
 (git-ignored) and in the GitHub step summary when there is one. A model call the scripted labels
-do not cover stops the run with exit 2.
+do not cover stops the run with exit 2, and so does a gateway that refuses a call under its
+residency policy (``ModelResidencyRefusedError``): asking it again, or scoring what it refused,
+says nothing about the prompts.
 """
 
 import argparse
@@ -32,6 +34,7 @@ from domain_kernel.documents import ExtractionContext
 from ontology import VERSION as ONTOLOGY_VERSION
 from ontology import load as load_ontology
 from pipeline.application.extractor import LlmRuleExtractor
+from pipeline.domain.errors import ModelResidencyRefusedError
 from pipeline.infrastructure.prompts import load_prompt
 
 PROMPT = ("extraction.rule_candidate", "1")
@@ -74,7 +77,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     suites = args.suite or list(SUITES)
     try:
         results = _run(args.profile, suites, providers, args.golden, args.gateway_url)
-    except UnscriptedCallError as exc:
+    except (UnscriptedCallError, ModelResidencyRefusedError) as exc:
         sys.stdout.write(f"eval: aborted: {exc}\n")
         return ABORTED
     if results is None:

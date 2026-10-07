@@ -24,6 +24,7 @@ from domain_kernel.documents import DocumentType, clause_id_for
 from domain_kernel.ids import DocumentId, SourceId
 from domain_kernel.knowledge import EntityType, RelationKind
 from pipeline.application.activities import (
+    RESIDENCY_ERROR,
     Frozen,
     ParseRequest,
     hints_for,
@@ -278,7 +279,11 @@ class ProposeRelations(ActivityBase[RelationsRequest, RelationBatchOut]):
         backoff_coefficient=2.0,
         maximum_interval=timedelta(minutes=2),
         maximum_attempts=3,
-        non_retryable_error_types=["RulebookRejectedError", "KnowledgeContractError"],
+        non_retryable_error_types=[
+            "RulebookRejectedError",
+            "KnowledgeContractError",
+            RESIDENCY_ERROR,
+        ],
     )
 
     def __init__(
@@ -383,7 +388,11 @@ class EmbedClauses(ActivityBase[EmbedRequest, EmbedReport]):
         backoff_coefficient=2.0,
         maximum_interval=timedelta(minutes=2),
         maximum_attempts=3,
-        non_retryable_error_types=["RulebookRejectedError", "EmbeddingContractError"],
+        non_retryable_error_types=[
+            "RulebookRejectedError",
+            "EmbeddingContractError",
+            RESIDENCY_ERROR,
+        ],
     )
 
     def __init__(self, stage: EmbeddingStage | None, *, enabled: bool) -> None:

@@ -7,10 +7,16 @@ from uuid import UUID
 import httpx2
 import pytest
 
+from domain_kernel.errors import PROBLEM_TYPE_PREFIX
 from domain_kernel.ids import TenantId
 from domain_kernel.llm import CompletionRequest
 from domain_kernel.vectors import EMBEDDING_DIMS
-from qa.domain.errors import DependencyUnavailableError, GatewayError, ModelBudgetExceededError
+from qa.domain.errors import (
+    DependencyUnavailableError,
+    GatewayError,
+    ModelBudgetExceededError,
+    ModelResidencyRefusedError,
+)
 from qa.infrastructure.gateway import GatewayProvider, HttpEmbedder
 
 TENANT = TenantId(UUID(int=1))
@@ -140,6 +146,28 @@ def test_a_used_up_budget_is_not_an_outage() -> None:
     assert caught.value.problem_headers == {"Retry-After": "86400"}
     with pytest.raises(ModelBudgetExceededError):
         HttpEmbedder(client=client).embed("when?", tenant=TENANT, metadata={})
+
+
+RESIDENCY = {
+    "type": PROBLEM_TYPE_PREFIX + "llm-residency-unavailable",
+    "title": "LLM unavailable under the residency policy",
+    "status": 503,
+    "detail": "CW_LLM_RESIDENCY=india_only keeps text in India, and 'x/y' on 'vercel' runs outside",
+}
+
+
+def test_a_residency_refusal_is_not_an_outage_for_a_completion_or_an_embedding() -> None:
+    client, seen = recording(503, RESIDENCY)
+    with pytest.raises(ModelResidencyRefusedError, match="keeps text in India"):
+        GatewayProvider(client=client).complete(request())
+    with pytest.raises(ModelResidencyRefusedError, match="residency policy"):
+        HttpEmbedder(client=client).embed("when?", tenant=TENANT, metadata={})
+    assert len(seen) == 2, "each asked once"
+    other, _ = recording(503, {**RESIDENCY, "type": PROBLEM_TYPE_PREFIX + "other"})
+    with pytest.raises(GatewayError):
+        GatewayProvider(client=other).complete(request())
+    with pytest.raises(DependencyUnavailableError):
+        HttpEmbedder(client=other).embed("when?", tenant=TENANT, metadata={})
 
 
 def test_an_unreachable_gateway_is_a_gateway_error() -> None:

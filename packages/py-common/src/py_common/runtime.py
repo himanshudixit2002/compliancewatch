@@ -576,6 +576,7 @@ def run_worker_process[S: Settings](
         service_name=settings.service_name,
         log_level=settings.log_level,
         json_output=settings.log_json,
+        env=settings.env,
     )
     telemetry = configure_telemetry(
         service_name=settings.service_name, version=version, settings=settings

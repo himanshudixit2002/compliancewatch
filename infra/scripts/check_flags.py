@@ -60,6 +60,7 @@ COPY_NOTE = "Generated from packages/flags/registry.json by make flags; do not e
 SWITCH_FIELDS: frozenset[str] = frozenset(
     {
         "profile_gstin_lookup",  # the GSTIN lookup provider; http arrives behind it
+        "llm_residency",  # the gateway's residency policy until ADR-020 is decided
     }
 )
 
@@ -68,7 +69,10 @@ _STORE = "store selector: memory for tests and demos, postgres otherwise"
 NOT_FLAGS: Mapping[str, str] = {
     "CW_ENV": "names the deployment environment, set once per environment",
     "CW_LOG_LEVEL": "log verbosity",
-    "CW_LOG_JSON": "log format: JSON lines in deployments, console output locally",
+    "CW_LOG_JSON": (
+        "log format: JSON lines in deployments (check-config refuses console lines in staging "
+        "and production), console output locally"
+    ),
     "CW_IDENTITY_STORE": _STORE,
     "CW_PROFILE_STORE": _STORE,
     "CW_RULEBOOK_STORE": _STORE,

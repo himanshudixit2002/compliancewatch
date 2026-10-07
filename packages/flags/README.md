@@ -90,12 +90,18 @@ Only a flag the code reads through `py_common.flags` or `@compliancewatch/flags`
 `CW_FLAGS_PROVIDER`, and today that is `profile.gstin_category_prefill` and
 `web.analytics_enabled` (the web app's other `web.*` flags are not read yet). Every other entry
 (`rulebook.publish`, `qa.kag`, `notification.whatsapp`, `pipeline.knowledge`,
-`identity.billing_provider`, `llm_gateway.provider`, `profile.gstin_lookup`, `flags.provider` and
-the WhatsApp bot's two switches) is a setting or an environment variable that its service reads
-once at start-up. Those entries are registered for their owner, default, removal condition and
-expiry date only: turning one on in Unleash changes nothing. Set its `env` variable and restart
-the service instead. An entry moves to the provider when its code starts reading it through one
-of the two clients.
+`identity.billing_provider`, `llm_gateway.provider`, `llm_gateway.residency`,
+`profile.gstin_lookup`, `flags.provider` and the WhatsApp bot's two switches) is a setting or an
+environment variable that its service reads once at start-up. Those entries are registered for
+their owner, default, removal condition and expiry date only: turning one on in Unleash changes
+nothing. Set its `env` variable and restart the service instead. An entry moves to the provider
+when its code starts reading it through one of the two clients.
+
+`llm_gateway.residency` never moves there: the residency policy is a decision taken with counsel
+(ADR-020), not a rollout, so the gateway reads `CW_LLM_RESIDENCY` alone. Its entry is that
+setting's record, and the gateway refuses to start with `CW_FLAG_LLM_GATEWAY_RESIDENCY` set or
+with `CW_LLM_RESIDENCY` empty, so the env provider answers the policy the gateway runs. Nothing
+reads the flag, from either provider; do not create it in Unleash.
 
 ## Adding a flag
 

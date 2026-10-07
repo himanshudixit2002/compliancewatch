@@ -37,11 +37,15 @@ def scripted(cases: Sequence[GoldenCase]) -> ScriptedProvider:
 def gateway_client(completion_provider: LLMProvider | None = None) -> Iterator[TestClient]:
     """The gateway app in process: fake provider, memory ledger, no cache, the repo's prompt
     registry. ``completion_provider`` answers every completion in place of the fake (embeddings
-    stay fake), so scripted answers still pass the registry check, the masking and the ledger."""
+    stay fake), so scripted answers still pass the registry check, the masking and the ledger.
+    It runs under the ``global`` residency policy whatever ``CW_LLM_RESIDENCY`` says: nothing it
+    serves leaves the process, and under ``india_only`` the gateway would refuse the scripted
+    provider, which it does not know to run in India."""
     settings = GatewaySettings(
         _env_file=None,
         service_name="llm-gateway",
         llm_provider="fake",
+        llm_residency="global",
         llm_ledger="memory",
         llm_cache_ttl_seconds=0,
         llm_feature_monthly_budget_inr=Decimal("100000"),

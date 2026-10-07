@@ -123,6 +123,24 @@
       ]
     },
     {
+      "name": "llm_gateway.residency",
+      "type": "string",
+      "default": "global",
+      "values": [
+        "global",
+        "india_only"
+      ],
+      "owner": "ai-platform",
+      "description": "The record of the gateway's CW_LLM_RESIDENCY setting, which the gateway reads once at start. Nothing reads this flag, from the env provider or Unleash (do not create it there), and the gateway refuses to start with CW_FLAG_LLM_GATEWAY_RESIDENCY set or CW_LLM_RESIDENCY empty, so the env provider always answers the policy that runs. Where the gateway may send text (ADR-020, Proposed): global lets masked text reach models outside India with zero data retention asked for, which every real model call does today; india_only refuses every call to a provider not in India with 503 llm-residency-unavailable, since no routed model runs inference in India, while fake/... models still answer in process.",
+      "removal": "When ADR-020 is decided with counsel: option A keeps global and removes the setting; option B keeps india_only as fixed configuration, which then lets through only the providers that run inference in India.",
+      "expires": "2027-03-31",
+      "targeting": "none",
+      "env": "CW_LLM_RESIDENCY",
+      "services": [
+        "llm-gateway"
+      ]
+    },
+    {
       "name": "mvp.worker_kafka",
       "type": "bool",
       "default": false,
