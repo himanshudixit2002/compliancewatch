@@ -20,8 +20,12 @@
     },
     "retained": [
       {
+        "table": "erased_tenant",
+        "reason": "the erased marker: the tenant's id, when and by which deletion event; the service's routes answer 410 and its consumers drop the tenant's events by it"
+      },
+      {
         "table": "outbox_event",
-        "reason": "events of the tenant the relay has not published yet, this one among them; the relay sends them and the outbox prune removes them"
+        "reason": "the tenant's events the relay has not published yet, this one among them: the relay sends them; nothing prunes the outbox on its own, an operator does (outbox-relay runbook)"
       }
     ]
   }

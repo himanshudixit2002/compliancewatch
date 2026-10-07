@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, TypeAliasType
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+
+TablesAdditionalProperty = TypeAliasType("TablesAdditionalProperty", Annotated[int, Field(ge=0)])
 
 
 class RetainedItem(BaseModel):
@@ -28,7 +30,7 @@ class RetainedItem(BaseModel):
 
 class TenantDataErasedV1(BaseModel):
     """
-    One service erased what it holds for a tenant that asked for deletion (tenant.deletion.requested): the rows it deleted or pseudonymised per table, and the tables it kept with the reason. Each service emits it once per deletion request, in the transaction of its erasure. Producers: identity, profile, obligation, notification, applicability-engine, rulebook. Consumers: identity, which completes the deletion request once every service has erased.
+    One service erased what it holds for a tenant that asked for deletion (tenant.deletion.requested): the rows it deleted or pseudonymised per table, and the tables it kept with the reason. Each service emits it once for each tenant.deletion.requested it accepts (identity sends a deletion request twice, the second pass, and again on a resend), in the transaction of its erasure; an event identity did not send is refused and answered with nothing. Producers: identity, profile, obligation, notification, applicability-engine, rulebook. Consumers: identity, which completes the deletion request once every service has answered both passes.
     """
 
     model_config = ConfigDict(
@@ -49,7 +51,7 @@ class TenantDataErasedV1(BaseModel):
     ]
     erased_at: Annotated[AwareDatetime, Field(description="When the service's erasure committed.")]
     tables: Annotated[
-        dict[str, int],
+        dict[str, TablesAdditionalProperty],
         Field(
             description="The rows deleted or pseudonymised, per table of the service, never negative; a table with no row of the tenant counts 0."
         ),

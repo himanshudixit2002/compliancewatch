@@ -19,6 +19,10 @@
       {
         "table": "rule_candidate",
         "reason": "regulatory data of no tenant: candidates extracted from public documents"
+      },
+      {
+        "table": "erased_tenant",
+        "reason": "the erased marker: the tenant's id, when and by which deletion event; the service's routes answer 410 and its consumers drop the tenant's events by it"
       }
     ]
   }

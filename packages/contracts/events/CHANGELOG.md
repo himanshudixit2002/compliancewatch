@@ -10,7 +10,8 @@ patch. Every line names the topic and its version.
   applicability engine and the rulebook each emit it once they have erased a tenant, and
   identity's group identity.erasure-records completes the deletion request
 - tenant.deletion.requested 1.0.1: wording: the consumers are the services that erase, each in
-  its group <service>.erasure, and each answers with tenant.data.erased
+  its group <service>.erasure, each checks the event with identity first, and each answers with
+  tenant.data.erased; identity sends it again for the second pass
 
 ## 2026-10-06
 
