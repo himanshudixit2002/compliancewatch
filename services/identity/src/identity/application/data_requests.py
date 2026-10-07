@@ -11,8 +11,12 @@ Who may (the routes admit the rest of the callers they name):
 ``RequestExport`` records an export request with its 30-day deadline and a
 ``data_request.created`` audit entry. ``RequestDeletion`` records a deletion request the same
 way, and in the same transaction turns the tenant ``deletion_requested`` (nobody signs in to it
-any more, and it asks for nothing else) and writes ``tenant.deletion.requested`` to the outbox;
-the services' erasure consumers answer it (``identity.application.erasure``). The internal tenant
+any more, and it asks identity for nothing else) and writes ``tenant.deletion.requested`` to the
+outbox, keeping the event's id on the request: every service checks the event it receives
+against it before erasing (``identity.application.erasure.CheckErasure``). The services' erasure
+consumers answer it (``identity.application.erasure``). Only identity's own routes refuse the
+tenant from then on; the other services take its tokens until they expire, and refuse it (410)
+once they have erased it. The internal tenant
 is never erased (``TenantNotErasableError``, 422), and a tenant already being deleted asks
 nothing more (``TenantDeletingError``, 403). The tenant's owner may still list and read its
 requests while the erasure runs, with the token it holds.
@@ -49,7 +53,7 @@ from typing import Any, Final
 from domain_kernel.access import Principal, PrincipalKind, Role
 from domain_kernel.audit import AuditEntry
 from domain_kernel.events import utc_now
-from domain_kernel.ids import TenantId
+from domain_kernel.ids import CorrelationId, TenantId
 from identity.application.audit import audit_entry
 from identity.application.sessions import check_session
 from identity.domain.billing import StoredBillingEvent, Subscription
@@ -236,16 +240,20 @@ class RequestDeletion(_MakeRequest):
             if tenant.kind is TenantKind.INTERNAL:
                 raise TenantNotErasableError()
             _require_active(tenant)
+            event = deletion_event(request, actor)
+            request = request.sent(event.event_id)
             uow.tenants.save(tenant.deletion_requested())
             uow.data_requests.add(request)
-            uow.events.publish(deletion_event(request, actor))
+            uow.events.publish(event)
             uow.audit.write(_created_entry(request, actor))
         return request
 
 
-def deletion_event(request: DataRequest, actor: Principal | None) -> TenantDeletionRequested:
+def deletion_event(
+    request: DataRequest, actor: Principal | None, *, correlation_id: CorrelationId | None = None
+) -> TenantDeletionRequested:
     """The ``tenant.deletion.requested`` a deletion request sends: who asked, a user of the
-    tenant, or None for a support request or an unnamed caller."""
+    tenant, or None for a support request, an unnamed caller, a resend or the second pass."""
     asked_by = None
     if (
         actor is not None
@@ -259,6 +267,7 @@ def deletion_event(request: DataRequest, actor: Principal | None) -> TenantDelet
         requested_at=request.requested_at,
         deadline_at=request.deadline_at,
         reason=request.reason,
+        correlation_id=correlation_id or CorrelationId.new(),
     )
 
 

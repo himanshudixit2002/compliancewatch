@@ -36,6 +36,7 @@ Design reference: Project Foundation guide, sections 7, 14 and 16.
 | `POST /v1/identity/data-requests` | Ask for a copy of the tenant's data (`kind` export) or its deletion (`kind` deletion: the tenant is shut at once and every service erases it), due 30 days later; the tenant's owner or CA admin, or the regulatory team's admin naming the tenant in `tenant_id` as a support request with a reason; 403 `identity-tenant-deleting` once the tenant asked for its deletion, 422 `identity-tenant-not-erasable` for the internal tenant |
 | `GET /v1/identity/data-requests`, `GET /v1/identity/data-requests/{request_id}` | The tenant's requests, newest first, or one (404 `identity-data-request-not-found`), each with its deadline, whether it is overdue, the services that answered it (held its export, or erased the tenant) and those still pending; owners and CA admins, of a tenant being deleted too |
 | `GET /v1/identity/data-requests/{request_id}/export` | The export as a JSON attachment, assembled now and never stored (409 `identity-export-not-ready` for a request that is not an export); owners and CA admins |
+| `GET /v1/identity/erasures/{tenant_id}` | What identity holds of a tenant's deletion, which every other service's erasure consumer checks before erasing: the tenant's `status`, whether it is `internal`, and the `deletion_event_id` it last sent for the open deletion request (null when none); 404 `identity-tenant-not-found`; a service with `erasure:verify` (internal listener only) |
 
 Purposes: `terms`, `privacy_notice`, `profile_processing`, `whatsapp_reminders`,
 `email_reminders`, `analytics`. Sources: `web_onboarding`, `web_settings` (a change made later
@@ -84,38 +85,59 @@ answered them (the request's row is locked while they are recorded). No secrets 
 platform's own payment account id), and a support request shows `support` as who asked; the
 tenant's audit trail names the admin who recorded it, as it names every actor. The table is
 `data_request` (migration 0010), under forced row-level security; `data_request.created` and
-`data_request.exported` go to the tenant's audit trail.
+`data_request.exported` go to the tenant's audit trail. Once identity has erased a tenant, its
+tenant routes answer 410 `tenant-erased` (its `erased_tenant` marker).
 
 Deletion (the erasure cascade; `docs/runbooks/data-requests.md`). A deletion request turns the
 tenant `deletion_requested` in the transaction that records it, with `tenant.deletion.requested`
-(1.0.1) in the outbox and `data_request.created`: the session exchange refuses the tenant's
-people (403 `identity-tenant-deleting`), its tokens open no identity route but its data requests
-and its audit trail, and it asks for nothing more. The internal tenant is never erased (422
-`identity-tenant-not-erasable`). The worker (`identity.worker`, `make worker SERVICE=identity`,
-or `cw-mvp worker`) hosts two consumers:
+(1.0.1) in the outbox, its event id kept on the request (`deletion_event_id`), and
+`data_request.created`: the session exchange refuses the tenant's people (403
+`identity-tenant-deleting`), its tokens open no identity route but its data requests and its
+audit trail, and it asks for nothing more. The other services take a token issued before the
+request until it expires, and answer 410 once they have erased the tenant. The internal tenant
+is never erased (422 `identity-tenant-not-erasable`). The worker (`identity.worker`, `make worker
+SERVICE=identity`, or `cw-mvp worker`) hosts two consumers:
 
 - `identity.erasure` on tenant.deletion.requested: while the flag `identity.tenant_erasure`
   (`CW_TENANT_ERASURE_ENABLED`, per tenant with `CW_TENANT_ERASURE_TENANTS`; owner
-  identity-partner, off) is off for the tenant it only logs `erasure.off`. On, it deletes every
-  user's account at the identity provider first, with no transaction open (an account already
-  gone counts as deleted), then in one transaction under `app.erasure`: deletes `user_subject`,
-  `app_user` and the idempotency keys; pseudonymises `consent_record` (the subject becomes
-  `erased:` and the first 16 hex digits of sha256(tenant|subject), the evidence is emptied and
-  `recorded_by` nulled) and the billing customer's email and name, keeping the provider's ids,
-  the subscriptions, starts and masked webhooks for the tax records (for the lawyer to confirm);
-  keeps the data requests; empties the tenant's name and marks it `erased`; prunes its published
-  events; and writes `tenant.data.erased` (service identity) with its `tenant.erased` audit row.
-- `identity.erasure-records` on tenant.data.erased: each service's answer joins the tenant's open
-  deletion request (`data_request.erased`); it completes (`data_request.completed`) once every
-  service of `CW_IDENTITY_ERASURE_SERVICES` (identity, profile, obligation, notification,
-  applicability-engine, rulebook by default) has answered.
+  identity-partner, off) is off for the tenant it only logs `erasure.off`. On, it first checks
+  the event against identity's records (`CheckErasure`): one for a tenant not being deleted, for
+  the internal tenant, or that is not the event identity last sent for the tenant's open deletion
+  request touches nothing, not even the provider; it writes `tenant.erasure_refused` and is
+  dead-lettered at once. Otherwise it deletes every user's account at the identity provider, with
+  no transaction open (an account already gone counts as deleted; one at another provider is
+  listed with its user id, provider and subject in the log and the `tenant.erased` row, for the
+  operator), then in one transaction under `app.erasure`: deletes `user_subject`, `app_user` and
+  the idempotency keys; pseudonymises `consent_record` (the subject becomes `erased:` and the
+  first 32 hex digits of HMAC-SHA256 keyed with `CW_IDENTITY_ERASURE_PEPPER` over
+  tenant|subject, the evidence is emptied and `recorded_by` nulled) and the billing customer's
+  email (the same pseudonym) and name (emptied), keeping the provider's ids, the subscriptions,
+  starts and masked webhooks for the tax records (for the lawyer to confirm); empties their
+  checkout links; keeps the data requests; empties the tenant's name and marks it `erased`;
+  prunes its published events; and writes `tenant.data.erased` (service identity), its
+  `tenant.erased` audit row and its erased marker. Run again, it counts only what it changed.
+- `identity.erasure-records` on tenant.data.erased: each service's answer to the event identity
+  last sent joins the tenant's open deletion request (`data_request.erased`). Once every service
+  of `CW_IDENTITY_ERASURE_SERVICES` (identity, profile, obligation, notification,
+  applicability-engine, rulebook by default) has answered, it writes the second pass to the outbox
+  held back `CW_IDENTITY_ERASURE_SECOND_PASS_SECONDS` (900, longer than an access token lives;
+  `data_request.second_pass_scheduled`), and the request completes (`data_request.completed`)
+  once every service has answered that too.
+
+`CW_IDENTITY_ERASURE_PEPPER` is a secret held outside the database: reversing a pseudonym needs
+it, and counsel must still sign the formula off. It is required wherever the flag can be on (the
+worker refuses to start without it) and `cw-mvp check-config` refuses it missing outside local
+and test, where `DEV_ERASURE_PEPPER`, a documented placeholder, stands in.
 
 Migration 0011 adds the consumers' `processed_event`, the consent records' guard (a trigger
-refuses every DELETE, and lets an UPDATE through only under `app.erasure=on` and only of
-subject, evidence and `recorded_by`) and lets an erased tenant's name be empty. With the flag
-off a deletion request stays `received` and turns overdue after 30 days, which pages;
-`identity-admin erasure resend --tenant ID --reason TEXT` sends it again once the flag is on
-(every erasure is idempotent). The audit log is never erased.
+refuses every DELETE, and lets an UPDATE through only under `app.erasure=on`) and lets an erased
+tenant's name be empty. Migration 0012 adds the request's `deletion_event_id`, `second_pass_at`
+and `second_pass_done`, the `erased_tenant` marker, makes the guard compare whole rows (only
+subject, evidence and `recorded_by` may differ, so a column added later is guarded unnamed), and
+makes an erased tenant's name empty and any other's not. With the flag off a deletion request
+stays `received` and turns overdue after 30 days, which pages; `identity-admin erasure resend
+--tenant ID --reason TEXT` sends the open request again once the flag is on, as the event the
+services check (every erasure is idempotent). The audit log is never erased.
 
 Counting every tenant's overdue requests needs to read past row-level security, so it goes
 through `identity.data_requests_open()`: a `SECURITY DEFINER` function owned by the NOLOGIN role

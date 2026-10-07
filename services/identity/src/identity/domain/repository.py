@@ -10,6 +10,7 @@ clients, which belong to no tenant.
 """
 
 from contextlib import AbstractContextManager
+from datetime import datetime
 from typing import Protocol
 
 from domain_kernel.audit import AuditSink
@@ -70,8 +71,9 @@ class SubjectIndex(Protocol):
 
 
 class EventSink(Protocol):
-    def publish(self, event: DomainEvent) -> None:
-        """Write ``event`` to the outbox; it commits or rolls back with the unit of work."""
+    def publish(self, event: DomainEvent, *, not_before: datetime | None = None) -> None:
+        """Write ``event`` to the outbox; it commits or rolls back with the unit of work. With
+        ``not_before`` the relay sends it no earlier than then."""
         ...
 
 

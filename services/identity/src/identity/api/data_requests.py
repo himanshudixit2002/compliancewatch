@@ -4,8 +4,11 @@
   tenant's owner or CA admin makes it for their tenant; the regulatory team's admin makes one
   for the tenant ``tenant_id`` names, as support, with a reason. It is due 30 days later. A
   deletion turns the tenant ``deletion_requested`` at once: nobody signs in to it any more
-  (403 identity-tenant-deleting), and every service is asked to erase it. The internal tenant is
-  never erased (422 identity-tenant-not-erasable).
+  (403 identity-tenant-deleting), identity's own routes refuse its tokens but for reading its
+  data requests and audit trail, and every service is asked to erase it. The other services take
+  a token issued before the request until it expires, and answer 410 tenant-erased once they
+  have erased the tenant. The internal tenant is never erased (422
+  identity-tenant-not-erasable).
 - ``GET`` lists the tenant's requests, newest first, and ``GET /{request_id}`` reads one, each
   with the services that have not answered it yet: those an export has not held, or those that
   have not erased the tenant. The owner of a tenant being deleted may still read them.
@@ -81,8 +84,10 @@ def make_data_request(
 ) -> DataRequestOut:
     """``tenant_id`` is for the regulatory team's admin recording a support request for that
     tenant (a reason is then required); anyone else leaves it out or names their own tenant. A
-    deletion makes the tenant unusable at once: 403 identity-tenant-deleting on its sign-ins and
-    on every later request but reading its data requests and its audit trail."""
+    deletion shuts the tenant out of identity at once: 403 identity-tenant-deleting on its
+    sign-ins and on its later requests to identity but reading its data requests and its audit
+    trail. The other services take a token issued before it until the token expires (ten minutes
+    by default), and answer 410 tenant-erased once each has erased the tenant."""
     for_tenant = None if body.tenant_id is None else TenantId(body.tenant_id)
     if for_tenant is not None and for_tenant != tenant:
         if not principal.has_role(Role.ADMIN):

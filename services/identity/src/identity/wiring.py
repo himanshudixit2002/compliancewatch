@@ -3,6 +3,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from domain_kernel.erasure import ErasedTenants
 from identity.application.audit import ReadAuditTrail
 from identity.application.billing import ReceiveBillingWebhook, StartSubscription
 from identity.application.channel_consents import ChannelConsentStatus, RecordChannelConsent
@@ -15,6 +16,7 @@ from identity.application.data_requests import (
     RequestExport,
 )
 from identity.application.entitlements import ReadEntitlements
+from identity.application.erasure import CheckErasure
 from identity.application.sessions import ExchangeSession, IssueServiceToken
 from identity.application.tenancy import (
     ChangeRoles,
@@ -69,3 +71,6 @@ class Wiring:
     read_data_request: ReadDataRequest
     export_tenant_data: ExportTenantData
     data_request_directory: DataRequestDirectory
+    check_erasure: CheckErasure
+    erased_tenants: ErasedTenants
+    """The tenants identity has erased: its tenant routes answer them 410."""

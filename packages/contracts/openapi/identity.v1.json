@@ -599,6 +599,18 @@
             "title": "Deadline At",
             "type": "string"
           },
+          "erasure_pass": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A deletion's pass the services answer: 1, then 2 once every service has answered the first and identity has scheduled the second; null for an export",
+            "title": "Erasure Pass"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -621,7 +633,29 @@
             "title": "Requested At",
             "type": "string"
           },
+          "second_pass_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a deletion's second pass goes out to the services; null until then",
+            "title": "Second Pass At"
+          },
+          "second_pass_done": {
+            "description": "The services that have answered a deletion's second pass",
+            "items": {
+              "type": "string"
+            },
+            "title": "Second Pass Done",
+            "type": "array"
+          },
           "services_done": {
+            "description": "The services whose data an export of it held, or that erased the tenant in a deletion's first pass",
             "items": {
               "type": "string"
             },
@@ -629,7 +663,7 @@
             "type": "array"
           },
           "services_pending": {
-            "description": "The services whose data an export of it has not held yet, or that have not erased the tenant for a deletion",
+            "description": "The services whose data an export of it has not held yet, or that have not answered a deletion's current pass",
             "items": {
               "type": "string"
             },
@@ -782,6 +816,46 @@
           "enforced"
         ],
         "title": "EntitlementsOut",
+        "type": "object"
+      },
+      "ErasureCheckOut": {
+        "description": "What identity holds of a tenant's deletion, which every erasure is checked against.",
+        "properties": {
+          "deletion_event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The tenant.deletion.requested identity last sent for the tenant's open deletion request; null when it has none",
+            "title": "Deletion Event Id"
+          },
+          "internal": {
+            "description": "Whether it is the regulatory team's internal tenant",
+            "title": "Internal",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TenantStatus",
+            "description": "The tenant's status at identity"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "status",
+          "internal",
+          "deletion_event_id"
+        ],
+        "title": "ErasureCheckOut",
         "type": "object"
       },
       "HealthResponse": {
@@ -1339,7 +1413,8 @@
           "llm:call",
           "identity:channel-consents",
           "entitlements:read",
-          "data:export"
+          "data:export",
+          "erasure:verify"
         ],
         "title": "Scope",
         "type": "string"
@@ -2882,7 +2957,7 @@
         ]
       },
       "post": {
-        "description": "``tenant_id`` is for the regulatory team's admin recording a support request for that\ntenant (a reason is then required); anyone else leaves it out or names their own tenant. A\ndeletion makes the tenant unusable at once: 403 identity-tenant-deleting on its sign-ins and\non every later request but reading its data requests and its audit trail.",
+        "description": "``tenant_id`` is for the regulatory team's admin recording a support request for that\ntenant (a reason is then required); anyone else leaves it out or names their own tenant. A\ndeletion shuts the tenant out of identity at once: 403 identity-tenant-deleting on its\nsign-ins and on its later requests to identity but reading its data requests and its audit\ntrail. The other services take a token issued before it until the token expires (ten minutes\nby default), and answer 410 tenant-erased once each has erased the tenant.",
         "operationId": "make_data_request_v1_identity_data_requests_post",
         "parameters": [
           {
@@ -3327,6 +3402,85 @@
           }
         ],
         "summary": "What the tenant's plan entitles it to: its registrations and seats",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/v1/identity/erasures/{tenant_id}": {
+      "get": {
+        "description": "404 identity-tenant-not-found for a tenant identity does not hold: the consumer then\nrefuses the event. ``deletion_event_id`` is null when the tenant has no open deletion\nrequest.",
+        "operationId": "check_erasure_v1_identity_erasures__tenant_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErasureCheckOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "What identity holds of a tenant's deletion, checked before any service erases it",
         "tags": [
           "identity"
         ]

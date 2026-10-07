@@ -43,6 +43,7 @@ from identity.domain.repository import UnitOfWork
 from identity.domain.service_clients import ServiceClient
 from identity.domain.tenancy import SubjectEntry, Tenant, TenantKind, User
 from py_common.audit import MemoryAuditSink
+from py_common.erasure import MemoryErasedTenants
 
 
 class RowSecurityViolationError(RuntimeError):
@@ -315,9 +316,12 @@ class MemoryBillingRepository:
 class MemorySink:
     def __init__(self) -> None:
         self.pending: list[DomainEvent] = []
+        self.not_before: dict[UUID, datetime] = {}
 
-    def publish(self, event: DomainEvent) -> None:
+    def publish(self, event: DomainEvent, *, not_before: datetime | None = None) -> None:
         self.pending.append(event)
+        if not_before is not None:
+            self.not_before[event.event_id.value] = not_before
 
 
 class MemoryUnitOfWork:
@@ -353,6 +357,7 @@ class MemoryUnitOfWork:
         store.data_requests.clear()
         store.data_requests.update(self._data_requests)
         store.events.extend(self.events.pending)
+        store.not_before.update(self.events.not_before)
         self.audit.commit()
 
 
@@ -366,7 +371,10 @@ class MemoryStore:
         self.billing = MemoryBillingLedger()
         self.data_requests: dict[DataRequestId, DataRequest] = {}
         self.events: list[DomainEvent] = []
+        self.not_before: dict[UUID, datetime] = {}
+        """When the relay would send an event held back (a deletion's second pass), by id."""
         self.audit: list[AuditEntry] = []
+        self.erased = MemoryErasedTenants()
         self._lock = threading.Lock()
 
     def __call__(self, tenant_id: TenantId | None) -> AbstractContextManager[UnitOfWork]:

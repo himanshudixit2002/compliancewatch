@@ -35,12 +35,13 @@ rows and the platform's, and it records itself as an ``audit.exported`` entry; t
 ``.partial`` names until that entry commits. Uploading the two files to the object-locked
 bucket is a manual step (docs/runbooks/audit-export.md).
 
-``erasure resend`` sends the tenant's deletion request (the open one, else the newest) to the
-services again (``tenant.deletion.requested``, a new event), for a request made while the flag
-``identity.tenant_erasure`` was off, one a service dead-lettered, or rows an event in flight
-wrote after a service had erased; it prints the request and writes a ``data_request.resent``
-entry with the reason. Each service's erasure is idempotent, so
-one that answered already erases nothing more (docs/runbooks/data-requests.md).
+``erasure resend`` sends the tenant's open deletion request to the services again
+(``tenant.deletion.requested``, a new event, which becomes the one every service checks), for a
+request made while the flag ``identity.tenant_erasure`` was off or one a service dead-lettered;
+it prints the request and writes a ``data_request.resent`` entry with the reason. Each service's
+erasure is idempotent, so one that answered already erases nothing more; an older event still in
+flight is refused and dead-lettered. A completed request is not sent again
+(docs/runbooks/data-requests.md).
 
 Every command but ``signing-key`` uses the database at ``CW_DATABASE_URL``, whose search_path
 must name the identity schema, as ``make migrate`` sets it, and the service-client, bootstrap and
@@ -133,7 +134,7 @@ def parser() -> argparse.ArgumentParser:
     erasure = commands.add_parser("erasure", help="a tenant's deletion request")
     erasure_commands = erasure.add_subparsers(dest="action", required=True)
     resend = erasure_commands.add_parser(
-        "resend", help="send the tenant's deletion request to the services again"
+        "resend", help="send the tenant's open deletion request to the services again"
     )
     resend.add_argument("--tenant", required=True, type=TenantId.parse, help="the tenant's id")
     resend.add_argument("--reason", required=True, help="why it is sent again (audited)")
@@ -239,7 +240,10 @@ def _resend(args: argparse.Namespace, store: UnitOfWorkFactory, out: TextIO) -> 
         "request_id": str(request.id),
         "tenant_id": str(request.tenant_id),
         "status": request.status.value,
+        "pass": request.erasure_pass,
         "services_done": list(request.services_done),
+        "second_pass_done": list(request.second_pass_done),
+        "deletion_event_id": str(request.deletion_event_id),
         "deadline_at": request.deadline_at.isoformat(),
     }
     out.write(json.dumps(described, indent=2) + "\n")

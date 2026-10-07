@@ -174,7 +174,10 @@ class TenantRow(Base):
         CheckConstraint(sql_in_list("kind", TENANT_KINDS), name="ck_tenant_kind"),
         CheckConstraint(sql_in_list("status", TENANT_STATUSES), name="ck_tenant_status"),
         CheckConstraint(sql_in_list("region", REGIONS), name="ck_tenant_region"),
-        CheckConstraint("btrim(name) <> '' OR status = 'erased'", name="ck_tenant_name"),
+        CheckConstraint(
+            "CASE WHEN status = 'erased' THEN name = '' ELSE btrim(name) <> '' END",
+            name="ck_tenant_name",
+        ),
         Index(
             INTERNAL_TENANT_INDEX,
             "kind",
@@ -401,6 +404,14 @@ class DataRequestRow(Base):
             "(status = 'completed') = (completed_at IS NOT NULL)",
             name="ck_data_request_completed",
         ),
+        CheckConstraint(
+            "kind = 'deletion' OR (deletion_event_id IS NULL AND second_pass_at IS NULL)",
+            name="ck_data_request_sent",
+        ),
+        CheckConstraint(
+            "second_pass_at IS NOT NULL OR cardinality(second_pass_done) = 0",
+            name="ck_data_request_second_pass",
+        ),
         Index("ix_data_request_tenant_requested", "tenant_id", "requested_at"),
         Index(
             "ix_data_request_open_deadline",
@@ -430,3 +441,8 @@ class DataRequestRow(Base):
         ARRAY(String(length=MAX_SERVICE_CHARS)), nullable=False, server_default="{}"
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deletion_event_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(), nullable=True)
+    second_pass_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    second_pass_done: Mapped[list[str]] = mapped_column(
+        ARRAY(String(length=MAX_SERVICE_CHARS)), nullable=False, server_default="{}"
+    )

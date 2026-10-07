@@ -13,7 +13,9 @@ export (``/v1/identity/data-requests``) gather identity's own data and the data 
 ``export_sources`` replaces them (tests and demos). With telemetry on, the app reports every
 tenant's open and overdue data requests (``install_data_request_metrics``). A deletion request
 turns the tenant ``deletion_requested`` and asks every service to erase it; identity's own worker
-(``identity.worker``) erases identity's part and records the answers.
+(``identity.worker``) erases identity's part and records the answers. Every other service checks
+the request with identity before erasing (``GET /v1/identity/erasures/{tenant_id}``), and once
+identity has erased a tenant its tenant routes answer 410 ``tenant-erased``.
 
 In local and test, with ``CW_IDENTITY_DEV_CLIENT_SECRET`` set, the app makes the dev service
 clients exist when it starts.
@@ -29,6 +31,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
 from domain_kernel.access import Principal, Scope
+from domain_kernel.erasure import ErasedTenants
 from domain_kernel.errors import DomainError
 from domain_kernel.events import utc_now
 from domain_kernel.ids import TenantId
@@ -37,6 +40,7 @@ from identity.api.audit import router as audit_router
 from identity.api.auth import router as auth_router
 from identity.api.data_requests import router as data_requests_router
 from identity.api.entitlements import router as entitlements_router
+from identity.api.erasures import router as erasures_router
 from identity.api.router import router
 from identity.api.tenancy import router as tenancy_router
 from identity.application.audit import ReadAuditTrail
@@ -52,6 +56,7 @@ from identity.application.data_requests import (
     RequestExport,
 )
 from identity.application.entitlements import ReadEntitlements, SeatCheck
+from identity.application.erasure import CheckErasure
 from identity.application.sessions import ExchangeSession, IssueServiceToken
 from identity.application.tenancy import (
     ChangeRoles,
@@ -134,6 +139,7 @@ from py_common.auth import (
     load_signing_keys,
 )
 from py_common.auth.fastapi import Authenticator
+from py_common.erasure import PostgresErasedTenants
 from py_common.flags import configure_flags
 from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
 from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
@@ -272,6 +278,7 @@ def wire(
     audit_reader: AuditReader
     directory: DataRequestDirectory
     idempotency: IdempotencyStore
+    erased: ErasedTenants
     ping: Callable[[], bool]
     if settings.identity_store == "memory":
         memory = MemoryStore()
@@ -280,6 +287,7 @@ def wire(
         audit_reader = MemoryAuditReader(memory)
         directory = MemoryDataRequestDirectory(memory, utc_now)
         idempotency = MemoryIdempotencyStore()
+        erased = memory.erased
     else:
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url)
         unit_of_work, ping = postgres, postgres.ping
@@ -287,6 +295,7 @@ def wire(
         audit_reader = PostgresAuditReader(postgres.engine)
         directory = PostgresDataRequestDirectory(postgres.engine)
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
+        erased = PostgresErasedTenants(postgres.engine)
 
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)
@@ -350,6 +359,8 @@ def wire(
             deadline_seconds=settings.identity_export_deadline_seconds,
         ),
         data_request_directory=directory,
+        check_erasure=CheckErasure(unit_of_work),
+        erased_tenants=erased,
     )
 
 
@@ -409,12 +420,14 @@ def build_app(
             audit_router,
             entitlements_router,
             data_requests_router,
+            erasures_router,
         ],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         lifespan=lifespan,
         problem_status=PROBLEM_STATUS,
         authenticator=Authenticator(settings.auth_mode, token_verifier(settings, wiring.keys)),
+        erased_tenants=wiring.erased_tenants,
     )
     app.state.wiring = wiring
     install_data_request_metrics(app, wiring)
