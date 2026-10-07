@@ -16,11 +16,13 @@ masked: they say who did what to which record.
 """
 
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Connection, insert
 
-from domain_kernel.audit import AuditEntry
+from domain_kernel.audit import AuditActor, AuditActorKind, AuditEntry, AuditEntryId
+from domain_kernel.ids import TenantId
 from py_common.audit.masking import masked_entry
 from py_common.audit.schema import audit_event
 
@@ -44,6 +46,27 @@ def audit_row(entry: AuditEntry) -> dict[str, Any]:
         "after": _plain(entry.after),
         "correlation_id": entry.correlation_id,
     }
+
+
+def entry_from_row(row: Mapping[Any, Any]) -> AuditEntry:
+    """The entry an ``audit.event`` row holds, the reverse of ``audit_row`` (identity's audit
+    trail reads rows back this way). A time without a zone (SQLite drops it) is UTC."""
+    occurred_at: datetime = row["occurred_at"]
+    return AuditEntry(
+        entry_id=AuditEntryId(row["id"]),
+        action=row["action"],
+        tenant_id=None if row["tenant_id"] is None else TenantId(row["tenant_id"]),
+        subject_type=row["subject_type"],
+        subject_id=row["subject_id"],
+        actor=AuditActor(AuditActorKind(row["actor_kind"]), row["actor_id"], row["actor_label"]),
+        reason=row["reason"],
+        before=row["before"],
+        after=row["after"],
+        occurred_at=occurred_at.replace(tzinfo=UTC)
+        if occurred_at.tzinfo is None
+        else occurred_at.astimezone(UTC),
+        correlation_id=row["correlation_id"],
+    )
 
 
 class AuditWriter:

@@ -10,7 +10,7 @@ roles.sql and dev-passwords.sql, before any migration. Every service then migrat
   but never writes its ``alembic_version`` (the first migration's copy is taken back by the
   second run), and it uses no other service's schema;
 - it may add rows to ``audit.event`` of its tenant or of none, under row-level security, and only
-  ``cw_identity`` reads them, its tenant's only;
+  ``cw_identity`` reads them: its tenant's, and the platform's under the regulatory scope;
 - running the file again changes no privilege, and a role made by hand with more is cut back.
 """
 
@@ -279,6 +279,9 @@ def test_a_service_role_adds_audit_rows_that_only_identity_reads(
         assert connection.execute(text(count), {"action": action}).scalar_one() == 0
         _as_tenant(connection, tenant)
         assert connection.execute(text(count), {"action": action}).scalar_one() == 2
+        # The regulatory scope adds the rows of no tenant (identity migration 0006).
+        connection.execute(text("SELECT set_config('app.audit_scope', 'regulatory', true)"))
+        assert connection.execute(text(count), {"action": action}).scalar_one() == 4
         assert (
             _refused(
                 connection,
