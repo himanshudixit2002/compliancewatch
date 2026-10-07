@@ -28,6 +28,12 @@ class TenantRateLimitedError(RateLimitedError):
     title = "Tenant rate limited"
 
 
+class QuotaReachedError(DomainError):
+    type_slug = "quota-reached"
+    title = "Quota reached"
+    problem_extensions: ClassVar[Mapping[str, object]] = {"limit": 3, "used": 3, "status": 200}
+
+
 class UnmappedError(DomainError):
     type_slug = "unmapped"
     title = "Unmapped"
@@ -43,6 +49,10 @@ def _app() -> FastAPI:
     @router.get("/mapped")
     async def mapped() -> None:
         raise TenantRateLimitedError("slow down")
+
+    @router.get("/quota")
+    async def quota() -> None:
+        raise QuotaReachedError()
 
     @router.get("/unmapped")
     async def unmapped() -> None:
@@ -73,7 +83,10 @@ def _app() -> FastAPI:
         return signature
 
     return create_app(
-        service_name="t", version="0", routers=[router], problem_status={RateLimitedError: 429}
+        service_name="t",
+        version="0",
+        routers=[router],
+        problem_status={RateLimitedError: 429, QuotaReachedError: 402},
     )
 
 
@@ -97,6 +110,14 @@ def test_mapped_error_uses_the_most_specific_status_and_the_error_type(client: T
         "instance": "/t/mapped",
         "correlation_id": "req-1",
     }
+
+
+def test_an_error_adds_its_extension_members_but_never_replaces_one(client: TestClient) -> None:
+    response = client.get("/t/quota")
+    assert response.status_code == 402
+    body = response.json()
+    assert (body["type"], body["status"]) == (PREFIX + "quota-reached", 402)
+    assert (body["limit"], body["used"]) == (3, 3)
 
 
 def test_unmapped_domain_error_is_400(client: TestClient) -> None:
