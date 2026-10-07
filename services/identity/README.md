@@ -108,38 +108,65 @@ service's audited actions). Rows are kept seven years and never changed.
 
 Identity writes its own entries in the transaction of each change: `tenant.created` (sign-up, and
 `bootstrap-internal`), `user.invited`, `user.roles_changed` and `user.disabled` (roles and status,
-never a contact detail), `consent.recorded`, `subscription.started` and
-`subscription.status_changed` (by `system:billing-webhook`), and from `identity-admin`
-`service_client.created`, `service_client.revoked` and `audit.exported` (by
-`system:identity-admin`). Channel consents and the dev service clients made at start are not
-audited.
+never a contact detail), `consent.recorded`, `subscription.started`, and by
+`system:billing-webhook` `subscription.status_changed`, `subscription.event_ignored` (a late
+event, or one after a cancellation) and `subscription.unmatched` (a webhook for a subscription
+the tenant may not hold), and from `identity-admin` `service_client.created`,
+`service_client.revoked` and `audit.exported` (by `system:identity-admin`). Channel consents and
+the dev service clients made at start are not audited.
 
-Billing ledger (migration 0008, `identity.billing_customer`, `billing_subscription` and
-`billing_event`, all under forced row-level security): a tenant's provider customer, its
-subscriptions with their plan, quantity and status, and every verified webhook, append-only (a
-trigger refuses UPDATE, and DELETE outside a tenant erasure). `StartSubscription` asks the
-provider for the customer (once per tenant) and the subscription, then stores both with
-`subscription.started` in one transaction; the provider's calls cannot join it, so when it fails
-the first webhook about the subscription, whose notes name the tenant and the plan, records it
-(`subscription.started` by `system:billing-webhook`). A webhook is dedupled per tenant by the
-SHA-256 of its body (unique (tenant_id, body_sha256)); its payload is stored masked for personal
-identifiers as audit rows are (names still get through). Its status and quantity move the
-subscription, and a change of status is `subscription.status_changed`. The webhook finds its
-tenant only in the subscription's notes, which this service sets when it creates it; one without
-is logged and answered as ignored.
+Billing ledger (migrations 0008 and 0009, `identity.billing_customer`, `billing_subscription`,
+`billing_start` and `billing_event`, all under forced row-level security): a tenant's provider
+customer, its subscriptions with their plan, quantity and status, the starts it asked for, and
+every verified webhook, append-only (a trigger refuses UPDATE, and DELETE outside a tenant
+erasure).
 
-Entitlements: the plan of the tenant's newest active or past-due subscription times its
-quantity, or the free allowance (`CW_PLAN_FREE_REGISTRATIONS` and `CW_PLAN_FREE_SEATS`, one
-each); the internal tenant has no limits. A past-due subscription keeps its plan while the
-provider retries the charge. With the flag `identity.plan_limits` on for a tenant
+- **One provider subscription per Idempotency-Key.** `StartSubscription` records the start
+  (`billing_start`, keyed by tenant and key) in its own transaction before it calls the provider.
+  The tenant's provider customer is made once and stored at once; two first starts racing each
+  other keep the customer stored first. The provider's answer is noted on the start, then the
+  subscription and `subscription.started` are stored in one transaction. A retry with the same
+  key never calls the provider again: it gets the stored subscription (recorded from the start's
+  note if the ledger write had failed), or 409 `identity-subscription-start-pending` when the
+  start failed after the provider may have created the subscription. A failure before the
+  subscription was asked for, or a refusal by the provider (nothing created), frees the key.
+- **Webhooks.** Verified first, then dedupled per tenant by the SHA-256 of the body (unique
+  (tenant_id, body_sha256)). The event is stored as a projection on an allowlist, never the body:
+  the event's kind, time and id (`x-razorpay-event-id`), and of the subscription, payment and
+  invoice entities only their ids, plan, status, quantity, times, amounts and currency (and the
+  notes `tenant_id` and `plan_key`), masked for personal identifiers as well. Names, emails, phone
+  numbers, VPAs, addresses and card or bank details are never stored.
+- **Order.** The subscription keeps the time of the last event applied (`last_event_at`); an
+  older event that arrives later is stored, changes nothing and is audited as
+  `subscription.event_ignored`. Cancelled is final: no later event makes it active again.
+- **Adoption.** A webhook for a subscription the tenant does not hold records it
+  (`subscription.started` by `system:billing-webhook`) only when the payload's customer is the
+  tenant's stored provider customer and the tenant exists, which covers a start whose last
+  write failed. Otherwise nothing changes, the event is audited as `subscription.unmatched`, and
+  the answer is 200 `ignored` with a warning: a webhook never creates a subscription from its
+  notes alone, and a subscription id another tenant holds is never moved (a tenant-guarded
+  insert, never a 500 that the provider would retry).
+- **Quantities** stay within 1..`CW_PLAN_MAX_QUANTITY` (1000; it can lower the API's ceiling,
+  not raise it), from a request or a webhook.
+
+A webhook finds its tenant only in the subscription's notes, which this service sets when it
+creates it; one without is logged and answered as ignored.
+
+Entitlements: the plan of the tenant's newest active subscription, or past-due one within the
+grace, times its quantity, or the free allowance (`CW_PLAN_FREE_REGISTRATIONS` and
+`CW_PLAN_FREE_SEATS`, one each); the internal tenant has no limits. A past-due subscription
+(Razorpay's `pending`, and `halted` once it stopped retrying) keeps its plan for
+`CW_PLAN_PAST_DUE_GRACE_DAYS` (14) after it turned past due, then the tenant has the free
+allowance until a charge succeeds. With the flag `identity.plan_limits` on for a tenant
 (`CW_PLAN_LIMITS_ENFORCED=true`, optionally `CW_PLAN_LIMITS_TENANTS=<ids>`; default off), an
-invitation past the seats (active users) is refused with 402 `identity-seat-limit-reached`,
-before the provider's account is made and again with the tenant locked, and profile refuses a new
-GSTIN registration past the registrations with 402 `profile-plan-limit-reached`. Both problems
-carry `limit` and `used`, and nothing else about the tenant. **Placeholders, decided by the
-maintainer with the pricing:** the plans' prices and limits (`identity.domain.billing.PLANS`:
-per unit, the owner plan 5 registrations and 3 seats, the CA plan 25 and 1), the free allowance,
-and the grace of a past-due subscription.
+invitation past the seats (active users) is refused with 402 `identity-seat-limit-reached`, once
+early and again with the tenant locked, before the provider's account is made, so a refused
+invitation leaves no account behind; profile refuses a new GSTIN registration past the
+registrations with 402 `profile-plan-limit-reached`. Both problems carry `limit` and `used`
+(the `LimitProblem` schema in the specs), and nothing else about the tenant. **Placeholders,
+decided by the maintainer with the pricing:** the plans' prices and limits
+(`identity.domain.billing.PLANS`: per unit, the owner plan 5 registrations and 3 seats, the CA
+plan 25 and 1), the free allowance, and the past-due grace of 14 days.
 
 Roles depend on the tenant's kind: a business has owners, staff and compliance leads; a CA firm has
 CA admins, CA staff and compliance leads; the internal tenant has analysts, reviewers and admins.

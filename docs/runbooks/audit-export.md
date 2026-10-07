@@ -17,7 +17,7 @@ a tenant's erasure included (pseudonymising them on erasure is not built yet).
 
 | Service | Actions | Tenant |
 | --- | --- | --- |
-| identity | `tenant.created`, `user.invited`, `user.roles_changed`, `user.disabled`, `consent.recorded`, `subscription.started`, `subscription.status_changed` (`system:billing-webhook`) | the tenant |
+| identity | `tenant.created`, `user.invited`, `user.roles_changed`, `user.disabled`, `consent.recorded`, `subscription.started`, `subscription.status_changed`, `subscription.event_ignored` and `subscription.unmatched` (`system:billing-webhook`) | the tenant |
 | identity (`identity-admin`) | `service_client.created`, `service_client.revoked`, `audit.exported` (`system:identity-admin`) | none |
 | profile | `profile_node.registered`, `profile_node.attributes_changed`, `profile_node.prefilled` | the tenant |
 | obligation | `obligation.created`, `obligation.rescheduled` (one per obligation, with its cause), `obligation.closed`, `obligation.status.start`, `.complete`, `.waive`, `obligation.assign`, `obligation.comment` | the tenant |
