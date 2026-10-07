@@ -24,6 +24,7 @@ from cw_mvp.testing import MEMORY_SERVICES, mvp_settings
 from notification.infrastructure.obligation_client import (
     OBLIGATIONS_PATH as NOTIFICATION_OBLIGATIONS_PATH,
 )
+from py_common.db_roles import SERVICE_SCHEMAS
 from py_common.settings import Settings
 from qa.infrastructure.obligation_client import OBLIGATIONS_PATH as QA_OBLIGATIONS_PATH
 from qa.main import build_app as build_qa
@@ -53,6 +54,12 @@ def test_every_service_directory_is_registered_once_with_identity_first() -> Non
 def test_the_schemas_are_the_ones_the_dev_database_creates_but_audit() -> None:
     created = re.findall(r"CREATE SCHEMA IF NOT EXISTS (\w+);", INIT_SQL.read_text("utf-8"))
     assert sorted(schemas()) == sorted(set(created) - {"audit"})
+
+
+def test_every_schema_has_its_database_role() -> None:
+    """infra/dev/postgres/roles.sql gives each schema a role, cw_<schema>, which make run and the
+    deployment's per-service URLs connect as; the app itself connects as cw_app."""
+    assert sorted(SERVICE_SCHEMAS) == sorted(schemas())
 
 
 @pytest.mark.parametrize("entry", REGISTRY, ids=lambda entry: entry.name)
