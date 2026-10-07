@@ -125,3 +125,18 @@ export function parseFakeSignInForm(formData: FormData): ParsedSignInForm {
   }
   return { ok: false, fieldErrors };
 }
+
+/**
+ * The plain reason the sign-in page shows for a refusal trying again cannot fix, by the
+ * problem type identity answers the session exchange with (the slug after the type's prefix).
+ * The real sign-in's proxy maps the refusal with it; a tenant whose deletion is under way
+ * (identity-tenant-deleting, 403) signs nobody in.
+ */
+const REFUSAL_KEYS: Readonly<Record<string, MessageKey>> = {
+  "identity-tenant-deleting": "signIn.refusal.tenantDeleting",
+};
+
+/** The message key of a refusal's plain reason, or undefined for a problem it has none for. */
+export function signInRefusalKey(slug: string): MessageKey | undefined {
+  return Object.hasOwn(REFUSAL_KEYS, slug) ? REFUSAL_KEYS[slug] : undefined;
+}
