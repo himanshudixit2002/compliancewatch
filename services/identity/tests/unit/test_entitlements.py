@@ -129,7 +129,11 @@ def test_with_the_flag_on_an_invitation_past_the_seats_is_refused_until_one_is_f
     assert business.provider.lookup(subject) is None, "no provider account was made"
     provider = MemoryBillingProvider(clock=lambda: NOW)
     started = StartSubscription(provider, business.store, clock=lambda: NOW).run(
-        business.tenant.id, OWNER.key, email="owner@example.com", name="Example Traders"
+        business.tenant.id,
+        OWNER.key,
+        key="example-key-0001",
+        email="owner@example.com",
+        name="Example Traders",
     )
     body = json.dumps(
         {
@@ -163,6 +167,65 @@ def test_a_disabled_user_frees_a_seat() -> None:
         business.invite_staff("+919811111111")
     DisableUser(business.store, clock=lambda: NOW).run(business.tenant.id, business.owner, staff.id)
     business.invite_staff("+919811111111")
+
+
+def test_a_refusal_at_the_locked_check_makes_no_provider_account() -> None:
+    """m6: the second seat check, with the tenant locked, runs before the provider's account is
+    made; an invitation it refuses leaves no account behind."""
+    business = Business()
+    calls = 0
+
+    def second_refuses(uow: object, tenant_id: TenantId) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise SeatLimitReachedError(limit=1, used=1)
+
+    invite = InviteUser(business.store, business.provider, seats=second_refuses)
+    with pytest.raises(SeatLimitReachedError):
+        invite.run(
+            business.tenant.id,
+            business.owner,
+            contact=Contact(phone="+919812345678"),
+            roles=[Role.STAFF],
+        )
+    subject = business.provider.subject_for(Contact(phone="+919812345678"))
+    assert business.provider.lookup(subject) is None
+
+
+def test_a_past_due_plan_lasts_for_the_grace_then_is_free() -> None:
+    """M5: past due (or halted) keeps the plan for the grace after it turned past due."""
+    business = Business(PLAN_LIMITS)
+    since = NOW
+    with business.store(business.tenant.id) as uow:
+        uow.billing.add_subscription(
+            Subscription(
+                business.tenant.id,
+                OWNER.key,
+                "sub_past_due",
+                SubscriptionStatus.PAST_DUE,
+                NOW - timedelta(days=60),
+                past_due_since=since,
+            )
+        )
+    grace = timedelta(days=14)
+
+    def read(at: datetime) -> str:
+        return (
+            ReadEntitlements(
+                business.store, PLANS, FREE, business.flags, clock=lambda: at, past_due_grace=grace
+            )
+            .run(business.tenant.id)
+            .plan_key
+        )
+
+    assert read(since + timedelta(days=13)) == OWNER.key
+    assert read(since + grace) == FREE_PLAN
+    seats = SeatCheck(
+        PLANS, FREE, business.flags, clock=lambda: since + grace, past_due_grace=grace
+    )
+    with business.store(business.tenant.id) as uow, pytest.raises(SeatLimitReachedError):
+        seats(uow, business.tenant.id)
 
 
 def test_the_internal_tenant_has_no_limits() -> None:
