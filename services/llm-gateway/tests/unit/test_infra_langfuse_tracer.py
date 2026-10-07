@@ -237,6 +237,45 @@ def test_an_embedding_is_traced_with_its_inputs_and_no_sampling_parameters() -> 
     assert (end["usage"]["input"], end["usage"]["output"]) == (10, 0)
 
 
+@pytest.mark.parametrize(
+    ("row", "status"),
+    [
+        (entry(), None),
+        (
+            entry(
+                status=CallStatus.ERROR,
+                error_type="llm-residency-unavailable",
+                input_tokens=0,
+                output_tokens=0,
+                generation_id="",
+            ),
+            "llm-residency-unavailable",
+        ),
+    ],
+    ids=["served", "refused"],
+)
+def test_without_text_only_the_calls_metadata_is_sent(row: LedgerEntry, status: str | None) -> None:
+    """Under CW_LLM_RESIDENCY=india_only: no prompt, answer or error detail reaches Langfuse."""
+    client = Client()
+    tracer = LangfuseTracer(client, environment="test", send_text=False)
+    assert tracer.send_text is False
+    tracer.record(record(row, error_detail="refused: Section 7 says the return is due monthly."))
+
+    [trace] = client.traces
+    assert trace["name"] == "llm.extraction"
+    assert trace["metadata"]["document_id"] == "doc-1"
+    [generation] = client.trace_client.generations
+    assert generation["input"] is None
+    assert generation["metadata"]["pii"] == PII
+    [end] = client.trace_client.generation_client.ended
+    assert end["output"] is None
+    assert end["status_message"] == status
+    assert end["usage"]["input"] == row.input_tokens
+    sent = repr((client.traces, client.trace_client.generations, end))
+    for text in ("Section 7", "Extract rules.", '{"rules": []}'):
+        assert text not in sent
+
+
 def test_a_failing_client_is_logged_and_swallowed() -> None:
     client = Client(fail=True)
     row = entry()
@@ -270,6 +309,7 @@ def test_from_keys_builds_the_client_with_the_keys(monkeypatch: pytest.MonkeyPat
         host="http://localhost:3010",
         environment="local",
     )
+    assert tracer.send_text is True
     tracer.flush()
     assert built == [
         {"public_key": "pk-lf-dev", "secret_key": "sk-lf-dev", "host": "http://localhost:3010"}

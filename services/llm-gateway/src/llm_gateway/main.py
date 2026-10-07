@@ -134,7 +134,12 @@ def wire(
         host, public_key, secret_key = langfuse
         tracers.append(
             LangfuseTracer.from_keys(
-                public_key=public_key, secret_key=secret_key, host=host, environment=settings.env
+                public_key=public_key,
+                secret_key=secret_key,
+                host=host,
+                environment=settings.env,
+                # Under india_only no prompt or answer text goes to Langfuse, wherever it runs.
+                send_text=residency.real_models_allowed,
             )
         )
     tracer = CompositeTracer(tracers)

@@ -26,6 +26,7 @@ from llm_gateway.infrastructure.providers.residency import (
     in_india,
 )
 from llm_gateway.infrastructure.providers.vercel import VercelGatewayProvider
+from llm_gateway.infrastructure.tracing import langfuse
 from llm_gateway.wiring import GatewayWiring
 
 AppFactory = Callable[..., FastAPI]
@@ -268,3 +269,63 @@ def test_models_reports_the_policy_on_every_route(
         routes = client.get(MODELS).json()
     assert [route["feature"] for route in routes] == [feature.value for feature in Feature]
     assert all(route["residency"] == residency for route in routes)
+
+
+class LangfuseStub:
+    """What the gateway sends to Langfuse: every trace, generation and end, as keyword sets."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict[str, Any]] = []
+
+    def __call__(self, **_: Any) -> "LangfuseStub":
+        return self
+
+    def trace(self, **kwargs: Any) -> "LangfuseStub":
+        self.sent.append(kwargs)
+        return self
+
+    def generation(self, **kwargs: Any) -> "LangfuseStub":
+        self.sent.append(kwargs)
+        return self
+
+    def end(self, **kwargs: Any) -> "LangfuseStub":
+        self.sent.append(kwargs)
+        return self
+
+    def flush(self) -> None:
+        return None
+
+
+LANGFUSE = {
+    "langfuse_host": "http://127.0.0.1:9",
+    "langfuse_public_key": "pk-lf-test",
+    "langfuse_secret_key": "sk-lf-test",
+}
+PROMPT = "Example question about GSTR-3B for owner@example.com"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "text_sent"),
+    [
+        ({"llm_residency": "india_only", **REAL}, False),
+        ({"llm_residency": "india_only"}, False),
+        ({}, True),
+    ],
+    ids=["india_only-refused", "india_only-fake", "global"],
+)
+@pytest.mark.usefixtures("no_model_call")
+def test_langfuse_gets_no_prompt_or_answer_under_india_only(
+    make_app: AppFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, Any],
+    text_sent: bool,
+) -> None:
+    stub = LangfuseStub()
+    monkeypatch.setattr(langfuse, "Langfuse", stub)
+    with TestClient(make_app(**overrides, **LANGFUSE)) as client:
+        client.post(COMPLETIONS, json={**QA, "user": PROMPT})
+    [trace, generation, end] = stub.sent
+    assert trace["name"] == "llm.qa"
+    assert (generation["input"] is not None, end["output"] is not None) == (text_sent, text_sent)
+    assert ("Example question" in repr(stub.sent)) is text_sent
+    assert "owner@example.com" not in repr(stub.sent), "masked under either policy"

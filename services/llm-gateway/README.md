@@ -312,9 +312,10 @@ hosts the route allows, with zero data retention asked for. `CW_LLM_RESIDENCY` (
   has to remember a wrapper, and a provider the guard does not know is refused. The guard
   refuses every completion and embedding with 503 `llm-residency-unavailable` without calling
   the provider. The refusal is booked in the ledger at no cost and traced like any failed call;
-  no fallback model is tried and the breaker does not count it. `fake/...` models, which the
-  gateway serves in process, still answer, and with `CW_LLM_PROVIDER=fake` every route does.
-  Today that means `india_only` stops every real model call: rule extraction, judgement,
+  no fallback model is tried and the breaker does not count it. Langfuse gets no prompt, answer
+  or error text of any call, only its metadata (names, ids, model, tokens, cost, masked counts).
+  `fake/...` models, which the gateway serves in process, still answer, and with
+  `CW_LLM_PROVIDER=fake` every route does. Today that means `india_only` stops every real model call: rule extraction, judgement,
   question answering and retrieval fail until a provider that runs inference in India is added
   to `IN_INDIA` and wired behind the gateway.
 
@@ -360,7 +361,9 @@ cost, cache hit, masked counts, tenant and correlation id. With the three `CW_LA
 variables set, the same call becomes a Langfuse trace named `llm.<feature>` (user = tenant,
 session = correlation id, tags for feature, cost source, cached or live, status) with one
 generation carrying the prompt reference, the model served, model parameters, masked input and
-output, token usage and cost. The response's `trace_id` is the ledger row id and the Langfuse
+output, token usage and cost. Under `CW_LLM_RESIDENCY=india_only` the generation carries no
+input, output or error detail (an error row carries its problem type): Langfuse gets the call's
+metadata only, wherever it runs. The response's `trace_id` is the ledger row id and the Langfuse
 trace id. Traces are flushed on shutdown.
 
 Locally: `make dev-observability`, set `CW_LANGFUSE_HOST=http://localhost:3010` with the

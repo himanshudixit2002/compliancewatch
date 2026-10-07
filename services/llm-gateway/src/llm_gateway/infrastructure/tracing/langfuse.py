@@ -4,6 +4,11 @@ Pinned to the v2 SDK because the self-hosted server is v2 (a v3 server needs Cli
 Redis and MinIO). The client is injected so tests use a stub and never start the SDK's
 background thread; ``from_keys`` builds the real one. The SDK ships no type marker, so the
 client is described by the small protocol below.
+
+With ``send_text`` off, which the gateway sets under ``CW_LLM_RESIDENCY=india_only``, no prompt,
+answer or error text goes to Langfuse, whose host may be outside India: the generation's input
+and output are empty and an error row carries its problem type, not its detail. What is left is
+metadata: the names, ids, tags, model, parameters, tokens, cost, masked counts and the latency.
 """
 
 from collections.abc import Mapping
@@ -66,19 +71,33 @@ class LangfuseClient(Protocol):
 
 
 class LangfuseTracer:
-    """Never fails a call: any SDK error is logged and swallowed."""
+    """Never fails a call: any SDK error is logged and swallowed. ``send_text`` off sends the
+    call's metadata only (see the module)."""
 
-    def __init__(self, client: LangfuseClient, *, environment: str = "local") -> None:
+    def __init__(
+        self, client: LangfuseClient, *, environment: str = "local", send_text: bool = True
+    ) -> None:
         self._client = client
         self._environment = environment
+        self._send_text = send_text
+
+    @property
+    def send_text(self) -> bool:
+        return self._send_text
 
     @classmethod
     def from_keys(
-        cls, *, public_key: str, secret_key: str, host: str, environment: str = "local"
+        cls,
+        *,
+        public_key: str,
+        secret_key: str,
+        host: str,
+        environment: str = "local",
+        send_text: bool = True,
     ) -> Self:
         """A tracer over a real client; ``flush`` at shutdown sends what the SDK buffered."""
         client: LangfuseClient = Langfuse(public_key=public_key, secret_key=secret_key, host=host)
-        return cls(client, environment=environment)
+        return cls(client, environment=environment, send_text=send_text)
 
     def record(self, call: CallRecord) -> None:
         try:
@@ -113,11 +132,12 @@ class LangfuseTracer:
                 **call.metadata,
             },
         )
+        prompt_text = _messages(call) if call.kind is CallKind.COMPLETION else call.user
         generation = trace.generation(
             name=prompt,
             model=entry.model_served,
             model_parameters=_parameters(call),
-            input=_messages(call) if call.kind is CallKind.COMPLETION else call.user,
+            input=prompt_text if self._send_text else None,
             start_time=entry.occurred_at,
             metadata={
                 "pii": dict(call.pii_counts),
@@ -126,11 +146,12 @@ class LangfuseTracer:
                 "cost_source": entry.cost_source.value,
             },
         )
+        detail = call.error_detail if self._send_text else entry.error_type
         generation.end(
-            output=call.output,
+            output=call.output if self._send_text else None,
             end_time=entry.occurred_at + timedelta(milliseconds=entry.latency_ms),
             level="ERROR" if failed else "DEFAULT",
-            status_message=call.error_detail or None,
+            status_message=detail or None,
             usage=_usage(entry.input_tokens, entry.output_tokens, entry.cost_usd),
         )
 
