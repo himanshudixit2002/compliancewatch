@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { codePointLength, highlightSpan, markSpans } from "./highlight";
+import { codePointLength, highlightSpan, markSpans, quoteSpan } from "./highlight";
 
 describe("highlightSpan", () => {
   it("cuts the text around the span, end exclusive", () => {
@@ -64,5 +64,17 @@ describe("markSpans", () => {
   it("keeps a text without spans as one plain run, the empty text included", () => {
     expect(markSpans("Example", [])).toEqual([{ text: "Example", mark: false }]);
     expect(markSpans("", [])).toEqual([{ text: "", mark: false }]);
+  });
+});
+
+describe("quoteSpan", () => {
+  it("finds a quote word for word, in code points", () => {
+    expect(quoteSpan("Example clause text.", "clause")).toEqual({ start: 8, end: 14 });
+    expect(quoteSpan("\u{1D4D0} Example clause", "Example")).toEqual({ start: 2, end: 9 });
+  });
+
+  it("finds nothing for an empty quote or one the text does not hold exactly", () => {
+    expect(quoteSpan("Example clause text.", "")).toBeNull();
+    expect(quoteSpan("Example clause text.", "Example  clause")).toBeNull();
   });
 });
