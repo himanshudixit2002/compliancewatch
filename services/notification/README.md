@@ -25,20 +25,26 @@ Design reference: Project Foundation guide, sections 7, 9 and 14.
 | `POST /v1/notification/receipts/email` | SES bounces, complaints and deliveries that SNS posts, with HTTP basic credentials whose password is `CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN`, and the SNS signature verified |
 | `GET /v1/notification/templates` | Every template with its Meta approval status |
 | `POST /v1/notification/bulk` | A CA firm's change card to the clients a change affects, in the public API from 0.4.0 (below); 201 with the businesses by outcome, with an Idempotency-Key; 503 `notification-bulk-disabled` while `CW_NOTIFICATION_BULK_ENABLED` is off |
-| `GET /v1/notification/data-export` | The tenant's data for its data export, which identity assembles: `recipients` (with their addresses and businesses), `preferences` (of the addresses the tenant's recipients hold, and no other) and `notifications`, each read 500 rows at a time. Suppressions, the address directory and the work index are not exported |
+| `GET /v1/notification/data-export` | The tenant's data for its data export, which identity assembles: `recipients` (with their addresses and businesses), `preferences` (of the addresses the tenant's recipients hold, only those the tenant's own users set on the web, with only the consent, language and quiet hours) and `notifications`, each read 500 rows at a time. Suppressions, the address directory and the work index are not exported |
 
 An opt-in given on the web (`opted_in` true with source `web_onboarding` or `web_settings`) is
 recorded only when identity holds a granted consent for the channel's purpose, `whatsapp_reminders`
 for WhatsApp and `email_reminders` for email, as docs/legal/data-map.md says a preference must be
-backed. The service reads `GET {CW_IDENTITY_URL}/v1/identity/consents?subject=` for the request's
-tenant (`x-tenant-id`, or the tenant a user's token names) with its own service token, which needs
-`tenant:act`. The subject is the body's `subject`, the user id the web records consents under; a
-user's token names it, and naming another is a 403. Without a granted consent the answer is a 409
-`notification-consent-not-recorded`, without a tenant a 401 `notification-tenant-required`,
-without a subject a 422 `notification-consent-subject-required`, and when identity cannot answer a
-503 `notification-dependency-unavailable`; nothing is recorded in any of these cases. Opt-outs and
-the other sources (`whatsapp_keyword`, `api`, `support`) are recorded as before without asking
-identity.
+backed, and, where identity holds the subject's phone (WhatsApp) or email, only for that
+address. The service reads `GET {CW_IDENTITY_URL}/v1/identity/consents?subject=&channel=&address=`
+for the request's tenant (`x-tenant-id`) with its own service token, which needs `tenant:act`. The
+subject is the body's `subject`, the user id the web records consents under. Without a granted
+consent the answer is a 409 `notification-consent-not-recorded`, for an address identity knows is
+not the subject's a 409 `notification-consent-address-not-theirs`, without a tenant a 401
+`notification-tenant-required`, without a subject a 422 `notification-consent-subject-required`,
+and when identity cannot answer a 503 `notification-dependency-unavailable`; nothing is recorded in
+any of these cases. Opt-outs and the other sources (`whatsapp_keyword`, `api`, `support`) are
+recorded without asking identity; outside header mode `api` and `support` need a service token
+(401 without one), since they skip the check. The trust boundary: only a service with
+`notification:preferences` reaches the route with a token, so the subject is the web app's server's
+word for its signed-in user; identity confirms the consent and the address, not who is at the
+browser. A change from the web records the tenant it was made for (`set_for_tenant_id`, migration
+0004), which decides which tenant's export shows it.
 
 The recipient, send, notification, bulk and data export routes act for one tenant, checked before the body (a
 request without one is a 401 `notification-tenant-required` problem). The spec is
@@ -63,7 +69,7 @@ as in `token` mode and one without it as in `header` mode; in `token` mode a bea
 | `POST /receipts/whatsapp` | a service with `notification:receipts`; `x-cw-bot-token` is accepted only in `header` and `dual` mode |
 | `POST /receipts/email`, `GET /templates` | read no token: SNS posts with basic credentials, and the templates are the same for everyone |
 | `POST /bulk` | a user of a CA firm (`ca_admin` or `ca_staff`) whose token names the tenant; no service |
-| `GET /data-export` | a user with `owner` or `ca_admin` for their own tenant, or a service with `data:export` naming the tenant in `x-tenant-id` with `tenant:act` (identity) |
+| `GET /data-export` | a user with `owner` or `ca_admin` for their own tenant, or identity's export token: `data:export`, bound to the tenant and addressed to `notification` (a token for another tenant or service, or one naming no tenant, is a 403) |
 
 A caller without the role or scope gets a 403 `auth-forbidden`. The dispatcher reads rule versions
 from the rulebook, and a bulk notification reads the clients' obligations from the obligation

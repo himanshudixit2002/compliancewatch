@@ -59,18 +59,29 @@ nothing links the two (docs/legal/consent-record.md).
 
 Data requests. A tenant's owner or CA admin asks for a copy of the tenant's data (an export),
 or the regulatory team's admin records one for a tenant that asked support. The request is due
-30 days after it was made (`docs/legal/data-map.md`; counsel to confirm), is `received` until
-its export is first downloaded, `in_progress` while a service has not answered, and `completed`
-once every service has. The export is assembled on download and never stored: identity's own
-data of the tenant (the tenant, its users, its consent records, its billing customer,
-subscriptions and webhooks, its data requests) and the part each service of
-`CW_IDENTITY_EXPORT_SOURCES` answers on `GET /v1/<service>/data-export` (profile, the
-applicability engine, obligation, notification; `service=url` pairs, the dev ports by default,
-the internal listener in the combined product), called with a token identity mints for itself
-(`data:export` and `tenant:act`, two minutes). A source that fails or answers for another
-tenant is named in `services_pending` and its entry says why; the download still answers 200.
-No secrets reach the bundle (no session versions, service clients, idempotency keys, checkout
-links or webhook digests), and a support request shows `support` as who asked. The table is
+30 days after it was made (`docs/legal/data-map.md`; counsel to confirm). An export is answered
+as soon as it is made: it is `in_progress` (offered for download) until a download has had every
+service's part, then `completed`. One the tenant never completes expires quietly at its deadline:
+it is no longer open and never overdue, since only the tenant can complete it. Only a request
+still `received`, never answered (a deletion, once M3-6 answers them), is overdue past its
+deadline. The export is assembled on download and never stored: identity's own data of the
+tenant (the tenant, its users, its consent records, its billing customer, subscriptions and
+webhooks, its data requests; the growing ones read 500 rows at a time) and the part each service
+of `CW_IDENTITY_EXPORT_SOURCES` answers on `GET /v1/<service>/data-export` (profile, the
+applicability engine, obligation, notification; `service=url` pairs, the dev ports by default and
+required outside local and test, each https or loopback; the internal listener in the combined
+product). Identity calls each with a token it mints for that call: `data:export` only, bound to
+the tenant (`tid`) and addressed to that one service (`aud` `compliancewatch:<service>`), for two
+minutes, so a token that leaks cannot be replayed for another tenant or at another service. The
+services are asked four at a time, 20 seconds each at most and 45 seconds for all
+(`CW_IDENTITY_EXPORT_CONCURRENCY`, `CW_IDENTITY_EXPORT_TIMEOUT_SECONDS`,
+`CW_IDENTITY_EXPORT_DEADLINE_SECONDS`), and the answer is written a service at a time. A source
+that fails, is late or answers for another tenant is named in `services_pending` and its entry
+says why; the download still answers 200. Two downloads at once each add the services that
+answered them (the request's row is locked while they are recorded). No secrets reach the bundle
+(no session versions, service clients, idempotency keys, checkout links, webhook digests or the
+platform's own payment account id), and a support request shows `support` as who asked; the
+tenant's audit trail names the admin who recorded it, as it names every actor. The table is
 `data_request` (migration 0010), under forced row-level security; `data_request.created` and
 `data_request.exported` go to the tenant's audit trail.
 
@@ -79,7 +90,9 @@ through `identity.data_requests_open()`: a `SECURITY DEFINER` function owned by 
 `cw_identity_directory`, which has a read policy of its own on `data_request` and nothing else,
 answering counts per kind (open, overdue) and no row. `infra/dev/postgres/roles.sql` makes the
 role, the policy and the function once the table exists; only `cw_identity` and `cw_app` may run
-it. With telemetry on, the app reports `identity_data_requests_open{kind}` and
+it (the role grants that itself, as the function's owner). A schema owner that is not a superuser
+is a member of the role WITH INHERIT FALSE, SET TRUE: it does not inherit the reads, but may SET
+ROLE to read through the policy, as the runbook does, no more than the tables' owner could anyway. With telemetry on, the app reports `identity_data_requests_open{kind}` and
 `identity_data_requests_overdue` from it, read at most once a minute; the DataRequestOverdue
 alert pages on the second (`docs/runbooks/data-requests.md`).
 
