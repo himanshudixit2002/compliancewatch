@@ -138,7 +138,7 @@ empty means unset). Everything below is read at process start.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `CW_LLM_PROVIDER` | `fake` | `fake` serves every route from the deterministic provider; `vercel` uses the Vercel AI Gateway and requires the key |
-| `CW_LLM_RESIDENCY` | `global` | `global` lets the masked text reach models outside India; `india_only` refuses every call to a real model with 503 `llm-residency-unavailable` (flag `llm_gateway.residency`; see [Residency](#residency)) |
+| `CW_LLM_RESIDENCY` | `global` | `global` lets the masked text reach models outside India; `india_only` refuses every call to a provider not in India with 503 `llm-residency-unavailable` (see [Residency](#residency)). An empty value is refused at start, not read as `global` |
 | `CW_LLM_LEDGER` | `memory` | `memory` (per process) or `postgres` (table `llm_gateway.cost_ledger`, after `make migrate SERVICE=llm-gateway`) |
 | `CW_AI_GATEWAY_API_KEY` | unset | Vercel AI Gateway key. Never committed; the process refuses to start with `vercel` and no key |
 | `CW_AI_GATEWAY_BASE_URL` | `https://ai-gateway.vercel.sh/v1` | OpenAI-compatible endpoint |
@@ -300,8 +300,13 @@ still reaches the model as written.
 ## Residency
 
 No routed model runs inference in India: every real call sends the masked text abroad, to the
-hosts the route allows, with zero data retention asked for. `CW_LLM_RESIDENCY` (flag
-`llm_gateway.residency`, owner ai-platform) says whether that may happen:
+hosts the route allows, with zero data retention asked for. `CW_LLM_RESIDENCY` says whether that
+may happen, and nothing else does. The gateway reads it once at start. It refuses to start with
+the variable set but empty, which every other setting would read as unset and here would mean
+`global`, and with `CW_FLAG_LLM_GATEWAY_RESIDENCY` set: the flag registry's entry
+`llm_gateway.residency` (owner ai-platform) is the setting's record and nothing reads the flag, so
+no flag provider can answer a policy the gateway is not running. `cw-mvp check-config` reports
+both:
 
 - `global`, the default, and what `make product` and the image run: it may, as described above.
 - `india_only`: no text leaves India. Once every provider is registered, the composition root

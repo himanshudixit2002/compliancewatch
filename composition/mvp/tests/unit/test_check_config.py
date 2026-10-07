@@ -185,6 +185,27 @@ def test_the_fake_model_is_refused(monkeypatch: pytest.MonkeyPatch, base: dict[s
     assert only(found).message.startswith("CW_LLM_PROVIDER=fake answers from a fake model")
 
 
+@pytest.mark.parametrize(
+    ("changes", "says"),
+    [
+        ({"llm_residency": ""}, "CW_LLM_RESIDENCY: CW_LLM_RESIDENCY is set but empty"),
+        (
+            {"flag_llm_gateway_residency": "india_only"},
+            "CW_LLM_RESIDENCY: CW_FLAG_LLM_GATEWAY_RESIDENCY is set, and nothing reads it",
+        ),
+    ],
+    ids=["empty", "flag-override"],
+)
+@pytest.mark.parametrize("env", ["local", "staging"])
+def test_a_residency_the_gateway_would_not_run_under_is_refused_everywhere(
+    monkeypatch: pytest.MonkeyPatch, env: str, changes: dict[str, str], says: str
+) -> None:
+    base = STAGING if env == "staging" else {"CW_ENV": "local", "CW_LLM_PROVIDER": "fake"}
+    found = report(monkeypatch, base, **changes)
+    assert only(found).where == "llm-gateway"
+    assert only(found).message.startswith(says)
+
+
 @pytest.mark.parametrize("base", [STAGING, PRODUCTION], ids=["staging", "prod"])
 def test_india_only_is_accepted_and_still_refuses_the_fake_model(
     monkeypatch: pytest.MonkeyPatch, base: dict[str, str]

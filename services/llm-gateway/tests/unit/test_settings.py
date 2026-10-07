@@ -134,6 +134,52 @@ def test_the_residency_policy_comes_from_its_variable(monkeypatch: pytest.Monkey
         GatewaySettings()
 
 
+EMPTY = "CW_LLM_RESIDENCY is set but empty: set global or india_only, or unset it"
+OVERRIDE = "CW_FLAG_LLM_GATEWAY_RESIDENCY is set, and nothing reads it"
+
+
+@pytest.mark.parametrize("value", ["", "  "])
+def test_an_empty_residency_is_refused_not_read_as_global(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """Empty means unset for every other setting; here it would send text out of India."""
+    monkeypatch.setenv("CW_LLM_RESIDENCY", value)
+    with pytest.raises(ValidationError, match=EMPTY):
+        GatewaySettings()
+    assert GatewaySettings(llm_residency="india_only").llm_residency == "india_only"
+
+
+def test_an_empty_residency_in_env_files_is_refused_and_the_environment_wins(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first, second = tmp_path / "first.env", tmp_path / "second.env"
+    first.write_text("CW_LLM_RESIDENCY=india_only\n", encoding="utf-8")
+    second.write_text("CW_LLM_RESIDENCY=\n", encoding="utf-8")
+    assert GatewaySettings(_env_file=first).llm_residency == "india_only"
+    with pytest.raises(ValidationError, match=EMPTY):
+        GatewaySettings(_env_file=(first, second))
+    monkeypatch.setenv("CW_LLM_RESIDENCY", "global")
+    assert GatewaySettings(_env_file=(first, second)).llm_residency == "global"
+
+
+def test_the_flag_override_of_the_residency_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The registry entry llm_gateway.residency is the setting's record: nothing reads the flag,
+    so an override would make flag_value disagree with the policy the gateway runs."""
+    monkeypatch.setenv("CW_FLAG_LLM_GATEWAY_RESIDENCY", "")
+    assert GatewaySettings().llm_residency == "global", "an empty override sets nothing"
+    for value in ("india_only", "global"):
+        monkeypatch.setenv("CW_FLAG_LLM_GATEWAY_RESIDENCY", value)
+        with pytest.raises(ValidationError, match=OVERRIDE):
+            GatewaySettings()
+    monkeypatch.delenv("CW_FLAG_LLM_GATEWAY_RESIDENCY")
+    env_file = tmp_path / ".env"
+    env_file.write_text("cw_flag_llm_gateway_residency=india_only\n", encoding="utf-8")
+    with pytest.raises(ValidationError, match=OVERRIDE):
+        GatewaySettings(_env_file=env_file)
+
+
 def test_vercel_with_a_key_is_accepted_and_the_key_is_hidden() -> None:
     settings = GatewaySettings(llm_provider="vercel", ai_gateway_api_key=SecretStr("k-1"))
     assert settings.llm_provider == "vercel"

@@ -78,8 +78,12 @@ Not taken yet. It is the maintainer's, with counsel. Until it is taken:
 
 ## What is built (2026-10-07)
 
-- `CW_LLM_RESIDENCY` in the gateway's settings (`global` or `india_only`; flag
-  `llm_gateway.residency`, owner ai-platform, default `global`).
+- `CW_LLM_RESIDENCY` in the gateway's settings (`global` or `india_only`, default `global`), the
+  policy's one source: read once at start, refused when set but empty (any other setting would
+  read that as unset, here `global`), and refused alongside a `CW_FLAG_LLM_GATEWAY_RESIDENCY`
+  override. The registry entry `llm_gateway.residency` (owner ai-platform) is its record and
+  nothing reads the flag, so a flag provider cannot hold another policy than the one that runs;
+  a policy taken with counsel is changed by configuration, not from Unleash.
 - Under `india_only` the composition root wraps every registered provider that is not an
   adapter in India (`IN_INDIA` in `infrastructure/providers/residency.py`: the fake provider
   alone) in `ResidencyBlockedProvider`, whatever it is, so a provider added later or one the

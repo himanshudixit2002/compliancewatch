@@ -97,6 +97,12 @@ their owner, default, removal condition and expiry date only: turning one on in 
 nothing. Set its `env` variable and restart the service instead. An entry moves to the provider
 when its code starts reading it through one of the two clients.
 
+`llm_gateway.residency` never moves there: the residency policy is a decision taken with counsel
+(ADR-020), not a rollout, so the gateway reads `CW_LLM_RESIDENCY` alone. Its entry is that
+setting's record, and the gateway refuses to start with `CW_FLAG_LLM_GATEWAY_RESIDENCY` set or with
+`CW_LLM_RESIDENCY` empty, so what `flag_value` would answer can never differ from the policy the
+gateway runs; do not create the flag in Unleash.
+
 ## Adding a flag
 
 1. Add the setting, named `*_enabled` for a bool, defaulting off; or, for a flag the code reads
