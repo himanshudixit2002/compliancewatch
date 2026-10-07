@@ -102,13 +102,13 @@ Not taken yet. It is the maintainer's, with counsel. Until it is taken:
 
 ## Consequences
 
-- Choosing option A: the setting is deleted with its flag and the gateway stays as it is; the
-  draft lines in the privacy notice and the data map become final text with counsel.
+- Choosing option A: the setting is deleted with its registry entry and the gateway stays as it
+  is; the draft lines in the privacy notice and the data map become final text with counsel.
 - Choosing option B: `india_only` becomes fixed configuration, every model feature waits for the
   in-region provider, and that provider's adapter joins `IN_INDIA`, the only way past the guard.
   Langfuse already gets no prompt or answer text under `india_only`, only each call's metadata,
-  so a trace host outside India holds no text of a call; the log collector has to be in India
-  too, or carry no text it should not.
+  so a trace host outside India holds no text of a call; the log collector and the OpenTelemetry
+  collector (spans are not masked) have to be in India too, or carry no text they should not.
 - Either way the decision is recorded here and this ADR becomes Accepted.
 - Revisit when a provider offers suitable models in India, when counsel's view or the rules under
   the Act change, or when a customer's contract asks for data to stay in India.

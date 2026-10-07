@@ -99,9 +99,9 @@ when its code starts reading it through one of the two clients.
 
 `llm_gateway.residency` never moves there: the residency policy is a decision taken with counsel
 (ADR-020), not a rollout, so the gateway reads `CW_LLM_RESIDENCY` alone. Its entry is that
-setting's record, and the gateway refuses to start with `CW_FLAG_LLM_GATEWAY_RESIDENCY` set or with
-`CW_LLM_RESIDENCY` empty, so what `flag_value` would answer can never differ from the policy the
-gateway runs; do not create the flag in Unleash.
+setting's record, and the gateway refuses to start with `CW_FLAG_LLM_GATEWAY_RESIDENCY` set or
+with `CW_LLM_RESIDENCY` empty, so the env provider answers the policy the gateway runs. Nothing
+reads the flag, from either provider; do not create it in Unleash.
 
 ## Adding a flag
 
