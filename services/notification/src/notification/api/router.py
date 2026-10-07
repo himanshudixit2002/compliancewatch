@@ -4,22 +4,35 @@ Preferences are keyed by channel and address and carry no tenant: an opt-out typ
 WhatsApp arrives before we know which tenant the number belongs to, and must be honoured
 either way. The address in the path is normalised first, so ``919876543210`` and
 ``+91 98765 43210`` are one record; an address that cannot be normalised is a 422 problem.
-A service token needs the notification:preferences scope for them. Sends are tenant data and
-need a tenant; a service token needs notification:send, and tenant:act to name the tenant.
+A service token needs the notification:preferences scope for them. An opt-in given on the web
+(source web_onboarding or web_settings) is recorded only when identity holds the subject's
+granted consent for the channel's purpose in the request's tenant: without one it is a 409,
+without a tenant a 401, without a subject a 422, and an identity that cannot answer a 503;
+nothing is recorded in any of those cases. Sends are tenant data and need a tenant; a service
+token needs notification:send, and tenant:act to name the tenant. The data export answers the
+tenant's recipients, the preferences of their addresses and its notifications.
 """
 
 from fastapi import APIRouter, HTTPException, status
 
 from domain_kernel.channels import Channel
 from domain_kernel.ids import BusinessId, NotificationId, ObligationId
-from notification.api.deps import PreferenceAccess, SendTenant, Wired
+from notification.api.deps import (
+    ExportTenant,
+    PreferenceAccess,
+    PreferenceCaller,
+    SendTenant,
+    Wired,
+)
 from notification.api.schemas import (
+    DataExportOut,
     PreferenceIn,
     PreferenceOut,
     SendIn,
     SendOut,
     TemplateOut,
 )
+from notification.application.preferences import needs_consent
 from notification.domain.model import NotificationRequest
 from notification.domain.preferences import QuietHours
 from notification.domain.templates import TEMPLATES
@@ -37,21 +50,31 @@ async def ping() -> dict[str, str]:
     "/preferences/{channel}/{recipient}",
     summary="Record an opt-in or opt-out for a channel and recipient",
     dependencies=[PreferenceAccess],
-    responses=problem_responses(401, 403, 422),
+    responses=problem_responses(401, 403, 409, 422, 503),
 )
 def set_preference(
-    channel: Channel, recipient: str, body: PreferenceIn, wired: Wired
+    channel: Channel,
+    recipient: str,
+    body: PreferenceIn,
+    caller: PreferenceCaller,
+    wired: Wired,
 ) -> PreferenceOut:
     quiet_hours = None
     if body.quiet_hours_start and body.quiet_hours_end:
         quiet_hours = QuietHours.parse(body.quiet_hours_start, body.quiet_hours_end)
-    preference = wired.set_opt_in.run(
+    tenant_id = subject = None
+    if needs_consent(body.opted_in, body.source):
+        tenant_id = caller.tenant()
+        subject = caller.subject(body.subject)
+    preference = wired.set_preference.run(
         channel,
         recipient,
         opted_in=body.opted_in,
         source=body.source,
         language=body.language,
         quiet_hours=quiet_hours,
+        tenant_id=tenant_id,
+        subject=subject,
     )
     return PreferenceOut.from_preference(preference, recipient=recipient)
 
@@ -96,3 +119,12 @@ def send(body: SendIn, tenant: SendTenant, wired: Wired) -> SendOut:
 @router.get("/templates", summary="Every message template with its approval status")
 def templates() -> list[TemplateOut]:
     return [TemplateOut.from_template(template) for template in TEMPLATES]
+
+
+@router.get(
+    "/data-export",
+    summary="The tenant's recipients, their addresses' preferences and its notifications",
+    responses=problem_responses(401, 403),
+)
+def data_export(tenant: ExportTenant, wired: Wired) -> DataExportOut:
+    return DataExportOut.from_export(wired.export.run(tenant))

@@ -149,3 +149,26 @@ class BulkNotificationsDisabledError(DomainError):
 
     def __init__(self) -> None:
         super().__init__("bulk notifications are refused until CW_NOTIFICATION_BULK_ENABLED is set")
+
+
+class ConsentNotRecordedError(DomainError):
+    """A web opt-in whose subject has no granted consent recorded at identity for the channel's
+    purpose. The detail names the purpose, never the address, which is personal data."""
+
+    type_slug: ClassVar[str] = "notification-consent-not-recorded"
+    title: ClassVar[str] = "Consent not recorded for the opt-in"
+
+    def __init__(self, purpose: str) -> None:
+        super().__init__(
+            f"no granted {purpose} consent is recorded for the subject; record it before the opt-in"
+        )
+
+
+class ConsentSubjectRequiredError(DomainError):
+    """A web opt-in that names no consent subject, from a caller whose token names no user."""
+
+    type_slug: ClassVar[str] = "notification-consent-subject-required"
+    title: ClassVar[str] = "Consent subject required for a web opt-in"
+
+    def __init__(self) -> None:
+        super().__init__("a web opt-in names the subject whose consent covers it (subject)")

@@ -10,6 +10,9 @@ rule version, a business's open obligations of one, and a place to count deliver
   obligations of a rule version, as the obligation service lists them for the tenant: what a CA
   firm's bulk change card is about. One that cannot answer raises
   ``DependencyUnavailableError``.
+- ``ConsentReader.granted(tenant, subject, purpose)``: whether identity holds a granted consent
+  of the subject for the purpose in the tenant, which an opt-in given on the web needs. One that
+  cannot answer raises ``DependencyUnavailableError``.
 - ``EmailFeedbackReader.read(body)``: the verified report in an SNS message from SES.
 - ``DeliveryMetrics``: the counters and the lag the alerts read, and the provider reports.
   ``NO_METRICS`` counts nothing.
@@ -83,6 +86,14 @@ class ObligationReader(Protocol):
         """The business's open obligations of the rule version, by due date (none last), as the
         tenant reads them: none for a business of another tenant. Raises
         ``DependencyUnavailableError`` when the obligation service cannot answer."""
+        ...
+
+
+class ConsentReader(Protocol):
+    def granted(self, tenant_id: TenantId, subject: str, purpose: str) -> bool:
+        """Whether the subject's consent for ``purpose`` (an identity ``ConsentPurpose`` value)
+        is recorded in the tenant and granted now; False when it was never recorded or was
+        withdrawn. Raises ``DependencyUnavailableError`` when identity cannot answer."""
         ...
 
 

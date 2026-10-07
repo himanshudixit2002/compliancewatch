@@ -16,6 +16,12 @@ mode, or ``dual`` mode without one) everything works as before tokens existed: t
   ``x-roles``.
 - ``PreferenceAccess``: a service with the notification:preferences scope. Preferences are keyed
   by channel and address and name no tenant, so no user may change them directly.
+- ``PreferenceCaller``: for a web opt-in only, which identity's consent must cover, the tenant
+  (``resolve_tenant``: the user's token's, or ``x-tenant-id``) and the consent subject: a user's
+  token names it (its user id), and a body naming another subject is a 403; otherwise the body
+  names it. Other changes never read either, so they behave as before.
+- ``ExportTenant`` (``/data-export``): a user with a tenant admin role (owner, ca_admin) for their
+  own tenant, or a service with the data:export scope naming the tenant with tenant:act.
 - ``BotAccess`` (WhatsApp receipts): a service with the notification:receipts scope, or the bot's
   shared secret in ``header`` and ``dual`` mode only.
 
@@ -25,11 +31,19 @@ No tenant at all is this service's own 401 ``notification-tenant-required``.
 import hmac
 from dataclasses import dataclass
 from typing import Annotated, Any, Final
+from uuid import UUID
 
-from fastapi import Depends, Request
+from fastapi import Depends, Header, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from domain_kernel.access import TENANT_MEMBER_ROLES, Principal, Role, Scope
+from domain_kernel.access import (
+    TENANT_ADMIN_ROLES,
+    TENANT_MEMBER_ROLES,
+    Principal,
+    PrincipalKind,
+    Role,
+    Scope,
+)
 from domain_kernel.audit import AuditActor
 from domain_kernel.ids import TenantId
 from notification.domain.errors import (
@@ -40,7 +54,15 @@ from notification.domain.errors import (
 )
 from notification.wiring import Wiring
 from py_common.audit import audit_actor, current_correlation_id
-from py_common.auth.fastapi import require_roles, shared_token_or_roles, tenant_scope
+from py_common.auth.errors import AuthForbiddenError
+from py_common.auth.fastapi import (
+    TENANT_HEADER_DESCRIPTION,
+    CurrentPrincipal,
+    require_roles,
+    resolve_tenant,
+    shared_token_or_roles,
+    tenant_scope,
+)
 
 SERVICE_NAME: Final = "notification"
 CA_ROLES: Final = (Role.CA_ADMIN, Role.CA_STAFF)
@@ -56,6 +78,37 @@ sender = require_roles(scopes={Scope.NOTIFICATION_SEND})
 ca_member = require_roles(CA_ROLES)
 """A user with a CA firm's role; a service is refused, and the anonymous principal of ``header``
 mode passes."""
+exporter = require_roles(TENANT_ADMIN_ROLES, scopes={Scope.DATA_EXPORT})
+"""A user with a tenant admin role or a service with data:export; the anonymous principal of
+``header`` mode passes."""
+
+
+@dataclass(frozen=True, slots=True)
+class OptInCaller:
+    """Who changes a preference and the tenant the request offers, read only for a web opt-in."""
+
+    principal: Principal
+    offered_tenant: TenantId | None = None
+
+    def tenant(self) -> TenantId | None:
+        """The request's tenant: the user's own (a header naming another is a 403), a service's
+        ``x-tenant-id`` with tenant:act, or the anonymous principal's header; None without."""
+        return resolve_tenant(self.principal, self.offered_tenant)
+
+    def subject(self, offered: str | None) -> str | None:
+        """The consent subject: a user's token names it, and the body may only repeat it."""
+        if self.principal.kind is PrincipalKind.USER:
+            if offered is not None and offered != self.principal.subject:
+                raise AuthForbiddenError("a user opts in only under their own consent")
+            return self.principal.subject
+        return offered
+
+
+async def preference_caller(
+    principal: CurrentPrincipal,
+    x_tenant_id: Annotated[UUID | None, Header(description=TENANT_HEADER_DESCRIPTION)] = None,
+) -> OptInCaller:
+    return OptInCaller(principal, None if x_tenant_id is None else TenantId(x_tenant_id))
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +152,14 @@ async def bulk_caller(
     )
 
 
+async def export_tenant(
+    principal: Annotated[Principal, Depends(exporter)],
+    tenant: Annotated[TenantId, Depends(tenant_of_request)],
+) -> TenantId:
+    """The tenant whose data is exported, once the caller is known to be one that may."""
+    return tenant
+
+
 def wiring(request: Request) -> Wiring:
     wired: Wiring = request.app.state.wiring
     return wired
@@ -107,6 +168,8 @@ def wiring(request: Request) -> Wiring:
 Tenant = Annotated[TenantId, Depends(member_tenant)]
 SendTenant = Annotated[TenantId, Depends(send_tenant)]
 Bulk = Annotated[BulkCaller, Depends(bulk_caller)]
+ExportTenant = Annotated[TenantId, Depends(export_tenant)]
+PreferenceCaller = Annotated[OptInCaller, Depends(preference_caller)]
 Wired = Annotated[Wiring, Depends(wiring)]
 
 PreferenceAccess = Depends(require_roles(scopes={Scope.NOTIFICATION_PREFERENCES}))

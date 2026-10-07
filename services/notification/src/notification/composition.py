@@ -9,12 +9,14 @@ behind ``CW_EMAIL_ENABLED`` with ``CW_SMTP_HOST`` and ``CW_EMAIL_FROM``; with
 message in ``CW_NOTIFICATION_SINK_PATH`` instead of sending it. The SES feedback is read
 from SNS with its signature verified. The dispatcher reads the facts of change cards from the
 rulebook at ``CW_RULEBOOK_URL``, and a CA firm's bulk notification reads its clients' open
-obligations from the obligation service at ``CW_OBLIGATION_URL``, both with the service's own
-access token once ``CW_SERVICE_CLIENT_SECRET`` is set; deliveries are counted through
+obligations from the obligation service at ``CW_OBLIGATION_URL``, and a web opt-in asks identity
+at ``CW_IDENTITY_URL`` whether the subject's consent covers it, all with the service's own access
+token once ``CW_SERVICE_CLIENT_SECRET`` is set; deliveries are counted through
 OpenTelemetry. The bulk route's Idempotency-Keys are kept next to the notifications
 (``idempotency_key``, migration 0003), each key in its own short transaction. ``wire(settings,
-channels=..., rules=..., email_feedback=..., obligations=...)`` replaces the channels, the
-rulebook reader, the SES feedback reader and the obligation reader, which is how the demo and the
+channels=..., rules=..., email_feedback=..., obligations=..., consents=...)`` replaces the
+channels, the rulebook reader, the SES feedback reader, the obligation reader and the consent
+reader, which is how the demo and the
 tests send and receive through fakes; and ``token_source=`` replaces where the readers' access
 token comes from, which is how a process that hosts identity gives them a token minted in the
 process.
@@ -33,8 +35,9 @@ from notification.application.bulk import BulkNotify
 from notification.application.dispatch import DispatchDue
 from notification.application.email_feedback import ReceiveEmailFeedback
 from notification.application.enqueue import EnqueueNotifications
+from notification.application.export import ExportTenantData
 from notification.application.history import GetNotification, ListNotifications
-from notification.application.preferences import GetPreference, SetOptIn
+from notification.application.preferences import GetPreference, SetOptIn, SetPreference
 from notification.application.receipts import ReconcileReceipts
 from notification.application.recipients import (
     GetRecipient,
@@ -47,10 +50,16 @@ from notification.application.retention import PurgeExpired
 from notification.application.send import SendNow
 from notification.domain.channels import ChannelAdapter
 from notification.domain.policy import BatchPolicy, DigestPolicy
-from notification.domain.ports import EmailFeedbackReader, ObligationReader, RuleVersionReader
+from notification.domain.ports import (
+    ConsentReader,
+    EmailFeedbackReader,
+    ObligationReader,
+    RuleVersionReader,
+)
 from notification.domain.preferences import QuietHours
 from notification.domain.repository import UnitOfWorkFactory, WorkIndex
 from notification.infrastructure.email import SmtpEmailChannel
+from notification.infrastructure.identity_client import HttpConsentReader
 from notification.infrastructure.memory import MemoryStore
 from notification.infrastructure.metrics import OtelDeliveryMetrics
 from notification.infrastructure.obligation_client import HttpObligationReader
@@ -111,6 +120,7 @@ def wire(
     rules: RuleVersionReader | None = None,
     email_feedback: EmailFeedbackReader | None = None,
     obligations: ObligationReader | None = None,
+    consents: ConsentReader | None = None,
     token_source: TokenSource | None = None,
 ) -> Wiring:
     unit_of_work: UnitOfWorkFactory
@@ -149,6 +159,8 @@ def wire(
         metrics=metrics,
     )
 
+    set_opt_in = SetOptIn(unit_of_work)
+
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)
 
@@ -168,7 +180,10 @@ def wire(
         ),
         idempotency=idempotency,
         dispatch=dispatch,
-        set_opt_in=SetOptIn(unit_of_work),
+        set_opt_in=set_opt_in,
+        set_preference=SetPreference(
+            set_opt_in, consents or HttpConsentReader(settings.identity_url, auth=auth)
+        ),
         get_preference=GetPreference(unit_of_work),
         register_recipient=RegisterRecipient(unit_of_work),
         get_recipient=GetRecipient(unit_of_work),
@@ -178,6 +193,7 @@ def wire(
         get_notification=GetNotification(unit_of_work),
         list_notifications=ListNotifications(unit_of_work),
         resend=ResendNotification(unit_of_work),
+        export=ExportTenantData(unit_of_work),
         reconcile=reconcile,
         email_feedback=ReceiveEmailFeedback(
             email_feedback or SnsFeedbackReader(topic_arn=settings.notification_ses_topic_arn),

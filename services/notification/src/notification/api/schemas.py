@@ -17,6 +17,7 @@ from notification.application.bulk import (
     BulkResult,
     BusinessResult,
 )
+from notification.application.export import TenantDataExport
 from notification.domain.model import Outcome, SendOutcome
 from notification.domain.notification import DeliveryState, Notification
 from notification.domain.occasions import OccasionKind
@@ -46,6 +47,16 @@ class PreferenceIn(Strict):
     language: str | None = Field(default=None, pattern=r"^[a-z]{2}$")
     quiet_hours_start: str | None = Field(default=None, pattern=CLOCK_TIME_PATTERN)
     quiet_hours_end: str | None = Field(default=None, pattern=CLOCK_TIME_PATTERN)
+    subject: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=254,
+        description=(
+            "The identity consent subject (the user id) whose consent covers a web opt-in "
+            "(opted_in with source web_onboarding or web_settings). A user's token names it; "
+            "otherwise a web opt-in needs it. Ignored for anything else"
+        ),
+    )
 
 
 class PreferenceOut(BaseModel):
@@ -444,4 +455,28 @@ class BulkNotificationOut(BaseModel):
             skipped_not_affected=result.count(BulkOutcome.NOT_AFFECTED),
             notifications_queued=result.notifications_queued,
             businesses=[BulkBusinessOut.from_result(business) for business in result.businesses],
+        )
+
+
+class DataExportOut(BaseModel):
+    """The tenant's data as this service holds it, for the tenant's data export."""
+
+    service: str = Field(description="The service that holds the data: notification")
+    tenant_id: UUID
+    generated_at: AwareDatetime
+    sections: dict[str, list[dict[str, Any]]] = Field(
+        description=(
+            "recipients (with their addresses and businesses), preferences (of the addresses "
+            "the tenant's recipients hold) and notifications, each oldest first; every section "
+            "is present, empty when there is nothing"
+        )
+    )
+
+    @classmethod
+    def from_export(cls, export: TenantDataExport) -> "DataExportOut":
+        return cls(
+            service=export.service,
+            tenant_id=export.tenant_id.value,
+            generated_at=export.generated_at,
+            sections={name: list(rows) for name, rows in export.sections.items()},
         )

@@ -140,6 +140,29 @@ class FakeObligationReader:
         )
 
 
+class FakeConsentReader:
+    """Identity's consents as a set of granted (tenant, subject, purpose) triples: ``grant``
+    adds one and ``withdraw`` takes it away. ``down`` makes every read fail as an outage would;
+    ``asked`` lists every read, so a test can tell identity was not asked at all."""
+
+    def __init__(self, granted: Iterable[tuple[TenantId, str, str]] = ()) -> None:
+        self.consents: set[tuple[TenantId, str, str]] = set(granted)
+        self.down = False
+        self.asked: list[tuple[TenantId, str, str]] = []
+
+    def grant(self, tenant_id: TenantId, subject: str, purpose: str) -> None:
+        self.consents.add((tenant_id, subject, purpose))
+
+    def withdraw(self, tenant_id: TenantId, subject: str, purpose: str) -> None:
+        self.consents.discard((tenant_id, subject, purpose))
+
+    def granted(self, tenant_id: TenantId, subject: str, purpose: str) -> bool:
+        self.asked.append((tenant_id, subject, purpose))
+        if self.down:
+            raise DependencyUnavailableError("identity unreachable (fake)")
+        return (tenant_id, subject, purpose) in self.consents
+
+
 class RecordingMetrics:
     """Keeps what the use cases count, for assertions."""
 
