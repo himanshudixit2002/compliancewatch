@@ -7,13 +7,17 @@ ES256 keys (``CW_IDENTITY_SIGNING_KEYS``). It verifies its own tokens in the pro
 authenticator it hands to ``create_app`` holds the same keys. It also keeps consent records,
 channel consents for numbers no tenant owns yet, and billing behind ``CW_BILLING_PROVIDER`` with
 the entitlements a tenant's plan gives (``GET /v1/identity/entitlements``), and it reads the
-audit log every service writes (``GET /v1/identity/audit``).
+audit log every service writes (``GET /v1/identity/audit``). A tenant's data requests and its
+export (``/v1/identity/data-requests``) gather identity's own data and the data each service of
+``CW_IDENTITY_EXPORT_SOURCES`` answers, called with a service token identity mints for itself;
+``export_sources`` replaces them (tests and demos). With telemetry on, the app reports every
+tenant's open and overdue data requests (``install_data_request_metrics``).
 
 In local and test, with ``CW_IDENTITY_DEV_CLIENT_SECRET`` set, the app makes the dev service
 clients exist when it starts.
 """
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from uuid import uuid4
@@ -22,10 +26,13 @@ from fastapi import FastAPI
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
+from domain_kernel.access import Principal, Scope
 from domain_kernel.errors import DomainError
+from domain_kernel.events import utc_now
 from identity import __version__
 from identity.api.audit import router as audit_router
 from identity.api.auth import router as auth_router
+from identity.api.data_requests import router as data_requests_router
 from identity.api.entitlements import router as entitlements_router
 from identity.api.router import router
 from identity.api.tenancy import router as tenancy_router
@@ -34,6 +41,12 @@ from identity.application.billing import ReceiveBillingWebhook, StartSubscriptio
 from identity.application.bootstrap import EnsureDevServiceClients
 from identity.application.channel_consents import ChannelConsentStatus, RecordChannelConsent
 from identity.application.consents import ConsentStatus, RecordConsent
+from identity.application.data_requests import (
+    ExportTenantData,
+    ListDataRequests,
+    ReadDataRequest,
+    RequestExport,
+)
 from identity.application.entitlements import ReadEntitlements, SeatCheck
 from identity.application.sessions import ExchangeSession, IssueServiceToken
 from identity.application.tenancy import (
@@ -49,6 +62,7 @@ from identity.composition import identity_provider
 from identity.domain.audit import AuditReader
 from identity.domain.billing import PLANS, BillingProvider
 from identity.domain.channel_consent import ChannelUnitOfWorkFactory
+from identity.domain.data_requests import DataRequestDirectory, ExportSource
 from identity.domain.entitlements import Limits
 from identity.domain.errors import (
     BillingDisabledError,
@@ -56,7 +70,10 @@ from identity.domain.errors import (
     ChannelSubjectInvalidError,
     ChannelTokenInvalidError,
     ChannelWritesDisabledError,
+    DataRequestKindUnavailableError,
+    DataRequestNotFoundError,
     DevSignInUnavailableError,
+    ExportNotReadyError,
     InternalTenantExistsError,
     InvalidWebhookSignatureError,
     LastAdminError,
@@ -84,11 +101,21 @@ from identity.domain.repository import UnitOfWorkFactory
 from identity.infrastructure.audit_reader import PostgresAuditReader
 from identity.infrastructure.billing.memory import MemoryBillingProvider
 from identity.infrastructure.billing.razorpay import RazorpayBillingProvider
+from identity.infrastructure.data_request_metrics import register_data_request_gauges
+from identity.infrastructure.export_sources import HttpExportSource
 from identity.infrastructure.flags import OpenFeatureFlags
-from identity.infrastructure.memory import MemoryAuditReader, MemoryChannelStore, MemoryStore
+from identity.infrastructure.memory import (
+    MemoryAuditReader,
+    MemoryChannelStore,
+    MemoryDataRequestDirectory,
+    MemoryStore,
+)
 from identity.infrastructure.minter import IssuerMinter
 from identity.infrastructure.providers.fake import FakeIdentityProvider
-from identity.infrastructure.repository import PostgresUnitOfWorkFactory
+from identity.infrastructure.repository import (
+    PostgresDataRequestDirectory,
+    PostgresUnitOfWorkFactory,
+)
 from identity.settings import IdentitySettings
 from identity.wiring import Wiring
 from py_common.app import create_app, module_app
@@ -105,6 +132,7 @@ from py_common.flags import configure_flags
 from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
 from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
 from py_common.logging import get_logger
+from py_common.telemetry import Telemetry
 
 SERVICE_NAME = "identity"
 PROBLEM_STATUS: dict[type[DomainError], int] = {
@@ -134,7 +162,13 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     InternalTenantExistsError: 409,
     SeatLimitReachedError: 402,
     SubscriptionStartPendingError: 409,
+    DataRequestNotFoundError: 404,
+    ExportNotReadyError: 409,
+    DataRequestKindUnavailableError: 422,
 }
+EXPORT_SCOPES = frozenset({Scope.DATA_EXPORT, Scope.TENANT_ACT})
+"""What identity's own token carries when it asks a service for a tenant's data."""
+EXPORT_TOKEN_TTL = timedelta(minutes=2)
 
 log = get_logger(__name__)
 
@@ -185,16 +219,39 @@ def token_verifier(settings: IdentitySettings, keys: KeySet) -> TokenVerifier:
     )
 
 
-def wire(settings: IdentitySettings, *, flags: FeatureFlags | None = None) -> Wiring:
+def export_sources(settings: IdentitySettings, minter: IssuerMinter) -> list[ExportSource]:
+    """One ``HttpExportSource`` per service of ``CW_IDENTITY_EXPORT_SOURCES``, each sending a
+    token identity mints for itself: data:export and tenant:act, for two minutes."""
+    principal = Principal.service(SERVICE_NAME, EXPORT_SCOPES)
+
+    def token() -> str:
+        return minter.mint(principal, EXPORT_TOKEN_TTL).token
+
+    return [
+        HttpExportSource(
+            service, url, token=token, timeout_seconds=settings.identity_export_timeout_seconds
+        )
+        for service, url in settings.export_sources.items()
+    ]
+
+
+def wire(
+    settings: IdentitySettings,
+    *,
+    flags: FeatureFlags | None = None,
+    sources: Sequence[ExportSource] | None = None,
+) -> Wiring:
     """The use cases on the store the settings name. Without ``flags`` the process-wide
     OpenFeature provider is configured from the settings and answers them. Idempotency keys
-    live next to the identity tables (``idempotency_key``, migration 0008)."""
+    live next to the identity tables (``idempotency_key``, migration 0008). ``sources`` replace
+    the export sources of the settings."""
     if flags is None:
         configure_flags(settings)
         flags = OpenFeatureFlags()
     unit_of_work: UnitOfWorkFactory
     channel_unit_of_work: ChannelUnitOfWorkFactory
     audit_reader: AuditReader
+    directory: DataRequestDirectory
     idempotency: IdempotencyStore
     ping: Callable[[], bool]
     if settings.identity_store == "memory":
@@ -202,12 +259,14 @@ def wire(settings: IdentitySettings, *, flags: FeatureFlags | None = None) -> Wi
         unit_of_work, ping = memory, memory.ping
         channel_unit_of_work = MemoryChannelStore()
         audit_reader = MemoryAuditReader(memory)
+        directory = MemoryDataRequestDirectory(memory, utc_now)
         idempotency = MemoryIdempotencyStore()
     else:
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url)
         unit_of_work, ping = postgres, postgres.ping
         channel_unit_of_work = postgres.channel_unit_of_work
         audit_reader = PostgresAuditReader(postgres.engine)
+        directory = PostgresDataRequestDirectory(postgres.engine)
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
 
     async def store_ready() -> bool:
@@ -261,6 +320,13 @@ def wire(settings: IdentitySettings, *, flags: FeatureFlags | None = None) -> Wi
         read_audit_trail=ReadAuditTrail(audit_reader, unit_of_work),
         read_entitlements=ReadEntitlements(unit_of_work, PLANS, free, flags, past_due_grace=grace),
         idempotency=idempotency,
+        request_export=RequestExport(unit_of_work),
+        list_data_requests=ListDataRequests(unit_of_work),
+        read_data_request=ReadDataRequest(unit_of_work),
+        export_tenant_data=ExportTenantData(
+            unit_of_work, export_sources(settings, minter) if sources is None else sources
+        ),
+        data_request_directory=directory,
     )
 
 
@@ -281,12 +347,29 @@ def ensure_dev_clients(wiring: Wiring) -> None:
     log.info("identity_dev_clients_ensured", clients=[client.client_id for client in ensured])
 
 
+def install_data_request_metrics(app: FastAPI, wiring: Wiring) -> bool:
+    """Register the data request gauges when telemetry is on; whether it did."""
+    telemetry: Telemetry = app.state.telemetry
+    if not telemetry.enabled or telemetry.meter_provider is None:
+        return False
+    register_data_request_gauges(
+        wiring.data_request_directory,
+        utc_now,
+        telemetry.meter_provider.get_meter(SERVICE_NAME, __version__),
+    )
+    return True
+
+
 def build_app(
-    settings: IdentitySettings | None = None, *, flags: FeatureFlags | None = None
+    settings: IdentitySettings | None = None,
+    *,
+    flags: FeatureFlags | None = None,
+    export_sources: Sequence[ExportSource] | None = None,
 ) -> FastAPI:
-    """``flags`` replaces the OpenFeature flags (tests)."""
+    """``flags`` replaces the OpenFeature flags and ``export_sources`` the services an export
+    calls (tests and demos)."""
     settings = settings or IdentitySettings(service_name=SERVICE_NAME)
-    wiring = wire(settings, flags=flags)
+    wiring = wire(settings, flags=flags, sources=export_sources)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -296,7 +379,14 @@ def build_app(
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router, auth_router, tenancy_router, audit_router, entitlements_router],
+        routers=[
+            router,
+            auth_router,
+            tenancy_router,
+            audit_router,
+            entitlements_router,
+            data_requests_router,
+        ],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         lifespan=lifespan,
@@ -304,6 +394,7 @@ def build_app(
         authenticator=Authenticator(settings.auth_mode, token_verifier(settings, wiring.keys)),
     )
     app.state.wiring = wiring
+    install_data_request_metrics(app, wiring)
     return app
 
 

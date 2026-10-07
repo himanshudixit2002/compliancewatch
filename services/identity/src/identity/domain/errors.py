@@ -315,3 +315,34 @@ class SubscriptionStartPendingError(DomainError):
             "a subscription is being created for this request; check the billing page before "
             "starting another one"
         )
+
+
+class DataRequestNotFoundError(DomainError):
+    """No request with this id in the tenant; another tenant's is not found either (404)."""
+
+    type_slug: ClassVar[str] = "identity-data-request-not-found"
+    title: ClassVar[str] = "Data request not found"
+
+    def __init__(self) -> None:
+        super().__init__("the tenant has no data request with this id")
+
+
+class ExportNotReadyError(DomainError):
+    """The request has no export to download: it asks for a deletion, not a copy (409)."""
+
+    type_slug: ClassVar[str] = "identity-export-not-ready"
+    title: ClassVar[str] = "No export for this request"
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(f"a {kind} request has no export to download")
+
+
+class DataRequestKindUnavailableError(DomainError):
+    """A kind of request the service cannot answer yet: deletions wait for the erasure cascade
+    (422)."""
+
+    type_slug: ClassVar[str] = "identity-data-request-kind-unavailable"
+    title: ClassVar[str] = "This kind of data request is not available yet"
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(f"{kind} requests are not available yet")

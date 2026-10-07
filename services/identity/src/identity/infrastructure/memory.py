@@ -1,18 +1,19 @@
 """In-memory stores: tests, demos and the app before Postgres.
 
-``MemoryStore`` holds consents, tenants, users, the subject index, service clients, the
-billing ledger (``billing``), the published events and the audit log (``audit``, masked as
-``audit.event`` keeps it). A unit of work keeps what it did only when it ends without an
-error, as a Postgres transaction would, and it mirrors row-level security: it sees the rows of
-its own tenant, none when it has no tenant, and refuses to write another tenant's rows (an audit
-entry of no tenant is allowed). A unit works on a copy of the store, so units run one at a time
-(a store-level lock held from open to commit or rollback): two overlapping requests, of one
+``MemoryStore`` holds consents, tenants, users, the subject index, service clients, the billing
+ledger (``billing``), the data requests (``data_requests``), the published events and the audit log
+(``audit``, masked as ``audit.event`` keeps it). A unit of work keeps what it did only when it ends
+without an error, as a Postgres transaction would, and it mirrors row-level security: it sees the
+rows of its own tenant, none when it has no tenant, and refuses to write another tenant's rows (an
+audit entry of no tenant is allowed). A unit works on a copy of the store, so units run one at a
+time (a store-level lock held from open to commit or rollback): two overlapping requests, of one
 tenant or of two, cannot both start from the same copy and lose each other's writes.
-``MemoryChannelStore`` does the same for channel consents.
+``MemoryChannelStore`` does the same for channel consents, and ``MemoryDataRequestDirectory``
+counts every tenant's open data requests as ``identity.data_requests_open()`` does.
 """
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import replace
 from datetime import datetime
@@ -28,6 +29,13 @@ from identity.domain.channel_consent import (
     ConsentChannel,
 )
 from identity.domain.consent import ConsentPurpose, ConsentRecord
+from identity.domain.data_requests import (
+    DataRequest,
+    DataRequestId,
+    DataRequestKind,
+    OpenRequests,
+    counts_by_kind,
+)
 from identity.domain.errors import InternalTenantExistsError, SubjectRegisteredError
 from identity.domain.repository import UnitOfWork
 from identity.domain.service_clients import ServiceClient
@@ -63,6 +71,36 @@ class MemoryConsentRepository:
             and r.subject == subject
             and (purpose is None or r.purpose is purpose)
         ]
+
+    def all(self) -> list[ConsentRecord]:
+        mine = [r for r in self._records if r.tenant_id == self._tenant]
+        return sorted(mine, key=lambda r: (r.recorded_at, r.id.value))
+
+
+class MemoryDataRequestRepository:
+    def __init__(
+        self, requests: dict[DataRequestId, DataRequest], tenant_id: TenantId | None
+    ) -> None:
+        self._requests = requests
+        self._tenant = tenant_id
+
+    def add(self, request: DataRequest) -> None:
+        _require_tenant(self._tenant, request.tenant_id)
+        if request.id in self._requests:
+            raise RowSecurityViolationError(f"data request {request.id} exists already")
+        self._requests[request.id] = request
+
+    def save(self, request: DataRequest) -> None:
+        _require_tenant(self._tenant, request.tenant_id)
+        self._requests[request.id] = request
+
+    def get(self, request_id: DataRequestId) -> DataRequest | None:
+        found = self._requests.get(request_id)
+        return found if found is not None and found.tenant_id == self._tenant else None
+
+    def list(self) -> list[DataRequest]:
+        mine = [r for r in self._requests.values() if r.tenant_id == self._tenant]
+        return sorted(mine, key=lambda r: (r.requested_at, r.id.value), reverse=True)
 
 
 class MemoryTenantRepository:
@@ -233,6 +271,10 @@ class MemoryBillingRepository:
         self._ledger.events.append(event)
         return True
 
+    def events(self) -> list[StoredBillingEvent]:
+        mine = [e for e in self._ledger.events if e.tenant_id == self._tenant]
+        return sorted(mine, key=lambda e: (e.received_at, e.id))
+
 
 class MemorySink:
     def __init__(self) -> None:
@@ -250,12 +292,14 @@ class MemoryUnitOfWork:
         self._subjects = dict(store.subjects)
         self._clients = dict(store.service_clients)
         self._billing = store.billing.copy()
+        self._data_requests = dict(store.data_requests)
         self.consents = MemoryConsentRepository(self._records, tenant_id)
         self.tenants = MemoryTenantRepository(self._tenants, tenant_id)
         self.users = MemoryUserRepository(self._users, tenant_id)
         self.subjects = MemorySubjectIndex(self._subjects)
         self.service_clients = MemoryServiceClientRepository(self._clients)
         self.billing = MemoryBillingRepository(self._billing, tenant_id)
+        self.data_requests = MemoryDataRequestRepository(self._data_requests, tenant_id)
         self.events = MemorySink()
         self.audit = MemoryAuditSink(store.audit, tenant_id=tenant_id)
 
@@ -270,6 +314,8 @@ class MemoryUnitOfWork:
         store.service_clients.clear()
         store.service_clients.update(self._clients)
         store.billing = self._billing
+        store.data_requests.clear()
+        store.data_requests.update(self._data_requests)
         store.events.extend(self.events.pending)
         self.audit.commit()
 
@@ -282,6 +328,7 @@ class MemoryStore:
         self.subjects: dict[tuple[str, str], SubjectEntry] = {}
         self.service_clients: dict[str, ServiceClient] = {}
         self.billing = MemoryBillingLedger()
+        self.data_requests: dict[DataRequestId, DataRequest] = {}
         self.events: list[DomainEvent] = []
         self.audit: list[AuditEntry] = []
         self._lock = threading.Lock()
@@ -376,3 +423,24 @@ class MemoryAuditReader:
     def export(self, since: datetime, until: datetime) -> Iterator[AuditEntry]:
         found = [entry for entry in list(self._store.audit) if since <= entry.occurred_at < until]
         yield from sorted(found, key=newest_first_key)
+
+
+class MemoryDataRequestDirectory:
+    """``DataRequestDirectory`` over a ``MemoryStore``: every tenant's requests, counted at
+    ``clock()`` as ``identity.data_requests_open()`` counts them at ``now()``."""
+
+    def __init__(self, store: MemoryStore, clock: Callable[[], datetime]) -> None:
+        self._store = store
+        self._clock = clock
+
+    def open_counts(self) -> list[OpenRequests]:
+        now = self._clock()
+        found: dict[DataRequestKind, tuple[int, int]] = {}
+        for request in list(self._store.data_requests.values()):
+            if request.is_completed:
+                continue
+            open_, overdue = found.get(request.kind, (0, 0))
+            found[request.kind] = (open_ + 1, overdue + int(request.is_overdue(now)))
+        return counts_by_kind(
+            OpenRequests(kind, open_, overdue) for kind, (open_, overdue) in found.items()
+        )

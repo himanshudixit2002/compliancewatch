@@ -14,7 +14,7 @@ reason = "evaluates a rule version for a tenant's business, and recomputes a bus
 
 [notification]
 scopes = ["tenant:act"]
-reason = "reads the rule versions its messages cite from the rulebook, whose read routes need no scope, and for a CA firm's bulk notification the open obligations of the firm's clients at the obligation service for that tenant"
+reason = "reads the rule versions its messages cite from the rulebook, whose read routes need no scope, for a CA firm's bulk notification the open obligations of the firm's clients at the obligation service for that tenant, and before a web opt-in the person's consent at identity for that tenant"
 
 [obligation]
 scopes = ["tenant:act"]

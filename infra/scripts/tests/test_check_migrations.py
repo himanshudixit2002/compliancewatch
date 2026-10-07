@@ -15,6 +15,7 @@ from check_migrations import (
     Table,
     TenantColumn,
     catalog_problems,
+    directory_reads,
     libpq_dsn,
     load_config,
     parse_config,
@@ -586,3 +587,37 @@ def test_the_sqlalchemy_url_form_is_accepted() -> None:
         "postgresql://cw:cw@localhost:5432/db"
     )
     assert libpq_dsn("postgresql://cw:cw@localhost/db") == "postgresql://cw:cw@localhost/db"
+
+
+# The read policy of identity's directory role (infra/dev/postgres/roles.sql).
+DIRECTORY = Policy("thing_directory", "SELECT", True, "true", None, ("cw_identity_directory",))
+
+
+def test_a_read_policy_of_one_directory_role_is_allowed(config: LintConfig) -> None:
+    assert directory_reads(DIRECTORY)
+    tables = [*baseline(), tenant_table(policies=(ISOLATION, DIRECTORY))]
+    assert catalog_problems(tables, config) == []
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        Policy("thing_directory", "SELECT", True, "true", None, ("public",)),
+        Policy("thing_directory", "SELECT", True, "true", None, ("cw_identity",)),
+        Policy(
+            "thing_directory",
+            "SELECT",
+            True,
+            "true",
+            None,
+            ("cw_identity_directory", "cw_identity"),
+        ),
+        Policy("thing_directory", "ALL", True, "true", "true", ("cw_identity_directory",)),
+        Policy("thing_directory", "UPDATE", True, "true", None, ("cw_identity_directory",)),
+    ],
+)
+def test_anything_wider_than_a_directory_read_fails(config: LintConfig, policy: Policy) -> None:
+    assert not directory_reads(policy)
+    problems = catalog_problems([*baseline(), tenant_table(policies=(ISOLATION, policy))], config)
+    assert len(problems) == 1
+    assert "admits rows without the tenant check" in problems[0]

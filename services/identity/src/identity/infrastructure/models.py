@@ -30,6 +30,13 @@ from identity.domain.channel_consent import (
     ConsentChannel,
 )
 from identity.domain.consent import ConsentPurpose, ConsentSource
+from identity.domain.data_requests import (
+    MAX_ACTOR_CHARS,
+    MAX_SERVICE_CHARS,
+    DataRequestKind,
+    DataRequestSource,
+    DataRequestStatus,
+)
 from identity.domain.tenancy import (
     MAX_EMAIL_CHARS,
     MAX_NAME_CHARS,
@@ -63,6 +70,9 @@ NO_RLS: Final[str] = "No row-level security: "
 INTERNAL_TENANT_INDEX: Final[str] = "ux_tenant_internal"
 SUBSCRIPTION_STATUSES: Final[tuple[str, ...]] = tuple(s.value for s in SubscriptionStatus)
 BILLING_EVENT_DIGEST: Final[str] = "uq_billing_event_body"
+DATA_REQUEST_KINDS: Final[tuple[str, ...]] = tuple(k.value for k in DataRequestKind)
+DATA_REQUEST_SOURCES: Final[tuple[str, ...]] = tuple(s.value for s in DataRequestSource)
+DATA_REQUEST_STATUSES: Final[tuple[str, ...]] = tuple(s.value for s in DataRequestStatus)
 PROVIDER_ID_CHARS: Final = 64
 START_KEY_CHARS: Final = 128
 """py_common.idempotency's longest key."""
@@ -375,3 +385,48 @@ class BillingEventRow(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     body_sha256: Mapped[str] = mapped_column(String(length=64), nullable=False)
     raw_event: Mapped[dict[str, object]] = mapped_column(JSONB(), nullable=False)
+
+
+class DataRequestRow(Base):
+    __tablename__ = "data_request"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_data_request"),
+        CheckConstraint(sql_in_list("kind", DATA_REQUEST_KINDS), name="ck_data_request_kind"),
+        CheckConstraint(sql_in_list("source", DATA_REQUEST_SOURCES), name="ck_data_request_source"),
+        CheckConstraint(
+            sql_in_list("status", DATA_REQUEST_STATUSES), name="ck_data_request_status"
+        ),
+        CheckConstraint("deadline_at > requested_at", name="ck_data_request_deadline"),
+        CheckConstraint(
+            "(status = 'completed') = (completed_at IS NOT NULL)",
+            name="ck_data_request_completed",
+        ),
+        Index("ix_data_request_tenant_requested", "tenant_id", "requested_at"),
+        Index(
+            "ix_data_request_open_deadline",
+            "deadline_at",
+            postgresql_where=text("status <> 'completed'"),
+        ),
+        {
+            "comment": (
+                "A tenant's export and deletion requests with their 30-day deadline; row-level "
+                "security by tenant_id"
+            )
+        },
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid())
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid(), nullable=False)
+    kind: Mapped[str] = mapped_column(String(length=16), nullable=False)
+    source: Mapped[str] = mapped_column(String(length=16), nullable=False)
+    requested_by: Mapped[str] = mapped_column(
+        String(length=MAX_ACTOR_CHARS), nullable=False, server_default=""
+    )
+    reason: Mapped[str] = mapped_column(Text(), nullable=False, server_default="")
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(length=16), nullable=False)
+    services_done: Mapped[list[str]] = mapped_column(
+        ARRAY(String(length=MAX_SERVICE_CHARS)), nullable=False, server_default="{}"
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

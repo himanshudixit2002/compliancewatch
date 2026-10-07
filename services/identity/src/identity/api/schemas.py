@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from domain_kernel.access import MAX_CLIENT_ID_CHARS, Principal, Role, Scope
+from domain_kernel.events import utc_now
 from identity.application.channel_consents import ChannelConsentSummary
 from identity.application.consents import ConsentSummary
 from identity.application.sessions import ServiceSession, Session
@@ -18,6 +19,13 @@ from identity.domain.channel_consent import (
     ConsentChannel,
 )
 from identity.domain.consent import ConsentPurpose, ConsentRecord, ConsentSource, ConsentState
+from identity.domain.data_requests import (
+    MAX_REASON_CHARS,
+    DataRequest,
+    DataRequestKind,
+    DataRequestSource,
+    DataRequestStatus,
+)
 from identity.domain.entitlements import Entitlements
 from identity.domain.tenancy import (
     MAX_NAME_CHARS,
@@ -505,3 +513,55 @@ class RolesIn(Strict):
 
 class UsersOut(BaseModel):
     items: list[UserOut] = Field(description="The tenant's users, oldest first")
+
+
+class DataRequestIn(Strict):
+    kind: Literal["export", "deletion"] = Field(
+        description="export; deletion is refused (422) until the erasure cascade exists"
+    )
+    reason: str = Field(default="", max_length=MAX_REASON_CHARS)
+    tenant_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The tenant a support request is for, by the regulatory team's admin (a reason is "
+            "then required); others leave it out"
+        ),
+    )
+
+
+class DataRequestOut(BaseModel):
+    id: UUID
+    kind: DataRequestKind
+    source: DataRequestSource
+    reason: str
+    requested_at: datetime
+    deadline_at: datetime = Field(description="30 days after it was made")
+    status: DataRequestStatus
+    overdue: bool = Field(description="Past its deadline and not completed")
+    services_done: list[str]
+    services_pending: list[str] = Field(
+        description="The services whose data an export of it has not held yet"
+    )
+    completed_at: datetime | None
+
+    @classmethod
+    def from_request(
+        cls, request: DataRequest, services: tuple[str, ...], *, now: datetime | None = None
+    ) -> "DataRequestOut":
+        return cls(
+            id=request.id.value,
+            kind=request.kind,
+            source=request.source,
+            reason=request.reason,
+            requested_at=request.requested_at,
+            deadline_at=request.deadline_at,
+            status=request.status,
+            overdue=request.is_overdue(now or utc_now()),
+            services_done=list(request.services_done),
+            services_pending=list(request.pending(services)),
+            completed_at=request.completed_at,
+        )
+
+
+class DataRequestsOut(BaseModel):
+    items: list[DataRequestOut]

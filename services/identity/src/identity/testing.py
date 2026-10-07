@@ -25,7 +25,9 @@ DEV_CLIENT_SECRET: Final = secrets.token_urlsafe(32)
 def identity_settings(**overrides: Any) -> IdentitySettings:
     """Settings that ignore the repo ``.env``: the memory store, memory billing,
     ``CHANNEL_TOKEN``, the fake provider with ``FAKE_PROVIDER_SECRET``, ``SIGNING_KEYS`` and the
-    dev clients with ``DEV_CLIENT_SECRET``, in header mode unless ``auth_mode`` says otherwise."""
+    dev clients with ``DEV_CLIENT_SECRET``, no export sources (an export holds identity's data
+    only, and never reaches a port of the dev stack), in header mode unless ``auth_mode`` says
+    otherwise."""
     values: dict[str, Any] = {
         "_env_file": None,
         "service_name": "identity",
@@ -36,6 +38,7 @@ def identity_settings(**overrides: Any) -> IdentitySettings:
         "identity_fake_provider_secret": FAKE_PROVIDER_SECRET,
         "identity_signing_keys": SIGNING_KEYS.dumps(),
         "identity_dev_client_secret": DEV_CLIENT_SECRET,
+        "identity_export_sources": "",
     }
     values.update(overrides)
     return IdentitySettings(**values)

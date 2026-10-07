@@ -38,6 +38,12 @@ services.
 ``identity_dev_client_secret``: the committed ``identity_dev_clients.toml`` unless
 ``CW_IDENTITY_DEV_CLIENTS`` gives ``client=scope+scope,client=scope``. The secret is refused
 outside local and test.
+
+``identity_export_sources`` are the services whose data a tenant's export holds besides
+identity's own, as ``service=base_url`` pairs (``CW_IDENTITY_EXPORT_SOURCES``): by default the
+dev stack's profile, applicability engine, obligation and notification ports. ``make web-stack``
+passes its own ports and the combined product points them at its internal listener.
+``identity_export_timeout_seconds`` bounds each service's answer.
 """
 
 import tomllib
@@ -49,11 +55,16 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 
 from domain_kernel.access import Scope
 from identity.domain.billing import MAX_QUANTITY
+from identity.domain.data_requests import parse_export_sources
 from py_common.settings import Settings
 
 MIN_FAKE_SECRET_BYTES = 32
 MIN_DEV_CLIENT_SECRET_CHARS = 32
 DEV_ENVIRONMENTS: Final = ("local", "test")
+DEFAULT_EXPORT_SOURCES: Final = (
+    "profile=http://localhost:8002,applicability-engine=http://localhost:8004,"
+    "obligation=http://localhost:8005,notification=http://localhost:8006"
+)
 DEV_CLIENTS_FILE: Final = Path(__file__).with_name("identity_dev_clients.toml")
 Store = Literal["memory", "postgres"]
 Billing = Literal["none", "memory", "razorpay"]
@@ -82,6 +93,8 @@ class IdentitySettings(Settings):
     service_token_ttl_seconds: int = Field(default=600, ge=60, le=3600)
     identity_dev_clients: str = ""
     identity_dev_client_secret: SecretStr | None = None
+    identity_export_sources: str = DEFAULT_EXPORT_SOURCES
+    identity_export_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
 
     @field_validator("razorpay_plan_ids", mode="before")
     @classmethod
@@ -129,6 +142,17 @@ class IdentitySettings(Settings):
         if self.is_dev:
             parse_dev_clients(self.identity_dev_clients)
         return self
+
+    @model_validator(mode="after")
+    def _check_the_export_sources(self) -> Self:
+        if "identity" in self.export_sources:
+            raise ValueError("CW_IDENTITY_EXPORT_SOURCES lists the other services, not identity")
+        return self
+
+    @property
+    def export_sources(self) -> Mapping[str, str]:
+        """The services an export calls, by name, with their base URLs."""
+        return parse_export_sources(self.identity_export_sources)
 
     @property
     def is_dev(self) -> bool:

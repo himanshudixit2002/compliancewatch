@@ -300,6 +300,10 @@ class BillingRepository(Protocol):
         with the same ``body_sha256`` (a redelivery)."""
         ...
 
+    def events(self) -> list[StoredBillingEvent]:
+        """The tenant's stored webhooks, oldest first (an export)."""
+        ...
+
 
 def current_subscription(
     subscriptions: list[Subscription],

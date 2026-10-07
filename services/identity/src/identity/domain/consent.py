@@ -77,3 +77,7 @@ class ConsentRepository(Protocol):
     def history(self, subject: str, purpose: ConsentPurpose | None = None) -> list[ConsentRecord]:
         """Oldest first."""
         ...
+
+    def all(self) -> list[ConsentRecord]:
+        """Every record of the unit of work's tenant, oldest first (an export)."""
+        ...
