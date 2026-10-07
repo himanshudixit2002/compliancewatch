@@ -36,7 +36,10 @@ erase, answer with ``tenant.data.erased``, and keep the erased tenant out afterw
   tenant, ``prune_outbox`` the tenant's events the relay has published or given up on (nothing
   prunes the outbox on its own: docs/runbooks/outbox-relay.md), and ``PostgresTenantEraser``
   writes the event to the service's outbox, the entry to the audit log and the erased marker on
-  the same connection.
+  the same connection. Their statements are SQLAlchemy Core: a table and its tenant column come
+  from an eraser's fixed list (plain names, which the dialect quotes), and the tenant is a bound
+  parameter. Only the advisory locks and ``set_config`` are SQL text, fixed strings with bound
+  parameters.
 """
 
 import re
@@ -57,10 +60,17 @@ from sqlalchemy import (
     MetaData,
     PrimaryKeyConstraint,
     Table,
+    TableClause,
     Uuid,
+    bindparam,
     create_engine,
+    delete,
+    func,
+    select,
     text,
 )
+from sqlalchemy import column as sql_column
+from sqlalchemy import table as sql_table
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.sql.schema import SchemaItem
 
@@ -88,6 +98,7 @@ from py_common.flags import configure_flags, flag_enabled
 from py_common.logging import get_logger
 from py_common.migrations import ERASURE_SETTING, TENANT_SETTING
 from py_common.outbox.consumer import EventRefusedError, Handler
+from py_common.outbox.schema import STATUS_PENDING, outbox_event
 from py_common.outbox.sync import SyncHandler, read_first_store, read_then_write
 from py_common.outbox.writer import OutboxWriter
 from py_common.runtime import ConsumerComponent
@@ -117,6 +128,8 @@ written."""
 LOCK_PREFIX: Final = "cw.erasure:"
 DETAIL_CHARS: Final = 300
 _IDENTIFIER: Final = re.compile(r"[a-z_][a-z0-9_]{0,62}")
+_TENANT_PARAM: Final = "tenant"
+"""The bound parameter that carries the tenant's id in the statements here."""
 
 Enabled = Callable[[TenantId], bool]
 """Whether erasing is on for a tenant."""
@@ -463,6 +476,16 @@ def _identifier(name: str) -> str:
     return name
 
 
+def _tenant_rows(table: str, column: str) -> TableClause:
+    """``table`` with its ``column`` that names the tenant, for a Core statement: plain names
+    only, quoted by the dialect where it must, never written into SQL text."""
+    return sql_table(_identifier(table), sql_column(_identifier(column)))
+
+
+def _tenant(tenant_id: TenantId) -> dict[str, UUID]:
+    return {_TENANT_PARAM: tenant_id.value}
+
+
 def _lock_key(tenant_id: TenantId) -> str:
     return f"{LOCK_PREFIX}{tenant_id}"
 
@@ -484,10 +507,9 @@ def delete_rows(
     connection: Connection, table: str, tenant_id: TenantId, *, column: str = "tenant_id"
 ) -> int:
     """Delete the rows of ``table`` whose ``column`` names the tenant; how many went."""
-    result = connection.execute(
-        text(f"DELETE FROM {_identifier(table)} WHERE {_identifier(column)} = :tenant"),
-        {"tenant": tenant_id.value},
-    )
+    rows = _tenant_rows(table, column)
+    statement = delete(rows).where(rows.c[column] == bindparam(_TENANT_PARAM))
+    result = connection.execute(statement, _tenant(tenant_id))
     return max(result.rowcount, 0)
 
 
@@ -495,20 +517,21 @@ def count_rows(
     connection: Connection, table: str, tenant_id: TenantId, *, column: str = "tenant_id"
 ) -> int:
     """How many rows of ``table`` name the tenant in ``column``."""
-    found = connection.execute(
-        text(f"SELECT count(*) FROM {_identifier(table)} WHERE {_identifier(column)} = :tenant"),
-        {"tenant": tenant_id.value},
-    ).scalar_one()
-    return int(found)
+    rows = _tenant_rows(table, column)
+    statement = (
+        select(func.count()).select_from(rows).where(rows.c[column] == bindparam(_TENANT_PARAM))
+    )
+    return int(connection.execute(statement, _tenant(tenant_id)).scalar_one())
 
 
 def prune_outbox(connection: Connection, tenant_id: TenantId) -> int:
     """Delete the tenant's outbox rows the relay has published or given up on; pending ones stay
     for the relay (``OUTBOX_RETAINED``)."""
-    result = connection.execute(
-        text(f"DELETE FROM {OUTBOX_TABLE} WHERE tenant_id = :tenant AND status <> 'pending'"),
-        {"tenant": tenant_id.value},
+    statement = delete(outbox_event).where(
+        outbox_event.c.tenant_id == bindparam(_TENANT_PARAM),
+        outbox_event.c.status != STATUS_PENDING,
     )
+    result = connection.execute(statement, _tenant(tenant_id))
     return max(result.rowcount, 0)
 
 
@@ -559,6 +582,17 @@ def mark_erased(connection: Connection, event: TenantDataErased) -> bool:
     return connection.execute(statement).rowcount > 0
 
 
+_MARKER_QUERY: Final = select(erased_tenant.c.tenant_id).where(
+    erased_tenant.c.tenant_id == bindparam(_TENANT_PARAM)
+)
+"""The tenant's erased marker, by its primary key."""
+
+
+def _has_marker(connection: Connection, tenant_id: TenantId) -> bool:
+    """Whether ``erased_tenant`` on the connection holds the tenant's marker."""
+    return connection.execute(_MARKER_QUERY, _tenant(tenant_id)).first() is not None
+
+
 class ConnectionErasedTenants:
     """The erased markers inside a consumer's transaction: ``is_erased`` first takes a shared
     lock on the tenant's erasure for the rest of the transaction, so an erasure that starts
@@ -572,11 +606,7 @@ class ConnectionErasedTenants:
             text("SELECT pg_advisory_xact_lock_shared(hashtextextended(:key, 0))"),
             {"key": _lock_key(tenant_id)},
         )
-        found = self._connection.execute(
-            text(f"SELECT 1 FROM {ERASED_TABLE} WHERE tenant_id = :tenant"),
-            {"tenant": tenant_id.value},
-        ).first()
-        return found is not None
+        return _has_marker(self._connection, tenant_id)
 
 
 class _NoMarkers:
@@ -625,11 +655,8 @@ class PostgresErasedTenants:
             if tenant_id in self._known:
                 return True
         with self._engine.connect() as connection:
-            found = connection.execute(
-                text(f"SELECT 1 FROM {ERASED_TABLE} WHERE tenant_id = :tenant"),
-                {"tenant": tenant_id.value},
-            ).first()
-        if found is None:
+            found = _has_marker(connection, tenant_id)
+        if not found:
             return False
         with self._lock:
             self._known.add(tenant_id)

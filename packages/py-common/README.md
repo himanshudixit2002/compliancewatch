@@ -512,11 +512,16 @@ seven years, the data map's documented exception (docs/legal/data-map.md).
   transaction), `delete_rows`, `count_rows` and `prune_outbox` (the tenant's published or dead
   outbox rows; `OUTBOX_RETAINED` names the pending ones it keeps: nothing prunes the outbox on its
   own, see docs/runbooks/outbox-relay.md). `ERASED_RETAINED` names the marker every eraser keeps.
+  Their statements are SQLAlchemy Core: the table and its tenant column come from the eraser's
+  fixed list (plain names, which the dialect quotes) and the tenant is a bound parameter. Only the
+  advisory locks and `set_config` are SQL text, fixed strings with bound parameters; `make sast`
+  refuses SQL assembled into `text()`.
 - `py_common.erasure_testing` has `FakeIdentity`, the check a consumer's verifier answers in a
   test, and `assert_nothing_left(connection, schema, tenant, answer)`, the catalog's check each
   service's Postgres erasure test runs: every table of the schema with a column `tenant_id` or
   `*_tenant_id` is one the eraser erased or retained with a reason, and holds no row of the
-  tenant unless retained.
+  tenant unless retained. `tenant_rows` counts them in a Core statement: the catalog's names,
+  quoted by the dialect, and the tenant bound.
 
 ## Worker processes
 

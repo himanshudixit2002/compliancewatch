@@ -6,7 +6,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Final, Protocol
 
-from sqlalchemy import Connection, text
+from sqlalchemy import Connection, bindparam, func, select, text
+from sqlalchemy import column as sql_column
+from sqlalchemy import table as sql_table
 
 from domain_kernel.erasure import ErasureCheck, Retained
 from domain_kernel.ids import EventId, TenantId
@@ -44,6 +46,17 @@ def tenant_columns(connection: Connection, schema: str) -> list[tuple[str, str]]
     return [(str(row.table_name), str(row.column_name)) for row in rows]
 
 
+def tenant_rows(
+    connection: Connection, schema: str, table: str, column: str, tenant_id: TenantId
+) -> int:
+    """How many rows of ``schema.table`` name the tenant in ``column``. The names are the
+    catalog's (``tenant_columns``), quoted by the dialect in a Core statement, and the tenant is
+    bound: nothing is written into SQL text."""
+    rows = sql_table(table, sql_column(column), schema=schema)
+    statement = select(func.count()).select_from(rows).where(rows.c[column] == bindparam("tenant"))
+    return int(connection.execute(statement, {"tenant": tenant_id.value}).scalar_one())
+
+
 class ErasureAnswer(Protocol):
     """What an erasure said it did: ``Erased``, or the ``TenantDataErased`` that carries it."""
 
@@ -72,12 +85,7 @@ def assert_nothing_left(
     left: dict[str, int] = {}
     retained: dict[str, int] = {}
     for table, column in columns:
-        found = int(
-            connection.execute(
-                text(f'SELECT count(*) FROM "{schema}"."{table}" WHERE "{column}" = :tenant'),
-                {"tenant": tenant_id.value},
-            ).scalar_one()
-        )
+        found = tenant_rows(connection, schema, table, column, tenant_id)
         if table in kept:
             assert kept[table].strip(), f"{table} is retained without a reason"
             retained[f"{table}.{column}"] = found
