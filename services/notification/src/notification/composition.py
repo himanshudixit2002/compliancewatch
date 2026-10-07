@@ -139,7 +139,7 @@ def wire(
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url)
         unit_of_work, work_index, ping = postgres, postgres.work_index, postgres.ping
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
-        erased = PostgresErasedTenants(postgres.engine)
+        erased = PostgresErasedTenants.pooled(settings.database_url)
     auth = service_auth_from(settings, token_source=token_source)
     wired_channels = dict(default_channels(settings) if channels is None else channels)
     quiet_hours = QuietHours.parse(settings.quiet_hours_start, settings.quiet_hours_end)

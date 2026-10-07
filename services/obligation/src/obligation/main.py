@@ -100,7 +100,7 @@ def wire(
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url)
         unit_of_work, ping = postgres, postgres.ping
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
-        erased = PostgresErasedTenants(postgres.engine)
+        erased = PostgresErasedTenants.pooled(settings.database_url)
     if rules is None or members is None or profiles is None:
         auth = service_auth_from(settings, token_source=token_source)
         rules = rules or HttpRuleVersionReader(settings.rulebook_url, auth=auth)

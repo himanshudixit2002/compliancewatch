@@ -295,7 +295,7 @@ def wire(
         audit_reader = PostgresAuditReader(postgres.engine)
         directory = PostgresDataRequestDirectory(postgres.engine)
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
-        erased = PostgresErasedTenants(postgres.engine)
+        erased = PostgresErasedTenants.pooled(settings.database_url)
 
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)

@@ -135,7 +135,7 @@ def wire(
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url, eval_cases=recorder)
         unit_of_work, ping = postgres, postgres.ping
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
-        erased = PostgresErasedTenants(postgres.engine)
+        erased = PostgresErasedTenants.pooled(settings.database_url)
 
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)

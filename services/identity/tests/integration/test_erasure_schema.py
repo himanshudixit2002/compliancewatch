@@ -291,8 +291,10 @@ def test_the_eraser_leaves_nothing_of_the_tenant_but_what_it_keeps(
     owner.dispose()
     assert retained["erased_tenant.tenant_id"] == 1, "the marker"
     assert retained["consent_record.tenant_id"] == 1, "pseudonymised, not deleted"
-    assert PostgresErasedTenants(role_engine).is_erased(tenant.id)
-    assert not PostgresErasedTenants(role_engine).is_erased(other.id)
+    markers = PostgresErasedTenants.pooled(as_role(database_url, SCHEMA))
+    assert markers.is_erased(tenant.id)
+    assert markers.is_erased(tenant.id), "known from now on"
+    assert not markers.is_erased(other.id)
     assert check.run(tenant.id).tenant_status == "erased"
     again = erase(role_engine, tenant)
     assert sum(again.tables.values()) == 0, "a second erasure changes nothing more"

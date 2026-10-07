@@ -7,6 +7,7 @@ retained with a reason, and holds no row of the tenant unless retained. Needs Do
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from alembic import command
@@ -26,8 +27,22 @@ from profile_service.infrastructure.repository import PostgresUnitOfWorkFactory
 from profile_service.testing import GSTIN_KARNATAKA
 from py_common.audit.testing import install_audit_table
 from py_common.db_roles import apply_roles, as_role
-from py_common.erasure import ConnectionErasedTenants, count_rows, erase_and_record
-from py_common.erasure_testing import assert_nothing_left
+from py_common.erasure import (
+    ConnectionErasedTenants,
+    count_rows,
+    erase_and_record,
+    erasure_component,
+)
+from py_common.erasure_testing import FakeIdentity, assert_nothing_left
+from py_common.events import EventMessage, encode
+from py_common.outbox import (
+    ConsumerConfig,
+    IdempotentConsumer,
+    InboundRecord,
+    Outcome,
+    read_first_store,
+)
+from py_common.outbox.testing import FakeProducer
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
@@ -130,3 +145,67 @@ def test_the_tenant_s_profile_goes_and_another_s_stays(engine: Engine, database_
             "profile", PostgresProfileEraser(connection), request, clock=lambda: NOW
         )
     assert sum(again.tables.values()) == 0, "run again it finds nothing"
+
+
+async def test_a_refused_event_is_audited_and_erases_nothing(
+    engine: Engine, database_url: str
+) -> None:
+    factory = PostgresUnitOfWorkFactory(engine)
+    tenant = TenantId.new()
+    stocked(factory, tenant, "Example Kept")
+    before = counts(engine, tenant)
+    component = erasure_component(
+        "profile",
+        PostgresProfileEraser,
+        enabled=lambda _: True,
+        verifier=FakeIdentity(EventId.new()),
+        clock=lambda: NOW,
+    )
+    consumer = IdempotentConsumer(
+        group_id=component.group_id,
+        store=read_first_store(engine, component.group_id),
+        handler=component.handler,
+        producer=FakeProducer(),
+        config=ConsumerConfig(max_handler_attempts=2, retry_backoff_seconds=0),
+    )
+    message = EventMessage(
+        event_id=uuid4(),
+        topic="tenant.deletion.requested",
+        schema_version="1.0.1",
+        occurred_at=NOW,
+        tenant_id=tenant.value,
+        correlation_id=uuid4(),
+        causation_id=None,
+        payload={
+            "requested_by": None,
+            "requested_at": NOW.isoformat(),
+            "deadline_at": (NOW + timedelta(days=30)).isoformat(),
+            "retain_audit": True,
+        },
+    )
+    record = InboundRecord(
+        topic=message.topic, partition=0, offset=0, key=b"k", value=encode(message)
+    )
+    assert await consumer.process(record) is Outcome.REFUSED
+    assert counts(engine, tenant) == before, "nothing erased"
+    owner = create_engine(database_url)
+    with owner.connect() as connection:
+        refused = connection.execute(
+            text(
+                "SELECT actor_label, after->>'refused' FROM audit.event "
+                "WHERE tenant_id = :t AND action = 'tenant.erasure_refused'"
+            ),
+            {"t": tenant.value},
+        ).all()
+        processed = connection.execute(
+            text("SELECT count(*) FROM processed_event WHERE consumer_group = :g"),
+            {"g": component.group_id},
+        ).scalar_one()
+    owner.dispose()
+    assert [tuple(row) for row in refused] == [
+        (
+            "system:profile",
+            "the event is not the one identity sent for the tenant's open deletion request",
+        )
+    ]
+    assert processed == 0, "a refused event is never marked processed"

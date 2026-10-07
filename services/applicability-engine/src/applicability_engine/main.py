@@ -150,7 +150,7 @@ def wire(
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url)
         unit_of_work, ping = postgres, postgres.ping
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
-        erased = PostgresErasedTenants(postgres.engine)
+        erased = PostgresErasedTenants.pooled(settings.database_url)
         fanouts = PostgresFanOutUnitOfWorkFactory(postgres.engine)
         directory = PostgresBusinessDirectory(postgres.engine)
         if workflows is None:

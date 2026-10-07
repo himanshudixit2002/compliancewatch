@@ -58,6 +58,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     Table,
     Uuid,
+    create_engine,
     text,
 )
 from sqlalchemy.dialects.postgresql import insert
@@ -594,13 +595,30 @@ def erased_on_connection(connection: Connection) -> ErasedTenants:
 
 
 class PostgresErasedTenants:
-    """The erased markers for a service's routes, on its engine. A tenant once seen erased stays
-    so in the process (an erasure is not undone); any other is read again on each request."""
+    """The erased markers for a service's routes, on ``engine``. A tenant once seen erased stays
+    so in the process (an erasure is not undone); any other is read again on each request, one
+    primary-key lookup. ``pooled(url)`` gives it a small pool of its own, so the services, whose
+    units of work open a connection each, do not open a second one per request for it."""
+
+    POOL_SIZE: Final = 2
+    MAX_OVERFLOW: Final = 4
 
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
         self._known: set[TenantId] = set()
         self._lock = threading.Lock()
+
+    @classmethod
+    def pooled(cls, database_url: str) -> "PostgresErasedTenants":
+        """The markers on an engine of their own with a small connection pool."""
+        return cls(
+            create_engine(
+                database_url,
+                pool_size=cls.POOL_SIZE,
+                max_overflow=cls.MAX_OVERFLOW,
+                pool_pre_ping=True,
+            )
+        )
 
     def is_erased(self, tenant_id: TenantId) -> bool:
         with self._lock:
@@ -726,4 +744,11 @@ class PostgresTenantEraser:
         mark_erased(self.connection, event)
 
     def write_audit(self, entry: AuditEntry) -> None:
+        """The entry alone (a refusal: nothing erased), under the entry's tenant setting, which
+        row-level security on ``audit.event`` needs for a row of a tenant."""
+        if entry.tenant_id is not None:
+            self.connection.execute(
+                text("SELECT set_config(:setting, :tenant, true)"),
+                {"setting": TENANT_SETTING, "tenant": str(entry.tenant_id)},
+            )
         self._audit.write(self.connection, entry)
