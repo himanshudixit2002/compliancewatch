@@ -1116,7 +1116,13 @@ where the workbench sends an approved version to be published, follows the same 
 approving, publishing and withdrawing are offered only to a reviewer or an admin
 (`admin.review.approve`, `admin.publish`) and named for anyone else, `takeStep` checks the role
 before any request, and `server/api/rulebook-write.ts` refuses those steps to any other session
-too, whichever action sends them; submitting, returning and citing stay every regulatory role's. Every step goes through
+too, whichever action sends them; submitting, returning and citing stay every regulatory role's.
+A relation a decision attaches is checked against what the page offered, read again on the
+server when the form is sent: the relation candidate page's approval (the open drafts it may start
+from, the versions it may point at) and a draft from a candidate (the document's open relation
+candidates, each with its versions); a crafted request naming another candidate or version is
+refused on its row with nothing sent, and whether a target is needed comes from that read rather
+than from the page. Every step goes through
 `rulebookWrites` in `server/api/rulebook-write.ts`, behind `web.admin_rulebook_writes` and the
 review token like the entity and relation decisions, with the session's user as `actor_id`.
 Drafting and editing are the claimant's alone (the rulebook's rule); deciding needs no claim, so a
@@ -1124,7 +1130,11 @@ second reviewer approves a task the first approval left open again. Consequences
 security review: through the shared token the rulebook would still take an analyst's approval,
 and a drafter may approve their own draft when it is not high impact (one approver suffices); in
 token mode the rulebook takes a claim and an edit from an analyst alone, so a reviewer or an admin
-claiming would then get the rulebook's 403, shown as it comes.
+claiming would then get the rulebook's 403, shown as it comes; the rulebook does not check a
+relation's target against its candidate (any version of any rule is taken), so it should, as the
+web app now does; an approval reads the candidate and every rule's versions again, and a draft
+with relations the document's open candidates and their versions (the versions of the rules they
+name only, every rule's when one names none, as the form reads them).
 
 ## D-062: The workbench never frames the stored file
 

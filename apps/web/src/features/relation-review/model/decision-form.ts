@@ -6,7 +6,12 @@ import {
 } from "@/entities/rulebook/types";
 import { t } from "@/shared/i18n";
 import { isHexUuid } from "@/shared/lib/identifiers";
-import { APPROVE_FIELDS, NOTE_MAX_LENGTH, REJECT_FIELDS } from "../ui/decision-shared";
+import {
+  APPROVE_FIELDS,
+  NOTE_MAX_LENGTH,
+  REJECT_FIELDS,
+  type VersionOption,
+} from "../ui/decision-shared";
 
 /**
  * The two decision forms' shapes, checked before the rulebook is asked. Approving takes the
@@ -53,6 +58,27 @@ export function parseApproval(formData: FormData, needsTarget: boolean): ParsedA
       note,
     },
   };
+}
+
+/**
+ * The versions an approval names that the page did not offer, read again when it is sent: the
+ * version it starts from must be one of the open drafts, and the one it points at one of the
+ * versions offered for the candidate. A crafted request could otherwise attach the relation to
+ * any version (D-061); the rulebook checks the draft itself, and should check the target too.
+ */
+export function unofferedVersions(
+  approval: CandidateApproval,
+  options: { from: readonly VersionOption[]; target: readonly VersionOption[] },
+): Record<string, string[]> {
+  const errors: Record<string, string[]> = {};
+  if (!options.from.some((option) => option.value === approval.fromRuleVersionId)) {
+    errors[APPROVE_FIELDS.fromRuleVersionId] = [t("relationReview.error.fromNotOffered")];
+  }
+  const target = approval.targetRuleVersionId;
+  if (target !== undefined && !options.target.some((option) => option.value === target)) {
+    errors[APPROVE_FIELDS.targetRuleVersionId] = [t("relationReview.error.targetNotOffered")];
+  }
+  return errors;
 }
 
 function isRejectReason(value: string): value is CandidateRejectReason {

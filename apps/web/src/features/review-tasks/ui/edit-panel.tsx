@@ -31,8 +31,8 @@ export function isFormField(name: string): boolean {
     /^(edits\.)?(title|summary|effective_from|effective_to|todo|specification)$/.test(name) ||
     /^(edits\.)?(recurrence|obligation_template)\.[a-z_]+$/.test(name) ||
     /^citations\.\d+\.(clause_id|quote)$/.test(name) ||
-    /^(rule_key|new_rule\.regulator|new_rule\.level)$/.test(name) ||
-    /^relation_candidates\.\d+\.target_rule_version_id$/.test(name)
+    /^(rule_key|new_rule\.regulator|new_rule\.level|relation_candidates)$/.test(name) ||
+    /^relation\.[^.]+\.(take|target)$/.test(name)
   );
 }
 

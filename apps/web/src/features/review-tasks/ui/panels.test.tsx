@@ -11,7 +11,13 @@ import { ClaimPanel } from "./claim-panel";
 import { DecidePanel } from "./decide-panel";
 import { DraftPanel } from "./draft-panel";
 import { EditPanel, isFormField } from "./edit-panel";
-import type { ContentValues, DraftForm, EditForm, WriteResult } from "./form-shared";
+import {
+  relationField,
+  type ContentValues,
+  type DraftForm,
+  type EditForm,
+  type WriteResult,
+} from "./form-shared";
 
 const ONTOLOGY = ontologyFixture();
 
@@ -169,7 +175,9 @@ describe("EditPanel", () => {
     expect(screen.getByText("Enter a title.")).toBeDefined();
     expect(screen.getByText("title: missing")).toBeDefined();
     expect(screen.getByText("Example other field")).toBeDefined();
-    expect(isFormField("relation_candidates.0.target_rule_version_id")).toBe(true);
+    expect(isFormField(relationField(EXAMPLE_RELATION_CANDIDATE_ID, "target"))).toBe(true);
+    expect(isFormField(relationField(EXAMPLE_RELATION_CANDIDATE_ID, "take"))).toBe(true);
+    expect(isFormField("relation_candidates")).toBe(true);
     expect(isFormField("edits.unknown")).toBe(false);
   });
 
@@ -250,8 +258,8 @@ describe("DraftPanel", () => {
       citations_mode: "own",
       "citations.0.clause_id": EXAMPLE_CLAUSE_IDS.first,
       "citations.0.quote": "Example clause text",
-      "relation_candidates.0.candidate_id": EXAMPLE_RELATION_CANDIDATE_ID,
-      "relation_candidates.0.target_rule_version_id": EXAMPLE_OTHER_VERSION_ID,
+      [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "take")]: "on",
+      [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "target")]: EXAMPLE_OTHER_VERSION_ID,
       "edits.title": "Example rule title",
       "base:edits.title": "Example rule title",
     });
@@ -283,6 +291,43 @@ describe("DraftPanel", () => {
       new_rule: "",
       citations_mode: "candidate",
     });
+  });
+
+  it("sends a relation ticked past the fiftieth row, and shows the errors on its row", async () => {
+    const candidate = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
+    const relations = Array.from({ length: 60 }, (_, index) => ({
+      candidateId: candidate(index + 1),
+      label: `Refers to: EXAMPLE-${index + 1}`,
+      evidenceQuote: "Example clause text",
+      needsTarget: false,
+      targetOptions: [{ value: EXAMPLE_OTHER_VERSION_ID, label: "example_rule v1 (Published)" }],
+    }));
+    const sent: Record<string, string>[] = [];
+    const action = vi.fn<WriteAction<WriteResult>>(async (_state, formData) => {
+      sent.push(sentOf(formData));
+      return {
+        status: "error",
+        fieldErrors: {
+          [relationField(candidate(55), "take")]: ["Example row refusal"],
+          relation_candidates: ["Example list refusal"],
+        },
+      };
+    });
+    const user = userEvent.setup();
+    render(
+      <DraftPanel action={action} form={{ ...FORM, relations }} blocked={null} ontology={null} />,
+    );
+    await user.click(screen.getByRole("checkbox", { name: /Refers to: EXAMPLE-55(?!\d)/ }));
+    await user.click(screen.getByRole("button", { name: "Draft the version" }));
+    await waitFor(() => expect(action).toHaveBeenCalled());
+    const taken = Object.keys(sent[0] ?? {}).filter((name) => name.endsWith(".take"));
+    expect(taken).toEqual([relationField(candidate(55), "take")]);
+    const row = screen.getByRole("checkbox", { name: /Refers to: EXAMPLE-55(?!\d)/ });
+    await waitFor(() => expect(row.getAttribute("aria-invalid")).toBe("true"));
+    expect(document.getElementById(row.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+      "Example row refusal",
+    );
+    expect(screen.getByText("Example list refusal")).toBeDefined();
   });
 
   it("says why no version can be drafted, and when the relations could not be read", () => {

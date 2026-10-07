@@ -42,7 +42,7 @@ export default async function RelationCandidatePage({ params, searchParams }: Pr
       title={SCREEN.title}
       crumbs={breadcrumbsFor("admin.rulebook.relation", { candidateId: id })}
       page={page.value}
-      approve={allowed ? approveCandidate.bind(null, id, page.value.needsTarget) : null}
+      approve={allowed ? approveCandidate.bind(null, id) : null}
       reject={allowed ? rejectCandidate.bind(null, id) : null}
     />
   );

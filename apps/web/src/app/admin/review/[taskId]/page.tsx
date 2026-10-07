@@ -33,9 +33,6 @@ export default async function ReviewWorkbenchPage({ params }: Props) {
   if (!page.ok) return <ServiceError heading={SCREEN.title} error={page.error} />;
   if (page.value === null) notFound();
   const view = page.value;
-  const needingTarget = (view.rule.draftForm?.relations ?? [])
-    .filter((relation) => relation.needsTarget)
-    .map((relation) => relation.candidateId);
   return (
     <WorkbenchView
       crumbs={breadcrumbsFor("admin.review.task", { taskId: id })}
@@ -44,7 +41,7 @@ export default async function ReviewWorkbenchPage({ params }: Props) {
         view.access.allowed
           ? {
               claim: claimTask.bind(null, id),
-              draft: draftFromCandidate.bind(null, id, needingTarget),
+              draft: draftFromCandidate.bind(null, id),
               edit: editDraft.bind(null, id),
               decide: decideTask.bind(null, id, view.candidateTask),
             }

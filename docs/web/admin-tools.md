@@ -343,7 +343,10 @@ it word for word, else the quote alone.
   rule's versions, and the version it points at: required for the relations that only point at a
   version (supersedes, extends a deadline, corrects, withdraws) and for a candidate that names its
   target rule (whose versions are offered then), optional otherwise, when the relation points at the
-  aligned entity. The dialog names both versions.
+  aligned entity. The dialog names both versions. When it is sent, the action reads the candidate
+  and every rule's versions again and refuses, on its field and before anything reaches the
+  rulebook, a draft or a target the page would not offer (D-061); whether a target is needed comes
+  from that read, never from the page.
 - **Reject** takes one of the rulebook's reasons (the wrong kind, the wrong target, not in the
   text, a duplicate, out of scope).
 - Both take an optional note and record the signed-in user as `decided_by`. The panel shows the
@@ -427,11 +430,14 @@ the not-found page.
   - **Draft from the candidate** (the claimant, before drafting): the rule key (the suggested one,
     another rule's, or a new rule's with its regulator and level), the proposed content with the
     analyst's changes, the citations (the candidate's quotes, or the analyst's own, each a clause of
-    the document and a quote), the document's open relation candidates to take on (each with the
-    version it points at where its kind needs one) and why. Refusals are said plainly: a key no
-    rule has or one a rule has, a candidate drafted already (the page renders its draft), an
-    overlapping version, a relation's refusal, a quote not in its clause, and an incomplete draft
-    with every problem the rulebook listed.
+    the document and a quote), the document's open relation candidates to take on (each row named
+    by its candidate, however many the document holds, at most 50 ticked; each with the version it
+    points at where its kind needs one, from the versions of the rule it names, or of every rule
+    when it names none) and why. The action reads the open candidates and their versions again and
+    refuses a candidate or a version the form would not offer, on its row, before anything is sent
+    (D-061). Refusals are said plainly: a key no rule has or one a rule has, a candidate drafted
+    already (the page renders its draft), an overlapping version, a relation's refusal, a quote not
+    in its clause, and an incomplete draft with every problem the rulebook listed.
   - **Edit the draft** (the claimant, while the version is a draft and not closed): the title,
     summary, dates, recurrence, obligation, open questions and condition (the predicate editor,
     D-064), only the fields changed sent; citations to add, each a clause of a cited document and

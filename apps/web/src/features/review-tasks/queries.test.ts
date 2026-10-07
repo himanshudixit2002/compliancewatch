@@ -18,7 +18,7 @@ import {
   reviewTaskDto,
   taskPageDto,
 } from "@/test/review-task-fixture";
-import { getQueuePage, getStatsPage, getWorkbench, taskNow } from "./queries";
+import { getQueuePage, getStatsPage, getWorkbench, relationsOffered, taskNow } from "./queries";
 
 const SESSION: ClientPrincipal = {
   userId: "00000000-0000-5000-8000-0000000000b9",
@@ -213,6 +213,100 @@ describe("getWorkbench", () => {
       targetOptions: [{ label: "example_rule v1 (Published)" }],
     });
     expect(page.value.source.documents[0]?.file).toEqual({ kind: "none" });
+    // Every candidate names its target's rule, so only that rule's versions are read.
+    const read = fake.requests.map((request) => request.pathname);
+    expect(read).toContain("/v1/rulebook/rules/example_rule/versions");
+    expect(read).not.toContain("/v1/rulebook/rules/example_gone/versions");
+  });
+
+  it("reads every rule's versions when a candidate names no target rule", async () => {
+    const claimed = candidateTaskDetailDto({
+      task: reviewTaskDto({
+        task_id: EXAMPLE_CANDIDATE_TASK_ID,
+        rule_version_id: null,
+        kind: "candidate",
+        status: "claimed",
+        claimed_by: SESSION.userId,
+      }),
+    });
+    const fake = fakeFetch([
+      { path: `/v1/rulebook/review/tasks/${EXAMPLE_CANDIDATE_TASK_ID}`, body: claimed },
+      { path: "/v1/ontology", body: ONTOLOGY_DTO },
+      { path: `/v1/rulebook/documents/${EXAMPLE_DOCUMENT_ID}`, body: documentDto() },
+      { path: `/v1/pipeline/documents/${EXAMPLE_DOCUMENT_ID}`, status: 404, problem: {} },
+      {
+        path: "/v1/rulebook/review/relations",
+        body: [
+          relationCandidateDto({ relation: "supersedes" }),
+          relationCandidateDto({
+            candidate_id: "00000000-0000-4000-8000-0000000000cc",
+            relation: "refers_to",
+            target_rule_key: null,
+          }),
+        ],
+      },
+      { path: "/v1/rulebook/rules", body: [ruleDto(), ruleDto({ rule_key: "example_other" })] },
+      {
+        path: "/v1/rulebook/rules/example_rule/versions",
+        body: [ruleVersionDto({ status: "published" })],
+      },
+      {
+        path: "/v1/rulebook/rules/example_other/versions",
+        body: [
+          ruleVersionDto({
+            rule_version_id: "00000000-0000-4000-8000-0000000000f9",
+            rule_key: "example_other",
+          }),
+        ],
+      },
+    ]);
+    const page = await getWorkbench(SESSION, EXAMPLE_CANDIDATE_TASK_ID, {
+      fetchImpl: fake.fetchImpl,
+    });
+    if (!page.ok || page.value === null) throw new Error("expected the workbench");
+    const [named, open] = page.value.rule.draftForm?.relations ?? [];
+    expect(named?.targetOptions.map((option) => option.label)).toEqual([
+      "example_rule v1 (Published)",
+    ]);
+    expect(open?.targetOptions.map((option) => option.label)).toEqual([
+      "example_other v1 (Draft)",
+      "example_rule v1 (Published)",
+    ]);
+  });
+
+  it("reads the relations a draft may take on again for the action, none for a seed task", async () => {
+    const fake = fakeFetch([
+      {
+        path: `/v1/rulebook/review/tasks/${EXAMPLE_CANDIDATE_TASK_ID}`,
+        body: candidateTaskDetailDto(),
+      },
+      { path: `/v1/rulebook/review/tasks/${EXAMPLE_TASK_ID}`, body: reviewTaskDetailDto() },
+      { path: "/v1/rulebook/review/relations", body: [relationCandidateDto()] },
+      {
+        path: "/v1/rulebook/rules/example_rule/versions",
+        body: [ruleVersionDto({ status: "published" })],
+      },
+    ]);
+    expect(
+      await relationsOffered(EXAMPLE_CANDIDATE_TASK_ID, { fetchImpl: fake.fetchImpl }),
+    ).toMatchObject({
+      ok: true,
+      value: [{ needsTarget: true, targetOptions: [{ label: "example_rule v1 (Published)" }] }],
+    });
+    expect(await relationsOffered(EXAMPLE_TASK_ID, { fetchImpl: fake.fetchImpl })).toEqual({
+      ok: true,
+      value: [],
+    });
+    const failing = fakeFetch([
+      {
+        path: `/v1/rulebook/review/tasks/${EXAMPLE_CANDIDATE_TASK_ID}`,
+        body: candidateTaskDetailDto(),
+      },
+      { path: "/v1/rulebook/review/relations", status: 503, problem: { title: "Example outage" } },
+    ]);
+    expect(
+      await relationsOffered(EXAMPLE_CANDIDATE_TASK_ID, { fetchImpl: failing.fetchImpl }),
+    ).toMatchObject({ ok: false, error: { message: "Example outage" } });
   });
 
   it("says the relations could not be read when every rule's versions fail", async () => {

@@ -27,7 +27,9 @@ import {
   reviewTaskDto,
   ruleCandidateDto,
 } from "@/test/review-task-fixture";
+import { relationField, type RelationChoice } from "../ui/form-shared";
 import {
+  checkRelations,
   editorOntology,
   previousVersion,
   sourceDocumentIds,
@@ -480,5 +482,63 @@ describe("the helpers", () => {
       "attributes",
       "operatorsByType",
     ]);
+  });
+});
+
+describe("checkRelations", () => {
+  const OFFERED: RelationChoice[] = [
+    {
+      candidateId: EXAMPLE_RELATION_CANDIDATE_ID,
+      label: "Supersedes: EXAMPLE-1",
+      evidenceQuote: "Example clause text",
+      needsTarget: true,
+      targetOptions: [{ value: EXAMPLE_OTHER_VERSION_ID, label: "example_rule v1 (Published)" }],
+    },
+    {
+      candidateId: EXAMPLE_TASK_ID,
+      label: "Refers to: EXAMPLE-2",
+      evidenceQuote: "Example clause text",
+      needsTarget: false,
+      targetOptions: [{ value: EXAMPLE_VERSION_ID, label: "example_rule v2 (Draft)" }],
+    },
+  ];
+
+  it("passes relations the form offered, with a version where the kind needs one", () => {
+    expect(
+      checkRelations(
+        [
+          {
+            candidateId: EXAMPLE_RELATION_CANDIDATE_ID,
+            targetRuleVersionId: EXAMPLE_OTHER_VERSION_ID,
+          },
+          { candidateId: EXAMPLE_TASK_ID, targetRuleVersionId: null },
+        ],
+        OFFERED,
+      ),
+    ).toEqual({});
+  });
+
+  it("refuses a candidate not offered, a missing target and a version outside the row's choices", () => {
+    const stranger = "00000000-0000-4000-8000-0000000000f9";
+    expect(
+      checkRelations(
+        [
+          { candidateId: EXAMPLE_RELATION_CANDIDATE_ID, targetRuleVersionId: null },
+          { candidateId: EXAMPLE_TASK_ID, targetRuleVersionId: stranger },
+          { candidateId: EXAMPLE_CANDIDATE_TASK_ID, targetRuleVersionId: null },
+        ],
+        OFFERED,
+      ),
+    ).toEqual({
+      [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "target")]: [
+        "Choose the version this relation points at.",
+      ],
+      [relationField(EXAMPLE_TASK_ID, "target")]: [
+        "Choose one of the versions offered for this relation.",
+      ],
+      [relationField(EXAMPLE_CANDIDATE_TASK_ID, "take")]: [
+        "This relation candidate is not open on the candidate's document any more: untick it.",
+      ],
+    });
   });
 });

@@ -22,6 +22,7 @@ import {
   EDITS_PREFIX,
   LIMITS,
   NOTE_FIELD,
+  RELATIONS_FIELD,
   RULE_KEY,
   citationField,
   relationField,
@@ -348,15 +349,53 @@ function isLevel(value: string): value is VersionLevel {
   return (LEVELS as readonly string[]).includes(value);
 }
 
+/** A ticked relation row's field: `relation.<candidate id>.take`. */
+const RELATION_TAKEN = /^relation\.([^.]+)\.take$/;
+
+/**
+ * The relation candidates ticked on the draft form, in the form's order, each with the version
+ * it points at, whatever their number (the rows are named by candidate id); more than one draft
+ * takes on is an error on the relations as a whole. Whether each was offered, and whether its
+ * kind needs a target, is checked against the rulebook in the action (`checkRelations`).
+ */
+export function parseRelations(formData: FormData): {
+  relations: DraftFromCandidate["relations"][number][];
+  errors: FormErrors;
+} {
+  const errors: FormErrors = {};
+  const relations: DraftFromCandidate["relations"][number][] = [];
+  const seen = new Set<string>();
+  for (const [name, value] of formData.entries()) {
+    const match = RELATION_TAKEN.exec(name);
+    if (match === null || value !== "on") continue;
+    const formId = match[1] as string;
+    const candidateId = formId.toLowerCase();
+    if (!isHexUuid(candidateId) || seen.has(candidateId)) continue;
+    seen.add(candidateId);
+    const targetName = relationField(formId, "target");
+    const target = text(formData, targetName).trim().toLowerCase();
+    if (target !== "" && !isHexUuid(target)) {
+      add(errors, targetName, t("workbench.error.relationTarget"));
+      continue;
+    }
+    relations.push({ candidateId, targetRuleVersionId: target === "" ? null : target });
+  }
+  if (seen.size > LIMITS.relations) {
+    add(
+      errors,
+      RELATIONS_FIELD,
+      t("workbench.error.relationsCount", { max: LIMITS.relations, count: seen.size }),
+    );
+  }
+  return { relations, errors };
+}
+
 /**
  * A version drafted from the candidate: the rule it joins (or starts, with its regulator and
  * level), the changes to what the candidate proposes, the citations (the candidate's quotes
  * unless the analyst cites others), the relation candidates taken on, and why.
  */
-export function parseDraft(
-  formData: FormData,
-  relationsNeedingTarget: ReadonlySet<string>,
-): Parsed<DraftFromCandidate> {
+export function parseDraft(formData: FormData): Parsed<DraftFromCandidate> {
   const errors: FormErrors = {};
   const ruleKey = text(formData, DRAFT_FIELDS.ruleKey).trim();
   if (ruleKey === "") add(errors, DRAFT_FIELDS.ruleKey, t("workbench.error.ruleKeyEmpty"));
@@ -387,23 +426,9 @@ export function parseDraft(
     Object.assign(errors, cited.errors);
     citations = cited.citations;
   }
-  const relations: DraftFromCandidate["relations"][number][] = [];
-  for (let index = 0; index < LIMITS.relations; index += 1) {
-    const candidateId = text(formData, relationField(index, "candidate_id")).trim().toLowerCase();
-    if (candidateId === "") continue;
-    const targetName = relationField(index, "target_rule_version_id");
-    const target = text(formData, targetName).trim().toLowerCase();
-    if (!isHexUuid(candidateId)) continue;
-    if (target === "" && relationsNeedingTarget.has(candidateId)) {
-      add(errors, targetName, t("workbench.error.relationTarget"));
-      continue;
-    }
-    if (target !== "" && !isHexUuid(target)) {
-      add(errors, targetName, t("workbench.error.relationTarget"));
-      continue;
-    }
-    relations.push({ candidateId, targetRuleVersionId: target === "" ? null : target });
-  }
+  const taken = parseRelations(formData);
+  Object.assign(errors, taken.errors);
+  const relations = taken.relations;
   const note = noteOf(formData, errors, false);
   if (Object.keys(errors).length > 0) return failed(errors);
   return {

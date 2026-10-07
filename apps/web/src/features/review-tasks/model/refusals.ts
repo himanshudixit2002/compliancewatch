@@ -2,6 +2,7 @@ import { isProblemOf, problemSlug } from "@/entities/problem/mappers";
 import { toActionProblem, type ApiError } from "@/server/result";
 import { t, type MessageKey } from "@/shared/i18n";
 import type { ActionState } from "@/shared/lib/action-state";
+import { relationField } from "../ui/form-shared";
 
 /**
  * The rulebook's refusals of a review step, said plainly. Each keeps the rulebook's problem type,
@@ -110,6 +111,35 @@ export function refusalState<T>(error: ApiError): ActionState<T> {
     ...(listed.length === 0 ? {} : { formErrors: listed }),
     ...(fieldErrors !== undefined && Object.keys(fieldErrors).length > 0 ? { fieldErrors } : {}),
   };
+}
+
+/** A rulebook field under the relation list: `relation_candidates.<n>.<field>`. */
+const RELATION_LIST_FIELD = /^relation_candidates\.(\d+)\.(.+)$/;
+
+/**
+ * A refusal's field errors on the relation list moved onto the form's rows: the rulebook names a
+ * relation by its place in the list sent (`relation_candidates.<n>.target_rule_version_id`), the
+ * form names its rows by candidate id (`relation.<id>.target`). Any other field stays as it is.
+ */
+export function onRelationRows<T>(
+  state: ActionState<T>,
+  sent: readonly { candidateId: string }[],
+): ActionState<T> {
+  if (state.status !== "error" || state.fieldErrors === undefined) return state;
+  const fieldErrors: Record<string, readonly string[]> = {};
+  for (const [field, messages] of Object.entries(state.fieldErrors)) {
+    const match = RELATION_LIST_FIELD.exec(field);
+    const relation = match === null ? undefined : sent[Number(match[1])];
+    const key =
+      relation === undefined
+        ? field
+        : relationField(
+            relation.candidateId,
+            (match?.[2] ?? "").startsWith("target") ? "target" : "take",
+          );
+    fieldErrors[key] = [...(fieldErrors[key] ?? []), ...messages];
+  }
+  return { ...state, fieldErrors };
 }
 
 /** Whether the refusal is this one of the rulebook's. */

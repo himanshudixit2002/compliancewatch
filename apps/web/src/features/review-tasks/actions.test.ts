@@ -12,15 +12,22 @@ import { resetFlagReader } from "@/server/flags";
 import { encryptSession } from "@/server/session";
 import { fakeCookies } from "@/test/fake-cookies";
 import { fakeFetch } from "@/test/fake-fetch";
-import { EXAMPLE_CLAUSE_IDS } from "@/test/rulebook-fixture";
+import {
+  EXAMPLE_CLAUSE_IDS,
+  EXAMPLE_DOCUMENT_ID,
+  relationCandidateDto,
+} from "@/test/rulebook-fixture";
 import {
   EXAMPLE_OTHER_ANALYST_ID,
+  EXAMPLE_OTHER_VERSION_ID,
   EXAMPLE_VERSION_ID,
   lifecycleDto,
+  ruleVersionDto,
 } from "@/test/rule-version-fixture";
 import {
   EXAMPLE_CANDIDATE_TASK_ID,
   EXAMPLE_NEXT_TASK_ID,
+  EXAMPLE_RELATION_CANDIDATE_ID,
   EXAMPLE_TASK_ID,
   candidateTaskDetailDto,
   reviewTaskDetailDto,
@@ -28,6 +35,7 @@ import {
   seedTasksDto,
   taskDecisionDto,
 } from "@/test/review-task-fixture";
+import { relationField } from "./ui/form-shared";
 import {
   claimFromQueue,
   claimTask,
@@ -240,9 +248,38 @@ describe("draftFromCandidate", () => {
     return data;
   };
 
+  /**
+   * The reads the action makes to check the relations it is sent: the task (its candidate's
+   * document), the document's open relation candidates, and the versions they may point at (a
+   * supersession naming example_rule, whose versions are a draft and a published one).
+   */
+  const offered = [
+    { method: "GET", path: CANDIDATE_TASK, body: candidateTaskDetailDto() },
+    {
+      method: "GET",
+      path: "/v1/rulebook/review/relations",
+      body: [
+        relationCandidateDto({
+          candidate_id: EXAMPLE_RELATION_CANDIDATE_ID,
+          relation: "supersedes",
+          target_rule_key: "example_rule",
+        }),
+      ],
+    },
+    {
+      method: "GET",
+      path: "/v1/rulebook/rules/example_rule/versions",
+      body: [
+        ruleVersionDto(),
+        ruleVersionDto({ rule_version_id: EXAMPLE_OTHER_VERSION_ID, version: 2 }),
+      ],
+    },
+  ];
+
   it("drafts the version and says which, with the relations taken on and the clauses cited", async () => {
     await signedInAs(["analyst"]);
     const fake = fakeFetch([
+      ...offered,
       {
         method: "POST",
         path: `${CANDIDATE_TASK}/draft`,
@@ -255,11 +292,11 @@ describe("draftFromCandidate", () => {
     vi.stubGlobal("fetch", fake.fetchImpl);
     const state = await draftFromCandidate(
       EXAMPLE_CANDIDATE_TASK_ID,
-      [],
       IDLE,
       base({
         "edits.title": "Example edited title",
-        "relation_candidates.0.candidate_id": EXAMPLE_NEXT_TASK_ID,
+        [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "take")]: "on",
+        [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "target")]: EXAMPLE_OTHER_VERSION_ID,
         note: "Example why",
       }),
     );
@@ -268,12 +305,117 @@ describe("draftFromCandidate", () => {
       message: "Drafted example_rule v1 from the candidate.",
       value: { details: ["Relation candidates taken on: 1.", "Clauses cited: 1."] },
     });
-    expect(fake.requests[0]?.body).toEqual({
+    // The relation reads stay with the candidate's document and the rule the candidate names.
+    expect(
+      fake.requests
+        .filter((request) => request.method === "GET")
+        .map((request) => request.pathname),
+    ).toEqual([
+      CANDIDATE_TASK,
+      "/v1/rulebook/review/relations",
+      "/v1/rulebook/rules/example_rule/versions",
+    ]);
+    expect(new URL(fake.requests[1]?.url ?? "").searchParams.get("document_id")).toBe(
+      EXAMPLE_DOCUMENT_ID,
+    );
+    expect(fake.requests.at(-1)?.body).toEqual({
       actor_id: USER_ID,
       rule_key: "example_rule",
       edits: { title: "Example edited title" },
-      relation_candidates: [{ candidate_id: EXAMPLE_NEXT_TASK_ID }],
+      relation_candidates: [
+        {
+          candidate_id: EXAMPLE_RELATION_CANDIDATE_ID,
+          target_rule_version_id: EXAMPLE_OTHER_VERSION_ID,
+        },
+      ],
       note: "Example why",
+    });
+  });
+
+  it("refuses a relation candidate or a version the page did not offer, and sends nothing", async () => {
+    await signedInAs(["analyst"]);
+    const fake = fakeFetch([
+      ...offered,
+      { method: "POST", path: `${CANDIDATE_TASK}/draft`, body: candidateTaskDetailDto() },
+    ]);
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const stranger = "00000000-0000-4000-8000-0000000000f9";
+    expect(
+      await draftFromCandidate(
+        EXAMPLE_CANDIDATE_TASK_ID,
+        IDLE,
+        base({
+          [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "take")]: "on",
+          [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "target")]: stranger,
+          [relationField(EXAMPLE_NEXT_TASK_ID, "take")]: "on",
+        }),
+      ),
+    ).toEqual({
+      status: "error",
+      fieldErrors: {
+        [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "target")]: [
+          "Choose one of the versions offered for this relation.",
+        ],
+        [relationField(EXAMPLE_NEXT_TASK_ID, "take")]: [
+          "This relation candidate is not open on the candidate's document any more: untick it.",
+        ],
+      },
+    });
+    expect(
+      await draftFromCandidate(
+        EXAMPLE_CANDIDATE_TASK_ID,
+        IDLE,
+        base({ [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "take")]: "on" }),
+      ),
+    ).toEqual({
+      status: "error",
+      fieldErrors: {
+        [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "target")]: [
+          "Choose the version this relation points at.",
+        ],
+      },
+    });
+    expect(fake.requests.filter((request) => request.method === "POST")).toHaveLength(0);
+  });
+
+  it("puts the rulebook's field errors on the relation's row", async () => {
+    await signedInAs(["analyst"]);
+    vi.stubGlobal(
+      "fetch",
+      fakeFetch([
+        ...offered,
+        {
+          method: "POST",
+          path: `${CANDIDATE_TASK}/draft`,
+          status: 422,
+          problem: {
+            type: `${PROBLEM_TYPE_PREFIX}validation-error`,
+            title: "Example validation",
+            errors: [
+              {
+                loc: ["body", "relation_candidates", 0, "target_rule_version_id"],
+                msg: "Example message",
+                type: "value_error",
+              },
+            ],
+          },
+        },
+      ]).fetchImpl,
+    );
+    expect(
+      await draftFromCandidate(
+        EXAMPLE_CANDIDATE_TASK_ID,
+        IDLE,
+        base({
+          [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "take")]: "on",
+          [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "target")]: EXAMPLE_VERSION_ID,
+        }),
+      ),
+    ).toMatchObject({
+      status: "error",
+      fieldErrors: {
+        [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "target")]: ["Example message"],
+      },
     });
   });
 
@@ -282,14 +424,9 @@ describe("draftFromCandidate", () => {
     const fake = fakeFetch([]);
     vi.stubGlobal("fetch", fake.fetchImpl);
     expect(
-      await draftFromCandidate(
-        EXAMPLE_CANDIDATE_TASK_ID,
-        [],
-        IDLE,
-        base({ rule_key: "Not A Key" }),
-      ),
+      await draftFromCandidate(EXAMPLE_CANDIDATE_TASK_ID, IDLE, base({ rule_key: "Not A Key" })),
     ).toMatchObject({ status: "error", fieldErrors: { rule_key: [expect.any(String)] } });
-    expect(await draftFromCandidate("nope", [], IDLE, base({}))).toEqual({
+    expect(await draftFromCandidate("nope", IDLE, base({}))).toEqual({
       status: "error",
       formErrors: ["This is not a review task's id."],
     });
@@ -308,7 +445,7 @@ describe("draftFromCandidate", () => {
         },
       ]).fetchImpl,
     );
-    expect(await draftFromCandidate(EXAMPLE_CANDIDATE_TASK_ID, [], IDLE, base({}))).toMatchObject({
+    expect(await draftFromCandidate(EXAMPLE_CANDIDATE_TASK_ID, IDLE, base({}))).toMatchObject({
       status: "error",
       problem: { title: "The draft is incomplete" },
       formErrors: ["title: missing", "recurrence: unreadable"],
@@ -323,7 +460,7 @@ describe("draftFromCandidate", () => {
         },
       ]).fetchImpl,
     );
-    expect(await draftFromCandidate(EXAMPLE_CANDIDATE_TASK_ID, [], IDLE, base({}))).toMatchObject({
+    expect(await draftFromCandidate(EXAMPLE_CANDIDATE_TASK_ID, IDLE, base({}))).toMatchObject({
       status: "error",
       problem: { title: "This candidate was drafted already" },
     });

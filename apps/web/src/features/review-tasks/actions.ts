@@ -26,8 +26,9 @@ import { ruleVersionStatusLabel } from "@/shared/ui/rule-version-status";
 import { candidateStatusLabel } from "./model/candidate";
 import { parseClaim, parseDecision, parseDraft, parseEdit, type Parsed } from "./model/forms";
 import { decisionLabel, taskHref } from "./model/queue";
-import { REVIEW_PROBLEMS, isRefusal, refusalState } from "./model/refusals";
-import { taskNow } from "./queries";
+import { REVIEW_PROBLEMS, isRefusal, onRelationRows, refusalState } from "./model/refusals";
+import { checkRelations } from "./model/workbench";
+import { relationsOffered, taskNow } from "./queries";
 import type { WriteResult } from "./ui/form-shared";
 
 /**
@@ -217,21 +218,33 @@ function savedResult(edit: DraftEdit): WriteResult {
   return result(t("workbench.edit.saved"), details);
 }
 
-/** A version drafted from a claimed candidate task's candidate. */
+/**
+ * A version drafted from a claimed candidate task's candidate. The relation candidates it takes
+ * on are checked against the ones the form offers, read again from the rulebook, before anything
+ * is sent: a crafted request could otherwise attach a relation to any version (D-061).
+ */
 export async function draftFromCandidate(
   taskId: string,
-  relationsNeedingTarget: readonly string[],
   _state: ActionState<WriteResult>,
   formData: FormData,
 ): Promise<ActionState<WriteResult>> {
   const session = await requireScreenSession(TASK, { taskId });
   if (!taskIdOk(taskId)) return actionFailure(t("workbench.error.task"));
-  const parsed = parseDraft(formData, new Set(relationsNeedingTarget));
+  const parsed = parseDraft(formData);
   if (!parsed.ok) return failure(parsed);
   const id = taskId.toLowerCase();
+  const relations = parsed.value.relations;
+  if (relations.length > 0) {
+    const offered = await relationsOffered(id);
+    if (!offered.ok) return refusalState(offered.error);
+    const problems = checkRelations(relations, offered.value);
+    if (Object.keys(problems).length > 0) return { status: "error", fieldErrors: problems };
+  }
   const writes = await rulebookWrites({ session });
   const drafted = await writes.draftFromCandidate(id, parsed.value);
-  if (!drafted.ok) return refusal(drafted.error, id, session, (found) => found);
+  if (!drafted.ok) {
+    return onRelationRows(await refusal(drafted.error, id, session, (found) => found), relations);
+  }
   refresh(id);
   const version = drafted.value.version;
   const done = result(

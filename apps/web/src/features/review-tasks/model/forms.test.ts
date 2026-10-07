@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { EXAMPLE_CLAUSE_IDS } from "@/test/rulebook-fixture";
 import { EXAMPLE_OTHER_VERSION_ID } from "@/test/rule-version-fixture";
 import { EXAMPLE_RELATION_CANDIDATE_ID, EXAMPLE_TASK_ID } from "@/test/review-task-fixture";
-import { BASE_PREFIX, EDITS_PREFIX } from "../ui/form-shared";
+import { BASE_PREFIX, EDITS_PREFIX, relationField } from "../ui/form-shared";
 import {
   canonical,
   parseCitations,
@@ -11,6 +11,7 @@ import {
   parseDecision,
   parseDraft,
   parseEdit,
+  parseRelations,
 } from "./forms";
 
 const SPEC = { all_of: [{ attribute: "example_kind", operator: "eq", value: "first" }] };
@@ -190,8 +191,6 @@ describe("parseEdit", () => {
 });
 
 describe("parseDraft", () => {
-  const NEEDS = new Set([EXAMPLE_RELATION_CANDIDATE_ID]);
-
   it("drafts into a rule with the candidate's quotes and the relations taken on", () => {
     const parsed = parseDraft(
       form(
@@ -199,15 +198,14 @@ describe("parseDraft", () => {
         {
           rule_key: "example_rule",
           citations_mode: "candidate",
-          "relation_candidates.0.candidate_id": EXAMPLE_RELATION_CANDIDATE_ID,
-          "relation_candidates.0.target_rule_version_id": EXAMPLE_OTHER_VERSION_ID,
-          "relation_candidates.1.candidate_id": "",
-          "relation_candidates.1.target_rule_version_id": EXAMPLE_OTHER_VERSION_ID,
+          [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "take")]: "on",
+          [relationField(EXAMPLE_RELATION_CANDIDATE_ID, "target")]: EXAMPLE_OTHER_VERSION_ID,
+          // A row left unticked sends its target, if any, and is not taken on.
+          [relationField(EXAMPLE_TASK_ID, "target")]: EXAMPLE_OTHER_VERSION_ID,
           note: "Example why",
         },
         EDITS_PREFIX,
       ),
-      NEEDS,
     );
     expect(parsed).toEqual({
       ok: true,
@@ -242,7 +240,6 @@ describe("parseDraft", () => {
         },
         EDITS_PREFIX,
       ),
-      NEEDS,
     );
     expect(parsed).toMatchObject({
       ok: true,
@@ -265,13 +262,11 @@ describe("parseDraft", () => {
           new_rule: "on",
           "new_rule.regulator": "",
           "new_rule.level": "nowhere",
-          "relation_candidates.0.candidate_id": EXAMPLE_RELATION_CANDIDATE_ID,
-          "relation_candidates.1.candidate_id": EXAMPLE_TASK_ID,
-          "relation_candidates.1.target_rule_version_id": "not-an-id",
+          [relationField(EXAMPLE_TASK_ID, "take")]: "on",
+          [relationField(EXAMPLE_TASK_ID, "target")]: "not-an-id",
         },
         EDITS_PREFIX,
       ),
-      NEEDS,
     );
     expect(parsed).toEqual({
       ok: false,
@@ -283,18 +278,59 @@ describe("parseDraft", () => {
         "new_rule.regulator": ["Enter the new rule's regulator, at most 40 characters."],
         "new_rule.level": ["Choose where the new rule applies."],
         "edits.title": ["Enter a title."],
-        "relation_candidates.0.target_rule_version_id": [
-          "Choose the version this relation points at.",
-        ],
-        "relation_candidates.1.target_rule_version_id": [
-          "Choose the version this relation points at.",
-        ],
+        [relationField(EXAMPLE_TASK_ID, "target")]: ["Choose the version this relation points at."],
       },
     });
-    expect(parseDraft(form({}, {}, EDITS_PREFIX), NEEDS)).toMatchObject({
+    expect(parseDraft(form({}, {}, EDITS_PREFIX))).toMatchObject({
       ok: false,
       errors: { rule_key: ["Enter the rule's key."] },
     });
+  });
+});
+
+describe("parseRelations", () => {
+  /** A relation candidate id for row n, 1-based: ...0001, ...0002, ... */
+  const candidate = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
+
+  function rows(count: number, ticked: readonly number[]): FormData {
+    const data = new FormData();
+    for (let n = 1; n <= count; n += 1) {
+      if (ticked.includes(n)) data.set(relationField(candidate(n), "take"), "on");
+      data.set(relationField(candidate(n), "target"), n % 2 === 0 ? EXAMPLE_OTHER_VERSION_ID : "");
+    }
+    return data;
+  }
+
+  it("takes a row ticked past the fiftieth: the rows are named by candidate id", () => {
+    expect(parseRelations(rows(60, [55]))).toEqual({
+      relations: [{ candidateId: candidate(55), targetRuleVersionId: null }],
+      errors: {},
+    });
+    expect(parseRelations(rows(200, [2, 199])).relations).toEqual([
+      { candidateId: candidate(2), targetRuleVersionId: EXAMPLE_OTHER_VERSION_ID },
+      { candidateId: candidate(199), targetRuleVersionId: null },
+    ]);
+  });
+
+  it("refuses more rows than one draft takes on, plainly", () => {
+    const all = Array.from({ length: 51 }, (_, index) => index + 1);
+    expect(parseRelations(rows(60, all)).errors).toEqual({
+      relation_candidates: [
+        "A draft takes on at most 50 relation candidates at a time; 51 are ticked.",
+      ],
+    });
+    expect(parseRelations(rows(60, all.slice(0, 50))).errors).toEqual({});
+  });
+
+  it("skips a name that is not a candidate's id and takes a candidate once", () => {
+    const data = rows(2, [1]);
+    data.append(relationField(candidate(1), "take"), "on");
+    data.set(relationField("not-an-id", "take"), "on");
+    data.set(relationField(candidate(2).toUpperCase(), "take"), "on");
+    expect(parseRelations(data).relations.map((relation) => relation.candidateId)).toEqual([
+      candidate(1),
+      candidate(2),
+    ]);
   });
 });
 

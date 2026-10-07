@@ -15,17 +15,18 @@ import { formatDateTime } from "@/shared/lib/dates";
 import { humanise } from "@/shared/lib/humanise";
 import type { ServiceErrorLike } from "@/shared/ui/service-error";
 import { describeSpecification, type SpecLine } from "@/shared/ui/specification";
-import type {
-  AccessView,
-  ApprovalsView,
-  ClaimView,
-  ClauseOption,
-  DecideView,
-  DraftForm,
-  EditForm,
-  EditorOntology,
-  PersonRef,
-  RelationChoice,
+import {
+  relationField,
+  type AccessView,
+  type ApprovalsView,
+  type ClaimView,
+  type ClauseOption,
+  type DecideView,
+  type DraftForm,
+  type EditForm,
+  type EditorOntology,
+  type PersonRef,
+  type RelationChoice,
 } from "../ui/form-shared";
 import { candidatePane, type CandidatePane } from "./candidate";
 import {
@@ -251,7 +252,12 @@ function versionOptionLabel(version: RuleVersion): string {
   });
 }
 
-function relationChoices(
+/**
+ * The relation candidates a draft may take on, as the form offers them: each open candidate of the
+ * document with the versions it may point at (its rule's, when it names one; any open version
+ * otherwise) and whether its kind needs one.
+ */
+export function relationChoices(
   relations: readonly RelationCandidate[],
   targets: readonly RuleVersion[],
 ): RelationChoice[] {
@@ -274,6 +280,42 @@ function relationChoices(
       )
       .map((version) => ({ value: version.ruleVersionId, label: versionOptionLabel(version) })),
   }));
+}
+
+/**
+ * The relation candidates a draft takes on, checked against what the form offers, read again from
+ * the rulebook when the draft is sent (a crafted request could name any candidate or version):
+ * each must be an open relation candidate of the candidate's document, name a version where its
+ * kind needs one, and name only a version among its row's choices (D-061). The problems are keyed
+ * by the rows' fields; none when every one is offered.
+ */
+export function checkRelations(
+  sent: readonly { candidateId: string; targetRuleVersionId: string | null }[],
+  offered: readonly RelationChoice[],
+): Record<string, string[]> {
+  const errors: Record<string, string[]> = {};
+  const byId = new Map(offered.map((choice) => [choice.candidateId, choice]));
+  for (const relation of sent) {
+    const choice = byId.get(relation.candidateId);
+    if (choice === undefined) {
+      errors[relationField(relation.candidateId, "take")] = [
+        t("workbench.error.relationNotOffered"),
+      ];
+    } else if (relation.targetRuleVersionId === null) {
+      if (choice.needsTarget) {
+        errors[relationField(relation.candidateId, "target")] = [
+          t("workbench.error.relationTarget"),
+        ];
+      }
+    } else if (
+      !choice.targetOptions.some((option) => option.value === relation.targetRuleVersionId)
+    ) {
+      errors[relationField(relation.candidateId, "target")] = [
+        t("workbench.error.relationTargetNotOffered"),
+      ];
+    }
+  }
+  return errors;
 }
 
 /** The version before this one of the rule, skipping closed drafts; null when there is none. */

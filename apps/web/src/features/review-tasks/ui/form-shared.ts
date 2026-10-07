@@ -49,12 +49,17 @@ export const DRAFT_FIELDS = {
   citationsMode: "citations_mode",
 } as const;
 
-export function relationField(
-  index: number,
-  part: "candidate_id" | "target_rule_version_id",
-): string {
-  return `relation_candidates.${index}.${part}`;
+/**
+ * A relation candidate's row of the draft form, named by the candidate's id rather than its place
+ * in the list, so every row ticked reaches the action however many the document holds: `take` is
+ * "on" when it is ticked, `target` the version it points at.
+ */
+export function relationField(candidateId: string, part: "take" | "target"): string {
+  return `relation.${candidateId}.${part}`;
 }
+
+/** Where an error about the relation candidates as a whole sits (more ticked than one draft takes). */
+export const RELATIONS_FIELD = "relation_candidates";
 
 export const DECIDE_FIELDS = {
   decision: "decision",

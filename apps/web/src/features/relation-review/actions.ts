@@ -16,9 +16,14 @@ import {
 } from "@/shared/lib/action-state";
 import { isHexUuid } from "@/shared/lib/identifiers";
 import { relationReviewGateway } from "./gateway";
-import { alreadyDecidedResult, approvedResult, rejectedResult } from "./model/candidate";
-import { parseApproval, parseRejection } from "./model/decision-form";
-import { findCandidate } from "./queries";
+import {
+  alreadyDecidedResult,
+  approvedResult,
+  needsTargetVersion,
+  rejectedResult,
+} from "./model/candidate";
+import { parseApproval, parseRejection, unofferedVersions } from "./model/decision-form";
+import { approvalOptions, findCandidate } from "./queries";
 import { candidateRejectReasonLabel, type CandidateDecisionResult } from "./ui/decision-shared";
 
 /**
@@ -65,17 +70,36 @@ async function refusal(
   return toActionState<CandidateDecisionResult>({ ok: false, error });
 }
 
+/**
+ * Approves a candidate. The form's shape is checked first; then the candidate and the versions the
+ * page offers it are read again, so whether it needs a target comes from the rulebook rather than
+ * the page, and a version the page did not offer is refused before anything is sent (D-061). A
+ * candidate decided meanwhile is said as information, as the rulebook's refusal of it would be.
+ */
 export async function approveCandidate(
   candidateId: string,
-  needsTarget: boolean,
   _state: ActionState<CandidateDecisionResult>,
   formData: FormData,
 ): Promise<ActionState<CandidateDecisionResult>> {
   const session = await requireScreenSession(PAGE, { candidateId });
   if (!isHexUuid(candidateId)) return actionFailure(t("relationReview.error.candidate"));
-  const parsed = parseApproval(formData, needsTarget);
-  if (!parsed.ok) return fieldFailure(parsed.errors);
+  const shape = parseApproval(formData, false);
+  if (!shape.ok) return fieldFailure(shape.errors);
   const id = candidateId.toLowerCase();
+  const offered = await approvalOptions(id);
+  if (!offered.ok)
+    return toActionState<CandidateDecisionResult>({ ok: false, error: offered.error });
+  if (offered.value === null) return actionFailure(t("relationReview.error.gone"));
+  const { candidate, options } = offered.value;
+  if (candidate.status !== "open") {
+    refresh(candidateId);
+    const already = alreadyDecidedResult(candidate, session.userId);
+    return actionSuccess(already, already.message);
+  }
+  const parsed = parseApproval(formData, needsTargetVersion(candidate));
+  if (!parsed.ok) return fieldFailure(parsed.errors);
+  const unoffered = unofferedVersions(parsed.approval, options);
+  if (Object.keys(unoffered).length > 0) return fieldFailure(unoffered);
   const writes = await rulebookWrites({ session });
   const result = await writes.approveCandidate(id, parsed.approval);
   if (!result.ok) return refusal(result.error, id, "approved", session);

@@ -24,6 +24,7 @@ import {
   LEVELS,
   LIMITS,
   NOTE_FIELD,
+  RELATIONS_FIELD,
   relationField,
   type DraftForm,
   type EditorOntology,
@@ -251,12 +252,20 @@ export function DraftPanel({ action, form, blocked, ontology }: DraftPanelProps)
                 correlationId={form.relationsError.requestId || undefined}
               />
             )}
+            {fieldErrors[RELATIONS_FIELD] === undefined ? null : (
+              <p role="alert" className="text-sm text-danger" data-slot="relations-error">
+                {fieldErrors[RELATIONS_FIELD].join(" ")}
+              </p>
+            )}
             {form.relations.length === 0 ? (
               <p className="text-sm text-fg-muted">{t("workbench.draft.noRelations")}</p>
             ) : (
               form.relations.map((relation, index) => {
                 const checked = taken[relation.candidateId] === true;
-                const targetName = relationField(index, "target_rule_version_id");
+                const takeName = relationField(relation.candidateId, "take");
+                const targetName = relationField(relation.candidateId, "target");
+                const takeError = fieldErrors[takeName];
+                const errorId = `${id}-relation-${index}-error`;
                 return (
                   <div
                     key={relation.candidateId}
@@ -269,6 +278,8 @@ export function DraftPanel({ action, form, blocked, ontology }: DraftPanelProps)
                         id={`${id}-relation-${index}`}
                         checked={checked}
                         disabled={pending}
+                        aria-invalid={takeError === undefined ? undefined : true}
+                        aria-describedby={takeError === undefined ? undefined : errorId}
                         onCheckedChange={(next) =>
                           setTaken((current) => ({
                             ...current,
@@ -286,11 +297,12 @@ export function DraftPanel({ action, form, blocked, ontology }: DraftPanelProps)
                         </span>
                       </Label>
                     </div>
-                    <input
-                      type="hidden"
-                      name={relationField(index, "candidate_id")}
-                      value={checked ? relation.candidateId : ""}
-                    />
+                    {takeError === undefined ? null : (
+                      <p id={errorId} className="text-sm text-danger" data-slot="relation-error">
+                        {takeError.join(" ")}
+                      </p>
+                    )}
+                    {checked ? <input type="hidden" name={takeName} value="on" /> : null}
                     {checked ? (
                       <Field
                         id={`${id}-relation-${index}-target`}
