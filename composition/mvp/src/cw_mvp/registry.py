@@ -9,7 +9,9 @@ entry names:
 - ``settings_type`` and ``build``, the service's settings class and ``<pkg>.main.build_app``;
 - ``components``, ``<pkg>.worker.components`` for a service with background work;
 - ``url_fields``, the settings that hold the URL of another service, all set to the internal
-  listener; a field ``<service>_url`` points at that service;
+  listener; a field ``<service>_url`` points at that service. Every service gets
+  ``identity_url`` from the shared settings, so ``calls_identity`` says a service's routes call
+  identity;
 - ``loopback_routes``, the routes (``METHOD /path``) that call other services over the internal
   listener while they serve a request. The app runs at most ``CW_MVP_LOOPBACK_LIMIT`` of them at
   once, and the routes they call make no such calls themselves (one level deep), so the calls
@@ -85,6 +87,7 @@ class ServiceEntry[S: Settings]:
     called_routes: tuple[str, ...] = ()
     takes_authenticator: bool = True
     takes_token_source: bool = False
+    calls_identity: bool = False
 
     def __post_init__(self) -> None:
         for field in self.url_fields:
@@ -99,8 +102,9 @@ class ServiceEntry[S: Settings]:
     @property
     def calls(self) -> tuple[str, ...]:
         """The services it calls: ``rulebook_url`` names rulebook, ``llm_gateway_url``
-        llm-gateway."""
-        return tuple(field.removesuffix(URL_SUFFIX).replace("_", "-") for field in self.url_fields)
+        llm-gateway, and identity with ``calls_identity``."""
+        named = tuple(field.removesuffix(URL_SUFFIX).replace("_", "-") for field in self.url_fields)
+        return (("identity",) if self.calls_identity else ()) + named
 
     @property
     def store_field(self) -> str | None:
@@ -114,7 +118,28 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
     ServiceEntry(
         "identity", "identity", IdentitySettings, build_identity, takes_authenticator=False
     ),
-    ServiceEntry("profile", "profile", ProfileSettings, build_profile),
+    ServiceEntry(
+        "profile",
+        "profile",
+        ProfileSettings,
+        build_profile,
+        # A new GSTIN registration reads the tenant's entitlements at identity while the flag
+        # identity.plan_limits is on for it.
+        loopback_routes=(
+            "POST /v1/profile/registrations",
+            "POST /v1/businesses",
+            "POST /v1/businesses/{business_id}/registrations",
+        ),
+        # The engine, obligation and qa read a node, its snapshot and a business, which call
+        # nothing.
+        called_routes=(
+            "GET /v1/profile/nodes/{node_id}",
+            "GET /v1/profile/nodes/{node_id}/snapshot",
+            "GET /v1/businesses/{business_id}",
+        ),
+        takes_token_source=True,
+        calls_identity=True,
+    ),
     ServiceEntry(
         "rulebook", "rulebook", RulebookSettings, build_rulebook, components=rulebook_components
     ),

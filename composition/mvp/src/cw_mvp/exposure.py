@@ -70,6 +70,9 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         # platform's. The route refuses staff, services, and a request without a token outside
         # header mode, and never shows the platform's rows to an anonymous caller.
         "GET /v1/identity/audit": PUBLIC,
+        # What the tenant's plan entitles it to: a user's own tenant, or a service with
+        # entitlements:read for the tenant it names (profile's registration check).
+        "GET /v1/identity/entitlements": PUBLIC,
     },
     "profile": {
         "GET /v1/profile/ping": PUBLIC,

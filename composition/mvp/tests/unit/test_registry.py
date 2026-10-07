@@ -9,6 +9,12 @@ from typing import Any
 
 import pytest
 
+from applicability_engine.infrastructure.profile_client import (
+    BUSINESS_PATH as ENGINE_BUSINESS_PATH,
+)
+from applicability_engine.infrastructure.profile_client import (
+    SNAPSHOT_PATH as ENGINE_SNAPSHOT_PATH,
+)
 from cw_mvp.exposure import EXPOSURE
 from cw_mvp.registry import (
     JWKS_PATH,
@@ -24,6 +30,7 @@ from cw_mvp.testing import MEMORY_SERVICES, mvp_settings
 from notification.infrastructure.obligation_client import (
     OBLIGATIONS_PATH as NOTIFICATION_OBLIGATIONS_PATH,
 )
+from obligation.infrastructure.profile_client import NODE_PATH as OBLIGATION_NODE_PATH
 from py_common.db_roles import SERVICE_SCHEMAS
 from py_common.settings import Settings
 from qa.infrastructure.obligation_client import OBLIGATIONS_PATH as QA_OBLIGATIONS_PATH
@@ -97,6 +104,7 @@ def test_every_url_of_another_service_is_a_registered_url_field(entry: ServiceEn
 def test_routes_that_call_other_services_go_one_level_deep() -> None:
     callers = [entry for entry in REGISTRY if entry.loopback_routes]
     assert [entry.name for entry in callers] == [
+        "profile",
         "applicability-engine",
         "obligation",
         "notification",
@@ -124,7 +132,12 @@ def test_the_routes_a_caller_reaches_are_the_ones_listed() -> None:
     assert set(obligation.called_routes) <= set(EXPOSURE["obligation"])
     assert f"GET {QA_OBLIGATIONS_PATH}" in obligation.called_routes, "qa reads the list"
     assert f"GET {NOTIFICATION_OBLIGATIONS_PATH}" in obligation.called_routes, "so does bulk"
-    assert [entry.name for entry in REGISTRY if entry.called_routes] == ["obligation"]
+    assert [entry.name for entry in REGISTRY if entry.called_routes] == ["profile", "obligation"]
+    profile = BY_NAME["profile"]
+    assert set(profile.called_routes) <= set(EXPOSURE["profile"])
+    assert f"GET {ENGINE_SNAPSHOT_PATH}" in profile.called_routes, "the engine reads snapshots"
+    assert f"GET {ENGINE_BUSINESS_PATH}" in profile.called_routes, "and businesses"
+    assert f"GET {OBLIGATION_NODE_PATH}" in profile.called_routes, "obligation reads a node"
 
 
 @pytest.mark.parametrize("entry", REGISTRY, ids=lambda entry: entry.name)
